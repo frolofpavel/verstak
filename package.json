@@ -32,6 +32,7 @@
     "@google/genai": "^2.4.0",
     "better-sqlite3": "^12.10.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "zustand": "^5.0.13"
   }
 }
