@@ -1,7 +1,15 @@
 import { ipcMain } from 'electron'
 import { createGeminiProvider } from '../ai/gemini'
+import { createGeminiCliProvider } from '../ai/gemini-cli'
 import { createFileTools, TOOL_DEFS } from '../ai/tools'
-import type { ChatMessage, ToolCall } from '../ai/types'
+import type { ChatMessage, ToolCall, ChatProvider } from '../ai/types'
+
+export type ProviderId = 'gemini-api' | 'gemini-cli'
+
+interface AiDeps {
+  getApiKey: () => string | null
+  getProviderId: () => ProviderId
+}
 
 let currentSendId = 0
 
@@ -12,18 +20,26 @@ interface PendingWrite {
 }
 const pendingWrites = new Map<string, PendingWrite>()
 
-export function registerAiIpc(getApiKey: () => string | null): void {
+export function registerAiIpc(deps: AiDeps): void {
   ipcMain.handle('ai:send', async (e, messages: ChatMessage[], projectPath: string | null) => {
-    const apiKey = getApiKey()
+    const providerId = deps.getProviderId()
+    const sendId = ++currentSendId
+
+    if (providerId === 'gemini-cli') {
+      const provider = createGeminiCliProvider({ cwd: projectPath ?? process.cwd() })
+      void runCliConversation(e.sender, sendId, provider, messages)
+      return sendId
+    }
+
+    // API path
+    const apiKey = deps.getApiKey()
     if (!apiKey) {
-      e.sender.send('ai:event', { id: 0, event: { type: 'error', message: 'API ключ Gemini не задан' } })
+      e.sender.send('ai:event', { id: 0, event: { type: 'error', message: 'API ключ Gemini не задан. Открой настройки и вставь ключ или переключись на режим CLI (подписка).' } })
       return 0
     }
-    const sendId = ++currentSendId
     const provider = createGeminiProvider({ apiKey })
     const tools = projectPath ? createFileTools(projectPath) : null
-
-    void runConversation(e.sender, sendId, provider, tools, projectPath, messages)
+    void runApiConversation(e.sender, sendId, provider, tools, projectPath, messages)
     return sendId
   })
 
@@ -36,10 +52,23 @@ export function registerAiIpc(getApiKey: () => string | null): void {
   })
 }
 
-async function runConversation(
+async function runCliConversation(
   sender: Electron.WebContents,
   sendId: number,
-  provider: ReturnType<typeof createGeminiProvider>,
+  provider: ChatProvider,
+  messages: ChatMessage[]
+): Promise<void> {
+  for await (const event of provider.send(messages, [])) {
+    sender.send('ai:event', { id: sendId, event })
+    if (event.type === 'done' || event.type === 'error') return
+  }
+  sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+}
+
+async function runApiConversation(
+  sender: Electron.WebContents,
+  sendId: number,
+  provider: ChatProvider,
   tools: ReturnType<typeof createFileTools> | null,
   projectPath: string | null,
   initialMessages: ChatMessage[]

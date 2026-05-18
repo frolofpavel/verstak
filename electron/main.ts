@@ -39,7 +39,13 @@ app.whenReady().then(() => {
   registerProjectIpc()
   registerFilesIpc()
   registerSettingsIpc(settings)
-  registerAiIpc(() => settings.getSecret('gemini_api_key'))
+  registerAiIpc({
+    getApiKey: () => settings.getSecret('gemini_api_key'),
+    getProviderId: () => {
+      const v = settings.getSecret('provider')
+      return v === 'gemini-cli' ? 'gemini-cli' : 'gemini-api'
+    }
+  })
   registerChatsIpc(chats)
   registerTerminalIpc()
   createWindow()
