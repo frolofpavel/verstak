@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+.vite/
+.geminigrok-data/
+*.log
+.DS_Store
+.superpowers/brainstorm/
