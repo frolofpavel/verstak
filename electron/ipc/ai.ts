@@ -20,6 +20,20 @@ interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 
+type TaggedSender = { send: (channel: string, payload: { id: number; event: unknown }) => void }
+
+/**
+ * Tag every ai:event with the project it belongs to so the renderer can route
+ * the update to the correct session (background-agent support).
+ */
+function tagSender(sender: Electron.WebContents, projectPath: string | null): TaggedSender {
+  return {
+    send: (channel: string, payload: { id: number; event: unknown }) => {
+      sender.send(channel, { ...payload, projectPath })
+    }
+  }
+}
+
 interface PendingWrite { resolve: (accept: boolean) => void }
 const pendingWrites = new Map<string, PendingWrite>()
 
@@ -47,10 +61,12 @@ export function registerAiIpc(deps: AiDeps): void {
       messagesWithSystem = [{ role: 'system', content: composed.system }, ...messages]
     }
 
+    const taggedSender = tagSender(e.sender, projectPath)
+
     // Resolve API key (or null for CLI)
     const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null
     if (descriptor.secretKey && !apiKey) {
-      e.sender.send('ai:event', {
+      taggedSender.send('ai:event', {
         id: 0,
         event: {
           type: 'error',
@@ -71,7 +87,7 @@ export function registerAiIpc(deps: AiDeps): void {
         signal: ctrl.signal
       })
     } catch (err) {
-      e.sender.send('ai:event', {
+      taggedSender.send('ai:event', {
         id: 0,
         event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
       })
@@ -81,9 +97,9 @@ export function registerAiIpc(deps: AiDeps): void {
 
     if (descriptor.supportsTools && projectPath) {
       const tools = createFileTools(projectPath)
-      void runApiConversation(e.sender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan).finally(cleanup)
+      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan).finally(cleanup)
     } else {
-      void runPlainConversation(e.sender, sendId, provider, messagesWithSystem, ctrl.signal).finally(cleanup)
+      void runPlainConversation(taggedSender, sendId, provider, messagesWithSystem, ctrl.signal).finally(cleanup)
     }
     return sendId
   })
@@ -114,7 +130,7 @@ export function registerAiIpc(deps: AiDeps): void {
  * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
  */
 async function runPlainConversation(
-  sender: Electron.WebContents,
+  sender: TaggedSender,
   sendId: number,
   provider: ChatProvider,
   messages: ChatMessage[],
@@ -145,7 +161,7 @@ function callSignature(call: ToolCall): string {
 }
 
 async function runApiConversation(
-  sender: Electron.WebContents,
+  sender: TaggedSender,
   sendId: number,
   provider: ChatProvider,
   tools: ReturnType<typeof createFileTools>,
@@ -303,7 +319,7 @@ async function runApiConversation(
 }
 
 async function handleWriteFile(
-  sender: Electron.WebContents,
+  sender: TaggedSender,
   sendId: number,
   tools: ReturnType<typeof createFileTools>,
   call: ToolCall,
@@ -330,7 +346,7 @@ async function handleWriteFile(
 }
 
 async function handleRunCommand(
-  sender: Electron.WebContents,
+  sender: TaggedSender,
   sendId: number,
   tools: ReturnType<typeof createFileTools>,
   call: ToolCall

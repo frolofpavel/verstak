@@ -53,7 +53,7 @@ declare global {
         resolveWrite: (callId: string, accept: boolean) => Promise<void>
         resolveCommand: (callId: string, accept: boolean) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
-        onEvent: (cb: (data: { id: number; event: ChatEvent }) => void) => () => void
+        onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
       }
       chats: {
         list: (projectPath: string) => Promise<StoredChatMessage[]>
