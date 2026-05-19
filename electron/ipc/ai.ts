@@ -1,53 +1,72 @@
 import { ipcMain } from 'electron'
-import { createGeminiProvider } from '../ai/gemini'
-import { createGeminiCliProvider } from '../ai/gemini-cli'
 import { createFileTools, TOOL_DEFS } from '../ai/tools'
+import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { ChatMessage, ToolCall, ChatProvider } from '../ai/types'
 
-export type ProviderId = 'gemini-api' | 'gemini-cli'
+export type { ProviderId } from '../ai/registry'
 
 interface AiDeps {
-  getApiKey: () => string | null
+  getSecret: (key: string) => string | null
   getProviderId: () => ProviderId
+  getProviderModel: (id: ProviderId) => string | null
 }
 
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 
-interface PendingWrite {
-  resolve: (accept: boolean) => void
-}
+interface PendingWrite { resolve: (accept: boolean) => void }
 const pendingWrites = new Map<string, PendingWrite>()
 
-interface PendingCommand {
-  resolve: (accept: boolean) => void
-}
+interface PendingCommand { resolve: (accept: boolean) => void }
 const pendingCommands = new Map<string, PendingCommand>()
 
 export function registerAiIpc(deps: AiDeps): void {
   ipcMain.handle('ai:send', async (e, messages: ChatMessage[], projectPath: string | null) => {
     const providerId = deps.getProviderId()
+    const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
     const ctrl = new AbortController()
     activeAborts.set(sendId, ctrl)
     const cleanup = () => { activeAborts.delete(sendId) }
 
-    if (providerId === 'gemini-cli') {
-      const provider = createGeminiCliProvider({ cwd: projectPath ?? process.cwd(), signal: ctrl.signal })
-      void runCliConversation(e.sender, sendId, provider, messages, ctrl.signal).finally(cleanup)
-      return sendId
-    }
-
-    // API path
-    const apiKey = deps.getApiKey()
-    if (!apiKey) {
-      e.sender.send('ai:event', { id: 0, event: { type: 'error', message: 'API ключ Gemini не задан. Открой настройки и вставь ключ или переключись на режим CLI (подписка).' } })
+    // Resolve API key (or null for CLI)
+    const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null
+    if (descriptor.secretKey && !apiKey) {
+      e.sender.send('ai:event', {
+        id: 0,
+        event: {
+          type: 'error',
+          message: `API ключ для ${descriptor.name} не задан. Открой настройки и добавь ключ или переключи провайдера.`
+        }
+      })
       cleanup()
       return 0
     }
-    const provider = createGeminiProvider({ apiKey })
-    const tools = projectPath ? createFileTools(projectPath) : null
-    void runApiConversation(e.sender, sendId, provider, tools, projectPath, messages, ctrl.signal).finally(cleanup)
+
+    const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
+    let provider: ChatProvider
+    try {
+      provider = createProvider(providerId, {
+        apiKey,
+        model,
+        cwd: projectPath ?? process.cwd(),
+        signal: ctrl.signal
+      })
+    } catch (err) {
+      e.sender.send('ai:event', {
+        id: 0,
+        event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      })
+      cleanup()
+      return 0
+    }
+
+    if (descriptor.supportsTools && projectPath) {
+      const tools = createFileTools(projectPath)
+      void runApiConversation(e.sender, sendId, provider, tools, projectPath, messages, ctrl.signal).finally(cleanup)
+    } else {
+      void runPlainConversation(e.sender, sendId, provider, messages, ctrl.signal).finally(cleanup)
+    }
     return sendId
   })
 
@@ -56,7 +75,6 @@ export function registerAiIpc(deps: AiDeps): void {
     if (!ctrl) return false
     ctrl.abort()
     activeAborts.delete(sendId)
-    // Auto-resolve any pending confirmations so the waiting promises don't dangle
     for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
     for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
     return true
@@ -64,22 +82,20 @@ export function registerAiIpc(deps: AiDeps): void {
 
   ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean) => {
     const p = pendingWrites.get(callId)
-    if (p) {
-      p.resolve(accept)
-      pendingWrites.delete(callId)
-    }
+    if (p) { p.resolve(accept); pendingWrites.delete(callId) }
   })
 
   ipcMain.handle('ai:resolve-command', (_e, callId: string, accept: boolean) => {
     const p = pendingCommands.get(callId)
-    if (p) {
-      p.resolve(accept)
-      pendingCommands.delete(callId)
-    }
+    if (p) { p.resolve(accept); pendingCommands.delete(callId) }
   })
 }
 
-async function runCliConversation(
+/**
+ * Plain streaming conversation — no tools, no multi-turn. Used for providers
+ * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
+ */
+async function runPlainConversation(
   sender: Electron.WebContents,
   sendId: number,
   provider: ChatProvider,
@@ -97,12 +113,16 @@ async function runCliConversation(
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
 }
 
+/**
+ * Full agentic loop with file tools + diff confirmation + command sandbox.
+ * Only providers that support function calling go through here.
+ */
 async function runApiConversation(
   sender: Electron.WebContents,
   sendId: number,
   provider: ChatProvider,
-  tools: ReturnType<typeof createFileTools> | null,
-  projectPath: string | null,
+  tools: ReturnType<typeof createFileTools>,
+  projectPath: string,
   initialMessages: ChatMessage[],
   signal: AbortSignal
 ): Promise<void> {
@@ -115,7 +135,7 @@ async function runApiConversation(
     }
     const toolCalls: ToolCall[] = []
     let assistantText = ''
-    for await (const event of provider.send(currentMessages, tools ? TOOL_DEFS : [])) {
+    for await (const event of provider.send(currentMessages, TOOL_DEFS)) {
       if (signal.aborted) {
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
@@ -135,18 +155,18 @@ async function runApiConversation(
         return
       }
     }
-    if (!tools || toolCalls.length === 0) {
+    if (toolCalls.length === 0) {
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
     if (assistantText) currentMessages.push({ role: 'assistant', content: assistantText })
 
     for (const call of toolCalls) {
-      if (call.name === 'write_file' && projectPath) {
+      if (call.name === 'write_file') {
         await handleWriteFile(sender, sendId, tools, call, currentMessages)
         continue
       }
-      if (call.name === 'run_command' && projectPath) {
+      if (call.name === 'run_command') {
         await handleRunCommand(sender, sendId, tools, call, currentMessages)
         continue
       }
@@ -163,6 +183,7 @@ async function runApiConversation(
         })
       }
     }
+    void projectPath  // silence unused
   }
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
 }
@@ -177,15 +198,10 @@ async function handleWriteFile(
   const path = String(call.args.path)
   const after = String(call.args.content)
   let before = ''
-  try {
-    before = await tools.execute('read_file', { path }) as string
-  } catch {
-    before = ''
-  }
+  try { before = await tools.execute('read_file', { path }) as string } catch { before = '' }
+  void after
   sender.send('ai:event', { id: sendId, event: { type: 'pending-write', callId: call.id, path, before, after } })
-  const accepted = await new Promise<boolean>(resolve => {
-    pendingWrites.set(call.id, { resolve })
-  })
+  const accepted = await new Promise<boolean>(resolve => { pendingWrites.set(call.id, { resolve }) })
   if (accepted) {
     try {
       await tools.execute('write_file', call.args)
@@ -206,7 +222,6 @@ async function handleRunCommand(
   messages: ChatMessage[]
 ): Promise<void> {
   const command = String(call.args.command ?? '')
-  // Layer 1: hard denylist
   const verdict = tools.classifyCommand(command)
   if (!verdict.allowed) {
     sender.send('ai:event', {
@@ -220,11 +235,8 @@ async function handleRunCommand(
     return
   }
 
-  // Layer 2: user confirmation
   sender.send('ai:event', { id: sendId, event: { type: 'pending-command', callId: call.id, command } })
-  const accepted = await new Promise<boolean>(resolve => {
-    pendingCommands.set(call.id, { resolve })
-  })
+  const accepted = await new Promise<boolean>(resolve => { pendingCommands.set(call.id, { resolve }) })
   if (!accepted) {
     sender.send('ai:event', {
       id: sendId,
@@ -234,7 +246,6 @@ async function handleRunCommand(
     return
   }
 
-  // Execute and report
   try {
     const result = await tools.runCommand(command)
     sender.send('ai:event', {
@@ -246,11 +257,11 @@ async function handleRunCommand(
       content: `[tool run_command result]\n${JSON.stringify(result).slice(0, 5000)}`
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const msg = err instanceof Error ? err.message : String(err)
     sender.send('ai:event', {
       id: sendId,
-      event: { type: 'command-result', callId: call.id, command, status: 'error', error: message }
+      event: { type: 'command-result', callId: call.id, command, status: 'error', error: msg }
     })
-    messages.push({ role: 'user', content: `[tool run_command error]\n${message}` })
+    messages.push({ role: 'user', content: `[tool run_command error]\n${msg}` })
   }
 }

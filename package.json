@@ -34,6 +34,7 @@
     "vitest": "^4.1.6"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.97.0",
     "@fontsource/geist-mono": "^5.2.8",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jetbrains-mono": "^5.2.8",
@@ -42,6 +43,7 @@
     "diff": "^9.0.0",
     "highlight.js": "^11.11.1",
     "node-pty": "^1.1.0",
+    "openai": "^6.38.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",

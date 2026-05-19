@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { useProject } from '../store/projectStore'
-import { useProvider } from '../hooks/useProvider'
 import { Markdown } from './Markdown'
+import { ModelPicker } from './ModelPicker'
 import type { Attachment } from '../types/api'
 import iconUrl from '../assets/icon.png'
 
@@ -45,7 +45,6 @@ async function blobToAttachment(blob: Blob, fallbackName: string): Promise<Attac
 
 export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatProps) {
   const { messages, addMessage, updateLastAssistant, isStreaming, setStreaming, activity } = useProject()
-  const provider = useProvider()
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -444,17 +443,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
                 <line x1="12" y1="19" x2="20" y2="19" />
               </svg>
             </button>
-            <button
-              type="button"
-              className="gg-model-pill"
-              onClick={onOpenSettings}
-              title="Сменить модель / провайдер"
-            >
-              <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
-              <span className="gg-model-pill-name">{provider.model}</span>
-              <span className="gg-model-pill-sep">·</span>
-              <span className="gg-model-pill-transport">{provider.transport}</span>
-            </button>
+            <ModelPicker onOpenSettings={onOpenSettings} />
           </div>
         </div>
       </div>

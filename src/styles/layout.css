@@ -425,6 +425,112 @@
 .gg-model-pill-sep { color: var(--text-disabled); }
 .gg-model-pill-transport { color: var(--text-tertiary); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
 
+/* ─── Model picker popover ─── */
+.gg-mp-wrap { position: relative; display: inline-block; }
+.gg-mp-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 40;
+  animation: gg-fade-in 140ms ease-out;
+}
+.gg-mp-section + .gg-mp-section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+.gg-mp-section-title {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 6px 10px 4px;
+}
+.gg-mp-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background 100ms ease;
+}
+.gg-mp-row:hover { background: var(--bg-hover); }
+.gg-mp-row.is-active { background: var(--accent-muted); color: var(--accent); }
+.gg-mp-row-label { font-weight: 500; flex: 1; }
+.gg-mp-row-meta { font-size: var(--text-xs); color: var(--text-tertiary); font-family: var(--font-mono); }
+.gg-mp-row.is-active .gg-mp-row-meta { color: var(--accent); }
+
+/* ─── Settings: provider list panel ─── */
+.gg-provider-list {
+  width: 250px;
+  background: var(--bg-base);
+  border-right: 1px solid var(--border-subtle);
+  padding: 14px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+  overflow-y: auto;
+}
+.gg-provider-card-row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 120ms ease;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.gg-provider-card-row:hover { background: var(--bg-hover); }
+.gg-provider-card-row.active {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+}
+.gg-provider-card-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex; align-items: center; gap: 6px;
+}
+.gg-provider-card-desc {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+.gg-provider-tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-weight: 500;
+}
+.gg-provider-tag.is-tools { color: var(--success); }
+.gg-provider-tag.is-cli { color: var(--accent); }
+
+.gg-provider-detail {
+  flex: 1;
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+.gg-provider-detail-title {
+  font-size: 17px; font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
 .gg-composer-meta {
   display: inline-flex; align-items: center; gap: 4px;
 }

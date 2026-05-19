@@ -149,7 +149,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
       <div className="gg-sidebar-footer">
         <div className="gg-provider-badge">
           <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
-          <span>{provider.id === 'gemini-cli' ? 'CLI · подписка' : 'API · ключ'}</span>
+          <span>{provider.label} · {provider.transport}</span>
         </div>
         <button className="gg-settings-trigger" onClick={onOpenSettings} title="Настройки">⚙</button>
       </div>

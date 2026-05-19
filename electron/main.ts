@@ -59,11 +59,13 @@ app.whenReady().then(() => {
   registerFilesIpc({ getProjectRoot: getActiveProjectPath })
   registerSettingsIpc(settings)
   registerAiIpc({
-    getApiKey: () => settings.getSecret('gemini_api_key'),
+    getSecret: (key: string) => settings.getSecret(key),
     getProviderId: () => {
       const v = settings.getSecret('provider')
-      return v === 'gemini-cli' ? 'gemini-cli' : 'gemini-api'
-    }
+      if (v === 'gemini-cli' || v === 'claude' || v === 'grok' || v === 'openai') return v
+      return 'gemini-api'
+    },
+    getProviderModel: (id) => settings.getSecret(`model_${id}`)
   })
   registerChatsIpc(chats)
   registerTasksIpc(tasks)
