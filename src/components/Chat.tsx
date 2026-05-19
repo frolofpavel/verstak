@@ -144,6 +144,22 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
             event.error ?? null)
         }
       }
+      else if (event.type === 'tool-activity') {
+        // Read-only / pure-info tool just ran — show in activity stream
+        const kind: 'read' | 'list' | 'command' = (event.name === 'read_file' || event.name === 'browser_read_page' || event.name === 'connector_query')
+          ? 'read'
+          : (event.name === 'list_directory' || event.name === 'list_connectors' || event.name === 'find_files' || event.name === 'search_project')
+            ? 'list'
+            : 'command'
+        store.pushActivity({
+          id: `${event.callId}-${event.name}`,
+          kind,
+          label: event.label,
+          detail: event.detail,
+          status: event.status,
+          timestamp: Date.now()
+        })
+      }
       else if (event.type === 'tool-blocked') {
         store.pushActivity({
           id: event.callId,

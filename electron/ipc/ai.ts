@@ -287,10 +287,15 @@ async function runApiConversation(
       }
       if (call.name === 'browser_navigate' || call.name === 'browser_read_page' || call.name === 'browser_screenshot') {
         toolResults[i] = await handleBrowserTool(sender, call)
+        const s = summarizeToolCall(call.name, call.args, undefined)
+        if (s) sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: s.label, detail: s.detail, status: toolResults[i].error ? 'error' : 'ok' } })
         continue
       }
       if (call.name === 'list_connectors') {
-        toolResults[i] = { id: call.id, name: call.name, result: JSON.stringify(connectors.list()) }
+        const list = connectors.list()
+        toolResults[i] = { id: call.id, name: call.name, result: JSON.stringify(list) }
+        const s = summarizeToolCall(call.name, call.args, JSON.stringify(list))
+        if (s) sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: s.label, detail: s.detail, status: 'ok' } })
         continue
       }
       if (call.name === 'connector_query') {
@@ -304,8 +309,12 @@ async function runApiConversation(
           void _omit
           const result = await connectors.query(cid, rest, signal)
           toolResults[i] = { id: call.id, name: call.name, result: typeof result === 'string' ? result : JSON.stringify(result) }
+          const s = summarizeToolCall(call.name, call.args, undefined)
+          if (s) sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: s.label, detail: s.detail, status: 'ok' } })
         } catch (err) {
-          toolResults[i] = { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+          const msg = err instanceof Error ? err.message : String(err)
+          toolResults[i] = { id: call.id, name: call.name, result: '', error: msg }
+          sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: call.name, detail: msg, status: 'error' } })
         }
         continue
       }
@@ -335,15 +344,22 @@ async function runApiConversation(
         }
         continue
       }
+      // Read-only / pure-info tools — emit an activity event so user sees what AI is doing.
       try {
         const result = await tools.execute(call.name, call.args)
+        const summary = summarizeToolCall(call.name, call.args, result)
+        if (summary) {
+          sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: summary.label, detail: summary.detail, status: 'ok' } })
+        }
         toolResults[i] = { id: call.id, name: call.name, result }
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: call.name, detail: msg, status: 'error' } })
         toolResults[i] = {
           id: call.id,
           name: call.name,
           result: '',
-          error: err instanceof Error ? err.message : String(err)
+          error: msg
         }
       }
     }
@@ -434,6 +450,46 @@ async function handleWriteFile(
     }
   }
   return { id: call.id, name: call.name, result: `User rejected write to ${path}`, error: 'User rejected' }
+}
+
+/** Short human-readable summary of a read-only tool call for the activity stream. */
+function summarizeToolCall(name: string, args: Record<string, unknown>, result: unknown): { label: string; detail: string } | null {
+  if (name === 'read_file') {
+    const p = String(args.path ?? '')
+    const len = typeof result === 'string' ? result.length : 0
+    return { label: `read_file`, detail: `${p} · ${len} символов` }
+  }
+  if (name === 'list_directory') {
+    const p = String(args.path ?? '.')
+    const count = Array.isArray(result) ? result.length : 0
+    return { label: `list_directory`, detail: `${p} · ${count} элементов` }
+  }
+  if (name === 'search_project') {
+    const q = String(args.query ?? '')
+    const r = result as { matches?: unknown[] } | undefined
+    const hits = Array.isArray(r?.matches) ? r!.matches!.length : 0
+    return { label: `search_project`, detail: `"${q}" · ${hits} совпадений` }
+  }
+  if (name === 'find_files') {
+    const pattern = String(args.pattern ?? '')
+    const r = result as { files?: unknown[] } | undefined
+    const hits = Array.isArray(r?.files) ? r!.files!.length : 0
+    return { label: `find_files`, detail: `${pattern} · ${hits} файлов` }
+  }
+  if (name === 'list_connectors') {
+    const arr = typeof result === 'string' ? JSON.parse(result) as Array<{ label?: string }> : []
+    return { label: `list_connectors`, detail: `${arr.length} коннекторов` }
+  }
+  if (name === 'connector_query') {
+    return { label: `connector_query`, detail: `${String(args.id ?? '?')}${args.entity ? ` · ${args.entity}` : ''}` }
+  }
+  if (name === 'browser_navigate') {
+    return { label: `browser_navigate`, detail: String(args.url ?? '') }
+  }
+  if (name === 'browser_read_page') {
+    return { label: `browser_read_page`, detail: args.selector ? String(args.selector) : '(вся страница)' }
+  }
+  return null
 }
 
 async function handleBrowserTool(sender: TaggedSender, call: ToolCall): Promise<ToolResult> {
