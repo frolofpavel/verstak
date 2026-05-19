@@ -1,6 +1,10 @@
 import { app, BrowserWindow, safeStorage } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { mkdirSync } from 'fs'
+
+// In ESM modules __dirname is not a global. Recreate it from import.meta.url.
+const HERE = dirname(fileURLToPath(import.meta.url))
 import { registerProjectIpc } from './ipc/projects'
 import { registerFilesIpc } from './ipc/files'
 import { registerTasksIpc } from './ipc/tasks'
@@ -18,16 +22,15 @@ import { createJournal } from './storage/journal'
 import { createProjects } from './storage/projects'
 
 function createWindow(): void {
-  // In dev: __dirname is out/main; in prod packaged build the path resolves the same way
-  // because we copy `resources/` next to the build output.
-  const iconPath = join(__dirname, '../../resources/icon.png')
+  // HERE = out/main in dev and prod
+  const iconPath = join(HERE, '../../resources/icon.png')
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     title: 'GeminiGrok',
     icon: iconPath,
     webPreferences: {
-      preload: join(__dirname, '../preload/preload.mjs'),
+      preload: join(HERE, '../preload/preload.mjs'),
       sandbox: false
     }
   })
@@ -35,7 +38,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
+    win.loadFile(join(HERE, '../renderer/index.html'))
   }
 }
 
