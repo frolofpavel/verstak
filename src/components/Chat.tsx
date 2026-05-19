@@ -181,10 +181,11 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
       }
       else if (event.type === 'done') {
         const path = store.path
+        const activeChatId = store.activeChatId
         const msgs = store.messages
         const lastAssistant = msgs[msgs.length - 1]
-        if (path && lastAssistant?.role === 'assistant' && lastAssistant.content) {
-          void window.api.chats.append(path, 'assistant', lastAssistant.content)
+        if (path && activeChatId && lastAssistant?.role === 'assistant' && lastAssistant.content) {
+          void window.api.chats.append(activeChatId, path, 'assistant', lastAssistant.content)
         }
         // If we were running a plan step, finalize it
         const running = store.runningPlanStep
@@ -333,8 +334,9 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
       ? `${text}${text ? '\n\n' : ''}📎 ${userAttachments.map(a => a.name).join(', ')}`
       : text
     addMessage({ role: 'user', content: text, attachments: userAttachments })
-    if (path) {
-      await window.api.chats.append(path, 'user', summary)
+    const activeChatId = store.activeChatId
+    if (path && activeChatId) {
+      await window.api.chats.append(activeChatId, path, 'user', summary)
       // log the start of a session — title is the first 80 chars of the request
       const journalTitle = text.length > 80 ? text.slice(0, 80) + '…' : (text || 'Сообщение с вложением')
       void window.api.journal.append(path, 'session', journalTitle,

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { FileNode, ChatMessage, ProjectMeta } from '../types/api'
+import type { FileNode, ChatMessage, ProjectMeta, ChatSession } from '../types/api'
 
 interface PendingWrite {
   callId: string
@@ -73,6 +73,10 @@ interface ProjectState {
   sessionUsage: SessionUsage
   runningPlanStep: RunningPlanStep | null
   projectList: ProjectMeta[]
+  /** Chat sessions of the active project. */
+  chatSessions: ChatSession[]
+  /** Currently active chat session id within the project. */
+  activeChatId: number | null
   /** Per-project session snapshots for backgrounded projects. */
   sessions: Record<string, SessionSnapshot>
   setProject: (path: string) => Promise<void>
@@ -97,6 +101,12 @@ interface ProjectState {
   applyEventToSession: (projectPath: string, event: { type: string; [k: string]: unknown }) => void
   /** Mark a session as read (clear the unread badge). */
   markSessionRead: (projectPath: string) => void
+  /** Switch to a different chat session within the active project. */
+  switchChatSession: (id: number) => Promise<void>
+  /** Refresh the chat sessions list (after create/rename/delete). */
+  refreshChatSessions: () => Promise<void>
+  /** Create a new chat session in the active project and switch to it. */
+  newChatSession: (title?: string) => Promise<ChatSession | null>
 }
 
 export const useProject = create<ProjectState>((set, get) => ({
@@ -111,6 +121,8 @@ export const useProject = create<ProjectState>((set, get) => ({
   sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
   runningPlanStep: null,
   projectList: [],
+  chatSessions: [],
+  activeChatId: null,
   sessions: {},
   setProject: async (path) => {
     const s = get()
@@ -145,12 +157,22 @@ export const useProject = create<ProjectState>((set, get) => ({
       void _drop
       nextSessions = rest
     } else {
-      const history = await window.api.chats.list(path)
-      target = {
-        ...freshSnapshot(),
-        messages: history.map(m => ({ role: m.role, content: m.content }))
-      }
+      target = freshSnapshot()
     }
+
+    // Load chat sessions list. Create a default one if project has none yet.
+    let chatSessions = await window.api.chatSessions.list(path)
+    if (chatSessions.length === 0) {
+      const created = await window.api.chatSessions.create(path, { title: 'Основной чат' })
+      chatSessions = [created]
+    }
+    // Pick the most recent active session (top of list)
+    const activeChatId = chatSessions[0]?.id ?? null
+    if (activeChatId && !existing) {
+      const history = await window.api.chats.list(activeChatId)
+      target.messages = history.map(m => ({ role: m.role, content: m.content }))
+    }
+
     set({
       path,
       tree,
@@ -163,6 +185,8 @@ export const useProject = create<ProjectState>((set, get) => ({
       runningPlanStep: target.runningPlanStep,
       activeView: 'chat',
       projectList,
+      chatSessions,
+      activeChatId,
       sessions: nextSessions
     })
   },
@@ -261,7 +285,42 @@ export const useProject = create<ProjectState>((set, get) => ({
     const existing = s.sessions[projectPath]
     if (!existing) return {}
     return { sessions: { ...s.sessions, [projectPath]: { ...existing, hasUnread: false } } }
-  })
+  }),
+  switchChatSession: async (id) => {
+    const s = get()
+    if (!s.path) return
+    const history = await window.api.chats.list(id)
+    set({
+      activeChatId: id,
+      messages: history.map(m => ({ role: m.role, content: m.content })),
+      activity: [],
+      pendingWrites: [],
+      pendingCommand: null,
+      runningPlanStep: null
+    })
+  },
+  refreshChatSessions: async () => {
+    const s = get()
+    if (!s.path) return
+    const list = await window.api.chatSessions.list(s.path)
+    set({ chatSessions: list })
+  },
+  newChatSession: async (title) => {
+    const s = get()
+    if (!s.path) return null
+    const created = await window.api.chatSessions.create(s.path, { title })
+    const list = await window.api.chatSessions.list(s.path)
+    set({
+      chatSessions: list,
+      activeChatId: created.id,
+      messages: [],
+      activity: [],
+      pendingWrites: [],
+      pendingCommand: null,
+      runningPlanStep: null
+    })
+    return created
+  }
 }))
 
 export type { ActivityEntry, PendingCommand }

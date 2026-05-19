@@ -30,10 +30,19 @@ contextBridge.exposeInMainWorld('api', {
       return () => { ipcRenderer.off('ai:event', handler) }
     }
   },
+  chatSessions: {
+    list: (projectPath: string) => ipcRenderer.invoke('chat-sessions:list', projectPath),
+    create: (projectPath: string, opts?: { title?: string; providerId?: string | null; model?: string | null }) =>
+      ipcRenderer.invoke('chat-sessions:create', projectPath, opts),
+    rename: (id: number, title: string) => ipcRenderer.invoke('chat-sessions:rename', id, title),
+    setModel: (id: number, providerId: string | null, model: string | null) =>
+      ipcRenderer.invoke('chat-sessions:set-model', id, providerId, model),
+    remove: (id: number) => ipcRenderer.invoke('chat-sessions:remove', id)
+  },
   chats: {
-    list: (projectPath: string) => ipcRenderer.invoke('chats:list', projectPath),
-    append: (projectPath: string, role: 'user' | 'assistant', content: string) =>
-      ipcRenderer.invoke('chats:append', projectPath, role, content)
+    list: (sessionId: number) => ipcRenderer.invoke('chats:list', sessionId),
+    append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) =>
+      ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content)
   },
   tasks: {
     list: (projectPath: string) => ipcRenderer.invoke('tasks:list', projectPath),

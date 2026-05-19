@@ -117,7 +117,8 @@ ${remaining || '— нет —'}
 
 Когда шаг готов — кратко напиши результат (что сделано, какие файлы тронуты). Не лезь в следующие шаги.`
     addMessage({ role: 'user', content: prompt })
-    if (path) await window.api.chats.append(path, 'user', prompt)
+    const activeChatId = useProject.getState().activeChatId
+    if (path && activeChatId) await window.api.chats.append(activeChatId, path, 'user', prompt)
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     setActiveView('chat')

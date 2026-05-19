@@ -2,6 +2,7 @@ export interface FileNode { name: string; path: string; isDirectory: boolean; ch
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
 export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[] }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; createdAt: number }
+export interface ChatSession { id: number; projectPath: string; title: string; providerId: string | null; model: string | null; createdAt: number; lastMessageAt: number }
 export interface Task { id: number; text: string; done: boolean; createdAt: number; doneAt: number | null }
 export type JournalKind = 'manual' | 'session' | 'tool' | 'note'
 export interface JournalEntry { id: number; kind: JournalKind; title: string; detail: string | null; createdAt: number }
@@ -56,9 +57,16 @@ declare global {
         stop: (sendId: number) => Promise<boolean>
         onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
       }
+      chatSessions: {
+        list: (projectPath: string) => Promise<ChatSession[]>
+        create: (projectPath: string, opts?: { title?: string; providerId?: string | null; model?: string | null }) => Promise<ChatSession>
+        rename: (id: number, title: string) => Promise<void>
+        setModel: (id: number, providerId: string | null, model: string | null) => Promise<void>
+        remove: (id: number) => Promise<void>
+      }
       chats: {
-        list: (projectPath: string) => Promise<StoredChatMessage[]>
-        append: (projectPath: string, role: 'user' | 'assistant', content: string) => Promise<void>
+        list: (sessionId: number) => Promise<StoredChatMessage[]>
+        append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => Promise<void>
       }
       tasks: {
         list: (projectPath: string) => Promise<Task[]>

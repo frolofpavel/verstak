@@ -17,6 +17,7 @@ import { registerTerminalIpc } from './ipc/terminal'
 import { openDb } from './storage/db'
 import { createSettings } from './storage/settings'
 import { createChats } from './storage/chats'
+import { createChatSessions } from './storage/chat-sessions'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
 import { createProjects } from './storage/projects'
@@ -60,6 +61,7 @@ app.whenReady().then(() => {
   const db = openDb(join(dir, 'geminigrok.db'))
   const settings = createSettings(db, safeStorage)
   const chats = createChats(db)
+  const chatSessions = createChatSessions(db)
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
@@ -88,7 +90,7 @@ app.whenReady().then(() => {
       return { id: plan.id }
     }
   })
-  registerChatsIpc(chats)
+  registerChatsIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)
   registerUndoIpc(undoStack)
