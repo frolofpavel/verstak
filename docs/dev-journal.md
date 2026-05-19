@@ -27,6 +27,12 @@
 | 2026-05-19 | **Design.** Полный UI редизайн | `(см. ниже)` | Geist Sans/Mono, GitHub-dark тема, markdown + highlight.js, новый layout. Sidebar с дискверным брендом, status footer с провайдером, новая модалка Settings, DiffView v2, тема терминала |
 | 2026-05-19 | **Feature.** Model pill в composer'е | — | Под полем ввода справа виден текущий провайдер `Gemini 2.5 Pro · API` или `Gemini Ultra · CLI`. Кликабельно — открывает Settings. Добавлен `hooks/useProvider.ts` (polling settings) |
 | 2026-05-19 | **Feature.** Вложения: файлы, скриншоты (Ctrl+V), drag-drop | `dc60a8f` | Кнопка скрепки в composer'е, обработчик paste для clipboard images, drag-drop overlay. API режим — `inlineData` в Gemini (нативная multimodal). CLI режим — упоминание имён файлов в промте. Лимит 5MB/файл, 8 файлов |
+| 2026-05-19 | **Security.** Аудит от Codex → закрытие критики | `(см. ниже)` | По итогам внешнего ревью закрыт MUST-блок безопасности (3 фикса) + SHOULD-блок UX (3 фичи) |
+| 2026-05-19 | **Security 1.** Path boundary для `files:read` IPC | `(в составе security commit)` | Главный процесс трекает активный проект (`state/project-state.ts`); `files:read` нормализует путь и отказывается читать вне корня. Лимит на размер файла 2MB |
+| 2026-05-19 | **Security 2.** `run_command` confirmation flow | `(в составе security commit)` | Раньше команды выполнялись неявно через `execSync`. Теперь IPC показывает модалку `CommandConfirm.tsx`, ждёт явное Accept/Reject. Внутри — `execFile` с timeout 60s, captured stderr, exit code |
+| 2026-05-19 | **Security 3.** Denylist деструктивных команд | — | `ai/command-policy.ts`: hard-блок 11 паттернов (rm -rf /, format, mkfs, dd of=/dev, fork bomb, shutdown, curl|sh, sudo rm, git push --force, git filter-repo, чтение ~/.ssh / .aws / .npmrc). 12 unit-тестов. Blocked-команды не доходят до confirmation — сразу отказ с причиной |
+| 2026-05-19 | **UX.** Activity log + Changed files summary | — | Под сообщением Gemini виден список действий (read/write/command) с цветовым статусом pending/ok/rejected/blocked. После окончания ответа — выделенный блок "Изменены файлы (N)" с зелёной рамкой |
+| 2026-05-19 | **UX.** Stop streaming (Esc / красная кнопка) | `7fd7e07` | `ai:stop` IPC с AbortController per-send. CLI subprocess убивается, API loop вылетает на следующей итерации. Незавершённые подтверждения auto-rejected чтобы модалки не зависали |
 
 ---
 
