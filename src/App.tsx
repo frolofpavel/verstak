@@ -13,7 +13,7 @@ export function App() {
     <div className="gg-app">
       <Sidebar onOpenSettings={() => setShowSettings(true)} />
       <main className="gg-main">
-        <Chat />
+        <Chat onOpenSettings={() => setShowSettings(true)} />
         {path && (
           <div className="gg-terminal-wrap">
             <div className="gg-terminal-header">

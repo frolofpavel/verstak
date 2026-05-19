@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useProvider } from '../hooks/useProvider'
 import type { FileNode } from '../types/api'
 
 function TreeNode({ node, depth }: { node: FileNode; depth: number }) {
@@ -28,19 +29,7 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenSettings }: SidebarProps) {
   const { path, tree, setProject } = useProject()
-  const [provider, setProvider] = useState<'gemini-api' | 'gemini-cli'>('gemini-api')
-
-  useEffect(() => {
-    void window.api.settings.getKey('provider').then(v => {
-      setProvider(v === 'gemini-cli' ? 'gemini-cli' : 'gemini-api')
-    })
-    const interval = window.setInterval(() => {
-      void window.api.settings.getKey('provider').then(v => {
-        setProvider(v === 'gemini-cli' ? 'gemini-cli' : 'gemini-api')
-      })
-    }, 1500)
-    return () => window.clearInterval(interval)
-  }, [])
+  const provider = useProvider()
 
   async function openProject() {
     const picked = await window.api.projects.pick()
@@ -87,8 +76,8 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
 
       <div className="gg-sidebar-footer">
         <div className="gg-provider-badge">
-          <span className={`gg-provider-dot ${provider === 'gemini-cli' ? 'cli' : ''}`} />
-          <span>{provider === 'gemini-cli' ? 'CLI · подписка' : 'API · ключ'}</span>
+          <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
+          <span>{provider.id === 'gemini-cli' ? 'CLI · подписка' : 'API · ключ'}</span>
         </div>
         <button className="gg-settings-trigger" onClick={onOpenSettings} title="Настройки">⚙</button>
       </div>

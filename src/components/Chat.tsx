@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useProvider } from '../hooks/useProvider'
 import { Markdown } from './Markdown'
 
-export function Chat() {
+interface ChatProps {
+  onOpenSettings: () => void
+}
+
+export function Chat({ onOpenSettings }: ChatProps) {
   const { messages, addMessage, updateLastAssistant, isStreaming, setStreaming } = useProject()
+  const provider = useProvider()
   const [input, setInput] = useState('')
   const streamRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -132,6 +138,17 @@ export function Chat() {
         </div>
         <div className="gg-composer-hint">
           <span><span className="gg-kbd">Enter</span> отправить · <span className="gg-kbd">Shift</span>+<span className="gg-kbd">Enter</span> новая строка</span>
+          <button
+            type="button"
+            className="gg-model-pill"
+            onClick={onOpenSettings}
+            title="Сменить модель / провайдер"
+          >
+            <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
+            <span className="gg-model-pill-name">{provider.model}</span>
+            <span className="gg-model-pill-sep">·</span>
+            <span className="gg-model-pill-transport">{provider.transport}</span>
+          </button>
         </div>
       </div>
     </div>
