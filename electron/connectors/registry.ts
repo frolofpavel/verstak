@@ -1,9 +1,11 @@
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
 import { createOneCConnector } from './onec'
+import { createHttpConnector } from './http'
 
 // Built-in connectors. Adding a new adapter = register it here.
 const BUILTINS: Connector[] = [
-  createOneCConnector()
+  createOneCConnector(),
+  createHttpConnector()
 ]
 
 export interface ConnectorRegistry {

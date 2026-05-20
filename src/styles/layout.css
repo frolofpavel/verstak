@@ -373,6 +373,19 @@
   padding: 1px 5px;
   border-radius: 3px;
 }
+.gg-http-endpoint {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.gg-http-endpoint-head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
 
 /* In-app browser view */
 .gg-browser-bar {

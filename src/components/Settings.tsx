@@ -116,6 +116,9 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [models, setModels] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
   const [onec, setOneC] = useState({ url: '', user: '', pass: '' })
+  const [httpEndpoints, setHttpEndpoints] = useState<Array<{ name: string; base: string; auth: string; paths: string }>>(
+    [{ name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }]
+  )
   const { theme, setTheme } = useTheme()
 
   useEffect(() => {
@@ -140,7 +143,19 @@ export function Settings({ onClose }: { onClose: () => void }) {
       const user = await window.api.settings.getKey('onec_username')
       const pass = await window.api.settings.getKey('onec_password')
       setOneC({ url: url ?? '', user: user ?? '', pass: pass ?? '' })
+      // HTTP endpoints
+      const eps: typeof httpEndpoints = []
+      for (let i = 1; i <= 4; i++) {
+        eps.push({
+          name:  (await window.api.settings.getKey(`http_endpoint_${i}_name`))  ?? '',
+          base:  (await window.api.settings.getKey(`http_endpoint_${i}_base`))  ?? '',
+          auth:  (await window.api.settings.getKey(`http_endpoint_${i}_auth`))  ?? '',
+          paths: (await window.api.settings.getKey(`http_endpoint_${i}_paths`)) ?? ''
+        })
+      }
+      setHttpEndpoints(eps)
     })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function save() {
@@ -156,6 +171,13 @@ export function Settings({ onClose }: { onClose: () => void }) {
     await window.api.settings.setKey('onec_base_url', onec.url)
     await window.api.settings.setKey('onec_username', onec.user)
     await window.api.settings.setKey('onec_password', onec.pass)
+    for (let i = 0; i < httpEndpoints.length; i++) {
+      const e = httpEndpoints[i]
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_name`,  e.name)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_base`,  e.base)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_auth`,  e.auth)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_paths`, e.paths)
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
@@ -318,6 +340,43 @@ export function Settings({ onClose }: { onClose: () => void }) {
             Кред хранится зашифрованным в Electron safeStorage. AI может звать
             tool <code>connector_query</code> с id=<code>onec</code>; пароль
             никогда не попадает в промпт.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 18 }}>HTTP коннекторы</div>
+          {httpEndpoints.map((ep, i) => (
+            <div key={i} className="gg-http-endpoint">
+              <div className="gg-http-endpoint-head">#{i + 1}</div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Имя</label>
+                <input className="gg-input" value={ep.name} placeholder='напр. "github" или "internal-api"'
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Base URL</label>
+                <input className="gg-input" value={ep.base} placeholder="https://api.github.com"
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, base: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Authorization</label>
+                <input className="gg-input" type="password" value={ep.auth} placeholder='напр. "Bearer ghp_…"'
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, auth: e.target.value } : x))}
+                  autoComplete="new-password" />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Allow-paths</label>
+                <input className="gg-input" value={ep.paths} placeholder="/repos,/user (пусто = всё под base)"
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, paths: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+            </div>
+          ))}
+          <div className="gg-settings-hint">
+            AI вызывает <code>connector_query</code> с <code>id="http"</code>,
+            <code>endpoint=&lt;имя&gt;</code> и path/method/query/body/headers.
+            Auth-заголовок подставляется из настроек, AI его не видит.
+            Allow-paths ограничивает к каким путям эндпоинта можно обращаться.
           </div>
         </div>
 

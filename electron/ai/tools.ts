@@ -86,16 +86,24 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'connector_query',
-    description: 'Выполнить запрос к внешнему коннектору. Для 1С (id="onec") передай entity и опционально filter/select/top, либо metadata:true для $metadata. Никогда не передавай пароли в args — креды берутся из настроек.',
+    description: 'Выполнить запрос к внешнему коннектору. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
     parameters: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'ID коннектора (например "onec").' },
-        entity: { type: 'string', description: 'Имя OData-сущности, например "Catalog_Контрагенты".' },
-        filter: { type: 'string', description: 'OData $filter, например "IsFolder eq false".' },
-        select: { type: 'string', description: 'Список полей через запятую.' },
-        top: { type: 'number', description: 'Размер страницы 1..100, по умолчанию 20.' },
-        metadata: { type: 'boolean', description: 'Если true — вернёт $metadata вместо данных.' }
+        id: { type: 'string', description: 'ID коннектора: "onec" | "http".' },
+        // 1С OData params
+        entity: { type: 'string', description: '[onec] Имя OData-сущности, например "Catalog_Контрагенты".' },
+        filter: { type: 'string', description: '[onec] OData $filter.' },
+        select: { type: 'string', description: '[onec] Список полей через запятую.' },
+        top: { type: 'number', description: '[onec] Размер страницы 1..100.' },
+        metadata: { type: 'boolean', description: '[onec] Если true — вернёт $metadata.' },
+        // HTTP params
+        endpoint: { type: 'string', description: '[http] Имя сконфигурированного эндпоинта.' },
+        method: { type: 'string', description: '[http] GET/POST/PUT/DELETE/PATCH (default GET).' },
+        path: { type: 'string', description: '[http] Относительный путь от base URL.' },
+        query: { type: 'object', description: '[http] Query-параметры (плоский объект).' },
+        body: { description: '[http] JSON-сериализуемое тело запроса.' },
+        headers: { type: 'object', description: '[http] Дополнительные заголовки.' }
       },
       required: ['id']
     }
