@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { createFileTools, TOOL_DEFS } from '../ai/tools'
+import { createFileTools, TOOL_DEFS, applySearchReplaceBlocks } from '../ai/tools'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import { loadUserLayer } from '../ai/user-layer'
 import { composeSystemPrompt } from '../ai/compose-prompt'
@@ -380,9 +380,10 @@ async function runApiConversation(
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
-      if (call.name === 'write_file') {
-        // Fire pending-write event immediately and queue the resolve promise.
-        // The renderer will accumulate all pending writes into one multi-file modal.
+      if (call.name === 'write_file' || call.name === 'apply_patch') {
+        // Both go through the same diff-confirm flow. apply_patch is converted
+        // to write_file semantics inside handleWriteFile (it computes the
+        // after-state by running search/replace blocks against current file).
         writePromises.push({ idx: i, promise: handleWriteFile(sender, sendId, tools, call, projectPath, recordWrite) })
         continue
       }
@@ -521,7 +522,7 @@ async function runApiConversation(
       const call = toolCalls[i]
       const result = toolResults[i]
       if (!result) continue
-      if (call.name === 'write_file' && !result.error) {
+      if ((call.name === 'write_file' || call.name === 'apply_patch') && !result.error) {
         const p = String(call.args.path ?? '')
         if (p) filesTouched.add(p)
       } else if (call.name === 'run_command' && !result.error) {
@@ -595,19 +596,39 @@ async function handleWriteFile(
   recordWrite: (projectPath: string, filePath: string, before: string, after: string) => void
 ): Promise<ToolResult> {
   const path = String(call.args.path)
-  const after = String(call.args.content)
   let before = ''
   try { before = await tools.execute('read_file', { path }) as string } catch { before = '' }
+  // Strip the secret-scanner header line we add to read_file output before
+  // computing the patch — it isn't actually in the file.
+  if (before.startsWith('[secret-scanner: redacted')) {
+    const nl = before.indexOf('\n')
+    if (nl >= 0) before = before.slice(nl + 1)
+  }
+
+  let after: string
+  if (call.name === 'apply_patch') {
+    // Compute the after-state by applying SEARCH/REPLACE blocks. Errors here
+    // bubble back to the model as a tool error so it can correct the patch.
+    try {
+      after = applySearchReplaceBlocks(before, String(call.args.diff ?? ''))
+    } catch (err) {
+      return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+    }
+  } else {
+    after = String(call.args.content)
+  }
+
   sender.send('ai:event', { id: sendId, event: { type: 'pending-write', callId: call.id, path, before, after } })
   const accepted = await new Promise<boolean>(resolve => {
     pendingWrites.set(scopedKey(sendId, call.id), { sendId, resolve })
   })
   if (accepted) {
     try {
-      await tools.execute('write_file', call.args)
-      // Save the before/after pair so the user can ↶ revert this write later
+      // We already computed `after`, so write it directly via the underlying
+      // write_file (skip apply_patch re-execution).
+      await tools.execute('write_file', { path, content: after })
       try { recordWrite(projectPath, path, before, after) } catch { /* undo storage failure shouldn't block the write */ }
-      return { id: call.id, name: call.name, result: `Applied write to ${path}` }
+      return { id: call.id, name: call.name, result: `Applied ${call.name === 'apply_patch' ? 'patch' : 'write'} to ${path}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }

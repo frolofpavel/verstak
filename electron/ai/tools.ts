@@ -36,7 +36,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'write_file',
-    description: 'Записать содержимое в файл. Требует подтверждения пользователя.',
+    description: 'Записать ПОЛНОЕ содержимое файла. Используй ТОЛЬКО для СОЗДАНИЯ новых файлов или ПОЛНОЙ замены маленьких файлов (<200 строк). Для ПРАВКИ существующих больших файлов вместо этого вызывай apply_patch — это дешевле и безопаснее.',
     parameters: {
       type: 'object',
       properties: {
@@ -44,6 +44,29 @@ export const TOOL_DEFS: ToolDefinition[] = [
         content: { type: 'string' }
       },
       required: ['path', 'content']
+    }
+  },
+  {
+    name: 'apply_patch',
+    description: `Точечная правка файла через SEARCH/REPLACE блоки. Намного дешевле и безопаснее чем write_file для существующих файлов.
+
+Формат diff:
+<<<<<<< SEARCH
+точный кусок текущего содержимого (включая отступы)
+=======
+новый текст
+>>>>>>> REPLACE
+
+Несколько блоков в одном файле — разделяй пустой строкой. Каждый SEARCH должен УНИКАЛЬНО совпадать с содержимым файла; если фрагмент встречается несколько раз — добавь больше контекста. Файл должен существовать (для создания используй write_file).
+
+Возвращает количество применённых блоков. Требует подтверждения пользователя как обычный write — diff отображается в том же модальном окне.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Относительный путь к существующему файлу.' },
+        diff: { type: 'string', description: 'Один или несколько SEARCH/REPLACE блоков.' }
+      },
+      required: ['path', 'diff']
     }
   },
   {
@@ -205,6 +228,43 @@ export interface FileTools {
   /** Pure execution — used by the IPC layer after user has confirmed the command. */
   runCommand: (command: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
   classifyCommand: typeof classifyCommand
+}
+
+/**
+ * Apply one or more SEARCH/REPLACE blocks to a string and return the result.
+ * Each SEARCH must match EXACTLY ONCE in the current state of the buffer
+ * (re-checked after each replacement so earlier rewrites don't break later
+ * matches). Throws with a precise error if a block doesn't match or is
+ * ambiguous — important so the AI sees feedback and can correct.
+ */
+export function applySearchReplaceBlocks(input: string, diff: string): string {
+  const blockRe = /<{7,}\s*SEARCH\s*\n([\s\S]*?)\n={7,}\s*\n([\s\S]*?)\n>{7,}\s*REPLACE\b/g
+  let result = input
+  let applied = 0
+  let m: RegExpExecArray | null
+  while ((m = blockRe.exec(diff)) !== null) {
+    const search = m[1]
+    const replace = m[2]
+    if (!search) {
+      throw new Error(`apply_patch: пустой SEARCH блок в позиции ${applied + 1}`)
+    }
+    const first = result.indexOf(search)
+    if (first === -1) {
+      // Provide a useful diagnostic: a few lines that might be close
+      const sample = search.split('\n')[0].slice(0, 80)
+      throw new Error(`apply_patch: SEARCH блок #${applied + 1} не найден в файле. Первая строка искомого: "${sample}". Прочитай файл заново и составь патч по актуальному содержимому.`)
+    }
+    const next = result.indexOf(search, first + 1)
+    if (next !== -1) {
+      throw new Error(`apply_patch: SEARCH блок #${applied + 1} встречается в файле несколько раз (позиции ${first} и ${next}). Добавь контекста до/после чтобы фрагмент стал уникальным.`)
+    }
+    result = result.slice(0, first) + replace + result.slice(first + search.length)
+    applied++
+  }
+  if (applied === 0) {
+    throw new Error('apply_patch: в diff не найдено ни одного валидного SEARCH/REPLACE блока. Формат: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE')
+  }
+  return result
 }
 
 function safeJoin(root: string, rel: string): string {
@@ -445,6 +505,22 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         // Invalidate project map cache so the next get_project_map sees this file
         invalidateProjectMap(root)
         return { ok: true }
+      }
+      if (name === 'apply_patch') {
+        // Note: this branch should normally NOT be reached — ipc/ai.ts
+        // intercepts apply_patch to wire it through the user-confirmation
+        // flow, just like write_file. We keep an implementation here for
+        // direct/test use.
+        const relPath = String(args.path)
+        if (isForbiddenPath(relPath)) {
+          throw new Error(`Запись запрещена политикой безопасности: ${relPath}`)
+        }
+        const abs = await safeRealJoin(root, relPath)
+        const before = await readFile(abs, 'utf8')
+        const after = applySearchReplaceBlocks(before, String(args.diff))
+        await writeFile(abs, after, 'utf8')
+        invalidateProjectMap(root)
+        return { ok: true, before, after }
       }
       if (name === 'run_command') {
         // The IPC layer intercepts this tool call to gather user confirmation
