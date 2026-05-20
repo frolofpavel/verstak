@@ -36,7 +36,7 @@ Switch in the chat composer's model picker. Each provider has its own list of mo
 - **Emergency stop.** Floating red pill while streaming + Shift+Esc kills every active stream and clears pending confirmations.
 - **Resizable sidebar.** Drag right edge to resize (200..480px), width persisted to localStorage.
 - **Auto-summary journal.** Every AI session writes a brief entry (touched files, commands run, last reply); plans get their own entry.
-- **CLI parity (light).** Subscription CLIs (Claude Code / Gemini / Grok Build / Codex) get the same Context Pack + user_layer + recent chat history as API providers. Tools still API-only (CLI is one-shot), but the «brain» is shared.
+- **CLI parity (light).** Subscription CLIs (Claude Code / Gemini / Grok Build / Codex) get the same Context Pack + user_layer + recent chat history as API providers. **Agent mode = API only; CLI = shared brain, no tools** — function-calling needs multi-turn protocol that vendors' one-shot `stream-json` modes don't expose.
 - **System layer.** Immutable agent protocols (7-step cycle, scope discipline, verification, secret-scanner policy) baked into the build. User extends via `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` / `.geminigrok/RULES.md` in the project root (auto-init on first project open).
 - **Dark / light theme.** Toggle in Settings.
 
