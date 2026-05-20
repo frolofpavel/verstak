@@ -37,11 +37,28 @@ function findBinary(): string {
 }
 
 interface CliEvent {
-  type: 'init' | 'message' | 'result' | 'tool_call' | 'tool_result' | string
+  type: 'init' | 'message' | 'result' | 'tool_call' | 'tool_result' | 'usage' | string
   role?: 'user' | 'assistant' | 'system'
   content?: string
   delta?: boolean
   status?: string
+  // Token usage — Gemini CLI emits these in `result` and/or `usage` events.
+  // Field names vary across CLI versions; we accept several.
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cached_input_tokens?: number
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
+  input_tokens?: number
+  output_tokens?: number
+  cached_input_tokens?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  tokens?: { input?: number; output?: number; cached?: number }
 }
 
 export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvider {
@@ -104,6 +121,32 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
 
       const wake = () => { if (resolve) { const r = resolve; resolve = null; r() } }
 
+      /** Extract token usage from a CLI event in whatever shape this CLI version uses. */
+      function extractUsage(ev: CliEvent): { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } | null {
+        // Shape 1: ev.usage = { input_tokens, output_tokens, cached_input_tokens }
+        if (ev.usage) {
+          const u = ev.usage
+          const input = u.input_tokens ?? u.prompt_tokens
+          const output = u.output_tokens ?? u.completion_tokens
+          if (input != null || output != null) {
+            return { inputTokens: input, outputTokens: output, cachedInputTokens: u.cached_input_tokens }
+          }
+        }
+        // Shape 2: flat input_tokens/output_tokens on the event
+        if (ev.input_tokens != null || ev.output_tokens != null || ev.prompt_tokens != null) {
+          return {
+            inputTokens: ev.input_tokens ?? ev.prompt_tokens,
+            outputTokens: ev.output_tokens ?? ev.completion_tokens,
+            cachedInputTokens: ev.cached_input_tokens
+          }
+        }
+        // Shape 3: ev.tokens = { input, output, cached }
+        if (ev.tokens && (ev.tokens.input != null || ev.tokens.output != null)) {
+          return { inputTokens: ev.tokens.input, outputTokens: ev.tokens.output, cachedInputTokens: ev.tokens.cached }
+        }
+        return null
+      }
+
       function processLine(line: string) {
         const trimmed = line.trim()
         if (!trimmed.startsWith('{')) return  // skip warnings, status lines
@@ -113,7 +156,20 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
         if (ev.type === 'message' && ev.role === 'assistant' && ev.content) {
           events.push({ type: 'text', text: ev.content })
           wake()
+        } else if (ev.type === 'usage') {
+          const u = extractUsage(ev)
+          if (u) {
+            events.push({ type: 'usage', usage: { ...u, model: opts.model ?? 'gemini-cli' } })
+            wake()
+          }
         } else if (ev.type === 'result') {
+          // Result event from Gemini CLI also carries final usage — pick it up
+          // here too so we don't miss it if the CLI never emits a separate
+          // `usage` event between message and result.
+          const u = extractUsage(ev)
+          if (u) {
+            events.push({ type: 'usage', usage: { ...u, model: opts.model ?? 'gemini-cli' } })
+          }
           if (ev.status === 'success') {
             events.push({ type: 'done' })
           } else {
