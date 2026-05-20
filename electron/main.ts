@@ -56,25 +56,32 @@ function createWindow(): void {
 }
 
 /**
- * Install a Content-Security-Policy header for the renderer to defence-in-depth
- * against XSS. The renderer is fully local; we allow self + data: (icons) only.
- * webview content runs in its own session and is NOT affected by this CSP.
+ * Install a Content-Security-Policy header for the renderer in production.
+ *
+ * Skipped in dev: Vite's HMR client uses inline scripts, eval-based module
+ * evaluation, and a websocket to localhost — a strict CSP breaks all of it
+ * and you get a blank window. In a packaged build there's no HMR, so we
+ * can lock things down. webview content runs in its own session and is
+ * NOT affected by this CSP either way.
  */
 function installCSP(): void {
+  // ELECTRON_RENDERER_URL is set by electron-vite dev runner.
+  if (process.env.ELECTRON_RENDERER_URL) return
+
   const csp = [
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",  // Vite/React inline styles
+    "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",
-    "connect-src 'self' ws: wss: https:",
+    "connect-src 'self' https:",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'"
   ].join('; ')
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    // Only inject for main renderer (file:// or local dev), not for <webview>
-    if (details.resourceType === 'mainFrame' || details.resourceType === 'subFrame' || details.resourceType === 'stylesheet' || details.resourceType === 'script') {
+    const rt = details.resourceType
+    if (rt === 'mainFrame' || rt === 'subFrame' || rt === 'stylesheet' || rt === 'script') {
       const headers = { ...details.responseHeaders, 'Content-Security-Policy': [csp] }
       callback({ responseHeaders: headers })
       return
