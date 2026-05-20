@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { Plan, PlanStep, StepStatus, ChatMessage } from '../types/api'
 
@@ -25,6 +25,8 @@ export function PlanView() {
   const [composer, setComposer] = useState<{ title: string; rawSteps: string }>({ title: '', rawSteps: '' })
   const [autopilot, setAutopilot] = useState({ enabled: false, maxSteps: 5, verifyCmd: '' })
   const [autopilotLog, setAutopilotLog] = useState<string[]>([])
+  /** Set to true to cancel an in-flight Autopilot run (waits + loop). */
+  const autopilotCancel = useRef(false)
 
   async function refresh() {
     if (!path) return
@@ -67,27 +69,49 @@ export function PlanView() {
     await refresh()
   }
 
-  /** Polls store until the current runningPlanStep is cleared (i.e. AI emitted 'done'). */
-  function waitForStepCompletion(stepId: number): Promise<void> {
+  /**
+   * Polls store until the current runningPlanStep is cleared (i.e. AI emitted
+   * 'done'). Exits as soon as `!isStreaming` — even if runningPlanStep was
+   * never cleared by an event (defensive: prevents infinite spin if a 'done'
+   * event was lost or routed to a background session). Hard timeout cap so
+   * a stuck stream never wedges the Autopilot loop.
+   */
+  function waitForStepCompletion(stepId: number, opts?: { timeoutMs?: number; cancel?: { current: boolean } }): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 5 * 60_000  // 5 minutes per step
     return new Promise(resolve => {
+      const startedAt = Date.now()
+      let timer: ReturnType<typeof setTimeout> | null = null
       const tick = () => {
-        const running = useProject.getState().runningPlanStep
+        if (opts?.cancel?.current) { resolve(); return }
         const streaming = useProject.getState().isStreaming
-        if (running?.stepId !== stepId && !streaming) { resolve(); return }
-        setTimeout(tick, 400)
+        const running = useProject.getState().runningPlanStep
+        // Primary exit: stream finished (whatever runningPlanStep says)
+        if (!streaming) { resolve(); return }
+        // Secondary: step explicitly switched away from us
+        if (running && running.stepId !== stepId) { resolve(); return }
+        // Hard cap
+        if (Date.now() - startedAt >= timeoutMs) { resolve(); return }
+        timer = setTimeout(tick, 400)
       }
       tick()
+      // expose cleanup so a parent cancellation can short-circuit
+      void timer
     })
   }
 
   async function runAll(plan: Plan) {
     if (!path || isStreaming) return
+    autopilotCancel.current = false
     // Snapshot the pending steps in order so we don't re-pick a step that was just done
     const queue = plan.steps.filter(s => s.status === 'pending' || s.status === 'failed').map(s => s.id)
     const limit = autopilot.enabled ? Math.max(1, Math.min(20, autopilot.maxSteps)) : queue.length
     setAutopilotLog([])
     let ran = 0
     for (const stepId of queue) {
+      if (autopilotCancel.current) {
+        setAutopilotLog(l => [...l, `⏹ Отменено пользователем.`])
+        break
+      }
       if (ran >= limit) {
         setAutopilotLog(l => [...l, `⏸ Лимит автопилота ${limit} шагов достигнут — пауза.`])
         break
@@ -100,7 +124,7 @@ export function PlanView() {
       if (step.status !== 'pending' && step.status !== 'failed') continue
       setAutopilotLog(l => [...l, `▶ ${step.title}`])
       await runStep(fresh, step)
-      await waitForStepCompletion(stepId)
+      await waitForStepCompletion(stepId, { cancel: autopilotCancel })
       await refresh()
       ran++
       // Abort if user cancelled or step failed
@@ -287,6 +311,14 @@ ${remaining || '— нет —'}
                 </div>
                 {autopilotLog.length > 0 && (
                   <div className="gg-autopilot-log">
+                    {isStreaming && (
+                      <button
+                        className="gg-btn gg-btn-ghost gg-btn-danger"
+                        style={{ alignSelf: 'flex-start', padding: '2px 10px', fontSize: '11px' }}
+                        onClick={() => { autopilotCancel.current = true }}
+                        title="Прервать автопилот после текущего шага"
+                      >⏹ Отменить автопилот</button>
+                    )}
                     {autopilotLog.map((l, i) => <div key={i}>{l}</div>)}
                   </div>
                 )}
