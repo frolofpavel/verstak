@@ -268,6 +268,10 @@ async function runApiConversation(
   // sliding-window eviction problem of the previous flat-array approach.
   const signatureCounts = new Map<string, number>()
   const LOOP_THRESHOLD = 3
+  // Accumulate token usage across all turns of this session for the final journal entry.
+  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
+    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
+  }
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
   const commandsRun: string[] = []
@@ -295,10 +299,13 @@ async function runApiConversation(
       } else if (event.type === 'tool-call') {
         toolCalls.push(event.call)
       } else if (event.type === 'usage') {
+        sessionUsage.inputTokens += event.usage.inputTokens ?? 0
+        sessionUsage.outputTokens += event.usage.outputTokens ?? 0
+        sessionUsage.cachedInputTokens += event.usage.cachedInputTokens ?? 0
         sender.send('ai:event', { id: sendId, event })
       } else if (event.type === 'done') {
         if (toolCalls.length === 0) {
-          writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun)
+          writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun, sessionUsage)
           sender.send('ai:event', { id: sendId, event })
           return
         }
@@ -308,7 +315,7 @@ async function runApiConversation(
       }
     }
     if (toolCalls.length === 0) {
-      writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun)
+      writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun, sessionUsage)
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
@@ -372,6 +379,16 @@ async function runApiConversation(
       }
       if (call.name === 'browser_navigate' || call.name === 'browser_read_page' || call.name === 'browser_screenshot') {
         toolResults[i] = await handleBrowserTool(sender, call)
+        // Journal browser actions — useful audit trail of what AI looked at on the web
+        try {
+          if (!toolResults[i].error) {
+            const url = String(call.args.url ?? '')
+            const label = call.name === 'browser_navigate' ? `Браузер → ${url}`
+                        : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
+                        : `Браузер: скриншот`
+            recordJournal(projectPath, 'tool', label, null)
+          }
+        } catch { /* journal not critical */ }
         // If a screenshot tool returned a data URL, queue it as an attachment
         // on the next user message so vision-capable providers receive it.
         if (call.name === 'browser_screenshot' && !toolResults[i].error) {
@@ -416,10 +433,17 @@ async function runApiConversation(
           toolResults[i] = { id: call.id, name: call.name, result: typeof result === 'string' ? result : JSON.stringify(result) }
           const s = summarizeToolCall(call.name, call.args, undefined)
           if (s) sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: s.label, detail: s.detail, status: 'ok' } })
+          // Journal connector queries — what external service was hit, what entity
+          try {
+            const entity = call.args.entity ? ` · ${call.args.entity}` : ''
+            const path = call.args.path ? ` · ${call.args.path}` : ''
+            recordJournal(projectPath, 'tool', `Коннектор ${cid}${entity}${path}`, null)
+          } catch { /* journal not critical */ }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           toolResults[i] = { id: call.id, name: call.name, result: '', error: msg }
           sender.send('ai:event', { id: sendId, event: { type: 'tool-activity', callId: call.id, name: call.name, label: call.name, detail: msg, status: 'error' } })
+          try { recordJournal(projectPath, 'tool', `Коннектор упал: ${String(call.args.id ?? '?')}`, msg) } catch { /* journal not critical */ }
         }
         continue
       }
@@ -494,7 +518,7 @@ async function runApiConversation(
     currentMessages.push(nextUserMsg)
   }
   // Max turns reached — warn user and exit
-  writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun)
+  writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun, sessionUsage)
   sender.send('ai:event', {
     id: sendId,
     event: {
@@ -516,18 +540,26 @@ function writeSessionJournal(
   projectPath: string,
   lastAssistantText: string,
   filesTouched: Set<string>,
-  commandsRun: string[]
+  commandsRun: string[],
+  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 ): void {
   const hasFiles = filesTouched.size > 0
   const hasCommands = commandsRun.length > 0
   const text = lastAssistantText.trim()
-  if (!hasFiles && !hasCommands && text.length < 40) return
+  const hasUsage = usage && ((usage.inputTokens ?? 0) > 0 || (usage.outputTokens ?? 0) > 0)
+  if (!hasFiles && !hasCommands && !hasUsage && text.length < 40) return
   // Title: first sentence of the assistant's reply, capped at 100 chars.
   const firstLine = text.split(/\n+/)[0] ?? ''
   const title = (firstLine.length > 0 ? firstLine : 'AI-сессия').slice(0, 100)
   const detailLines: string[] = []
   if (hasFiles) detailLines.push(`Файлы (${filesTouched.size}): ${[...filesTouched].slice(0, 8).join(', ')}${filesTouched.size > 8 ? ' …' : ''}`)
   if (hasCommands) detailLines.push(`Команды (${commandsRun.length}): ${commandsRun.slice(0, 5).join(' · ')}${commandsRun.length > 5 ? ' …' : ''}`)
+  if (hasUsage) {
+    const i = usage!.inputTokens ?? 0
+    const o = usage!.outputTokens ?? 0
+    const c = usage!.cachedInputTokens ?? 0
+    detailLines.push(`Токены: ↑${i} ↓${o}${c > 0 ? ` ⟲${c}` : ''}`)
+  }
   if (text && text.length > firstLine.length) {
     const rest = text.slice(firstLine.length).trim()
     if (rest) detailLines.push(rest.slice(0, 600))

@@ -16,17 +16,34 @@ const KIND_COLOR: Record<JournalEntry['kind'], string> = {
   note: 'var(--text-tertiary)'
 }
 
+type KindFilter = 'all' | JournalEntry['kind']
+
 export function JournalView() {
   const { path } = useProject()
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [draft, setDraft] = useState('')
   const [draftDetail, setDraftDetail] = useState('')
+  const [filter, setFilter] = useState<KindFilter>('all')
+  const [search, setSearch] = useState('')
 
   async function refresh() {
     if (!path) return
     const list = await window.api.journal.list(path, 200)
     setEntries(list)
   }
+
+  const visible = entries.filter(e => {
+    if (filter !== 'all' && e.kind !== filter) return false
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!e.title.toLowerCase().includes(q) && !(e.detail ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+
+  // Counts per kind for the filter chips
+  const counts: Record<KindFilter, number> = { all: entries.length, manual: 0, session: 0, tool: 0, note: 0 }
+  for (const e of entries) counts[e.kind]++
 
   useEffect(() => { void refresh() }, [path])
 
@@ -56,7 +73,29 @@ export function JournalView() {
     <div className="gg-panel">
       <div className="gg-panel-header">
         <h2 className="gg-panel-title">Журнал разработки</h2>
-        <div className="gg-panel-meta">{entries.length} записей</div>
+        <div className="gg-panel-meta">{visible.length} из {entries.length}</div>
+      </div>
+
+      <div className="gg-journal-toolbar">
+        <div className="gg-journal-filters" role="tablist">
+          {(['all', 'session', 'tool', 'manual', 'note'] as KindFilter[]).map(k => (
+            <button
+              key={k}
+              type="button"
+              className={`gg-journal-chip ${filter === k ? 'is-active' : ''}`}
+              onClick={() => setFilter(k)}
+            >
+              {k === 'all' ? 'Все' : k === 'session' ? 'Сессии' : k === 'tool' ? 'Действия' : k === 'manual' ? 'Заметки' : 'Прочее'}
+              <span className="gg-journal-chip-count">{counts[k]}</span>
+            </button>
+          ))}
+        </div>
+        <input
+          className="gg-input gg-journal-search"
+          placeholder="Поиск по тексту…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
       </div>
 
       <div className="gg-panel-body">
@@ -88,7 +127,7 @@ export function JournalView() {
         )}
 
         <div className="gg-journal-list">
-          {entries.map(e => (
+          {visible.map(e => (
             <div key={e.id} className="gg-journal-entry">
               <div className="gg-journal-meta">
                 <span className="gg-journal-kind" style={{ color: KIND_COLOR[e.kind], borderColor: KIND_COLOR[e.kind] }}>

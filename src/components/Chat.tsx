@@ -229,6 +229,12 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           store.setRunningPlanStep(null)
         }
         updateLastAssistant(`\n\n[Ошибка: ${event.message}]`)
+        // Persist the error in the journal — otherwise you lose context once
+        // you close the chat and can't tell why the answer failed.
+        if (store.path) {
+          void window.api.journal.append(store.path, 'note', 'AI-ошибка',
+            ('message' in event ? event.message : '').slice(0, 600))
+        }
         setStreaming(false)
       }
     })
