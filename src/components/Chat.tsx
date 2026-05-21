@@ -595,7 +595,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
                 void stop()
               }
             }}
-            placeholder={isStreaming ? 'Gemini отвечает… (Esc — остановить)' : 'Опиши задачу. Enter — отправить, Shift+Enter — новая строка. Ctrl+V — вставить скриншот.'}
+            placeholder={isStreaming ? `${provider.label} отвечает… (Esc — остановить)` : 'Опиши задачу. Enter — отправить, Shift+Enter — новая строка. Ctrl+V — вставить скриншот.'}
           />
           <div className="gg-composer-actions">
             <button

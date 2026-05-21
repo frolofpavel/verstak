@@ -31,10 +31,12 @@ export function ModelPicker({ onOpenSettings }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   // Persist provider/model on the current chat session so it sticks per-chat
-  async function persistOnSession(providerId: ProviderId, model: string) {
+  async function persistOnSession(providerId: ProviderId, model: string | null) {
     if (!activeChatId) return
     try {
-      await window.api.chatSessions.setModel(activeChatId, providerId, model)
+      // null model => 'use this provider's default'. Avoids writing empty
+      // strings that mask stored defaults on next switchChatSession.
+      await window.api.chatSessions.setModel(activeChatId, providerId, model && model.length > 0 ? model : null)
       await refreshChatSessions()
     } catch { /* don't block UX if persistence fails */ }
   }
@@ -71,10 +73,16 @@ export function ModelPicker({ onOpenSettings }: Props) {
                 key={p.id}
                 type="button"
                 className={`gg-mp-row ${provider.id === p.id ? 'is-active' : ''}`}
-                onClick={() => void provider.setProviderId(p.id).then(async () => {
-                  await persistOnSession(p.id, provider.model)
+                onClick={async () => {
+                  // STALE CLOSURE FIX: provider.model captured BEFORE
+                  // setProviderId completes is the OLD provider's model
+                  // (e.g. 'gemini-3.5-flash' when switching to claude-cli).
+                  // Read the NEW provider's stored model directly.
+                  await provider.setProviderId(p.id)
+                  const storedNewModel = await window.api.settings.getKey(`model_${p.id}`)
+                  await persistOnSession(p.id, storedNewModel)
                   setOpen(false)
-                })}
+                }}
               >
                 <span className="gg-mp-row-label">{p.label}</span>
                 <span className="gg-mp-row-meta">{p.description}</span>

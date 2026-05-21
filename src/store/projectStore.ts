@@ -1,6 +1,27 @@
 import { create } from 'zustand'
 import type { FileNode, ChatMessage, ProjectMeta, ChatSession } from '../types/api'
 
+/**
+ * Sanity check for stored chat-session (providerId, model) pairs.
+ * Earlier bug: switching provider in ModelPicker saved the OLD provider's
+ * model on the new provider's session entry (e.g. claude-cli + gemini-3.5-flash).
+ * This guard rejects such impossible pairs at switch time.
+ */
+const PROVIDER_MODEL_MAP: Record<string, string[]> = {
+  'gemini-api': ['gemini-3-pro', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  'gemini-cli': ['auto', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  'claude': ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101'],
+  'claude-cli': ['auto', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
+  'grok': ['grok-4', 'grok-4-fast', 'grok-3'],
+  'grok-cli': ['auto', 'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'grok-3'],
+  'openai': ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
+  'codex-cli': ['auto', 'gpt-5-codex', 'gpt-5', 'gpt-5-mini', 'o3', 'o3-mini', 'gpt-4o']
+}
+function isModelValidForProvider(providerId: string, model: string): boolean {
+  const allowed = PROVIDER_MODEL_MAP[providerId]
+  return !!allowed && allowed.includes(model)
+}
+
 interface PendingWrite {
   callId: string
   path: string
@@ -323,12 +344,19 @@ export const useProject = create<ProjectState>((set, get) => ({
     const history = await window.api.chats.list(id)
     // Per-chat provider: if the session has providerId / model saved, apply
     // them to the global settings so the next ai:send uses that provider.
+    // Sanity check: if stored (providerId, model) pair is invalid (e.g. older
+    // bug saved gemini's model on a claude session), drop the model so
+    // useProvider falls back to the provider's default.
     const session = s.chatSessions.find(c => c.id === id)
     if (session?.providerId) {
       try {
         await window.api.settings.setKey('provider', session.providerId)
-        if (session.model) {
+        if (session.model && isModelValidForProvider(session.providerId, session.model)) {
           await window.api.settings.setKey(`model_${session.providerId}`, session.model)
+        } else if (session.model) {
+          // Clear stale/invalid model — useProvider will pick the default
+          await window.api.settings.setKey(`model_${session.providerId}`, '')
+          await window.api.chatSessions.setModel(id, session.providerId, null)
         }
       } catch { /* settings write failure shouldn't block chat switch */ }
     }
