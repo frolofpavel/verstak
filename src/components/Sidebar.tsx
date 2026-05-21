@@ -4,7 +4,7 @@ import { useProvider } from '../hooks/useProvider'
 import type { FileNode } from '../types/api'
 
 function ChatNavSection() {
-  const { chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, refreshChatSessions, chatSnapshots } = useProject()
+  const { chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, refreshChatSessions, chatSnapshots, patchChatSession } = useProject()
   const [open, setOpen] = useState(true)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -18,10 +18,22 @@ function ChatNavSection() {
   async function commitEdit() {
     if (editingId == null) return
     const t = editTitle.trim()
-    if (t) await window.api.chatSessions.rename(editingId, t)
+    const idToEdit = editingId
+    // Очищаем edit-state СРАЗУ чтобы input закрылся даже если IPC упадёт
     setEditingId(null)
     setEditTitle('')
-    await refreshChatSessions()
+    if (!t) return
+    // Optimistic local update — заголовок меняется мгновенно, без полной
+    // перезагрузки chatSessions. Это убирает re-render волну, которая
+    // ранее иногда обрывала входящий ai:event стрим (Pavel 2026-05-21).
+    patchChatSession(idToEdit, { title: t })
+    try {
+      await window.api.chatSessions.rename(idToEdit, t)
+    } catch (err) {
+      // Если запись в DB упала — откатываем UI и подтягиваем правду
+      console.error('[Sidebar] rename failed, reverting:', err)
+      await refreshChatSessions()
+    }
   }
   async function removeSession(id: number) {
     if (!window.confirm('Удалить этот чат и все его сообщения?')) return

@@ -168,6 +168,9 @@ interface ProjectState {
   switchChatSession: (id: number) => Promise<void>
   /** Refresh the chat sessions list (after create/rename/delete). */
   refreshChatSessions: () => Promise<void>
+  /** Optimistically update a chat-session row without refetching the list.
+   *  Used by rename — avoids the stream-disrupting re-render cascade. */
+  patchChatSession: (id: number, patch: Partial<ChatSession>) => void
   /** Create a new chat session in the active project and switch to it. */
   newChatSession: (title?: string) => Promise<ChatSession | null>
 }
@@ -513,6 +516,17 @@ export const useProject = create<ProjectState>((set, get) => ({
     const list = await window.api.chatSessions.list(s.path)
     set({ chatSessions: list })
   },
+  /**
+   * Patch one chat-session in place — used by rename so we don't have to
+   * refetch the whole list. Pavel feedback 2026-05-21: переименование чата
+   * во время стрима ломало ответ. Полная перезагрузка списка чатов давала
+   * re-render волну, которая в некоторых условиях прерывала входящий
+   * ai:event поток. Локальный optimistic patch убирает этот класс багов
+   * целиком — ничего, кроме одного title, не меняется.
+   */
+  patchChatSession: (id, patch) => set(s => ({
+    chatSessions: s.chatSessions.map(c => c.id === id ? { ...c, ...patch } : c)
+  })),
   newChatSession: async (title) => {
     const s = get()
     if (!s.path) return null
