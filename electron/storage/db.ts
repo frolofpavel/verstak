@@ -99,26 +99,76 @@ export function openDb(path: string): DB {
     );
   `)
 
-  // Migrate chats → session-aware. Add session_id column if missing, then
-  // backfill: for every project that has orphan chats, create a default
-  // session and tag those rows. Idempotent.
-  const chatCols = (db.prepare("PRAGMA table_info(chats)").all() as Array<{ name: string }>).map(c => c.name)
-  if (!chatCols.includes('session_id')) {
-    db.exec('ALTER TABLE chats ADD COLUMN session_id INTEGER')
-  }
-  const orphans = db.prepare(`
-    SELECT DISTINCT project_path FROM chats WHERE session_id IS NULL
-  `).all() as Array<{ project_path: string }>
-  for (const { project_path } of orphans) {
-    const now = Date.now()
-    const info = db.prepare(
-      'INSERT INTO chat_sessions (project_path, title, created_at, last_message_at) VALUES (?, ?, ?, ?)'
-    ).run(project_path, 'Основной чат', now, now)
-    db.prepare('UPDATE chats SET session_id = ? WHERE project_path = ? AND session_id IS NULL').run(
-      info.lastInsertRowid, project_path
-    )
-  }
-  db.exec('CREATE INDEX IF NOT EXISTS idx_chats_session ON chats(session_id, created_at)')
+  runMigrations(db)
 
   return db
+}
+
+/**
+ * Versioned migrations. Each entry runs ONCE per database — tracked via
+ * `schema_version` table. Adding a new migration: append to MIGRATIONS array
+ * with a NEW (higher) `version` number. Never edit/reorder old entries
+ * (they may have already run on user databases).
+ *
+ * Before this lived in openDb() — ALTER TABLE / SELECT scans ran on EVERY
+ * app start. Fine while tiny but noticeable as chats table grows. Now
+ * migrations only fire on version bump.
+ */
+const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) => void }> = [
+  {
+    version: 1,
+    description: 'Chats → session-aware: add session_id column, backfill orphans with "Основной чат" session',
+    run: (db) => {
+      const chatCols = (db.prepare("PRAGMA table_info(chats)").all() as Array<{ name: string }>).map(c => c.name)
+      if (!chatCols.includes('session_id')) {
+        db.exec('ALTER TABLE chats ADD COLUMN session_id INTEGER')
+      }
+      const orphans = db.prepare(
+        `SELECT DISTINCT project_path FROM chats WHERE session_id IS NULL`
+      ).all() as Array<{ project_path: string }>
+      for (const { project_path } of orphans) {
+        const now = Date.now()
+        const info = db.prepare(
+          'INSERT INTO chat_sessions (project_path, title, created_at, last_message_at) VALUES (?, ?, ?, ?)'
+        ).run(project_path, 'Основной чат', now, now)
+        db.prepare('UPDATE chats SET session_id = ? WHERE project_path = ? AND session_id IS NULL').run(
+          info.lastInsertRowid, project_path
+        )
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_chats_session ON chats(session_id, created_at)')
+    }
+  }
+]
+
+function runMigrations(db: DB): void {
+  // schema_version: tracks which migrations have been applied. Single-row
+  // table — we just keep the highest applied version number.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  const row = db.prepare('SELECT version FROM schema_version WHERE id = 1').get() as { version: number } | undefined
+  const current = row?.version ?? 0
+  const targets = MIGRATIONS.filter(m => m.version > current).sort((a, b) => a.version - b.version)
+  if (targets.length === 0) return
+
+  // Apply each pending migration in a transaction. If any throws, the
+  // schema_version doesn't advance — user can retry on next start.
+  for (const m of targets) {
+    const tx = db.transaction(() => {
+      m.run(db)
+      db.prepare(
+        'INSERT INTO schema_version (id, version, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at'
+      ).run(m.version, Date.now())
+    })
+    try {
+      tx()
+    } catch (err) {
+      console.error(`[db] migration v${m.version} (${m.description}) failed:`, err)
+      throw err  // abort startup — corrupt schema is worse than crash
+    }
+  }
 }
