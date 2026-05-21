@@ -16,6 +16,7 @@ import { buildContextPack } from '../../electron/ai/context-pack'
 import { buildProjectMap, projectMapToText } from '../../electron/ai/project-map'
 import { scanText, isForbiddenPath } from '../../electron/ai/secret-scanner'
 import { classifyCommand } from '../../electron/ai/command-policy'
+import { safeJoin, safeRealJoin } from '../../electron/ai/path-policy'
 
 describe('agent-bench: 10 эталонных регрессий', () => {
   let dir: string
@@ -116,6 +117,19 @@ export const Widget = () => null
     expect(pack).toMatch(/electron/)
     expect(pack).toMatch(/react/)
     expect(pack).toMatch(/geminigrok/)
+  })
+
+  // 13. path-policy: safeJoin блокирует ../ traversal
+  it('[13] path-policy: safeJoin режет .. traversal', () => {
+    expect(() => safeJoin(dir, '../../etc/passwd')).toThrow(/Запрещён выход/)
+    expect(() => safeJoin(dir, '..')).toThrow(/Запрещён выход/)
+  })
+
+  // 14. path-policy: safeRealJoin совпадает с safeJoin для нормальных путей
+  it('[14] path-policy: safeRealJoin пропускает нормальные пути внутри root', async () => {
+    writeFileSync(join(dir, 'normal.ts'), 'export const x = 1')
+    const abs = await safeRealJoin(dir, 'normal.ts')
+    expect(abs.endsWith('normal.ts')).toBe(true)
   })
 
   // 12. context-pack: product_stack для Python проекта по requirements.txt

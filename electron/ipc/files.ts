@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron'
 import { readdir, stat, readFile } from 'fs/promises'
-import { join, resolve, relative, sep } from 'path'
+import { join } from 'path'
+import { safeRealJoin } from '../ai/path-policy'
+import { isForbiddenPath, scanText } from '../ai/secret-scanner'
 
 const IGNORE = new Set(['node_modules', '.git', 'out', 'dist', '.geminigrok-data', '.superpowers'])
 const MAX_READ_BYTES = 2 * 1024 * 1024  // 2 MB safety cap
@@ -36,21 +38,6 @@ async function listTree(current: string, depth: number): Promise<FileNode[]> {
   return nodes
 }
 
-/**
- * Verifies that `target` resolves to a path inside `root` after symlink-aware
- * normalization. Throws on path traversal or attempts to read outside the project.
- */
-function assertInsideRoot(root: string, target: string): string {
-  if (!root) throw new Error('Проект не открыт — чтение файлов недоступно')
-  const normalizedRoot = resolve(root)
-  const normalizedTarget = resolve(target)
-  const rel = relative(normalizedRoot, normalizedTarget)
-  if (rel === '' || rel.startsWith('..') || rel.includes('..' + sep) || rel.startsWith(sep)) {
-    throw new Error(`Запрещено читать вне проекта: ${target}`)
-  }
-  return normalizedTarget
-}
-
 export interface FilesIpcDeps {
   getProjectRoot: () => string | null
 }
@@ -64,12 +51,29 @@ export function registerFilesIpc(deps: FilesIpcDeps): void {
   ipcMain.handle('files:read', async (_e, path: string) => {
     const root = deps.getProjectRoot()
     if (!root) throw new Error('Проект не открыт')
-    const abs = assertInsideRoot(root, path)
+    // SECURITY: symlink-safe resolution (was: textual-only resolve + relative).
+    // We must compute the relative path against the project root for both the
+    // forbidden-path policy check and the realpath escape check.
+    const relPath = path.startsWith(root) ? path.slice(root.length).replace(/^[\\/]+/, '') : path
+    if (isForbiddenPath(relPath)) {
+      throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+    }
+    const abs = await safeRealJoin(root, relPath)
     const st = await stat(abs)
     if (!st.isFile()) throw new Error(`Не файл: ${path}`)
     if (st.size > MAX_READ_BYTES) {
       throw new Error(`Файл слишком большой для чтения: ${st.size} байт (лимит ${MAX_READ_BYTES})`)
     }
-    return await readFile(abs, 'utf8')
+    const raw = await readFile(abs, 'utf8')
+    // Apply secret scanner — consistency with what AI sees. If user is reading
+    // a file with API keys via the UI, they'll see [REDACTED:type] markers
+    // instead of the raw token. They can still click outside the app to read
+    // the file with another editor if they truly need raw — this is layered
+    // defence, not perfect prevention.
+    const scan = scanText(raw)
+    if (scan.hits.length > 0) {
+      return `[secret-scanner: redacted ${scan.hits.join(', ')} — открой файл в редакторе вне приложения для raw-доступа]\n${scan.redacted}`
+    }
+    return raw
   })
 }

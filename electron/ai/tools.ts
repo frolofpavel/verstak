@@ -1,12 +1,13 @@
-import { readFile, readdir, stat, writeFile, realpath } from 'fs/promises'
-import { join, resolve, relative, sep } from 'path'
+import { readFile, readdir, stat, writeFile } from 'fs/promises'
+import { join, relative } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, realpathSync } from 'fs'
+import { existsSync } from 'fs'
 import type { ToolDefinition } from './types'
 import { classifyCommand } from './command-policy'
 import { isForbiddenPath, scanText } from './secret-scanner'
 import { getProjectMap, invalidateProjectMap, projectMapToText } from './project-map'
+import { safeRealJoin } from './path-policy'
 
 const execFileAsync = promisify(execFile)
 
@@ -267,40 +268,7 @@ export function applySearchReplaceBlocks(input: string, diff: string): string {
   return result
 }
 
-function safeJoin(root: string, rel: string): string {
-  const abs = resolve(root, rel)
-  const r = relative(root, abs)
-  if (r.startsWith('..') || r.includes('..' + sep) || r === '..') {
-    throw new Error(`Запрещён выход за пределы проекта: ${rel}`)
-  }
-  return abs
-}
-
-/**
- * Resolve symlinks and verify the final real path still lives inside the
- * project root. Prevents symlink escapes (e.g. `link -> /home/user/.ssh`).
- * Falls back to safeJoin if realpath throws (file doesn't exist yet — fine,
- * we're about to create it).
- */
-async function safeRealJoin(root: string, rel: string): Promise<string> {
-  const abs = safeJoin(root, rel)
-  try {
-    const realAbs = await realpath(abs)
-    let realRoot: string
-    try { realRoot = await realpath(root) } catch { realRoot = root }
-    const r = relative(realRoot, realAbs)
-    if (r.startsWith('..') || r.includes('..' + sep) || r === '..') {
-      throw new Error(`Запрещён выход за пределы проекта через symlink: ${rel}`)
-    }
-    return abs
-  } catch (err) {
-    // ENOENT — file doesn't exist; that's fine, we'll create it inside root.
-    // Anything else (EACCES on the link itself, etc.) — rethrow.
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return abs
-    throw err
-  }
-}
-void realpathSync  // tslint silencer — kept for sync fallbacks if needed later
+// safeJoin / safeRealJoin moved to ./path-policy.ts — see import above.
 
 function isRipgrepAvailable(): boolean {
   // Cheap probe — bare check if `rg` resolves. PATH lookup is sync via `where`/`which`
