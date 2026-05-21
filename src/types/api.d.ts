@@ -2,7 +2,18 @@ export interface FileNode { name: string; path: string; isDirectory: boolean; ch
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
 export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; createdAt: number }
-export interface ChatSession { id: number; projectPath: string; title: string; providerId: string | null; model: string | null; createdAt: number; lastMessageAt: number }
+export type ChatKind = 'main' | 'review'
+export interface ChatSession {
+  id: number
+  projectPath: string
+  title: string
+  providerId: string | null
+  model: string | null
+  createdAt: number
+  lastMessageAt: number
+  kind: ChatKind
+  parentChatId: number | null
+}
 export interface Task { id: number; text: string; done: boolean; createdAt: number; doneAt: number | null }
 export type JournalKind = 'manual' | 'session' | 'tool' | 'note'
 export interface JournalEntry { id: number; kind: JournalKind; title: string; detail: string | null; createdAt: number }
@@ -56,6 +67,11 @@ declare global {
       ai: {
         send: (messages: ChatMessage[], projectPath: string | null) => Promise<number>
         sendWithBudget: (messages: ChatMessage[], projectPath: string | null, budget: number) => Promise<number>
+        sendWithOverrides: (
+          messages: ChatMessage[],
+          projectPath: string | null,
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string }
+        ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
@@ -64,7 +80,14 @@ declare global {
       }
       chatSessions: {
         list: (projectPath: string) => Promise<ChatSession[]>
-        create: (projectPath: string, opts?: { title?: string; providerId?: string | null; model?: string | null }) => Promise<ChatSession>
+        listReviews: (parentChatId: number) => Promise<ChatSession[]>
+        create: (projectPath: string, opts?: {
+          title?: string
+          providerId?: string | null
+          model?: string | null
+          kind?: ChatKind
+          parentChatId?: number | null
+        }) => Promise<ChatSession>
         rename: (id: number, title: string) => Promise<void>
         setModel: (id: number, providerId: string | null, model: string | null) => Promise<void>
         remove: (id: number) => Promise<void>

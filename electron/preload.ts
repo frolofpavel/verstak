@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ai:send', messages, projectPath),
     sendWithBudget: (messages: unknown[], projectPath: string | null, budget: number) =>
       ipcRenderer.invoke('ai:send', messages, projectPath, budget),
+    /** Send with provider/model/systemPrompt override. Used by Explicit Review:
+     *  routes through ai:send with overrides so reviewer ≠ chat provider. */
+    sendWithOverrides: (
+      messages: unknown[],
+      projectPath: string | null,
+      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string }
+    ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-write', callId, accept, sendId),
     resolveCommand: (callId: string, accept: boolean, sendId?: number) =>
@@ -36,8 +43,14 @@ contextBridge.exposeInMainWorld('api', {
   },
   chatSessions: {
     list: (projectPath: string) => ipcRenderer.invoke('chat-sessions:list', projectPath),
-    create: (projectPath: string, opts?: { title?: string; providerId?: string | null; model?: string | null }) =>
-      ipcRenderer.invoke('chat-sessions:create', projectPath, opts),
+    listReviews: (parentChatId: number) => ipcRenderer.invoke('chat-sessions:list-reviews', parentChatId),
+    create: (projectPath: string, opts?: {
+      title?: string
+      providerId?: string | null
+      model?: string | null
+      kind?: 'main' | 'review'
+      parentChatId?: number | null
+    }) => ipcRenderer.invoke('chat-sessions:create', projectPath, opts),
     rename: (id: number, title: string) => ipcRenderer.invoke('chat-sessions:rename', id, title),
     setModel: (id: number, providerId: string | null, model: string | null) =>
       ipcRenderer.invoke('chat-sessions:set-model', id, providerId, model),

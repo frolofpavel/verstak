@@ -65,8 +65,25 @@ function scopedKey(sendId: number, callId: string): string {
 }
 
 export function registerAiIpc(deps: AiDeps): void {
-  ipcMain.handle('ai:send', async (e, messages: ChatMessage[], projectPath: string | null, budget?: number) => {
-    const providerId = deps.getProviderId()
+  /**
+   * Optional overrides for ai:send. Used by Explicit Review feature: the
+   * reviewer needs a DIFFERENT provider from the chat's main provider, must
+   * skip tool dispatch (review is read-only synthesis), and may use a custom
+   * system prompt (REVIEWER_SYSTEM_PROMPT) instead of the project's system
+   * layer. Without overrides, ai:send behaves exactly as before.
+   */
+  interface AiSendOverrides {
+    providerId?: ProviderId
+    model?: string | null
+    /** Force plain (no-tools) mode even if provider supports tools. */
+    noTools?: boolean
+    /** Replace assembled system prompt entirely. When set, project's user-layer
+     *  / context-pack is NOT prepended — caller owns the full system message. */
+    systemPrompt?: string
+  }
+
+  ipcMain.handle('ai:send', async (e, messages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides) => {
+    const providerId = overrides?.providerId ?? deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
     const ctrl = new AbortController()
@@ -97,9 +114,14 @@ export function registerAiIpc(deps: AiDeps): void {
     // and prepend the immutable system layer + user layer as a single system message.
     // CLI providers run their own agent inside, so we don't inject for them — the
     // user's AGENTS.md is already picked up by Claude Code / Codex / Grok Build natively.
-    const injectSystem = descriptor.transport === 'API'
+    //
+    // OVERRIDE path (Explicit Review): caller passes its own system prompt
+    // (REVIEWER_SYSTEM_PROMPT) and we don't want to also inject the project's
+    // user_layer — reviewer prompt is self-contained.
     let messagesWithSystem = messages
-    if (injectSystem) {
+    if (overrides?.systemPrompt) {
+      messagesWithSystem = [{ role: 'system', content: overrides.systemPrompt }, ...messages]
+    } else if (descriptor.transport === 'API') {
       // Same assembly path as CLI providers — see ai/compose-system.ts.
       const composed = await prepareSystemContext({
         projectPath,
@@ -125,7 +147,7 @@ export function registerAiIpc(deps: AiDeps): void {
       return 0
     }
 
-    const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
+    const model = (overrides?.model ?? deps.getProviderModel(providerId)) ?? descriptor.defaultModel
     let provider: ChatProvider
     try {
       provider = createProvider(providerId, {
@@ -143,7 +165,9 @@ export function registerAiIpc(deps: AiDeps): void {
       return 0
     }
 
-    if (descriptor.supportsTools && projectPath) {
+    // Force-plain path: review uses no tools regardless of provider capability.
+    const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
+    if (useToolsPath) {
       const tools = createFileTools(projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.connectors, deps.getAgentMode(), turnsBudget).finally(cleanup)

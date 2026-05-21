@@ -1,13 +1,19 @@
 import { ipcMain } from 'electron'
 import type { Chats } from '../storage/chats'
-import type { ChatSessions } from '../storage/chat-sessions'
+import type { ChatSessions, ChatKind } from '../storage/chat-sessions'
 
 export function registerChatsIpc(chats: Chats, sessions: ChatSessions): void {
   // Sessions
   ipcMain.handle('chat-sessions:list', (_e, projectPath: string) => sessions.list(projectPath))
-  ipcMain.handle('chat-sessions:create', (_e, projectPath: string, opts?: { title?: string; providerId?: string | null; model?: string | null }) =>
-    sessions.create(projectPath, opts)
-  )
+  /** Review sub-chats для родительского — для рендера pills в Timeline. */
+  ipcMain.handle('chat-sessions:list-reviews', (_e, parentChatId: number) => sessions.listReviews(parentChatId))
+  ipcMain.handle('chat-sessions:create', (_e, projectPath: string, opts?: {
+    title?: string
+    providerId?: string | null
+    model?: string | null
+    kind?: ChatKind
+    parentChatId?: number | null
+  }) => sessions.create(projectPath, opts))
   ipcMain.handle('chat-sessions:rename', (_e, id: number, title: string) => sessions.rename(id, title))
   ipcMain.handle('chat-sessions:set-model', (_e, id: number, providerId: string | null, model: string | null) =>
     sessions.setProviderModel(id, providerId, model)
