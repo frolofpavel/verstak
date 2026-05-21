@@ -5,6 +5,7 @@ import { estimateCost } from '../lib/pricing'
 import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
 import { ModePicker } from './ModePicker'
+import { VoiceInput } from './VoiceInput'
 import { useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment } from '../types/api'
 import iconUrl from '../assets/icon.png'
@@ -687,6 +688,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
                 <path d="m21.44 11.05 -9.19 9.19a6 6 0 0 1 -8.49 -8.49l9.19 -9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1 -2.83 -2.83l8.49 -8.48" />
               </svg>
             </button>
+            <VoiceInput onTranscript={chunk => setInput(prev => prev + chunk)} />
             {isStreaming ? (
               <button
                 className="gg-send-btn gg-stop-btn"
@@ -720,7 +722,6 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           />
         </div>
         <div className="gg-composer-hint">
-          <span><span className="gg-kbd">Enter</span> отправить · <span className="gg-kbd">Shift</span>+<span className="gg-kbd">Enter</span> новая строка · <span className="gg-kbd">Ctrl+V</span> картинка</span>
           <div className="gg-composer-meta">
             {previewTokens && previewTokens.tokens > 0 && (() => {
               const cost = estimateCost(provider.id, provider.model, previewTokens.tokens, 0, 0)

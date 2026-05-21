@@ -71,6 +71,20 @@ function createWindow(): void {
  * can lock things down. webview content runs in its own session and is
  * NOT affected by this CSP either way.
  */
+/**
+ * Allow microphone access so VoiceInput / Web Speech API can request it.
+ * Without this Electron silently rejects getUserMedia('audio').
+ */
+function installMediaPermissions(): void {
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'media') return callback(true)
+    callback(false)
+  })
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return permission === 'media'
+  })
+}
+
 function installCSP(): void {
   // ELECTRON_RENDERER_URL is set by electron-vite dev runner.
   if (process.env.ELECTRON_RENDERER_URL) return
@@ -105,6 +119,7 @@ if (process.platform === 'win32') {
 
 app.whenReady().then(() => {
   installCSP()
+  installMediaPermissions()
   const dir = join(app.getPath('userData'), 'storage')
   mkdirSync(dir, { recursive: true })
   const db = openDb(join(dir, 'geminigrok.db'))
