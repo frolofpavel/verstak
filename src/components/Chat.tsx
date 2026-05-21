@@ -145,7 +145,8 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           callId: event.callId,
           path: event.path,
           before: event.before,
-          after: event.after
+          after: event.after,
+          sendId: id  // pass through for strict resolve lookup in main
         })
         store.pushActivity({
           id: event.callId,
@@ -157,7 +158,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
         })
       }
       else if (event.type === 'pending-command') {
-        store.setPendingCommand({ callId: event.callId, command: event.command })
+        store.setPendingCommand({ callId: event.callId, command: event.command, sendId: id })
         store.pushActivity({
           id: event.callId,
           kind: 'command',
@@ -357,8 +358,8 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
     if (!text) { setPreviewTokens(null); return }
     const timer = window.setTimeout(async () => {
       try {
-        const projectPath = useProject.getState().path
-        const res = await window.api.ai.countTokens(text, projectPath)
+        const state = useProject.getState()
+        const res = await window.api.ai.countTokens(text, state.path, state.messages)
         setPreviewTokens({ tokens: res.tokens, exact: res.exact })
       } catch { /* silent: it's only a preview */ }
     }, 400)

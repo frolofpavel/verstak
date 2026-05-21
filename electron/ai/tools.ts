@@ -260,17 +260,56 @@ export function applySearchReplaceBlocks(input: string, diff: string): string {
     if (!search) {
       throw new Error(`apply_patch: пустой SEARCH блок в позиции ${applied + 1}`)
     }
-    const first = result.indexOf(search)
+    // Primary: exact match
+    let first = result.indexOf(search)
+    let actualSearch = search
     if (first === -1) {
-      // Provide a useful diagnostic: a few lines that might be close
+      // Fallback 1: trim trailing whitespace on each line of SEARCH AND target.
+      // LLMs commonly add/strip a trailing space — exact match fails on that
+      // and the agent then re-reads the file 3 times → loop detection breaks
+      // a legitimate turn. We try a normalized comparison; if it matches
+      // uniquely, accept it.
+      const stripTrailing = (s: string) => s.split('\n').map(l => l.replace(/[\t ]+$/, '')).join('\n')
+      const normSearch = stripTrailing(search)
+      const normResult = stripTrailing(result)
+      const normFirst = normResult.indexOf(normSearch)
+      if (normFirst !== -1) {
+        const normNext = normResult.indexOf(normSearch, normFirst + 1)
+        if (normNext !== -1) {
+          throw new Error(`apply_patch: SEARCH блок #${applied + 1} после нормализации whitespace встречается несколько раз (позиции ${normFirst} и ${normNext}). Добавь контекста.`)
+        }
+        // Find the real (un-normalized) range that corresponds to normFirst.
+        // We walk lines in result until we reach the normalized position.
+        let charsInNorm = 0
+        let realPos = 0
+        for (const realLine of result.split('\n')) {
+          if (charsInNorm >= normFirst) break
+          charsInNorm += realLine.replace(/[\t ]+$/, '').length + 1  // +newline
+          realPos += realLine.length + 1
+        }
+        // Approximate — but for the un-normalized substring of equivalent
+        // length: walk forward search.length characters preserving original.
+        first = realPos - search.length >= 0 ? result.indexOf(result.slice(realPos - 1).split('\n', search.split('\n').length).join('\n')) : -1
+        if (first === -1) {
+          // Robust fallback: rebuild by joining the right number of lines.
+          const startLine = result.slice(0, realPos).split('\n').length - search.split('\n').length
+          const lines = result.split('\n')
+          actualSearch = lines.slice(startLine, startLine + search.split('\n').length).join('\n')
+          first = result.indexOf(actualSearch)
+        }
+      }
+    }
+    if (first === -1) {
       const sample = search.split('\n')[0].slice(0, 80)
-      throw new Error(`apply_patch: SEARCH блок #${applied + 1} не найден в файле. Первая строка искомого: "${sample}". Прочитай файл заново и составь патч по актуальному содержимому.`)
+      throw new Error(`apply_patch: SEARCH блок #${applied + 1} не найден в файле (даже после нормализации whitespace). Первая строка искомого: "${sample}". Прочитай файл заново и составь патч по актуальному содержимому.`)
     }
-    const next = result.indexOf(search, first + 1)
-    if (next !== -1) {
-      throw new Error(`apply_patch: SEARCH блок #${applied + 1} встречается в файле несколько раз (позиции ${first} и ${next}). Добавь контекста до/после чтобы фрагмент стал уникальным.`)
+    if (actualSearch === search) {
+      const nextEx = result.indexOf(search, first + 1)
+      if (nextEx !== -1) {
+        throw new Error(`apply_patch: SEARCH блок #${applied + 1} встречается в файле несколько раз (позиции ${first} и ${nextEx}). Добавь контекста до/после чтобы фрагмент стал уникальным.`)
+      }
     }
-    result = result.slice(0, first) + replace + result.slice(first + search.length)
+    result = result.slice(0, first) + replace + result.slice(first + actualSearch.length)
     applied++
   }
   if (applied === 0) {

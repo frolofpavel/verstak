@@ -6,11 +6,11 @@ export function CommandConfirm() {
   const ref = pendingCommand
 
   async function accept() {
-    await window.api.ai.resolveCommand(ref.callId, true)
+    await window.api.ai.resolveCommand(ref.callId, true, ref.sendId)
     setPendingCommand(null)
   }
   async function reject() {
-    await window.api.ai.resolveCommand(ref.callId, false)
+    await window.api.ai.resolveCommand(ref.callId, false, ref.sendId)
     setPendingCommand(null)
   }
 

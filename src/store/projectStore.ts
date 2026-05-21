@@ -27,11 +27,16 @@ interface PendingWrite {
   path: string
   before: string
   after: string
+  /** sendId of the ai:send that produced this write — used for strict
+   *  resolveWrite lookup in main (avoids endsWith-based collisions). */
+  sendId?: number
 }
 
 interface PendingCommand {
   callId: string
   command: string
+  /** sendId for strict resolve lookup. */
+  sendId?: number
 }
 
 interface ActivityEntry {

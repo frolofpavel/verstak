@@ -56,10 +56,10 @@ declare global {
       ai: {
         send: (messages: ChatMessage[], projectPath: string | null) => Promise<number>
         sendWithBudget: (messages: ChatMessage[], projectPath: string | null, budget: number) => Promise<number>
-        resolveWrite: (callId: string, accept: boolean) => Promise<void>
-        resolveCommand: (callId: string, accept: boolean) => Promise<void>
+        resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
+        resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
-        countTokens: (text: string, projectPath: string | null) => Promise<{ tokens: number; exact: boolean; providerId: string }>
+        countTokens: (text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => Promise<{ tokens: number; exact: boolean; providerId: string }>
         onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
       }
       chatSessions: {

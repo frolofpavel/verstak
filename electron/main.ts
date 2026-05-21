@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session } from 'electron'
+import { app, BrowserWindow, safeStorage, session, dialog } from 'electron'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { mkdirSync } from 'fs'
@@ -122,7 +122,27 @@ app.whenReady().then(() => {
   installMediaPermissions()
   const dir = join(app.getPath('userData'), 'storage')
   mkdirSync(dir, { recursive: true })
-  const db = openDb(join(dir, 'geminigrok.db'))
+  let db
+  try {
+    db = openDb(join(dir, 'geminigrok.db'))
+  } catch (err) {
+    // DB locked, disk full, schema migration failed — show GUI error
+    // instead of crashing silently with stderr only.
+    const msg = err instanceof Error ? err.message : String(err)
+    dialog.showErrorBox(
+      'GeminiGrok: не удалось открыть базу данных',
+      `Путь: ${join(dir, 'geminigrok.db')}\n\nОшибка: ${msg}\n\n` +
+      `Возможные причины: файл заблокирован другим процессом GeminiGrok, ` +
+      `диск переполнен, или повреждённая миграция схемы.\n\n` +
+      `Что попробовать:\n` +
+      `1. Закрой все другие копии GeminiGrok\n` +
+      `2. Проверь свободное место на диске\n` +
+      `3. Если ничего не помогает — переименуй geminigrok.db в .bak и перезапусти ` +
+      `(чаты будут потеряны, но проект откроется)`
+    )
+    app.quit()
+    return
+  }
   const settings = createSettings(db, safeStorage)
   const chats = createChats(db)
   const chatSessions = createChatSessions(db)

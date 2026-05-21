@@ -21,13 +21,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ai:send', messages, projectPath),
     sendWithBudget: (messages: unknown[], projectPath: string | null, budget: number) =>
       ipcRenderer.invoke('ai:send', messages, projectPath, budget),
-    resolveWrite: (callId: string, accept: boolean) =>
-      ipcRenderer.invoke('ai:resolve-write', callId, accept),
-    resolveCommand: (callId: string, accept: boolean) =>
-      ipcRenderer.invoke('ai:resolve-command', callId, accept),
+    resolveWrite: (callId: string, accept: boolean, sendId?: number) =>
+      ipcRenderer.invoke('ai:resolve-write', callId, accept, sendId),
+    resolveCommand: (callId: string, accept: boolean, sendId?: number) =>
+      ipcRenderer.invoke('ai:resolve-command', callId, accept, sendId),
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
-    countTokens: (text: string, projectPath: string | null) =>
-      ipcRenderer.invoke('ai:count-tokens', text, projectPath) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
+    countTokens: (text: string, projectPath: string | null, historyMessages?: unknown[]) =>
+      ipcRenderer.invoke('ai:count-tokens', text, projectPath, historyMessages) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
     onEvent: (cb: (data: { id: number; event: unknown }) => void) => {
       const handler = (_e: unknown, data: { id: number; event: unknown }) => cb(data)
       ipcRenderer.on('ai:event', handler)

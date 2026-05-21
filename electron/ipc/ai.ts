@@ -157,8 +157,15 @@ export function registerAiIpc(deps: AiDeps): void {
     return true
   })
 
-  ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean) => {
-    // Renderer doesn't know about sendId — look up by callId suffix.
+  ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
+    // If renderer knows sendId (it should — Chat.tsx stores it after ai:send),
+    // use strict key lookup. Fallback to suffix scan for backward compat with
+    // older renderer code paths.
+    if (typeof sendId === 'number' && sendId > 0) {
+      const key = scopedKey(sendId, callId)
+      const exact = pendingWrites.get(key)
+      if (exact) { exact.resolve(accept); pendingWrites.delete(key); return }
+    }
     for (const [k, p] of pendingWrites) {
       if (k.endsWith('::' + callId)) {
         p.resolve(accept)
@@ -173,7 +180,7 @@ export function registerAiIpc(deps: AiDeps): void {
    * "≈ N tokens, ~$X" preview in the composer. Only implemented for providers
    * that expose a real countTokens API — others get a rough estimate.
    */
-  ipcMain.handle('ai:count-tokens', async (_e, text: string, projectPath: string | null) => {
+  ipcMain.handle('ai:count-tokens', async (_e, text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => {
     const providerId = deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null
@@ -191,20 +198,30 @@ export function registerAiIpc(deps: AiDeps): void {
         const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
         // Same compose path as ai:send — keeps countTokens estimate aligned
         // with what actually gets sent on the next ai:send.
+        // Build the FULL context the next ai:send would see: system + history
+        // + draft text. Without history the estimate could be off by orders of
+        // magnitude on long conversations (50+ msgs → ~20k tokens of history).
+        const history = Array.isArray(historyMessages) ? historyMessages : []
         const composed = await prepareSystemContext({
           projectPath,
-          messages: [],  // estimating: no prior history, just system + draft text
+          messages: history,
           recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : []
         })
-        // Cheap approximation of the full context size: system + user text.
+        // Full context size: system + every prior turn + the draft text.
+        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [
+          { role: 'user', parts: [{ text: composed.system }] }
+        ]
+        for (const m of history) {
+          if (m.role === 'system') continue  // already in composed.system
+          contents.push({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content ?? '' }]
+          })
+        }
+        if (text) contents.push({ role: 'user', parts: [{ text }] })
         const res = await (client.models as unknown as {
-          countTokens: (opts: { model: string; contents: Array<{ role: string; parts: Array<{ text: string }> }> }) => Promise<{ totalTokens?: number }>
-        }).countTokens({
-          model,
-          contents: [
-            { role: 'user', parts: [{ text: composed.system + '\n\n' + (text ?? '') }] }
-          ]
-        })
+          countTokens: (opts: { model: string; contents: typeof contents }) => Promise<{ totalTokens?: number }>
+        }).countTokens({ model, contents })
         return { tokens: res.totalTokens ?? 0, exact: true, providerId }
       }
     } catch (err) {
@@ -213,7 +230,12 @@ export function registerAiIpc(deps: AiDeps): void {
     return { tokens: Math.ceil((text?.length ?? 0) / 4), exact: false, providerId }
   })
 
-  ipcMain.handle('ai:resolve-command', (_e, callId: string, accept: boolean) => {
+  ipcMain.handle('ai:resolve-command', (_e, callId: string, accept: boolean, sendId?: number) => {
+    if (typeof sendId === 'number' && sendId > 0) {
+      const key = scopedKey(sendId, callId)
+      const exact = pendingCommands.get(key)
+      if (exact) { exact.resolve(accept); pendingCommands.delete(key); return }
+    }
     for (const [k, p] of pendingCommands) {
       if (k.endsWith('::' + callId)) {
         p.resolve(accept)

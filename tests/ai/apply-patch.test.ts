@@ -60,6 +60,22 @@ other
     expect(applySearchReplaceBlocks(before, diff)).toBe('  if (x) {\n    return z\n  }\n')
   })
 
+  it('whitespace fallback: matches when trailing spaces differ', () => {
+    // Original file has trailing space on the line
+    const before = 'const x = 1   \nconst y = 2\n'
+    // AI generates patch WITHOUT trailing spaces
+    const diff = `<<<<<<< SEARCH
+const x = 1
+const y = 2
+=======
+const x = 99
+const y = 88
+>>>>>>> REPLACE`
+    const result = applySearchReplaceBlocks(before, diff)
+    expect(result).toContain('const x = 99')
+    expect(result).toContain('const y = 88')
+  })
+
   it('handles multiline replacements', () => {
     const before = 'a\nb\nc\n'
     const diff = `<<<<<<< SEARCH

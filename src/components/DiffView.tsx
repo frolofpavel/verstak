@@ -81,7 +81,7 @@ export function DiffView() {
     const w = pendingWrites.find(x => x.callId === callId)
     if (!w) return
     const d = computeDiff(w.before, w.after)
-    await window.api.ai.resolveWrite(callId, true)
+    await window.api.ai.resolveWrite(callId, true, w.sendId)
     updateActivity(callId, { status: 'ok', detail: `${w.path} (+${d.added} −${d.removed})` })
     if (path) {
       void window.api.journal.append(path, 'tool', `Изменён файл: ${w.path}`, `+${d.added} −${d.removed} строк`)
@@ -89,7 +89,8 @@ export function DiffView() {
     resolvePendingWrite(callId)
   }
   async function rejectOne(callId: string) {
-    await window.api.ai.resolveWrite(callId, false)
+    const w = pendingWrites.find(x => x.callId === callId)
+    await window.api.ai.resolveWrite(callId, false, w?.sendId)
     updateActivity(callId, { status: 'rejected' })
     resolvePendingWrite(callId)
   }
