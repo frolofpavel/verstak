@@ -48,6 +48,14 @@ interface ActivityEntry {
   timestamp: number
 }
 
+/**
+ * Marker shown next to a file in the project tree to indicate that the AI
+ * has touched it during the current session. Priority: write > read > list.
+ * Recorded per project-relative path so the Sidebar can render a small badge.
+ */
+export type TouchKind = 'read' | 'write' | 'list'
+const TOUCH_PRIORITY: Record<TouchKind, number> = { write: 3, read: 2, list: 1 }
+
 export type ViewId = 'chat' | 'tasks' | 'journal' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser'
 
 export interface SessionUsage {
@@ -95,6 +103,14 @@ interface ProjectState {
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   activity: ActivityEntry[]
+  /** Per-session "the AI has touched these files" map — feeds Sidebar markers
+   *  (Gemini Ultra audit: Context Depth Visualizer). Keyed by project-relative
+   *  path; value is the highest-priority kind observed. */
+  touchedFiles: Record<string, TouchKind>
+  /** Undo entry ID at the moment the user pressed "📍 Чекпоинт". Revert-to-
+   *  checkpoint pops every entry whose id > this until back at this mark.
+   *  Null when no checkpoint set. */
+  checkpointId: number | null
   activeView: ViewId
   sessionUsage: SessionUsage
   runningPlanStep: RunningPlanStep | null
@@ -129,6 +145,13 @@ interface ProjectState {
   pushActivity: (entry: ActivityEntry) => void
   updateActivity: (id: string, patch: Partial<ActivityEntry>) => void
   clearActivity: () => void
+  /** Record that the AI just touched a file (read / write / list). Upgrades
+   *  the marker if a higher-priority kind is observed. */
+  markFileTouched: (path: string, kind: TouchKind) => void
+  clearTouchedFiles: () => void
+  /** Snap a checkpoint at the current undo head. Subsequent writes can be
+   *  rolled back to this mark in one click. */
+  setCheckpoint: (id: number | null) => void
   addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
   resetUsage: () => void
   setRunningPlanStep: (s: RunningPlanStep | null) => void
@@ -163,6 +186,8 @@ export const useProject = create<ProjectState>((set, get) => ({
   pendingWrites: [],
   pendingCommand: null,
   activity: [],
+  touchedFiles: {},
+  checkpointId: null,
   activeView: 'chat',
   sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
   runningPlanStep: null,
@@ -243,7 +268,11 @@ export const useProject = create<ProjectState>((set, get) => ({
       projectList,
       chatSessions,
       activeChatId,
-      sessions: nextSessions
+      sessions: nextSessions,
+      // Reset per-session UI markers when switching project — they're scoped
+      // to the active conversation, not the project itself.
+      touchedFiles: {},
+      checkpointId: null
     })
   },
   closeProject: () => set({
@@ -294,6 +323,14 @@ export const useProject = create<ProjectState>((set, get) => ({
     activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
   clearActivity: () => set({ activity: [] }),
+  markFileTouched: (path, kind) => set(s => {
+    if (!path) return {}
+    const existing = s.touchedFiles[path]
+    if (existing && TOUCH_PRIORITY[existing] >= TOUCH_PRIORITY[kind]) return {}
+    return { touchedFiles: { ...s.touchedFiles, [path]: kind } }
+  }),
+  clearTouchedFiles: () => set({ touchedFiles: {} }),
+  setCheckpoint: (id) => set({ checkpointId: id }),
   addUsage: (delta) => set(s => ({
     sessionUsage: {
       inputTokens: s.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
@@ -498,7 +535,9 @@ export const useProject = create<ProjectState>((set, get) => ({
       pendingWrites: [],
       pendingCommand: null,
       runningPlanStep: null,
-      isStreaming: false
+      isStreaming: false,
+      touchedFiles: {},
+      checkpointId: null
     })
     return created
   }

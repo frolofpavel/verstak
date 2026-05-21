@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
+import { treeKill } from './child-kill'
 
 interface ClaudeCliOptions {
   binary?: string
@@ -38,10 +39,29 @@ function findBinary(): string {
 interface CliEvent {
   type: string
   subtype?: string
-  message?: { content?: Array<{ type: string; text?: string }> }
+  message?: {
+    content?: Array<{ type: string; text?: string }>
+    /** Some Claude CLI versions embed token counts inside message.usage on
+     *  the assistant event. */
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+  }
   is_error?: boolean
   error?: string
   result?: string
+  /** Token usage on the final `result` event (Claude Code stream-json shape).
+   *  Field names track the Anthropic API: input_tokens, output_tokens,
+   *  cache_read_input_tokens. */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
 }
 
 export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvider {
@@ -82,13 +102,13 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
         child.stdin.end()
       } catch (err) {
         yield { type: 'error', message: `Claude CLI stdin error: ${err instanceof Error ? err.message : String(err)}` }
-        try { child.kill() } catch { /* noop */ }
+        treeKill(child)
         return
       }
 
       let abortListener: (() => void) | null = null
       if (opts.signal) {
-        abortListener = () => { try { child.kill() } catch { /* noop */ } }
+        abortListener = () => { treeKill(child) }
         opts.signal.addEventListener('abort', abortListener, { once: true })
       }
 
@@ -123,7 +143,37 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
               wake()
             }
           }
+        } else if (ev.type === 'assistant' && ev.message?.usage) {
+          // Token usage may arrive piggybacked on the assistant event in some
+          // CLI versions. Emit a usage event so the chat UI / journal can
+          // surface token counts the same way they do for API providers.
+          const u = ev.message.usage
+          if ((u.input_tokens ?? 0) > 0 || (u.output_tokens ?? 0) > 0) {
+            queue.push({
+              type: 'usage',
+              usage: {
+                inputTokens: u.input_tokens,
+                outputTokens: u.output_tokens,
+                cachedInputTokens: u.cache_read_input_tokens,
+                model: opts.model ?? 'claude-cli'
+              }
+            })
+            wake()
+          }
         } else if (ev.type === 'result') {
+          // Final result event also carries usage — capture it before done so
+          // the journal gets a token count even if no assistant.usage fired.
+          if (ev.usage && ((ev.usage.input_tokens ?? 0) > 0 || (ev.usage.output_tokens ?? 0) > 0)) {
+            queue.push({
+              type: 'usage',
+              usage: {
+                inputTokens: ev.usage.input_tokens,
+                outputTokens: ev.usage.output_tokens,
+                cachedInputTokens: ev.usage.cache_read_input_tokens,
+                model: opts.model ?? 'claude-cli'
+              }
+            })
+          }
           if (ev.is_error) {
             queue.push({ type: 'error', message: ev.error ?? ev.result ?? 'Claude CLI завершился с ошибкой' })
           } else {
@@ -168,7 +218,7 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           const ev = queue.shift()!
           yield ev
           if (ev.type === 'done' || ev.type === 'error') {
-            try { child.kill() } catch { /* noop */ }
+            treeKill(child)
             return
           }
         }

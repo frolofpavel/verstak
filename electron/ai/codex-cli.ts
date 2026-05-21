@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
+import { treeKill } from './child-kill'
 
 interface CodexCliOptions {
   binary?: string
@@ -42,6 +43,23 @@ interface CliEvent {
   type: string
   item?: { type?: string; text?: string }
   error?: string
+  /** Codex token counts. Field names track OpenAI completions API:
+   *  prompt_tokens (input), completion_tokens (output), cache hits as
+   *  prompt_tokens_details.cached_tokens. May arrive on turn.completed
+   *  or on dedicated token_count events. */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    prompt_tokens?: number
+    completion_tokens?: number
+    cached_input_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number }
+  }
+  token_usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cached_input_tokens?: number
+  }
 }
 
 export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider {
@@ -82,13 +100,13 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
         child.stdin.end()
       } catch (err) {
         yield { type: 'error', message: `Codex CLI stdin error: ${err instanceof Error ? err.message : String(err)}` }
-        try { child.kill() } catch { /* noop */ }
+        treeKill(child)
         return
       }
 
       let abortListener: (() => void) | null = null
       if (opts.signal) {
-        abortListener = () => { try { child.kill() } catch { /* noop */ } }
+        abortListener = () => { treeKill(child) }
         opts.signal.addEventListener('abort', abortListener, { once: true })
       }
 
@@ -109,6 +127,21 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
           queue.push({ type: 'text', text: ev.item.text })
           wake()
         } else if (ev.type === 'turn.completed') {
+          // turn.completed carries final token usage in some Codex versions.
+          // Field names vary: `usage.{input,output,cached_input}_tokens` OR
+          // `usage.{prompt,completion}_tokens` OR `token_usage.*`. Accept all.
+          const u = ev.usage ?? ev.token_usage
+          if (u) {
+            const input = u.input_tokens ?? (u as { prompt_tokens?: number }).prompt_tokens
+            const output = u.output_tokens ?? (u as { completion_tokens?: number }).completion_tokens
+            const cached = u.cached_input_tokens ?? (u as { prompt_tokens_details?: { cached_tokens?: number } }).prompt_tokens_details?.cached_tokens
+            if ((input ?? 0) > 0 || (output ?? 0) > 0) {
+              queue.push({
+                type: 'usage',
+                usage: { inputTokens: input, outputTokens: output, cachedInputTokens: cached, model: opts.model ?? 'codex-cli' }
+              })
+            }
+          }
           queue.push({ type: 'done' })
           wake()
         } else if (ev.type === 'error') {
@@ -151,7 +184,7 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
           const ev = queue.shift()!
           yield ev
           if (ev.type === 'done' || ev.type === 'error') {
-            try { child.kill() } catch { /* noop */ }
+            treeKill(child)
             return
           }
         }

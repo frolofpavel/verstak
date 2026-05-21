@@ -148,7 +148,7 @@ export function registerAiIpc(deps: AiDeps): void {
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.connectors, deps.getAgentMode(), turnsBudget).finally(cleanup)
     } else {
-      void runPlainConversation(taggedSender, sendId, provider, messagesWithSystem, ctrl.signal).finally(cleanup)
+      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal).finally(cleanup)
     }
     return sendId
   })
@@ -269,23 +269,78 @@ export function registerAiIpc(deps: AiDeps): void {
 /**
  * Plain streaming conversation — no tools, no multi-turn. Used for providers
  * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
+ *
+ * Per Grok audit 2026-05-21 (CLI parity, finding 2.1/2.2/2.5): previously this
+ * path was 17 lines with zero journaling, no lastAssistantText capture, no
+ * usage tracking, no exit-reason. CLI sessions left no trail in dev-journal —
+ * the same gap we already closed for the API path. Now mirrors the API
+ * lifecycle: collect text/usage during the stream, write a session journal in
+ * try/finally regardless of how the stream ended.
  */
 async function runPlainConversation(
   sender: TaggedSender,
   sendId: number,
   provider: ChatProvider,
+  projectPath: string | null,
   messages: ChatMessage[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  recordJournal: AiDeps['recordJournal']
 ): Promise<void> {
-  for await (const event of provider.send(messages, [])) {
-    if (signal.aborted) {
-      sender.send('ai:event', { id: sendId, event: { type: 'done' } })
-      return
-    }
-    sender.send('ai:event', { id: sendId, event })
-    if (event.type === 'done' || event.type === 'error') return
+  let lastAssistantText = ''
+  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
+    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
   }
-  sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+  let exitReason: ExitReason = 'completed'
+  try {
+    for await (const event of provider.send(messages, [])) {
+      if (signal.aborted) {
+        exitReason = 'aborted'
+        sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+        return
+      }
+      // Accumulate stream into lastAssistantText so journal has a real summary.
+      // CLI providers stream text in chunks via { type: 'text' } — same shape
+      // as API providers.
+      if (event.type === 'text' && typeof event.text === 'string') {
+        lastAssistantText += event.text
+      } else if (event.type === 'usage' && event.usage) {
+        sessionUsage.inputTokens += event.usage.inputTokens ?? 0
+        sessionUsage.outputTokens += event.usage.outputTokens ?? 0
+        sessionUsage.cachedInputTokens += event.usage.cachedInputTokens ?? 0
+      } else if (event.type === 'error') {
+        exitReason = 'error'
+      }
+      sender.send('ai:event', { id: sendId, event })
+      if (event.type === 'done' || event.type === 'error') return
+    }
+    sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+  } catch (err) {
+    exitReason = 'crashed'
+    sender.send('ai:event', {
+      id: sendId,
+      event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
+    })
+    sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+  } finally {
+    // Same guarantee as runApiConversation: every exit path writes a journal
+    // entry. Skipped when there's no projectPath (background sessions in the
+    // future may not have one).
+    if (projectPath) {
+      try {
+        writeSessionJournal(
+          recordJournal,
+          projectPath,
+          lastAssistantText,
+          new Set<string>(),   // CLI path: no tool-driven file writes tracked here
+          [],                  // CLI path: no command-tool dispatch (CLI runs them inside)
+          sessionUsage,
+          exitReason
+        )
+      } catch (err) {
+        console.error('[ai.ts] writeSessionJournal (plain) failed in finally:', err)
+      }
+    }
+  }
 }
 
 // Type re-exports for renderer (api.d.ts)

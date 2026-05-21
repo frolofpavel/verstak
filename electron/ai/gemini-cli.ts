@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
+import { treeKill } from './child-kill'
 
 interface GeminiCliOptions {
   binary?: string  // override path for testing
@@ -101,14 +102,14 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
         child.stdin.end()
       } catch (err) {
         yield { type: 'error', message: `Не удалось передать промт в Gemini CLI: ${err instanceof Error ? err.message : String(err)}` }
-        try { child.kill() } catch { /* noop */ }
+        treeKill(child)
         return
       }
 
       // Allow the caller to abort by killing the subprocess.
       let abortListener: (() => void) | null = null
       if (opts.signal) {
-        abortListener = () => { try { child.kill() } catch { /* noop */ } }
+        abortListener = () => { treeKill(child) }
         opts.signal.addEventListener('abort', abortListener, { once: true })
       }
 
@@ -223,7 +224,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
         const ev = events.shift()!
         yield ev
         if (ev.type === 'done' || ev.type === 'error') {
-          try { child.kill() } catch { /* already exited */ }
+          treeKill(child)
           return
         }
       }

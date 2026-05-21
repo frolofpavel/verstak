@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
+import { treeKill } from './child-kill'
 
 interface GrokCliOptions {
   binary?: string
@@ -114,7 +115,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
 
       let abortListener: (() => void) | null = null
       if (opts.signal) {
-        abortListener = () => { try { child.kill() } catch { /* noop */ } }
+        abortListener = () => { treeKill(child) }
         opts.signal.addEventListener('abort', abortListener, { once: true })
       }
 
@@ -189,7 +190,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
           const ev = queue.shift()!
           yield ev
           if (ev.type === 'done' || ev.type === 'error') {
-            try { child.kill() } catch { /* noop */ }
+            treeKill(child)
             return
           }
         }

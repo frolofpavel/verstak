@@ -6,6 +6,8 @@ import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
 import { ModePicker } from './ModePicker'
 import { VoiceInput } from './VoiceInput'
+import { TimelineBar } from './TimelineBar'
+import { CheckpointButton } from './CheckpointButton'
 import { useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment } from '../types/api'
 import iconUrl from '../assets/icon.png'
@@ -156,6 +158,14 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           status: 'pending',
           timestamp: Date.now()
         })
+        // Same relative→absolute conversion as for read_file (see tool-activity
+        // handler below). Tools emit project-relative paths; tree keys by abs.
+        if (event.path && store.path) {
+          const clean = event.path.replace(/^\.[\\/]/, '')
+          const sep = store.path.includes('\\') ? '\\' : '/'
+          const abs = `${store.path}${sep}${clean.replace(/[\\/]/g, sep)}`
+          store.markFileTouched(abs, 'write')
+        }
       }
       else if (event.type === 'pending-command') {
         store.setPendingCommand({ callId: event.callId, command: event.command, sendId: id })
@@ -198,6 +208,20 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           status: event.status,
           timestamp: Date.now()
         })
+        // Tag the file in the Sidebar tree so the user sees where the AI
+        // looked. Tools emit project-relative paths; the Sidebar tree keys
+        // by absolute paths — so we join with the active project root.
+        if (event.status === 'ok' && event.detail && store.path) {
+          const rel = event.detail.split(' · ')[0]?.trim()
+          if (rel) {
+            // Strip any leading "./" so join doesn't double up
+            const clean = rel.replace(/^\.[\\/]/, '')
+            const sep = store.path.includes('\\') ? '\\' : '/'
+            const abs = `${store.path}${sep}${clean.replace(/[\\/]/g, sep)}`
+            if (event.name === 'read_file') store.markFileTouched(abs, 'read')
+            else if (event.name === 'list_directory') store.markFileTouched(abs, 'list')
+          }
+        }
         // Persist read-only tool calls to Journal too — это превращает
         // Journal в реальный audit trail 'что AI делал у меня в проекте'.
         // Безопасник/тимлид может выгрузить и посмотреть.
@@ -527,6 +551,19 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
             <div className="gg-chat-empty-hint">
               Открой проект слева и напиши задачу. Можно прикрепить файл, бросить скриншот через Ctrl+V или drag-and-drop.
             </div>
+            <div className="gg-chat-empty-modes">
+              <div className="gg-chat-empty-modes-title">5 режимов агента — переключаются цифрами 1-5</div>
+              <div className="gg-chat-empty-modes-row">
+                <span><b>1</b> 🛡 Запрос — каждый шаг через подтверждение</span>
+                <span><b>2</b> ✏ Принимать правки — файлы авто, команды спрашивает</span>
+                <span><b>3</b> 📋 План — только чтение и план, без правок</span>
+                <span><b>4</b> ⚡ Авто — всё авто-принимается</span>
+                <span><b>5</b> 🚀 Без подтверждений — для CI / опытных</span>
+              </div>
+              <div className="gg-chat-empty-modes-tip">
+                <b>Shift+Esc</b> — экстренный стоп всех сессий. Кнопка <b>📍 Чекпоинт</b> внизу — запомнить состояние файлов и откатить одним кликом.
+              </div>
+            </div>
             {activePath && (
               <div className="gg-chat-empty-quick">
                 <button
@@ -630,6 +667,8 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           )
         })}
       </div>
+
+      <TimelineBar />
 
       <div className="gg-composer">
         {attachments.length > 0 && (
@@ -777,6 +816,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
                 <span className="gg-undo-count">{undoCount}</span>
               </button>
             )}
+            <CheckpointButton />
             <button
               type="button"
               className={`gg-terminal-toggle ${terminalOpen ? 'is-open' : ''}`}

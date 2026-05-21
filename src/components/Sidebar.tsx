@@ -153,18 +153,35 @@ function FilesSection({ tree }: { tree: FileNode[] }) {
   )
 }
 
+/**
+ * Map a TouchKind to a one-glyph marker. Keeps the tree visually quiet —
+ * full descriptions live in the title tooltip.
+ */
+function touchMarker(kind: 'read' | 'write' | 'list'): { icon: string; title: string } {
+  if (kind === 'write') return { icon: '●', title: 'AI правил этот файл в текущей сессии' }
+  if (kind === 'read') return { icon: '○', title: 'AI читал этот файл в текущей сессии' }
+  return { icon: '·', title: 'AI листал этот каталог в текущей сессии' }
+}
+
 function TreeNode({ node, depth }: { node: FileNode; depth: number }) {
   const [open, setOpen] = useState(depth < 1)
   const isDir = node.isDirectory
+  // Touched-by-AI marker. The store keys by the project-relative path the
+  // tools emit — match against node.path. If it doesn't match (different
+  // separator on Windows), fall through silently.
+  const touched = useProject(s => s.touchedFiles[node.path])
+  const marker = touched ? touchMarker(touched) : null
   return (
     <>
       <div
-        className={`gg-tree-node ${isDir ? 'is-dir' : 'is-file'}`}
+        className={`gg-tree-node ${isDir ? 'is-dir' : 'is-file'} ${touched ? `is-touched is-${touched}` : ''}`}
         style={{ paddingLeft: 8 + depth * 12 }}
         onClick={() => isDir && setOpen(o => !o)}
+        title={marker?.title}
       >
         <span className="gg-tree-icon">{isDir ? (open ? '▾' : '▸') : '·'}</span>
         <span className="gg-tree-name">{node.name}</span>
+        {marker && <span className="gg-tree-touch" aria-hidden>{marker.icon}</span>}
       </div>
       {isDir && open && node.children?.map(child => (
         <TreeNode key={child.path} node={child} depth={depth + 1} />

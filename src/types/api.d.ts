@@ -91,6 +91,17 @@ declare global {
         count: (projectPath: string) => Promise<number>
         clear: (projectPath: string) => Promise<number>
         revert: (projectPath: string, id?: number) => Promise<{ ok: boolean; filePath?: string; reason?: string }>
+        /** Snap a checkpoint. Returns the id of the newest entry, or 0 if
+         *  the stack is currently empty (0 is below any real autoincrement
+         *  id, so `id > 0` naturally matches every future entry). */
+        checkpoint: (projectPath: string) => Promise<number>
+        /** Revert every entry with id > checkpointId. */
+        revertToCheckpoint: (projectPath: string, checkpointId: number) => Promise<{
+          ok: boolean
+          restored: string[]
+          count: number
+          failed?: Array<{ id: number; filePath: string; reason: string }>
+        }>
       }
       feedback: {
         list: (projectPath: string | null, limit?: number) => Promise<FeedbackEntry[]>

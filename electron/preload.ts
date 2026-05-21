@@ -66,7 +66,10 @@ contextBridge.exposeInMainWorld('api', {
     list: (projectPath: string) => ipcRenderer.invoke('undo:list', projectPath),
     count: (projectPath: string) => ipcRenderer.invoke('undo:count', projectPath),
     clear: (projectPath: string) => ipcRenderer.invoke('undo:clear', projectPath),
-    revert: (projectPath: string, id?: number) => ipcRenderer.invoke('undo:revert', projectPath, id)
+    revert: (projectPath: string, id?: number) => ipcRenderer.invoke('undo:revert', projectPath, id),
+    checkpoint: (projectPath: string) => ipcRenderer.invoke('undo:checkpoint', projectPath),
+    revertToCheckpoint: (projectPath: string, checkpointId: number) =>
+      ipcRenderer.invoke('undo:revertToCheckpoint', projectPath, checkpointId)
   },
   feedback: {
     list: (projectPath: string | null, limit?: number) => ipcRenderer.invoke('feedback:list', projectPath, limit),
