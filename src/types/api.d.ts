@@ -25,6 +25,18 @@ export interface Plan { id: number; title: string; status: PlanStatus; createdAt
 export interface FeedbackEntry { id: number; projectPath: string | null; providerId: string | null; rating: number | null; message: string; createdAt: number }
 export interface ProjectMeta { path: string; name: string; color: string; lastOpenedAt: number }
 
+/** User profile — multi-user поддержка команды агентства (14 человек). */
+export interface UserProfile {
+  id: number
+  name: string
+  role: string | null
+  defaultProvider: string | null
+  defaultModel: string | null
+  skillsEnabled: string[] | null
+  createdAt: number
+  isActive: boolean
+}
+
 /** Skill — переиспользуемый агентский пресет (system prompt + tools + provider).
  *  См. electron/ai/skills/types.ts для серверной структуры. */
 export interface Skill {
@@ -153,6 +165,14 @@ declare global {
         get: (id: string) => Promise<Skill | null>
         refresh: () => Promise<{ added: number; updated: number; failed: string[] }>
         status: () => Promise<{ lastRefreshAt: number | null; serverReachable: boolean; total: number }>
+      }
+      userProfiles: {
+        list: () => Promise<UserProfile[]>
+        getActive: () => Promise<UserProfile | null>
+        create: (input: { name: string; role?: string; defaultProvider?: string; defaultModel?: string; skillsEnabled?: string[] }) => Promise<UserProfile>
+        setActive: (id: number) => Promise<void>
+        update: (id: number, patch: { name?: string; role?: string; defaultProvider?: string; defaultModel?: string; skillsEnabled?: string[] }) => Promise<void>
+        remove: (id: number) => Promise<void>
       }
       feedback: {
         list: (projectPath: string | null, limit?: number) => Promise<FeedbackEntry[]>

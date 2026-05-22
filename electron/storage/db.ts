@@ -156,6 +156,28 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_chat_sessions_parent ON chat_sessions(parent_chat_id) WHERE parent_chat_id IS NOT NULL')
     }
+  },
+  {
+    version: 3,
+    description: 'User profiles — multi-user поддержка для команды агентства (14 человек). + onboarding state.',
+    run: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_profiles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          role TEXT,
+          default_provider TEXT,
+          default_model TEXT,
+          skills_enabled TEXT,
+          created_at INTEGER NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_active ON user_profiles(is_active) WHERE is_active = 1;
+      `)
+      // Onboarding completed flag хранится отдельно — простой key в settings,
+      // не нужна новая таблица. Когда wizard завершён → settings.setSecret(
+      // 'onboarding_completed', '1') + создаётся первый user_profile.
+    }
   }
 ]
 

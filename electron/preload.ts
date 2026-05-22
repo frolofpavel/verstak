@@ -91,6 +91,16 @@ contextBridge.exposeInMainWorld('api', {
     refresh: () => ipcRenderer.invoke('skills:refresh'),
     status: () => ipcRenderer.invoke('skills:status')
   },
+  userProfiles: {
+    list: () => ipcRenderer.invoke('user-profiles:list'),
+    getActive: () => ipcRenderer.invoke('user-profiles:get-active'),
+    create: (input: { name: string; role?: string; defaultProvider?: string; defaultModel?: string; skillsEnabled?: string[] }) =>
+      ipcRenderer.invoke('user-profiles:create', input),
+    setActive: (id: number) => ipcRenderer.invoke('user-profiles:set-active', id),
+    update: (id: number, patch: { name?: string; role?: string; defaultProvider?: string; defaultModel?: string; skillsEnabled?: string[] }) =>
+      ipcRenderer.invoke('user-profiles:update', id, patch),
+    remove: (id: number) => ipcRenderer.invoke('user-profiles:remove', id)
+  },
   feedback: {
     list: (projectPath: string | null, limit?: number) => ipcRenderer.invoke('feedback:list', projectPath, limit),
     submit: (input: { projectPath: string | null; providerId: string | null; rating: number | null; message: string }) =>

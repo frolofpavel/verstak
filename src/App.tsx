@@ -12,6 +12,7 @@ import { StubView } from './components/StubView'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
 import { Terminal } from './components/Terminal'
+import { OnboardingWizard } from './components/OnboardingWizard'
 import { useProject } from './store/projectStore'
 
 const SIDEBAR_MIN = 200
@@ -23,6 +24,17 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Onboarding: показывается при первом запуске пока не помечен completed
+  // в settings. После — больше не появляется.
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const done = await window.api.settings.getKey('onboarding_completed')
+        if (!done) setShowOnboarding(true)
+      } catch { /* первый запуск, settings ещё нет */ setShowOnboarding(true) }
+    })()
+  }, [])
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const stored = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '0', 10)
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
@@ -147,6 +159,7 @@ export function App() {
         )}
       </main>
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       <DiffView />
       <CommandConfirm />
     </div>

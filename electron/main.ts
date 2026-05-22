@@ -34,6 +34,8 @@ import { PROVIDERS, type ProviderId } from './ai/registry'
 import { AGENT_MODES } from './ai/mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
 import { registerSkillsIpc } from './ipc/skills'
+import { createUserProfiles } from './storage/user-profiles'
+import { registerUserProfilesIpc } from './ipc/user-profiles'
 
 function createWindow(): void {
   // HERE = out/main in dev and prod
@@ -181,6 +183,7 @@ app.whenReady().then(() => {
   const plans = createPlans(db)
   const feedback = createFeedback(db)
   const connectorRegistry = createConnectorRegistry()
+  const userProfiles = createUserProfiles(db)
 
   // Skill registry — собирает скиллы из server API + ~/.geminigrok/skills/ +
   // built-in. См. electron/ai/skills/loader.ts. Конфиг сервера читается из
@@ -254,6 +257,7 @@ app.whenReady().then(() => {
   })
   registerTerminalIpc()
   registerSkillsIpc(skillRegistry)
+  registerUserProfilesIpc(userProfiles)
   createWindow()
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
