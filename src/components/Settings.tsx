@@ -126,6 +126,16 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [httpEndpoints, setHttpEndpoints] = useState<Array<{ name: string; base: string; auth: string; paths: string }>>(
     [{ name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }]
   )
+  // V3 — российские коннекторы (раздел 5 плана).
+  const [gsheetsJson, setGsheetsJson] = useState('')
+  const [telegramBotToken, setTelegramBotToken] = useState('')
+  const [telegramWhitelist, setTelegramWhitelist] = useState('')
+  const [sshHost, setSshHost] = useState('')
+  const [sshKeyPath, setSshKeyPath] = useState('')
+  const [bitrixWebhook, setBitrixWebhook] = useState('')
+  const [yDirectToken, setYDirectToken] = useState('')
+  const [yDirectLogin, setYDirectLogin] = useState('')
+  const [skillsServerBase, setSkillsServerBase] = useState('')
   const { theme, setTheme } = useTheme()
 
   useEffect(() => {
@@ -172,6 +182,16 @@ export function Settings({ onClose }: { onClose: () => void }) {
         const st = await window.api.autonomous.status()
         setAutonomousState(st)
       } catch { /* ignore */ }
+      // V3 коннекторы
+      setGsheetsJson((await window.api.settings.getKey('gsheets_service_account_json')) ?? '')
+      setTelegramBotToken((await window.api.settings.getKey('telegram_bot_token')) ?? '')
+      setTelegramWhitelist((await window.api.settings.getKey('telegram_chat_whitelist')) ?? '')
+      setSshHost((await window.api.settings.getKey('ssh_default_host')) ?? '')
+      setSshKeyPath((await window.api.settings.getKey('ssh_key_path')) ?? '')
+      setBitrixWebhook((await window.api.settings.getKey('bitrix24_webhook_url')) ?? '')
+      setYDirectToken((await window.api.settings.getKey('yandex_direct_token')) ?? '')
+      setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
+      setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -196,6 +216,16 @@ export function Settings({ onClose }: { onClose: () => void }) {
       await window.api.settings.setKey(`http_endpoint_${i + 1}_auth`,  e.auth)
       await window.api.settings.setKey(`http_endpoint_${i + 1}_paths`, e.paths)
     }
+    // V3 — российские коннекторы и server skills
+    await window.api.settings.setKey('gsheets_service_account_json', gsheetsJson)
+    await window.api.settings.setKey('telegram_bot_token', telegramBotToken)
+    await window.api.settings.setKey('telegram_chat_whitelist', telegramWhitelist)
+    await window.api.settings.setKey('ssh_default_host', sshHost)
+    await window.api.settings.setKey('ssh_key_path', sshKeyPath)
+    await window.api.settings.setKey('bitrix24_webhook_url', bitrixWebhook)
+    await window.api.settings.setKey('yandex_direct_token', yDirectToken)
+    await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
+    await window.api.settings.setKey('skills_server_base', skillsServerBase)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
@@ -403,6 +433,144 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <code>endpoint=&lt;имя&gt;</code> и path/method/query/body/headers.
             Auth-заголовок подставляется из настроек, AI его не видит.
             Allow-paths ограничивает к каким путям эндпоинта можно обращаться.
+          </div>
+
+          {/* ============================================================
+              V3 — российские коннекторы (раздел 5 плана).
+              ============================================================ */}
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>📊 Google Sheets</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Service Account JSON</label>
+            <textarea
+              className="gg-input"
+              value={gsheetsJson}
+              onChange={e => setGsheetsJson(e.target.value)}
+              placeholder='{"type": "service_account", "client_email": "...", "private_key": "-----BEGIN PRIVATE KEY-----\\n...", ...}'
+              rows={5}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            JSON service account (как в <code>/opt/los/creds.json</code>). Шифруется через safeStorage.
+            AI вызывает <code>connector_query</code> с <code>id="gsheets"</code> и <code>op="read_as_records"</code> /
+            <code>"update_row"</code> / etc. См. electron/connectors/gsheets.ts.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>✉ Telegram bot</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Bot token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={telegramBotToken}
+              onChange={e => setTelegramBotToken(e.target.value)}
+              placeholder="1234567890:AAH... (от @BotFather)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Chat whitelist (JSON)</label>
+            <input
+              className="gg-input"
+              value={telegramWhitelist}
+              onChange={e => setTelegramWhitelist(e.target.value)}
+              placeholder='["-1003242936373", "@private_chat"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            JSON-массив chat_id куда боту разрешено отправлять. Пустая строка = всем (только dev).
+            Rate limit 20 send/min на chat_id вшит в коннектор. Read истории — через SSH к Telethon скрипту.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>🔧 SSH executor</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Default host</label>
+            <input
+              className="gg-input"
+              value={sshHost}
+              onChange={e => setSshHost(e.target.value)}
+              placeholder="user@178.62.230.241 или alias из ~/.ssh/config"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Path к private key</label>
+            <input
+              className="gg-input"
+              value={sshKeyPath}
+              onChange={e => setSshKeyPath(e.target.value)}
+              placeholder="C:/Users/Pavel/.ssh/id_ed25519 (или путь к ключу gemini-agent)"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Whitelist: только default host разрешён для запросов. Команды денилист:
+            rm -rf системных корней, mkfs, dd на /dev, passwd, sudo su, systemctl stop, и т.п.
+            Через connector_query с <code>id="ssh"</code> и <code>op="run_remote"</code>.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>💼 Битрикс24</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Incoming webhook URL</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={bitrixWebhook}
+              onChange={e => setBitrixWebhook(e.target.value)}
+              placeholder="https://your-portal.bitrix24.ru/rest/USER_ID/TOKEN/"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Создать в Битрикс24: Разработчикам → Другое → Входящий вебхук. Полный URL с токеном.
+            Denied methods: *.delete (crm.deal/lead/contact/company/user). Allowed prefixes: crm.*, tasks.*, user.*.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>📈 Яндекс.Директ</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">OAuth token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={yDirectToken}
+              onChange={e => setYDirectToken(e.target.value)}
+              placeholder="Получить: oauth.yandex.ru, scope: direct:api"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Client-Login (опц.)</label>
+            <input
+              className="gg-input"
+              value={yDirectLogin}
+              onChange={e => setYDirectLogin(e.target.value)}
+              placeholder="Login клиента — для агентских аккаунтов"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Reports API асинхронный — connector polls до 30s. Если отчёт большой,
+            возвращается <code>processing: true</code>, повторяй запрос.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>🎭 Сервер скиллов</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Skills server base URL</label>
+            <input
+              className="gg-input"
+              value={skillsServerBase}
+              onChange={e => setSkillsServerBase(e.target.value)}
+              placeholder="https://aioperatingsystem.ru (или пусто для built-in only)"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Сервер должен предоставлять <code>GET /api/skills</code> возвращающий
+            <code>{`{skills: [{id, raw, sourceRef}]}`}</code>. Если недоступен — используются built-in
+            (bos-sales / bos-mkt / client-cycle) + локальные из ~/.geminigrok/skills/.
           </div>
         </div>
         )}

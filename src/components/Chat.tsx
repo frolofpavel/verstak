@@ -637,6 +637,27 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
               <div className="gg-chat-empty-quick">
                 <button
                   className="gg-quick-action"
+                  onClick={() => setInput('/bos-sales')}
+                  title="Активировать скилл «Продажи агентства» — voronka HH-лидов, overdue, follow-ups"
+                >
+                  💼 Продажи (bos-sales)
+                </button>
+                <button
+                  className="gg-quick-action"
+                  onClick={() => setInput('/bos-mkt')}
+                  title="Активировать скилл «Маркетолог» — аудиты, КП, стратегии по клиентам"
+                >
+                  📊 Маркетинг (bos-mkt)
+                </button>
+                <button
+                  className="gg-quick-action"
+                  onClick={() => setInput('/client-cycle')}
+                  title="Активировать скилл «Директор по клиенту» — daily/weekly check"
+                >
+                  👁 Директор по клиенту
+                </button>
+                <button
+                  className="gg-quick-action"
                   onClick={() => setInput(GOAL_CYCLE_PROMPT)}
                   title="AI прочитает журнал работы, карту проекта и предложит 3 конкретных улучшения с планом"
                 >
@@ -644,14 +665,14 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
                 </button>
                 <button
                   className="gg-quick-action"
-                  onClick={() => setInput('Сделай аудит последних изменений за вчера-сегодня: вызови read_journal с kind="session" на 10 записей, выдели риски и регрессии. Используй get_project_map если нужен контекст.')}
+                  onClick={() => setInput('Сделай аудит последних изменений за вчера-сегодня: вызови read_journal с kind="session" на 10 записей, выдели риски и регрессии.')}
                   title="AI прочитает свежие сессии и поищет регрессии"
                 >
-                  🔍 Аудит последних изменений
+                  🔍 Аудит изменений
                 </button>
                 <button
                   className="gg-quick-action"
-                  onClick={() => setInput('Покажи карту проекта: вызови get_project_map с format=text и кратко опиши главные каталоги + стек.')}
+                  onClick={() => setInput('Покажи карту проекта: вызови get_project_map с format=text.')}
                   title="Быстрый обзор структуры проекта"
                 >
                   🗺 Карта проекта
