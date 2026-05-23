@@ -2954,3 +2954,63 @@
 }
 .gg-artifact-preview-state p { margin: 8px 0; }
 
+/* ======================================================================
+   Sidecar Terminal Intelligence — toast в правом нижнем углу.
+   Источник: V3 Plan раздел 4.1.
+   ====================================================================== */
+.gg-term-error-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  background: var(--bg-elevated);
+  border: 1px solid rgba(244,113,116,0.5);
+  border-left: 3px solid var(--error);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 14px 16px;
+  z-index: 80;
+  animation: gg-toast-slide-in 220ms ease-out;
+}
+@keyframes gg-toast-slide-in {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.gg-term-error-toast-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
+}
+.gg-term-error-toast-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--error);
+  font-weight: 600;
+}
+.gg-term-error-toast-close {
+  background: transparent; border: none; color: var(--text-tertiary);
+  cursor: pointer; font-size: 16px; line-height: 1;
+  padding: 2px 6px; border-radius: var(--radius-sm);
+}
+.gg-term-error-toast-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+.gg-term-error-toast-loc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+.gg-term-error-toast-msg {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 10px;
+  max-height: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gg-term-error-toast-actions {
+  display: flex; gap: 8px;
+}
+

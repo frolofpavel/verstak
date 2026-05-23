@@ -143,6 +143,13 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_e: unknown, data: { id: number }) => cb(data)
       ipcRenderer.on('term:exit', handler)
       return () => { ipcRenderer.off('term:exit', handler) }
+    },
+    /** Sidecar terminal intelligence: подписка на обнаруженные ошибки
+     *  в потоке терминала. */
+    onErrorDetected: (cb: (data: { id: number; error: { kind: string; file?: string; line?: number; message: string; raw: string } }) => void) => {
+      const handler = (_e: unknown, data: { id: number; error: { kind: string; file?: string; line?: number; message: string; raw: string } }) => cb(data)
+      ipcRenderer.on('term:error-detected', handler)
+      return () => { ipcRenderer.off('term:error-detected', handler) }
     }
   }
 })

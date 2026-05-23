@@ -419,6 +419,20 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
   }
   useEffect(autoGrow, [input])
 
+  // Sidecar Terminal Intelligence inject — TerminalErrorToast диспатчит
+  // CustomEvent('gg-inject-prompt') когда юзер жмёт «Fix in chat».
+  useEffect(() => {
+    function onInject(e: Event) {
+      const ev = e as CustomEvent<string>
+      if (typeof ev.detail === 'string') {
+        setInput(ev.detail)
+        textareaRef.current?.focus()
+      }
+    }
+    window.addEventListener('gg-inject-prompt', onInject)
+    return () => window.removeEventListener('gg-inject-prompt', onInject)
+  }, [])
+
   // Cleanup warning timer on unmount
   useEffect(() => () => { if (warningTimer.current) window.clearTimeout(warningTimer.current) }, [])
 

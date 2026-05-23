@@ -6,6 +6,7 @@ import { createSshConnector } from './ssh'
 import { createTelegramConnector } from './telegram'
 import { createBitrix24Connector } from './bitrix24'
 import { createYandexDirectConnector } from './yandex-direct'
+import { createYandexDiskConnector } from './yandex-disk'
 
 // Built-in connectors. Adding a new adapter = register it here.
 const BUILTINS: Connector[] = [
@@ -15,7 +16,8 @@ const BUILTINS: Connector[] = [
   createSshConnector(),
   createTelegramConnector(),
   createBitrix24Connector(),
-  createYandexDirectConnector()
+  createYandexDirectConnector(),
+  createYandexDiskConnector()
 ]
 
 export interface ConnectorRegistry {

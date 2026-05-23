@@ -201,6 +201,7 @@ declare global {
         kill: (id: number) => Promise<void>
         onData: (cb: (data: { id: number; data: string }) => void) => () => void
         onExit: (cb: (data: { id: number }) => void) => () => void
+        onErrorDetected: (cb: (data: { id: number; error: { kind: string; file?: string; line?: number; message: string; raw: string } }) => void) => () => void
       }
       autonomous: {
         status: () => Promise<AutonomousStatus>

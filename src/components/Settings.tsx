@@ -138,6 +138,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [yDirectLogin, setYDirectLogin] = useState('')
   const [skillsServerBase, setSkillsServerBase] = useState('')
   const [claudeOauthToken, setClaudeOauthToken] = useState('')
+  const [yDiskToken, setYDiskToken] = useState('')
   const { theme, setTheme } = useTheme()
 
   useEffect(() => {
@@ -195,6 +196,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
       setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
       setClaudeOauthToken((await window.api.settings.getKey('claude_code_oauth_token')) ?? '')
+      setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -230,6 +232,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
     await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
     await window.api.settings.setKey('skills_server_base', skillsServerBase)
     await window.api.settings.setKey('claude_code_oauth_token', claudeOauthToken)
+    await window.api.settings.setKey('yandex_disk_token', yDiskToken)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
@@ -583,6 +586,24 @@ export function Settings({ onClose }: { onClose: () => void }) {
           <div className="gg-settings-hint">
             Reports API асинхронный — connector polls до 30s. Если отчёт большой,
             возвращается <code>processing: true</code>, повторяй запрос.
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>📦 Yandex Disk</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">OAuth token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={yDiskToken}
+              onChange={e => setYDiskToken(e.target.value)}
+              placeholder="oauth.yandex.ru со scope cloud_api:disk.write"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Используется агентом для шеринга артефактов с клиентами:
+            upload_file → get_public_url → отправка ссылки в TG.
+            Загрузка идёт в <code>/Geminigrok/{`{дата}`}/</code> чтобы не засорять корень Диска.
           </div>
 
           <div className="gg-settings-section-title" style={{ marginTop: 24 }}>🎭 Сервер скиллов</div>
