@@ -234,6 +234,23 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'render_chart',
+    description: 'Сгенерировать SVG-диаграмму (bar / line / pie) для встройки в HTML/DOCX артефакт. Сохраняется в .geminigrok/artifacts/{date}/. Возвращает путь — далее его можно вставить как <img src> в HTML или использовать в DOCX. Идеально для аудитов Я.Директ, отчётов по конверсиям, разбивке источников.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', description: 'Имя файла без расширения' },
+        kind: { type: 'string', enum: ['bar', 'line', 'pie'], description: 'Тип диаграммы' },
+        title: { type: 'string', description: 'Заголовок над графиком' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Подписи оси X / сегментов pie' },
+        values: { type: 'array', items: { type: 'number' }, description: 'Числовые значения, длина = labels.length' },
+        x_axis_label: { type: 'string', description: 'Подпись оси X (для bar/line)' },
+        y_axis_label: { type: 'string', description: 'Подпись оси Y (для bar/line)' }
+      },
+      required: ['filename', 'kind', 'labels', 'values']
+    }
+  },
+  {
     name: 'delegate_task',
     description: 'Делегировать узкую подзадачу другому AI-агенту (другая модель или другой скилл). Используй когда: (а) нужна вторая независимая точка зрения на патч/решение; (б) подзадача узкая и можно отдать дешёвой модели (анализ stdout, классификация, поиск опечатки); (в) нужно вытащить контекст из источника с другим скиллом (например DOSSIER клиента). Результат подтягивается обратно как tool_result, основной агент использует его и продолжает свою работу. Sub-agent работает без tools (только размышление + ответ) — это намеренно, чтобы не было каскадов.',
     parameters: {

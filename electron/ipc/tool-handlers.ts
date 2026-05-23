@@ -579,6 +579,43 @@ const delegateTaskHandler: ToolHandler = {
 // Artifact handlers — generate_html / generate_docx
 // ============================================================================
 
+const renderChartHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const { renderChartSvg } = await import('../ai/charts')
+      const { artifactsDir } = await import('../ai/artifacts')
+      const { mkdir, writeFile } = await import('fs/promises')
+      const { join } = await import('path')
+      const filename = String(call.args.filename ?? 'chart').replace(/[^a-zA-Z0-9а-яА-ЯёЁ_\-.,()\s]/g, '_').slice(0, 100) + '.svg'
+      const kind = String(call.args.kind ?? 'bar') as 'bar' | 'line' | 'pie'
+      const labels = Array.isArray(call.args.labels) ? call.args.labels.map(String) : []
+      const values = Array.isArray(call.args.values) ? call.args.values.map(Number) : []
+      if (labels.length === 0 || labels.length !== values.length) {
+        return { id: call.id, name: call.name, result: '', error: 'render_chart: labels и values должны быть одинаковой длины и непустые' }
+      }
+      const svg = renderChartSvg({
+        kind, labels, values,
+        title: call.args.title ? String(call.args.title) : undefined,
+        xAxisLabel: call.args.x_axis_label ? String(call.args.x_axis_label) : undefined,
+        yAxisLabel: call.args.y_axis_label ? String(call.args.y_axis_label) : undefined
+      })
+      const dir = artifactsDir(ctx.projectPath)
+      await mkdir(dir, { recursive: true })
+      const path = join(dir, filename)
+      await writeFile(path, svg, 'utf8')
+      try { ctx.recordJournal(ctx.projectPath, 'tool', `📊 Диаграмма ${kind}: ${filename}`, `${svg.length} bytes → ${path}`) } catch { /* */ }
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'tool-activity', callId: call.id, name: 'render_chart', label: 'render_chart', detail: `${filename} · ${kind} · ${labels.length} точек`, status: 'ok' }
+      })
+      return { id: call.id, name: call.name, result: `Chart saved: ${path}\nKind: ${kind}, ${labels.length} data points.\nИспользуй в HTML: <img src="${filename}"> (относительно той же папки артефактов).` }
+    } catch (err) {
+      return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+}
+
 const generateHtmlHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
@@ -679,6 +716,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'read_journal': readJournalHandler,
   'generate_html': generateHtmlHandler,
   'generate_docx': generateDocxHandler,
+  'render_chart': renderChartHandler,
   'delegate_task': delegateTaskHandler
 }
 
