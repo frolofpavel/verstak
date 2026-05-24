@@ -213,32 +213,38 @@ export async function reloginCli(providerId: CliProviderId): Promise<ReloginResu
   }
 
   if (platform() === 'win32') {
+    // Windows консоль по умолчанию использует кодировку cp866 (на ru-RU),
+    // а CLI (grok / claude / gemini / codex) пишут в UTF-8. Без переключения
+    // на cp65001 + Console.OutputEncoding=UTF-8 их ascii-art / русский текст
+    // отображается как «тАйтАйтАйтАй». Префикс делает консоль UTF-8-ready
+    // ПЕРЕД запуском CLI и не падает если cmd уже UTF-8.
+    const prefix = 'chcp 65001 > $null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
+    const cmdLine = prefix + d.loginCmd
+
     // Пробуем Windows Terminal — у него красивее UX и tabs. wt.exe есть на
     // Win11 по умолчанию и устанавливается на Win10 через Store.
     const wt = whichBin('wt')
     if (wt) {
       try {
-        // wt new-tab "powershell -NoExit -Command claude" — открывает таб
-        // с командой, оставляет открытым после её завершения чтобы юзер видел.
-        const child = spawn(wt, ['new-tab', 'powershell', '-NoExit', '-Command', d.loginCmd], {
+        const child = spawn(wt, ['new-tab', 'powershell', '-NoExit', '-Command', cmdLine], {
           detached: true,
           stdio: 'ignore',
           windowsHide: false
         })
         child.unref()
-        return { ok: true, command: `wt new-tab powershell -NoExit -Command ${d.loginCmd}` }
+        return { ok: true, command: `wt new-tab powershell -NoExit -Command ${cmdLine}` }
       } catch { /* fall through to powershell */ }
     }
     // Fallback: PowerShell в новом окне через start
     try {
-      const child = spawn('cmd.exe', ['/c', 'start', '', 'powershell.exe', '-NoExit', '-Command', d.loginCmd], {
+      const child = spawn('cmd.exe', ['/c', 'start', '', 'powershell.exe', '-NoExit', '-Command', cmdLine], {
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
         shell: false
       })
       child.unref()
-      return { ok: true, command: `powershell -NoExit -Command ${d.loginCmd}` }
+      return { ok: true, command: `powershell -NoExit -Command ${cmdLine}` }
     } catch (err) {
       return { ok: false, message: `Не удалось открыть терминал: ${(err as Error).message}` }
     }
