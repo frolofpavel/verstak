@@ -85,17 +85,25 @@ async function runRemote(args: Record<string, unknown>, ctx: ConnectorContext): 
     return { error: 'blocked', message: `Команда отклонена политикой: ${dangerReason}. Изменения в системных областях — только вручную.` }
   }
 
-  const host = String(args.host ?? ctx.getSecret('ssh_default_host') ?? '')
-  if (!host) {
-    return { error: 'no-host', message: 'host не указан и ssh_default_host не задан в settings.' }
+  // ТЗ Pavel'а (2026-05-26): если defaultHost не настроен — БЛОКИРУЕМ всё.
+  // Старая логика разрешала любой host если default не задан (через fallback
+  // `args.host ?? '' `) — опасно: модель может слить команды на любой сервер.
+  // Теперь whitelist обязателен.
+  const defaultHost = ctx.getSecret('ssh_default_host')
+  if (!defaultHost) {
+    return {
+      error: 'no-host',
+      message: 'SSH: укажите default host в Settings → Коннекторы → SSH (поле «Default host»). Без него SSH-команды заблокированы по безопасности.'
+    }
   }
 
-  // Whitelist V1: если в settings один default_host, остальные хосты отклоняем.
-  const defaultHost = ctx.getSecret('ssh_default_host')
-  if (defaultHost && host !== defaultHost) {
+  // host либо берётся из defaultHost (если модель не указала), либо явно
+  // совпадает с whitelist'ом. Никаких других вариантов.
+  const host = String(args.host ?? defaultHost)
+  if (host !== defaultHost) {
     return {
       error: 'blocked',
-      message: `Хост «${host}» не в whitelist. Default: ${defaultHost}. Чтобы разрешить — добавь в settings.`
+      message: `Хост «${host}» не в whitelist. Разрешён только «${defaultHost}» (из Settings → Коннекторы → SSH). Чтобы добавить другой — поменяй default host или дождись whitelist V2.`
     }
   }
 

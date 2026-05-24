@@ -165,7 +165,12 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         yield { type: 'error', message: 'Нет user-сообщения для отправки' }
         return
       }
-      const minimalMode = true  // toggle if grok stabilizes for larger payloads
+      // ТЗ Pavel'а (2026-05-26): переключаем на FULL payload.
+      // Если grok CLI упадёт с ACCESS_VIOLATION (Windows 0xC0000005 / 3221225477)
+      // — поймаем в child.on('close') ниже и вернём user-friendly ошибку с
+      // предложением переключиться на Grok API. Лучше пробовать, чем мириться
+      // с обрезанным контекстом без системных правил.
+      const minimalMode = false
       let payload: string
       if (minimalMode) {
         payload = lastUser.content
@@ -290,13 +295,31 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         }
         if (code !== 0 && !queue.some(e => e.type === 'done')) {
           // 0xC0000005 (3221225477) = Windows STATUS_ACCESS_VIOLATION.
-          // Grok CLI sometimes crashes on large prompts or odd Unicode.
-          // Give the user a hint instead of just the raw exit code.
-          let hint = ''
-          if (code === 3221225477 || code === -1073741819) {
-            hint = ' Похоже, grok CLI сам упал (Windows ACCESS_VIOLATION). Попробуй обновить CLI (см. x.ai) или переключись на Grok (API) в Settings.'
+          // Также 0xC0000409 (3221226505) = STACK_BUFFER_OVERRUN, и любой
+          // другой 0xC000... код — нативный краш CLI на больших промптах
+          // или unicode-кейсах. Сообщение по ТЗ Pavel'а: явно и понятно,
+          // не молчим, не зависаем — предлагаем единственный воркэраунд.
+          const isNativeCrash =
+            code === 3221225477 || code === -1073741819 || // 0xC0000005
+            code === 3221226505 || code === -1073740791 || // 0xC0000409
+            (typeof code === 'number' && code !== null && (code >>> 0) >= 0xC0000000)
+          if (isNativeCrash) {
+            queue.push({
+              type: 'error',
+              message:
+                'Grok CLI нестабилен на этой машине (нативный краш ' +
+                `exit 0x${((code ?? 0) >>> 0).toString(16).toUpperCase()}). ` +
+                'Используйте Grok API вместо CLI: открой Settings → Провайдеры → Grok (API) → ' +
+                'добавь ключ от console.x.ai. Альтернативно — обнови grok CLI ' +
+                'с сайта xAI, иногда помогает.' +
+                (stderrBuffer ? '\n\nstderr: ' + stderrBuffer.slice(0, 400) : '')
+            })
+          } else {
+            queue.push({
+              type: 'error',
+              message: `Grok CLI exit ${code}.${stderrBuffer ? ' ' + stderrBuffer.slice(0, 400) : ''}`
+            })
           }
-          queue.push({ type: 'error', message: `Grok CLI exit ${code}.${hint}${stderrBuffer ? ' ' + stderrBuffer.slice(0, 400) : ''}` })
         }
         done = true; wake()
       })

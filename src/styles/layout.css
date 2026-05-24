@@ -1260,6 +1260,38 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 
 /* ─── Providers page: cards (подключённые / доступные) ─── */
 .gg-providers-page { padding: 20px 24px; }
+
+/* Онбординг-баннер для тестера: показывается если нет ни одного API ключа.
+ * Tone: дружелюбный accent (синий tinted), эмодзи 👋 слева, action-hint внутри. */
+.gg-prov-onboarding {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  margin: 12px 0 4px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  animation: gg-fade-in 240ms ease-out;
+}
+.gg-prov-onboarding-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.gg-prov-onboarding-body { min-width: 0; flex: 1; }
+.gg-prov-onboarding-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  margin-bottom: 4px;
+}
+.gg-prov-onboarding-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
 .gg-prov-toast {
   margin: 10px 0 4px;
   padding: 10px 14px;

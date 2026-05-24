@@ -8,15 +8,20 @@ interface ProviderOption {
   description: string
 }
 
+// ТЗ Pavel'а (2026-05-26): CLI-провайдеры помечены (beta) с явным tooltip'ом.
+// Не скрываем — пользователь может ими пользоваться — но даём сигнал что они
+// требуют локальной установки CLI и иногда падают (особенно grok-cli на Windows).
+const CLI_BETA_HINT = 'CLI-провайдеры требуют локальной установки. Если агент не отвечает — переключитесь на API-версию.'
+
 const PROVIDER_OPTIONS: ProviderOption[] = [
-  { id: 'gemini-api', label: 'Gemini',       description: 'API · с tools' },
-  { id: 'gemini-cli', label: 'Gemini Ultra', description: 'CLI · подписка' },
-  { id: 'claude',     label: 'Claude',       description: 'API · с tools' },
-  { id: 'claude-cli', label: 'Claude Code',  description: 'CLI · Pro/Max подписка' },
-  { id: 'grok',       label: 'Grok',         description: 'API · с tools' },
-  { id: 'grok-cli',   label: 'Grok Build',   description: 'CLI · SuperGrok подписка' },
-  { id: 'openai',     label: 'ChatGPT',      description: 'API · с tools' },
-  { id: 'codex-cli',  label: 'Codex',        description: 'CLI · Plus подписка' }
+  { id: 'gemini-api', label: 'Gemini',             description: 'API · с tools' },
+  { id: 'gemini-cli', label: 'Gemini Ultra (beta)', description: 'CLI · подписка' },
+  { id: 'claude',     label: 'Claude',             description: 'API · с tools' },
+  { id: 'claude-cli', label: 'Claude Code (beta)', description: 'CLI · Pro/Max подписка' },
+  { id: 'grok',       label: 'Grok',               description: 'API · с tools' },
+  { id: 'grok-cli',   label: 'Grok Build (beta)',  description: 'CLI · SuperGrok подписка' },
+  { id: 'openai',     label: 'ChatGPT',            description: 'API · с tools' },
+  { id: 'codex-cli',  label: 'Codex (beta)',       description: 'CLI · Plus подписка' }
 ]
 
 interface Props {
@@ -99,26 +104,30 @@ export function ModelPicker({ onOpenSettings }: Props) {
         <div className="gg-mp-popover">
           <div className="gg-mp-section">
             <div className="gg-mp-section-title">Провайдер</div>
-            {PROVIDER_OPTIONS.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                className={`gg-mp-row ${provider.id === p.id ? 'is-active' : ''}`}
-                onClick={async () => {
-                  // STALE CLOSURE FIX: provider.model captured BEFORE
-                  // setProviderId completes is the OLD provider's model
-                  // (e.g. 'gemini-3.5-flash' when switching to claude-cli).
-                  // Read the NEW provider's stored model directly.
-                  await provider.setProviderId(p.id)
-                  const storedNewModel = await window.api.settings.getKey(`model_${p.id}`)
-                  await persistOnSession(p.id, storedNewModel)
-                  setOpen(false)
-                }}
-              >
-                <span className="gg-mp-row-label">{p.label}</span>
-                <span className="gg-mp-row-meta">{p.description}</span>
-              </button>
-            ))}
+            {PROVIDER_OPTIONS.map(p => {
+              const isCli = p.id.endsWith('-cli')
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`gg-mp-row ${provider.id === p.id ? 'is-active' : ''}`}
+                  title={isCli ? CLI_BETA_HINT : undefined}
+                  onClick={async () => {
+                    // STALE CLOSURE FIX: provider.model captured BEFORE
+                    // setProviderId completes is the OLD provider's model
+                    // (e.g. 'gemini-3.5-flash' when switching to claude-cli).
+                    // Read the NEW provider's stored model directly.
+                    await provider.setProviderId(p.id)
+                    const storedNewModel = await window.api.settings.getKey(`model_${p.id}`)
+                    await persistOnSession(p.id, storedNewModel)
+                    setOpen(false)
+                  }}
+                >
+                  <span className="gg-mp-row-label">{p.label}</span>
+                  <span className="gg-mp-row-meta">{p.description}</span>
+                </button>
+              )
+            })}
           </div>
 
           {provider.models.length > 1 && (() => {

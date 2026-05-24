@@ -965,9 +965,37 @@ function ProvidersPage(props: ProvidersPageProps) {
     }
   }
 
+  // ТЗ Pavel'а (2026-05-26): онбординг-баннер для внешнего тестера.
+  // Если нет НИ ОДНОГО заданного API ключа среди API-провайдеров — показываем
+  // явный hint что делать. CLI-провайдеры в учёт не идут: они через подписку
+  // и могут быть «среда»/«залогинен», но без API-ключей агент в облачные
+  // модели стрелять не сможет.
+  const hasAnyApiKey = providers.some(p =>
+    p.transport === 'API' && p.secretKey != null && Boolean(keys[p.secretKey])
+  )
+  // Custom-openai считаем «настроенным» если baseUrl задан, даже без ключа.
+  const hasCustomConfigured = customOpenaiBaseUrl.trim().length > 0
+  const showOnboardingHint = !hasAnyApiKey && !hasCustomConfigured
+
   return (
     <div className="gg-settings-extra gg-providers-page">
       <h2 className="gg-settings-page-title">Провайдеры</h2>
+
+      {showOnboardingHint && (
+        <div className="gg-prov-onboarding" role="alert">
+          <div className="gg-prov-onboarding-icon" aria-hidden>👋</div>
+          <div className="gg-prov-onboarding-body">
+            <div className="gg-prov-onboarding-title">Добавьте хотя бы один API ключ чтобы начать</div>
+            <div className="gg-prov-onboarding-text">
+              Рекомендуем — <strong>Gemini API</strong> (есть бесплатный tier на
+              {' '}<a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a>)
+              или <strong>Claude API</strong> ({' '}<a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>).
+              Найди карточку ниже → «+ Подключить» → вставь ключ → «Сохранить».
+              CLI-провайдеры (Claude Code, Gemini CLI и т.п.) — на твоей подписке, отдельная история.
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className={`gg-prov-toast is-${toast.kind}`} role="status">
