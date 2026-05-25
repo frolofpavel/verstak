@@ -31,6 +31,9 @@ export interface PrepareSystemInput {
    *  "Системный промпт проекта" section). When non-empty, appended to the
    *  user_layer content so the agent treats it as additional project rules. */
   projectSystemPrompt?: string | null
+  /** Топ-5 воспоминаний проекта — передаются в context-pack для инжекции
+   *  в system prompt. Опционально: если не передано, секция не появляется. */
+  memories?: Array<{ type: string; content: string; tags: string[] }>
 }
 
 export interface PreparedParts {
@@ -57,7 +60,7 @@ export async function prepareSystemContext(input: PrepareSystemInput): Promise<C
  * developed system prompt — we don't want to layer ours on top.
  */
 export async function prepareParts(input: PrepareSystemInput): Promise<PreparedParts> {
-  const { projectPath, messages, recentWrites, projectSystemPrompt } = input
+  const { projectPath, messages, recentWrites, projectSystemPrompt, memories } = input
   let userLayer = projectPath ? await loadUserLayer(projectPath) : { path: null, content: '' }
 
   // Project Settings — пользователь может задать промпт через UI шестерёнки
@@ -82,7 +85,8 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
         projectPath,
         recentWrites,
         latestUserMessage: lastUser?.content ?? '',
-        isFirstTurn
+        isFirstTurn,
+        memories
       })
     } catch (err) {
       // Visible failure — previously this was silent and made debugging hard.

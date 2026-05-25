@@ -147,11 +147,19 @@ export function registerAiIpc(deps: AiDeps): void {
       // (UI шестерёнки в Project Rail). Хранится в settings ключом
       // `system_prompt_${path}`. Если пусто — игнорируется.
       const projectSystemPrompt = projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null
+      // Топ-5 воспоминаний проекта для инжекции в context-pack — только для
+      // первого хода (isFirstTurn), чтобы не удваивать стоимость каждого turn'а.
+      // На последующих ходах модель уже видела память в начале сессии.
+      const isFirstTurn = !messages.some(m => m.role === 'assistant')
+      const memories = (projectPath && isFirstTurn)
+        ? deps.searchMemories(projectPath, '', 5)
+        : []
       const composed = await prepareSystemContext({
         projectPath,
         messages,
         recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
-        projectSystemPrompt
+        projectSystemPrompt,
+        memories
       })
       messagesWithSystem = [{ role: 'system', content: composed.system }, ...messages]
     }

@@ -19,9 +19,15 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { getProjectMap, projectMapToText } from './project-map'
 import { detectCrossProjectPaths } from './grounding'
-
 // Re-export for backward compatibility — tests still import from here.
 export { detectCrossProjectPaths }
+
+/** Минимальный срез Memory — только поля, нужные для инжекции в context-pack. */
+interface MemoryEntry {
+  type: string
+  content: string
+  tags: string[]
+}
 
 const execFileAsync = promisify(execFile)
 
@@ -34,6 +40,9 @@ export interface ContextPackInput {
   /** True when this is the first user message in the chat session. We nudge
    *  the model to call get_project_map BEFORE reading individual files. */
   isFirstTurn?: boolean
+  /** Топ-5 воспоминаний проекта из долговременной памяти — инжектятся как
+   *  информационный блок. Пустой массив или undefined = секция не добавляется. */
+  memories?: MemoryEntry[]
 }
 
 /**
@@ -92,12 +101,23 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
     /* map build failed — skip silently */
   }
 
-  if (parts.length === 0 && !mapBlock) return ''
+  // 5. Долговременная память — топ-N воспоминаний проекта. Каждое — одна строка,
+  //    только информационно, не инструкция. Не добавляем пустую секцию.
+  let memorySection = ''
+  if (input.memories && input.memories.length > 0) {
+    const lines = input.memories.slice(0, 5).map(m => {
+      const tags = m.tags.length > 0 ? `${m.tags.join(', ')} — ` : ''
+      return `[${m.type}] ${tags}${m.content}`
+    })
+    memorySection = `\n\n## Память агента (из прошлых сессий)\n\n${lines.join('\n')}`
+  }
+
+  if (parts.length === 0 && !mapBlock && !memorySection) return ''
 
   const meta = parts.length > 0 ? parts.join('\n') : '(no git, no recent writes)'
   const mapSection = mapBlock ? `\n\nproject_map (compact):\n${mapBlock}` : ''
   return `<context_pack generated="auto" project="${escapeAttr(projectPath)}">
-${meta}${mapSection}
+${meta}${mapSection}${memorySection}
 </context_pack>`
 }
 
