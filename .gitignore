@@ -8,6 +8,8 @@ release/
 .DS_Store
 .superpowers/
 
+.worktrees/
+
 # Unrelated experiments in this folder
 Gemini.bat
 GeminiStudio.ps1
