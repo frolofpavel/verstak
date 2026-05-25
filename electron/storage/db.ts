@@ -200,13 +200,13 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
           content=memories,
           content_rowid=rowid
         );
-        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
           INSERT INTO memories_fts(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
         END;
-        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
         END;
-        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
           INSERT INTO memories_fts(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
         END;

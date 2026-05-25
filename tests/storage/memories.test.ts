@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import { openDb } from '../../electron/storage/db'
@@ -16,9 +16,10 @@ describe('memories storage', () => {
     db = openDb(join(dir, 'test.db'))
   })
 
-  // afterEach не нужен — база in-process, процесс чистый между тестами;
-  // tmpdir подчищается ОС. Но для чистоты закроем явно.
-  // (better-sqlite3 closes on GC anyway)
+  afterEach(() => {
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   const PROJECT = '/home/user/my-project'
   const OTHER = '/home/user/other-project'
@@ -112,13 +113,14 @@ describe('memories storage', () => {
     })
 
     it('updates accessed_at for returned records', () => {
-      const before = listMemories(db, PROJECT)
-      const oldAccessed = before.find(m => m.content.includes('TypeScript'))!.accessed_at
+      // Встроить старое время через прямой UPDATE
+      const oldTime = Date.now() - 10000
+      db.prepare(`UPDATE memories SET accessed_at = ? WHERE project_path = ?`).run(oldTime, PROJECT)
 
-      // Небольшая задержка чтобы новое время было точно > старого
-      const now = Date.now() + 100
-      const results = searchMemories(db, PROJECT, 'TypeScript', 5)
-      expect(results[0].accessed_at).toBeGreaterThanOrEqual(oldAccessed)
+      searchMemories(db, PROJECT, 'TypeScript', 5)
+
+      const updated = listMemories(db, PROJECT).find(m => m.content.includes('TypeScript'))!
+      expect(updated.accessed_at).toBeGreaterThan(oldTime)
     })
   })
 

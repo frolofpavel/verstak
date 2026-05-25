@@ -25,7 +25,13 @@ interface MemoryRow {
 }
 
 function rowToMemory(row: MemoryRow): Memory {
-  return { ...row, tags: JSON.parse(row.tags) as string[] }
+  let tags: string[]
+  try {
+    tags = JSON.parse(row.tags) as string[]
+  } catch {
+    tags = []
+  }
+  return { ...row, tags }
 }
 
 export function saveMemory(
@@ -57,12 +63,17 @@ export function searchMemories(
     ).all(projectPath, limit) as MemoryRow[]
   } else {
     // FTS5 поиск по контенту и тегам, фильтрация по проекту
-    rows = db.prepare(
-      `SELECT m.* FROM memories m
-       JOIN memories_fts ON m.rowid = memories_fts.rowid
-       WHERE memories_fts MATCH ? AND m.project_path = ?
-       LIMIT ?`
-    ).all(query, projectPath, limit) as MemoryRow[]
+    try {
+      rows = db.prepare(
+        `SELECT m.* FROM memories m
+         JOIN memories_fts ON m.rowid = memories_fts.rowid
+         WHERE memories_fts MATCH ? AND m.project_path = ?
+         LIMIT ?`
+      ).all(query, projectPath, limit) as MemoryRow[]
+    } catch {
+      // FTS5 парсер не принял query — возвращаем пустой результат
+      rows = []
+    }
   }
 
   if (rows.length > 0) {
