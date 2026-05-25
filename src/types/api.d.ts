@@ -211,6 +211,12 @@ declare global {
         updateStep: (id: number, patch: { status?: StepStatus; result?: string | null }) => Promise<void>
         remove: (id: number) => Promise<void>
       }
+      memory: {
+        save(projectPath: string, type: string, content: string, tags: string[]): Promise<Memory>
+        search(projectPath: string, query: string, limit?: number): Promise<Memory[]>
+        list(projectPath: string): Promise<Memory[]>
+        delete(id: string): Promise<boolean>
+      }
       verify: {
         exec: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>
       }
@@ -232,6 +238,17 @@ declare global {
     }
   }
 }
+/** Воспоминание агента — факт, решение, баг или паттерн, привязанный к проекту. */
+export interface Memory {
+  id: string
+  project_path: string
+  type: 'fact' | 'decision' | 'bug' | 'preference' | 'pattern'
+  content: string
+  tags: string[]
+  created_at: number
+  accessed_at: number
+}
+
 export interface AutonomousStatus {
   enabled: boolean
   intervalMin: number

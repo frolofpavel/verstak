@@ -37,6 +37,7 @@ import { createSkillRegistry } from './ai/skills/registry'
 import { registerSkillsIpc } from './ipc/skills'
 import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
+import { registerMemoryIpc } from './ipc/memory'
 
 function createWindow(): void {
   // HERE = out/main in dev and prod
@@ -272,6 +273,7 @@ app.whenReady().then(() => {
   registerTerminalIpc()
   registerSkillsIpc(skillRegistry, { getSecret })
   registerUserProfilesIpc(userProfiles)
+  registerMemoryIpc(db)
   createWindow()
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

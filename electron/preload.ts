@@ -125,6 +125,16 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('plans:update-step', id, patch),
     remove: (id: number) => ipcRenderer.invoke('plans:remove', id)
   },
+  memory: {
+    save: (projectPath: string, type: string, content: string, tags: string[]) =>
+      ipcRenderer.invoke('memory:save', { projectPath, type, content, tags }),
+    search: (projectPath: string, query: string, limit?: number) =>
+      ipcRenderer.invoke('memory:search', { projectPath, query, limit }),
+    list: (projectPath: string) =>
+      ipcRenderer.invoke('memory:list', { projectPath }),
+    delete: (id: string) =>
+      ipcRenderer.invoke('memory:delete', { id })
+  },
   verify: {
     exec: (command: string) => ipcRenderer.invoke('verify:exec', command) as Promise<{ exitCode: number; stdout: string; stderr: string }>
   },
