@@ -221,6 +221,30 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_unique_content ON memories(project_path, content);
       `)
     }
+  },
+  {
+    version: 6,
+    description: 'FTS5 index for chat message search (conversation_search tool)',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS chats_fts USING fts5(
+          content,
+          content=chats,
+          content_rowid=rowid
+        );
+
+        -- Populate from existing data
+        INSERT INTO chats_fts(chats_fts) VALUES('rebuild');
+
+        -- Keep in sync with inserts and deletes
+        CREATE TRIGGER IF NOT EXISTS chats_fts_ai AFTER INSERT ON chats BEGIN
+          INSERT INTO chats_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS chats_fts_ad AFTER DELETE ON chats BEGIN
+          INSERT INTO chats_fts(chats_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        END;
+      `)
+    }
   }
 ]
 

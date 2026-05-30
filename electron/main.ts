@@ -39,6 +39,7 @@ import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
 import { registerMemoryIpc } from './ipc/memory'
 import { saveMemory, searchMemories } from './storage/memories'
+import { searchConversations } from './storage/chats'
 import { registerCommandsIpc } from './ipc/commands'
 
 function createWindow(): void {
@@ -232,6 +233,9 @@ app.whenReady().then(() => {
     },
     searchMemories: (projectPath, query, limit) => {
       return searchMemories(db, projectPath, query, limit)
+    },
+    searchConversations: (projectPath, query, limit) => {
+      return searchConversations(db, projectPath, query, limit)
     },
     connectors: {
       list: () => connectorRegistry.list().map(c => ({ ...c })),

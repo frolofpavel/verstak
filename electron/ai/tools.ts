@@ -327,6 +327,18 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'conversation_search',
+    description: 'Ищет по всем прошлым разговорам в этом проекте. Используй когда нужно вспомнить что обсуждали раньше, найти принятое решение или контекст прошлой сессии.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Поисковый запрос' },
+        limit: { type: 'number', description: 'Максимум результатов (default 10)' }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'generate_docx',
     description: 'Сохранить артефакт в формате Word (.docx). Файл попадает в .verstak/artifacts/{YYYY-MM-DD}/. Принимает структуру секций — каждая с heading и параграфами.',
     parameters: {

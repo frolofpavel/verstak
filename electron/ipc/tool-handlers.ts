@@ -67,6 +67,8 @@ export interface ToolContext {
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string }
   /** Поиск по долговременной памяти проекта. */
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
+  /** Полнотекстовый поиск по истории разговоров проекта. */
+  searchConversations: (projectPath: string, query: string, limit: number) => Array<{ session_id: number; role: string; content: string; created_at: number }>
   connectors: ConnectorRegistry
   /** Mutated by browser_screenshot; flushed by the agent loop into next user msg. */
   pendingAttachments: Attachment[]
@@ -838,6 +840,35 @@ const checkDiagnosticsHandler: ToolHandler = {
 }
 
 // ============================================================================
+// conversation_search — FTS5 search across past chat messages
+// ============================================================================
+
+const conversationSearchHandler: ToolHandler = {
+  mode: 'parallel-read',
+  async handle(call, ctx) {
+    try {
+      const query = String(call.args.query ?? '').trim()
+      const limit = typeof call.args.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(call.args.limit))) : 10
+      const results = ctx.searchConversations(ctx.projectPath, query, limit)
+      emitActivity(ctx, call, 'ok', 'conversation_search', `"${query}" · ${results.length} результатов`)
+      if (results.length === 0) {
+        return { id: call.id, name: call.name, result: 'Ничего не найдено в истории разговоров.' }
+      }
+      const lines: string[] = [`Found ${results.length} results:\n`]
+      for (const r of results) {
+        const date = new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 16)
+        lines.push(`[Session #${r.session_id}, ${date}] ${r.role}:\n${r.content}\n`)
+      }
+      return { id: call.id, name: call.name, result: lines.join('\n') }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
+// ============================================================================
 // Registry — single source of truth for tool dispatch
 // ============================================================================
 
@@ -862,7 +893,9 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'memory_save': memorySaveHandler,
   'memory_search': memorySearchHandler,
   // Diagnostics — parallel-read, no user confirmation needed
-  'check_diagnostics': checkDiagnosticsHandler
+  'check_diagnostics': checkDiagnosticsHandler,
+  // Conversation history search — parallel-read, FTS5
+  'conversation_search': conversationSearchHandler
 }
 
 /**
