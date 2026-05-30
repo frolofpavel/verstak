@@ -310,6 +310,16 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           void window.api.journal.append(store.path, 'tool', `Заблокировано: ${event.command ?? event.name}`, event.reason)
         }
       }
+      else if (event.type === 'info') {
+        store.pushActivity({
+          id: `info-${Date.now()}`,
+          kind: 'read',
+          label: event.text,
+          detail: '',
+          status: 'ok',
+          timestamp: Date.now()
+        })
+      }
       else if (event.type === 'usage') {
         store.addUsage({
           inputTokens: event.usage.inputTokens,
@@ -847,6 +857,8 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
           <SlashCommandPopup
             text={input}
             onClear={() => setInput('')}
+            onInject={text => setInput(text)}
+            projectPath={activePath}
             systemCommands={[
               {
                 kind: 'system',

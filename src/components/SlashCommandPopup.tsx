@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSkills } from '../store/skillStore'
+import type { UserCommand } from '../types/api'
 
 /**
  * Slash command popup — появляется когда в композере набрано "/" в начале.
@@ -7,37 +8,56 @@ import { useSkills } from '../store/skillStore'
  * Источники команд:
  *  1. Все скиллы с заполненным frontmatter.slash (главное).
  *  2. Built-in системные команды (/clear, /mode auto, /new).
+ *  3. User/project команды из ~/.verstak/commands/ и {project}/.verstak/commands/.
  *
  * Поведение:
  *  - Фильтрация по подстроке после /.
  *  - ↑↓ — навигация, Enter — выбор, Esc — закрыть.
  *  - При выборе скилла: активируется skill + текст композера очищается.
  *  - Системные команды дёргают callback.
+ *  - User/project команды: если есть $VARIABLES — window.prompt для каждой,
+ *    затем инжектируют resolved body в composer через onInject.
  */
 
 export type SlashCommand =
   | { kind: 'skill'; skillId: string; trigger: string; label: string; description?: string; icon?: string }
   | { kind: 'system'; trigger: string; label: string; description: string; icon: string; action: () => void }
+  | { kind: 'user-command'; command: UserCommand; trigger: string; label: string; description?: string; icon?: string }
 
 interface Props {
   /** Текущий текст композера. Если начинается с "/", popup открыт. */
   text: string
   /** Вызывается когда нужно очистить композер (после выбора скилла или /clear). */
   onClear: () => void
+  /** Вызывается когда нужно вставить текст команды в композер. */
+  onInject?: (text: string) => void
   /** Опционально — системные команды от родителя (/clear messages и т.п.). */
   systemCommands?: SlashCommand[]
+  /** Путь к текущему проекту (для загрузки project-scope команд). */
+  projectPath?: string | null
 }
 
-export function SlashCommandPopup({ text, onClear, systemCommands = [] }: Props) {
+export function SlashCommandPopup({ text, onClear, onInject, systemCommands = [], projectPath = null }: Props) {
   const skills = useSkills(s => s.skills)
   const setActiveSkill = useSkills(s => s.setActiveSkill)
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const [userCommands, setUserCommands] = useState<UserCommand[]>([])
 
   // Активируется при тексте начинающемся с "/"
   const slashState = parseSlash(text)
   const isOpen = slashState !== null
 
-  // Собрать все команды: skill slashes + system
+  // Загружаем команды когда popup открывается
+  useEffect(() => {
+    if (!isOpen) return
+    window.api.commands.list(projectPath).then(cmds => {
+      setUserCommands(cmds)
+    }).catch(err => {
+      console.error('[SlashCommandPopup] commands:list failed:', err)
+    })
+  }, [isOpen, projectPath])
+
+  // Собрать все команды: skill slashes + user-commands + system
   const allCommands: SlashCommand[] = useMemo(() => {
     const skillCommands: SlashCommand[] = skills
       .filter(s => s.slash)
@@ -49,8 +69,16 @@ export function SlashCommandPopup({ text, onClear, systemCommands = [] }: Props)
         description: s.description,
         icon: s.icon
       }))
-    return [...skillCommands, ...systemCommands]
-  }, [skills, systemCommands])
+    const cmdCommands: SlashCommand[] = userCommands.map(cmd => ({
+      kind: 'user-command' as const,
+      command: cmd,
+      trigger: cmd.name,
+      label: cmd.name,
+      description: cmd.description || undefined,
+      icon: cmd.scope === 'project' ? '📁' : '📝'
+    }))
+    return [...skillCommands, ...cmdCommands, ...systemCommands]
+  }, [skills, userCommands, systemCommands])
 
   // Фильтр по введённому query
   const filtered = useMemo(() => {
@@ -97,11 +125,30 @@ export function SlashCommandPopup({ text, onClear, systemCommands = [] }: Props)
     if (cmd.kind === 'skill') {
       setActiveSkill(cmd.skillId)
       onClear()
-    } else {
+    } else if (cmd.kind === 'system') {
       cmd.action()
       onClear()
+    } else {
+      // user-command: запросить переменные через window.prompt, затем инжектировать
+      const userCmd = cmd.command
+      let body = userCmd.body
+      for (const varName of userCmd.variables) {
+        // eslint-disable-next-line no-alert
+        const val = window.prompt(`Введи значение для $${varName}:`) ?? ''
+        body = body.replaceAll(`$${varName}`, val)
+      }
+      if (onInject) {
+        onInject(body)
+      } else {
+        onClear()
+      }
     }
   }
+
+  // Разделитель между скиллами и командами (user-command) — показываем если обе группы есть
+  const hasSkillsInFiltered = filtered.some(c => c.kind === 'skill')
+  const hasCommandsInFiltered = filtered.some(c => c.kind === 'user-command')
+  const firstCommandIdx = filtered.findIndex(c => c.kind === 'user-command')
 
   if (filtered.length === 0) {
     return (
@@ -114,23 +161,34 @@ export function SlashCommandPopup({ text, onClear, systemCommands = [] }: Props)
   return (
     <div className="gg-slash-popup">
       <div className="gg-slash-header">Команды агента — Enter для выбора, Esc закрыть</div>
-      {filtered.map((c, i) => (
-        <div
-          key={c.kind === 'skill' ? `skill:${c.skillId}` : `sys:${c.trigger}`}
-          className={`gg-slash-item ${i === selectedIdx ? 'is-selected' : ''}`}
-          onMouseEnter={() => setSelectedIdx(i)}
-          onClick={() => execute(c)}
-        >
-          <span className="gg-slash-icon">{c.icon ?? '🎭'}</span>
-          <span className="gg-slash-body">
-            <span className="gg-slash-name">
-              /{c.trigger}
-              <span className="gg-slash-label">— {c.label}</span>
-            </span>
-            {c.description && <span className="gg-slash-desc">{c.description}</span>}
-          </span>
-        </div>
-      ))}
+      {filtered.map((c, i) => {
+        const key = c.kind === 'skill' ? `skill:${c.skillId}` : c.kind === 'user-command' ? `cmd:${c.command.id}` : `sys:${c.trigger}`
+        const showSeparator = c.kind === 'user-command' && i === firstCommandIdx && hasSkillsInFiltered && hasCommandsInFiltered
+        return (
+          <div key={key}>
+            {showSeparator && (
+              <div className="gg-slash-separator">Команды</div>
+            )}
+            <div
+              className={`gg-slash-item ${i === selectedIdx ? 'is-selected' : ''}`}
+              onMouseEnter={() => setSelectedIdx(i)}
+              onClick={() => execute(c)}
+            >
+              <span className="gg-slash-icon">{c.icon ?? '🎭'}</span>
+              <span className="gg-slash-body">
+                <span className="gg-slash-name">
+                  /{c.trigger}
+                  <span className="gg-slash-label">— {c.label}</span>
+                  {c.kind === 'user-command' && (
+                    <span className="gg-slash-scope-badge">{c.command.scope}</span>
+                  )}
+                </span>
+                {c.description && <span className="gg-slash-desc">{c.description}</span>}
+              </span>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

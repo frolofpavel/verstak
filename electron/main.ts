@@ -39,6 +39,7 @@ import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
 import { registerMemoryIpc } from './ipc/memory'
 import { saveMemory, searchMemories } from './storage/memories'
+import { registerCommandsIpc } from './ipc/commands'
 
 function createWindow(): void {
   // HERE = out/main in dev and prod
@@ -281,6 +282,7 @@ app.whenReady().then(() => {
   registerSkillsIpc(skillRegistry, { getSecret })
   registerUserProfilesIpc(userProfiles)
   registerMemoryIpc(db)
+  registerCommandsIpc()
   createWindow()
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

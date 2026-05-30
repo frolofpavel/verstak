@@ -3169,6 +3169,29 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   color: var(--text-tertiary);
   line-height: 1.4;
 }
+.gg-slash-separator {
+  padding: 4px 12px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
+  margin-top: 2px;
+}
+.gg-slash-scope-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 6px;
+  background: rgba(78, 201, 176, 0.15);
+  color: var(--accent-green, #4ec9b0);
+  vertical-align: middle;
+}
 
 /* ======================================================================
    Artifact pills — клик открывает в дефолтном приложении (HTML→браузер,

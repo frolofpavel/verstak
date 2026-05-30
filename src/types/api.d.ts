@@ -75,6 +75,7 @@ export type ChatEvent =
   | { type: 'plan-created'; planId: number; title: string; stepCount: number }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx'; filename: string; path: string; sizeBytes: number }
   | { type: 'usage'; usage: UsageDelta }
+  | { type: 'info'; text: string }
   | { type: 'done' }
   | { type: 'error'; message: string }
 
@@ -236,6 +237,9 @@ declare global {
         start: (intervalMin: number) => Promise<AutonomousStatus>
         stop: () => Promise<AutonomousStatus>
       }
+      commands: {
+        list: (projectPath: string | null) => Promise<UserCommand[]>
+      }
     }
   }
 }
@@ -248,6 +252,17 @@ export interface Memory {
   tags: string[]
   created_at: number
   accessed_at: number
+}
+
+/** Пользовательская команда — .md файл из ~/.verstak/commands/ или {project}/.verstak/commands/. */
+export interface UserCommand {
+  id: string
+  name: string
+  scope: 'user' | 'project'
+  description: string
+  body: string
+  variables: string[]
+  filePath: string
 }
 
 export interface AutonomousStatus {

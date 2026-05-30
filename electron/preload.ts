@@ -145,6 +145,9 @@ contextBridge.exposeInMainWorld('api', {
     start: (intervalMin: number) => ipcRenderer.invoke('autonomous:start', intervalMin),
     stop: () => ipcRenderer.invoke('autonomous:stop')
   },
+  commands: {
+    list: (projectPath: string | null) => ipcRenderer.invoke('commands:list', projectPath)
+  },
   term: {
     spawn: (cwd: string) => ipcRenderer.invoke('term:spawn', cwd) as Promise<number>,
     write: (id: number, data: string) => ipcRenderer.invoke('term:write', id, data),
