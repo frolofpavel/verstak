@@ -1,6 +1,5 @@
 # Verstak V3 — Vision Spec
-**Дата:** 2026-05-23  
-**Контекст:** Brainstorm сессия ai-lab → передача в bos-hq
+**Дата:** 2026-05-23
 
 ---
 
@@ -63,20 +62,17 @@
 
 ---
 
-## Архитектурные решения (из предыдущей сессии)
+## Архитектурные решения
 
 - **Скиллы** — с сервера через API (`/api/skills/{id}/context`), не локально
-- **Google Sheets** — тот же service account из `/opt/los/creds.json`
-- **Telegram** — новый бот через @BotFather
-- **SSH** — отдельный пользователь `gemini-agent` с whitelist команд
-- **14 сотрудников** — каждый со своим API key
+- **Google Sheets** — service account credentials
+- **Telegram** — бот через @BotFather
+- **SSH** — отдельный пользователь с whitelist команд
+- **Мультипользователь** — каждый со своим API key
 - **Артефакты** — HTML + DOCX
-- **Bitrix пилот** — БАУМЕХ первый
 
 ---
 
-## Что передаётся в bos-hq
+## Задача разработчику
 
-Детальный план реализации: `C:\Users\Pavel\Downloads\Verstak-V3-Plan.html` (v1.1)
-
-Задача разработчику: взять этот vision + план → написать implementation plan по неделям → стартовать Неделю 1 (коннекторы + skill loader через server-API).
+Взять этот vision → написать implementation plan по неделям → стартовать Неделю 1 (коннекторы + skill loader через server-API).

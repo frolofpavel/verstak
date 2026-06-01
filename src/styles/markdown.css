@@ -36,7 +36,7 @@
 .gg-md a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* Inline code — theme-aware. Hard-coded color was invisible on light theme
- * (Pavel feedback 2026-05-21: "в белой надо ссылки и прочее в другом дизайне,
+ * (в белой теме ссылки и прочее в другом дизайне,
  * а то не видно"). Now uses --text-code / --bg-code / --border-code defined
  * per theme in theme.css. */
 .gg-md :not(pre) > code {

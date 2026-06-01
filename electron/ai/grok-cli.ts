@@ -166,7 +166,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         yield { type: 'error', message: 'Нет user-сообщения для отправки' }
         return
       }
-      // ТЗ Pavel'а (2026-05-26): переключаем на FULL payload.
+      // Переключаем на FULL payload.
       // Если grok CLI упадёт с ACCESS_VIOLATION (Windows 0xC0000005 / 3221225477)
       // — поймаем в child.on('close') ниже и вернём user-friendly ошибку с
       // предложением переключиться на Grok API. Лучше пробовать, чем мириться
@@ -299,7 +299,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
           // 0xC0000005 (3221225477) = Windows STATUS_ACCESS_VIOLATION.
           // Также 0xC0000409 (3221226505) = STACK_BUFFER_OVERRUN, и любой
           // другой 0xC000... код — нативный краш CLI на больших промптах
-          // или unicode-кейсах. Сообщение по ТЗ Pavel'а: явно и понятно,
+          // или unicode-кейсах. Сообщение: явно и понятно,
           // не молчим, не зависаем — предлагаем единственный воркэраунд.
           const isNativeCrash =
             code === 3221225477 || code === -1073741819 || // 0xC0000005

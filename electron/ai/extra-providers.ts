@@ -3,9 +3,9 @@
  * OpenAI API — добавляются мгновенно потому что у нас уже есть
  * createOpenAiCompatProvider({apiKey, baseUrl, models, model}).
  *
- * Pavel запросил «как у OpenCode» — у них в Available стоят OpenRouter,
- * DeepSeek, Vercel Gateway, Custom, etc. Мы выбираем что реально полезно
- * для русского digital-агентства:
+ * Дополнительные провайдеры в стиле OpenCode — Available стоят OpenRouter,
+ * DeepSeek, Vercel Gateway, Custom, etc. Выбраны наиболее полезные
+ * для русского рынка:
  *  - OpenRouter (один ключ → все модели)
  *  - DeepSeek (дешёвый, R1 reasoning)
  *  - Mistral (европейский, без санкционных рисков)

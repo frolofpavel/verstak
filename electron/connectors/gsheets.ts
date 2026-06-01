@@ -4,15 +4,14 @@
  * Источник: V3 Plan раздел 5.1. Реализация без googleapis npm пакета —
  * минимальный JWT (RS256) + fetch для всего API.
  *
- * Credentials: service account JSON (тот же что в /opt/los/creds.json у
- * Pavel'я). Хранится в settings под ключом 'gsheets_service_account_json',
+ * Credentials: service account JSON. Хранится в settings под ключом 'gsheets_service_account_json',
  * шифруется через safeStorage.
  *
  * Безопасность:
  *  - access_token кешируется на 50 минут (Google даёт 60), чтобы не
  *    дёргать oauth на каждый запрос.
- *  - НЕТ whitelist spreadsheet_id в V1 — Pavel единственный пользователь
- *    на данный момент. Когда подключим Кристину и других — добавим.
+ *  - НЕТ whitelist spreadsheet_id в V1 — добавим в следующей версии при
+ *    необходимости multi-user изоляции.
  *  - update/append логируются (через emitActivity в tool-handlers выше).
  */
 
@@ -35,7 +34,7 @@ export function createGSheetsConnector(): Connector {
   return {
     info(): ConnectorInfo {
       // Status вычисляется в момент list — есть ли creds в settings.
-      // ConnectorRegistry дёргает info() в list, и Pavel должен видеть актуальный
+      // ConnectorRegistry дёргает info() в list, актуальный
       // статус. Но info() синхронный, поэтому проверку делаем на месте запроса.
       return {
         id: 'gsheets',

@@ -25,7 +25,7 @@ function ChatNavSection() {
     if (!t) return
     // Optimistic local update — заголовок меняется мгновенно, без полной
     // перезагрузки chatSessions. Это убирает re-render волну, которая
-    // ранее иногда обрывала входящий ai:event стрим (Pavel 2026-05-21).
+    // ранее иногда обрывала входящий ai:event стрим.
     patchChatSession(idToEdit, { title: t })
     try {
       await window.api.chatSessions.rename(idToEdit, t)

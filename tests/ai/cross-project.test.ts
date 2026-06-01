@@ -2,21 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { detectCrossProjectPaths } from '../../electron/ai/context-pack'
 
 describe('detectCrossProjectPaths', () => {
-  const proj = 'C:/Users/Pavel/verstak'
+  const proj = 'C:/Users/testuser/verstak'
 
   it('flags абсолютный путь вне проекта (Windows)', () => {
-    const r = detectCrossProjectPaths('сделай аудит C:\\Users\\Pavel\\grok-chat', proj)
+    const r = detectCrossProjectPaths('сделай аудит C:\\Users\\testuser\\other-project', proj)
     expect(r).toHaveLength(1)
-    expect(r[0]).toMatch(/grok-chat/)
+    expect(r[0]).toMatch(/other-project/)
   })
 
   it('игнорирует пути внутри активного проекта', () => {
-    const r = detectCrossProjectPaths('правка C:\\Users\\Pavel\\verstak\\src\\App.tsx', proj)
+    const r = detectCrossProjectPaths('правка C:\\Users\\testuser\\verstak\\src\\App.tsx', proj)
     expect(r).toEqual([])
   })
 
   it('case-insensitive — c:/users/...', () => {
-    const r = detectCrossProjectPaths('файл c:/users/pavel/grok-chat/main.py', proj)
+    const r = detectCrossProjectPaths('файл c:/users/testuser/other-project/main.py', proj)
     expect(r).toHaveLength(1)
   })
 
@@ -27,7 +27,7 @@ describe('detectCrossProjectPaths', () => {
   })
 
   it('игнорирует пути внутри кодоблоков', () => {
-    const text = '```\nC:\\Users\\Pavel\\other\\file.ts\n```'
+    const text = '```\nC:\\Users\\testuser\\other\\file.ts\n```'
     expect(detectCrossProjectPaths(text, proj)).toEqual([])
   })
 

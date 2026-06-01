@@ -1,7 +1,7 @@
 /**
  * Exponential backoff с jitter для AI-провайдеров.
  *
- * Источник: ночной рефактор V3 (Pavel), recommendation #4 из аудита Grok.
+ * Источник: V3 рефактор, recommendation #4 из аудита Grok.
  *
  * ПРОБЛЕМА:
  * При длительных агентных сессиях (20-40 turns) один сетевой сбой (HTTP 503),

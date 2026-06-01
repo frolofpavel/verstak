@@ -630,7 +630,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
               className="gg-input"
               value={sshHost}
               onChange={e => setSshHost(e.target.value)}
-              placeholder="user@178.62.230.241 или alias из ~/.ssh/config"
+              placeholder="user@server.example.com или alias из ~/.ssh/config"
               spellCheck={false}
             />
           </div>
@@ -640,7 +640,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
               className="gg-input"
               value={sshKeyPath}
               onChange={e => setSshKeyPath(e.target.value)}
-              placeholder="C:/Users/Pavel/.ssh/id_ed25519 (или путь к ключу gemini-agent)"
+              placeholder="~/.ssh/id_ed25519 (или полный путь к приватному ключу)"
               spellCheck={false}
             />
           </div>
@@ -1279,7 +1279,7 @@ function ProvidersPage(props: ProvidersPageProps) {
     }
   }
 
-  // ТЗ Pavel'а (2026-05-26): онбординг-баннер для внешнего тестера.
+  // Онбординг-баннер для нового пользователя без API ключей.
   // Если нет НИ ОДНОГО заданного API ключа среди API-провайдеров — показываем
   // явный hint что делать. CLI-провайдеры в учёт не идут: они через подписку
   // и могут быть «среда»/«залогинен», но без API-ключей агент в облачные

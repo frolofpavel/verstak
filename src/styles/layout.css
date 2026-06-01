@@ -883,7 +883,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 /*
  * Scroll container takes the FULL panel width so the scrollbar lives at the
- * physical right edge of the chat panel (Pavel feedback 2026-05-21: бегунок
+ * physical right edge of the chat panel (бегунок
  * висел в воздухе между текстом и краем, теперь прижат). Content stays
  * narrow via .gg-chat-stream-inner — same 980px max-width as the composer.
  */
@@ -1049,7 +1049,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   min-height: 44px;
   max-height: 220px;
   /* Right padding clears the action cluster (attach 30 + voice 30 + send 30
-   * + 2×4 gaps + 8 right offset ≈ 110). Pavel feedback 2026-05-21: при
+   * + 2×4 gaps + 8 right offset ≈ 110). При
    * наборе длинного текста буквы заезжали под скрепку — некрасиво. */
   padding: 12px 116px 12px 14px;
   background: transparent;
@@ -2736,7 +2736,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 
 /* ======================================================================
    Per-message hover toolbar (copy / etc). Hidden by default, faded in
-   when the user hovers the message. Pavel feedback 2026-05-21.
+   when the user hovers the message.
    ====================================================================== */
 .gg-msg-actions {
   display: flex; gap: 4px;

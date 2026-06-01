@@ -591,7 +591,7 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
     addMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
     const activeChatId = store.activeChatId
     if (path && activeChatId) {
-      // В БД сохраняем оригинальный text Pavel'я (без loader-контекста),
+      // В БД сохраняем оригинальный text пользователя (без loader-контекста),
       // чтобы при reload UI не показывал жирный системный блок.
       await window.api.chats.append(activeChatId, path, 'user', summary)
       // log the start of a session — title is the first 80 chars of the request
@@ -1083,9 +1083,8 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
 
 /**
  * Hover toolbar shown under every message — copy-to-clipboard for now.
- * Hidden by default; fades in on .gg-msg:hover (см. layout.css). Pavel
- * фидбек 2026-05-21: "при наведении должно появляться как у тебя функция
- * копировать".
+ * Hidden by default; fades in on .gg-msg:hover (см. layout.css).
+ * При наведении появляется кнопка копирования.
  */
 function MessageActions({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)

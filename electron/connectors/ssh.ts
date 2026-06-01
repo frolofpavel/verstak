@@ -1,12 +1,12 @@
 /**
  * SSH executor — выполнение команд на удалённой машине через системный
- * ssh клиент. Без дополнительных npm зависимостей (Pavel уже использует
- * ssh из bash в своих скиллах — тот же бинарь).
+ * ssh клиент. Без дополнительных npm зависимостей (использует системный
+ * ssh бинарь).
  *
  * Источник: V3 Plan раздел 5.3.
  *
  * Credentials (settings keys):
- *   ssh_default_host    — например 'root@178.62.230.241' или просто host
+ *   ssh_default_host    — например 'user@your-server.example.com' или просто host
  *                         (если host берётся из ~/.ssh/config)
  *   ssh_default_user    — опционально, если не в host
  *   ssh_key_path        — путь к private key (по умолчанию ~/.ssh/id_ed25519)
@@ -18,10 +18,9 @@
  *     отклоняются.
  *   - Timeout 60s по умолчанию. Можно поднять до 600s через args.
  *
- * Подключение к существующей инфраструктуре Pavel'я:
- *   - Главный target: 178.62.230.241 (LOS сервер), там скрипты в /opt/los/
- *     с venv.
- *   - Pavel создаст gemini-agent user отдельно с whitelist sudo на python
+ * Подключение к серверу:
+ *   - Главный target: your configured server
+ *   - Рекомендуется создать отдельного пользователя с whitelist sudo на нужные
  *     скрипты (см. V3 Plan раздел 14 «SSH ключ»).
  */
 
@@ -37,7 +36,7 @@ const MAX_OUTPUT_BYTES = 64 * 1024
 
 /** Жёсткий denylist — независимо от режима agent mode. */
 const DANGEROUS_PATTERNS = [
-  // rm -rf корневых системных путей (но НЕ /tmp/foo, не /home/user/x — там Pavel хозяин)
+  // rm -rf корневых системных путей (но НЕ /tmp/foo, не /home/user/x)
   /\brm\s+-[rRf]+\s+\/(\s|$|var($|\/)|etc($|\/)|usr($|\/)|bin($|\/)|sbin($|\/)|lib($|\/)|boot($|\/)|opt($|\/)|root($|\/))/,
   /\bmkfs\b/,                              // форматирование
   /\bdd\s+.*of=\/dev/,                     // dd на устройство
@@ -85,7 +84,7 @@ async function runRemote(args: Record<string, unknown>, ctx: ConnectorContext): 
     return { error: 'blocked', message: `Команда отклонена политикой: ${dangerReason}. Изменения в системных областях — только вручную.` }
   }
 
-  // ТЗ Pavel'а (2026-05-26): если defaultHost не настроен — БЛОКИРУЕМ всё.
+  // Если defaultHost не настроен — БЛОКИРУЕМ всё.
   // Старая логика разрешала любой host если default не задан (через fallback
   // `args.host ?? '' `) — опасно: модель может слить команды на любой сервер.
   // Теперь whitelist обязателен.
@@ -127,7 +126,7 @@ async function runRemote(args: Record<string, unknown>, ctx: ConnectorContext): 
 async function runPythonScript(args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const scriptPath = String(args.script_path ?? '')
   if (!scriptPath) return { error: 'bad-args', message: 'script_path обязателен' }
-  // Pavel'я инфра: venv в /opt/los/venv, скрипты в /opt/los/*.py
+  // По умолчанию ищем venv по пути /opt/los/venv (можно переопределить через args.venv)
   const venv = String(args.venv ?? '/opt/los/venv')
   const scriptArgs = (args.args as string[] | undefined) ?? []
   const formattedArgs = scriptArgs.map(shellQuote).join(' ')

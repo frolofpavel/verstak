@@ -643,7 +643,7 @@ export const useProject = create<ProjectState>((set, get) => ({
   },
   /**
    * Patch one chat-session in place — used by rename so we don't have to
-   * refetch the whole list. Pavel feedback 2026-05-21: переименование чата
+   * refetch the whole list. переименование чата
    * во время стрима ломало ответ. Полная перезагрузка списка чатов давала
    * re-render волну, которая в некоторых условиях прерывала входящий
    * ai:event поток. Локальный optimistic patch убирает этот класс багов

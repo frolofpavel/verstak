@@ -7,7 +7,7 @@
  *   большинство современных CLI), если exit != 0 — fallback удаляет известный
  *   credentials-файл провайдера. НИКОГДА не удаляет директории целиком —
  *   только специфичные .credentials.json / oauth.json / auth.json файлы,
- *   чтобы случайно не снести Obsidian vault Павла в ~/.claude/.
+ *   чтобы случайно не снести данные пользователя в ~/.claude/.
  *
  * - reloginCli(providerId): запускает CLI в НОВОМ окне терминала
  *   (Windows Terminal → PowerShell → cmd, по убыванию) detached, чтобы
@@ -129,8 +129,8 @@ export interface LogoutResult {
  *  1. Если у CLI есть logout subcmd — запускаем `<bin> logout` (timeout 15s).
  *     Если exit=0 → success (method='logout-cmd'). Но даже при success'е
  *     дополнительно удаляем известные credentials-файлы — некоторые CLI
- *     оставляют их валяться (Pavel жаловался: после `claude logout` всё ещё
- *     был залогинен в новом запуске).
+ *     оставляют их валяться (после `claude logout` credentials могут
+ *     остаться и логин сохраняется в новом запуске).
  *  2. Иначе (или если subcmd упал) — fallback: только удаление файлов
  *     (method='creds-deleted').
  *  3. Если бинарь не найден И файлов нет → ok:false с понятным сообщением.

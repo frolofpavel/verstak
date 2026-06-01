@@ -64,8 +64,11 @@ export function listLoaders(): string[] {
  * load_client_card — читает фасад клиента из ~/.claude/agents/agent-client-{slug}.md
  *
  * Используется в client-cycle скилле когда вызывается через slash с аргументом
- * («/client-cycle alfa-development»). Лоадер достаёт agent-client-alfa-development.md,
+ * («/client-cycle my-client»). Лоадер достаёт agent-client-{slug}.md,
  * вытаскивает блок «## ФАСАД» если есть, инжектит в контекст чата.
+ *
+ * Примечание: custom loader — требует наличия файлов agent-client-*.md
+ * в ~/.claude/agents/. Если файлов нет — лоадер вернёт подсказку.
  */
 async function load_client_card(ctx: LoaderContext): Promise<LoaderResult | null> {
   if (!ctx.arg) {
@@ -94,10 +97,11 @@ async function load_client_card(ctx: LoaderContext): Promise<LoaderResult | null
 }
 
 /**
- * load_clients_list — перечисляет всех клиентов агентства из
+ * load_clients_list — перечисляет клиентов из
  * ~/.claude/agents/agent-client-*.md (имена и краткие описания).
  *
- * Используется в bos-mkt для morning-walk / общего обзора по клиентам.
+ * Примечание: custom loader — требует наличия файлов agent-client-*.md
+ * в ~/.claude/agents/.
  */
 async function load_clients_list(ctx: LoaderContext): Promise<LoaderResult | null> {
   void ctx

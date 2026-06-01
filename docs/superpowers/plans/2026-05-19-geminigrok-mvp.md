@@ -68,7 +68,7 @@ verstak/
 - [ ] **Step 1: Initialize project**
 
 ```bash
-cd C:/Users/Pavel/verstak
+cd /path/to/verstak
 npm init -y
 npm install --save-dev electron electron-vite vite typescript @types/node @types/react @types/react-dom @vitejs/plugin-react
 npm install react react-dom
@@ -963,7 +963,7 @@ export function App() {
 
 Run: `npm run dev`
 - Жми "Открыть проект"
-- Выбери C:\Users\Pavel\verstak
+- Выбери папку проекта
 - Дерево показывает docs/, electron/, src/, etc.
 
 - [ ] **Step 6: Commit**
@@ -1708,7 +1708,7 @@ await window.api.ai.send(allMessages, path)
 - [ ] **Step 8: Manual test for MVP criterion 2**
 
 Run: `npm run dev`
-- Открой папку C:\Users\Pavel\verstak
+- Открой папку проекта
 - В чат: "Опиши что в этом проекте — посмотри package.json и README"
 - Gemini должен вызвать list_directory и read_file, затем дать осмысленный ответ
 

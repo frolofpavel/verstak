@@ -126,8 +126,8 @@ async function editMessage(token: string, args: Record<string, unknown>, ctx: Co
 
 async function sendDocument(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   // Document upload требует multipart/form-data, что усложняет код.
-  // V1: поддерживаем только URL document — Pavel сначала кладёт файл в
-  // Yandex Disk / своё облако, затем шлёт ссылку. Multipart добавим в V3.1.
+  // V1: поддерживаем только URL document — сначала загрузите файл в
+  // Yandex Disk или другое облако, затем шлите ссылку. Multipart добавим в V3.1.
   const chatId = String(args.chat_id ?? '')
   const documentUrl = String(args.document_url ?? '')
   const caption = args.caption ? String(args.caption) : undefined

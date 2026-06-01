@@ -2,7 +2,7 @@
  * Context Sliding Window — сжимает старые tool-results в истории сообщений,
  * чтобы длинные сессии не пробивали context window.
  *
- * Источник: ночной рефактор V3 (Pavel), recommendation #6 из аудита Grok.
+ * Источник: V3 рефактор, recommendation #6 из аудита Grok.
  *
  * ПРОБЛЕМА:
  * Каждый turn агент-цикла добавляет в currentMessages результаты тулзов:

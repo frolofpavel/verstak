@@ -192,7 +192,7 @@ app.whenReady().then(() => {
 
   // Skill registry — собирает скиллы из server API + ~/.verstak/skills/ +
   // built-in. См. electron/ai/skills/loader.ts. Конфиг сервера читается из
-  // settings (Pavel может сменить URL через UI). Refresh при старте — async,
+  // settings (URL можно сменить через UI). Refresh при старте — async,
   // не блокирует window open.
   const skillRegistry = createSkillRegistry(() => ({
     serverBase: settings.getSecret('skills_server_base')
