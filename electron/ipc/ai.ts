@@ -11,6 +11,7 @@ import { createCostGuard } from '../ai/cost-guard'
 import type { AgentMode } from '../ai/mode-policy'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
+import { captureToolObservation } from '../ai/memory-hooks'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
 
 export type { ProviderId } from '../ai/registry'
@@ -837,6 +838,8 @@ async function runApiConversation(
       toolResults[idx] = await promise
     }
     // Tally tool usage for the end-of-session journal summary
+    // auto_capture_memory: по умолчанию включено; выключается настройкой 'false'
+    const autoCaptureEnabled = getSecretForDelegate?.('auto_capture_memory') !== 'false'
     let acceptedWritesThisTurn = 0
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
@@ -857,6 +860,17 @@ async function runApiConversation(
         const cmd = String(call.args.command ?? '')
         if (cmd) commandsRun.push(cmd)
       }
+      // Auto-capture memory observation — fire-and-forget, не блокирует цикл
+      captureToolObservation(
+        saveMemory,
+        {
+          tool: call.name,
+          args: call.args,
+          result: typeof result.result === 'string' ? result.result : JSON.stringify(result.result ?? ''),
+          projectPath
+        },
+        autoCaptureEnabled
+      )
     }
     // If user just accepted writes, gently nudge the model on the next turn
     // to verify (run tests / typecheck / lint). The context-pack already
