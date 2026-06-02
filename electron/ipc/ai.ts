@@ -13,6 +13,7 @@ import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 import { captureToolObservation } from '../ai/memory-hooks'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
+import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -334,12 +335,45 @@ export function registerAiIpc(deps: AiDeps): void {
 
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
+
+    // Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера.
+    // Только если smart_fallback не отключён явно, только для API-провайдеров,
+    // только без reviewer override (ревьюер работает в изоляции).
+    const smartFallbackEnabled = deps.getSecret('smart_fallback') !== 'false'
+      && descriptor.transport === 'API'
+      && !overrides?.providerId  // не задействуем fallback в Explicit Review
+
+    /** Создаёт провайдера для fallback-кандидата с теми же опциями. */
+    function makeFallbackProvider(fallbackId: ProviderId): ChatProvider | null {
+      const fallbackDesc = PROVIDERS[fallbackId]
+      if (!fallbackDesc) return null
+      const fallbackKey = fallbackDesc.secretKey ? deps.getSecret(fallbackDesc.secretKey) : null
+      if (fallbackDesc.secretKey && !fallbackKey) return null
+      const fallbackModel = deps.getProviderModel(fallbackId) ?? fallbackDesc.defaultModel
+      try {
+        return createProvider(fallbackId, {
+          apiKey: fallbackKey,
+          model: fallbackModel,
+          cwd: projectPath ?? process.cwd(),
+          signal: ctrl.signal,
+          projectSystemPrompt: projectSystemPromptForProvider,
+          effortLevel: overrides?.effortLevel
+        })
+      } catch {
+        return null
+      }
+    }
+
     if (useToolsPath) {
       const tools = createFileTools(projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
-      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, deps.getAgentMode(), turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model).finally(cleanup)
+      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, deps.getAgentMode(), turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
+        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined
+      ).finally(cleanup)
     } else {
-      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model).finally(cleanup)
+      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
+        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined
+      ).finally(cleanup)
     }
     return sendId
   })
@@ -465,6 +499,19 @@ export function registerAiIpc(deps: AiDeps): void {
   })
 }
 
+/** Опции smart fallback — пробрасываются из ai:send в conversation runners. */
+interface FallbackOpts {
+  /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
+  getNextProvider: (id: ProviderId) => ChatProvider | null
+  /** Провайдеры с настроенными ключами. */
+  configuredProviders: Set<ProviderId>
+  /** Уже попробованные провайдеры (мутируется по ходу). */
+  triedProviders: Set<ProviderId>
+}
+
+/** Максимальное количество fallback-попыток (original + 2 alternates). */
+const MAX_FALLBACK_ATTEMPTS = 2
+
 /**
  * Plain streaming conversation — no tools, no multi-turn. Used for providers
  * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
@@ -486,7 +533,8 @@ async function runPlainConversation(
   recordJournal: AiDeps['recordJournal'],
   costGuard?: ReturnType<typeof createCostGuard>,
   providerId?: ProviderId,
-  model?: string
+  model?: string,
+  fallbackOpts?: FallbackOpts
 ): Promise<void> {
   let lastAssistantText = ''
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
@@ -530,6 +578,23 @@ async function runPlainConversation(
     }
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } catch (err) {
+    // Smart fallback: если ошибка retriable и есть ещё кандидаты — пробуем.
+    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
+      fallbackOpts.triedProviders.add(providerId)
+      if (shouldFallback(err)) {
+        const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
+        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
+        if (nextProvider && nextId) {
+          console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
+          sender.send('ai:event', {
+            id: sendId,
+            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
+          })
+          fallbackOpts.triedProviders.add(nextId)
+          return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, model, fallbackOpts)
+        }
+      }
+    }
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
@@ -619,7 +684,8 @@ async function runApiConversation(
   getSecretForDelegate?: AiDeps['getSecret'],
   costGuard?: ReturnType<typeof createCostGuard>,
   providerId?: ProviderId,
-  model?: string
+  model?: string,
+  fallbackOpts?: FallbackOpts
 ): Promise<void> {
   const currentMessages = [...initialMessages]
   // Loop detection: per-signature occurrence counter across the whole agent
@@ -950,6 +1016,33 @@ async function runApiConversation(
     }
   })
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+  } catch (err) {
+    // Smart fallback для API-агентного пути: если withInitialRetry исчерпал
+    // попытки и ошибка всё ещё retriable — переключаемся на следующего провайдера.
+    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
+      fallbackOpts.triedProviders.add(providerId)
+      if (shouldFallback(err)) {
+        const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
+        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
+        if (nextProvider && nextId) {
+          console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
+          sender.send('ai:event', {
+            id: sendId,
+            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
+          })
+          fallbackOpts.triedProviders.add(nextId)
+          // Передаём tools из замыкания — они привязаны к projectPath и signal, не к провайдеру.
+          const fallbackTools = createFileTools(projectPath, signal)
+          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, model, fallbackOpts)
+        }
+      }
+    }
+    exitReason = 'crashed'
+    sender.send('ai:event', {
+      id: sendId,
+      event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
+    })
+    sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
     // GUARANTEED journal write on every exit path — completion, abort, error,
     // max-turns, loop-detected, crashed (uncaught). Per Gemini audit Idea B:
