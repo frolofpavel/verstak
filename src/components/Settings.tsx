@@ -9,7 +9,7 @@ import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/mo
 import {
   IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
   IconSSH, IconBitrix, IconYandexDirect, IconYandexDisk,
-  IconSkillsServer, IconPlug, IconHTTP, IconGitHub
+  IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
 } from './ConnectorIcons'
 
 interface ProviderConfig {
@@ -265,6 +265,7 @@ const CONNECTORS: ConnectorDef[] = [
   { id: 'ydisk', name: 'Яндекс.Диск', description: 'Файлы и шеринг артефактов', icon: IconYandexDisk, configuredKey: 'yandex_disk_token' },
   { id: 'skills-server', name: 'Сервер скиллов', description: 'Удалённые AI-скиллы', icon: IconSkillsServer, configuredKey: 'skills_server_base' },
   { id: 'github', name: 'GitHub', description: 'Репозитории, issues, PR, code search', icon: IconGitHub, configuredKey: 'github_token' },
+  { id: 'social-publish', name: 'Social Publish', description: 'Постинг в Telegram, VK, webhooks', icon: IconSocialPublish, configuredKey: 'social_publish_telegram_channels' },
 ]
 
 export function Settings({ onClose }: { onClose: () => void }) {
@@ -295,6 +296,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [claudeOauthToken, setClaudeOauthToken] = useState('')
   const [yDiskToken, setYDiskToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
+  const [socialTgChannels, setSocialTgChannels] = useState('')
+  const [socialVkToken, setSocialVkToken] = useState('')
+  const [socialVkGroupId, setSocialVkGroupId] = useState('')
+  const [socialWebhooks, setSocialWebhooks] = useState('')
   const [costCap, setCostCap] = useState('')
   const [configuredConnectors, setConfiguredConnectors] = useState<Set<string>>(new Set())
   const [openConnector, setOpenConnector] = useState<string | null>(null)
@@ -367,6 +372,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
       setClaudeOauthToken((await window.api.settings.getKey('claude_code_oauth_token')) ?? '')
       setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
       setGithubToken((await window.api.settings.getKey('github_token')) ?? '')
+      setSocialTgChannels((await window.api.settings.getKey('social_publish_telegram_channels')) ?? '')
+      setSocialVkToken((await window.api.settings.getKey('social_publish_vk_token')) ?? '')
+      setSocialVkGroupId((await window.api.settings.getKey('social_publish_vk_group_id')) ?? '')
+      setSocialWebhooks((await window.api.settings.getKey('social_publish_webhooks')) ?? '')
       setCostCap((await window.api.settings.getKey('cost_cap_usd_per_session')) ?? '')
       setCustomOpenaiBaseUrl((await window.api.settings.getKey('custom_openai_baseurl')) ?? '')
       setCustomOpenaiModels((await window.api.settings.getKey('custom_openai_models')) ?? '')
@@ -461,6 +470,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
     await window.api.settings.setKey('claude_code_oauth_token', claudeOauthToken)
     await window.api.settings.setKey('yandex_disk_token', yDiskToken)
     await window.api.settings.setKey('github_token', githubToken)
+    await window.api.settings.setKey('social_publish_telegram_channels', socialTgChannels)
+    await window.api.settings.setKey('social_publish_vk_token', socialVkToken)
+    await window.api.settings.setKey('social_publish_vk_group_id', socialVkGroupId)
+    await window.api.settings.setKey('social_publish_webhooks', socialWebhooks)
     await window.api.settings.setKey('cost_cap_usd_per_session', costCap)
     await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
     await window.api.settings.setKey('custom_openai_baseurl', customOpenaiBaseUrl)
@@ -756,6 +769,61 @@ export function Settings({ onClose }: { onClose: () => void }) {
             Нужны scopes: <code>repo</code>, <code>read:org</code>. AI вызывает <code>connector_query</code> с{' '}
             <code>id="github"</code> и <code>op="list_repos"</code> / <code>"list_issues"</code> / etc.
             Хранится зашифрованным через safeStorage.
+          </div>
+        </>
+      )
+      case 'social-publish': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Telegram-каналы (JSON)</label>
+            <input
+              className="gg-input"
+              value={socialTgChannels}
+              onChange={e => setSocialTgChannels(e.target.value)}
+              placeholder='["-1001234567890", "@my_channel"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+            Переиспользует Bot token из коннектора Telegram (telegram_bot_token). Список chat_id куда постить.
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">VK token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={socialVkToken}
+              onChange={e => setSocialVkToken(e.target.value)}
+              placeholder="User token со scope wall (vk.com/dev, oauth.vk.com)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">VK group ID</label>
+            <input
+              className="gg-input"
+              value={socialVkGroupId}
+              onChange={e => setSocialVkGroupId(e.target.value)}
+              placeholder="Числовой ID группы (без минуса), напр. 123456789"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Webhooks (JSON)</label>
+            <input
+              className="gg-input"
+              value={socialWebhooks}
+              onChange={e => setSocialWebhooks(e.target.value)}
+              placeholder='["https://hooks.example.com/abc", "https://n8n.example.com/webhook/xyz"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            AI вызывает <code>connector_query</code> с <code>id="social-publish"</code> и
+            <code>op="publish_text"</code>, <code>text="..."</code>.
+            Опционально <code>platforms: ["telegram", "vk", "webhook"]</code> — если не передан, постит во всё настроенное.
           </div>
         </>
       )

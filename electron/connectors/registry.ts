@@ -8,6 +8,7 @@ import { createBitrix24Connector } from './bitrix24'
 import { createYandexDirectConnector } from './yandex-direct'
 import { createYandexDiskConnector } from './yandex-disk'
 import { createGitHubConnector } from './github'
+import { createSocialPublishConnector } from './social-publish'
 
 // Built-in connectors. Adding a new adapter = register it here.
 const BUILTINS: Connector[] = [
@@ -19,7 +20,8 @@ const BUILTINS: Connector[] = [
   createBitrix24Connector(),
   createYandexDirectConnector(),
   createYandexDiskConnector(),
-  createGitHubConnector()
+  createGitHubConnector(),
+  createSocialPublishConnector()
 ]
 
 export interface ConnectorRegistry {

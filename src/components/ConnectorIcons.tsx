@@ -111,6 +111,16 @@ export function IconGitHub({ size = 18 }: IconProps) {
   )
 }
 
+export function IconSocialPublish({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12c0 .55.45 1 1 1h10c.55 0 1-.45 1-1V6c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v6z" />
+      <path d="M7 9l2.5-2 2.5 2" />
+      <line x1="9.5" y1="7" x2="9.5" y2="13" />
+    </svg>
+  )
+}
+
 export function IconPlug({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
