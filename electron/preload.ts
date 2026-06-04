@@ -193,6 +193,15 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('update:progress', (_, data) => cb(data))
     },
   },
+  audit: {
+    query: (projectPath: string, opts?: { limit?: number; action?: string; since?: number }) =>
+      ipcRenderer.invoke('audit:query', projectPath, opts),
+    export: (projectPath: string) => ipcRenderer.invoke('audit:export', projectPath),
+    clear: (projectPath: string, olderThan?: number) => ipcRenderer.invoke('audit:clear', projectPath, olderThan)
+  },
+  suggestions: {
+    get: (projectPath: string) => ipcRenderer.invoke('suggestions:get', projectPath)
+  },
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:list-servers'),
     addServer: (entry: unknown) => ipcRenderer.invoke('mcp:add-server', entry),

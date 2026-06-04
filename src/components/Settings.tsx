@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
-import type { Memory, DetectedCli } from '../types/api'
+import type { Memory, DetectedCli, AuditEntry } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import { useTheme } from '../hooks/useTheme'
 import type { AutonomousStatus } from '../types/api'
@@ -218,7 +218,7 @@ const PROVIDERS: ProviderConfig[] = [
   }
 ]
 
-type Tab = 'appearance' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp'
+type Tab = 'appearance' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit'
 
 // TAB_GROUPS is built inside the Settings component to support i18n translations.
 
@@ -510,7 +510,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
       { id: 'connectors', label: t.settings.connectors, icon: <IconPlug size={16} /> },
       { id: 'mcp',        label: 'MCP',                 icon: '⚡' },
       { id: 'autonomous', label: t.settings.nightMode,  icon: '🌙' },
-      { id: 'memory',     label: t.settings.memory,     icon: '🧠' }
+      { id: 'memory',     label: t.settings.memory,     icon: '🧠' },
+      { id: 'audit',      label: 'Audit Log',            icon: '📋' }
     ] }
   ]
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
@@ -557,6 +558,9 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [coreMemorySaved, setCoreMemorySaved] = useState(false)
   const [currentLang, setCurrentLang] = useState('en')
   const { theme, setTheme } = useTheme()
+  // Audit log
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
+  const [auditPath, setAuditPath] = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -668,6 +672,25 @@ export function Settings({ onClose }: { onClose: () => void }) {
       } catch { /* ignore */ }
     })()
   }, [tab, activeProjectPath, loadMemories])
+
+  // Загружаем audit log при открытии вкладки
+  useEffect(() => {
+    if (tab !== 'audit') return
+    void (async () => {
+      let path = activeProjectPath
+      if (!path) {
+        const projects = await window.api.projects.list()
+        if (projects.length === 0) return
+        const sorted = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+        path = sorted[0].path
+      }
+      setAuditPath(path)
+      try {
+        const entries = await window.api.audit.query(path, { limit: 100 })
+        setAuditEntries(entries)
+      } catch { /* ignore */ }
+    })()
+  }, [tab, activeProjectPath])
 
   // Detect which connectors are configured (for card badges)
   useEffect(() => {
@@ -1448,6 +1471,94 @@ export function Settings({ onClose }: { onClose: () => void }) {
               <option value="ru">Русский</option>
             </select>
           </div>
+        </div>
+        )}
+
+        {tab === 'audit' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">📋 Audit Log</div>
+          {auditPath && (
+            <div className="gg-settings-hint" style={{ marginBottom: 12 }}>
+              Проект: <code>{auditPath}</code>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button
+              type="button"
+              className="gg-btn gg-btn-primary"
+              disabled={!auditPath}
+              onClick={async () => {
+                if (!auditPath) return
+                try {
+                  const csv = await window.api.audit.export(auditPath)
+                  const blob = new Blob([csv], { type: 'text/csv' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `audit-${Date.now()}.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch { /* ignore */ }
+              }}
+            >
+              ⬇ Export CSV
+            </button>
+            <button
+              type="button"
+              className="gg-btn gg-btn-ghost"
+              disabled={!auditPath}
+              onClick={async () => {
+                if (!auditPath) return
+                if (!window.confirm('Очистить весь audit log для этого проекта?')) return
+                try {
+                  await window.api.audit.clear(auditPath)
+                  setAuditEntries([])
+                } catch { /* ignore */ }
+              }}
+            >
+              🗑 Clear
+            </button>
+          </div>
+          {auditEntries.length === 0 ? (
+            <div className="gg-settings-hint">Нет записей. Audit log заполняется по мере работы агента.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--gg-border)' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Time</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Action</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Provider</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditEntries.map(e => (
+                    <tr key={e.id} style={{ borderBottom: '1px solid var(--gg-border-subtle, #333)' }}>
+                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', color: 'var(--gg-text-muted)' }}>
+                        {new Date(e.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          padding: '1px 6px', borderRadius: 4, fontSize: 11,
+                          background: e.action === 'error' ? 'var(--gg-error-bg, #3a1a1a)' : 'var(--gg-tag-bg, #1a2a3a)',
+                          color: e.action === 'error' ? 'var(--gg-error, #f87171)' : 'var(--gg-accent, #60a5fa)'
+                        }}>
+                          {e.action}
+                        </span>
+                      </td>
+                      <td style={{ padding: '4px 8px', color: 'var(--gg-text-muted)', whiteSpace: 'nowrap' }}>
+                        {e.providerId ?? '—'}
+                      </td>
+                      <td style={{ padding: '4px 8px', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {e.detail}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
         )}
 

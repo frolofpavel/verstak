@@ -52,6 +52,9 @@ import { searchConversations } from './storage/chats'
 import { registerCommandsIpc } from './ipc/commands'
 import { registerMcpIpc } from './ipc/mcp'
 import { mcpClient } from './mcp/client'
+import { registerAuditIpc } from './ipc/audit'
+import { appendAudit } from './storage/audit-log'
+import { registerSuggestionsIpc } from './ipc/suggestions'
 import { initAutoUpdater } from './updater'
 
 function createWindow(): BrowserWindow {
@@ -281,7 +284,11 @@ app.whenReady().then(() => {
       }))
     },
     // MCP client — внешние инструменты через Model Context Protocol
-    mcpClient
+    mcpClient,
+    // Audit log — пишем каждое агентное действие
+    appendAudit: (projectPath, chatId, action, detail, providerId, model) => {
+      appendAudit(db, { timestamp: Date.now(), projectPath, chatId, action, detail, providerId, model })
+    }
   })
   registerChatsIpc(chats, chatSessions, db)
   registerTasksIpc(tasks)
@@ -313,6 +320,8 @@ app.whenReady().then(() => {
   registerMemoryIpc(db)
   registerCommandsIpc()
   registerMcpIpc(settings)
+  registerAuditIpc(db)
+  registerSuggestionsIpc(db)
   const mainWindow = createWindow()
 
   if (!process.env.VITE_DEV_SERVER_URL) {

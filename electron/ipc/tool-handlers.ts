@@ -91,6 +91,8 @@ export interface ToolContext {
   currentProviderId?: string
   /** MCP client для роутинга вызовов внешних MCP-инструментов. */
   mcpClient?: McpClient
+  /** Опциональный аппендер в audit_log — вызывается после каждого tool call. */
+  appendAudit?: (action: string, detail: string) => void
 }
 
 export type ToolMode = 'parallel-read' | 'sequential' | 'confirm-write'
@@ -109,6 +111,13 @@ function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'error', 
     id: ctx.sendId,
     event: { type: 'tool-activity', callId: call.id, name: call.name, label, detail, status }
   })
+  // Audit log — fire-and-forget, не критично
+  if (ctx.appendAudit) {
+    try {
+      const auditDetail = JSON.stringify({ callId: call.id, status, detail: detail.slice(0, 200) })
+      ctx.appendAudit(status === 'error' ? 'error' : 'tool_call', auditDetail)
+    } catch { /* not critical */ }
+  }
 }
 
 /** Short human-readable summary of a tool call for the activity stream. */

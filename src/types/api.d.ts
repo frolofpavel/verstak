@@ -255,6 +255,14 @@ declare global {
         onDownloaded(cb: (data: { version: string }) => void): void
         onProgress(cb: (data: { percent: number }) => void): void
       }
+      audit: {
+        query(projectPath: string, opts?: { limit?: number; action?: string; since?: number }): Promise<AuditEntry[]>
+        export(projectPath: string): Promise<string>
+        clear(projectPath: string, olderThan?: number): Promise<number>
+      }
+      suggestions: {
+        get(projectPath: string): Promise<Suggestion[]>
+      }
       mcp: {
         listServers(): Promise<McpServerEntry[]>
         addServer(entry: Omit<McpServerEntry, 'id'>): Promise<McpServerEntry>
@@ -329,6 +337,26 @@ export interface McpTool {
   description: string
   inputSchema: Record<string, unknown>
   serverId: string
+}
+
+/** Предложение от proactive agent — что сделать следующим. */
+export interface Suggestion {
+  title: string
+  description: string
+  source: 'memory' | 'journal' | 'pattern'
+  priority: 'high' | 'medium' | 'low'
+}
+
+/** Запись в журнале аудита — каждое агентское действие. */
+export interface AuditEntry {
+  id: number
+  timestamp: number
+  projectPath: string
+  chatId: number | null
+  action: string
+  detail: string
+  providerId: string | null
+  model: string | null
 }
 
 /** Предустановленный популярный MCP-сервер. */

@@ -52,6 +52,8 @@ interface AiDeps {
   }
   /** MCP client — внешние серверы, опционально. */
   mcpClient?: McpClient
+  /** Опциональный аппендер в audit_log — вызывается после каждого tool call. */
+  appendAudit?: (projectPath: string, chatId: number | null, action: string, detail: string, providerId: string | null, model: string | null) => void
 }
 
 let currentSendId = 0
@@ -370,9 +372,17 @@ export function registerAiIpc(deps: AiDeps): void {
     if (useToolsPath) {
       const tools = createFileTools(projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
+      const auditFn = deps.appendAudit
+        ? (action: string, detail: string) => {
+            try {
+              deps.appendAudit!(projectPath, chatId ? Number(chatId) : null, action, detail, providerId, model ?? null)
+            } catch { /* audit not critical */ }
+          }
+        : undefined
       void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, deps.getAgentMode(), turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
-        deps.mcpClient
+        deps.mcpClient,
+        auditFn
       ).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
@@ -690,7 +700,8 @@ async function runApiConversation(
   providerId?: ProviderId,
   model?: string,
   fallbackOpts?: FallbackOpts,
-  mcpClientRef?: McpClient
+  mcpClientRef?: McpClient,
+  appendAuditFn?: (action: string, detail: string) => void
 ): Promise<void> {
   const currentMessages = [...initialMessages]
   // Loop detection: per-signature occurrence counter across the whole agent
@@ -890,7 +901,8 @@ async function runApiConversation(
       pendingAttachments, pendingWrites, pendingCommands, scopedKey,
       agentMode, skillRegistry, getSecretForDelegate,
       currentProviderId: providerId,
-      mcpClient: mcpClientRef
+      mcpClient: mcpClientRef,
+      appendAudit: appendAuditFn
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

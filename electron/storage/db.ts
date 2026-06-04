@@ -255,6 +255,26 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('ALTER TABLE memories ADD COLUMN decay_score REAL NOT NULL DEFAULT 1.0')
       }
     }
+  },
+  {
+    version: 8,
+    description: 'audit_log — полный журнал всех агентских действий для отладки и enterprise-использования',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          action TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '{}',
+          provider_id TEXT,
+          model TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_path);
+      `)
+    }
   }
 ]
 
