@@ -31,6 +31,7 @@ import { join } from 'path'
 import type { Attachment, ToolCall, ToolResult } from '../ai/types'
 import { applySearchReplaceBlocks, type FileTools } from '../ai/tools'
 import { decide, blockReason, type AgentMode } from '../ai/mode-policy'
+import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../ai/mcp-policy'
 import { getRolePrompt } from '../ai/agent-roles'
 import { invalidateProjectMap, markFileDirty } from '../ai/project-map'
 import type { McpClient } from '../mcp/client'
@@ -1527,6 +1528,35 @@ const mcpToolHandler: ToolHandler = {
     const matchedTool = allMcpTools.find(t => t.name === call.name)
     if (!matchedTool) {
       return { id: call.id, name: call.name, result: '', error: `MCP tool "${call.name}" not found in connected servers` }
+    }
+    // Mode policy: внешние MCP-тулзы — не локальные правки, а side-effects на чужих
+    // серверах. Гейтим их так же, как connector_query: scope тулза классифицируем
+    // по name + description (read → авто, write/command/network/unknown → команда),
+    // затем mcpDecision(scope, mode) даёт block/confirm/auto-accept.
+    const scope = classifyMcpToolScope(matchedTool.name, matchedTool.description)
+    const decision = mcpDecision(scope, ctx.agentMode)
+    // Короткая сводка аргументов для модалки подтверждения (без раскрытия больших значений)
+    const argKeys = Object.keys(call.args ?? {})
+    const argsSummary = argKeys.length ? argKeys.join(', ') : ''
+    const summary = `MCP ${call.name}${argsSummary ? ` · ${argsSummary}` : ''}`
+    if (decision === 'block') {
+      const reason = mcpBlockReason(call.name, scope, ctx.agentMode)
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'tool-blocked', callId: call.id, name: call.name, command: summary, reason }
+      })
+      return { id: call.id, name: call.name, result: '', error: reason }
+    }
+    if (decision === 'confirm') {
+      // 'confirm' — переиспользуем pending-command поток (та же модалка подтверждения)
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary } })
+      const accepted = await new Promise<boolean>(resolve => {
+        ctx.pendingCommands.set(ctx.scopedKey(ctx.sendId, call.id), { sendId: ctx.sendId, resolve })
+      })
+      if (!accepted) {
+        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })
+        return { id: call.id, name: call.name, result: summary, error: 'User rejected' }
+      }
     }
     try {
       emitActivity(ctx, call, 'ok', `mcp:${call.name}`, matchedTool.serverId)
