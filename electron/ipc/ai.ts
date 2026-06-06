@@ -269,10 +269,10 @@ export function registerAiIpc(deps: AiDeps): void {
     } else if (overrides?.systemPrompt) {
       // Не-API (CLI) транспорт со скилл-override. CLI-провайдеры строят свой
       // системный промпт внутри buildCliPrompt и игнорируют system-сообщение в
-      // messages (cli-prompt.ts фильтрует role==='system'). Сохраняем прежнее
-      // поведение: кладём промпт скилла как system-сообщение (для не-CLI
-      // не-API провайдеров, если такие появятся). Наслоение промпта скилла на
-      // базу для CLI — отдельный gap уровня buildCliPrompt, вне scope этого фикса.
+      // messages (cli-prompt.ts фильтрует role==='system'). Сам скилл наслаивается
+      // для CLI через skillPromptForProvider → createProvider → buildCliPrompt
+      // секцией <skill_layer> (см. ниже). Это system-сообщение — безвредный
+      // fallback для гипотетических не-CLI не-API провайдеров (CLI его отфильтрует).
       messagesWithSystem = [{ role: 'system', content: overrides.systemPrompt }, ...messages]
     }
 
@@ -324,6 +324,10 @@ export function registerAiIpc(deps: AiDeps): void {
     const projectSystemPromptForProvider = (overrides?.useReviewerPrompt || overrides?.systemPrompt)
       ? null
       : (projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null)
+    // Skill-промпт для CLI-провайдеров: наслаивается секцией <skill_layer> внутри
+    // buildCliPrompt (как в API-пути). Не пробрасываем при reviewer override —
+    // ревьюер работает в изоляции. Уже содержит anti-stall nudge (Chat.tsx).
+    const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (overrides?.systemPrompt ?? null)
     let provider: ChatProvider
     try {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
@@ -357,6 +361,7 @@ export function registerAiIpc(deps: AiDeps): void {
         cwd: projectPath ?? process.cwd(),
         signal: ctrl.signal,
         projectSystemPrompt: projectSystemPromptForProvider,
+        skillPrompt: skillPromptForProvider,
         claudeOauthToken,
         customBaseUrl,
         customModels,
@@ -405,6 +410,7 @@ export function registerAiIpc(deps: AiDeps): void {
           cwd: projectPath ?? process.cwd(),
           signal: ctrl.signal,
           projectSystemPrompt: projectSystemPromptForProvider,
+          skillPrompt: skillPromptForProvider,
           effortLevel: overrides?.effortLevel
         })
       } catch {

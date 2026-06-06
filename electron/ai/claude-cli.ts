@@ -14,6 +14,8 @@ interface ClaudeCliOptions {
   /** Project-specific prompt (Project Settings → «Системный промпт проекта»).
    *  Пробрасывается в buildCliPrompt, дописывается к user_layer. */
   projectSystemPrompt?: string | null
+  /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
+  skillPrompt?: string | null
   /** Long-lived OAuth token из `claude setup-token`. Передаётся как env var
    *  CLAUDE_CODE_OAUTH_TOKEN дочернему процессу. Это решает headless+Max
    *  ограничение Claude Code v2.1+. */
@@ -105,6 +107,7 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           projectPath: cwd ?? null,
           messages,
           projectSystemPrompt: opts.projectSystemPrompt,
+          skillPrompt: opts.skillPrompt,
           memories: opts.memories
         })
       } catch (err) {

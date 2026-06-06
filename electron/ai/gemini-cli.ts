@@ -12,6 +12,8 @@ interface GeminiCliOptions {
   model?: string
   signal?: AbortSignal
   projectSystemPrompt?: string | null
+  /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
+  skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
 }
 
@@ -82,6 +84,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
           projectPath: opts.cwd ?? null,
           messages,
           projectSystemPrompt: opts.projectSystemPrompt,
+          skillPrompt: opts.skillPrompt,
           memories: opts.memories
         })
       } catch (err) {

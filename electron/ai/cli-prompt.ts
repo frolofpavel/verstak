@@ -59,6 +59,11 @@ interface BuildCliPromptOpts {
   /** Promt из Project Settings (см. compose-system.ts). Передаётся вниз в
    *  prepareParts, дописывается к user_layer. */
   projectSystemPrompt?: string | null
+  /** Промпт активного скилла (специализация роли). Наслаивается секцией
+   *  <skill_layer> поверх system/user/context — как в API-пути. Раньше для CLI
+   *  терялся (приходил как role:system и фильтровался), поэтому Grok Build /
+   *  Codex / Gemini CLI не видели активный скилл. */
+  skillPrompt?: string | null
   /** Топ-5 воспоминаний проекта — те же что инжектятся API-провайдерам.
    *  Передаются в prepareParts → buildContextPack. */
   memories?: Array<{ type: string; content: string; tags: string[] }>
@@ -69,7 +74,7 @@ interface BuildCliPromptOpts {
  * string that should be written to the subprocess's stdin.
  */
 export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> {
-  const { providerId, projectPath, messages, recentWrites, projectSystemPrompt, memories } = opts
+  const { providerId, projectPath, messages, recentWrites, projectSystemPrompt, skillPrompt, memories } = opts
 
   const lastUser = messages.filter(m => m.role === 'user').at(-1)
   if (!lastUser) throw new Error('CLI prompt: нет user-сообщения')
@@ -120,6 +125,14 @@ ${effectiveUserLayer}
   // 3. Context pack — same content as API providers get, just appended as
   //    a separate section in stdin payload.
   if (contextPack) sections.push(contextPack)
+
+  // 3.5. Skill layer — специализация роли агента (активный скилл). Наслаивается
+  //      ПОВЕРХ system/user/context, как в API-пути (compose-prompt.ts
+  //      <skill_layer>). Применяется ко ВСЕМ CLI, включая claude-cli: это выбор
+  //      пользователя, а не наш базовый регламент. Закрывает gap, из-за которого
+  //      Grok Build / Codex / Gemini CLI не видели активный скилл.
+  const trimmedSkill = (skillPrompt ?? '').trim()
+  if (trimmedSkill) sections.push(`<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
 
   // 3. Conversation history — token-budgeted walk from newest to oldest.
   //    NEVER include system messages here (they're already above).

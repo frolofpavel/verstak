@@ -91,4 +91,38 @@ describe('buildCliPrompt', () => {
       messages: [{ role: 'assistant', content: 'hi' }]
     })).rejects.toThrow(/нет user/)
   })
+
+  // Регрессия: skill-промпт раньше терялся для CLI-провайдеров (приходил как
+  // role:system и фильтровался) — Grok Build / Codex / Gemini CLI не видели
+  // активный скилл. Теперь он наслаивается секцией <skill_layer>.
+  it('grok-cli: skillPrompt попадает в <skill_layer>', async () => {
+    const out = await buildCliPrompt({
+      providerId: 'grok-cli',
+      projectPath: dir,
+      messages: [{ role: 'user', content: 'q' }],
+      skillPrompt: 'Ты эксперт по рекламе. Анализируй кабинеты.'
+    })
+    expect(out).toContain('<skill_layer>')
+    expect(out).toContain('эксперт по рекламе')
+  })
+
+  it('claude-cli: skillPrompt наслаивается тоже (выбор пользователя)', async () => {
+    const out = await buildCliPrompt({
+      providerId: 'claude-cli',
+      projectPath: dir,
+      messages: [{ role: 'user', content: 'q' }],
+      skillPrompt: 'СПЕЦИАЛИЗАЦИЯ-СКИЛЛА'
+    })
+    expect(out).toContain('<skill_layer>')
+    expect(out).toContain('СПЕЦИАЛИЗАЦИЯ-СКИЛЛА')
+  })
+
+  it('без skillPrompt — нет секции <skill_layer>', async () => {
+    const out = await buildCliPrompt({
+      providerId: 'grok-cli',
+      projectPath: dir,
+      messages: [{ role: 'user', content: 'q' }]
+    })
+    expect(out).not.toContain('<skill_layer>')
+  })
 })

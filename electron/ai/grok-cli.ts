@@ -104,6 +104,8 @@ interface GrokCliOptions {
   signal?: AbortSignal
   model?: string
   projectSystemPrompt?: string | null
+  /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
+  skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
 }
 
@@ -185,6 +187,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
             projectPath: cwd ?? null,
             messages,
             projectSystemPrompt: opts.projectSystemPrompt,
+            skillPrompt: opts.skillPrompt,
             memories: opts.memories
           })
         } catch (err) {

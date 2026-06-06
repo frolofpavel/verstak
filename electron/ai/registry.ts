@@ -163,6 +163,9 @@ export interface CreateOptions {
    *  попасть в payload CLI-провайдеров. Для API-провайдеров не нужен (там
    *  ipc/ai.ts напрямую вызывает prepareSystemContext с этим полем). */
   projectSystemPrompt?: string | null
+  /** Промпт активного скилла — пробрасывается до buildCliPrompt (<skill_layer>),
+   *  чтобы CLI-провайдеры видели активный скилл, как и API-провайдеры. */
+  skillPrompt?: string | null
   /** OAuth token для Claude Code (из `claude setup-token`). Передаётся как
    *  env var CLAUDE_CODE_OAUTH_TOKEN — решает headless+Max ограничение. */
   claudeOauthToken?: string | null
@@ -189,7 +192,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createGeminiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'gemini-cli':
-      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, memories: opts.memories })
+      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
     case 'claude': {
       if (!opts.apiKey) throw new Error('Anthropic API key not set')
       return createClaudeProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
@@ -200,6 +203,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
         signal: opts.signal,
         model: opts.model,
         projectSystemPrompt: opts.projectSystemPrompt,
+        skillPrompt: opts.skillPrompt,
         oauthToken: opts.claudeOauthToken,
         memories: opts.memories
       })
@@ -208,13 +212,13 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createGrokProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'grok-cli':
-      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, memories: opts.memories })
+      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
     case 'openai': {
       if (!opts.apiKey) throw new Error('OpenAI API key not set')
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'codex-cli':
-      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, memories: opts.memories })
+      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
     case 'yandex-gpt': {
       if (!opts.apiKey) throw new Error('YandexGPT: API ключ не задан')
       if (!opts.yandexFolderId) throw new Error('YandexGPT: Folder ID не задан (Settings → Провайдеры → YandexGPT)')
