@@ -764,7 +764,12 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
     // orphaned. spawn() gives us the child handle we need for treeKill.
     const isWindows = process.platform === 'win32'
     const shell = isWindows ? process.env.ComSpec || 'cmd.exe' : '/bin/sh'
-    const shellArgs = isWindows ? ['/d', '/s', '/c', command] : ['-c', command]
+    // Windows консоль по умолчанию пишет в OEM-кодировке (cp866 на ru-RU), а мы
+    // декодируем stdout как UTF-8 ниже — без переключения кодовой страницы
+    // русский вывод (npm/git/python) превращается в мойибейк. `chcp 65001`
+    // переводит cmd.exe и его дочерние процессы на UTF-8 ПЕРЕД командой.
+    // Тот же приём уже используется в terminal.ts и cli-auth.ts.
+    const shellArgs = isWindows ? ['/d', '/s', '/c', `chcp 65001 > nul & ${command}`] : ['-c', command]
 
     return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
       const child = spawn(shell, shellArgs, {
@@ -783,11 +788,16 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         resolve(result)
       }
 
-      child.stdout?.on('data', (chunk: Buffer) => {
-        if (stdout.length < MAX_BUF) stdout += chunk.toString()
+      // setEncoding('utf8') гарантирует UTF-8 декод и корректно склеивает
+      // многобайтовые символы, разорванные на границе чанков (StringDecoder
+      // буферизует незавершённую последовательность). Так же делают CLI-провайдеры.
+      child.stdout?.setEncoding('utf8')
+      child.stderr?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        if (stdout.length < MAX_BUF) stdout += chunk
       })
-      child.stderr?.on('data', (chunk: Buffer) => {
-        if (stderr.length < MAX_BUF) stderr += chunk.toString()
+      child.stderr?.on('data', (chunk: string) => {
+        if (stderr.length < MAX_BUF) stderr += chunk
       })
 
       // Hard timeout — resolve with exitCode 124 (same as GNU timeout)
