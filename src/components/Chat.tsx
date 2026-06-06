@@ -24,10 +24,12 @@ const MAX_ATTACHMENTS = 8
 
 const ACCEPTED_MIME_PREFIXES = ['image/', 'text/', 'application/pdf', 'application/json']
 
+type RightPanel = 'none' | 'terminal' | 'files'
+
 interface ChatProps {
   onOpenSettings: () => void
-  onToggleTerminal: () => void
-  terminalOpen: boolean
+  rightPanel: RightPanel
+  onSelectRightPanel: (panel: RightPanel) => void
 }
 
 function formatSize(bytes: number): string {
@@ -82,8 +84,11 @@ const GOAL_CYCLE_PROMPT = `Запусти цикл self-improvement по это�
 
 Out of scope: общие best practices, рефакторинги ради красоты, изменения без обоснования в журнале.`
 
-export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatProps) {
+export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel }: ChatProps) {
   const t = useT()
+  // Codex-style right-panel menu anchored to the top-right header button.
+  const [panelMenuOpen, setPanelMenuOpen] = useState(false)
+  const panelMenuRef = useRef<HTMLDivElement>(null)
   const { messages, addMessage, updateLastAssistant, isStreaming, setStreaming, activity, preflights, subagentRuns, sessionUsage, path: activePath, chatSessions, activeChatId, effortLevel, setEffortLevel } = useProject()
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode()
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
@@ -481,6 +486,18 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
   // Cleanup warning timer on unmount
   useEffect(() => () => { if (warningTimer.current) window.clearTimeout(warningTimer.current) }, [])
 
+  // Close the right-panel menu on outside click.
+  useEffect(() => {
+    if (!panelMenuOpen) return
+    function onDown(e: MouseEvent) {
+      if (panelMenuRef.current && !panelMenuRef.current.contains(e.target as Node)) {
+        setPanelMenuOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [panelMenuOpen])
+
   // Live token preview: debounce text changes (400ms) and ask the main process
   // to count tokens for the current draft. Gemini API gives an exact count;
   // CLI / other providers get a rough 4-chars-per-token estimate.
@@ -726,18 +743,50 @@ export function Chat({ onOpenSettings, onToggleTerminal, terminalOpen }: ChatPro
               <span className="gg-chat-project-chat">{activeChatTitle}</span>
             </>
           )}
-          {/* Тоггл терминала — в правом верхнем углу, как панель-кнопка у Claude Code / Codex */}
-          <button
-            type="button"
-            className={`gg-terminal-toggle gg-chat-project-action ${terminalOpen ? 'is-open' : ''}`}
-            onClick={onToggleTerminal}
-            title={terminalOpen ? 'Скрыть терминал' : 'Показать терминал'}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
-          </button>
+          {/* Меню панелей — в правом верхнем углу, как у Codex: файлы / терминал / параллельный чат */}
+          <div className="gg-panel-menu gg-chat-project-action" ref={panelMenuRef}>
+            <button
+              type="button"
+              className={`gg-terminal-toggle ${rightPanel !== 'none' ? 'is-open' : ''}`}
+              onClick={() => setPanelMenuOpen(v => !v)}
+              title="Панели — файлы, терминал, параллельный чат"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </button>
+            {panelMenuOpen && (
+              <div className="gg-panel-menu-pop">
+                <button
+                  type="button"
+                  className="gg-panel-menu-item"
+                  onClick={() => { onSelectRightPanel(rightPanel === 'files' ? 'none' : 'files'); setPanelMenuOpen(false) }}
+                >
+                  <span className="gg-panel-menu-icon">📁</span>
+                  <span className="gg-panel-menu-label">Файлы</span>
+                  {rightPanel === 'files' && <span className="gg-panel-menu-check">✓</span>}
+                </button>
+                <button
+                  type="button"
+                  className="gg-panel-menu-item"
+                  onClick={() => { onSelectRightPanel(rightPanel === 'terminal' ? 'none' : 'terminal'); setPanelMenuOpen(false) }}
+                >
+                  <span className="gg-panel-menu-icon">▱</span>
+                  <span className="gg-panel-menu-label">Терминал</span>
+                  {rightPanel === 'terminal' && <span className="gg-panel-menu-check">✓</span>}
+                </button>
+                <button
+                  type="button"
+                  className="gg-panel-menu-item"
+                  onClick={() => { void useProject.getState().newChatSession(); setPanelMenuOpen(false) }}
+                >
+                  <span className="gg-panel-menu-icon">💬</span>
+                  <span className="gg-panel-menu-label">Параллельный чат</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

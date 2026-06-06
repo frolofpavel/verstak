@@ -19,6 +19,7 @@ import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
 import { UpdateNotification } from './components/UpdateNotification'
 import { Terminal } from './components/Terminal'
+import { FilesPanel } from './components/FilesPanel'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { ArtifactPreviewContainer } from './components/ArtifactPreview'
 import { TerminalErrorToast } from './components/TerminalErrorToast'
@@ -32,7 +33,8 @@ const SIDEBAR_WIDTH_KEY = 'gg.sidebarWidth'
 
 export function App() {
   const [showSettings, setShowSettings] = useState(false)
-  const [showTerminal, setShowTerminal] = useState(false)
+  // Right docked panel: one of terminal / files / none (Codex-style selector).
+  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'files'>('none')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [lang, setLang] = useState<Lang>('en')
 
@@ -89,7 +91,8 @@ export function App() {
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
   const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand } = useProject()
-  const canShowTerminal = path && showTerminal
+  // Panels require an open project (the terminal/file tree are project-scoped).
+  const effectiveRightPanel = path ? rightPanel : 'none'
 
   // Ctrl/Cmd+B toggles the project sidebar; Esc cancels active stream (safety
   // net — if the UI ever feels stuck during a long agentic loop, Esc kills it).
@@ -189,17 +192,17 @@ export function App() {
           <div className="gg-chat-area">
             <Chat
               onOpenSettings={() => setShowSettings(true)}
-              onToggleTerminal={() => setShowTerminal(t => !t)}
-              terminalOpen={showTerminal}
+              rightPanel={effectiveRightPanel}
+              onSelectRightPanel={setRightPanel}
             />
-            {canShowTerminal && (
+            {effectiveRightPanel === 'terminal' && (
               <div className="gg-terminal-wrap">
                 <div className="gg-terminal-header">
                   <span className="gg-terminal-dot" />
                   <span>{t.views.terminal}</span>
                   <button
                     className="gg-terminal-close"
-                    onClick={() => setShowTerminal(false)}
+                    onClick={() => setRightPanel('none')}
                     title={t.views.hide}
                   >×</button>
                 </div>
@@ -207,6 +210,9 @@ export function App() {
                   <Terminal />
                 </div>
               </div>
+            )}
+            {effectiveRightPanel === 'files' && (
+              <FilesPanel onClose={() => setRightPanel('none')} />
             )}
           </div>
         )}
