@@ -4,6 +4,7 @@ import { createFileTools, TOOL_DEFS } from '../ai/tools'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
+import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory } from '../ai/compact-history'
@@ -364,6 +365,39 @@ export function registerAiIpc(deps: AiDeps): void {
     // buildCliPrompt (как в API-пути). Не пробрасываем при reviewer override —
     // ревьюер работает в изоляции. Уже содержит anti-stall nudge (Chat.tsx).
     const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (overrides?.systemPrompt ?? null)
+
+    // Debug Packet для CLI-провайдеров. API-путь снапшотит composedSystem выше;
+    // CLI строит свой stdin-payload внутри buildCliPrompt и раньше ничего не
+    // сохранял — Debug Packet был «слепым» для claude-cli/codex-cli/grok-cli/
+    // gemini-cli. Здесь вызываем buildCliPrompt ВТОРОЙ раз ровно с теми же опциями,
+    // что использует сам CLI-провайдер (см. *-cli.ts: projectPath=cwd, без
+    // recentWrites, projectSystemPrompt/skillPrompt/memories пробрасываются),
+    // чтобы сохранённый промпт совпадал с реально отправленным. Лишний вызов —
+    // приемлемая цена ради отладочной фичи; никогда не блокирует run (try/catch).
+    if (descriptor.transport === 'CLI' && deps.saveRunInput) {
+      const lastUser = [...messages].reverse().find(m => m.role === 'user')
+      try {
+        const cliPayload = await buildCliPrompt({
+          providerId: providerId as CliProviderId,
+          projectPath: projectPath ?? process.cwd(),
+          messages,
+          projectSystemPrompt: projectSystemPromptForProvider,
+          skillPrompt: skillPromptForProvider,
+          memories
+        })
+        deps.saveRunInput({
+          runId,
+          projectPath,
+          chatId: chatId ? Number(chatId) : null,
+          timestamp: Date.now(),
+          providerId,
+          model: model ?? null,
+          systemPrompt: cliPayload,
+          userMessage: lastUser?.content ?? ''
+        })
+      } catch { /* snapshot not critical — CLI run continues unaffected */ }
+    }
+
     let provider: ChatProvider
     try {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
