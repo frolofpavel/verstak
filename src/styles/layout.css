@@ -4522,14 +4522,19 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 .gg-mcp-server-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   padding: 10px 14px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   transition: border-color 120ms;
+}
+.gg-mcp-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .gg-mcp-server-card.is-connected {
   border-color: var(--success, #4ade80);
@@ -4628,6 +4633,149 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 .gg-toggle input:checked + .gg-toggle-slider::after {
   transform: translateX(16px);
+}
+
+/* === MCP Hardening === */
+/* Превью манифеста MCP-сервера: что он умеет + риск, до доверия серверу. */
+.gg-mcp-manifest-error {
+  font-size: var(--text-xs);
+  color: var(--error, #dc3545);
+  background: color-mix(in srgb, var(--error, #dc3545) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error, #dc3545) 30%, transparent);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.gg-mcp-manifest {
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gg-mcp-manifest-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gg-mcp-risk-pill {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.gg-mcp-risk-pill.is-low {
+  color: #3fb950;
+  background: color-mix(in srgb, #3fb950 14%, transparent);
+  border-color: color-mix(in srgb, #3fb950 35%, transparent);
+}
+.gg-mcp-risk-pill.is-medium {
+  color: #d29922;
+  background: color-mix(in srgb, #d29922 14%, transparent);
+  border-color: color-mix(in srgb, #d29922 35%, transparent);
+}
+.gg-mcp-risk-pill.is-high {
+  color: #f85149;
+  background: color-mix(in srgb, #f85149 14%, transparent);
+  border-color: color-mix(in srgb, #f85149 40%, transparent);
+}
+.gg-mcp-manifest-summary {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.gg-mcp-manifest-warn {
+  font-size: var(--text-xs);
+  color: #f85149;
+  background: color-mix(in srgb, #f85149 8%, transparent);
+  border: 1px solid color-mix(in srgb, #f85149 30%, transparent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.4;
+}
+.gg-mcp-manifest-env-title,
+.gg-mcp-manifest-tools-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+.gg-mcp-manifest-env-empty {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-mcp-manifest-env {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gg-mcp-env-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-base, var(--bg-elevated));
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.gg-mcp-env-chip code {
+  font-family: var(--font-mono);
+}
+.gg-mcp-env-chip.is-empty {
+  border-color: color-mix(in srgb, #d29922 40%, transparent);
+  color: #d29922;
+}
+.gg-mcp-env-flag {
+  font-weight: 600;
+}
+.gg-mcp-manifest-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gg-mcp-tool-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.gg-mcp-scope-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.gg-mcp-scope-badge.is-command {
+  color: #f85149;
+  border-color: color-mix(in srgb, #f85149 40%, transparent);
+}
+.gg-mcp-scope-badge.is-write,
+.gg-mcp-scope-badge.is-unknown {
+  color: #d29922;
+  border-color: color-mix(in srgb, #d29922 35%, transparent);
+}
+.gg-mcp-scope-badge.is-read {
+  color: #3fb950;
+  border-color: color-mix(in srgb, #3fb950 35%, transparent);
+}
+.gg-mcp-tool-text {
+  min-width: 0;
+}
+.gg-mcp-tool-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.gg-mcp-tool-desc {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 /* ── Proactive Suggestions ────────────────────────────────────────────── */

@@ -12,6 +12,7 @@ import {
   IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
 } from './ConnectorIcons'
 import { useT } from '../i18n'
+import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
 
 interface ProviderConfig {
   id: ProviderId
@@ -284,6 +285,49 @@ const CONNECTORS: ConnectorDef[] = [
 
 import type { McpServerEntry, McpTool, PopularMcpServer } from '../types/api'
 
+// ── MCP Hardening — review-before-trust helpers ──────────────────────────────
+
+/** Бейдж scope: иконка + русская подпись + класс цвета. */
+const SCOPE_META: Record<McpScope, { icon: string; label: string }> = {
+  read:    { icon: '🟢', label: 'чтение' },
+  write:   { icon: '🟡', label: 'запись' },
+  network: { icon: '🌐', label: 'сеть' },
+  command: { icon: '🔴', label: 'команда' },
+  unknown: { icon: '⚪', label: 'неизвестно' }
+}
+
+/** Человекочитаемая сводка по scope-ам сервера, напр. «3 чтение · 2 запись · 1 команда». */
+function scopeSummary(scopes: Record<McpScope, number>): string {
+  const order: McpScope[] = ['read', 'write', 'network', 'command', 'unknown']
+  return order
+    .filter(s => scopes[s] > 0)
+    .map(s => `${scopes[s]} ${SCOPE_META[s].label}`)
+    .join(' · ')
+}
+
+/** Манифест сервера, собранный после connect + классификации. */
+interface McpManifest {
+  tools: Array<McpTool & { scope: McpScope }>
+  risk: McpRisk
+  scopes: Record<McpScope, number>
+  toolCount: number
+  /** Имена env-переменных из конфига сервера + флаг «пусто». */
+  env: Array<{ key: string; empty: boolean }>
+}
+
+/** Парсит env-JSON сервера в список требований. */
+function parseEnvRequirements(envJson: string): Array<{ key: string; empty: boolean }> {
+  try {
+    const obj = JSON.parse(envJson || '{}') as Record<string, unknown>
+    return Object.keys(obj).map(key => ({
+      key,
+      empty: !String(obj[key] ?? '').trim()
+    }))
+  } catch {
+    return []
+  }
+}
+
 function McpTab() {
   const [servers, setServers] = useState<McpServerEntry[]>([])
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set())
@@ -293,6 +337,10 @@ function McpTab() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [newForm, setNewForm] = useState({ name: '', command: '', args: '', env: '' })
+  // MCP Hardening — превью манифеста сервера (review-before-trust).
+  const [manifests, setManifests] = useState<Record<string, McpManifest>>({})
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void loadAll()
@@ -339,6 +387,36 @@ function McpTab() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setBusy(null) }
+  }
+
+  // MCP Hardening — подключиться, перечислить инструменты, классифицировать → манифест.
+  async function handlePreview(s: McpServerEntry) {
+    if (manifests[s.id]) {
+      // toggle — повторный клик сворачивает карточку
+      setManifests(prev => { const m = { ...prev }; delete m[s.id]; return m })
+      return
+    }
+    setPreviewBusy(s.id)
+    setPreviewError(prev => { const e = { ...prev }; delete e[s.id]; return e })
+    try {
+      const tools = await window.api.mcp.connect(s.id) as McpTool[]
+      const agg = classifyServer(tools)
+      const manifest: McpManifest = {
+        tools: tools.map(t => ({ ...t, scope: classifyTool(t).scope })),
+        risk: agg.risk,
+        scopes: agg.scopes,
+        toolCount: agg.toolCount,
+        env: parseEnvRequirements(s.env)
+      }
+      setManifests(prev => ({ ...prev, [s.id]: manifest }))
+      // connect фактически подключает сервер — отражаем это в общем состоянии
+      setConnectedIds(prev => new Set([...prev, s.id]))
+      setToolCounts(prev => ({ ...prev, [s.id]: tools.length }))
+    } catch (e) {
+      setPreviewError(prev => ({ ...prev, [s.id]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setPreviewBusy(null)
+    }
   }
 
   async function handleToggle(id: string, enabled: boolean) {
@@ -412,46 +490,107 @@ function McpTab() {
           {servers.map(s => {
             const connected = connectedIds.has(s.id)
             const count = toolCounts[s.id] ?? 0
+            const manifest = manifests[s.id]
+            const pError = previewError[s.id]
             return (
               <div key={s.id} className={`gg-mcp-server-card ${connected ? 'is-connected' : ''}`}>
-                <div className="gg-mcp-server-info">
-                  <div className="gg-mcp-server-name">
-                    {s.name}
-                    {connected && <span className="gg-badge-connected" style={{ marginLeft: 8 }}>✓ {count} tools</span>}
+                <div className="gg-mcp-server-row">
+                  <div className="gg-mcp-server-info">
+                    <div className="gg-mcp-server-name">
+                      {s.name}
+                      {connected && <span className="gg-badge-connected" style={{ marginLeft: 8 }}>✓ {count} tools</span>}
+                    </div>
+                    <div className="gg-mcp-server-cmd" title={`${s.command} ${JSON.parse(s.args || '[]').join(' ')}`}>
+                      {s.command} {JSON.parse(s.args || '[]').join(' ')}
+                    </div>
                   </div>
-                  <div className="gg-mcp-server-cmd" title={`${s.command} ${JSON.parse(s.args || '[]').join(' ')}`}>
-                    {s.command} {JSON.parse(s.args || '[]').join(' ')}
-                  </div>
-                </div>
-                <div className="gg-mcp-server-actions">
-                  <label className="gg-toggle" title="Включить/отключить сервер">
-                    <input
-                      type="checkbox"
-                      checked={s.enabled}
-                      onChange={e => void handleToggle(s.id, e.target.checked)}
-                    />
-                    <span className="gg-toggle-slider" />
-                  </label>
-                  {connected ? (
+                  <div className="gg-mcp-server-actions">
                     <button
                       className="gg-btn gg-btn-ghost"
-                      onClick={() => void handleDisconnect(s.id)}
-                      disabled={busy === s.id}
-                    >{busy === s.id ? '…' : 'Отключить'}</button>
-                  ) : (
+                      onClick={() => void handlePreview(s)}
+                      disabled={previewBusy === s.id}
+                      title="Подключиться, показать инструменты и оценить риск ДО доверия серверу"
+                    >{previewBusy === s.id ? '…' : (manifest ? '✕ Свернуть' : '🔍 Проверить возможности')}</button>
+                    <label className="gg-toggle" title="Включить/отключить сервер">
+                      <input
+                        type="checkbox"
+                        checked={s.enabled}
+                        onChange={e => void handleToggle(s.id, e.target.checked)}
+                      />
+                      <span className="gg-toggle-slider" />
+                    </label>
+                    {connected ? (
+                      <button
+                        className="gg-btn gg-btn-ghost"
+                        onClick={() => void handleDisconnect(s.id)}
+                        disabled={busy === s.id}
+                      >{busy === s.id ? '…' : 'Отключить'}</button>
+                    ) : (
+                      <button
+                        className="gg-btn gg-btn-primary"
+                        onClick={() => void handleConnect(s.id)}
+                        disabled={busy === s.id || !s.enabled}
+                      >{busy === s.id ? '…' : 'Подключить'}</button>
+                    )}
                     <button
-                      className="gg-btn gg-btn-primary"
-                      onClick={() => void handleConnect(s.id)}
-                      disabled={busy === s.id || !s.enabled}
-                    >{busy === s.id ? '…' : 'Подключить'}</button>
-                  )}
-                  <button
-                    className="gg-btn gg-btn-ghost"
-                    style={{ color: 'var(--error, #dc3545)' }}
-                    onClick={() => void handleRemove(s.id)}
-                    title="Удалить сервер"
-                  >✕</button>
+                      className="gg-btn gg-btn-ghost"
+                      style={{ color: 'var(--error, #dc3545)' }}
+                      onClick={() => void handleRemove(s.id)}
+                      title="Удалить сервер"
+                    >✕</button>
+                  </div>
                 </div>
+
+                {pError && (
+                  <div className="gg-mcp-manifest-error">⚠ Не удалось проверить: {pError}</div>
+                )}
+
+                {manifest && (
+                  <div className="gg-mcp-manifest">
+                    <div className="gg-mcp-manifest-head">
+                      <span className={`gg-mcp-risk-pill is-${manifest.risk}`}>
+                        {manifest.risk === 'high' ? 'Высокий риск' : manifest.risk === 'medium' ? 'Средний риск' : 'Низкий риск'}
+                      </span>
+                      <span className="gg-mcp-manifest-summary">
+                        {manifest.toolCount} инстр. · {scopeSummary(manifest.scopes) || '—'}
+                      </span>
+                    </div>
+
+                    {manifest.risk === 'high' && (
+                      <div className="gg-mcp-manifest-warn">
+                        ⚠️ Этот сервер может выполнять команды / писать файлы — включай только если доверяешь источнику.
+                      </div>
+                    )}
+
+                    <div className="gg-mcp-manifest-env-title">Требуемые env-переменные</div>
+                    {manifest.env.length === 0 ? (
+                      <div className="gg-mcp-manifest-env-empty">Не требуются</div>
+                    ) : (
+                      <div className="gg-mcp-manifest-env">
+                        {manifest.env.map(e => (
+                          <span key={e.key} className={`gg-mcp-env-chip ${e.empty ? 'is-empty' : ''}`} title={e.empty ? 'Значение пустое — задай перед использованием' : 'Заполнено'}>
+                            <code>{e.key}</code>{e.empty && <span className="gg-mcp-env-flag"> · пусто</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="gg-mcp-manifest-tools-title">Инструменты ({manifest.toolCount})</div>
+                    <div className="gg-mcp-manifest-tools">
+                      {manifest.tools.map(t => (
+                        <div key={t.name} className="gg-mcp-tool-row">
+                          <span className={`gg-mcp-scope-badge is-${t.scope}`} title={SCOPE_META[t.scope].label}>
+                            {SCOPE_META[t.scope].icon} {SCOPE_META[t.scope].label}
+                          </span>
+                          <div className="gg-mcp-tool-text">
+                            <div className="gg-mcp-tool-name">{t.name}</div>
+                            {t.description && <div className="gg-mcp-tool-desc">{t.description}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}
