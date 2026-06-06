@@ -236,11 +236,13 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     let messagesWithSystem = messages
-    const effectiveSystemPrompt = overrides?.useReviewerPrompt
-      ? REVIEWER_SYSTEM_PROMPT
-      : overrides?.systemPrompt
-    if (effectiveSystemPrompt) {
-      messagesWithSystem = [{ role: 'system', content: effectiveSystemPrompt }, ...messages]
+    // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
+    // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
+    // независимый разбор. Давать ему system-layer + user-layer = заставить
+    // вести себя как сам агент, а не как критик → теряется смысл кросс-ревью.
+    // Поэтому reviewer-промпт остаётся единственной системной инструкцией.
+    if (overrides?.useReviewerPrompt) {
+      messagesWithSystem = [{ role: 'system', content: REVIEWER_SYSTEM_PROMPT }, ...messages]
     } else if (descriptor.transport === 'API') {
       // Same assembly path as CLI providers — see ai/compose-system.ts.
       // projectSystemPrompt — пользовательский промпт из Project Settings
@@ -249,15 +251,29 @@ export function registerAiIpc(deps: AiDeps): void {
       const projectSystemPrompt = projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null
       // Core memory загружается при каждом turn'е — MEMORY.md + USER.md всегда актуальны.
       const coreMemory = projectPath ? loadCoreMemory(projectPath) : { memory: '', user: '' }
+      // Skill override — НАСЛОЕНИЕ, а не замена. Промпт скилла (overrides.systemPrompt)
+      // дописывается ПОВЕРХ базового промпта секцией <skill_layer> внутри
+      // composeSystemPrompt. Так скилл уточняет роль агента, но базовый протокол
+      // выполнения (system-layer 7-шаговый цикл + работа с тулзами) сохраняется —
+      // раньше промпт скилла полностью заменял базу и агент терял протокол.
       const composed = await prepareSystemContext({
         projectPath,
         messages,
         recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
         projectSystemPrompt,
         memories,
-        coreMemory
+        coreMemory,
+        skillPrompt: overrides?.systemPrompt
       })
       messagesWithSystem = [{ role: 'system', content: composed.system }, ...messages]
+    } else if (overrides?.systemPrompt) {
+      // Не-API (CLI) транспорт со скилл-override. CLI-провайдеры строят свой
+      // системный промпт внутри buildCliPrompt и игнорируют system-сообщение в
+      // messages (cli-prompt.ts фильтрует role==='system'). Сохраняем прежнее
+      // поведение: кладём промпт скилла как system-сообщение (для не-CLI
+      // не-API провайдеров, если такие появятся). Наслоение промпта скилла на
+      // базу для CLI — отдельный gap уровня buildCliPrompt, вне scope этого фикса.
+      messagesWithSystem = [{ role: 'system', content: overrides.systemPrompt }, ...messages]
     }
 
     const taggedSender = tagSender(e.sender, projectPath)

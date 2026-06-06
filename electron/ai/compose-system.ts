@@ -38,6 +38,11 @@ export interface PrepareSystemInput {
   /** Core memory (Hermes-style) — MEMORY.md + USER.md, всегда в system prompt.
    *  Загружается при каждом turn'е в отличие от архивной памяти. */
   coreMemory?: CoreMemoryBlocks
+  /** Промпт активного скилла. Когда задан — НАСЛАИВАЕТСЯ поверх базового
+   *  промпта (system-layer + user-layer + context-pack) как секция
+   *  специализации, а НЕ заменяет его. Скилл уточняет роль агента, но базовый
+   *  протокол выполнения (7-шаговый цикл, работа с тулзами) остаётся в силе. */
+  skillPrompt?: string | null
 }
 
 export interface PreparedParts {
@@ -55,7 +60,7 @@ export interface PreparedParts {
  */
 export async function prepareSystemContext(input: PrepareSystemInput): Promise<ComposedPrompt> {
   const parts = await prepareParts(input)
-  return composeSystemPrompt(parts.userLayer, parts.contextPack)
+  return composeSystemPrompt(parts.userLayer, parts.contextPack, input.skillPrompt ?? undefined)
 }
 
 /**
