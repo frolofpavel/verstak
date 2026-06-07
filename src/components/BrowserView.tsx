@@ -11,7 +11,8 @@ import { useEffect, useRef, useState } from 'react'
  * extension point — see useEffect below.
  */
 
-const HOMEPAGE = 'https://duckduckgo.com/'
+const HOMEPAGE = 'https://www.google.com/'
+const SEARCH_URL = 'https://www.google.com/search?q='
 
 // Minimal subset of the Electron webview API we use.
 interface Webview extends HTMLElement {
@@ -46,7 +47,7 @@ function normalizeUrl(input: string): string {
   if (!trimmed) return HOMEPAGE
   if (/^https?:\/\//i.test(trimmed)) return trimmed
   if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) return 'https://' + trimmed
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(trimmed)
+  return SEARCH_URL + encodeURIComponent(trimmed)
 }
 
 export function BrowserView() {
