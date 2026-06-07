@@ -10,6 +10,7 @@ import { createExtraProvider, EXTRA_PROVIDERS, type ExtraProviderSpec } from './
 import { createYandexGptProvider, YANDEX_GPT_MODELS } from './yandex-gpt'
 import { createGigaChatProvider, GIGACHAT_MODELS } from './gigachat'
 import type { ChatProvider } from './types'
+import type { AgentMode } from './mode-policy'
 
 export type ProviderId =
   | 'gemini-api' | 'gemini-cli'
@@ -183,6 +184,9 @@ export interface CreateOptions {
   /** Уровень усилий модели: влияет на max_tokens и extended thinking.
    *  'quick' — короткие ответы; 'standard' (default) — без изменений; 'deep' — максимальное мышление. */
   effortLevel?: 'quick' | 'standard' | 'deep'
+  /** Режим агента — CLI-провайдеры (Codex) маппят его во флаги песочницы.
+   *  Для API-провайдеров режим применяется в ipc/ai.ts через mode-policy.decide. */
+  agentMode?: AgentMode
 }
 
 export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvider {
@@ -218,7 +222,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'codex-cli':
-      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
+      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
     case 'yandex-gpt': {
       if (!opts.apiKey) throw new Error('YandexGPT: API ключ не задан')
       if (!opts.yandexFolderId) throw new Error('YandexGPT: Folder ID не задан (Settings → Провайдеры → YandexGPT)')

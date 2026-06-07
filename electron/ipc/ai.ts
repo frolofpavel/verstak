@@ -438,7 +438,8 @@ export function registerAiIpc(deps: AiDeps): void {
         yandexFolderId,
         gigachatClientSecret,
         memories: descriptor.transport === 'CLI' ? memories : undefined,
-        effortLevel: overrides?.effortLevel
+        effortLevel: overrides?.effortLevel,
+        agentMode: deps.getAgentMode()
       })
     } catch (err) {
       taggedSender.send('ai:event', {
@@ -481,7 +482,8 @@ export function registerAiIpc(deps: AiDeps): void {
           signal: ctrl.signal,
           projectSystemPrompt: projectSystemPromptForProvider,
           skillPrompt: skillPromptForProvider,
-          effortLevel: overrides?.effortLevel
+          effortLevel: overrides?.effortLevel,
+          agentMode: deps.getAgentMode()
         })
       } catch {
         return null

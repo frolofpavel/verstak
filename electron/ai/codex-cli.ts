@@ -3,6 +3,7 @@ import { platform } from 'os'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import type { AgentMode } from './mode-policy'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 
@@ -15,6 +16,28 @@ interface CodexCliOptions {
   /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
   skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  /** Режим агента Verstak — маппится во флаги песочницы `codex exec`.
+   *  Без него Codex стартует в read-only и не может писать/выполнять (auto «не встаёт»). */
+  agentMode?: AgentMode
+}
+
+/**
+ * Перевести режим Verstak во флаги песочницы `codex exec` (он неинтерактивен,
+ * approval-промптов нет — рычаг только sandbox-политика):
+ *  ask/plan → read-only · accept-edits/auto → workspace-write · bypass → full bypass.
+ */
+export function sandboxArgsForMode(mode: AgentMode | undefined): string[] {
+  switch (mode) {
+    case 'bypass':
+      return ['--dangerously-bypass-approvals-and-sandbox']
+    case 'auto':
+    case 'accept-edits':
+      return ['-s', 'workspace-write']
+    case 'plan':
+    case 'ask':
+    default:
+      return ['-s', 'read-only']
+  }
 }
 
 export const CODEX_CLI_MODELS = [
@@ -93,7 +116,7 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
 
       // --skip-git-repo-check: разрешает работу вне доверенной git-директории.
       // Без этого Codex CLI exit 1 с "Not inside a trusted directory".
-      const args = ['exec', '--json', '--skip-git-repo-check']
+      const args = ['exec', '--json', '--skip-git-repo-check', ...sandboxArgsForMode(opts.agentMode)]
       if (opts.model && opts.model !== 'auto') {
         args.push('-m', opts.model)
       }
