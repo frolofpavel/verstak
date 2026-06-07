@@ -50,8 +50,8 @@ contextBridge.exposeInMainWorld('api', {
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
     countTokens: (text: string, projectPath: string | null, historyMessages?: unknown[]) =>
       ipcRenderer.invoke('ai:count-tokens', text, projectPath, historyMessages) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
-    onEvent: (cb: (data: { id: number; event: unknown }) => void) => {
-      const handler = (_e: unknown, data: { id: number; event: unknown }) => cb(data)
+    onEvent: (cb: (data: { id: number; event: unknown; projectPath: string | null }) => void) => {
+      const handler = (_e: unknown, data: { id: number; event: unknown; projectPath: string | null }) => cb(data)
       ipcRenderer.on('ai:event', handler)
       return () => { ipcRenderer.off('ai:event', handler) }
     }
