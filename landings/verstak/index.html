@@ -3,1288 +3,856 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Verstak — AI-верстак для кода. Любая модель, один IDE</title>
-<meta name="description" content="Vendor-agnostic AI IDE для русскоязычных разработчиков. Claude, GPT, Gemini, Grok, GigaChat, YandexGPT — одна среда, любая модель, без VPN. Используй свои подписки CLI, не плати за токены дважды.">
-<meta name="theme-color" content="#1a1a1a">
+<title>Verstal — единая агентная платформа для разработки и управления рабочим местом</title>
+<meta name="description" content="Verstal — единая агентная платформа для разработки, AI-агентов и управления рабочим местом. Без VPN, оплата по расчётному счёту, соблюдение 152-ФЗ, локальные и российские модели.">
+<meta name="theme-color" content="#10110f">
 <link rel="canonical" href="https://verstak.io/">
-
-<!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://verstak.io/">
-<meta property="og:title" content="Verstak — AI-верстак для кода">
-<meta property="og:description" content="Claude · GPT · Gemini · Grok · GigaChat · YandexGPT — любая модель, один интерфейс, без VPN. Vendor-agnostic IDE для русскоязычных разработчиков.">
+<meta property="og:title" content="Verstal — единая агентная платформа">
+<meta property="og:description" content="Разработка, AI-агенты и управление рабочим местом. Без VPN, оплата по расчётному счёту, соблюдение 152-ФЗ.">
 <meta property="og:image" content="https://verstak.io/assets/og-cover.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
 <meta property="og:locale" content="ru_RU">
-
-<!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Verstak — AI-верстак для кода">
-<meta name="twitter:description" content="Любая модель, один IDE. Используй свои CLI-подписки. Сделано в РФ.">
+<meta name="twitter:title" content="Verstal — единая агентная платформа">
+<meta name="twitter:description" content="Разработка и управление рабочим местом: без VPN, расчётный счёт, 152-ФЗ.">
 <meta name="twitter:image" content="https://verstak.io/assets/og-cover.png">
-
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/logo-180.png">
-
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
-
 <style>
   :root {
-    --bg: #1a1a1a;
-    --bg-card: #232323;
-    --bg-deep: #141414;
-    --border: #3a3a3a;
-    --accent: #ff7a18;
-    --accent-hover: #e85d04;
-    --accent-dim: rgba(255, 122, 24, 0.08);
-    --text: #f5f5f0;
-    --text-muted: #a0a0a0;
-    --success: #4ade80;
-    --error: #ef4444;
-    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --maxw: 1200px;
+    --bg: #10110f;
+    --paper: #f5f0e7;
+    --paper-2: #e8ded0;
+    --ink: #191a17;
+    --muted: #6f6b61;
+    --line: rgba(25,26,23,.14);
+    --dark: #181a17;
+    --dark-2: #22251f;
+    --dark-line: rgba(245,240,231,.13);
+    --green: #24c76a;
+    --amber: #f2a23a;
+    --red: #e35c4c;
+    --blue: #4b8dff;
+    --maxw: 1160px;
+    --mono: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
-    background: var(--bg);
-    color: var(--text);
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
     font-family: var(--sans);
-    font-size: 16px;
-    line-height: 1.6;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
   }
-  ::selection { background: var(--accent); color: #1a1a1a; }
-
   a { color: inherit; text-decoration: none; }
-  img, svg { display: block; max-width: 100%; }
+  img { max-width: 100%; display: block; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
 
-  .container {
-    max-width: var(--maxw);
-    margin: 0 auto;
-    padding: 0 32px;
-  }
-
-  /* ==================== NAVBAR ==================== */
-  .navbar {
+  .topbar {
     position: sticky;
     top: 0;
-    z-index: 100;
-    background: rgba(26, 26, 26, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid transparent;
-    transition: border-color .25s ease, background .25s ease;
+    z-index: 20;
+    background: rgba(245,240,231,.86);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
   }
-  .navbar.scrolled {
-    background: rgba(20, 20, 20, 0.92);
-    border-bottom-color: var(--border);
-  }
-  .nav-inner {
+  .nav {
+    height: 64px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 64px;
+    gap: 22px;
   }
   .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: 18px;
-    letter-spacing: -.02em;
-  }
-  .brand svg { width: 28px; height: 28px; }
-  .brand .accent { color: var(--accent); }
-
-  .nav-links {
-    display: flex;
-    gap: 32px;
-    font-size: 14px;
-    color: var(--text-muted);
-  }
-  .nav-links a { transition: color .15s; }
-  .nav-links a:hover { color: var(--text); }
-
-  .nav-cta { display: flex; align-items: center; gap: 12px; }
-
-  /* Бургер */
-  .burger {
-    display: none;
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text);
-    width: 40px;
-    height: 40px;
-    cursor: pointer;
-    padding: 0;
-    align-items: center;
-    justify-content: center;
-  }
-  .burger span {
-    display: block;
-    width: 18px;
-    height: 2px;
-    background: var(--text);
-    position: relative;
-  }
-  .burger span::before, .burger span::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    width: 18px;
-    height: 2px;
-    background: var(--text);
-  }
-  .burger span::before { top: -6px; }
-  .burger span::after { top: 6px; }
-
-  .mobile-menu {
-    display: none;
-    border-top: 1px solid var(--border);
-    background: var(--bg);
-  }
-  .mobile-menu.open { display: block; }
-  .mobile-menu a {
-    display: block;
-    padding: 14px 32px;
-    color: var(--text);
-    font-size: 15px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  /* ==================== BUTTONS ==================== */
-  .btn {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 22px;
+    font-weight: 850;
+    letter-spacing: -.03em;
+  }
+  .brand img { width: 30px; height: 30px; }
+  .brand small {
+    color: var(--muted);
     font-family: var(--mono);
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .links { display: flex; align-items: center; gap: 22px; color: var(--muted); font-size: 14px; }
+  .links a:hover { color: var(--ink); }
+  .nav-actions { display: flex; gap: 10px; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-weight: 750;
+    font-size: 14px;
     cursor: pointer;
-    border: 1px solid transparent;
-    transition: transform .12s ease, background .15s, border-color .15s, color .15s;
-    user-select: none;
-    white-space: nowrap;
+    transition: transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
   }
-  .btn:active { transform: translateY(1px); }
-  .btn-primary {
-    background: var(--accent);
-    color: #1a1a1a;
-    border-color: var(--accent);
-  }
-  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-  .btn-ghost {
-    background: transparent;
-    color: var(--text);
-    border-color: var(--border);
-  }
-  .btn-ghost:hover { border-color: var(--text-muted); }
-  .btn-lg { padding: 16px 28px; font-size: 14px; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .btn.green { background: var(--green); color: #07150d; border-color: var(--green); }
+  .btn.ghost { background: transparent; }
+  .btn.primary:hover { box-shadow: 0 16px 34px rgba(25,26,23,.24); }
+  .btn.green:hover { box-shadow: 0 16px 34px rgba(36,199,106,.28); }
 
-  /* ==================== HERO ==================== */
   .hero {
     position: relative;
-    padding: 80px 0 120px;
+    min-height: 760px;
     overflow: hidden;
+    background:
+      radial-gradient(circle at 86% 16%, rgba(75,141,255,.22), transparent 28%),
+      radial-gradient(circle at 68% 74%, rgba(36,199,106,.22), transparent 30%),
+      linear-gradient(135deg, #fbf6ed 0%, #f2e8d8 48%, #d9e5d8 100%);
+    border-bottom: 1px solid var(--line);
   }
-  /* Параллакс-сетка */
   .hero::before {
-    content: '';
+    content: "";
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(var(--border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--border) 1px, transparent 1px);
-    background-size: 64px 64px;
-    opacity: 0.18;
-    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+      linear-gradient(rgba(25,26,23,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(25,26,23,.045) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(90deg, #000 0%, rgba(0,0,0,.66) 54%, transparent 100%);
     pointer-events: none;
   }
-  /* Искры — анимация */
   .hero::after {
-    content: '';
+    content: "";
     position: absolute;
-    right: -100px;
-    bottom: -100px;
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(255, 122, 24, 0.18) 0%, transparent 60%);
+    inset: auto 0 0 0;
+    height: 140px;
+    background: repeating-linear-gradient(90deg, rgba(25,26,23,.08) 0 1px, transparent 1px 42px);
     pointer-events: none;
-    animation: spark 8s ease-in-out infinite alternate;
   }
-  @keyframes spark {
-    0%   { transform: translate(0, 0) scale(1); opacity: .85; }
-    100% { transform: translate(-30px, -20px) scale(1.1); opacity: 1; }
-  }
-
-  .hero-inner {
-    position: relative;
+  .hero-inner { position: relative; z-index: 1; padding: 44px 0 58px; }
+  .hero-grid {
     display: grid;
-    grid-template-columns: 1.15fr 1fr;
-    gap: 64px;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr) minmax(390px, 520px);
+    gap: 44px;
+    align-items: start;
   }
-  .hero-eyebrow {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 24px;
-    display: inline-block;
-    border: 1px solid var(--accent);
-    padding: 6px 12px;
-  }
-  .hero h1 {
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: clamp(48px, 6.5vw, 84px);
-    line-height: 0.95;
-    letter-spacing: -0.04em;
-    margin-bottom: 28px;
-  }
-  .hero h1 .accent { color: var(--accent); }
-
-  .hero-sub {
-    font-size: 20px;
-    color: var(--text);
-    margin-bottom: 16px;
-    font-weight: 500;
-  }
-  .hero-sub .pipe { color: var(--accent); margin: 0 6px; }
-
-  .hero-desc {
-    font-size: 16px;
-    color: var(--text-muted);
-    margin-bottom: 36px;
-    max-width: 560px;
-  }
-  .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
-  .hero-note {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 0.5px;
-  }
-
-  /* Окно IDE */
-  .ide {
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255, 122, 24, 0.05);
-    font-family: var(--mono);
-    font-size: 12px;
-    overflow: hidden;
-  }
-  .ide-bar {
-    display: flex;
-    align-items: center;
+  .hero-text { max-width: 760px; padding-top: 34px; }
+  .eyebrow {
+    display: inline-flex;
     gap: 8px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    background: #1c1c1c;
-  }
-  .ide-dot { width: 10px; height: 10px; border-radius: 50%; background: #444; }
-  .ide-title {
-    flex: 1;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 11px;
-    letter-spacing: 1px;
-  }
-  .ide-body {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    min-height: 340px;
-  }
-  .ide-side {
-    border-right: 1px solid var(--border);
-    padding: 14px 12px;
-    background: #181818;
-  }
-  .ide-side .label {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin: 12px 0 8px;
-  }
-  .ide-side .label:first-child { margin-top: 0; }
-  .ide-side .item {
-    color: var(--text);
-    padding: 4px 0;
-    opacity: 0.7;
-  }
-  .ide-side .item.active { color: var(--accent); opacity: 1; }
-  .ide-side .item.muted { opacity: 0.4; }
-
-  .ide-main { padding: 14px 18px; color: var(--text); }
-  .ide-line { padding: 2px 0; }
-  .ide-line .k { color: #ff7a18; }
-  .ide-line .s { color: #4ade80; }
-  .ide-line .c { color: var(--text-muted); }
-  .ide-line .n { color: #b39df7; }
-  .ide-prompt {
-    margin-top: 18px;
-    padding-top: 14px;
-    border-top: 1px dashed var(--border);
-    color: var(--text-muted);
-  }
-  .ide-prompt b { color: var(--accent); }
-  .ide-cursor {
-    display: inline-block;
-    width: 8px;
-    height: 14px;
-    background: var(--accent);
-    vertical-align: middle;
-    margin-left: 2px;
-    animation: blink 1s steps(2) infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-
-  /* ==================== SECTIONS ==================== */
-  section { padding: 100px 0; }
-  .section-eyebrow {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 16px;
-    display: flex;
     align-items: center;
-    gap: 16px;
-  }
-  .section-eyebrow::before {
-    content: '';
-    width: 28px;
-    height: 2px;
-    background: var(--accent);
-  }
-  .section-title {
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: clamp(32px, 4vw, 52px);
-    line-height: 1.05;
-    letter-spacing: -0.03em;
-    margin-bottom: 24px;
-    max-width: 800px;
-  }
-  .section-lead {
-    font-size: 18px;
-    color: var(--text-muted);
-    max-width: 680px;
-    margin-bottom: 56px;
-  }
-
-  /* ==================== USP / CARDS ==================== */
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-  }
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: 32px;
-    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
-  }
-  .card:hover {
-    transform: translateY(-4px);
-    border-color: var(--accent);
-    box-shadow: 0 12px 40px rgba(255, 122, 24, 0.08);
-  }
-  .card .icon {
-    font-size: 28px;
-    margin-bottom: 16px;
-    display: block;
-  }
-  .card h3 {
-    font-family: var(--mono);
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 14px;
-    letter-spacing: -.01em;
-  }
-  .card p { color: var(--text-muted); font-size: 15px; }
-
-  /* ==================== HOW IT WORKS ==================== */
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
-    counter-reset: step;
-  }
-  .step {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: 32px 28px;
-    position: relative;
-  }
-  .step::before {
-    counter-increment: step;
-    content: '0' counter(step);
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: 48px;
-    color: var(--accent);
-    opacity: 0.25;
-    position: absolute;
-    top: 16px;
-    right: 20px;
-    line-height: 1;
-  }
-  .step h3 {
-    font-family: var(--mono);
-    font-size: 18px;
-    margin-bottom: 12px;
-    margin-top: 8px;
-  }
-  .step p { color: var(--text-muted); font-size: 14px; }
-
-  /* ==================== TABLE ==================== */
-  .table-wrap {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    overflow-x: auto;
-  }
-  table.compare {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 15px;
-    min-width: 720px;
-  }
-  table.compare th, table.compare td {
-    padding: 18px 20px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-  table.compare th {
+    margin-bottom: 18px;
     font-family: var(--mono);
     font-size: 12px;
-    font-weight: 700;
+    color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 1.2px;
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--accent);
-    background: #1c1c1c;
+    letter-spacing: .08em;
   }
-  table.compare tbody tr:last-child td { border-bottom: none; }
-  table.compare td:first-child { font-weight: 600; }
-  table.compare .verstak-col {
-    background: rgba(255, 122, 24, 0.06);
-    color: var(--text);
-    border-left: 1px solid var(--accent);
-    border-right: 1px solid var(--accent);
-    font-weight: 600;
+  .eyebrow::before { content: ""; width: 9px; height: 9px; background: var(--green); border-radius: 50%; }
+  h1 {
+    max-width: 760px;
+    margin: 0 0 20px;
+    font-size: clamp(40px, 5.6vw, 72px);
+    line-height: .98;
+    letter-spacing: -.06em;
   }
-  table.compare thead .verstak-col { color: var(--accent); border-top: 1px solid var(--accent); }
-  table.compare tbody tr:last-child .verstak-col { border-bottom: 1px solid var(--accent); }
-  .check { color: var(--success); font-weight: 700; }
-  .cross { color: var(--error); font-weight: 700; }
-  .partial { color: #facc15; font-weight: 700; }
-
-  /* ==================== AUDIENCE ==================== */
-  .audiences { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .audience {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    padding: 32px;
+  .hero-copy {
+    max-width: 710px;
+    margin: 0 0 22px;
+    font-size: clamp(17px, 1.7vw, 20px);
+    color: #48463f;
   }
-  .audience h3 {
-    font-family: var(--mono);
-    font-size: 22px;
-    margin-bottom: 8px;
-  }
-  .audience .price {
-    font-family: var(--mono);
-    color: var(--accent);
-    font-weight: 700;
-    font-size: 18px;
-    margin: 12px 0 16px;
-    display: block;
-  }
-  .audience p { color: var(--text-muted); font-size: 15px; }
-
-  /* ==================== FEATURES GRID ==================== */
-  .features {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
-  }
-  .feature {
-    background: var(--bg);
-    padding: 28px;
-  }
-  .feature .icon { font-size: 24px; margin-bottom: 12px; }
-  .feature h4 {
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  .feature p { color: var(--text-muted); font-size: 14px; line-height: 1.55; }
-
-  /* ==================== PRICING ==================== */
-  .pricing-note {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-    padding: 8px 14px;
-    margin-bottom: 32px;
-  }
-  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .plan {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: 36px 32px;
+  .hero-copy b { color: var(--ink); }
+  .compliance-strip {
     display: flex;
-    flex-direction: column;
-    position: relative;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 26px;
   }
-  .plan.featured {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-  }
-  .plan-badge {
-    position: absolute;
-    top: -12px;
-    left: 32px;
-    background: var(--accent);
-    color: #1a1a1a;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    padding: 5px 10px;
-  }
-  .plan h3 {
-    font-family: var(--mono);
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: var(--text-muted);
-    margin-bottom: 16px;
-  }
-  .plan .price {
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: 40px;
-    color: var(--text);
-    line-height: 1;
-    margin-bottom: 4px;
-    letter-spacing: -.02em;
-  }
-  .plan .price .per { font-size: 14px; color: var(--text-muted); font-weight: 500; }
-  .plan .desc { color: var(--text-muted); font-size: 14px; margin: 16px 0 24px; }
-  .plan ul { list-style: none; margin-bottom: 32px; }
-  .plan ul li {
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 14px;
-    color: var(--text);
-  }
-  .plan ul li::before {
-    content: '✓';
-    color: var(--accent);
-    font-weight: 700;
-    margin-right: 10px;
-  }
-  .plan ul li:last-child { border-bottom: none; }
-  .plan .btn { margin-top: auto; justify-content: center; }
-
-  /* ==================== FAQ ==================== */
-  .faq { max-width: 880px; margin: 0 auto; }
-  .faq details {
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    margin-bottom: 10px;
-    transition: border-color .15s;
-  }
-  .faq details[open] { border-color: var(--accent); }
-  .faq summary {
-    padding: 22px 28px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 16px;
-    list-style: none;
-    display: flex;
-    justify-content: space-between;
+  .compliance-strip span {
+    display: inline-flex;
     align-items: center;
-    gap: 16px;
-  }
-  .faq summary::-webkit-details-marker { display: none; }
-  .faq summary::after {
-    content: '+';
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(25,26,23,.16);
+    background: rgba(255,250,240,.72);
+    color: #24251f;
     font-family: var(--mono);
-    color: var(--accent);
-    font-size: 22px;
-    line-height: 1;
-    transition: transform .2s;
+    font-size: 12px;
+    font-weight: 750;
   }
-  .faq details[open] summary::after { content: '−'; }
-  .faq .answer {
-    padding: 0 28px 24px;
-    color: var(--text-muted);
-    font-size: 15px;
-    line-height: 1.7;
+  .compliance-strip span::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--green);
   }
-
-  /* ==================== CTA ==================== */
-  .cta-block {
-    background: var(--bg-card);
-    border: 1px solid var(--accent);
-    padding: 80px 48px;
-    text-align: center;
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 32px; }
+  .proof {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    max-width: 850px;
+    border: 1px solid var(--line);
+    background: rgba(245,240,231,.74);
+  }
+  .proof div { padding: 14px 16px; border-right: 1px solid var(--line); }
+  .proof div:last-child { border-right: 0; }
+  .proof strong { display: block; font-size: 21px; line-height: 1.1; }
+  .proof span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .hero-console {
     position: relative;
+    min-height: 500px;
+    border: 1px solid rgba(25,26,23,.2);
+    border-radius: 18px;
+    background: rgba(24,26,23,.96);
+    color: var(--paper);
+    box-shadow: 0 40px 110px rgba(24,26,23,.28);
     overflow: hidden;
+    transform: translateY(8px) rotate(.45deg);
   }
-  .cta-block::before {
-    content: '';
+  .hero-console::before {
+    content: "";
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at top right, rgba(255, 122, 24, 0.12), transparent 60%);
+    background: linear-gradient(135deg, rgba(255,255,255,.08), transparent 34%), radial-gradient(circle at 78% 18%, rgba(36,199,106,.22), transparent 32%);
     pointer-events: none;
   }
-  .cta-block > * { position: relative; }
-  .cta-block h2 {
-    font-family: var(--mono);
-    font-size: clamp(28px, 4vw, 44px);
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    margin-bottom: 16px;
-    line-height: 1.1;
-  }
-  .cta-block p {
-    color: var(--text-muted);
-    font-size: 18px;
-    max-width: 640px;
-    margin: 0 auto 36px;
-  }
-  .cta-buttons {
+  .console-top {
+    position: relative;
     display: flex;
-    gap: 14px;
-    justify-content: center;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-  }
-  .cta-note {
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--dark-line);
     font-family: var(--mono);
     font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 1px;
+    color: rgba(245,240,231,.62);
   }
-
-  /* ==================== FOOTER ==================== */
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 64px 0 32px;
-    background: var(--bg-deep);
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border: 1px solid rgba(36,199,106,.35);
+    border-radius: 999px;
+    color: #a8f4c3;
+    background: rgba(36,199,106,.1);
   }
-  .footer-grid {
-    display: grid;
-    grid-template-columns: 1.4fr 1fr 1fr 1fr;
-    gap: 48px;
-    margin-bottom: 48px;
+  .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .console-body { position: relative; display: grid; gap: 10px; padding: 14px; }
+  .console-card {
+    border: 1px solid var(--dark-line);
+    border-radius: 12px;
+    background: rgba(255,255,255,.035);
+    padding: 13px;
   }
-  .footer-brand .brand { margin-bottom: 16px; }
-  .footer-brand p { color: var(--text-muted); font-size: 13px; max-width: 280px; }
-  .footer-col h5 {
+  .console-label {
     font-family: var(--mono);
     font-size: 11px;
+    color: rgba(245,240,231,.46);
     text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--accent);
-    margin-bottom: 16px;
+    letter-spacing: .07em;
+    margin-bottom: 10px;
   }
-  .footer-col ul { list-style: none; }
-  .footer-col li { margin-bottom: 10px; }
-  .footer-col a {
-    color: var(--text-muted);
-    font-size: 14px;
-    transition: color .15s;
-  }
-  .footer-col a:hover { color: var(--text); }
-
-  .footer-bottom {
-    border-top: 1px solid var(--border);
-    padding-top: 24px;
-    display: flex;
-    justify-content: space-between;
+  .model-row, .queue-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
     align-items: center;
+    padding: 8px 0;
+    border-top: 1px solid var(--dark-line);
+  }
+  .model-row:first-of-type, .queue-row:first-of-type { border-top: 0; padding-top: 0; }
+  .model-row strong, .queue-row strong { display: block; font-size: 14px; }
+  .model-row span, .queue-row span { display: block; margin-top: 2px; color: rgba(245,240,231,.52); font-family: var(--mono); font-size: 11px; }
+  .chip {
+    min-width: 74px;
+    text-align: center;
+    padding: 5px 8px;
+    border-radius: 7px;
+    background: rgba(245,240,231,.08);
+    color: rgba(245,240,231,.74);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .chip.green { background: rgba(36,199,106,.16); color: #a8f4c3; }
+  .chip.amber { background: rgba(242,162,58,.16); color: #ffd18e; }
+  .hero-diff {
+    margin: 0 -14px;
+    padding: 10px 14px;
+    background: #0d0e0b;
+    border-top: 1px solid var(--dark-line);
+    border-bottom: 1px solid var(--dark-line);
     font-family: var(--mono);
     font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 0.5px;
   }
-  .socials { display: flex; gap: 16px; }
-  .socials a {
-    display: inline-flex;
-    width: 36px;
-    height: 36px;
+  .hero-diff div { padding: 3px 0; color: rgba(245,240,231,.5); }
+  .hero-diff .add { color: #a8f4c3; }
+  .hero-diff .del { color: #ffaca3; }
+  .approval {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
     align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border);
-    transition: border-color .15s, color .15s;
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    background: rgba(242,162,58,.12);
+    border: 1px solid rgba(242,162,58,.32);
   }
-  .socials a:hover { border-color: var(--accent); color: var(--accent); }
-  .socials svg { width: 16px; height: 16px; fill: currentColor; }
+  .approval b { display: block; color: #ffd18e; }
+  .approval span { color: rgba(245,240,231,.58); font-size: 12px; }
+  .ok-button { border: 0; border-radius: 8px; padding: 11px 14px; background: var(--green); color: #07150d; font-weight: 850; }
 
-  /* ==================== RESPONSIVE ==================== */
-  @media (max-width: 1200px) {
-    .features { grid-template-columns: repeat(3, 1fr); }
+  section { padding: 86px 0; }
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .55s ease, transform .55s ease; }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+  .dark { background: var(--dark); color: var(--paper); }
+  .section-head { display: grid; grid-template-columns: .8fr 1.2fr; gap: 44px; align-items: end; margin-bottom: 42px; }
+  .kicker { font-family: var(--mono); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .09em; }
+  .dark .kicker { color: rgba(245,240,231,.48); }
+  h2 { margin: 8px 0 0; font-size: clamp(30px, 4.2vw, 56px); line-height: 1; letter-spacing: -.05em; }
+  .lead { margin: 0; color: var(--muted); font-size: 18px; max-width: 720px; }
+  .dark .lead { color: rgba(245,240,231,.66); }
+
+  .workbench {
+    display: grid;
+    grid-template-columns: 290px 1fr 310px;
+    min-height: 560px;
+    border: 1px solid var(--dark-line);
+    background: #11130f;
+    color: var(--paper);
+    box-shadow: 0 30px 80px rgba(0,0,0,.28);
   }
-  @media (max-width: 900px) {
-    .container { padding: 0 24px; }
-    section { padding: 72px 0; }
-    .nav-links, .nav-cta .btn { display: none; }
-    .burger { display: inline-flex; }
-    .hero { padding: 56px 0 80px; }
-    .hero-inner { grid-template-columns: 1fr; gap: 48px; }
-    .grid-3, .audiences, .plans { grid-template-columns: 1fr; }
-    .steps { grid-template-columns: repeat(2, 1fr); }
-    .features { grid-template-columns: repeat(2, 1fr); }
-    .footer-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
-    .cta-block { padding: 56px 24px; }
+  .rail, .side { padding: 18px; border-right: 1px solid var(--dark-line); }
+  .side { border-right: 0; border-left: 1px solid var(--dark-line); }
+  .rail-title, .panel-title { font-family: var(--mono); color: rgba(245,240,231,.48); font-size: 11px; text-transform: uppercase; margin-bottom: 12px; }
+  .project, .agent, .log {
+    border: 1px solid var(--dark-line);
+    border-radius: 7px;
+    padding: 12px;
+    margin-bottom: 10px;
+    background: rgba(255,255,255,.025);
   }
-  @media (max-width: 600px) {
-    section { padding: 56px 0; }
-    .steps, .features { grid-template-columns: 1fr; }
-    .footer-grid { grid-template-columns: 1fr; }
-    .footer-bottom { flex-direction: column; gap: 16px; text-align: center; }
-    .card, .plan, .audience { padding: 24px; }
-    .ide-body { grid-template-columns: 100px 1fr; }
-    .ide-main { font-size: 11px; }
+  .project.active { border-color: rgba(36,199,106,.55); background: rgba(36,199,106,.08); }
+  .project strong, .agent strong { display: block; font-size: 14px; }
+  .project span, .agent span, .log span { color: rgba(245,240,231,.52); font-size: 12px; font-family: var(--mono); }
+  .stage { padding: 18px; }
+  .terminal {
+    border: 1px solid var(--dark-line);
+    background: #0b0c0a;
+    min-height: 290px;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .terminal-bar { height: 36px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--dark-line); color: rgba(245,240,231,.45); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+  .dot:nth-child(2) { background: var(--amber); }
+  .dot:nth-child(3) { background: var(--green); }
+  .diff { padding: 16px 18px; }
+  .line { white-space: pre-wrap; color: rgba(245,240,231,.56); padding: 3px 0; }
+  .line.add { color: #9ff2bd; background: rgba(36,199,106,.08); margin: 0 -18px; padding-left: 18px; }
+  .line.del { color: #ffaaa0; background: rgba(227,92,76,.08); margin: 0 -18px; padding-left: 18px; }
+  .gate { margin-top: 16px; padding: 16px; border: 1px solid rgba(242,162,58,.36); background: rgba(242,162,58,.09); border-radius: 8px; }
+  .gate b { color: var(--amber); }
+  .gate-actions { display: flex; gap: 10px; margin-top: 12px; }
+  .mini { min-height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--dark-line); background: transparent; color: var(--paper); font-weight: 700; }
+  .mini.ok { background: var(--green); color: #07150d; border-color: var(--green); }
+
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .tier {
+    min-height: 350px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    background: #fffaf0;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .tier:hover {
+    transform: translateY(-4px);
+    border-color: rgba(25,26,23,.28);
+    box-shadow: 0 24px 60px rgba(25,26,23,.12);
+  }
+  .tier.dark-card { background: #1c1f1a; color: var(--paper); border-color: var(--dark-line); }
+  .tier.dark-card:hover { border-color: rgba(36,199,106,.45); box-shadow: 0 24px 70px rgba(36,199,106,.18); }
+  .badge { display: inline-flex; width: fit-content; padding: 4px 8px; border-radius: 6px; font-family: var(--mono); font-size: 11px; background: rgba(36,199,106,.14); color: #118044; margin-bottom: 16px; }
+  .dark-card .badge { color: #9ff2bd; }
+  .tier h3 { margin: 0 0 8px; font-size: 25px; letter-spacing: -.04em; }
+  .price { margin: 0 0 16px; color: var(--muted); font-family: var(--mono); }
+  .dark-card .price { color: rgba(245,240,231,.58); }
+  .tier p { margin: 0 0 16px; color: var(--muted); }
+  .dark-card p { color: rgba(245,240,231,.67); }
+  .tier ul { margin: auto 0 0; padding: 0; list-style: none; }
+  .tier li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .dark-card li { border-top-color: var(--dark-line); }
+
+  .workflow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .step { border: 1px solid var(--line); background: #fffaf0; padding: 18px; border-radius: 8px; }
+  .step:nth-child(2) { transform: translateY(18px); }
+  .step:nth-child(4) { transform: translateY(18px); }
+  .step strong { display: block; font-size: 16px; margin-bottom: 8px; }
+  .step span { color: var(--muted); font-size: 14px; }
+  .step .num { color: var(--green); font-family: var(--mono); font-size: 12px; margin-bottom: 12px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .trust-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+  .trust-card {
+    border: 1px solid var(--dark-line);
+    border-radius: 12px;
+    padding: 20px;
+    background: rgba(255,255,255,.035);
+  }
+  .trust-card strong {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 19px;
+    letter-spacing: -.03em;
+  }
+  .trust-card span {
+    display: block;
+    color: rgba(245,240,231,.62);
+    font-size: 14px;
+  }
+  .box { border: 1px solid var(--line); border-radius: 8px; background: #fffaf0; padding: 24px; }
+  .box {
+    position: relative;
+    overflow: hidden;
+  }
+  .box::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--green), var(--amber), var(--blue));
+  }
+  .box h3 { margin: 0 0 12px; font-size: 24px; letter-spacing: -.04em; }
+  .box p { color: var(--muted); margin: 0 0 14px; }
+  .box ul { padding-left: 18px; color: var(--muted); }
+  .box li { margin: 8px 0; }
+
+  .compare { border: 1px solid var(--line); overflow-x: auto; background: #fffaf0; border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  th, td { padding: 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-family: var(--mono); font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 750; color: var(--ink); }
+  .yes { color: #118044; font-weight: 800; }
+  .warn { color: #9b610e; font-weight: 800; }
+  .no { color: #b8392c; font-weight: 800; }
+
+  .cta {
+    padding: 74px 0;
+    background: var(--ink);
+    color: var(--paper);
+    text-align: center;
+  }
+  .cta h2 { max-width: 820px; margin: 0 auto 18px; }
+  .cta p { max-width: 680px; margin: 0 auto 28px; color: rgba(245,240,231,.66); font-size: 18px; }
+  .cta .hero-actions { justify-content: center; margin: 0; }
+
+  footer { padding: 36px 0; background: #0d0e0c; color: rgba(245,240,231,.62); }
+  .foot { display: flex; justify-content: space-between; gap: 22px; flex-wrap: wrap; font-size: 14px; }
+  .foot a { color: var(--paper); }
+
+  @media (max-width: 980px) {
+    .links { display: none; }
+    .hero-grid { grid-template-columns: 1fr; }
+    .hero-console { transform: none; min-height: auto; }
+    .proof, .grid4, .workflow, .split, .section-head, .trust-grid { grid-template-columns: 1fr; }
+    .step:nth-child(2), .step:nth-child(4) { transform: none; }
+    .workbench { grid-template-columns: 1fr; }
+    .rail, .side { border: 0; border-bottom: 1px solid var(--dark-line); }
+  }
+  @media (max-width: 620px) {
+    .wrap { padding: 0 18px; }
+    .nav-actions .ghost { display: none; }
+    .hero-inner { padding-top: 58px; }
+    .proof { display: none; }
+    section { padding: 64px 0; }
+    .btn { width: 100%; }
   }
 </style>
 </head>
 <body>
-
-<!-- =========== NAVBAR =========== -->
-<nav class="navbar" id="navbar">
-  <div class="container nav-inner">
-    <a href="#" class="brand" aria-label="Verstak">
-      <svg viewBox="0 0 100 100" fill="none">
-        <path d="M22 18 L50 70 L78 18" stroke="#f5f5f0" stroke-width="11" stroke-linecap="square" stroke-linejoin="round"/>
-        <path d="M12 76 L88 76 L82 88 L18 88 Z" fill="#ff7a18"/>
-        <path d="M12 76 L4 73 L4 80 L12 80 Z" fill="#ff7a18"/>
-        <rect x="40" y="88" width="20" height="6" fill="#ff7a18"/>
-      </svg>
-      <span>VERS<span class="accent">TAK</span></span>
+<header class="topbar">
+  <div class="wrap nav">
+    <a class="brand" href="#">
+      <img src="assets/logo.svg" alt="">
+      <span>Verstal <small>agent platform</small></span>
     </a>
-    <div class="nav-links">
-      <a href="#features">Возможности</a>
-      <a href="#pricing">Цены</a>
-      <a href="#faq">FAQ</a>
-      <a href="https://github.com/verstak" target="_blank" rel="noopener">GitHub</a>
-    </div>
-    <div class="nav-cta">
-      <a href="#download" class="btn btn-primary">Скачать</a>
-      <button class="burger" id="burger" aria-label="Меню"><span></span></button>
-    </div>
-  </div>
-  <div class="mobile-menu" id="mobileMenu">
-    <a href="#features">Возможности</a>
-    <a href="#pricing">Цены</a>
-    <a href="#faq">FAQ</a>
-    <a href="https://github.com/verstak" target="_blank" rel="noopener">GitHub</a>
-    <a href="#download" style="color: var(--accent);">Скачать</a>
-  </div>
-</nav>
-
-<!-- =========== HERO =========== -->
-<header class="hero">
-  <div class="container hero-inner">
-    <div>
-      <span class="hero-eyebrow">Открытая бета · Июнь 2026</span>
-      <h1>Твой AI-вер<span class="accent">с</span>так<br>для кода</h1>
-      <p class="hero-sub">
-        Claude <span class="pipe">·</span> GPT <span class="pipe">·</span> Gemini <span class="pipe">·</span> Grok <span class="pipe">·</span> GigaChat <span class="pipe">·</span> YandexGPT
-      </p>
-      <p class="hero-desc">
-        Vendor-agnostic IDE для русскоязычных разработчиков. Любая модель, один интерфейс, без VPN. Используй свои подписки — не плати дважды за токены.
-      </p>
-      <div class="hero-cta">
-        <a href="#download" class="btn btn-primary btn-lg">Скачать для Windows / macOS / Linux</a>
-        <a href="https://github.com/verstak" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">Посмотреть на GitHub</a>
-      </div>
-      <p class="hero-note">Бесплатно во время бета-теста · Предзаказная подписка от 1 990 ₽/мес</p>
-    </div>
-
-    <!-- Mock IDE window -->
-    <div class="ide" aria-hidden="true">
-      <div class="ide-bar">
-        <span class="ide-dot"></span>
-        <span class="ide-dot"></span>
-        <span class="ide-dot"></span>
-        <span class="ide-title">verstak — my-saas / src / api.ts</span>
-      </div>
-      <div class="ide-body">
-        <div class="ide-side">
-          <div class="label">Проекты</div>
-          <div class="item active">my-saas</div>
-          <div class="item muted">landing</div>
-          <div class="item muted">bot</div>
-          <div class="label">Модель</div>
-          <div class="item" style="color: var(--accent);">claude-4.5</div>
-          <div class="item muted">gpt-5</div>
-          <div class="item muted">gigachat</div>
-        </div>
-        <div class="ide-main">
-          <div class="ide-line"><span class="c">// api.ts — добавь endpoint /webhook</span></div>
-          <div class="ide-line"><span class="k">export async function</span> <span class="n">handleWebhook</span>(req) {</div>
-          <div class="ide-line">  <span class="k">const</span> data = <span class="k">await</span> req.<span class="n">json</span>();</div>
-          <div class="ide-line">  <span class="k">if</span> (!data.signature) <span class="k">return</span></div>
-          <div class="ide-line">    <span class="n">Response</span>.<span class="n">json</span>({ error: <span class="s">'no sig'</span> });</div>
-          <div class="ide-line">  <span class="k">await</span> <span class="n">verify</span>(data);</div>
-          <div class="ide-line">  <span class="k">return</span> <span class="n">Response</span>.<span class="n">json</span>({ ok: <span class="k">true</span> });</div>
-          <div class="ide-line">}</div>
-          <div class="ide-prompt">
-            <b>verstak ›</b> добавил верификацию подписи + 2 теста. Применить? <span class="ide-cursor"></span>
-          </div>
-        </div>
-      </div>
+    <nav class="links" aria-label="Основная навигация">
+      <a href="#product">Продукт</a>
+      <a href="#tiers">Линия</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#compare">Почему платить</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="btn ghost" href="#deploy">Внедрение</a>
+      <a class="btn primary" href="#start">Скачать Core</a>
     </div>
   </div>
 </header>
 
-<!-- =========== USP =========== -->
-<section id="why">
-  <div class="container">
-    <div class="section-eyebrow">Почему Verstak</div>
-    <h2 class="section-title">Три причины, по которым тебе нужен именно этот IDE</h2>
+<main>
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <div class="hero-grid">
+        <div class="hero-text">
+          <div class="eyebrow">агенты · разработка · рабочие места · российский контур</div>
+          <h1>Verstal — единая агентная платформа для разработки и управления рабочим местом.</h1>
+          <p class="hero-copy">
+            Подключай <b>Codex, Claude Code, Gemini, Grok, локальные и российские модели</b>, веди клиентские проекты, контролируй действия агентов и управляй рабочим контуром команды из одного desktop workspace.
+          </p>
+          <div class="compliance-strip" aria-label="Условия для российского B2B-контура">
+            <span>Без VPN</span>
+            <span>Оплата по расчётному счёту</span>
+            <span>Соблюдение 152-ФЗ</span>
+          </div>
+          <div class="hero-actions">
+            <a class="btn primary" href="https://github.com/frolofpavel/verstak/releases">Скачать Core</a>
+            <a class="btn green" href="#go">Хочу модели из коробки</a>
+            <a class="btn ghost" href="#deploy">Обсудить внедрение</a>
+          </div>
+          <div class="proof" aria-label="Ключевые свойства продукта">
+            <div><strong>Dev</strong><span>агенты для задач разработки</span></div>
+            <div><strong>Work</strong><span>управление рабочим местом</span></div>
+            <div><strong>OK</strong><span>контроль действий и диффов</span></div>
+            <div><strong>RU</strong><span>договор, счёт, 152-ФЗ</span></div>
+          </div>
+        </div>
 
-    <div class="grid-3">
-      <div class="card">
-        <span class="icon">🔧</span>
-        <h3>Любая модель, один IDE</h3>
-        <p>Claude, GPT, Gemini, Grok, GigaChat, YandexGPT. Переключайся на лету между провайдерами. Не зависишь от того, кому продастся стартап через год.</p>
-      </div>
-      <div class="card">
-        <span class="icon">💳</span>
-        <h3>Не плати за токены дважды</h3>
-        <p>Уже есть Claude Pro или ChatGPT Plus? Verstak использует твои подписочные CLI — не дублирует расходы на API. Один тулинг, все твои подписки.</p>
-      </div>
-      <div class="card">
-        <span class="icon">🇷🇺</span>
-        <h3>Локализован под РФ с первого дня</h3>
-        <p>GigaChat и YandexGPT нативно, без VPN. Оплата картой РФ. 1С-коннекторы. PDF-отчёты для бухгалтерии. Юрлицо в РФ.</p>
+        <div class="hero-console" aria-label="Интерфейс Verstal">
+          <div class="console-top">
+            <span>verstak://client/fridservis</span>
+            <span class="status-pill">agent paused</span>
+          </div>
+          <div class="console-body">
+            <div class="console-card">
+              <div class="console-label">Routing</div>
+              <div class="model-row"><div><strong>Codex</strong><span>coding · подписка</span></div><span class="chip green">active</span></div>
+              <div class="model-row"><div><strong>DeepSeek</strong><span>routine · cheap</span></div><span class="chip">queue</span></div>
+              <div class="model-row"><div><strong>Ollama</strong><span>private · local</span></div><span class="chip">local</span></div>
+            </div>
+            <div class="console-card">
+              <div class="console-label">Client task</div>
+              <div class="queue-row"><div><strong>Починить форму заявки</strong><span>site lead flow · prod risk</span></div><span class="chip amber">review</span></div>
+              <div class="hero-diff">
+                <div class="del">- await sendLead(payload)</div>
+                <div class="add">+ if (!validatePhone(payload.phone)) return setError(...)</div>
+                <div class="add">+ await sendLead({ ...payload, source: 'site' })</div>
+              </div>
+              <div class="approval">
+                <div><b>Остановлено перед записью</b><span>дифф готов, checkpoint создан</span></div>
+                <button class="ok-button">OK</button>
+              </div>
+            </div>
+            <div class="console-card">
+              <div class="console-label">Project log</div>
+              <div class="queue-row"><div><strong>09:47 · pending-write</strong><span>ожидает решения Павла</span></div><span class="chip">audit</span></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== HOW IT WORKS =========== -->
-<section id="how" style="background: var(--bg-deep);">
-  <div class="container">
-    <div class="section-eyebrow">Как работает</div>
-    <h2 class="section-title">От открытия проекта до production — четыре шага</h2>
+  <section class="dark" id="product">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="kicker">платформа</div>
+          <h2>Разработка, агенты и рабочее место в одном управляемом контуре</h2>
+        </div>
+        <p class="lead">Verstal соединяет модельную силу, агентные сценарии, контроль правок, журнал действий и клиентский контур. Это не отдельный чат рядом с работой, а управляющий слой над тем, как команда разрабатывает, проверяет и внедряет изменения.</p>
+      </div>
 
-    <div class="steps">
-      <div class="step">
-        <h3>Открой проект</h3>
-        <p>Verstak видит структуру, индексирует код, читает <code>CLAUDE.md</code> / <code>AGENTS.md</code> для контекста и правил.</p>
+      <div class="workbench" aria-label="Макет рабочего места Verstal">
+        <aside class="rail">
+          <div class="rail-title">Клиентские проекты</div>
+          <div class="project active"><strong>fridservis.ru</strong><span>аудит формы заявки · prod risk</span></div>
+          <div class="project"><strong>bitrix24-sync</strong><span>CRM webhook · review pending</span></div>
+          <div class="project"><strong>1c-price-loader</strong><span>OData · local model</span></div>
+          <div class="rail-title" style="margin-top:24px">Модели</div>
+          <div class="agent"><strong>Codex</strong><span>coding · подписка</span></div>
+          <div class="agent"><strong>DeepSeek</strong><span>routine · дешево</span></div>
+          <div class="agent"><strong>Ollama</strong><span>private · local</span></div>
+        </aside>
+        <section class="stage">
+          <div class="panel-title">Apply-контроль</div>
+          <div class="terminal">
+            <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>pending-write · src/components/LeadForm.tsx</span></div>
+            <div class="diff">
+              <div class="line del">- await sendLead(payload)</div>
+              <div class="line add">+ const valid = validatePhone(payload.phone)</div>
+              <div class="line add">+ if (!valid) return setError('Проверь телефон')</div>
+              <div class="line add">+ await sendLead({ ...payload, source: 'site' })</div>
+              <div class="line">  trackEvent('lead_submit')</div>
+            </div>
+          </div>
+          <div class="gate">
+            <b>Остановлено перед применением.</b> Агент предлагает правку, но не меняет файл без подтверждения.
+            <div class="gate-actions">
+              <button class="mini ok">Применить</button>
+              <button class="mini">Отклонить</button>
+              <button class="mini">Отдать на ревью другой модели</button>
+            </div>
+          </div>
+        </section>
+        <aside class="side">
+          <div class="panel-title">Журнал проекта</div>
+          <div class="log"><strong>09:42</strong><span>Codex нашёл баг в валидации телефона</span></div>
+          <div class="log"><strong>09:44</strong><span>GigaChat проверил текст ошибки</span></div>
+          <div class="log"><strong>09:46</strong><span>Checkpoint создан до записи</span></div>
+          <div class="log"><strong>09:47</strong><span>Дифф ожидает OK Павла</span></div>
+        </aside>
       </div>
-      <div class="step">
-        <h3>Выбери модель</h3>
-        <p>Клик в композере — выбор провайдера и модели. Подсчёт стоимости токенов в реальном времени.</p>
-      </div>
-      <div class="step">
-        <h3>Куй код</h3>
-        <p>Plan mode для сложных задач, Autopilot для рутины, multi-file diff с подтверждением каждой правки.</p>
-      </div>
-      <div class="step">
-        <h3>Контролируй</h3>
-        <p>Undo-стек, kill switch (Shift+Esc), secret-scanner, path policy. Ничего не уходит без твоего согласия.</p>
+
+      <div class="trust-grid" aria-label="Российский B2B-контур">
+        <div class="trust-card">
+          <strong>Без VPN и серых обходов</strong>
+          <span>Работа в российском контуре: локальные модели, RU-провайдеры и прямое подключение без ежедневной IP-пляски.</span>
+        </div>
+        <div class="trust-card">
+          <strong>Оплата по расчётному счёту</strong>
+          <span>Для компаний и агентств: договор, счёт, закрывающие документы и понятная закупка вместо Stripe/BIN-барьеров.</span>
+        </div>
+        <div class="trust-card">
+          <strong>Соблюдение 152-ФЗ</strong>
+          <span>On-prem, BYOK, локальные модели, контроль секретов и журнал действий для задач, где код и данные нельзя выпускать наружу.</span>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== COMPARE =========== -->
-<section id="compare">
-  <div class="container">
-    <div class="section-eyebrow">Сравнение</div>
-    <h2 class="section-title">Verstak vs западные IDE</h2>
-    <p class="section-lead">Не маркетинг — таблица фактов. Что есть у нас, чего нет у Cursor, Antigravity и Windsurf.</p>
-
-    <div class="table-wrap">
-      <table class="compare">
-        <thead>
-          <tr>
-            <th></th>
-            <th>Cursor</th>
-            <th>Antigravity</th>
-            <th>Windsurf</th>
-            <th class="verstak-col">Verstak</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Любая модель</td>
-            <td><span class="cross">✕</span> Anthropic</td>
-            <td><span class="cross">✕</span> Gemini</td>
-            <td><span class="partial">●</span> несколько API</td>
-            <td class="verstak-col"><span class="check">✓</span> Любая + GigaChat / YandexGPT</td>
-          </tr>
-          <tr>
-            <td>Подписки CLI</td>
-            <td><span class="cross">✕</span> платишь за токены</td>
-            <td><span class="cross">✕</span> платишь за токены</td>
-            <td><span class="cross">✕</span> платишь за токены</td>
-            <td class="verstak-col"><span class="check">✓</span> Используешь свои CLI</td>
-          </tr>
-          <tr>
-            <td>Юрлицо</td>
-            <td>🇺🇸 США</td>
-            <td>🇺🇸 США</td>
-            <td>🇺🇸 США</td>
-            <td class="verstak-col">🇷🇺 РФ</td>
-          </tr>
-          <tr>
-            <td>Оплата картой РФ</td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td class="verstak-col"><span class="check">✓</span></td>
-          </tr>
-          <tr>
-            <td>Российские модели</td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td class="verstak-col"><span class="check">✓</span> Нативно</td>
-          </tr>
-          <tr>
-            <td>1С-интеграция</td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td><span class="cross">✕</span></td>
-            <td class="verstak-col"><span class="check">✓</span></td>
-          </tr>
-          <tr>
-            <td>Open-platform</td>
-            <td>Закрытая</td>
-            <td>Закрытая</td>
-            <td>Полу-открытая</td>
-            <td class="verstak-col"><span class="check">✓</span> Любые провайдеры</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-<!-- =========== AUDIENCE =========== -->
-<section id="for-who" style="background: var(--bg-deep);">
-  <div class="container">
-    <div class="section-eyebrow">Для кого</div>
-    <h2 class="section-title">Три портрета мастера</h2>
-
-    <div class="audiences">
-      <div class="audience">
-        <h3>Solo-разработчик</h3>
-        <span class="price">1 990 ₽/мес</span>
-        <p>Fullstack, frontend или backend. Уже платит за Claude Pro / ChatGPT Plus и хочет нативный РФ-инструмент без посредников.</p>
+  <section id="tiers">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="kicker">линейка продукта</div>
+          <h2>Соединяем три модели монетизации, но не смешиваем их в кашу</h2>
+        </div>
+        <p class="lead">Пользователь входит бесплатно через Core. Если ему нужна сила сразу — берёт Go. Если у него поток проектов — Pro. Если нужен контур клиента — Deploy.</p>
       </div>
-      <div class="audience">
-        <h3>Команда 3–10 человек</h3>
-        <span class="price">9 990 ₽/мес</span>
-        <p>Стартап или мидл-бизнес. Единая платформа для команды, юр.чистота, общие коннекторы и приоритетная поддержка.</p>
-      </div>
-      <div class="audience">
-        <h3>Enterprise</h3>
-        <span class="price">от 100 000 ₽/мес</span>
-        <p>Банки, телеком, гос-сектор. On-premise, локальные модели (GigaChat / YandexGPT), 1С-интеграции, SLA.</p>
+
+      <div class="grid4">
+        <article class="tier">
+          <span class="badge">сейчас</span>
+          <h3>Core</h3>
+          <p class="price">0 ₽ · open source</p>
+          <p>Desktop workspace поверх твоих подписок, API-ключей и локальных моделей.</p>
+          <ul>
+            <li>Codex / Claude / Gemini / Grok CLI</li>
+            <li>Ollama и custom OpenAI endpoint</li>
+            <li>Дифф, approval, checkpoint, undo</li>
+          </ul>
+        </article>
+        <article class="tier dark-card" id="go">
+          <span class="badge">early access</span>
+          <h3>Go</h3>
+          <p class="price">модели из коробки</p>
+          <p>Ответ на главный вопрос: “почему в Cursor модель уже есть, а здесь надо настраивать?”</p>
+          <ul>
+            <li>стартовый баланс или подписка</li>
+            <li>проверенные модели для coding/review/routine</li>
+            <li>прозрачные лимиты и расход</li>
+          </ul>
+        </article>
+        <article class="tier">
+          <span class="badge">для команд</span>
+          <h3>Pro</h3>
+          <p class="price">workspace по проектам</p>
+          <p>Платный слой для агентств и команд, где важны не токены, а порядок.</p>
+          <ul>
+            <li>клиенты, проекты, роли</li>
+            <li>журнал действий и отчёт клиенту</li>
+            <li>cost tracking и cross-review</li>
+          </ul>
+        </article>
+        <article class="tier">
+          <span class="badge">внедрение</span>
+          <h3>Deploy</h3>
+          <p class="price">под ключ</p>
+          <p>Managed/on-prem установка под клиента, российский контур и коннекторы.</p>
+          <ul>
+            <li>GigaChat / YandexGPT / local models</li>
+            <li>1С, Битрикс, Telegram, SSH</li>
+            <li>обучение, поддержка, регламент</li>
+          </ul>
+        </article>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== FEATURES =========== -->
-<section id="features">
-  <div class="container">
-    <div class="section-eyebrow">Возможности</div>
-    <h2 class="section-title">Девять инструментов на верстаке</h2>
-    <p class="section-lead">Не «AI-чатик», а полноценный рабочий стол: от plan mode до vision и коннекторов в 1С.</p>
-
-    <div class="features">
-      <div class="feature">
-        <span class="icon">🔌</span>
-        <h4>8+ провайдеров</h4>
-        <p>Claude, GPT, Gemini, Grok, GigaChat, YandexGPT через API + CLI-подписки. Переключение в один клик.</p>
+  <section class="dark" id="workflow">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="kicker">killer workflow</div>
+          <h2>Из клиентской задачи в проверенное изменение</h2>
+        </div>
+        <p class="lead">Verstal не должен побеждать Cursor “как IDE”. Он должен закрывать более широкий рабочий цикл: задача, модель, агент, контроль, журнал, рабочее место и внедрение в контур команды.</p>
       </div>
-      <div class="feature">
-        <span class="icon">📊</span>
-        <h4>Plan Mode + Autopilot</h4>
-        <p>AI генерирует структурный план, ты запускаешь по шагам или включаешь автопилот со step-verify.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">🗂️</span>
-        <h4>Multi-project rail</h4>
-        <p>Все открытые проекты в одной боковой панели. Переключение без потери контекста.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">🌐</span>
-        <h4>Встроенный браузер</h4>
-        <p>Electron webview + AI-tools <code>browser_navigate</code>, <code>browser_read</code>, <code>browser_screenshot</code>.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">👁️</span>
-        <h4>Vision</h4>
-        <p>Gemini 3 Pro анализирует скриншоты страниц. Покажи модели UI — получи план переделки.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">🔐</span>
-        <h4>Secret scanner</h4>
-        <p>.env, .ssh, ключи блокируются. API-ключи редактируются регуляркой во всех output'ах.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">↶</span>
-        <h4>Undo-стек</h4>
-        <p>Откат любой правки в один клик. Никаких «ой, AI снёс важный файл».</p>
-      </div>
-      <div class="feature">
-        <span class="icon">🔗</span>
-        <h4>Connectors</h4>
-        <p>1С OData + generic HTTP из коробки. Credentials в safeStorage, не в промте.</p>
-      </div>
-      <div class="feature">
-        <span class="icon">💰</span>
-        <h4>Cost estimator</h4>
-        <p>Цена токенов с учётом кеш-скидки прямо в композере. Знаешь, сколько стоит каждый запрос.</p>
+      <div class="workflow">
+        <div class="step"><div class="num">01</div><strong>Проект</strong><span>Выбираешь клиента, сайт, репозиторий или рабочую папку.</span></div>
+        <div class="step"><div class="num">02</div><strong>Модель</strong><span>Core берёт твой CLI/API. Go даст модель сразу.</span></div>
+        <div class="step"><div class="num">03</div><strong>Действие</strong><span>Агент читает файлы, логи, терминал, коннекторы.</span></div>
+        <div class="step"><div class="num">04</div><strong>Контроль</strong><span>Перед записью показывает дифф и ждёт OK.</span></div>
+        <div class="step"><div class="num">05</div><strong>Отчёт</strong><span>Журнал объясняет, что сделано, чем проверено, как откатить.</span></div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== PRICING =========== -->
-<section id="pricing" style="background: var(--bg-deep);">
-  <div class="container">
-    <div class="section-eyebrow">Цены</div>
-    <h2 class="section-title">Три тарифа. Без скрытых строк.</h2>
-    <span class="pricing-note">Бесплатно во время открытой беты — присоединяйся к waitlist</span>
+  <section id="compare">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="kicker">почему платить</div>
+          <h2>Платят не за оболочку. Платят за снятую боль</h2>
+        </div>
+        <p class="lead">Если Verstal остаётся только интерфейсом к чужим ключам, платить почти незачем. Деньги появляются там, где платформа даёт модель, управление рабочим контуром, контроль риска и внедрение.</p>
+      </div>
+      <div class="compare">
+        <table>
+          <thead>
+            <tr>
+              <th>Слой</th>
+              <th>Что снимает</th>
+              <th>Кто платит</th>
+              <th>Почему не Cursor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Core</td>
+              <td><span class="yes">хаос инструментов</span>: один workspace для CLI, BYOK и local models</td>
+              <td>OSS-пользователь, внедренец, dev в РФ</td>
+              <td>не замена модели, а контрольный слой поверх твоей силы</td>
+            </tr>
+            <tr>
+              <td>Go</td>
+              <td><span class="yes">нет модели из коробки</span>: старт без ключей и baseUrl</td>
+              <td>разработчик и маленькая команда</td>
+              <td>прозрачный расход, выбор моделей, РФ-доступ</td>
+            </tr>
+            <tr>
+              <td>Pro</td>
+              <td><span class="yes">нет операционного учёта</span>: проекты, журнал, ревью, стоимость</td>
+              <td>агентство, фрилансер-автоматизатор, тимлид</td>
+              <td>Cursor не ведёт клиентский проект как операционку</td>
+            </tr>
+            <tr>
+              <td>Deploy</td>
+              <td><span class="yes">страх клиента</span>: 152-ФЗ, on-prem, коннекторы, поддержка</td>
+              <td>B2B-клиент и внедренец</td>
+              <td>западный backend, платежи, VPN и ИБ-риски</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
-    <div class="plans">
-      <div class="plan">
-        <h3>Solo</h3>
-        <div class="price">1 990 ₽<span class="per"> / мес</span></div>
-        <p class="desc">Для одного разработчика. Всё нужное, ничего лишнего.</p>
+  <section>
+    <div class="wrap split">
+      <div class="box">
+        <h3>Честное ограничение</h3>
+        <p>Verstal не выигрывает у Cursor полировкой IDE и не выигрывает у Codex силой модели сам по себе.</p>
         <ul>
-          <li>Все 8+ провайдеров</li>
-          <li>1 пользователь</li>
-          <li>Все фичи продукта</li>
-          <li>Поддержка по email</li>
-          <li>Оплата картой РФ</li>
+          <li>Поэтому Core бесплатный и должен быть полезен поверх уже купленных агентов.</li>
+          <li>Go нужен, чтобы убрать трение “где модель?”</li>
+          <li>Pro и Deploy нужны, чтобы продавать не токены, а порядок и снижение риска.</li>
         </ul>
-        <a href="#download" class="btn btn-ghost">Попробовать бесплатно</a>
       </div>
-
-      <div class="plan featured">
-        <span class="plan-badge">Рекомендовано</span>
-        <h3>Команда</h3>
-        <div class="price">9 990 ₽<span class="per"> / мес</span></div>
-        <p class="desc">Для стартапов и команд 3–10 разработчиков.</p>
+      <div class="box">
+        <h3>Главный пользователь</h3>
+        <p>Не абстрактный “разработчик”. Первый покупатель — AI-внедренец, который отвечает за клиентские сайты, CRM, 1С, боты, интеграции и отчёты.</p>
         <ul>
-          <li>До 10 пользователей</li>
-          <li>Всё из Solo</li>
-          <li>Shared connectors</li>
-          <li>Приоритетная поддержка</li>
-          <li>Командный биллинг</li>
+          <li>Один сорванный проект стоит дороже подписки.</li>
+          <li>Дифф и журнал превращаются в доверие клиента.</li>
+          <li>RU-контур и локальные модели становятся аргументом продажи.</li>
         </ul>
-        <a href="#download" class="btn btn-primary">Выбрать Команду</a>
-      </div>
-
-      <div class="plan">
-        <h3>Enterprise</h3>
-        <div class="price">по запросу<span class="per"></span></div>
-        <p class="desc">Банки, телеком, гос-сектор и крупный бизнес.</p>
-        <ul>
-          <li>Безлимит пользователей</li>
-          <li>On-premise / self-hosted</li>
-          <li>Кастомные интеграции</li>
-          <li>SLA + dedicated support</li>
-          <li>Custom contracts</li>
-        </ul>
-        <a href="mailto:sales@verstak.io" class="btn btn-ghost">Связаться</a>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== FAQ =========== -->
-<section id="faq">
-  <div class="container">
-    <div class="section-eyebrow">FAQ</div>
-    <h2 class="section-title">Частые вопросы</h2>
-
-    <div class="faq">
-      <details>
-        <summary>Чем Verstak отличается от Cursor?</summary>
-        <div class="answer">
-          Тремя вещами: (1) любая модель — не привязан к Anthropic; (2) использует твои CLI-подписки вместо токенов API; (3) сделан под РФ — GigaChat / YandexGPT нативно, оплата картой РФ, 1С-коннекторы, юрлицо в России.
-        </div>
-      </details>
-      <details>
-        <summary>А я уже плачу за Claude Pro / ChatGPT Plus — это пригодится?</summary>
-        <div class="answer">
-          Да. Verstak умеет работать через подписочные CLI (Claude Code, Codex, Gemini, Grok). Ставишь CLI один раз, логинишься, и Verstak использует твою подписку — не берёт ни рубля за токены. Если CLI ещё не вышел для нужного провайдера, Verstak подключается через API по твоему ключу.
-        </div>
-      </details>
-      <details>
-        <summary>Безопасны ли мои API-ключи и код?</summary>
-        <div class="answer">
-          Ключи хранятся в Electron <code>safeStorage</code> (системный keychain). Secret-scanner блокирует чтение <code>.env</code>, <code>.ssh</code>, <code>*.key</code>, <code>credentials</code>. Все output'ы инструментов проходят через регулярки, редактирующие API-ключи и приватные блоки как <code>[REDACTED:type]</code>. Код никуда не уходит, кроме выбранного тобой провайдера модели.
-        </div>
-      </details>
-      <details>
-        <summary>Какие операционные системы поддерживаются?</summary>
-        <div class="answer">
-          Windows 10/11, macOS 12+ (Intel и Apple Silicon), Linux (Ubuntu 22.04+, Fedora, Arch). Сборки — Electron, нативная производительность, ~150 МБ дистрибутив.
-        </div>
-      </details>
-      <details>
-        <summary>Нужен ли VPN для GigaChat / YandexGPT?</summary>
-        <div class="answer">
-          Нет. Verstak обращается к российским API напрямую с российских IP. Никакого VPN, никаких прокси. Это и есть одна из главных причин Russia-first позиционирования.
-        </div>
-      </details>
-      <details>
-        <summary>Поддерживается ли on-premise развёртывание?</summary>
-        <div class="answer">
-          Да, на Enterprise-тарифе. Можно поставить Verstak в закрытый контур, подключить локальные модели (GigaChat MLP, YandexGPT on-premise, llama.cpp), настроить аудит и SSO. Связывайтесь — <a href="mailto:sales@verstak.io" style="color: var(--accent);">sales@verstak.io</a>.
-        </div>
-      </details>
-      <details>
-        <summary>Как происходит оплата для РФ?</summary>
-        <div class="answer">
-          Карта любого российского банка через ЮKassa / CloudPayments. Для юрлиц — счёт по реквизитам, акт, счёт-фактура с НДС. Никаких посредников, иностранных платёжных систем или криптовалют.
-        </div>
-      </details>
-      <details>
-        <summary>Что в roadmap?</summary>
-        <div class="answer">
-          Q2 2026: open beta, packaged installer, multi-chat per project. Q3: background agents, MCP-серверы, маркетплейс коннекторов, on-premise Enterprise. Q4: коллаборативные сессии, командные библиотеки промтов, биллинг по командам. Подписывайся на GitHub — релизы выходят каждые 2 недели.
-        </div>
-      </details>
-    </div>
-  </div>
-</section>
-
-<!-- =========== CTA =========== -->
-<section id="download">
-  <div class="container">
-    <div class="cta-block">
-      <h2>Готов забрать AI-разработку в свои руки?</h2>
-      <p>Скачай Verstak бесплатно. Подключи свои подписки. Начни кодить уже сегодня.</p>
-      <div class="cta-buttons">
-        <a href="#" class="btn btn-primary btn-lg">Скачать для Windows</a>
-        <a href="#" class="btn btn-primary btn-lg">для macOS</a>
-        <a href="#" class="btn btn-primary btn-lg">для Linux</a>
+  <section class="cta" id="start">
+    <div class="wrap">
+      <h2>Начни с Core. Добавь модели. Преврати в рабочую операционку.</h2>
+      <p>Сейчас Verstal ценен как единый слой управления агентами, моделями и проектами. Следующий шаг продукта — Go, чтобы модель была доступна сразу после установки.</p>
+      <div class="hero-actions">
+        <a class="btn green" href="https://github.com/frolofpavel/verstak/releases">Скачать Core</a>
+        <a class="btn ghost" href="https://github.com/frolofpavel/verstak">GitHub</a>
+        <a class="btn ghost" href="#deploy">Запросить Deploy</a>
       </div>
-      <p class="cta-note">Открытая бета · Доступна с июня 2026 · github.com/verstak</p>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- =========== FOOTER =========== -->
+  <section id="deploy">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="kicker">для B2B</div>
+          <h2>Deploy продаётся руками, пока продукт растёт</h2>
+        </div>
+        <p class="lead">Если клиенту нужен контур, регламент, модели, коннекторы и ответственность, это не “скачать приложение”. Это внедрение. Здесь Verstal становится частью управляемого рабочего места клиента.</p>
+      </div>
+      <div class="split">
+        <div class="box">
+          <h3>Что входит</h3>
+          <p>Настройка проекта, моделей, режимов контроля, коннекторов и отчётности под клиента.</p>
+          <ul>
+            <li>локальные модели или RU API</li>
+            <li>1С / Битрикс / Telegram / Sheets / SSH</li>
+            <li>журнал действий и правила работы агента</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Когда покупать</h3>
+          <p>Когда AI должен работать не в демо, а в боевых задачах с ответственностью за результат.</p>
+          <ul>
+            <li>клиент не пускает код во внешний backend</li>
+            <li>команда хочет Codex/Claude, но с контролем и журналом</li>
+            <li>нужен repeatable workflow для внедрений</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
 <footer>
-  <div class="container">
-    <div class="footer-grid">
-      <div class="footer-brand">
-        <div class="brand">
-          <svg viewBox="0 0 100 100" fill="none">
-            <path d="M22 18 L50 70 L78 18" stroke="#f5f5f0" stroke-width="11" stroke-linecap="square" stroke-linejoin="round"/>
-            <path d="M12 76 L88 76 L82 88 L18 88 Z" fill="#ff7a18"/>
-            <path d="M12 76 L4 73 L4 80 L12 80 Z" fill="#ff7a18"/>
-            <rect x="40" y="88" width="20" height="6" fill="#ff7a18"/>
-          </svg>
-          <span>VERS<span class="accent">TAK</span></span>
-        </div>
-        <p>© 2026 Verstak · Сделано в РФ. AI-верстак для русскоязычных разработчиков.</p>
-      </div>
-      <div class="footer-col">
-        <h5>Продукт</h5>
-        <ul>
-          <li><a href="#download">Скачать</a></li>
-          <li><a href="#features">Возможности</a></li>
-          <li><a href="#pricing">Цены</a></li>
-          <li><a href="#">Roadmap</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h5>Ресурсы</h5>
-        <ul>
-          <li><a href="https://github.com/verstak" target="_blank" rel="noopener">GitHub</a></li>
-          <li><a href="#">Документация</a></li>
-          <li><a href="#">Сообщество</a></li>
-          <li><a href="#">Блог</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h5>Компания</h5>
-        <ul>
-          <li><a href="#">О нас</a></li>
-          <li><a href="mailto:hello@verstak.io">Контакты</a></li>
-          <li><a href="#">Юр. информация</a></li>
-          <li><a href="mailto:sales@verstak.io">Enterprise</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="footer-bottom">
-      <span>VERSTAK.IO · v0.1 BETA</span>
-      <div class="socials">
-        <a href="https://t.me/verstak" target="_blank" rel="noopener" aria-label="Telegram">
-          <svg viewBox="0 0 24 24"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
-        </a>
-        <a href="https://github.com/verstak" target="_blank" rel="noopener" aria-label="GitHub">
-          <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.17c-3.34.72-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.85 1.24 1.85 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.23-3.22-.12-.3-.53-1.52.12-3.17 0 0 1-.32 3.3 1.23a11.5 11.5 0 016 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.65.25 2.87.12 3.17.77.84 1.23 1.91 1.23 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.58C20.57 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>
-        </a>
-        <a href="https://x.com/verstak" target="_blank" rel="noopener" aria-label="X">
-          <svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        </a>
-      </div>
-    </div>
+  <div class="wrap foot">
+    <span>© 2026 Verstal. Единая агентная платформа для разработки и управления рабочим местом.</span>
+    <span><a href="https://github.com/frolofpavel/verstak">GitHub</a> · <a href="https://github.com/frolofpavel/verstak/releases">Releases</a> · Core / Go / Pro / Deploy</span>
   </div>
 </footer>
-
 <script>
-  // Navbar shadow on scroll
-  const nav = document.getElementById('navbar');
-  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 20);
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-
-  // Mobile menu
-  const burger = document.getElementById('burger');
-  const menu = document.getElementById('mobileMenu');
-  burger.addEventListener('click', () => menu.classList.toggle('open'));
-  menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => menu.classList.remove('open')));
+  const revealItems = document.querySelectorAll('section .section-head, .workbench, .tier, .step, .box, .compare')
+  revealItems.forEach(item => item.classList.add('reveal'))
+  const reveal = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in')
+        reveal.unobserve(entry.target)
+      }
+    })
+  }, { threshold: 0.12 })
+  revealItems.forEach(item => reveal.observe(item))
 </script>
-
 </body>
 </html>

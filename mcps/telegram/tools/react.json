@@ -1,0 +1,23 @@
+{
+  "name": "react",
+  "description": "Add an emoji reaction to a Telegram message. Telegram only accepts a fixed whitelist (👍 👎 ❤ 🔥 👀 🎉 etc) — non-whitelisted emoji will be rejected.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "chat_id": {
+        "type": "string"
+      },
+      "message_id": {
+        "type": "string"
+      },
+      "emoji": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "chat_id",
+      "message_id",
+      "emoji"
+    ]
+  }
+}

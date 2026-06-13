@@ -1,0 +1,38 @@
+{
+  "name": "reply",
+  "description": "Reply on Telegram. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, and files (absolute paths) to attach images or documents.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "chat_id": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "reply_to": {
+        "type": "string",
+        "description": "Message ID to thread under. Use message_id from the inbound <channel> block."
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Absolute file paths to attach. Images send as photos (inline preview); other types as documents. Max 50MB each."
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "text",
+          "markdownv2"
+        ],
+        "description": "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed)."
+      }
+    },
+    "required": [
+      "chat_id",
+      "text"
+    ]
+  }
+}
