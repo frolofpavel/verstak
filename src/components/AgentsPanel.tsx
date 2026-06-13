@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
 import type { SubSession, SessionTodo, StoredChatMessage, ProviderDescriptorDTO } from '../types/api'
 import { Markdown } from './Markdown'
+import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 
 /**
  * Панель Agents (Фаза 2, Идея 7) — Inspector 2.0 для суб-агентов.
@@ -41,6 +42,16 @@ function fmtCost(cents: number | null): string | null {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+/** Узел развёрстанного дерева делегирования. */
+interface TreeNode {
+  sub: SubSession
+  level: number
+  /** Есть ли дочерние суб-агенты — для toggle сворачивания. */
+  hasChildren: boolean
+  /** id родительского узла (sub.id) — для скрытия под свёрнутым предком. */
+  parentId: number | null
+}
+
 /**
  * Дерево делегирования (Фаза 4, Идея 3): раскладывает плоский список суб-сессий
  * в иерархию main → суб → под-суб по связи callId ↔ parentCallId. Возвращает
@@ -48,7 +59,7 @@ function fmtCost(cents: number | null): string | null {
  * родителя (parentCallId == null) или с неизвестным родителем — корни (дети
  * главного агента). Защита от циклов: посещённые callId не разворачиваются дважды.
  */
-function buildAgentTree(subs: SubSession[]): Array<{ sub: SubSession; level: number }> {
+function buildAgentTree(subs: SubSession[]): TreeNode[] {
   const byParent = new Map<string, SubSession[]>()
   const knownCallIds = new Set(subs.map(s => s.callId).filter(Boolean) as string[])
   const roots: SubSession[] = []
@@ -62,18 +73,18 @@ function buildAgentTree(subs: SubSession[]): Array<{ sub: SubSession; level: num
       roots.push(s)
     }
   }
-  const out: Array<{ sub: SubSession; level: number }> = []
+  const out: TreeNode[] = []
   const visited = new Set<number>()
-  const walk = (s: SubSession, level: number) => {
+  const walk = (s: SubSession, level: number, parentId: number | null) => {
     if (visited.has(s.id)) return  // защита от циклов
     visited.add(s.id)
-    out.push({ sub: s, level })
     const children = s.callId ? byParent.get(s.callId) ?? [] : []
-    for (const c of children) walk(c, level + 1)
+    out.push({ sub: s, level, hasChildren: children.length > 0, parentId })
+    for (const c of children) walk(c, level + 1, s.id)
   }
-  for (const r of roots) walk(r, 0)
+  for (const r of roots) walk(r, 0, null)
   // На случай орфанов из цикла — добавим непосещённые в конец как корни.
-  for (const s of subs) if (!visited.has(s.id)) walk(s, 0)
+  for (const s of subs) if (!visited.has(s.id)) walk(s, 0, null)
   return out
 }
 
@@ -97,22 +108,28 @@ function SubSessionViewer({ sub, providerLabel, onClose, onBring }: { sub: SubSe
     [messages]
   )
 
+  const status = sub.status ?? ''
   return (
-    <div className="gg-inspector-csv-overlay" onClick={onClose}>
-      <div className="gg-debug-modal" onClick={e => e.stopPropagation()}>
-        <div className="gg-inspector-csv-head">
-          <span>🤖 {sub.role ?? 'sub-agent'} · {providerLabel(sub.providerId)} · {STATUS_LABEL[sub.status ?? ''] ?? sub.status}</span>
-          <div className="gg-inspector-csv-actions">
+    <div className="gg-subviewer-overlay" onClick={onClose}>
+      <div className="gg-subviewer-modal" onClick={e => e.stopPropagation()}>
+        <div className="gg-subviewer-head">
+          <div className="gg-subviewer-title">
+            <span className={`gg-agent-status-dot is-${status}`} />
+            <span className="gg-subviewer-role">🤖 {sub.role ?? 'sub-agent'}</span>
+            <span className="gg-subviewer-sub">{providerLabel(sub.providerId)}{sub.model ? ` · ${sub.model}` : ''}</span>
+            <span className={`gg-subviewer-status is-${status}`}>{STATUS_LABEL[status] ?? status}</span>
+          </div>
+          <div className="gg-subviewer-actions">
             {lastAssistant && (
               <button className="gg-btn gg-btn-ghost" onClick={() => { onBring(lastAssistant); onClose() }}>↪ Притащить в чат</button>
             )}
             <button className="gg-btn gg-btn-ghost" onClick={onClose}>Закрыть</button>
           </div>
         </div>
-        <div className="gg-debug-body">
-          <div className="gg-debug-section-title">Задача</div>
-          <pre className="gg-debug-pre">{sub.task ?? '—'}</pre>
-          <div className="gg-debug-section-title">История ({messages.length})</div>
+        <div className="gg-subviewer-body">
+          <div className="gg-subviewer-section-title">Задача</div>
+          <pre className="gg-subviewer-pre">{sub.task ?? '—'}</pre>
+          <div className="gg-subviewer-section-title">История ({messages.length})</div>
           {loading && <div className="gg-panel-empty">Загрузка…</div>}
           {!loading && messages.length === 0 && <div className="gg-panel-empty">История пуста.</div>}
           {messages.map(m => (
@@ -139,6 +156,8 @@ export function AgentsPanel() {
   const [roleFilter, setRoleFilter] = useState<string>('')
   const [providerFilter, setProviderFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  // Свёрнутые родительские узлы дерева (по sub.id). По умолчанию всё развёрнуто.
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   // Карта id провайдера → читаемый лейбл (shortLabel/name всех провайдеров).
   const [providerMeta, setProviderMeta] = useState<Record<string, string>>({})
 
@@ -187,14 +206,49 @@ export function AgentsPanel() {
 
   // Дерево делегирования: когда фильтры не активны — показываем иерархию
   // main → суб → под-суб с отступами. С активным фильтром структура рвётся,
-  // поэтому показываем плоско (level 0).
+  // поэтому показываем плоско (level 0, без детей).
   const treeActive = !roleFilter && !providerFilter && !statusFilter
-  const tree = useMemo(
-    () => treeActive ? buildAgentTree(filtered) : filtered.map(sub => ({ sub, level: 0 })),
+  const tree = useMemo<TreeNode[]>(
+    () => treeActive
+      ? buildAgentTree(filtered)
+      : filtered.map(sub => ({ sub, level: 0, hasChildren: false, parentId: null })),
     [filtered, treeActive]
   )
 
+  // Видимое дерево: скрываем узлы, у которых свёрнут какой-либо предок.
+  // Идём по pre-order списку — если родитель в collapsed, прячем всё поддерево.
+  const visibleTree = useMemo<TreeNode[]>(() => {
+    if (collapsed.size === 0) return tree
+    const hidden = new Set<number>()
+    const out: TreeNode[] = []
+    for (const node of tree) {
+      const parentHidden = node.parentId != null && (hidden.has(node.parentId) || collapsed.has(node.parentId))
+      if (parentHidden) {
+        hidden.add(node.sub.id)
+        continue
+      }
+      out.push(node)
+    }
+    return out
+  }, [tree, collapsed])
+
+  function toggleCollapse(id: number) {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const runningCount = subs.filter(s => s.status === 'running').length
+
+  // Инжект в композер основного чата + переход на вкладку Chat.
+  // Используется empty-state кнопками быстрого старта оркестрации/роя.
+  function injectToChat(text: string) {
+    window.dispatchEvent(new CustomEvent('gg-inject-prompt', { detail: text }))
+    setActiveView('chat')
+  }
 
   // Притащить результат суба в композер основного чата (переиспользуем
   // существующий CustomEvent gg-inject-prompt, что слушает Chat.tsx).
@@ -254,53 +308,90 @@ export function AgentsPanel() {
       </div>
 
       <div className="gg-panel-body">
-        {todos.length > 0 && (
-          <div className="gg-todogate">
-            <div className="gg-todogate-head">
-              <span className="gg-todogate-title">TodoGate</span>
-              <span className="gg-todogate-progress">{todos.filter(t => t.status === 'done').length}/{todos.length} готово</span>
+        {todos.length > 0 && (() => {
+          const doneCount = todos.filter(t => t.status === 'done').length
+          const pct = todos.length > 0 ? Math.round((doneCount / todos.length) * 100) : 0
+          return (
+            <div className="gg-todogate">
+              <div className="gg-todogate-head">
+                <span className="gg-todogate-title">TodoGate</span>
+                <span className="gg-todogate-progress">{doneCount}/{todos.length} готово</span>
+              </div>
+              {/* Прогресс-бар — наглядная доля закрытых пунктов. */}
+              <div className="gg-todogate-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                <div className="gg-todogate-bar-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="gg-todogate-list">
+                {todos.map(t => (
+                  <div key={t.id} className={`gg-todo-item is-${t.status}`} title={t.goal ?? ''}>
+                    <span className="gg-todo-icon">
+                      {t.status === 'done' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'blocked' ? '⛔' : '○'}
+                    </span>
+                    <span className="gg-todo-title">{t.title}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="gg-todogate-list">
-              {todos.map(t => (
-                <div key={t.id} className={`gg-todo-item is-${t.status}`} title={t.goal ?? ''}>
-                  <span className="gg-todo-icon">
-                    {t.status === 'done' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'blocked' ? '⛔' : '☐'}
-                  </span>
-                  <span className="gg-todo-title">{t.title}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )
+        })()}
         {filtered.length === 0 && (
-          <div className="gg-panel-empty">
-            Пока нет суб-агентов. Когда главный агент делегирует задачи (delegate_task / delegate_parallel), они появятся здесь.
+          <div className="gg-agents-empty">
+            <div className="gg-agents-empty-icon">🤖</div>
+            <div className="gg-agents-empty-title">Пока агентов нет</div>
+            <div className="gg-agents-empty-hint">
+              Запусти оркестрацию или рой — суб-агенты появятся здесь с живым статусом.
+            </div>
+            <div className="gg-agents-empty-actions">
+              <button
+                className="gg-quick-action"
+                onClick={() => injectToChat(MULTI_AGENT_TEMPLATES.orchestrate.template)}
+                title="Разбить цель на подзадачи по ролям и выполнить параллельно (orchestrate)"
+              >
+                📊 Оркестровать · /orchestrate
+              </button>
+              <button
+                className="gg-quick-action"
+                onClick={() => injectToChat(MULTI_AGENT_TEMPLATES.swarm.template)}
+                title="Несколько агентов разными стратегиями + арбитр (swarm)"
+              >
+                🐝 Запустить рой · /swarm
+              </button>
+            </div>
           </div>
         )}
         <div className="gg-run-list">
-          {tree.map(({ sub: s, level }) => {
+          {visibleTree.map(({ sub: s, level, hasChildren }) => {
             const cost = fmtCost(s.costCents)
             // Узлы роя помечаются по sub_group (callId роя в group). Здесь —
             // эвристика: задача начинается с [swarm. Бейдж 🐝 для наглядности.
             const isSwarm = (s.task ?? '').startsWith('[swarm')
+            const isCollapsed = collapsed.has(s.id)
             return (
               <div
                 key={s.id}
-                className={`gg-agent-card is-${s.status}${level > 0 ? ' is-child' : ''}`}
+                className={`gg-agent-card gg-agent-card-anim is-${s.status}${level > 0 ? ' is-child' : ''}`}
                 style={level > 0 ? { marginLeft: level * 18 } : undefined}
               >
+                {/* Toggle сворачивания поддерева — только у родительских узлов. */}
+                {hasChildren ? (
+                  <button
+                    className="gg-agent-toggle"
+                    title={isCollapsed ? 'Развернуть поддерево' : 'Свернуть поддерево'}
+                    onClick={() => toggleCollapse(s.id)}
+                  >{isCollapsed ? '▸' : '▾'}</button>
+                ) : (
+                  level > 0 && <span className="gg-agent-tree-branch" aria-hidden>↳</span>
+                )}
                 <button className="gg-agent-card-main" onClick={() => setViewing(s)}>
-                  {level > 0 && <span className="gg-agent-tree-branch" aria-hidden>↳</span>}
                   <span className={`gg-agent-status-dot is-${s.status}`} />
                   <span className="gg-agent-role">{isSwarm ? '🐝 ' : ''}{s.role ?? 'sub-agent'}</span>
                   <span className="gg-agent-provider">{providerLabel(s.providerId)}{s.model ? ` · ${s.model}` : ''}</span>
                   {s.depth != null && s.depth > 0 && <span className="gg-agent-depth" title="глубина в дереве делегирования">d{s.depth}</span>}
                   <span className="gg-agent-task" title={s.task ?? ''}>{s.task ?? ''}</span>
                   <span className="gg-agent-meta">
-                    {STATUS_LABEL[s.status ?? ''] ?? s.status}
-                    {' · '}{fmtDuration(s.startedAt, s.endedAt)}
-                    {s.toolCount != null && ` · 🔧${s.toolCount}`}
-                    {cost && ` · ${cost}`}
+                    <span className="gg-agent-meta-dur">{fmtDuration(s.startedAt, s.endedAt)}</span>
+                    {s.toolCount != null && <span className="gg-agent-meta-tools">🔧{s.toolCount}</span>}
+                    {cost && <span className="gg-agent-meta-cost">{cost}</span>}
                   </span>
                 </button>
                 {s.status === 'running' && s.role && (

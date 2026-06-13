@@ -12,7 +12,9 @@ import { ReviewPanel } from './ReviewPills'
 import { CheckpointButton } from './CheckpointButton'
 import { ReviewButton } from './ReviewButton'
 import { SkillPicker } from './SkillPicker'
+import { MultiAgentPicker } from './MultiAgentPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
+import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment, Suggestion } from '../types/api'
@@ -718,6 +720,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     currentSendIdRef.current = null
   }
 
+  /**
+   * Вставить шаблон в композер и сфокусировать textarea (курсор в конце —
+   * пользователь сразу дописывает цель). Используется мультиагентными
+   * slash-командами и кнопкой «Мультиагент». setTimeout(0) — чтобы значение
+   * не было перетёрто onClear() из SlashCommandPopup.execute() (см. там).
+   */
+  function injectTemplate(template: string) {
+    window.setTimeout(() => {
+      setInput(template)
+      const ta = textareaRef.current
+      if (ta) {
+        ta.focus()
+        ta.setSelectionRange(template.length, template.length)
+      }
+    }, 0)
+  }
+
   const hasMessages = messages.length > 0
   const canSend = !isStreaming && (input.trim().length > 0 || attachments.length > 0)
 
@@ -860,6 +879,22 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   title="Быстрый обзор структуры проекта"
                 >
                   🗺 Карта проекта
+                </button>
+                {/* Мультиагент: быстрый старт оркестрации и роя — тот же шаблон,
+                    что у slash-команд /orchestrate /swarm. Цель дописывает юзер. */}
+                <button
+                  className="gg-quick-action"
+                  onClick={() => setInput(MULTI_AGENT_TEMPLATES.orchestrate.template)}
+                  title="Разбить цель на подзадачи по ролям и выполнить параллельно (orchestrate)"
+                >
+                  📊 Оркестровать задачу
+                </button>
+                <button
+                  className="gg-quick-action"
+                  onClick={() => setInput(MULTI_AGENT_TEMPLATES.swarm.template)}
+                  title="Несколько агентов разными стратегиями + арбитр сведёт консенсус (swarm)"
+                >
+                  🐝 Запустить рой
                 </button>
               </div>
             )}
@@ -1091,6 +1126,34 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 description: 'Снять активный скилл (сообщения остаются)',
                 icon: '∅',
                 action: () => { useSkillsStore.getState().setActiveSkill(null) }
+              },
+              // Мультиагент: системные команды инжектят шаблон в композер. Сам
+              // execute() в popup после action() зовёт onClear() (= setInput('')),
+              // поэтому ставим значение в следующий тик, иначе очистка перетрёт
+              // шаблон. Курсор остаётся в textarea — пользователь дописывает цель.
+              {
+                kind: 'system',
+                trigger: MULTI_AGENT_TEMPLATES.orchestrate.trigger,
+                label: MULTI_AGENT_TEMPLATES.orchestrate.label,
+                description: 'Оркестратор — разбить цель на подзадачи по ролям',
+                icon: MULTI_AGENT_TEMPLATES.orchestrate.icon,
+                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.orchestrate.template)
+              },
+              {
+                kind: 'system',
+                trigger: MULTI_AGENT_TEMPLATES.swarm.trigger,
+                label: MULTI_AGENT_TEMPLATES.swarm.label,
+                description: 'Рой — N агентов разными стратегиями + арбитр',
+                icon: MULTI_AGENT_TEMPLATES.swarm.icon,
+                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.swarm.template)
+              },
+              {
+                kind: 'system',
+                trigger: MULTI_AGENT_TEMPLATES.parallel.trigger,
+                label: MULTI_AGENT_TEMPLATES.parallel.label,
+                description: 'Параллельно — пакет независимых задач суб-агентам',
+                icon: MULTI_AGENT_TEMPLATES.parallel.icon,
+                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.parallel.template)
               }
             ]}
           />
@@ -1223,6 +1286,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               </button>
             )}
             <SkillPicker />
+            <MultiAgentPicker onInject={injectTemplate} />
             <CheckpointButton />
             <ReviewButton />
             <div className="gg-effort-toggle" title="Уровень усилий модели">
