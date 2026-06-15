@@ -137,7 +137,7 @@ async function main() {
       spacing: { after: 200 }
     }),
     body(`Обновлено: ${new Date().toLocaleString('ru-RU')}`),
-    body('Версия в package.json: 1.3.0'),
+    body('Версия в package.json: 1.3.1'),
     body('Исходники: C:\\Users\\RAYNER\\verstak'),
     body('Установка: %LOCALAPPDATA%\\Programs\\Verstak'),
     body('Правило: после каждого изменения/деплоя агент дописывает запись и перегенерирует этот файл (node scripts/sync-verstak-changelog.cjs).'),
