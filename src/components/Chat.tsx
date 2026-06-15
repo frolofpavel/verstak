@@ -122,8 +122,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const [warning, setWarning] = useState<string | null>(null)
   const streamRef = useRef<HTMLDivElement>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
+  const autoScrollEnabledRef = useRef(autoScrollEnabled)
   /** Пока true и автопрокрутка вкл — новые сообщения тянут чат вниз. */
   const stickToBottomRef = useRef(true)
+  /** Отправка своего сообщения — принудительно липнем к низу, onScroll не сбрасывает. */
+  const pendingPinToBottomRef = useRef(false)
   const [showScrollDown, setShowScrollDown] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -463,18 +466,48 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     return off
   }, [updateLastAssistant, setStreaming])
 
+  useEffect(() => {
+    autoScrollEnabledRef.current = autoScrollEnabled
+  }, [autoScrollEnabled])
+
   const SCROLL_STICK_THRESHOLD = 72
 
   function isNearBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_THRESHOLD
   }
 
-  function scrollChatToBottom(behavior: ScrollBehavior = 'smooth') {
+  function applyScrollToBottom(behavior: ScrollBehavior = 'auto') {
     const el = streamRef.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
-    if (autoScrollEnabled) stickToBottomRef.current = true
+    if (behavior === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
+  }
+
+  /** После commit React — иначе scrollHeight ещё старый. */
+  function pinChatToBottom(behavior: ScrollBehavior = 'auto') {
+    stickToBottomRef.current = true
     setShowScrollDown(false)
+    applyScrollToBottom(behavior)
+    requestAnimationFrame(() => {
+      applyScrollToBottom(behavior)
+      requestAnimationFrame(() => applyScrollToBottom(behavior))
+    })
+  }
+
+  function armAutoScrollForOutgoing() {
+    if (!autoScrollEnabledRef.current) return
+    stickToBottomRef.current = true
+    pendingPinToBottomRef.current = true
+    setShowScrollDown(false)
+  }
+
+  function scrollChatToBottom(behavior: ScrollBehavior = 'smooth') {
+    if (autoScrollEnabledRef.current) stickToBottomRef.current = true
+    setShowScrollDown(false)
+    pinChatToBottom(behavior)
   }
 
   function toggleAutoScroll() {
@@ -503,10 +536,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   }, [activeChatId, activePath, autoScrollEnabled])
 
   useEffect(() => {
+    if (!autoScrollEnabled) return
+    if (!stickToBottomRef.current && !pendingPinToBottomRef.current) return
+    pendingPinToBottomRef.current = false
+    pinChatToBottom('auto')
+  }, [messages, autoScrollEnabled])
+
+  useEffect(() => {
     const el = streamRef.current
     if (!el) return
     function onScroll() {
       const atBottom = isNearBottom(el)
+      if (pendingPinToBottomRef.current) {
+        setShowScrollDown(!atBottom && messages.length > 0)
+        return
+      }
       if (autoScrollEnabled) stickToBottomRef.current = atBottom
       setShowScrollDown(!atBottom && messages.length > 0)
     }
@@ -514,12 +558,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     onScroll()
     return () => el.removeEventListener('scroll', onScroll)
   }, [messages.length, autoScrollEnabled])
-
-  useEffect(() => {
-    if (!autoScrollEnabled || !stickToBottomRef.current) return
-    const el = streamRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, autoScrollEnabled])
 
   // Refresh undo count when project changes / after each assistant turn settles
   useEffect(() => {
@@ -686,6 +724,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const store = useProject.getState()
     const newBudget = Math.min(exhausted.maxBudget, exhausted.used + exhausted.suggestedAdd)
     setExhausted(null)
+    armAutoScrollForOutgoing()
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     // Send everything except the empty placeholder we just pushed
@@ -758,6 +797,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         console.warn('[chat] skill loaders failed:', err)
       }
     }
+    armAutoScrollForOutgoing()
     addMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
     const activeChatId = ctx.activeChatId
     if (path && activeChatId) {
@@ -1356,12 +1396,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               onClick={toggleAutoScroll}
               title={autoScrollEnabled ? t.chat.autoScrollOn : t.chat.autoScrollOff}
               aria-pressed={autoScrollEnabled}
-              aria-label={autoScrollEnabled ? t.chat.autoScrollOn : t.chat.autoScrollOff}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <polyline points="6 9 12 15 18 9" />
-                <line x1="5" y1="5" x2="19" y2="19" className="gg-auto-scroll-off-mark" />
-              </svg>
+              {autoScrollEnabled ? t.chat.autoScrollLabelOn : t.chat.autoScrollLabelOff}
             </button>
             <SkillPicker />
             <CheckpointButton />
