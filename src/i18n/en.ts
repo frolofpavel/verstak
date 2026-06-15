@@ -25,6 +25,16 @@ export const en = {
   },
 
   // Sidebar
+  rail: {
+    clients: 'Clients',
+    openClient: 'Open client',
+    search: 'Search clients',
+    searchPlaceholder: 'Find client…',
+    clearSearch: 'Clear search',
+    noResults: 'No matches',
+    expandPanel: 'Expand — show names',
+    collapsePanel: 'Collapse client panel',
+  },
   sidebar: {
     chat: 'Chat',
     tasks: 'Tasks',

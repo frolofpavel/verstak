@@ -24,6 +24,16 @@ export const ru: Translations = {
     nameHint: 'Как тебя зовут?',
     emailHint: 'для будущей облачной синхронизации',
   },
+  rail: {
+    clients: 'Клиенты',
+    openClient: 'Открыть клиента',
+    search: 'Поиск по клиентам',
+    searchPlaceholder: 'Найти клиента…',
+    clearSearch: 'Очистить поиск',
+    noResults: 'Ничего не найдено',
+    expandPanel: 'Развернуть — показать названия',
+    collapsePanel: 'Свернуть панель клиентов',
+  },
   sidebar: {
     chat: 'Чат',
     tasks: 'Задачи',
