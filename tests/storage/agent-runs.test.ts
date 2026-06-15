@@ -169,4 +169,34 @@ describe('agent-runs (migration 16)', () => {
     expect(runs.list('/p2').map(r => r.runId)).toEqual(['b'])
     db.close()
   })
+
+  it('reconcileStale помечает зависшие running/queued (ended_at null) как failed', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    // r1 — зависший running (краш/выход без живого процесса), ended_at null.
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A' })
+    // r2 — штатно завершён (done): reconcile его не трогает.
+    runs.create({ runId: 'r2', projectPath: '/p', title: 'B' })
+    runs.finish('r2', 'done')
+    const reconciled = runs.reconcileStale()
+    expect(reconciled).toBe(1)                       // только r1
+    const r1 = runs.get('r1')!
+    expect(r1.status).toBe('failed')                 // running → failed
+    expect(r1.endedAt).not.toBeNull()                // проставлен ended_at
+    const r2 = runs.get('r2')!
+    expect(r2.status).toBe('done')                   // done не тронут
+    db.close()
+  })
+
+  it('reconcileStale фильтрует по projectPath', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'a', projectPath: '/p1', title: 'A' })   // зависший
+    runs.create({ runId: 'b', projectPath: '/p2', title: 'B' })   // зависший
+    const reconciled = runs.reconcileStale('/p1')
+    expect(reconciled).toBe(1)                       // только из /p1
+    expect(runs.get('a')!.status).toBe('failed')
+    expect(runs.get('b')!.status).toBe('running')    // /p2 не тронут
+    db.close()
+  })
 })

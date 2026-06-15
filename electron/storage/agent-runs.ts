@@ -87,6 +87,13 @@ export interface AgentRuns {
   get: (runId: string) => AgentRun | null
   /** События прогона в порядке добавления (id ASC). */
   getEvents: (runId: string) => AgentRunEvent[]
+  /**
+   * Пометить зависшие прогоны как failed. На старте app строки со
+   * status IN ('running','queued') И ended_at IS NULL — это прогоны,
+   * прерванные крахом/выходом без живого процесса. Возвращает число помеченных.
+   * projectPath опционален: без него реконсайлятся все проекты.
+   */
+  reconcileStale: (projectPath?: string) => number
 }
 
 const SELECT_RUN = `
@@ -175,6 +182,15 @@ export function createAgentRuns(db: Database): AgentRuns {
     },
     getEvents(runId) {
       return db.prepare(`${SELECT_EVENT} WHERE run_id = ? ORDER BY id ASC`).all(runId) as AgentRunEvent[]
+    },
+    reconcileStale(projectPath) {
+      const where = ["status IN ('running','queued')", 'ended_at IS NULL']
+      const vals: unknown[] = [Date.now()]
+      if (projectPath !== undefined) { where.push('project_path = ?'); vals.push(projectPath) }
+      const info = db.prepare(
+        `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE ${where.join(' AND ')}`
+      ).run(...vals)
+      return info.changes
     }
   }
 }

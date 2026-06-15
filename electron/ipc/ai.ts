@@ -21,7 +21,7 @@ import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfigur
 import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
-import type { AgentRuns } from '../storage/agent-runs'
+import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -467,6 +467,31 @@ export function registerAiIpc(deps: AiDeps): void {
     const capUsd = capRaw ? parseFloat(capRaw) : null
     const costGuard = createCostGuard(capUsd && capUsd > 0 ? capUsd : null)
 
+    // Multi-agent Manager (Фаза 2): один ai:send = одна строка agent_runs.
+    // Owner определяется по реально доступному в main сигналу: Explicit Review
+    // форсит reviewer-промпт (useReviewerPrompt) → owner='review'; всё остальное
+    // через этот путь — обычный чат → 'main'. autonomous loop НЕ проходит через
+    // runApiConversation/runPlainConversation (зовёт provider.send напрямую),
+    // поэтому 'background' здесь недостижим — он будет проставлен из autonomous,
+    // если/когда тот начнёт писать прогоны. finish вызывают сами runner'ы в
+    // finally по exitReason. Best-effort: agentRuns опционален + try/catch.
+    const runOwner: AgentRunOwner = overrides?.useReviewerPrompt ? 'review' : 'main'
+    const runTitle = ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
+    try {
+      deps.agentRuns?.create({
+        runId,
+        projectPath: projectPath ?? '',
+        chatId: chatId ? Number(chatId) : null,
+        owner: runOwner,
+        title: runTitle,
+        providerId,
+        model: model ?? null,
+        sendId
+      })
+    } catch (err) {
+      console.warn('[agent-runs] create failed:', err instanceof Error ? err.message : err)
+    }
+
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
 
@@ -521,11 +546,15 @@ export function registerAiIpc(deps: AiDeps): void {
         deps.trackToolPattern,
         chatId ? Number(chatId) : null,
         deps.subSessions,
-        deps.sessionTodos
+        deps.sessionTodos,
+        deps.agentRuns,
+        runId
       ).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined
+        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
+        deps.agentRuns,
+        runId
       ).finally(cleanup)
     }
     return sendId
@@ -652,6 +681,25 @@ export function registerAiIpc(deps: AiDeps): void {
   })
 }
 
+/**
+ * Маппинг exitReason агентного цикла → status строки agent_runs.
+ * completed → done; aborted → stopped; error/crashed → failed.
+ * max-turns/loop-detected → done: цикл штатно остановился по защитному лимиту
+ * (бюджет ходов исчерпан / детектор зацикливания) — это не сбой выполнения,
+ * пользователь может «↻ Переотправить» (Resume V1). Ошибкой это не считаем.
+ */
+function exitReasonToStatus(reason: ExitReason): AgentRunStatus {
+  switch (reason) {
+    case 'completed': return 'done'
+    case 'aborted': return 'stopped'
+    case 'error':
+    case 'crashed': return 'failed'
+    case 'max-turns':
+    case 'loop-detected': return 'done'
+    default: return 'done'
+  }
+}
+
 /** Опции smart fallback — пробрасываются из ai:send в conversation runners. */
 interface FallbackOpts {
   /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
@@ -687,7 +735,9 @@ async function runPlainConversation(
   costGuard?: ReturnType<typeof createCostGuard>,
   providerId?: ProviderId,
   model?: string,
-  fallbackOpts?: FallbackOpts
+  fallbackOpts?: FallbackOpts,
+  agentRuns?: AgentRuns,
+  runId?: string
 ): Promise<void> {
   let lastAssistantText = ''
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
@@ -773,6 +823,21 @@ async function runPlainConversation(
         console.error('[ai.ts] writeSessionJournal (plain) failed in finally:', err)
       }
     }
+    // Multi-agent Manager (Фаза 2): завершаем прогон. Best-effort — ошибка
+    // storage не должна ломать runner. Plain-путь: tool/files = 0 (CLI крутит
+    // их внутри, наружу не видно), стоимость из costGuard. agentRuns/runId не
+    // прокидываются в рекурсивный fallback-вызов → finish пишется ровно раз
+    // (внешний finally). Review-прогоны (owner='review') финишируются здесь же.
+    if (agentRuns && runId) {
+      try {
+        agentRuns.finish(runId, exitReasonToStatus(exitReason), {
+          costCents: costGuard?.current() ?? 0,
+          error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
+        })
+      } catch (err) {
+        console.warn('[agent-runs] finish (plain) failed:', err instanceof Error ? err.message : err)
+      }
+    }
   }
 }
 
@@ -818,7 +883,9 @@ async function runApiConversation(
   trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void,
   parentChatId?: number | null,
   subSessions?: AiDeps['subSessions'],
-  sessionTodos?: AiDeps['sessionTodos']
+  sessionTodos?: AiDeps['sessionTodos'],
+  agentRuns?: AgentRuns,
+  runId?: string
 ): Promise<void> {
   const currentMessages = [...initialMessages]
   // Loop detection: per-signature occurrence counter across the whole agent
@@ -834,6 +901,10 @@ async function runApiConversation(
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
   const commandsRun: string[] = []
+  // Manager (Фаза 2): сколько tool-вызовов выполнено за прогон — для счётчика
+  // tool_count в agent_runs. Считаем все диспетчеризованные вызовы (включая
+  // read-only), как и инспектор audit.
+  let toolCallCount = 0
   // Cross-verify: накапливаем изменённые файлы с контентом для ревью другим провайдером.
   const sessionChanges: TurnChange[] = []
   let lastAssistantText = ''
@@ -1013,6 +1084,7 @@ async function runApiConversation(
     }
 
     const toolResults: ToolResult[] = new Array(toolCalls.length)
+    toolCallCount += toolCalls.length  // Manager (Фаза 2): tool_count прогона
 
     // Dispatch via tool-handlers registry. Each handler knows its own scheduling
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
@@ -1222,6 +1294,24 @@ async function runApiConversation(
       writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun, sessionUsage, exitReason)
     } catch (err) {
       console.error('[ai.ts] writeSessionJournal failed in finally:', err)
+    }
+    // Multi-agent Manager (Фаза 2): завершаем прогон — статус из exitReason,
+    // счётчики из того что уже накоплено в прогоне (tool/files/agents),
+    // стоимость из costGuard. Best-effort: ошибка storage не ломает loop.
+    // agentRuns/runId не прокидываются в рекурсивный fallback-вызов → finish
+    // пишется ровно раз (этот внешний finally).
+    if (agentRuns && runId) {
+      try {
+        agentRuns.finish(runId, exitReasonToStatus(exitReason), {
+          costCents: costGuard?.current() ?? 0,
+          toolCount: toolCallCount,
+          filesCount: filesTouched.size,
+          agentsCount: agentCounter.count,
+          error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
+        })
+      } catch (err) {
+        console.warn('[agent-runs] finish (api) failed:', err instanceof Error ? err.message : err)
+      }
     }
   }
 }

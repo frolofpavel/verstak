@@ -247,9 +247,18 @@ app.whenReady().then(() => {
   const chatSessions = createChatSessions(db)
   const subSessions = createSubSessions(db)
   const sessionTodos = createSessionTodos(db)
-  // Multi-agent Manager (Фаза 1) — фундамент «задач» поверх run_id. Пока только
-  // инстанцируется и прокидывается в AiDeps; запись прогонов включит Фаза 2.
+  // Multi-agent Manager (Фаза 2) — фундамент «задач» поверх run_id. ai.ts пишет
+  // прогоны (create на старте / finish на завершении), панель Задач читает их.
   const agentRuns = createAgentRuns(db)
+  // Реконсайл зависших прогонов: строки running/queued без ended_at — это
+  // прогоны, прерванные крахом/выходом приложения (без живого процесса).
+  // Помечаем их failed один раз на старте, чтобы они не висели «в работе».
+  try {
+    const staleCount = agentRuns.reconcileStale()
+    if (staleCount > 0) console.log(`[agent-runs] reconciled ${staleCount} stale run(s) → failed`)
+  } catch (err) {
+    console.warn('[agent-runs] reconcileStale failed:', err instanceof Error ? err.message : err)
+  }
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
