@@ -157,6 +157,12 @@ html.gg-atelier .gg-models-card {
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
+html.gg-atelier .gg-models-row.is-default .gg-models-row-main {
+  border-left: 4px solid var(--accent);
+  background: color-mix(in srgb, var(--accent-muted) 65%, var(--vol-recessed-bg));
+  box-shadow: inset 5px 0 0 var(--accent);
+}
+
 html.gg-atelier .gg-theme-card:hover,
 html.gg-atelier .gg-prov-card:hover,
 html.gg-atelier .gg-models-card:hover,

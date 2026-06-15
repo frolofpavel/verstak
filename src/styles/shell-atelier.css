@@ -158,8 +158,6 @@ html.gg-atelier body {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--vol-shadow-inset);
-  width: calc(100% - 3px);
-  margin-right: 3px;
 }
 
 .gg-app-atelier .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
@@ -173,14 +171,6 @@ html.gg-atelier body {
 
 .gg-app-atelier .gg-rail-status.is-unread {
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
-}
-
-.gg-app-atelier .gg-rail:not(.is-shell-expanded) .gg-rail-add {
-  margin-top: 0;
-}
-
-.gg-app-atelier .gg-rail:not(.is-shell-expanded) .gg-rail-add-icon {
-  transform: translateY(-3px);
 }
 
 .gg-app-atelier .gg-rail.is-shell-expanded .gg-rail-add {

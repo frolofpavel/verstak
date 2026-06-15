@@ -2,7 +2,7 @@
 @property --gg-rail-w {
   syntax: '<length>';
   inherits: true;
-  initial-value: 68px;
+  initial-value: 76px;
 }
 @property --gg-sidebar-panel-w {
   syntax: '<length>';
@@ -18,7 +18,7 @@
   --shell-dur: 280ms;
   --shell-ease: cubic-bezier(0.25, 0.8, 0.25, 1);
   --gg-sidebar-target-w: 260px;
-  --gg-rail-w: 68px;
+  --gg-rail-w: 76px;
 }
 html {
   transition: --gg-rail-w var(--shell-dur) var(--shell-ease);
@@ -113,7 +113,8 @@ html {
 }
 .gg-rail:not(.is-shell-expanded) {
   overflow-x: visible;
-  padding-right: 10px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .gg-rail-top {
   display: flex;
@@ -1090,7 +1091,6 @@ html {
   padding: 0;
   align-self: center;
   margin-inline: auto;
-  margin-top: 2px;
 }
 .gg-rail.is-shell-expanded .gg-rail-add {
   width: 100%;
@@ -1112,10 +1112,9 @@ html {
   justify-content: center;
   width: 20px;
   height: 20px;
-  font-size: 20px;
-  font-weight: 400;
+  font-size: 22px;
+  font-weight: 300;
   line-height: 1;
-  transform: translateY(-2px);
 }
 .gg-rail-add-label {
   font-size: var(--text-sm);
@@ -2634,6 +2633,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   border-top: 1px solid var(--border-subtle);
   max-height: 280px;
   overflow-y: auto;
+  overflow-x: visible;
 }
 .gg-models-required-modal {
   width: min(480px, calc(100vw - 32px));
@@ -2693,30 +2693,25 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   border-top: 1px solid var(--border-default);
 }
 .gg-models-row-main {
-  position: relative;
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 10px;
-  background: transparent; border: none;
-  padding: 4px 6px 4px 12px;
+  background: transparent;
+  border: none;
+  border-left: 4px solid transparent;
+  padding: 6px 8px 6px 10px;
   cursor: pointer;
   text-align: left;
   border-radius: var(--radius-sm, 4px);
-  transition: background 100ms ease;
+  transition: background 100ms ease, border-color 100ms ease;
 }
 .gg-models-row-main:hover { background: var(--bg-hover); }
-.gg-models-row.is-default .gg-models-row-main::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 5px;
-  bottom: 5px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 65%, transparent);
+.gg-models-row.is-default .gg-models-row-main {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-muted) 55%, transparent);
+  box-shadow: inset 4px 0 0 var(--accent);
 }
 .gg-models-row.is-default .gg-models-row-main:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--accent-muted) 70%, var(--bg-hover));
 }
 .gg-models-row-name {
   font-family: var(--font-mono);

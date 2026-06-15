@@ -2814,7 +2814,7 @@ function ModelsPage(props: ModelsPageProps) {
                   )}
                   {list.map(e => {
                     const enabled = enabledModels.has(e.key)
-                    const isDefault = activeProvider === p.id && (models[p.id] ?? p.defaultModel) === e.model
+                    const isDefault = (models[p.id] ?? p.defaultModel) === e.model
                     return (
                       <div key={e.key} className={`gg-models-row ${isDefault ? 'is-default' : ''}`}>
                         <button
