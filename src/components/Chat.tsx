@@ -118,6 +118,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const screenshotCounter = useRef(0)
   const warningTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
+  // Resume задачи (Фаза 4): взводится при gg-resume-send, эффект ниже шлёт send().
+  const resumeAutoSendRef = useRef(false)
   const [undoCount, setUndoCount] = useState(0)
   // Cross-verify: результат авто-ревью другим провайдером после изменения файлов.
   // null = ещё не было; object = последний результат (сбрасывается при новом send).
@@ -508,6 +510,33 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     window.addEventListener('gg-inject-prompt', onInject)
     return () => window.removeEventListener('gg-inject-prompt', onInject)
   }, [])
+
+  // Resume задачи (Multi-agent Manager, Фаза 4): AgentRunsPanel диспатчит
+  // CustomEvent('gg-resume-send') с текстом исходного запроса. В отличие от
+  // gg-inject-prompt (только заполняет ввод), здесь — ЧЕСТНЫЙ re-send: ставим
+  // текст в ввод и взводим флаг, эффект ниже автоматически вызывает send().
+  useEffect(() => {
+    function onResume(e: Event) {
+      const ev = e as CustomEvent<string>
+      if (typeof ev.detail === 'string' && ev.detail.trim()) {
+        setInput(ev.detail)
+        resumeAutoSendRef.current = true
+      }
+    }
+    window.addEventListener('gg-resume-send', onResume)
+    return () => window.removeEventListener('gg-resume-send', onResume)
+  }, [])
+
+  // Автоотправка после resume: когда input обновился из gg-resume-send и взведён
+  // флаг — шлём ровно как при ручной отправке (через send()). Флаг гасим сразу,
+  // чтобы обычный ввод пользователя не уезжал в авто-send.
+  useEffect(() => {
+    if (resumeAutoSendRef.current && input.trim() && !isStreaming) {
+      resumeAutoSendRef.current = false
+      void send()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, isStreaming])
 
   // Cleanup warning timer on unmount
   useEffect(() => () => { if (warningTimer.current) window.clearTimeout(warningTimer.current) }, [])

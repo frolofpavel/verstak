@@ -156,7 +156,12 @@ export function createAgentRuns(db: Database): AgentRuns {
       if (opts?.agentsCount !== undefined) { sets.push('agents_count = ?'); vals.push(opts.agentsCount) }
       if (opts?.error !== undefined) { sets.push('error = ?'); vals.push(opts.error) }
       vals.push(runId)
-      db.prepare(`UPDATE agent_runs SET ${sets.join(', ')} WHERE run_id = ?`).run(...vals)
+      // Guard ended_at IS NULL — финиш идемпотентен по первому завершению (Фаза 4):
+      // 'agent-runs:stop' пишет finish('stopped'), а затем естественный finally
+      // runner'а тоже вызовет finish(...) по exitReason='aborted' → 'stopped'/
+      // 'done'. Без guard'а второй вызов затёр бы stop-статус и счётчики первого.
+      // Первый дошедший finish фиксирует состояние; повторные — no-op.
+      db.prepare(`UPDATE agent_runs SET ${sets.join(', ')} WHERE run_id = ? AND ended_at IS NULL`).run(...vals)
     },
     incr(runId, field, by = 1) {
       // field — из фиксированного enum AgentRunCounterField, не пользовательский

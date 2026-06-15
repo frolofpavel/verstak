@@ -23,7 +23,7 @@ import { registerJournalIpc } from './ipc/journal'
 import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerCliAuthIpc } from './ipc/cli-auth'
-import { registerAiIpc } from './ipc/ai'
+import { registerAiIpc, abortSend } from './ipc/ai'
 import { registerChatsIpc } from './ipc/chats'
 import { registerHandoffIpc } from './ipc/handoff'
 import { registerTerminalIpc } from './ipc/terminal'
@@ -382,8 +382,9 @@ app.whenReady().then(() => {
   })
   registerChatsIpc(chats, chatSessions, db)
   registerAgentsIpc(subSessions, chats, sessionTodos)
-  // Вкладка «Задачи» (Multi-agent Manager Фаза 3) — read-only список прогонов.
-  registerAgentRunsIpc(agentRuns, subSessions, sessionTodos)
+  // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).
+  // abortSend переиспользует ядро ai:stop; db — для getRunInput при resume.
+  registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend)
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)

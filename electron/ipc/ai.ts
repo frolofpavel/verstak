@@ -134,6 +134,37 @@ function scopedKey(sendId: number, callId: string): string {
 }
 
 /**
+ * Прерывает активный ai:send по sendId — то же ядро, что и ai:stop. Вынесено в
+ * экспорт, чтобы Multi-agent Manager ('agent-runs:stop', Фаза 4) переиспользовал
+ * ровно тот же путь: abort каскадит в субы/sub-queue через ctx.signal, дренирует
+ * pending-подтверждения этой сессии. Возвращает true если что-то прервали.
+ *
+ *  sendId <= 0 → emergency abort: останавливает ВСЕ активные стримы + отклоняет
+ *  все подтверждения (Shift+Esc). Иначе — точечно по sendId.
+ */
+export function abortSend(sendId: number): boolean {
+  if (sendId <= 0) {
+    for (const [k, c] of activeAborts) { c.abort(); activeAborts.delete(k) }
+    for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
+    for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
+    return true
+  }
+  const ctrl = activeAborts.get(sendId)
+  if (!ctrl) return false
+  ctrl.abort()
+  activeAborts.delete(sendId)
+  // Reject ONLY this session's pending confirmations — other concurrent
+  // ai:send streams (background sessions) keep theirs intact.
+  for (const [k, p] of pendingWrites) {
+    if (p.sendId === sendId) { p.resolve(false); pendingWrites.delete(k) }
+  }
+  for (const [k, p] of pendingCommands) {
+    if (p.sendId === sendId) { p.resolve(false); pendingCommands.delete(k) }
+  }
+  return true
+}
+
+/**
  * Fire-and-forget: запускаем кросс-верификацию асинхронно после done.
  * Никогда не бросает — любые ошибки логируем и тихо игнорируем.
  * Результат приходит как cross-verify event ПОСЛЕ done основного ответа.
@@ -560,29 +591,7 @@ export function registerAiIpc(deps: AiDeps): void {
     return sendId
   })
 
-  ipcMain.handle('ai:stop', (_e, sendId: number) => {
-    // sendId <= 0 → emergency abort: stop EVERY active stream + reject all pending
-    // confirmations. Used by Shift+Esc when the UI feels stuck.
-    if (sendId <= 0) {
-      for (const [k, c] of activeAborts) { c.abort(); activeAborts.delete(k) }
-      for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
-      for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
-      return true
-    }
-    const ctrl = activeAborts.get(sendId)
-    if (!ctrl) return false
-    ctrl.abort()
-    activeAborts.delete(sendId)
-    // Reject ONLY this session's pending confirmations — other concurrent
-    // ai:send streams (background sessions) keep theirs intact.
-    for (const [k, p] of pendingWrites) {
-      if (p.sendId === sendId) { p.resolve(false); pendingWrites.delete(k) }
-    }
-    for (const [k, p] of pendingCommands) {
-      if (p.sendId === sendId) { p.resolve(false); pendingCommands.delete(k) }
-    }
-    return true
-  })
+  ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
 
   ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
     // If renderer knows sendId (it should — Chat.tsx stores it after ai:send),
@@ -1108,7 +1117,15 @@ async function runApiConversation(
       // Счётчик агентов один на весь прогон → общий потолок на всё дерево.
       delegationDepth: 0,
       parentCallId: null,
-      agentCounter
+      agentCounter,
+      // Multi-agent Manager (Фаза 4): живой Timeline задачи. runId + best-effort
+      // appendEvent. Хендлеры дёргают ctx.recordRunEvent рядом с существующими
+      // ai:event-эмиттерами; ошибка storage не ломает agent loop (try/catch).
+      runId,
+      recordRunEvent: (kind, p) => {
+        if (!agentRuns || !runId) return
+        try { agentRuns.appendEvent(runId, kind, p) } catch { /* best-effort */ }
+      }
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

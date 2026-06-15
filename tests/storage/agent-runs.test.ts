@@ -85,6 +85,28 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
+  it('finish идемпотентен по ended_at: stop→естественный finally не затирает stopped (Фаза 4)', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A' })
+    // 1) Stop: agent-runs:stop пишет finish('stopped') первым.
+    runs.finish('r1', 'stopped', {})
+    const afterStop = runs.get('r1')!
+    expect(afterStop.status).toBe('stopped')
+    const endedAt = afterStop.endedAt
+    expect(endedAt).not.toBeNull()
+    // 2) Естественный finally runner'а по exitReason='aborted' тоже зовёт finish.
+    //    Без guard'а WHERE ended_at IS NULL это затёрло бы статус и счётчики.
+    runs.finish('r1', 'stopped', { toolCount: 99, costCents: 500, error: 'aborted' })
+    const afterSecond = runs.get('r1')!
+    expect(afterSecond.status).toBe('stopped')   // не изменился
+    expect(afterSecond.endedAt).toBe(endedAt)    // ended_at тот же (первый финиш)
+    expect(afterSecond.toolCount).toBe(0)        // второй finish — no-op
+    expect(afterSecond.costCents).toBe(0)
+    expect(afterSecond.error).toBeNull()
+    db.close()
+  })
+
   it('appendEvent + getEvents возвращает события в порядке id', () => {
     const db = openDb(join(dir, 'test.db'))
     const runs = createAgentRuns(db)

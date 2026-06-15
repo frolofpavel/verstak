@@ -144,6 +144,13 @@ export interface ToolContext {
     list: (projectPath: string, sessionId?: number | null) => Array<{ id: number; title: string; status: string; assigneeCallId: string | null; ord: number }>
     findByTitle: (projectPath: string, sessionId: number | null, title: string) => { id: number; title: string; status: string } | null
   }
+  /** ID агентного прогона этого ai:send (Multi-agent Manager, Фаза 4). */
+  runId?: string
+  /** Записать событие в Timeline прогона (Фаза 4). ОПЦИОНАЛЬНОЕ, best-effort:
+   *  ai.ts подкладывает реализацию с try/catch поверх agentRuns.appendEvent.
+   *  Дёргается РЯДОМ с существующими ai:event-эмиттерами (emitActivity/
+   *  diffConfirmWrite/delegate/artifact/verify), не плодя новые точки. */
+  recordRunEvent?: (kind: string, payload: { label?: string | null; detail?: string | null; ref?: string | null; status?: string | null }) => void
 }
 
 export type ToolMode = 'parallel-read' | 'sequential' | 'confirm-write'
@@ -157,6 +164,13 @@ export interface ToolHandler {
 // Activity event helper
 // ============================================================================
 
+// Значимые tool-вызовы для Timeline задачи (Фаза 4). НЕ пишем read_file/
+// list_directory/search_project/find_files/get_project_map и прочую read-only
+// мелочь — иначе Timeline раздувается. Команда/коннектор/делегирование значимы.
+const TIMELINE_TOOL_CALLS = new Set([
+  'run_command', 'connector_query', 'delegate_task', 'delegate_parallel'
+])
+
 function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'error', label: string, detail: string): void {
   ctx.sender.send('ai:event', {
     id: ctx.sendId,
@@ -168,6 +182,13 @@ function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'error', 
       const auditDetail = JSON.stringify({ callId: call.id, status, detail: detail.slice(0, 200) })
       ctx.appendAudit(status === 'error' ? 'error' : 'tool_call', auditDetail)
     } catch { /* not critical */ }
+  }
+  // Timeline задачи (Фаза 4): значимые tool-вызовы → событие tool_call. check_diagnostics
+  // — это верификация, поэтому пишется как kind='verify' (status pass/fail) рядом
+  // со своим emitActivity, а не здесь. recordRunEvent best-effort (ai.ts оборачивает
+  // в try/catch); вызываем только для «крупных» вызовов из TIMELINE_TOOL_CALLS.
+  if (ctx.recordRunEvent && TIMELINE_TOOL_CALLS.has(call.name)) {
+    ctx.recordRunEvent('tool_call', { label: call.name, detail, status })
   }
 }
 
@@ -285,6 +306,9 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
     try { ctx.recordWrite(ctx.projectPath, path, before, after) } catch { /* undo not critical */ }
     // Incremental project map update — mark file dirty instead of full rebuild
     markFileDirty(ctx.projectPath, join(ctx.projectPath, path))
+    // Timeline задачи (Фаза 4): принятая запись файла. ref/label = путь (панель
+    // строит секцию «Файлы» из событий file_write). best-effort.
+    try { ctx.recordRunEvent?.('file_write', { label: path, ref: path, status: 'ok' }) } catch { /* best-effort */ }
     return { id: call.id, name: call.name, result: `Applied ${call.name === 'apply_patch' ? 'patch' : 'write'} to ${path}` }
   } catch (err) {
     return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
@@ -438,6 +462,9 @@ const runCommandHandler: ToolHandler = {
         id: ctx.sendId,
         event: { type: 'command-result', callId: call.id, command, status: 'ok', exitCode: result.exitCode, stdout, stderr }
       })
+      // Timeline задачи (Фаза 4): run_command не идёт через emitActivity, поэтому
+      // пишем событие здесь, рядом с command-result. exitCode≠0 → status='error'.
+      try { ctx.recordRunEvent?.('tool_call', { label: 'run_command', detail: command, status: result.exitCode === 0 ? 'ok' : 'error' }) } catch { /* best-effort */ }
       return { id: call.id, name: call.name, result: { stdout, stderr, exitCode: result.exitCode } }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -445,6 +472,7 @@ const runCommandHandler: ToolHandler = {
         id: ctx.sendId,
         event: { type: 'command-result', callId: call.id, command, status: 'error', error: msg }
       })
+      try { ctx.recordRunEvent?.('tool_call', { label: 'run_command', detail: msg, status: 'error' }) } catch { /* best-effort */ }
       return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
@@ -888,16 +916,22 @@ const delegateTaskHandler: ToolHandler = {
         if (res.exitReason === 'error') {
           emitSubagent('error', res.error)
           finalizeSub('error', res.text.trim() || undefined)
+          // Timeline задачи (Фаза 4): делегирование завершилось ошибкой.
+          try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: res.error, ref: call.id, status: 'error' }) } catch { /* best-effort */ }
           return { id: call.id, name: call.name, result: '', error: `delegate_task error: ${res.error}` }
         }
         const trimmed = res.text.trim()
         if (!trimmed) {
           emitSubagent('error', 'sub-agent вернул пустой ответ')
           finalizeSub('error')
+          try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: 'пустой ответ', ref: call.id, status: 'error' }) } catch { /* best-effort */ }
           return { id: call.id, name: call.name, result: '', error: 'delegate_task: sub-agent вернул пустой ответ' }
         }
         emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
         finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
+        // Timeline задачи (Фаза 4): делегирование завершено. label=роль/скилл/
+        // провайдер суба, ref=callId, detail — число tool-вызовов суба.
+        try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: `${res.toolCallCount} tools via ${subProvider ?? fallbackProvider}`, ref: call.id, status: 'ok' }) } catch { /* best-effort */ }
         try {
           ctx.recordJournal(ctx.projectPath, 'note',
             `🎭 Делегирование → ${skill?.name ?? skillId ?? role ?? fallbackProvider} (${res.toolCallCount} tools, ${res.exitReason})`,
@@ -1881,6 +1915,8 @@ const renderChartHandler: ToolHandler = {
         id: ctx.sendId,
         event: { type: 'tool-activity', callId: call.id, name: 'render_chart', label: 'render_chart', detail: `${filename} · ${kind} · ${labels.length} точек`, status: 'ok' }
       })
+      // Timeline задачи (Фаза 4): диаграмма — тоже артефакт. label=имя, ref=путь.
+      try { ctx.recordRunEvent?.('artifact', { label: filename, ref: path, status: 'ok' }) } catch { /* best-effort */ }
       return { id: call.id, name: call.name, result: `Chart saved: ${path}\nKind: ${kind}, ${labels.length} data points.\nИспользуй в HTML: <img src="${filename}"> (относительно той же папки артефактов).` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
@@ -1907,6 +1943,8 @@ const generateHtmlHandler: ToolHandler = {
         id: ctx.sendId,
         event: { type: 'artifact-created', callId: call.id, kind: 'html', filename: res.filename, path: res.path, sizeBytes: res.sizeBytes }
       })
+      // Timeline задачи (Фаза 4): создан артефакт. label=имя файла, ref=путь.
+      try { ctx.recordRunEvent?.('artifact', { label: res.filename, ref: res.path, status: 'ok' }) } catch { /* best-effort */ }
       return { id: call.id, name: call.name, result: `HTML artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
@@ -1933,6 +1971,8 @@ const generateDocxHandler: ToolHandler = {
         id: ctx.sendId,
         event: { type: 'artifact-created', callId: call.id, kind: 'docx', filename: res.filename, path: res.path, sizeBytes: res.sizeBytes }
       })
+      // Timeline задачи (Фаза 4): создан артефакт. label=имя файла, ref=путь.
+      try { ctx.recordRunEvent?.('artifact', { label: res.filename, ref: res.path, status: 'ok' }) } catch { /* best-effort */ }
       return { id: call.id, name: call.name, result: `DOCX artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
@@ -2205,6 +2245,15 @@ const checkDiagnosticsHandler: ToolHandler = {
       : errors
 
     emitActivity(ctx, call, 'ok', 'check_diagnostics', `${filtered.length} ошибок${fileFilter ? ` в ${fileFilter}` : ''}`)
+    // Timeline задачи (Фаза 4): check_diagnostics — это верификация. 0 ошибок →
+    // pass, иначе fail (waiting_review вычисляется из последнего verify=fail).
+    try {
+      ctx.recordRunEvent?.('verify', {
+        label: 'check_diagnostics',
+        detail: `${filtered.length} ошибок TypeScript${fileFilter ? ` в ${fileFilter}` : ''}`,
+        status: filtered.length === 0 ? 'pass' : 'fail'
+      })
+    } catch { /* best-effort */ }
 
     if (filtered.length === 0) {
       return { id: call.id, name: call.name, result: '✅ Нет ошибок TypeScript.' }

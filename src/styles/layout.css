@@ -7034,6 +7034,22 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-run-stat-dur { font-family: var(--font-mono); }
 .gg-run-card-caret { color: var(--text-tertiary); font-size: 11px; }
 
+/* Lifecycle-кнопки задачи (Multi-agent Manager, Фаза 4) — Stop / Переотправить.
+   Живут в meta-строке карточки; stopPropagation не даёт раскрыть карточку. */
+.gg-run-action {
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  user-select: none;
+}
+.gg-run-action:hover { background: var(--bg-hover); color: var(--text-primary); }
+.gg-run-action-stop:hover { border-color: var(--error); color: var(--error); }
+.gg-run-action-resume:hover { border-color: var(--accent); color: var(--accent); }
+
 .gg-run-card-error {
   padding: 6px 14px;
   font-size: 11px;

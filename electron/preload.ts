@@ -273,11 +273,13 @@ contextBridge.exposeInMainWorld('api', {
     todos: (projectPath: string, sessionId?: number | null) =>
       ipcRenderer.invoke('agents:todos', projectPath, sessionId)
   },
-  // Вкладка «Задачи» (Multi-agent Manager Фаза 3) — высокоуровневые прогоны.
+  // Вкладка «Задачи» (Multi-agent Manager) — высокоуровневые прогоны + stop/resume (Фаза 4).
   agentRuns: {
     list: (projectPath: string, opts?: { status?: string; owner?: string; limit?: number }) =>
       ipcRenderer.invoke('agent-runs:list', projectPath, opts),
-    get: (runId: string) => ipcRenderer.invoke('agent-runs:get', runId)
+    get: (runId: string) => ipcRenderer.invoke('agent-runs:get', runId),
+    stop: (runId: string) => ipcRenderer.invoke('agent-runs:stop', runId),
+    resume: (runId: string) => ipcRenderer.invoke('agent-runs:resume', runId)
   },
   suggestions: {
     get: (projectPath: string) => ipcRenderer.invoke('suggestions:get', projectPath)

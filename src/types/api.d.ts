@@ -347,10 +347,14 @@ declare global {
         queueStats(): Promise<{ inFlight: number; queued: number; tracked: number }>
         todos(projectPath: string, sessionId?: number | null): Promise<SessionTodo[]>
       }
-      // Вкладка «Задачи» (Multi-agent Manager Фаза 3) — высокоуровневые прогоны.
+      // Вкладка «Задачи» (Multi-agent Manager) — высокоуровневые прогоны + stop/resume (Фаза 4).
       agentRuns: {
         list(projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }): Promise<AgentRun[]>
         get(runId: string): Promise<AgentRunDetail>
+        /** Остановить активный прогон (переиспользует ai:stop abort). true если прервали. */
+        stop(runId: string): Promise<boolean>
+        /** Данные для честного re-send: { chatId, userMessage } или { error }. */
+        resume(runId: string): Promise<{ chatId: number | null; userMessage: string } | { error: string }>
       }
       suggestions: {
         get(projectPath: string): Promise<Suggestion[]>

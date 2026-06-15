@@ -212,13 +212,19 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
 }
 
 // Карточка прогона в списке — статус, заголовок, owner, провайдер, счётчики.
-function RunCard({ run, providerLabel, expanded, onToggle }: {
+function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
   run: AgentRun
   providerLabel: (id: string | null) => string
   expanded: boolean
   onToggle: () => void
+  onStop: (runId: string) => void
+  onResume: (runId: string) => void
 }) {
   const cost = fmtCost(run.costCents)
+  // Lifecycle-кнопки (Фаза 4): активный прогон можно остановить; завершённый
+  // ошибкой/остановкой — переотправить (честный re-send из run_inputs).
+  const canStop = run.status === 'running' || run.status === 'queued'
+  const canResume = run.status === 'failed' || run.status === 'stopped'
   return (
     <div className={`gg-run-card is-${run.status}${expanded ? ' is-expanded' : ''}`}>
       <button className="gg-run-card-head" onClick={onToggle}>
@@ -232,6 +238,26 @@ function RunCard({ run, providerLabel, expanded, onToggle }: {
           {run.filesCount > 0 && <span className="gg-run-stat" title="файлов изменено">📄{run.filesCount}</span>}
           {cost && <span className="gg-run-stat gg-run-stat-cost">{cost}</span>}
           <span className="gg-run-stat gg-run-stat-dur">{fmtDuration(run.startedAt, run.endedAt)}</span>
+          {canStop && (
+            <span
+              className="gg-run-action gg-run-action-stop"
+              role="button"
+              tabIndex={0}
+              title="Остановить задачу"
+              onClick={(e) => { e.stopPropagation(); onStop(run.runId) }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStop(run.runId) } }}
+            >⏹</span>
+          )}
+          {canResume && (
+            <span
+              className="gg-run-action gg-run-action-resume"
+              role="button"
+              tabIndex={0}
+              title="Переотправить тот же запрос в чат"
+              onClick={(e) => { e.stopPropagation(); onResume(run.runId) }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onResume(run.runId) } }}
+            >↻ Переотправить</span>
+          )}
           <span className="gg-run-card-caret">{expanded ? '▾' : '▸'}</span>
         </span>
       </button>
@@ -243,6 +269,8 @@ function RunCard({ run, providerLabel, expanded, onToggle }: {
 
 export function AgentRunsPanel() {
   const path = useProject(s => s.path)
+  const switchChatSession = useProject(s => s.switchChatSession)
+  const setActiveView = useProject(s => s.setActiveView)
   const [runs, setRuns] = useState<AgentRun[]>([])
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [ownerFilter, setOwnerFilter] = useState<string>('')
@@ -276,6 +304,35 @@ export function AgentRunsPanel() {
     const t = setInterval(() => void refresh(), 2000)
     return () => clearInterval(t)
   }, [refresh])
+
+  // Stop (Фаза 4): прерываем прогон через тот же abort, что и кнопка ⏹ в чате,
+  // затем сразу обновляем список (поллинг подхватит, но мгновенный refresh —
+  // отзывчивее).
+  const handleStop = useCallback((runId: string) => {
+    void window.api.agentRuns.stop(runId).catch(() => {}).finally(() => void refresh())
+  }, [refresh])
+
+  // Resume (Фаза 4) = честный re-send (НЕ восстановление состояния). Берём
+  // { chatId, userMessage } из run_inputs, переключаемся на этот чат + вкладку
+  // «Чат» и диспатчим gg-resume-send — Chat.tsx сам отправит тем же текстом, как
+  // при ручном вводе. Нет ввода / ошибка → тихо игнорируем (кнопки нет смысла).
+  const handleResume = useCallback(async (runId: string) => {
+    let res: { chatId: number | null; userMessage: string } | { error: string }
+    try {
+      res = await window.api.agentRuns.resume(runId)
+    } catch { return }
+    if ('error' in res) return
+    const { chatId, userMessage } = res
+    if (!userMessage) return
+    try {
+      if (chatId != null) await switchChatSession(chatId)
+    } catch { /* переключение не критично — отправим в текущий активный чат */ }
+    setActiveView('chat')
+    // На следующий тик — даём чату перерендериться на нужной сессии до автоотправки.
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: userMessage }))
+    }, 0)
+  }, [switchChatSession, setActiveView])
 
   const filtered = useMemo(() => runs.filter(r =>
     (!statusFilter || r.status === statusFilter) &&
@@ -333,6 +390,8 @@ export function AgentRunsPanel() {
                 providerLabel={providerLabel}
                 expanded={expanded === r.runId}
                 onToggle={() => setExpanded(prev => prev === r.runId ? null : r.runId)}
+                onStop={handleStop}
+                onResume={() => void handleResume(r.runId)}
               />
             ))}
           </div>
