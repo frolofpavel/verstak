@@ -357,6 +357,13 @@ declare global {
         /** Данные для честного re-send: { chatId, userMessage } или { error }. */
         resume(runId: string): Promise<{ chatId: number | null; userMessage: string } | { error: string }>
       }
+      // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
+      verifications: {
+        list(projectPath: string, limit?: number): Promise<VerificationRow[]>
+        /** Свежайшая верификация проекта; chatId сужает до конкретного чата (Review DoD). */
+        latest(projectPath: string, chatId?: number | null): Promise<VerificationRow | null>
+        get(id: number): Promise<VerificationRow | null>
+      }
       suggestions: {
         get(projectPath: string): Promise<Suggestion[]>
       }
@@ -570,6 +577,27 @@ export interface AgentRunDetail {
   events: AgentRunEvent[]
   subs: SubSession[]
   todos: SessionTodo[]
+}
+
+/**
+ * Verification Artifact (Фаза 3) — строка истории DoD. Зеркало shape из
+ * electron/storage/verifications.ts — renderer не импортит electron/, поэтому
+ * тип дублируется здесь. Источник истины — файл-артефакт (.verification.json/.html).
+ */
+export type VerificationOverall = 'passed' | 'failed' | 'partial' | 'not_run'
+export interface VerificationRow {
+  id: number
+  projectPath: string
+  chatId: number | null
+  runId: string | null
+  overall: VerificationOverall
+  checksTotal: number
+  checksPassed: number
+  changedFilesCount: number
+  artifactPath: string
+  htmlPath: string | null
+  taskSummary: string | null
+  createdAt: number
 }
 
 /** Дескриптор провайдера — единый источник из main process (electron/ai/registry.ts). */

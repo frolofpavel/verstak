@@ -34,8 +34,10 @@ import { createChatSessions } from './storage/chat-sessions'
 import { createSubSessions } from './storage/sub-sessions'
 import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
+import { createVerifications } from './storage/verifications'
 import { registerAgentsIpc } from './ipc/agents'
 import { registerAgentRunsIpc } from './ipc/agent-runs'
+import { registerVerificationsIpc } from './ipc/verifications'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
 import { createProjects } from './storage/projects'
@@ -260,6 +262,9 @@ app.whenReady().then(() => {
   } catch (err) {
     console.warn('[agent-runs] reconcileStale failed:', err instanceof Error ? err.message : err)
   }
+  // Verification Artifact (Фаза 3) — история DoD поверх файла-артефакта.
+  // attest_verification пишет строку, Review подтягивает latest по чату.
+  const verifications = createVerifications(db)
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
@@ -378,13 +383,20 @@ app.whenReady().then(() => {
     // Multi-agent Manager (Фаза 1) — фасад agent_runs прокинут заранее. В ai.ts
     // пока НЕ используется: запись прогонов (create/finish/recordRunEvent) включит
     // Фаза 2. Здесь только делаем фундамент доступным для следующих фаз.
-    agentRuns
+    agentRuns,
+    // Verification Artifact (Фаза 3) — attest_verification пишет строку истории
+    // после writeVerificationArtifact (best-effort). Только insert нужен в ctx.
+    verifications: {
+      insert: (row) => verifications.insert(row)
+    }
   })
   registerChatsIpc(chats, chatSessions, db)
   registerAgentsIpc(subSessions, chats, sessionTodos)
   // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).
   // abortSend переиспользует ядро ai:stop; db — для getRunInput при resume.
   registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend)
+  // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
+  registerVerificationsIpc(verifications)
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)

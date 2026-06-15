@@ -281,6 +281,14 @@ contextBridge.exposeInMainWorld('api', {
     stop: (runId: string) => ipcRenderer.invoke('agent-runs:stop', runId),
     resume: (runId: string) => ipcRenderer.invoke('agent-runs:resume', runId)
   },
+  // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
+  verifications: {
+    list: (projectPath: string, limit?: number) =>
+      ipcRenderer.invoke('verifications:list', projectPath, limit),
+    latest: (projectPath: string, chatId?: number | null) =>
+      ipcRenderer.invoke('verifications:latest', projectPath, chatId),
+    get: (id: number) => ipcRenderer.invoke('verifications:get', id)
+  },
   suggestions: {
     get: (projectPath: string) => ipcRenderer.invoke('suggestions:get', projectPath)
   },

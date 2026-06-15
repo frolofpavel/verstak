@@ -32,6 +32,8 @@ const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 export function ReviewButton() {
   const messages = useProject(s => s.messages)
   const startReview = useProject(s => s.startReview)
+  const path = useProject(s => s.path)
+  const activeChatId = useProject(s => s.activeChatId)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [defaultReviewer, setDefaultReviewer] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState<string | null>(null)
@@ -70,7 +72,14 @@ export function ReviewButton() {
       await window.api.settings.setKey('default_review_provider', providerId)
       setDefaultReviewer(providerId)
     }
-    const payload = composeReviewPayload(messages)
+    // DoD (Фаза 4): подтягиваем latest-верификацию чата, чтобы ревьюер сверял
+    // заявленный итог с доказательством. Best-effort — нет verstak-истории или
+    // ошибка IPC → ревью идёт как раньше, без VERIFICATION-блока.
+    let verification = null
+    if (path) {
+      try { verification = await window.api.verifications.latest(path, activeChatId) } catch { /* DoD не критичен */ }
+    }
+    const payload = composeReviewPayload(messages, verification)
     // Модель — null (бэкэнд возьмёт default для этого провайдера)
     await startReview({ providerId, model: null, payload })
   }

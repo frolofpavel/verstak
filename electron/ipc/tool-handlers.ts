@@ -156,6 +156,24 @@ export interface ToolContext {
    *  Источник истины для attest_verification — сверка claimed vs actual.
    *  Опционально: ai.ts отдаёт снимок filesTouched; без него actual=claimed. */
   runFilesTouched?: () => string[]
+  /** Фасад истории Verification Artifact (Фаза 3). attest_verification после
+   *  writeVerificationArtifact пишет строку (best-effort). Опционально: без него
+   *  артефакт-файл всё равно создаётся, в БД истории просто не попадает. */
+  verifications?: {
+    insert: (row: {
+      projectPath: string
+      chatId: number | null
+      runId: string | null
+      overall: 'passed' | 'failed' | 'partial' | 'not_run'
+      checksTotal: number
+      checksPassed: number
+      changedFilesCount: number
+      artifactPath: string
+      htmlPath: string | null
+      taskSummary: string | null
+      createdAt: number
+    }) => number
+  }
 }
 
 export type ToolMode = 'parallel-read' | 'sequential' | 'confirm-write'
@@ -2124,6 +2142,25 @@ const attestVerificationHandler: ToolHandler = {
 
       const res = await writeVerificationArtifact(ctx.projectPath, art)
       const checksPassed = checks.filter(c => c.status === 'passed').length
+
+      // Персист (Фаза 3): лёгкая строка истории поверх файла-артефакта. Нужна для
+      // verifications.latest(chatId) в Review DoD и панели истории. Best-effort —
+      // источник истины это файл, провал записи в БД не ломает attest.
+      try {
+        ctx.verifications?.insert({
+          projectPath: ctx.projectPath,
+          chatId: ctx.parentChatId ?? null,
+          runId: ctx.runId ?? null,
+          overall,
+          checksTotal: checks.length,
+          checksPassed,
+          changedFilesCount: changedFiles.length,
+          artifactPath: res.jsonPath,
+          htmlPath: res.htmlPath,
+          taskSummary,
+          createdAt: art.createdAt
+        })
+      } catch { /* история не критична — файл-артефакт уже записан */ }
 
       try { ctx.recordJournal(ctx.projectPath, 'session', `${overall === 'passed' ? '✅' : overall === 'failed' ? '✗' : '⚠'} Верификация: ${overall}`, taskSummary) } catch { /* journal not critical */ }
 

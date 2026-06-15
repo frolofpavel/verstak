@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../types/api'
+import type { ChatMessage, VerificationRow } from '../types/api'
 
 /**
  * Сериализует last turn основного чата для отправки ревьюеру.
@@ -7,6 +7,8 @@ import type { ChatMessage } from '../types/api'
  * - Последнее user сообщение (что просили агента сделать).
  * - Последний assistant ответ (что агент написал).
  * - Краткие выжимки tool calls/results (если есть в thinking).
+ * - VERIFICATION-блок (если передан) — заявленный агентом DoD: чтобы ревьюер
+ *   СВЕРЯЛ утверждения агента с доказательством, а не верил на слово.
  *
  * Что НЕ включаем:
  * - Историю старше last turn (ревьюер смотрит ТОЛЬКО на последний шаг).
@@ -14,8 +16,11 @@ import type { ChatMessage } from '../types/api'
  *
  * Результат — обычный текст, который попадёт в user-message ревьюера.
  * Ревьюер получит его как «вот что произошло, проверь».
+ *
+ * @param verification — опциональная latest-верификация чата (Фаза 4). Если есть,
+ *        вставляется блок «=== VERIFICATION (заявленный DoD) ===» для сверки.
  */
-export function composeReviewPayload(messages: ChatMessage[]): string {
+export function composeReviewPayload(messages: ChatMessage[], verification?: VerificationRow | null): string {
   // Берём с конца: последний assistant, перед ним последний user.
   let lastAssistant: ChatMessage | null = null
   let lastUser: ChatMessage | null = null
@@ -55,10 +60,32 @@ export function composeReviewPayload(messages: ChatMessage[]): string {
     lines.push('')
   }
 
+  // VERIFICATION-блок (Фаза 4): заявленный агентом DoD. Ревьюер должен сверять
+  // утверждения агента («я всё проверил») с этим доказательством, а не верить
+  // на слово. Статусы здесь поставлены хендлером по реальному exitCode перепрогона.
+  if (verification) {
+    lines.push('=== VERIFICATION (заявленный DoD) ===')
+    lines.push(`Итог: ${OVERALL_RU[verification.overall] ?? verification.overall} · проверок зелёных ${verification.checksPassed}/${verification.checksTotal} · изменено файлов ${verification.changedFilesCount}`)
+    if (verification.taskSummary) {
+      lines.push(`Что заявлено сделано: ${truncate(verification.taskSummary, 1500)}`)
+    }
+    lines.push('Статусы проверок поставлены перепрогоном команд по реальному exitCode (не словам агента).')
+    lines.push('Сверь: соответствует ли заявленный итог реальной работе из ответа выше? Не пропущены ли проверки (overall=partial/not_run при заявленном «готово»)?')
+    lines.push('')
+  }
+
   lines.push('## Задача')
   lines.push('Прочитай запрос и ответ. Найди проблемы в работе агента и выдай отчёт в формате, описанном в системном промпте.')
 
   return lines.join('\n')
+}
+
+/** Человекочитаемый итог верификации для VERIFICATION-блока. */
+const OVERALL_RU: Record<string, string> = {
+  passed: 'проверки пройдены',
+  failed: 'есть проваленные проверки',
+  partial: 'проверено частично',
+  not_run: 'проверки не запускались'
 }
 
 function truncate(text: string, max: number): string {

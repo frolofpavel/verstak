@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { Markdown } from './Markdown'
+import type { VerificationRow } from '../types/api'
 
 /**
  * Pills ревью в Timeline + ReviewPanel над composer.
@@ -81,6 +83,19 @@ export function ReviewPanel() {
   const setStreaming = useProject(s => s.setStreaming)
   const registerSendOwner = useProject(s => s.registerSendOwner)
 
+  // DoD-бейдж (Фаза 4): latest-верификация текущего чата рядом с ревью — чтобы
+  // было видно доказательство, которое ревьюер сверял. Подтягиваем при открытии
+  // панели / смене чата. Best-effort: нет истории или ошибка → бейджа просто нет.
+  const [verification, setVerification] = useState<VerificationRow | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (openedReviewId == null || !path || activeChatId == null) { setVerification(null); return }
+    window.api.verifications.latest(path, activeChatId)
+      .then(v => { if (alive) setVerification(v) })
+      .catch(() => { if (alive) setVerification(null) })
+    return () => { alive = false }
+  }, [openedReviewId, path, activeChatId])
+
   if (openedReviewId == null) return null
   const review = reviews[openedReviewId]
   if (!review) return null
@@ -125,6 +140,14 @@ export function ReviewPanel() {
           {review.status === 'streaming' && <span className="gg-review-streaming">· идёт…</span>}
           {review.status === 'error' && <span className="gg-review-error">· ошибка</span>}
         </span>
+        {verification && (
+          <span
+            className={`gg-timeline-pill gg-verification-pill is-${verification.overall}`}
+            title={`Заявленный DoD этого чата: ${verification.taskSummary ?? 'без описания'}. Ревьюер сверял его с ответом агента.`}
+          >
+            {dodLabel(verification)}
+          </span>
+        )}
         <button type="button" className="gg-review-panel-close" onClick={() => toggleReviewPanel(null)}>×</button>
       </div>
       <div className="gg-review-panel-body">
@@ -164,4 +187,15 @@ function plural(n: number, one: string, few: string, many: string): string {
   if (mod10 === 1 && mod100 !== 11) return one
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few
   return many
+}
+
+/** Короткий DoD-бейдж для ReviewPanel: ✅passed N/M / ✗failed / ⚠partial. */
+function dodLabel(v: VerificationRow): string {
+  const nm = `${v.checksPassed}/${v.checksTotal}`
+  switch (v.overall) {
+    case 'passed': return `✅ DoD ${nm}`
+    case 'failed': return `✗ DoD ${nm}`
+    case 'partial': return `⚠ DoD ${nm}`
+    default: return `⚠ DoD не запущен`
+  }
 }

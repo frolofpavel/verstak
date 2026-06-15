@@ -75,6 +75,9 @@ interface AiDeps {
   /** Фасад Multi-agent Manager (Фаза 1) — agent_runs. Прокинут заранее; запись
    *  прогонов (create/finish/recordRunEvent) подключит Фаза 2 — здесь НЕ используется. */
   agentRuns?: AgentRuns
+  /** Фасад истории Verification Artifact (Фаза 3) — attest_verification пишет
+   *  строку после writeVerificationArtifact. Прокидывается в ToolContext. */
+  verifications?: ToolContext['verifications']
 }
 
 let currentSendId = 0
@@ -579,7 +582,8 @@ export function registerAiIpc(deps: AiDeps): void {
         deps.subSessions,
         deps.sessionTodos,
         deps.agentRuns,
-        runId
+        runId,
+        deps.verifications
       ).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
@@ -894,7 +898,8 @@ async function runApiConversation(
   subSessions?: AiDeps['subSessions'],
   sessionTodos?: AiDeps['sessionTodos'],
   agentRuns?: AgentRuns,
-  runId?: string
+  runId?: string,
+  verifications?: AiDeps['verifications']
 ): Promise<void> {
   const currentMessages = [...initialMessages]
   // Loop detection: per-signature occurrence counter across the whole agent
@@ -1128,7 +1133,10 @@ async function runApiConversation(
       },
       // attest_verification (Verification Фаза 2): снимок реально записанных за
       // прогон файлов — для сверки claimed vs actual в DoD-артефакте.
-      runFilesTouched: () => Array.from(filesTouched)
+      runFilesTouched: () => Array.from(filesTouched),
+      // Verification Фаза 3: фасад истории — attest_verification пишет строку
+      // после writeVerificationArtifact (best-effort, для latest в Review DoD).
+      verifications
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

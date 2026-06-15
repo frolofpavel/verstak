@@ -427,6 +427,27 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_run_events_run ON agent_run_events(run_id, id);
       `)
     }
+  },
+  {
+    version: 17,
+    description: 'Verification Artifact (Фаза 3): verifications — лёгкая строка истории DoD поверх файла-артефакта (.verification.json/.html). Нужна для verifications.latest(chatId) в Explicit Review.',
+    run: (db: DB) => {
+      // Источник истины — файл-артефакт в .verstak/artifacts/. Эта таблица —
+      // лёгкий индекс для истории и выборки latest по чату (Review DoD).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS verifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL, chat_id INTEGER, run_id TEXT,
+          overall TEXT NOT NULL,            -- passed/failed/partial/not_run
+          checks_total INTEGER NOT NULL DEFAULT 0, checks_passed INTEGER NOT NULL DEFAULT 0,
+          changed_files_count INTEGER NOT NULL DEFAULT 0,
+          artifact_path TEXT NOT NULL, html_path TEXT, task_summary TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_verifications_project ON verifications(project_path, created_at);
+        CREATE INDEX IF NOT EXISTS idx_verifications_chat ON verifications(chat_id);
+      `)
+    }
   }
 ]
 
