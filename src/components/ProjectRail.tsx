@@ -92,9 +92,11 @@ function ProjectChip({ project, active, unread, streaming, shellExpanded, conten
 interface ProjectRailProps {
   onOpenProjectSettings: (project: ProjectMeta) => void
   onOpenAppSettings: () => void
+  sidebarOpen: boolean
+  onToggleSidebar: () => void
 }
 
-export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings }: ProjectRailProps) {
+export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarOpen, onToggleSidebar }: ProjectRailProps) {
   const t = useT()
   const { path, projectList, sessions, setProject, refreshProjectList } = useProject()
   const [bootstrapped, setBootstrapped] = useState(false)
@@ -114,6 +116,9 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings }: Projec
   )
   const showSearch = projectList.length >= 2
   const hasActiveFilter = projectQuery.trim().length > 0
+  const showSearchTool = !contentExpanded && showSearch
+  const showSidebarTool = contentExpanded || !showSearch
+  const toolbarToolCount = 1 + (showSearchTool || showSidebarTool ? 1 : 0)
 
   function openSearch() {
     setRailExpanded(true)
@@ -186,7 +191,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings }: Projec
 
       <div
         className={`gg-rail-toolbar ${shellExpanded ? 'is-expanded is-row' : ''}`}
-        data-tool-count={showSearch ? 2 : 1}
+        data-tool-count={toolbarToolCount}
       >
         <button
           type="button"
@@ -210,16 +215,32 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings }: Projec
             <polyline points="9 6 15 12 9 18" />
           </svg>
         </button>
-        {showSearch && (
+        {showSearchTool && (
           <button
             type="button"
             className={`gg-rail-tool ${hasActiveFilter ? 'is-on' : ''}`}
             onClick={openSearch}
             title={t.rail.search}
+            aria-label={t.rail.search}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="11" cy="11" r="7" />
               <line x1="16.5" y1="16.5" x2="21" y2="21" />
+            </svg>
+          </button>
+        )}
+        {showSidebarTool && (
+          <button
+            type="button"
+            className={`gg-rail-tool ${sidebarOpen ? 'is-on' : ''}`}
+            onClick={onToggleSidebar}
+            title={sidebarOpen ? t.rail.hideNavPanel : t.rail.showNavPanel}
+            aria-pressed={sidebarOpen}
+            aria-label={sidebarOpen ? t.rail.hideNavPanel : t.rail.showNavPanel}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
         )}

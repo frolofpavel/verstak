@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { I18nContext, getTranslations, type Lang } from './i18n'
 import { AuthScreen } from './components/AuthScreen'
 import { ProjectRail } from './components/ProjectRail'
-import { SidebarToggleButton } from './components/SidebarToggleButton'
+
 import { ProjectSettings } from './components/ProjectSettings'
 import type { ProjectMeta } from './types/api'
 import { Sidebar } from './components/Sidebar'
@@ -37,6 +37,15 @@ const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 480
 const SIDEBAR_DEFAULT = 260
 const SIDEBAR_WIDTH_KEY = 'gg.sidebarWidth'
+const SIDEBAR_OPEN_KEY = 'gg-sidebar-open'
+
+function readSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_OPEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 export function App() {
   const [showSettings, setShowSettings] = useState(false)
@@ -48,7 +57,7 @@ export function App() {
   // Lazily-created dedicated side-chat session id. Created on first open of the
   // side-chat panel, reused while the panel stays open within a project.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [lang, setLang] = useState<Lang>('en')
 
   useEffect(() => {
@@ -194,6 +203,12 @@ export function App() {
     try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)) } catch { /* ignore */ }
   }, [sidebarWidth])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_KEY, sidebarOpen ? '1' : '0')
+    } catch { /* ignore */ }
+  }, [sidebarOpen])
+
   if (authDone === null) {
     return (
       <I18nContext.Provider value={getTranslations(lang)}>
@@ -214,15 +229,10 @@ export function App() {
       <ProjectRail
         onOpenProjectSettings={setProjectSettingsTarget}
         onOpenAppSettings={() => setShowSettings(true)}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(v => !v)}
       />
       <main className="gg-main">
-        {activeView !== 'chat' && (
-          <SidebarToggleButton
-            open={sidebarOpen}
-            onClick={() => setSidebarOpen(v => !v)}
-            className="gg-sidebar-toggle--main-float"
-          />
-        )}
         {/* Chat НЕ размонтируется при уходе на другие вкладки — иначе его
             слушатель ai:event отваливается и фоновый стрим (CLI вроде Codex)
             теряет ответ. Прячем через display:none, слушатель остаётся жив. */}
@@ -232,8 +242,6 @@ export function App() {
               rightPanel={effectiveRightPanel}
               onSelectRightPanel={setRightPanel}
               onOpenSideChat={() => void openSideChat()}
-              sidebarOpen={sidebarOpen}
-              onToggleSidebar={() => setSidebarOpen(v => !v)}
             />
             {effectiveRightPanel === 'terminal' && (
               <div className="gg-terminal-wrap">
