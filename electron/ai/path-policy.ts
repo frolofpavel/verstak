@@ -13,14 +13,17 @@
  * renderer or model supplies. Mixing the two is how layered defence leaks.
  */
 
-import { resolve, relative, sep } from 'path'
+import { resolve, relative, sep, isAbsolute } from 'path'
 import { realpath } from 'fs/promises'
 
 /** Textual safety only: blocks `..` traversal. Does NOT catch symlinks. */
 export function safeJoin(root: string, rel: string): string {
   const abs = resolve(root, rel)
   const r = relative(root, abs)
-  if (r.startsWith('..') || r.includes('..' + sep) || r === '..') {
+  // isAbsolute(r) — Windows drive bypass: relative() между разными дисками
+  // (проект на C:\, цель на D:\) возвращает АБСОЛЮТНЫЙ путь, который не
+  // начинается с '..'. Без этой проверки агент выходит на любой диск.
+  if (r.startsWith('..') || r.includes('..' + sep) || r === '..' || isAbsolute(r)) {
     throw new Error(`Запрещён выход за пределы проекта: ${rel}`)
   }
   return abs
@@ -41,7 +44,7 @@ export async function safeRealJoin(root: string, rel: string): Promise<string> {
     let realRoot: string
     try { realRoot = await realpath(root) } catch { realRoot = root }
     const r = relative(realRoot, realAbs)
-    if (r.startsWith('..') || r.includes('..' + sep) || r === '..') {
+    if (r.startsWith('..') || r.includes('..' + sep) || r === '..' || isAbsolute(r)) {
       throw new Error(`Запрещён выход за пределы проекта через symlink: ${rel}`)
     }
     return abs
