@@ -72,10 +72,11 @@ html.gg-atelier body {
 }
 
 .gg-app-atelier .gg-rail-toolbar {
-  background: var(--vol-recessed-bg);
-  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-base) 55%, transparent);
+  border-color: var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--vol-shadow-inset);
+  backdrop-filter: blur(12px);
 }
 
 .gg-app-atelier .gg-rail-tool {

@@ -83,7 +83,7 @@
   --vol-blur: blur(22px) saturate(1.3);
   --vol-glass: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
   --vol-glass-deep: color-mix(in srgb, var(--bg-overlay) 74%, transparent);
-  --vol-highlight: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --vol-highlight: color-mix(in srgb, var(--text-primary) 7%, transparent);
   --vol-shadow-up:
     0 -1px 0 var(--vol-highlight),
     0 10px 36px color-mix(in srgb, var(--bg-base) 72%, transparent),
@@ -92,15 +92,12 @@
     4px 0 24px color-mix(in srgb, var(--bg-base) 65%, transparent),
     1px 0 0 color-mix(in srgb, var(--accent) 8%, transparent);
   --vol-shadow-inset:
-    inset 0 8px 36px rgba(0, 0, 0, 0.68),
-    inset 0 4px 16px rgba(0, 0, 0, 0.52),
-    inset 0 2px 6px rgba(0, 0, 0, 0.40),
-    inset 0 1px 0 rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    inset 0 2px 12px color-mix(in srgb, var(--bg-base) 52%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
   --vol-lift:
     0 14px 40px color-mix(in srgb, var(--bg-base) 68%, transparent),
     0 0 0 1px var(--border-default);
-  --vol-recessed-bg: color-mix(in srgb, var(--bg-base) 48%, #1e2229);
+  --vol-recessed-bg: color-mix(in srgb, var(--bg-base) 58%, transparent);
   --shell-rail-fill:
     linear-gradient(165deg, color-mix(in srgb, var(--vol-highlight) 80%, transparent) 0%, transparent 38%),
     var(--vol-glass);
@@ -171,14 +168,12 @@ html[data-theme="light"] {
     3px 0 16px color-mix(in srgb, var(--bg-base) 12%, transparent),
     1px 0 0 color-mix(in srgb, var(--accent) 6%, transparent);
   --vol-shadow-inset:
-    inset 0 6px 28px rgba(15, 25, 40, 0.34),
-    inset 0 3px 12px rgba(15, 25, 40, 0.24),
-    inset 0 1px 4px rgba(15, 25, 40, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    inset 0 2px 8px color-mix(in srgb, var(--bg-base) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent);
   --vol-lift:
     0 12px 32px color-mix(in srgb, var(--bg-base) 14%, transparent),
     0 0 0 1px var(--border-default);
-  --vol-recessed-bg: color-mix(in srgb, var(--bg-overlay) 62%, #c8ced8);
+  --vol-recessed-bg: color-mix(in srgb, var(--bg-base) 94%, var(--bg-overlay));
 
   --bg-code: #eef1ff;
   --text-code: #3d3996;
