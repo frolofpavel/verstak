@@ -93,6 +93,11 @@ declare global {
     api: {
       projects: {
         pick: () => Promise<string | null>
+        create: (input: { name: string; folderSlug: string; iconSourcePath?: string | null }) => Promise<
+          { ok: true; path: string; meta: ProjectMeta } | { ok: false; error: string }
+        >
+        clientsRoot: () => Promise<string>
+        pickImage: () => Promise<string | null>
         setCurrent: (path: string | null) => Promise<void>
         list: () => Promise<ProjectMeta[]>
         rename: (path: string, name: string) => Promise<void>

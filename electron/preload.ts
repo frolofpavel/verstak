@@ -3,6 +3,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('api', {
   projects: {
     pick: () => ipcRenderer.invoke('projects:pick'),
+    create: (input: { name: string; folderSlug: string; iconSourcePath?: string | null }) =>
+      ipcRenderer.invoke('projects:create', input),
+    clientsRoot: () => ipcRenderer.invoke('projects:clients-root') as Promise<string>,
+    pickImage: () => ipcRenderer.invoke('projects:pick-image') as Promise<string | null>,
     setCurrent: (path: string | null) => ipcRenderer.invoke('projects:set-current', path),
     list: () => ipcRenderer.invoke('projects:list'),
     rename: (path: string, name: string) => ipcRenderer.invoke('projects:rename', path, name),

@@ -1,9 +1,35 @@
 import { app, dialog, ipcMain, BrowserWindow, shell } from 'electron'
+import { mkdirSync } from 'fs'
+import { join } from 'path'
 import { setActiveProjectPath } from '../state/project-state'
 import { ensureUserLayer } from '../ai/user-layer'
 import type { Projects } from '../storage/projects'
+import {
+  clientFolderExists,
+  getClientsRoot,
+  normalizeClientFolderSlug,
+  scaffoldClientFolder,
+  validateClientFolderSlug
+} from '../storage/clients-root'
 import { deleteProjectIconFile, importProjectIcon } from '../storage/project-icons'
 import { forgetMemorizedProject } from './ai'
+import type { ProjectMeta } from '../storage/projects'
+
+export type CreateClientResult =
+  | { ok: true; path: string; meta: ProjectMeta }
+  | { ok: false; error: string }
+
+async function pickImageFile(win: BrowserWindow): Promise<string | null> {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Изображение клиента',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico'] }
+    ]
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+}
 
 export function registerProjectIpc(projects: Projects): void {
   ipcMain.handle('projects:pick', async () => {
@@ -37,6 +63,59 @@ export function registerProjectIpc(projects: Projects): void {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
     void shell.openExternal(url)
     return true
+  })
+
+  ipcMain.handle('projects:clients-root', () => getClientsRoot())
+
+  ipcMain.handle('projects:pick-image', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return null
+    return pickImageFile(win)
+  })
+
+  ipcMain.handle('projects:create', async (_e, input: {
+    name?: string
+    folderSlug?: string
+    iconSourcePath?: string | null
+  }): Promise<CreateClientResult> => {
+    const displayName = (input.name ?? '').trim()
+    if (!displayName) return { ok: false, error: 'Укажите название клиента' }
+
+    const slug = normalizeClientFolderSlug(input.folderSlug ?? '')
+    const slugError = validateClientFolderSlug(slug)
+    if (slugError) return { ok: false, error: slugError }
+
+    const clientsRoot = getClientsRoot()
+    mkdirSync(clientsRoot, { recursive: true })
+
+    if (clientFolderExists(clientsRoot, slug)) {
+      return { ok: false, error: `Папка «${slug}» уже есть в ${clientsRoot}` }
+    }
+
+    const projectPath = join(clientsRoot, slug)
+    try {
+      mkdirSync(projectPath, { recursive: false })
+      scaffoldClientFolder(clientsRoot, projectPath, displayName, slug)
+      void ensureUserLayer(projectPath).catch(() => { /* non-critical */ })
+    } catch {
+      return { ok: false, error: 'Не удалось создать папку клиента на диске' }
+    }
+
+    projects.upsert(projectPath)
+    let meta = projects.updateMeta(projectPath, { name: displayName })
+    if (!meta) return { ok: false, error: 'Клиент создан на диске, но не записался в базу' }
+
+    if (input.iconSourcePath) {
+      try {
+        const iconPath = importProjectIcon(projectPath, input.iconSourcePath)
+        meta = projects.updateMeta(projectPath, { iconPath }) ?? meta
+      } catch {
+        /* icon optional — client still created */
+      }
+    }
+
+    setActiveProjectPath(projectPath)
+    return { ok: true, path: projectPath, meta }
   })
 
   ipcMain.handle('projects:list', () => projects.list())

@@ -5,6 +5,7 @@ import iconUrl from '../assets/icon.png'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
 import { UpdateNotification } from './UpdateNotification'
+import { CreateClientModal } from './CreateClientModal'
 import { useT } from '../i18n'
 
 const RAIL_EXPANDED_KEY = 'gg-rail-expanded'
@@ -101,6 +102,7 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSetting
   const [bootstrapped, setBootstrapped] = useState(false)
   const [railExpanded, setRailExpanded] = useState(readRailExpanded)
   const [projectQuery, setProjectQuery] = useState('')
+  const [showCreateClient, setShowCreateClient] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const filteredProjects = useMemo(
@@ -145,12 +147,13 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSetting
   }, [])
   void bootstrapped
 
-  async function addProject() {
-    const picked = await window.api.projects.pick()
-    if (picked) await setProject(picked)
+  async function handleClientOpened(path: string) {
+    await setProject(path)
+    await refreshProjectList()
   }
 
   return (
+    <>
     <div className={`gg-rail ${railExpanded ? 'is-expanded' : ''}`}>
       <div className="gg-rail-top">
         <button
@@ -263,11 +266,11 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSetting
         <button
           type="button"
           className="gg-rail-add"
-          onClick={() => void addProject()}
-          title={t.rail.openClient}
+          onClick={() => setShowCreateClient(true)}
+          title={t.rail.createClient}
         >
           <span className="gg-rail-add-icon" aria-hidden>+</span>
-          {railExpanded && <span className="gg-rail-add-label">{t.rail.openClient}</span>}
+          {railExpanded && <span className="gg-rail-add-label">{t.rail.createClient}</span>}
         </button>
       </div>
 
@@ -285,5 +288,12 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSetting
         </button>
       </div>
     </div>
+    {showCreateClient && (
+      <CreateClientModal
+        onClose={() => setShowCreateClient(false)}
+        onOpened={path => void handleClientOpened(path)}
+      />
+    )}
+    </>
   )
 }
