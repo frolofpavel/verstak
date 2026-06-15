@@ -3,7 +3,9 @@ import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { setActiveProjectPath } from '../state/project-state'
 import { ensureUserLayer } from '../ai/user-layer'
+import type { Database } from 'better-sqlite3'
 import type { Projects } from '../storage/projects'
+import { deleteProjectDirectory, purgeProjectAppData } from '../storage/project-purge'
 import {
   clientFolderExists,
   getClientsRoot,
@@ -31,7 +33,7 @@ async function pickImageFile(win: BrowserWindow): Promise<string | null> {
   return result.filePaths[0]
 }
 
-export function registerProjectIpc(projects: Projects): void {
+export function registerProjectIpc(projects: Projects, db: Database): void {
   ipcMain.handle('projects:pick', async () => {
     const win = BrowserWindow.getFocusedWindow()
     if (!win) return null
@@ -144,10 +146,24 @@ export function registerProjectIpc(projects: Projects): void {
     if (existing?.iconPath) deleteProjectIconFile(existing.iconPath)
     return projects.updateMeta(projectPath, { iconPath: null })
   })
-  ipcMain.handle('projects:remove', (_e, path: string) => {
+  ipcMain.handle('projects:remove', (_e, path: string, options?: { deleteData?: boolean }) => {
     const existing = projects.list().find(p => p.path === path)
-    if (existing?.iconPath) deleteProjectIconFile(existing.iconPath)
+    if (!existing) return { ok: false, error: 'Клиент не найден в списке' }
+
+    if (existing.iconPath) deleteProjectIconFile(existing.iconPath)
+
+    if (options?.deleteData) {
+      try {
+        purgeProjectAppData(db, path)
+        deleteProjectDirectory(path)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Не удалось удалить данные клиента'
+        return { ok: false, error: msg }
+      }
+    }
+
     projects.remove(path)
     forgetMemorizedProject(path)
+    return { ok: true }
   })
 }

@@ -129,7 +129,7 @@ interface ProjectState {
   closeProject: () => void
   refreshProjectList: () => Promise<void>
   updateProjectMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
-  removeProject: (path: string) => Promise<void>
+  removeProject: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
   setActiveView: (v: ViewId) => void
   addMessage: (msg: ChatMessage) => void
   updateLastAssistant: (text: string) => void
@@ -379,15 +379,17 @@ export const useProject = create<ProjectState>((set, get) => ({
     }))
     return updated
   },
-  removeProject: async (path: string) => {
-    await window.api.projects.remove(path)
+  removeProject: async (path: string, options?: { deleteData?: boolean }) => {
+    const result = await window.api.projects.remove(path, options)
+    if (!result.ok) return result
     const projectList = await window.api.projects.list()
     const state = get()
     if (state.path === path) {
-      set({ path: null, tree: [], messages: [], projectList })
+      set({ path: null, tree: [], messages: [], projectList, activeChatId: null, chatSessions: [] })
     } else {
       set({ projectList })
     }
+    return result
   },
   setActiveView: (v) => set({ activeView: v }),
   addMessage: (msg) => set(s => ({ messages: [...s.messages, msg] })),

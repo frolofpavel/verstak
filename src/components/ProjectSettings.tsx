@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
 import type { ProjectMeta } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
+import { DeleteCountdownButton } from './DeleteCountdownButton'
+import { useT } from '../i18n'
 
 interface ProjectSettingsProps {
   project: ProjectMeta
@@ -11,6 +13,7 @@ interface ProjectSettingsProps {
 }
 
 export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectSettingsProps) {
+  const t = useT()
   const { removeProject, setProject, updateProjectMeta, refreshProjectList } = useProject()
   const [displayName, setDisplayName] = useState(project.name)
   const [localProject, setLocalProject] = useState(project)
@@ -19,6 +22,9 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
   const [saved, setSaved] = useState(false)
   const [appearanceSaved, setAppearanceSaved] = useState(false)
   const [iconBusy, setIconBusy] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     setDisplayName(project.name)
@@ -91,14 +97,37 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
     setTimeout(() => setSaved(false), 2000)
   }
 
-  async function handleRemove() {
-    const ok = window.confirm(`Убрать «${localProject.name}» из списка?\nФайлы проекта не будут удалены.`)
+  async function handleRemoveFromList() {
+    const ok = window.confirm(
+      t.projectSettings.removeFromListConfirm.replace('{name}', localProject.name)
+    )
     if (!ok) return
+    const result = await removeProject(project.path)
+    if (!result.ok) {
+      window.alert(t.projectSettings.deleteFailed.replace('{error}', result.error ?? ''))
+      return
+    }
     onClose()
-    await removeProject(project.path)
+  }
+
+  async function handleDeleteWithData() {
+    setDeleteBusy(true)
+    setDeleteError(null)
+    try {
+      const result = await removeProject(project.path, { deleteData: true })
+      if (!result.ok) {
+        setDeleteError(t.projectSettings.deleteFailed.replace('{error}', result.error ?? ''))
+        return
+      }
+      setShowDeleteConfirm(false)
+      onClose()
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   return createPortal(
+    <>
     <div className="gg-modal-backdrop" onClick={onClose}>
       <div
         className="gg-project-settings"
@@ -152,7 +181,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     </button>
                   )}
                 </div>
-                <div className="gg-settings-hint">PNG, JPG, WebP и др. Сохраняется в профиле Grok Desktop — папку на диске не переименовывает.</div>
+                <div className="gg-settings-hint">PNG, JPG, WebP и др. Сохраняется в профиле Verstak — папку на диске не переименовывает.</div>
               </div>
             </div>
           </section>
@@ -207,20 +236,65 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
           </section>
 
           <section className="gg-ps-section gg-ps-danger-zone">
-            <div className="gg-ps-section-label gg-ps-danger-label">Danger Zone</div>
-            <div className="gg-ps-danger-row">
+            <div className="gg-ps-section-label gg-ps-danger-label">Удаление клиента</div>
+
+            <div className="gg-ps-danger-row gg-ps-danger-row-stack">
               <div>
-                <div className="gg-ps-danger-title">Убрать из списка</div>
-                <div className="gg-ps-danger-desc">Файлы проекта не удаляются — только запись в Grok Desktop.</div>
+                <div className="gg-ps-danger-title">{t.projectSettings.removeFromList}</div>
+                <div className="gg-ps-danger-desc">{t.projectSettings.removeFromListDesc}</div>
               </div>
-              <button className="gg-ps-danger-btn" onClick={() => void handleRemove()}>
-                Убрать
+              <button type="button" className="gg-ps-action-btn gg-ps-remove-list-btn" onClick={() => void handleRemoveFromList()}>
+                {t.projectSettings.removeFromList}
               </button>
+            </div>
+
+            <div className="gg-ps-danger-row gg-ps-danger-row-stack gg-ps-danger-row-separated">
+              <div>
+                <div className="gg-ps-danger-title">{t.projectSettings.deleteWithData}</div>
+                <div className="gg-ps-danger-desc">{t.projectSettings.deleteWithDataDesc}</div>
+              </div>
+              <DeleteCountdownButton
+                className="gg-ps-danger-btn"
+                label={t.projectSettings.deleteWithData}
+                readyLabel={t.projectSettings.deleteWithDataReady}
+                waitingLabel={sec => t.projectSettings.deleteWithDataHold.replace('{seconds}', String(sec))}
+                onActivate={() => setShowDeleteConfirm(true)}
+                disabled={deleteBusy}
+              />
             </div>
           </section>
         </div>
       </div>
-    </div>,
+    </div>
+
+    {showDeleteConfirm && (
+      <div className="gg-modal-backdrop gg-delete-confirm-backdrop" onClick={() => setShowDeleteConfirm(false)}>
+        <div className="gg-modal gg-delete-client-confirm" onClick={e => e.stopPropagation()} role="alertdialog" aria-modal="true">
+          <div className="gg-modal-header">
+            <div className="gg-modal-title">{t.projectSettings.deleteConfirmTitle}</div>
+            <button type="button" className="gg-modal-close" onClick={() => setShowDeleteConfirm(false)}>×</button>
+          </div>
+          <div className="gg-modal-body">
+            <p className="gg-delete-confirm-text">
+              {t.projectSettings.deleteConfirmBody.replace('{name}', localProject.name)}
+            </p>
+            <p className="gg-delete-confirm-path">
+              {t.projectSettings.deleteConfirmPath.replace('{path}', project.path)}
+            </p>
+            {deleteError && <div className="gg-create-client-error" role="alert">{deleteError}</div>}
+          </div>
+          <div className="gg-modal-footer">
+            <button type="button" className="gg-btn gg-btn-ghost" onClick={() => setShowDeleteConfirm(false)} disabled={deleteBusy}>
+              {t.projectSettings.deleteConfirmNo}
+            </button>
+            <button type="button" className="gg-btn gg-btn-danger" onClick={() => void handleDeleteWithData()} disabled={deleteBusy}>
+              {deleteBusy ? t.projectSettings.deleting : t.projectSettings.deleteConfirmYes}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>,
     document.body
   )
 }

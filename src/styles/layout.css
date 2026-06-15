@@ -516,6 +516,19 @@
 }
 .gg-ps-danger-label { color: var(--error) !important; }
 .gg-ps-danger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.gg-ps-danger-row-stack {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.gg-ps-danger-row-separated {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--error) 22%, transparent);
+}
+.gg-ps-remove-list-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .gg-ps-danger-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
 .gg-ps-danger-desc { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
 .gg-ps-danger-btn {
@@ -524,6 +537,61 @@
   cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: opacity 0.15s;
 }
 .gg-ps-danger-btn:hover { opacity: 0.85; }
+
+.gg-delete-countdown-btn {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  min-width: 148px;
+}
+.gg-delete-countdown-btn.is-holding:not(.is-ready) {
+  opacity: 0.92;
+  cursor: wait;
+}
+.gg-delete-countdown-btn.is-ready {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--error) 35%, transparent);
+}
+.gg-delete-countdown-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: color-mix(in srgb, #fff 18%, var(--error));
+  pointer-events: none;
+  transition: transform 40ms linear;
+}
+.gg-delete-countdown-text {
+  position: relative;
+  z-index: 1;
+}
+.gg-delete-confirm-backdrop {
+  z-index: 1200;
+}
+.gg-delete-client-confirm {
+  width: min(440px, calc(100vw - 32px));
+  z-index: 1201;
+}
+.gg-delete-confirm-text {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.gg-delete-confirm-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+  line-height: 1.4;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+}
 
 /* ── Create client modal ─────────────────────────────────── */
 .gg-create-client-modal {

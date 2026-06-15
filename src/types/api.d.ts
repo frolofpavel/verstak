@@ -104,7 +104,7 @@ declare global {
         updateMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
         pickIcon: (path: string) => Promise<ProjectMeta | null>
         clearIcon: (path: string) => Promise<ProjectMeta | null>
-        remove: (path: string) => Promise<void>
+        remove: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
       }
       app: {
         getHomeDir: () => Promise<string>

@@ -255,7 +255,7 @@ app.whenReady().then(() => {
     console.warn('[skills] initial refresh failed:', err instanceof Error ? err.message : err)
   })
 
-  registerProjectIpc(projects)
+  registerProjectIpc(projects, db)
   registerFilesIpc({ getProjectRoot: getActiveProjectPath })
   registerSettingsIpc(settings)
   registerCliAuthIpc(settings)

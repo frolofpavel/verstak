@@ -14,7 +14,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('projects:update-meta', path, patch),
     pickIcon: (path: string) => ipcRenderer.invoke('projects:pick-icon', path),
     clearIcon: (path: string) => ipcRenderer.invoke('projects:clear-icon', path),
-    remove: (path: string) => ipcRenderer.invoke('projects:remove', path)
+    remove: (path: string, options?: { deleteData?: boolean }) =>
+      ipcRenderer.invoke('projects:remove', path, options) as Promise<{ ok: boolean; error?: string }>
   },
   app: {
     getHomeDir: () => ipcRenderer.invoke('app:home-dir') as Promise<string>,
