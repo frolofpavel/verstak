@@ -4,33 +4,12 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .gg-app-atelier {
-  --vol-blur: blur(22px) saturate(1.3);
-  --vol-glass: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
-  --vol-glass-deep: color-mix(in srgb, var(--bg-overlay) 74%, transparent);
-  --vol-highlight: color-mix(in srgb, var(--text-primary) 7%, transparent);
-  --vol-shadow-up:
-    0 -1px 0 var(--vol-highlight),
-    0 10px 36px rgba(0, 0, 0, 0.42),
-    0 2px 6px rgba(0, 0, 0, 0.28);
-  --vol-shadow-side:
-    4px 0 24px rgba(0, 0, 0, 0.32),
-    1px 0 0 color-mix(in srgb, var(--accent) 8%, transparent);
-  --vol-shadow-inset:
-    inset 0 2px 12px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
-  --vol-lift: 0 14px 40px rgba(0, 0, 0, 0.48), 0 0 0 1px var(--border-default);
-  --vol-recessed-bg: color-mix(in srgb, var(--bg-base) 60%, transparent);
   --shell-gap: 5px;
   --shell-col-gap: 2px;
-  --shell-rail-fill:
-    linear-gradient(165deg, color-mix(in srgb, var(--vol-highlight) 80%, transparent) 0%, transparent 38%),
-    var(--vol-glass);
-  --shell-panel-fill: var(--shell-rail-fill);
-  --shell-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* Depth backdrop — works with any theme via accent-muted */
-body:has(.gg-app-atelier) {
+html.gg-atelier body {
   background:
     radial-gradient(ellipse 80% 55% at 12% -8%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 58%),
     radial-gradient(ellipse 60% 45% at 92% 102%, color-mix(in srgb, var(--accent) 8%, transparent) 0%, transparent 52%),
