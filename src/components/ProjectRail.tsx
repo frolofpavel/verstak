@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ProjectGroup, ProjectMeta } from '../types/api'
-import iconUrl from '../assets/icon.png'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
 import { UpdateNotification } from './UpdateNotification'
@@ -382,18 +381,6 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
   return (
     <>
     <div className={`gg-rail ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''}`}>
-      <div className="gg-rail-top">
-        <button
-          type="button"
-          className="gg-rail-home"
-          onClick={() => useProject.getState().closeProject()}
-          title="Главная"
-        >
-          <img src={iconUrl} alt="Verstak" />
-        </button>
-        <span className="gg-rail-brand-name" aria-hidden={!contentExpanded}>VERSTAK</span>
-      </div>
-
       <div
         className={`gg-rail-toolbar ${shellExpanded ? 'is-expanded is-row' : ''}`}
         data-tool-count={toolbarToolCount}
