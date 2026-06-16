@@ -81,6 +81,22 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`
 }
 
+/** Иконка-индикатор черновика: заливка растёт с объёмом текста (визуальный cap 32k). */
+function TokenPreviewMeter({ tokens, exact, title }: { tokens: number; exact: boolean; title: string }) {
+  const fill = Math.min(1, tokens / 32_000)
+  const innerH = Math.max(1.2, fill * 9)
+  const innerY = 13.2 - innerH
+  return (
+    <span className="gg-usage-pill is-preview" title={title}>
+      <svg className="gg-usage-meter-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+        <rect x="3" y="2" width="10" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.15" opacity="0.38" />
+        <rect x="3.6" y={innerY} width="8.8" height={innerH} rx="1.1" fill="currentColor" opacity="0.9" />
+      </svg>
+      <span className="gg-usage-meter-label">{exact ? '' : '≈'}{formatTokens(tokens)}</span>
+    </span>
+  )
+}
+
 function isAcceptable(mime: string): boolean {
   return ACCEPTED_MIME_PREFIXES.some(p => mime.startsWith(p))
 }
@@ -1632,22 +1648,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <div className="gg-composer-meta-cluster">
               {previewTokens && previewTokens.tokens > 0 && (() => {
                 const cost = estimateCost(provider.id, provider.model, previewTokens.tokens, 0, 0)
-                const exactBadge = previewTokens.exact ? '' : '≈'
+                const title = previewTokens.exact
+                  ? `Точная оценка от ${provider.label}: ${previewTokens.tokens} токенов на следующий запрос${cost.usd ? `, ~${cost.usd} (только input)` : ''}`
+                  : `Грубая оценка (4 символа = 1 токен): ${previewTokens.tokens} токенов`
                 return (
-                  <span
-                    className="gg-usage-pill is-preview"
-                    title={previewTokens.exact
-                      ? `Точная оценка от ${provider.label}: ${previewTokens.tokens} токенов на следующий запрос${cost.usd ? `, ~${cost.usd} (только input)` : ''}`
-                      : `Грубая оценка (4 символа = 1 токен): ${previewTokens.tokens} токенов`}
-                  >
-                    <span>📝 {exactBadge}{formatTokens(previewTokens.tokens)}</span>
+                  <>
+                    <TokenPreviewMeter tokens={previewTokens.tokens} exact={previewTokens.exact} title={title} />
                     {cost.usd && previewTokens.exact && (
-                      <>
-                        <span className="gg-usage-sep">·</span>
+                      <span className="gg-usage-pill is-preview is-cost-hint" title={title}>
                         <span className="gg-usage-cost">~{cost.usd}</span>
-                      </>
+                      </span>
                     )}
-                  </span>
+                  </>
                 )
               })()}
               {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
