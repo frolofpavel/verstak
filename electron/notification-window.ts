@@ -4,8 +4,9 @@ import { fileURLToPath } from 'url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-const TOAST_W = 440
-const TOAST_H = 320
+const TOAST_W = 420
+/** Высота окна под до 3 тостов (~132px каждый + отступы). */
+const TOAST_H = 440
 const MARGIN = 16
 const BOTTOM = 24
 
