@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useProject } from '../store/projectStore'
 import type { Memory, DetectedCli, AuditEntry, PolicyMatrixDTO, PolicyDecision, AgentModeId } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
@@ -891,6 +891,13 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [costCap, setCostCap] = useState('')
   const [configuredConnectors, setConfiguredConnectors] = useState<Set<string>>(new Set())
   const [openConnector, setOpenConnector] = useState<string | null>(null)
+  // Детали коннектора рендерятся ПОД гридом из 31 карточки — при клике по
+  // карточке вверху панель появлялась за экраном («ничего не происходит»).
+  // Скроллим к ней, чтобы поля настройки сразу были видны.
+  const connectorDetailRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (openConnector) connectorDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [openConnector])
   // Custom OpenAI-compatible: base URL + список моделей через запятую.
   // Сохраняется в settings.custom_openai_baseurl / custom_openai_models.
   const [customOpenaiBaseUrl, setCustomOpenaiBaseUrl] = useState('')
@@ -1954,7 +1961,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
           {/* Expanded settings panel below the grid */}
           {openConnector && (
-            <div className="gg-connector-detail">
+            <div className="gg-connector-detail" ref={connectorDetailRef}>
               <div className="gg-connector-detail-header">
                 {(() => { const def = CONNECTORS.find(c => c.id === openConnector); return def ? <><def.icon size={20} /> {def.name}</> : null })()}
                 <button className="gg-connector-detail-close" onClick={() => setOpenConnector(null)}>×</button>
