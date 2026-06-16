@@ -922,7 +922,9 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       setActiveProvider(valid)
       const keyVals: Record<string, string> = {}
       const modelVals: Record<string, string> = {}
-      for (const p of PROVIDERS) {
+      // Грузим ключи/модели всех провайдеров ПАРАЛЛЕЛЬНО (было последовательно —
+      // 18 провайдеров × 2 await = ~36 IPC цепочкой, заметный лаг открытия).
+      await Promise.all(PROVIDERS.map(async p => {
         if (p.secretKey) {
           const v = await window.api.settings.getKey(p.secretKey)
           if (v) keyVals[p.secretKey] = v
@@ -935,7 +937,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           m = p.defaultModel
         }
         modelVals[p.id] = m ?? p.defaultModel
-      }
+      }))
       setKeys(keyVals)
       setModels(modelVals)
       // 1С connector creds
@@ -960,59 +962,82 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         setAutonomousState(st)
       } catch { /* ignore */ }
       // V3 коннекторы
-      setGsheetsJson((await window.api.settings.getKey('gsheets_service_account_json')) ?? '')
-      setTelegramBotToken((await window.api.settings.getKey('telegram_bot_token')) ?? '')
-      setTelegramWhitelist((await window.api.settings.getKey('telegram_chat_whitelist')) ?? '')
-      setSshHost((await window.api.settings.getKey('ssh_default_host')) ?? '')
-      setSshKeyPath((await window.api.settings.getKey('ssh_key_path')) ?? '')
-      setBitrixWebhook((await window.api.settings.getKey('bitrix24_webhook_url')) ?? '')
-      setYDirectToken((await window.api.settings.getKey('yandex_direct_token')) ?? '')
-      setDadataApiKey((await window.api.settings.getKey('dadata_api_key')) ?? '')
-      setDadataSecret((await window.api.settings.getKey('dadata_secret')) ?? '')
-      setYMetrikaToken((await window.api.settings.getKey('yandex_metrika_token')) ?? '')
-      setAvitoClientId((await window.api.settings.getKey('avito_client_id')) ?? '')
-      setAvitoClientSecret((await window.api.settings.getKey('avito_client_secret')) ?? '')
-      setYWebmasterToken((await window.api.settings.getKey('yandex_webmaster_token')) ?? '')
-      setYWordstatToken((await window.api.settings.getKey('yandex_wordstat_token')) ?? '')
-      setOzonClientId((await window.api.settings.getKey('ozon_client_id')) ?? '')
-      setOzonApiKey((await window.api.settings.getKey('ozon_api_key')) ?? '')
-      setWbToken((await window.api.settings.getKey('wildberries_token')) ?? '')
-      setYookassaShopId((await window.api.settings.getKey('yookassa_shop_id')) ?? '')
-      setYookassaSecretKey((await window.api.settings.getKey('yookassa_secret_key')) ?? '')
-      setVkToken((await window.api.settings.getKey('vk_access_token')) ?? '')
-      setAmocrmSubdomain((await window.api.settings.getKey('amocrm_subdomain')) ?? '')
-      setAmocrmToken((await window.api.settings.getKey('amocrm_access_token')) ?? '')
-      setMoyskladToken((await window.api.settings.getKey('moysklad_token')) ?? '')
-      setYTrackerToken((await window.api.settings.getKey('yandex_tracker_token')) ?? '')
-      setYTrackerOrgId((await window.api.settings.getKey('yandex_tracker_org_id')) ?? '')
-      setSendpulseClientId((await window.api.settings.getKey('sendpulse_client_id')) ?? '')
-      setSendpulseClientSecret((await window.api.settings.getKey('sendpulse_client_secret')) ?? '')
-      setUnisenderApiKey((await window.api.settings.getKey('unisender_api_key')) ?? '')
-      setGa4Token((await window.api.settings.getKey('ga4_access_token')) ?? '')
-      setGa4PropertyId((await window.api.settings.getKey('ga4_property_id')) ?? '')
-      setNotionToken((await window.api.settings.getKey('notion_token')) ?? '')
-      setKonturFocusKey((await window.api.settings.getKey('kontur_focus_api_key')) ?? '')
-      setMpstatsToken((await window.api.settings.getKey('mpstats_token')) ?? '')
-      setOzonPerfClientId((await window.api.settings.getKey('ozon_perf_client_id')) ?? '')
-      setOzonPerfClientSecret((await window.api.settings.getKey('ozon_perf_client_secret')) ?? '')
-      setJiraBaseUrl((await window.api.settings.getKey('jira_base_url')) ?? '')
-      setJiraEmail((await window.api.settings.getKey('jira_email')) ?? '')
-      setJiraApiToken((await window.api.settings.getKey('jira_api_token')) ?? '')
-      setTrelloApiKey((await window.api.settings.getKey('trello_api_key')) ?? '')
-      setTrelloToken((await window.api.settings.getKey('trello_token')) ?? '')
-      setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
-      setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
-      setClaudeOauthToken((await window.api.settings.getKey('claude_code_oauth_token')) ?? '')
-      setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
-      setGithubToken((await window.api.settings.getKey('github_token')) ?? '')
-      setSocialTgChannels((await window.api.settings.getKey('social_publish_telegram_channels')) ?? '')
-      setSocialVkToken((await window.api.settings.getKey('social_publish_vk_token')) ?? '')
-      setSocialVkGroupId((await window.api.settings.getKey('social_publish_vk_group_id')) ?? '')
-      setSocialWebhooks((await window.api.settings.getKey('social_publish_webhooks')) ?? '')
-      setCostCap((await window.api.settings.getKey('cost_cap_usd_per_session')) ?? '')
-      setCustomOpenaiBaseUrl((await window.api.settings.getKey('custom_openai_baseurl')) ?? '')
-      setCustomOpenaiModels((await window.api.settings.getKey('custom_openai_models')) ?? '')
-      setCurrentLang((await window.api.settings.getKey('app_language')) ?? 'en')
+      // Плоские ключи коннекторов/прочего — ОДНОЙ параллельной пачкой. Раньше
+      // здесь было ~50 последовательных await getKey (каждый ждёт предыдущего) —
+      // главный источник лага открытия Settings после роста до 31 коннектора.
+      const FLAT_KEYS = [
+        'gsheets_service_account_json', 'telegram_bot_token', 'telegram_chat_whitelist',
+        'ssh_default_host', 'ssh_key_path', 'bitrix24_webhook_url', 'yandex_direct_token',
+        'dadata_api_key', 'dadata_secret', 'yandex_metrika_token', 'avito_client_id',
+        'avito_client_secret', 'yandex_webmaster_token', 'yandex_wordstat_token',
+        'ozon_client_id', 'ozon_api_key', 'wildberries_token', 'yookassa_shop_id',
+        'yookassa_secret_key', 'vk_access_token', 'amocrm_subdomain', 'amocrm_access_token',
+        'moysklad_token', 'yandex_tracker_token', 'yandex_tracker_org_id', 'sendpulse_client_id',
+        'sendpulse_client_secret', 'unisender_api_key', 'ga4_access_token', 'ga4_property_id',
+        'notion_token', 'kontur_focus_api_key', 'mpstats_token', 'ozon_perf_client_id',
+        'ozon_perf_client_secret', 'jira_base_url', 'jira_email', 'jira_api_token',
+        'trello_api_key', 'trello_token', 'yandex_direct_login', 'skills_server_base',
+        'claude_code_oauth_token', 'yandex_disk_token', 'github_token',
+        'social_publish_telegram_channels', 'social_publish_vk_token', 'social_publish_vk_group_id',
+        'social_publish_webhooks', 'cost_cap_usd_per_session', 'custom_openai_baseurl',
+        'custom_openai_models', 'app_language'
+      ]
+      const F: Record<string, string> = Object.fromEntries(
+        await Promise.all(FLAT_KEYS.map(async k => [k, (await window.api.settings.getKey(k)) ?? ''] as const))
+      )
+      setGsheetsJson(F['gsheets_service_account_json'])
+      setTelegramBotToken(F['telegram_bot_token'])
+      setTelegramWhitelist(F['telegram_chat_whitelist'])
+      setSshHost(F['ssh_default_host'])
+      setSshKeyPath(F['ssh_key_path'])
+      setBitrixWebhook(F['bitrix24_webhook_url'])
+      setYDirectToken(F['yandex_direct_token'])
+      setDadataApiKey(F['dadata_api_key'])
+      setDadataSecret(F['dadata_secret'])
+      setYMetrikaToken(F['yandex_metrika_token'])
+      setAvitoClientId(F['avito_client_id'])
+      setAvitoClientSecret(F['avito_client_secret'])
+      setYWebmasterToken(F['yandex_webmaster_token'])
+      setYWordstatToken(F['yandex_wordstat_token'])
+      setOzonClientId(F['ozon_client_id'])
+      setOzonApiKey(F['ozon_api_key'])
+      setWbToken(F['wildberries_token'])
+      setYookassaShopId(F['yookassa_shop_id'])
+      setYookassaSecretKey(F['yookassa_secret_key'])
+      setVkToken(F['vk_access_token'])
+      setAmocrmSubdomain(F['amocrm_subdomain'])
+      setAmocrmToken(F['amocrm_access_token'])
+      setMoyskladToken(F['moysklad_token'])
+      setYTrackerToken(F['yandex_tracker_token'])
+      setYTrackerOrgId(F['yandex_tracker_org_id'])
+      setSendpulseClientId(F['sendpulse_client_id'])
+      setSendpulseClientSecret(F['sendpulse_client_secret'])
+      setUnisenderApiKey(F['unisender_api_key'])
+      setGa4Token(F['ga4_access_token'])
+      setGa4PropertyId(F['ga4_property_id'])
+      setNotionToken(F['notion_token'])
+      setKonturFocusKey(F['kontur_focus_api_key'])
+      setMpstatsToken(F['mpstats_token'])
+      setOzonPerfClientId(F['ozon_perf_client_id'])
+      setOzonPerfClientSecret(F['ozon_perf_client_secret'])
+      setJiraBaseUrl(F['jira_base_url'])
+      setJiraEmail(F['jira_email'])
+      setJiraApiToken(F['jira_api_token'])
+      setTrelloApiKey(F['trello_api_key'])
+      setTrelloToken(F['trello_token'])
+      setYDirectLogin(F['yandex_direct_login'])
+      setSkillsServerBase(F['skills_server_base'])
+      setClaudeOauthToken(F['claude_code_oauth_token'])
+      setYDiskToken(F['yandex_disk_token'])
+      setGithubToken(F['github_token'])
+      setSocialTgChannels(F['social_publish_telegram_channels'])
+      setSocialVkToken(F['social_publish_vk_token'])
+      setSocialVkGroupId(F['social_publish_vk_group_id'])
+      setSocialWebhooks(F['social_publish_webhooks'])
+      setCostCap(F['cost_cap_usd_per_session'])
+      setCustomOpenaiBaseUrl(F['custom_openai_baseurl'])
+      setCustomOpenaiModels(F['custom_openai_models'])
+      setCurrentLang(F['app_language'] || 'en')
       // Какие модели «включены» в picker'е. Нет ключа = только активный провайдер.
       const em = await window.api.settings.getKey('enabled_models')
       if (em) {
