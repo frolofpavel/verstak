@@ -2897,6 +2897,29 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-prov-badge.is-missing{ color: var(--warning, #facc15); border-color: var(--warning, #facc15); }
 .gg-prov-badge.is-recommended { color: var(--text-secondary); background: var(--bg-input); }
 
+/* Бейдж возможностей CLI-провайдера в композере (аудит P1 #12). */
+.gg-provider-caps-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--warning, #facc15);
+  color: var(--warning, #facc15);
+  background: transparent;
+  cursor: help;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+/* Живой инструмент running-прогона в карточке «Задачи» (аудит P0 #3). */
+.gg-run-stat-livetool {
+  color: var(--accent, #5865f2);
+  font-style: italic;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─── Models page: карточки провайдеров ─── */
 .gg-models-page { padding: 20px 24px; }
 .gg-models-intro {

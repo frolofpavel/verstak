@@ -84,24 +84,58 @@ const MUTATING_TOOLS = new Set<string>([
 const UNSAFE_MODES = new Set<string>(['auto', 'bypass'])
 
 /**
+ * Мутирующий ли инструмент: побочный эффект на файлы/систему/внешний сервис.
+ * Любой connector-* трактуем как потенциально мутирующий (1С запись, Telegram
+ * send и т.п.) — точную read/write-классификацию не вводим, безопаснее не
+ * доигрывать.
+ */
+export function isMutatingTool(name: string | null | undefined): boolean {
+  if (!name) return false
+  return MUTATING_TOOLS.has(name) || name.startsWith('connector')
+}
+
+/**
+ * Выбрать tool для гарда резюма из ВСЕХ инструментов незавершённого turn'а:
+ * если в turn был хоть один мутирующий — возвращаем его (а не просто последний),
+ * иначе последний. Закрывает дыру: `write_file → run_command → read_file` в
+ * одном turn давал last=read_file → ложный autoResumable=true (аудит P1 #11).
+ */
+export function pickResumeGuardTool(toolNames: string[]): string | null {
+  if (toolNames.length === 0) return null
+  const mutating = toolNames.find(isMutatingTool)
+  return mutating ?? toolNames[toolNames.length - 1]
+}
+
+/**
+ * CLI-провайдер (claude-cli/codex-cli/gemini-cli/grok-cli): tools выполняет
+ * внешний агент ВНУТРИ субпроцесса — наружу деструктив не виден, и tick на
+ * CLI-пути (runPlainConversation) не пишется, поэтому last_tool_name=NULL.
+ * Все CLI-id оканчиваются на '-cli' и помечены supportsTools:false (registry).
+ */
+export function isCliProvider(providerId: string | null | undefined): boolean {
+  return typeof providerId === 'string' && providerId.endsWith('-cli')
+}
+
+/**
  * Чистый гард безопасности крэш-резюма (юнит-тестируемый, без БД).
  * Авто-возобновление РАЗРЕШЕНО только когда последний инструмент НЕ
  * деструктивный И режим безопасный (ask/accept-edits/plan). Любой мутирующий
  * tool, любой connector-* (мутирующий коннектор), режим auto/bypass → false:
  * деструктив никогда не доигрывается сам, пользователю предлагается лишь
  * «показать что было сделано» + ручной ре-промпт.
+ *
+ * CLI-прогоны → ВСЕГДА false: их деструктив невидим main-процессу (см.
+ * isCliProvider), а last_tool_name=NULL ложно проходил бы как read-only.
+ * Крашнутый Claude Code, записавший десятки файлов, не должен получать
+ * авто-resume = повтор разрушительной работы (аудит P0, дыра CLI-слепоты).
  */
-export function isAutoResumable(run: { lastToolName: string | null; agentMode: string | null }): boolean {
+export function isAutoResumable(run: { lastToolName: string | null; agentMode: string | null; providerId?: string | null }): boolean {
+  if (isCliProvider(run.providerId)) return false
   const mode = run.agentMode
   if (mode != null && UNSAFE_MODES.has(mode)) return false
-  const tool = run.lastToolName
-  if (tool != null) {
-    if (MUTATING_TOOLS.has(tool)) return false
-    // Любой коннектор трактуем как потенциально мутирующий (1С запись, Bitrix,
-    // Telegram send, Я.Директ и т.п.) — точную read/write-классификацию не
-    // вводим, безопаснее не доигрывать.
-    if (tool.startsWith('connector')) return false
-  }
+  // last_tool_name = «самый опасный» tool turn'а (pickResumeGuardTool на записи),
+  // поэтому достаточно проверить его одного.
+  if (isMutatingTool(run.lastToolName)) return false
   return true
 }
 
@@ -139,7 +173,17 @@ export interface AgentRuns {
    * Пишет только для ЕЩЁ живых прогонов (ended_at IS NULL) — завершённый не
    * воскрешаем. Best-effort: переданы только не-undefined поля.
    */
-  tick: (runId: string, patch: { turnIndex?: number; lastToolName?: string | null; lastCheckpointId?: number | null }) => void
+  tick: (runId: string, patch: {
+    turnIndex?: number
+    lastToolName?: string | null
+    lastCheckpointId?: number | null
+    // Live-счётчики прогресса: SET абсолютных накопленных значений на каждом
+    // turn (не incr) — чтобы карточка running-задачи показывала прогресс, а не
+    // нули до finish (аудит P0).
+    toolCount?: number
+    filesCount?: number
+    agentsCount?: number
+  }) => void
   /** Добавить событие в Timeline прогона. detail кап до 500 симв. */
   appendEvent: (runId: string, kind: string, opts?: {
     label?: string | null
@@ -235,6 +279,9 @@ export function createAgentRuns(db: Database): AgentRuns {
       if (patch.turnIndex !== undefined) { sets.push('turn_index = ?'); vals.push(patch.turnIndex) }
       if (patch.lastToolName !== undefined) { sets.push('last_tool_name = ?'); vals.push(patch.lastToolName) }
       if (patch.lastCheckpointId !== undefined) { sets.push('last_checkpoint_id = ?'); vals.push(patch.lastCheckpointId) }
+      if (patch.toolCount !== undefined) { sets.push('tool_count = ?'); vals.push(patch.toolCount) }
+      if (patch.filesCount !== undefined) { sets.push('files_count = ?'); vals.push(patch.filesCount) }
+      if (patch.agentsCount !== undefined) { sets.push('agents_count = ?'); vals.push(patch.agentsCount) }
       vals.push(runId)
       // ended_at IS NULL — тикаем только живой прогон. Завершённый (finish уже
       // прошёл / stop) не воскрешаем поздним тиком из догоняющего turn'а.

@@ -151,8 +151,16 @@ describe('writeVerificationArtifact', () => {
     expect(htmlRaw).toContain('<!DOCTYPE html>')
   })
 
-  it('fallback slug = verification если taskSummary пуст', async () => {
+  it('fallback slug = verification если taskSummary пуст (+ суффикс уникальности)', async () => {
     const r = await writeVerificationArtifact(projectPath, art(baseArt, { taskSummary: '' }))
-    expect(r.filename).toBe('verification.verification.html')
+    // Базовый slug 'verification' + суффикс уникальности (runId/timestamp), чтобы
+    // повторная аттестация не затирала прежний артефакт.
+    expect(r.filename).toMatch(/^verification-[a-z0-9]+\.verification\.html$/)
+  })
+
+  it('повторная аттестация не затирает прежний артефакт (разные имена)', async () => {
+    const a = await writeVerificationArtifact(projectPath, art(baseArt, { taskSummary: 'fix bug', runId: 'run-aaaa1111' }))
+    const b = await writeVerificationArtifact(projectPath, art(baseArt, { taskSummary: 'fix bug', runId: 'run-bbbb2222' }))
+    expect(a.filename).not.toBe(b.filename)
   })
 })

@@ -377,6 +377,7 @@ declare global {
         buildPackage(id: number, opts?: { runChecks?: boolean; checks?: string[] }): Promise<DevTaskPackage | null>
         /** Открыть PR через github (нужен github_token + work_branch). */
         createPr(id: number, opts: { repo: string; base: string; draft?: boolean }): Promise<{ ok: boolean; url?: string; number?: number; error?: string }>
+        setBranch(id: number, branch: string): Promise<DevTask | null>
       }
       term: {
         spawn: (cwd: string) => Promise<number>

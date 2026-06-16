@@ -20,7 +20,13 @@ import type { ChatMessage, VerificationRow } from '../types/api'
  * @param verification — опциональная latest-верификация чата (Фаза 4). Если есть,
  *        вставляется блок «=== VERIFICATION (заявленный DoD) ===» для сверки.
  */
-export function composeReviewPayload(messages: ChatMessage[], verification?: VerificationRow | null): string {
+/**
+ * @param diff — опциональный git-patch рабочего дерева (GitDiff.patch). КРИТИЧНО
+ *        для качества findings: без реального кода ревьюер выдаёт «file:line» из
+ *        нарратива агента — номера строк галлюцинируются. С diff он видит сами
+ *        изменения и привязывает замечания к настоящим строкам (аудит P0 #6).
+ */
+export function composeReviewPayload(messages: ChatMessage[], verification?: VerificationRow | null, diff?: string | null): string {
   // Берём с конца: последний assistant, перед ним последний user.
   let lastAssistant: ChatMessage | null = null
   let lastUser: ChatMessage | null = null
@@ -57,6 +63,18 @@ export function composeReviewPayload(messages: ChatMessage[], verification?: Ver
       lines.push('## Размышление агента (внутреннее)')
       lines.push(truncate(lastAssistant.thinking, 3000))
     }
+    lines.push('')
+  }
+
+  // Реальные изменения кода (git diff рабочего дерева). Даёт ревьюеру код с
+  // номерами строк — иначе file:line в findings берутся из прозы агента и
+  // галлюцинируются (аудит P0 #6). Обрезаем щедро: diff важнее размышлений.
+  if (diff && diff.trim()) {
+    lines.push('## Изменения в коде (git diff рабочего дерева)')
+    lines.push('```diff')
+    lines.push(truncate(diff, 14000))
+    lines.push('```')
+    lines.push('Привязывай file:line в замечаниях к этим строкам, а не к пересказу агента.')
     lines.push('')
   }
 

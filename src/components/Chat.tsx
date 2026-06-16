@@ -1557,6 +1557,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <ComposerToolsMenu onInject={injectTemplate} />
             <ModePicker mode={agentMode} onChange={setAgentMode} />
             <ModelPicker onOpenSettings={onOpenSettings} />
+            {/* Бейдж возможностей провайдера (аудит P1 #12): у CLI-провайдеров
+                правки делает внешний агент в субпроцессе — контрольные гарантии
+                Verstak (per-file undo / checkpoint / подтверждение write / mode-
+                policy) НЕ действуют, вложения уходят текстовым хинтом. Бейдж
+                закрывает дыру «выглядит одинаково, ведёт себя по-разному». */}
+            {provider.id.endsWith('-cli') && (
+              <span
+                className="gg-provider-caps-badge"
+                title="CLI-провайдер: правки выполняет внешний агент. Контроль Verstak (per-file undo, checkpoint, подтверждение write, mode-policy) не действует. Вложения уходят текстовым хинтом, не картинкой."
+              >
+                CLI ⚠
+              </span>
+            )}
             <TierRecommendation input={input} />
           </div>
         </div>

@@ -88,7 +88,7 @@ export function DevTaskPanel() {
   // Поллинг раз в 3с пока вкладка открыта — diff/state живые во время прогона.
   useEffect(() => {
     void refresh()
-    const t = setInterval(() => void refresh(), 3000)
+    const t = setInterval(() => { if (!document.hidden) void refresh() }, 3000)
     return () => clearInterval(t)
   }, [refresh])
 
@@ -138,8 +138,12 @@ export function DevTaskPanel() {
     setNotice(null)
     try {
       const res = await window.api.git.branchCreate({ name })
-      if (res.ok) setNotice(`Ветка создана: ${res.branch}`)
-      else setNotice(`Не удалось создать ветку: ${res.error ?? 'ошибка'}`)
+      if (res.ok) {
+        setNotice(`Ветка создана: ${res.branch}`)
+        // Write-back ветки в задачу (аудит P0 #7): без этого work_branch оставался
+        // null навсегда → кнопка «Создать PR» (гейт на workBranch) не появлялась.
+        try { await window.api.devtask.setBranch(devTask.id, res.branch ?? name) } catch { /* refresh ниже подхватит */ }
+      } else setNotice(`Не удалось создать ветку: ${res.error ?? 'ошибка'}`)
     } catch {
       setNotice('Не удалось создать ветку.')
     }
@@ -151,6 +155,14 @@ export function DevTaskPanel() {
     if (activeDevTaskId == null) return
     const msg = commitMessage.trim()
     if (!msg) { setNotice('Заполни сообщение коммита.'); return }
+    // Предупреждение при упавших проверках (аудит P1 #9): коммит поверх красных
+    // проверок противоречит позиционированию «высокий контроль» — требуем явного
+    // подтверждения, а не молча коммитим.
+    const failed = checks.filter(c => c.status === 'fail').length
+    if (failed > 0) {
+      const ok = window.confirm(`Есть проваленные проверки (${failed} ✗). Точно закоммитить поверх них?`)
+      if (!ok) return
+    }
     setCommitting(true)
     setNotice(null)
     try {
@@ -162,7 +174,7 @@ export function DevTaskPanel() {
     }
     setCommitting(false)
     await refresh()
-  }, [activeDevTaskId, commitMessage, refresh])
+  }, [activeDevTaskId, commitMessage, checks, refresh])
 
   // Создать PR через github-коннектор. repo/base спрашиваем простым prompt'ом
   // (V1 — без отдельной формы). Доступно только при наличии work_branch; токен

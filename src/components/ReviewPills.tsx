@@ -201,9 +201,9 @@ export function ReviewPanel() {
         {review.status === 'error' ? (
           <div className="gg-review-error-msg">{review.errorMessage ?? 'Неизвестная ошибка'}</div>
         ) : findings.length > 0 ? (
-          // V2: карточки findings по severity.
+          // V2: карточки findings, отсортированные по severity (P0 первыми).
           <ul className="gg-finding-list">
-            {findings.map(f => (
+            {[...findings].sort((a, b) => sevRank(a.severity) - sevRank(b.severity)).map(f => (
               <FindingCard
                 key={f.id}
                 finding={f}
@@ -316,6 +316,18 @@ function severityClass(sev: FindingSeverity): string {
     case 'P1': return 'p1'
     case 'P2': return 'p2'
     default: return 'p3'
+  }
+}
+
+/** Ранг severity для сортировки списка findings: P0 (критично) — первым,
+ *  P3 (мелочь) — последним. Раньше карточки шли в порядке прихода и P0-дыра
+ *  тонула среди P3 (аудит). */
+function sevRank(sev: FindingSeverity): number {
+  switch (sev) {
+    case 'P0': return 0
+    case 'P1': return 1
+    case 'P2': return 2
+    default: return 3
   }
 }
 

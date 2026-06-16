@@ -24,13 +24,23 @@ export function ResumeBanner() {
   const resumableRuns = useProject(s => s.resumableRuns)
   const dismissResumableRun = useProject(s => s.dismissResumableRun)
   const setActiveView = useProject(s => s.setActiveView)
+  const switchChatSession = useProject(s => s.switchChatSession)
 
   if (resumableRuns.length === 0) return null
 
-  function resume(run: ResumableRun) {
-    // Честный re-send: тот же gg-resume-send, что у Manager-resume. Chat.tsx
-    // ставит текст в ввод и авто-шлёт send(). После — убираем баннер.
-    window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: run.lastUserRequest }))
+  async function resume(run: ResumableRun) {
+    // Честный re-send: тот же gg-resume-send, что у Manager-resume. КРИТИЧНО —
+    // сначала переключаемся на чат прогона (run.chatId), иначе re-send уедет в
+    // текущий активный чат (чужой контекст), если пользователь успел сменить
+    // чат/проект после старта app (аудит P0). Паттерн — как AgentRunsPanel.
+    try {
+      if (run.chatId != null) await switchChatSession(run.chatId)
+    } catch { /* переключение не критично — уйдёт в текущий чат */ }
+    setActiveView('chat')
+    // Следующий тик — даём чату перерендериться на нужной сессии до автоотправки.
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: run.lastUserRequest }))
+    }, 0)
     dismissResumableRun(run.runId)
   }
 

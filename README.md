@@ -1,6 +1,6 @@
 # Verstak
 
-Open-source desktop AI coding IDE. Vendor-agnostic, 10+ providers, persistent memory, parallel agents.
+Open-source desktop AI coding IDE. Vendor-agnostic — 18 providers, 31 connectors, multi-agent orchestration, system-verified results, persistent memory.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -16,15 +16,16 @@ The key idea: never be locked in. If one provider is down or expensive, switch i
 
 ## Features
 
-### Providers (10+)
+### Providers (18)
 
 **API providers** (bring your own key):
-- Gemini, Claude, Grok, ChatGPT, OpenRouter, DeepSeek, Mistral, Groq, Ollama, Custom OpenAI-compatible
+- Gemini, Claude, Grok, ChatGPT, OpenRouter, DeepSeek, Kimi (Moonshot), Qwen, Mistral, Groq, Ollama, Custom OpenAI-compatible
+- **Russian:** YandexGPT, GigaChat (Sber)
 
-**CLI providers** (use your existing subscription):
-- Claude Code, Codex, Gemini CLI, Grok Build, Hermes, Aider
+**CLI providers** (use your existing subscription — no API key):
+- Claude Code, Codex, Gemini CLI, Grok Build
 
-Verstak **auto-detects installed CLIs on startup**. Switch provider and model per chat — background sessions keep streaming when you switch projects.
+Verstak **auto-detects installed CLIs on startup**. Switch provider and model per chat; if one is rate-limited or down, switch in one click without losing the session. Background sessions keep streaming when you switch projects. Automatic fallback on 429/503, smart model routing by task complexity.
 
 ---
 
@@ -46,8 +47,11 @@ Memory is visible and editable in Settings → Memory.
 
 - **20+ tools:** read/write files, terminal, search, browser navigation, diagnostics
 - **`check_diagnostics`** — runs `tsc --noEmit` as a native agent tool; agent sees and fixes type errors in the loop
-- **`delegate_parallel`** — dispatches 2–5 subtasks to different providers simultaneously and merges results
-- **Auto cross-verify** — second provider reviews code changes automatically (configurable)
+- **Multi-agent orchestration** — `delegate` / `orchestrate` / **`swarm`** (consensus): dispatch subtasks to different providers/roles in parallel, live agent graph, todo-gate
+- **Tasks dashboard** — every `ai:send` is a tracked run with live progress (turn N, current tool, counters), stop / resume, crash-resume that **never auto-replays destructive actions**
+- **Verification artifact (proof of done)** — re-runs your tests and sets status by **real exit code**, not the model's word; `.json` + `.html` artifact
+- **Dev Task Flow** — task → branch → diff → checks → commit/PR, with git-write behind a denylist (no `push --force` / `reset --hard`)
+- **Explicit review** — a second model reviews the change with structured findings (severity, file:line, "fix selected")
 - **Effort control** — quick / standard / deep thinking toggle per message
 - **Auto-compact** — session summarization kicks in at 95% context window, no context overflow errors
 - **Loop detection** — same tool + args called 3× triggers supervisor break; max turns per send configurable
@@ -64,15 +68,23 @@ Memory is visible and editable in Settings → Memory.
 - Connector marketplace (card grid, Codex-style)
 - Custom commands from `.md` files (Skills system)
 - Cost estimator in composer — shows `↑ tokens · ↓ tokens · $cost` per send
-- Dark / light theme
+- **Voice input** — local Whisper (small), runs offline, no cloud STT
+- Project groups, 5 agent modes (ask / accept-edits / plan / auto / bypass), per-file undo + session checkpoints
+- Dark / light / Nord themes
 
 ---
 
-### Connectors (11)
+### Connectors (31)
 
-GitHub, Google Sheets, Telegram Bot, SSH Executor, Битрикс24, Яндекс.Директ, Яндекс.Диск, 1С OData, Generic HTTP API, Skills Server, Custom OpenAI-compatible endpoint.
+Pull live data from external systems straight into the agent chat. Read-only, credentials encrypted.
 
-Credentials stored in encrypted `safeStorage` (Electron built-in), never in prompts or logs.
+- **Dev / global:** GitHub, Google Sheets, Generic HTTP, SSH Executor, Telegram, Jira, Trello, Notion, Social Publish
+- **Analytics & ads:** Google Analytics 4, Яндекс.Метрика, Яндекс.Директ, Яндекс.Вебмастер, Яндекс.Wordstat, Ozon Performance
+- **Marketplaces:** Ozon Seller, Wildberries, MPSTATS, Avito
+- **CRM & ops:** 1С OData, Битрикс24, amoCRM, МойСклад, Яндекс.Трекер
+- **Counterparties / payments / messaging:** DaData, Контур.Фокус, ЮКасса (read-only), SendPulse, UniSender, VK, Яндекс.Диск
+
+Each is hand-written over the official API (no scraping), read-only by default. Credentials stored in encrypted `safeStorage` (Electron built-in), never in prompts or logs.
 
 ---
 
@@ -128,8 +140,6 @@ On startup, Verstak scans your PATH for installed CLI tools and makes them avail
 | Codex | `codex` |
 | Gemini CLI | `gemini` |
 | Grok Build | `grok` |
-| Hermes | `hermes` |
-| Aider | `aider` |
 
 ---
 

@@ -69,8 +69,8 @@ export function computeOverall(checks: VerificationCheck[]): VerificationArtifac
 const BADGE = {
   passed: '#4ec9b0',   // success
   failed: '#f47174',   // error
-  partial: '#d7ba7d',  // warning
-  not_run: '#d7ba7d'   // warning (то же, что partial)
+  partial: '#d7ba7d',  // warning (жёлтый — часть проверена)
+  not_run: '#8c93a0'   // нейтрально-серый — «ничего не проверено» ≠ «частично» (аудит P2)
 } as const
 
 const STATUS_RU: Record<VerificationCheck['status'], string> = {

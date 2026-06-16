@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createTelegramConnector } from '../../electron/connectors/telegram'
 
 const noToken = {
@@ -38,9 +38,16 @@ describe('Telegram connector', () => {
   })
 
   it('пустой whitelist (null) — пропускает (dev mode)', async () => {
-    // С пустым whitelist - НЕ должно вернуть not-whitelisted (попробует
+    // С пустым whitelist - НЕ должно вернуть not-whitelisted (попытается
     // отправить и упадёт уже на fetch). Здесь мы тестируем именно whitelist
-    // логику, а не успешность отправки.
+    // логику, а не успешность отправки. fetch замокан, чтобы тест был
+    // детерминированным и быстрым (без реального сетевого вызова к Telegram —
+    // он давал flaky timeout 5s). Глобальный afterEach (tests/setup.ts) снимет стаб.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 401,
+      text: async () => '{"ok":false,"error_code":401}',
+      json: async () => ({ ok: false, error_code: 401 })
+    })))
     const conn = createTelegramConnector()
     const res = await conn.query(
       { op: 'send_message', chat_id: '999', text: 'hi' },

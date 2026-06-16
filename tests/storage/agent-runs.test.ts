@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
-import { createAgentRuns, isAutoResumable } from '../../electron/storage/agent-runs'
+import { createAgentRuns, isAutoResumable, pickResumeGuardTool } from '../../electron/storage/agent-runs'
 import { saveRunInput } from '../../electron/storage/run-inputs'
 
 /**
@@ -292,6 +292,29 @@ describe('crash-resume (migration 19)', () => {
     expect(isAutoResumable({ lastToolName: 'read_file', agentMode: 'auto' })).toBe(false)
     expect(isAutoResumable({ lastToolName: 'read_file', agentMode: 'bypass' })).toBe(false)
     expect(isAutoResumable({ lastToolName: null, agentMode: 'bypass' })).toBe(false)
+  })
+
+  it('isAutoResumable: CLI-провайдер → false ВСЕГДА (деструктив невидим, дыра CLI-слепоты)', () => {
+    // На CLI-пути tick не пишется → lastToolName=NULL, что без этого гарда ложно
+    // проходило бы как read-only → авто-resume = повтор деструктива (аудит P0).
+    for (const id of ['claude-cli', 'codex-cli', 'gemini-cli', 'grok-cli']) {
+      expect(isAutoResumable({ lastToolName: null, agentMode: 'ask', providerId: id })).toBe(false)
+      // даже с явно read-only last tool и безопасным режимом — всё равно false
+      expect(isAutoResumable({ lastToolName: 'read_file', agentMode: 'accept-edits', providerId: id })).toBe(false)
+    }
+    // API-провайдер с теми же безопасными признаками остаётся резюмируемым
+    expect(isAutoResumable({ lastToolName: 'read_file', agentMode: 'ask', providerId: 'claude' })).toBe(true)
+    expect(isAutoResumable({ lastToolName: null, agentMode: 'ask', providerId: null })).toBe(true)
+  })
+
+  it('pickResumeGuardTool: мутирующий tool turn’а побеждает последний (read)', () => {
+    // write→run→read в одном turn: гард должен взять деструктив, а не read.
+    expect(pickResumeGuardTool(['read_file', 'write_file', 'read_file'])).toBe('write_file')
+    expect(pickResumeGuardTool(['search_project', 'run_command', 'get_project_map'])).toBe('run_command')
+    expect(pickResumeGuardTool(['connector_query', 'read_file'])).toBe('connector_query')
+    // нет мутирующих → последний инструмент
+    expect(pickResumeGuardTool(['read_file', 'search_project', 'get_project_map'])).toBe('get_project_map')
+    expect(pickResumeGuardTool([])).toBe(null)
   })
 
   it('findResumable: возвращает зависшие на этом старте + гард деструктива + только с run_inputs', () => {

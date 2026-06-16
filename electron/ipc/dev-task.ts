@@ -209,6 +209,17 @@ export function registerDevTaskIpc(deps: DevTaskDeps): void {
     tasks.linkRun(id, runId)
   })
 
+  // devtask:setBranch — записать рабочую ветку в задачу (аудит P0 #7). Кнопка
+  // «Создать ветку» в панели создаёт git-ветку, но без этого write-back
+  // work_branch оставался null навсегда → кнопка «Создать PR» (гейт на
+  // workBranch) не появлялась и весь путь branch→PR был недостижим.
+  ipcMain.handle('devtask:setBranch', (_e, id: number, branch: string): DevTask | null => {
+    if (!id || !branch) return null
+    tasks.update(id, { workBranch: branch })
+    tasks.setState(id, 'in_progress')
+    return tasks.get(id)
+  })
+
   /**
    * devtask:revert — откатить файловые правки задачи к её чекпоинту.
    * Переиспользует СУЩЕСТВУЮЩИЙ механизм undo:revertToCheckpoint (тот же стек,

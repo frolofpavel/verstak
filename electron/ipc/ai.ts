@@ -22,6 +22,7 @@ import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
+import { pickResumeGuardTool } from '../storage/agent-runs'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -531,6 +532,9 @@ export function registerAiIpc(deps: AiDeps): void {
         // (auto/bypass → авто-resume запрещён).
         agentMode: deps.getAgentMode()
       })
+      // Timeline: исходный запрос пользователя первым событием — чтобы лента
+      // читалась как нарратив (запрос → действия → итог), а не только механика.
+      if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
     } catch (err) {
       console.warn('[agent-runs] create failed:', err instanceof Error ? err.message : err)
     }
@@ -863,6 +867,11 @@ async function runPlainConversation(
     // (внешний finally). Review-прогоны (owner='review') финишируются здесь же.
     if (agentRuns && runId) {
       try {
+        // Timeline: финальный ответ агента — итог CLI-прогона (на CLI-пути нет
+        // recordRunEvent, так что это единственное содержательное событие ленты).
+        if (lastAssistantText.trim()) {
+          agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
+        }
         agentRuns.finish(runId, exitReasonToStatus(exitReason), {
           costCents: costGuard?.current() ?? 0,
           error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
@@ -935,6 +944,9 @@ async function runApiConversation(
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
   const commandsRun: string[] = []
+  // DoD-принуждение (аудит P1 #8): был ли вызван attest_verification за прогон.
+  // Если прогон менял файлы и завершился успешно без аттестации — итог не доказан.
+  let attestedThisRun = false
   // Manager (Фаза 2): сколько tool-вызовов выполнено за прогон — для счётчика
   // tool_count в agent_runs. Считаем все диспетчеризованные вызовы (включая
   // read-only), как и инспектор audit.
@@ -1205,6 +1217,8 @@ async function runApiConversation(
       } else if (call.name === 'run_command' && !result.error) {
         const cmd = String(call.args.command ?? '')
         if (cmd) commandsRun.push(cmd)
+      } else if (call.name === 'attest_verification' && !result.error) {
+        attestedThisRun = true  // DoD-принуждение (аудит P1 #8)
       }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(
@@ -1254,8 +1268,18 @@ async function runApiConversation(
     // best-effort поля; останется NULL). Best-effort: ошибка storage не ломает loop.
     if (agentRuns && runId) {
       try {
-        const lastTool = toolCalls.length > 0 ? toolCalls[toolCalls.length - 1].name : null
-        agentRuns.tick(runId, { turnIndex: turn + 1, lastToolName: lastTool })
+        // Гард резюма: «самый опасный» tool turn'а, а не просто последний —
+        // иначе write→run→read дал бы last=read → ложный autoResumable (аудит P1 #11).
+        const lastTool = pickResumeGuardTool(toolCalls.map(c => c.name))
+        agentRuns.tick(runId, {
+          turnIndex: turn + 1,
+          lastToolName: lastTool,
+          // Live-счётчики: карточка running-задачи показывает прогресс на каждом
+          // turn, а не нули до finish (аудит P0).
+          toolCount: toolCallCount,
+          filesCount: filesTouched.size,
+          agentsCount: agentCounter.count
+        })
       } catch { /* best-effort — tick живого прогресса не критичен */ }
     }
 
@@ -1362,6 +1386,22 @@ async function runApiConversation(
     // пишется ровно раз (этот внешний finally).
     if (agentRuns && runId) {
       try {
+        // DoD-принуждение (аудит P1 #8): прогон завершён успешно и менял файлы,
+        // но attest_verification не вызван → итог НЕ доказан. Помечаем в Timeline
+        // событием verify=not_run (видно в карточке «Задачи»), без навязчивого
+        // вмешательства в чат — мягкое принуждение через видимость.
+        if (exitReason === 'completed' && filesTouched.size > 0 && !attestedThisRun) {
+          agentRuns.appendEvent(runId, 'verify', {
+            status: 'not_run',
+            label: 'DoD не запущен',
+            detail: `Изменено файлов: ${filesTouched.size}, но attest_verification не вызван — итог не доказан проверками.`
+          })
+        }
+        // Timeline: финальный ответ агента последним событием — чтобы в карточке
+        // был виден ИТОГ, а не только список действий (аудит P0 «где результат?»).
+        if (lastAssistantText.trim()) {
+          agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
+        }
         agentRuns.finish(runId, exitReasonToStatus(exitReason), {
           costCents: costGuard?.current() ?? 0,
           toolCount: toolCallCount,

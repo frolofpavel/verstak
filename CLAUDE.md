@@ -23,7 +23,7 @@
 **V3 фичи:**
 - **Skills как first-class.** Frontmatter `.md` файлы → system prompt + tools_allow + context_loaders + default_provider/model. Авто-импорт из `~/.claude/skills/` + `~/.verstak/skills/` + 3 built-in (code-review / git-summary / explain-code). Picker 🎭 в composer + slash commands `/code-review`.
 - **Context loaders** — frontmatter `context_loaders: [{impl, runs_on}]` авто-инжектят данные в первое user msg. Готовые: `load_client_card`, `load_clients_list`, `load_today_brief`.
-- **8 коннекторов:** 1C OData, generic HTTP, Google Sheets, SSH executor (с denylist), Telegram bot, Битрикс24, Я.Директ, Я.Диск.
+- **31 коннектор:** базовые (1C OData, generic HTTP, Google Sheets, SSH с denylist, Telegram, Битрикс24, Я.Директ, Я.Диск, GitHub, Social Publish) + RU-стек (DaData, Контур.Фокус, Я.Метрика/Вебмастер/Wordstat/Трекер, GA4, Ozon Seller/Performance, Wildberries, MPSTATS, Avito, amoCRM, МойСклад, ЮКасса-чтение, SendPulse, UniSender, VK, Jira, Trello, Notion). Все read-only, свой код поверх официальных API.
 - **Artifacts:** `generate_html` / `generate_docx` / `render_chart` (SVG bar/line/pie) tools. Embedded preview (HTML напрямую, DOCX через mammoth.js).
 - **Multi-user profiles:** Onboarding wizard + Settings → Профили. 5 ролей с пресетами.
 - **delegate_task** — мультиагент V1: основной агент делегирует sub-task другому скиллу/модели, получает результат как tool_result.
@@ -79,7 +79,7 @@ electron/                  ← main process (Node.js)
 │   ├── undo.ts              ← per-file undo stack
 │   ├── plans.ts, journal.ts, tasks.ts, projects.ts, feedback.ts
 │   └── settings.ts          ← encrypted secrets через safeStorage
-└── connectors/            ← внешние сервисы — 8 шт
+└── connectors/            ← внешние сервисы — 31 шт
     ├── registry.ts
     ├── types.ts             ← Connector interface
     ├── onec.ts              ← 1С OData

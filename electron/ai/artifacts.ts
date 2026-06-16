@@ -161,7 +161,12 @@ export async function writeVerificationArtifact(
 ): Promise<{ jsonPath: string; htmlPath: string; sizeBytes: number; filename: string }> {
   const dir = artifactsDir(projectPath)
   await mkdir(dir, { recursive: true })
-  const slug = sanitizeFilename(art.taskSummary || 'verification') || 'verification'
+  const baseSlug = sanitizeFilename(art.taskSummary || 'verification') || 'verification'
+  // Суффикс уникальности — без него повторная аттестация похожей задачи затирала
+  // прежний .verification.json/.html (объявленный источником истины), а строка в
+  // БД продолжала на него указывать (аудит P1). runId короткий, иначе timestamp.
+  const suffix = art.runId ? art.runId.slice(0, 8) : art.createdAt.toString(36)
+  const slug = `${baseSlug}-${suffix}`
   const jsonName = `${slug}.verification.json`
   const htmlName = `${slug}.verification.html`
   const jsonPath = join(dir, jsonName)

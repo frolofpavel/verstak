@@ -76,10 +76,14 @@ export function ReviewButton() {
     // заявленный итог с доказательством. Best-effort — нет verstak-истории или
     // ошибка IPC → ревью идёт как раньше, без VERIFICATION-блока.
     let verification = null
+    let diff: string | null = null
     if (path) {
       try { verification = await window.api.verifications.latest(path, activeChatId) } catch { /* DoD не критичен */ }
+      // Реальный diff рабочего дерева — чтобы ревьюер видел код, а не пересказ
+      // (file:line перестают галлюцинироваться, аудит P0 #6). Best-effort.
+      try { const d = await window.api.git.diff({ path }); diff = d.patch ?? null } catch { /* не git-проект / нет правок */ }
     }
-    const payload = composeReviewPayload(messages, verification)
+    const payload = composeReviewPayload(messages, verification, diff)
     // Модель — null (бэкэнд возьмёт default для этого провайдера)
     await startReview({ providerId, model: null, payload })
   }
