@@ -8819,9 +8819,10 @@ textarea.gg-input {
   cursor: default;
   min-width: 0;
   max-width: min(320px, 100%);
-  gap: 6px;
-  padding-right: 6px;
-  overflow: visible;
+  gap: 5px;
+  padding-right: 4px;
+  overflow: hidden;
+  align-items: center;
   animation: gg-fade-in 140ms ease-out;
 }
 .gg-composer-meta .gg-tier-rec.tier-cheap {
@@ -8842,30 +8843,29 @@ textarea.gg-input {
   text-overflow: ellipsis;
   font-weight: 500;
 }
-.gg-tier-rec-apply {
+.gg-composer-meta .gg-tier-rec .gg-tier-rec-apply {
   align-self: center;
   flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
+  border: 1px solid color-mix(in srgb, var(--border-default) 55%, var(--border-subtle));
   border-radius: var(--radius-sm);
-  height: 20px;
-  min-height: 20px;
-  padding: 0 8px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0 7px;
   margin: 0;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 600;
   cursor: pointer;
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated));
-  color: var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  background: color-mix(in srgb, var(--bg-hover) 40%, var(--bg-base));
+  color: color-mix(in srgb, var(--text-primary) 18%, var(--text-secondary));
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
   white-space: nowrap;
-  line-height: 20px;
+  line-height: 18px;
   box-sizing: border-box;
 }
-.gg-tier-rec-apply:hover {
-  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elevated));
-  border-color: var(--accent-border, var(--accent));
+.gg-composer-meta .gg-tier-rec .gg-tier-rec-apply:hover {
+  background: color-mix(in srgb, var(--bg-hover) 65%, var(--bg-base));
+  border-color: var(--border-default);
   color: var(--text-primary);
 }
 .gg-tier-rec-ok {
