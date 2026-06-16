@@ -84,6 +84,29 @@ const MUTATING_TOOLS = new Set<string>([
 const UNSAFE_MODES = new Set<string>(['auto', 'bypass'])
 
 /**
+ * Мутирующий ли инструмент: побочный эффект на файлы/систему/внешний сервис.
+ * Любой connector-* трактуем как потенциально мутирующий (1С запись, Telegram
+ * send и т.п.) — точную read/write-классификацию не вводим, безопаснее не
+ * доигрывать.
+ */
+export function isMutatingTool(name: string | null | undefined): boolean {
+  if (!name) return false
+  return MUTATING_TOOLS.has(name) || name.startsWith('connector')
+}
+
+/**
+ * Выбрать tool для гарда резюма из ВСЕХ инструментов незавершённого turn'а:
+ * если в turn был хоть один мутирующий — возвращаем его (а не просто последний),
+ * иначе последний. Закрывает дыру: `write_file → run_command → read_file` в
+ * одном turn давал last=read_file → ложный autoResumable=true (аудит P1 #11).
+ */
+export function pickResumeGuardTool(toolNames: string[]): string | null {
+  if (toolNames.length === 0) return null
+  const mutating = toolNames.find(isMutatingTool)
+  return mutating ?? toolNames[toolNames.length - 1]
+}
+
+/**
  * CLI-провайдер (claude-cli/codex-cli/gemini-cli/grok-cli): tools выполняет
  * внешний агент ВНУТРИ субпроцесса — наружу деструктив не виден, и tick на
  * CLI-пути (runPlainConversation) не пишется, поэтому last_tool_name=NULL.
@@ -110,14 +133,9 @@ export function isAutoResumable(run: { lastToolName: string | null; agentMode: s
   if (isCliProvider(run.providerId)) return false
   const mode = run.agentMode
   if (mode != null && UNSAFE_MODES.has(mode)) return false
-  const tool = run.lastToolName
-  if (tool != null) {
-    if (MUTATING_TOOLS.has(tool)) return false
-    // Любой коннектор трактуем как потенциально мутирующий (1С запись, Bitrix,
-    // Telegram send, Я.Директ и т.п.) — точную read/write-классификацию не
-    // вводим, безопаснее не доигрывать.
-    if (tool.startsWith('connector')) return false
-  }
+  // last_tool_name = «самый опасный» tool turn'а (pickResumeGuardTool на записи),
+  // поэтому достаточно проверить его одного.
+  if (isMutatingTool(run.lastToolName)) return false
   return true
 }
 

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
-import { createAgentRuns, isAutoResumable } from '../../electron/storage/agent-runs'
+import { createAgentRuns, isAutoResumable, pickResumeGuardTool } from '../../electron/storage/agent-runs'
 import { saveRunInput } from '../../electron/storage/run-inputs'
 
 /**
@@ -305,6 +305,16 @@ describe('crash-resume (migration 19)', () => {
     // API-провайдер с теми же безопасными признаками остаётся резюмируемым
     expect(isAutoResumable({ lastToolName: 'read_file', agentMode: 'ask', providerId: 'claude' })).toBe(true)
     expect(isAutoResumable({ lastToolName: null, agentMode: 'ask', providerId: null })).toBe(true)
+  })
+
+  it('pickResumeGuardTool: мутирующий tool turn’а побеждает последний (read)', () => {
+    // write→run→read в одном turn: гард должен взять деструктив, а не read.
+    expect(pickResumeGuardTool(['read_file', 'write_file', 'read_file'])).toBe('write_file')
+    expect(pickResumeGuardTool(['search_project', 'run_command', 'get_project_map'])).toBe('run_command')
+    expect(pickResumeGuardTool(['connector_query', 'read_file'])).toBe('connector_query')
+    // нет мутирующих → последний инструмент
+    expect(pickResumeGuardTool(['read_file', 'search_project', 'get_project_map'])).toBe('get_project_map')
+    expect(pickResumeGuardTool([])).toBe(null)
   })
 
   it('findResumable: возвращает зависшие на этом старте + гард деструктива + только с run_inputs', () => {

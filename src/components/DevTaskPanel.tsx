@@ -155,6 +155,14 @@ export function DevTaskPanel() {
     if (activeDevTaskId == null) return
     const msg = commitMessage.trim()
     if (!msg) { setNotice('Заполни сообщение коммита.'); return }
+    // Предупреждение при упавших проверках (аудит P1 #9): коммит поверх красных
+    // проверок противоречит позиционированию «высокий контроль» — требуем явного
+    // подтверждения, а не молча коммитим.
+    const failed = checks.filter(c => c.status === 'fail').length
+    if (failed > 0) {
+      const ok = window.confirm(`Есть проваленные проверки (${failed} ✗). Точно закоммитить поверх них?`)
+      if (!ok) return
+    }
     setCommitting(true)
     setNotice(null)
     try {
@@ -166,7 +174,7 @@ export function DevTaskPanel() {
     }
     setCommitting(false)
     await refresh()
-  }, [activeDevTaskId, commitMessage, refresh])
+  }, [activeDevTaskId, commitMessage, checks, refresh])
 
   // Создать PR через github-коннектор. repo/base спрашиваем простым prompt'ом
   // (V1 — без отдельной формы). Доступно только при наличии work_branch; токен

@@ -22,6 +22,7 @@ import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
+import { pickResumeGuardTool } from '../storage/agent-runs'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -1262,7 +1263,9 @@ async function runApiConversation(
     // best-effort поля; останется NULL). Best-effort: ошибка storage не ломает loop.
     if (agentRuns && runId) {
       try {
-        const lastTool = toolCalls.length > 0 ? toolCalls[toolCalls.length - 1].name : null
+        // Гард резюма: «самый опасный» tool turn'а, а не просто последний —
+        // иначе write→run→read дал бы last=read → ложный autoResumable (аудит P1 #11).
+        const lastTool = pickResumeGuardTool(toolCalls.map(c => c.name))
         agentRuns.tick(runId, {
           turnIndex: turn + 1,
           lastToolName: lastTool,
