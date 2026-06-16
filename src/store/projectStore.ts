@@ -742,6 +742,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       // ещё активен — иначе результат stale, выбрасываем.
       const activeNow = get().activeChatId
       if (activeNow !== parentChatId) return
+      const toHydrate: number[] = []
       set(s => {
         const next = { ...s.reviews }
         for (const r of list) {
@@ -749,25 +750,45 @@ export const useProject = create<ProjectState>((set, get) => ({
           // БД-версия — это «сохранённый факт ревью», память может содержать
           // живой стрим, который мы не должны затирать.
           if (next[r.id] && next[r.id].status !== 'done') continue
-          next[r.id] = next[r.id] ?? {
-            reviewChatId: r.id,
-            parentChatId,
-            providerId: r.providerId ?? 'unknown',
-            model: r.model,
-            content: '',
-            // V1: текст ревью НЕ сохраняем в chats — он живёт только в памяти
-            // до перезапуска. При перезапуске restored entries имеют пустой
-            // content и noteCount=-1 (запись в chat_sessions с kind='review'
-            // остаётся для аудита).
-            status: 'done',
-            createdAt: r.createdAt,
-            noteCount: -1,
-            findings: [],
-            accepted: []
+          if (!next[r.id]) {
+            next[r.id] = {
+              reviewChatId: r.id,
+              parentChatId,
+              providerId: r.providerId ?? 'unknown',
+              model: r.model,
+              content: '',
+              status: 'done',
+              createdAt: r.createdAt,
+              noteCount: -1,
+              findings: [],
+              accepted: []
+            }
+            toHydrate.push(r.id)  // подгрузить сохранённый текст ревью ниже
           }
         }
         return { reviews: next }
       })
+      // Гидратация content+findings из сохранённых сообщений review-чата (аудит
+      // P0 #5): finalizeReview персистит текст ревью как assistant-сообщение
+      // review-сессии. Без этого restored pill раскрывался пустым «фантомом».
+      // Best-effort, по одному; повторно активный чат сверяем (анти-stale).
+      for (const reviewChatId of toHydrate) {
+        try {
+          const msgs = await window.api.chats.list(reviewChatId)
+          const content = [...msgs].reverse().find(mm => mm.role === 'assistant')?.content ?? ''
+          if (!content.trim()) continue
+          if (get().activeChatId !== parentChatId) return
+          const firstLine = content.split('\n', 1)[0] ?? ''
+          const m = firstLine.match(/ЗАМЕЧАНИЙ:\s*(\d+)/i)
+          const noteCount = m ? parseInt(m[1], 10) : -1
+          const findings = parseReviewFindings(content)
+          set(s => {
+            const cur = s.reviews[reviewChatId]
+            if (!cur || cur.status !== 'done' || cur.content) return {}
+            return { reviews: { ...s.reviews, [reviewChatId]: { ...cur, content, noteCount, findings } } }
+          })
+        } catch { /* гидратация best-effort — pill останется без содержимого */ }
+      }
     } catch (err) {
       console.error('[store] refreshReviewsFor failed:', err)
     }
@@ -854,9 +875,9 @@ export const useProject = create<ProjectState>((set, get) => ({
     if (!r) return {}
     return { reviews: { ...s.reviews, [reviewChatId]: { ...r, content: r.content + text } } }
   }),
-  finalizeReview: (reviewChatId) => set(s => {
-    const r = s.reviews[reviewChatId]
-    if (!r) return {}
+  finalizeReview: (reviewChatId) => {
+    const r = get().reviews[reviewChatId]
+    if (!r) return
     // Парсим «ЗАМЕЧАНИЙ: N» из первой строки (V1, на нём завязан pill noteCount).
     const firstLine = r.content.split('\n', 1)[0] ?? ''
     const m = firstLine.match(/ЗАМЕЧАНИЙ:\s*(\d+)/i)
@@ -864,8 +885,19 @@ export const useProject = create<ProjectState>((set, get) => ({
     // V2: вытаскиваем структурированные findings из ```json блока (fallback на
     // старый текстовый формат внутри parseReviewFindings).
     const findings = parseReviewFindings(r.content)
-    return { reviews: { ...s.reviews, [reviewChatId]: { ...r, status: 'done', noteCount, findings } } }
-  }),
+    set(s => {
+      const cur = s.reviews[reviewChatId]
+      if (!cur) return {}
+      return { reviews: { ...s.reviews, [reviewChatId]: { ...cur, status: 'done', noteCount, findings } } }
+    })
+    // Персист (аудит P0 #5): сохраняем текст ревью как сообщение review-чата,
+    // чтобы после рестарта refreshReviewsFor восстановил content+findings, а не
+    // показывал пустой «фантомный» pill. Best-effort.
+    const path = get().path
+    if (path && r.content.trim()) {
+      void window.api.chats.append(reviewChatId, path, 'assistant', r.content).catch(() => {})
+    }
+  },
   toggleFinding: (reviewChatId, findingId) => set(s => {
     const r = s.reviews[reviewChatId]
     if (!r) return {}

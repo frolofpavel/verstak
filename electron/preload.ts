@@ -240,7 +240,8 @@ contextBridge.exposeInMainWorld('api', {
     revert: (id: number) => ipcRenderer.invoke('devtask:revert', id),
     commit: (id: number, opts: { message: string; paths?: string[] }) => ipcRenderer.invoke('devtask:commit', id, opts),
     buildPackage: (id: number, opts?: { runChecks?: boolean; checks?: string[] }) => ipcRenderer.invoke('devtask:buildPackage', id, opts),
-    createPr: (id: number, opts: { repo: string; base: string; draft?: boolean }) => ipcRenderer.invoke('devtask:createPr', id, opts)
+    createPr: (id: number, opts: { repo: string; base: string; draft?: boolean }) => ipcRenderer.invoke('devtask:createPr', id, opts),
+    setBranch: (id: number, branch: string) => ipcRenderer.invoke('devtask:setBranch', id, branch)
   },
   autonomous: {
     status: () => ipcRenderer.invoke('autonomous:status') as Promise<{ enabled: boolean; intervalMin: number; lastRunAt: number | null; lastRunSuggestions: number; lastRunError: string | null; nextRunAt: number | null }>,

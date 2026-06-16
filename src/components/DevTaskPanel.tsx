@@ -138,8 +138,12 @@ export function DevTaskPanel() {
     setNotice(null)
     try {
       const res = await window.api.git.branchCreate({ name })
-      if (res.ok) setNotice(`Ветка создана: ${res.branch}`)
-      else setNotice(`Не удалось создать ветку: ${res.error ?? 'ошибка'}`)
+      if (res.ok) {
+        setNotice(`Ветка создана: ${res.branch}`)
+        // Write-back ветки в задачу (аудит P0 #7): без этого work_branch оставался
+        // null навсегда → кнопка «Создать PR» (гейт на workBranch) не появлялась.
+        try { await window.api.devtask.setBranch(devTask.id, res.branch ?? name) } catch { /* refresh ниже подхватит */ }
+      } else setNotice(`Не удалось создать ветку: ${res.error ?? 'ошибка'}`)
     } catch {
       setNotice('Не удалось создать ветку.')
     }

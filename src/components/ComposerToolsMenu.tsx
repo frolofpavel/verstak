@@ -20,6 +20,7 @@ type SubId = 'skill' | 'review' | 'checkpoint'
 export function ComposerToolsMenu() {
   const path = useProject(s => s.path)
   const messages = useProject(s => s.messages)
+  const activeChatId = useProject(s => s.activeChatId)
   const checkpointId = useProject(s => s.checkpointId)
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)
@@ -147,7 +148,16 @@ export function ComposerToolsMenu() {
       await window.api.settings.setKey('default_review_provider', providerId)
       setDefaultReviewer(providerId)
     }
-    const payload = composeReviewPayload(messages)
+    // Парити с ReviewButton (аудит P1 #10): подтягиваем DoD-верификацию + реальный
+    // diff, иначе этот вход в ревью молча терял VERIFICATION-блок и слал ревьюеру
+    // только прозу (file:line галлюцинировались, аудит P0 #6).
+    let verification = null
+    let diff: string | null = null
+    if (path) {
+      try { verification = await window.api.verifications.latest(path, activeChatId) } catch { /* DoD не критичен */ }
+      try { const d = await window.api.git.diff({ path }); diff = d.patch ?? null } catch { /* не git-проект / нет правок */ }
+    }
+    const payload = composeReviewPayload(messages, verification, diff)
     await startReview({ providerId, model: null, payload })
     setOpen(false)
   }

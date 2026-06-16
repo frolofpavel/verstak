@@ -266,7 +266,11 @@ function parseNumstat(stdout: string): GitDiffStatEntry[] {
 export async function readDiffStat(cwd: string, base?: string): Promise<GitDiffStatEntry[]> {
   const args = ['diff', '--numstat']
   if (base && /^[\w./@^~-]+$/.test(base) && !base.startsWith('-')) {
-    args.splice(1, 0, `${base}..HEAD`)
+    // `git diff <base>` (base vs рабочее дерево) — ВЕСЬ diff задачи от базы:
+    // и закоммиченное, и незакоммиченное. НЕ `base..HEAD` (только коммиты) —
+    // иначе в dirty-in-place (агент правит, но не коммитит) пакет пуст, хотя
+    // правки есть в worktree, и расходится с commit (аудит P0 #7 diff-sync).
+    args.splice(1, 0, base)
   }
   try {
     const { stdout } = await runGit(cwd, args)
