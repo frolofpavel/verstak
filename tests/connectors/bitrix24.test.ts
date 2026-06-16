@@ -46,6 +46,22 @@ describe('Bitrix24 connector', () => {
     expect(res.error).toBe('blocked')
   })
 
+  it('write-операции read-only: add_deal/update_deal/add_activity заблокированы (B5)', async () => {
+    const conn = createBitrix24Connector()
+    for (const op of ['add_deal', 'update_deal', 'add_activity']) {
+      const res = await conn.query({ op, deal_id: 1, description: 'x' }, ctx) as { error: string }
+      expect(res.error).toBe('read-only')
+    }
+  })
+
+  it('generic call с write-глаголом блокируется (crm.deal.add → read-only) (B5)', async () => {
+    const conn = createBitrix24Connector()
+    const add = await conn.query({ op: 'call', method: 'crm.deal.add', params: {} }, ctx) as { error: string }
+    expect(add.error).toBe('read-only')
+    const upd = await conn.query({ op: 'call', method: 'crm.lead.update', params: {} }, ctx) as { error: string }
+    expect(upd.error).toBe('read-only')
+  })
+
   it('info() возвращает корректный label', () => {
     const conn = createBitrix24Connector()
     const info = conn.info()

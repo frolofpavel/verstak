@@ -11,12 +11,13 @@
  *
  * Безопасность:
  *   - URL содержит token, поэтому хранится в safeStorage.
- *   - Whitelist методов: V1 разрешает только read + add/update сделок
- *     и leads. Удаление (crm.deal.delete) запрещено через denylist.
+ *   - READ-ONLY (аудит B5): любой метод с write-глаголом (add/update/delete/
+ *     set/import/…) запрещён в chokepoint callMethod → инвариант «все 31
+ *     коннектора read-only» соблюдён. Прежний denylist на 5 *.delete оставлен
+ *     как доп.слой. Generic call ограничен read-namespace + тем же гейтом.
  *
  * API style: Битрикс REST использует «методы» как путь после webhook,
- * формат crm.deal.list, crm.lead.add и т.п. Аргументы — JSON body или
- * URL-encoded query string.
+ * формат crm.deal.list и т.п. Аргументы — JSON body или URL-encoded query.
  */
 
 import type { Connector, ConnectorInfo, ConnectorContext } from './types'
@@ -57,16 +58,19 @@ export function createBitrix24Connector(): Connector {
         switch (op) {
           case 'list_deals':         return await listDeals(webhook, args, ctx)
           case 'get_deal':           return await callMethod(webhook, 'crm.deal.get', { id: args.deal_id }, ctx)
-          case 'add_deal':           return await addDeal(webhook, args, ctx)
-          case 'update_deal':        return await updateDeal(webhook, args, ctx)
-          case 'add_activity':       return await addActivity(webhook, args, ctx)
           case 'list_leads':         return await listLeads(webhook, args, ctx)
           case 'get_source_report':  return await getSourceReport(webhook, args, ctx)
           case 'call':               return await rawCall(webhook, args, ctx)
+          // Аудит B5: write-операции (add_deal/update_deal/add_activity) убраны —
+          // коннектор read-only. Запись в чужой CRM нарушала бы инвариант.
+          case 'add_deal':
+          case 'update_deal':
+          case 'add_activity':
+            return { error: 'read-only', message: `Коннектор Битрикс24 — read-only. Операция «${op}» (запись в CRM) недоступна.` }
           default:
             return {
               error: 'unknown-op',
-              message: `Неизвестная op «${op}». Доступно: list_deals, get_deal, add_deal, update_deal, add_activity, list_leads, get_source_report, call.`
+              message: `Неизвестная op «${op}». Доступно (read-only): list_deals, get_deal, list_leads, get_source_report, call.`
             }
         }
       } catch (err) {
@@ -89,36 +93,6 @@ async function listDeals(webhook: string, args: Record<string, unknown>, ctx: Co
   }
   const select = (args.select as string[] | undefined) ?? ['ID', 'TITLE', 'STAGE_ID', 'OPPORTUNITY', 'CURRENCY_ID', 'SOURCE_ID', 'DATE_CREATE', 'COMPANY_TITLE', 'ASSIGNED_BY_ID']
   return await callMethod(webhook, 'crm.deal.list', { filter, select, order: { DATE_CREATE: 'DESC' } }, ctx)
-}
-
-async function addDeal(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
-  const fields = (args.fields as Record<string, unknown> | undefined) ?? {}
-  if (args.title) fields.TITLE = args.title
-  if (args.source) fields.SOURCE_ID = args.source
-  if (args.opportunity) fields.OPPORTUNITY = args.opportunity
-  return await callMethod(webhook, 'crm.deal.add', { fields }, ctx)
-}
-
-async function updateDeal(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
-  if (!args.deal_id) return { error: 'bad-args', message: 'update_deal требует deal_id' }
-  const fields = (args.patch as Record<string, unknown> | undefined) ?? {}
-  return await callMethod(webhook, 'crm.deal.update', { id: args.deal_id, fields }, ctx)
-}
-
-async function addActivity(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
-  if (!args.deal_id || !args.description) {
-    return { error: 'bad-args', message: 'add_activity требует deal_id и description' }
-  }
-  return await callMethod(webhook, 'crm.activity.add', {
-    fields: {
-      OWNER_TYPE_ID: 2, // 2 = deal
-      OWNER_ID: args.deal_id,
-      TYPE_ID: 4,       // 4 = call/meeting
-      SUBJECT: String(args.subject ?? 'Касание'),
-      DESCRIPTION: String(args.description),
-      COMPLETED: 'Y'
-    }
-  }, ctx)
 }
 
 async function listLeads(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
@@ -151,15 +125,28 @@ async function rawCall(webhook: string, args: Record<string, unknown>, ctx: Conn
   const isAllowed = ALLOWED_PREFIXES.some(p => method.startsWith(p))
   if (!isAllowed) return { error: 'blocked', message: `Метод «${method}» не в allowed prefixes (${ALLOWED_PREFIXES.join(', ')}).` }
   if (DENIED_METHODS.has(method)) return { error: 'blocked', message: `Метод «${method}» в denylist.` }
+  // Аудит B5: read-only — write-глаголы блокируем чисто (а не через throw в callMethod).
+  const verb = method.split('.').pop()?.toLowerCase() ?? ''
+  if (WRITE_VERBS.has(verb)) return { error: 'read-only', message: `Метод «${method}» пишет в CRM (глагол «${verb}») — коннектор read-only.` }
   const params = (args.params as Record<string, unknown>) ?? {}
   return await callMethod(webhook, method, params, ctx)
 }
 
 // ----------------------------------------------------------------- helpers
 
+// Аудит B5: инвариант «все 31 коннектора read-only». Bitrix умел писать в CRM
+// (crm.deal.add/update, crm.activity.add), denylist ловил только 5 *.delete.
+// Гейт по write-глаголу в единственном chokepoint делает ВЕСЬ коннектор
+// read-only разом — независимо от op и от generic call.
+const WRITE_VERBS = new Set(['add', 'update', 'delete', 'set', 'import', 'register', 'unregister', 'bind', 'unbind', 'start', 'finish', 'save'])
+
 async function callMethod(webhook: string, method: string, params: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   if (DENIED_METHODS.has(method)) {
     throw new Error(`Method ${method} blocked by denylist`)
+  }
+  const verb = method.split('.').pop()?.toLowerCase() ?? ''
+  if (WRITE_VERBS.has(verb)) {
+    throw new Error(`Bitrix24 read-only: метод ${method} пишет в CRM (глагол «${verb}») и запрещён`)
   }
   const url = `${webhook.replace(/\/+$/, '')}/${method}.json`
   const res = await fetch(url, {
