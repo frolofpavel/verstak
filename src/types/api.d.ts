@@ -31,6 +31,15 @@ export interface ProjectMeta {
   lastOpenedAt: number
 }
 
+export interface ProjectGroup {
+  id: number
+  name: string
+  sortOrder: number
+  collapsed: boolean
+  projectPaths: string[]
+  createdAt: number
+}
+
 /** User profile — multi-user поддержка команды агентства (14 человек). */
 export interface UserProfile {
   id: number
@@ -105,6 +114,17 @@ declare global {
         pickIcon: (path: string) => Promise<ProjectMeta | null>
         clearIcon: (path: string) => Promise<ProjectMeta | null>
         remove: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
+        listGroups: () => Promise<ProjectGroup[]>
+        createGroup: (name: string, projectPaths: string[]) => Promise<
+          { ok: true; group: ProjectGroup } | { ok: false; error: string }
+        >
+        updateGroup: (id: number, patch: {
+          name?: string
+          projectPaths?: string[]
+          collapsed?: boolean
+          sortOrder?: number
+        }) => Promise<{ ok: true; group: ProjectGroup } | { ok: false; error: string }>
+        deleteGroup: (id: number) => Promise<{ ok: true }>
       }
       app: {
         getHomeDir: () => Promise<string>

@@ -22,4 +22,22 @@ describe('openDb', () => {
     expect(row).toEqual({ name: 'chats' })
     db.close()
   })
+
+  it('applies project_groups migration when schema is already past v13', () => {
+    const dbPath = join(dir, 'stale-schema.db')
+    const db = openDb(dbPath)
+    db.exec('DROP TABLE IF EXISTS project_group_members')
+    db.exec('DROP TABLE IF EXISTS project_groups')
+    db.prepare('UPDATE schema_version SET version = 19 WHERE id = 1').run()
+    db.close()
+
+    const reopened = openDb(dbPath)
+    const groups = reopened.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='project_groups'").get()
+    const members = reopened.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='project_group_members'").get()
+    const version = reopened.prepare('SELECT version FROM schema_version WHERE id = 1').get() as { version: number }
+    expect(groups).toEqual({ name: 'project_groups' })
+    expect(members).toEqual({ name: 'project_group_members' })
+    expect(version.version).toBe(20)
+    reopened.close()
+  })
 })

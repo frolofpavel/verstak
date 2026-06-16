@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
-import type { ProjectMeta } from '../types/api'
+import type { ProjectGroup, ProjectMeta } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
 import { UpdateNotification } from './UpdateNotification'
 import { CreateClientModal } from './CreateClientModal'
+import { CreateProjectGroupModal } from './CreateProjectGroupModal'
 import { useT } from '../i18n'
 
 const RAIL_EXPANDED_KEY = 'gg-rail-expanded'
@@ -21,17 +22,88 @@ function readRailExpanded(): boolean {
   }
 }
 
-function filterProjects(list: ProjectMeta[], query: string, activePath: string | null): ProjectMeta[] {
-  const q = query.trim().toLowerCase()
-  if (!q) return list
-  const matches = list.filter(
-    p => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
-  )
-  if (activePath && !matches.some(p => p.path === activePath)) {
-    const active = list.find(p => p.path === activePath)
-    if (active) return [active, ...matches]
+interface RailView {
+  groups: Array<{ group: ProjectGroup; projects: ProjectMeta[] }>
+  ungrouped: ProjectMeta[]
+  visibleCount: number
+}
+
+function buildRailView(
+  groups: ProjectGroup[],
+  projects: ProjectMeta[],
+  query: string,
+  activePath: string | null
+): RailView {
+  const byPath = new Map(projects.map(p => [p.path, p]))
+  const inGroup = new Set<string>()
+  for (const g of groups) {
+    for (const path of g.projectPaths) inGroup.add(path)
   }
-  return matches
+
+  const q = query.trim().toLowerCase()
+
+  const visibleGroups = groups.flatMap(group => {
+    const memberProjects = group.projectPaths
+      .map(path => byPath.get(path))
+      .filter((p): p is ProjectMeta => !!p)
+
+    if (!q) {
+      if (memberProjects.length === 0) return []
+      return [{ group, projects: memberProjects }]
+    }
+
+    const groupNameMatch = group.name.toLowerCase().includes(q)
+    const matching = memberProjects.filter(
+      p => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+    )
+    if (groupNameMatch && memberProjects.length > 0) return [{ group, projects: memberProjects }]
+    if (matching.length > 0) return [{ group, projects: matching }]
+    return []
+  })
+
+  let ungrouped = projects.filter(p => !inGroup.has(p.path))
+  if (q) {
+    ungrouped = ungrouped.filter(
+      p => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+    )
+  }
+
+  if (activePath) {
+    const inVisible = ungrouped.some(p => p.path === activePath)
+      || visibleGroups.some(v => v.projects.some(p => p.path === activePath))
+    if (!inVisible) {
+      const active = byPath.get(activePath)
+      if (active) {
+        if (inGroup.has(activePath)) {
+          const host = visibleGroups.find(v => v.projects.some(p => p.path === activePath))
+          if (host) return { groups: visibleGroups, ungrouped, visibleCount: countVisible(visibleGroups, ungrouped) }
+          const group = groups.find(g => g.projectPaths.includes(activePath))
+          if (group) {
+            return {
+              groups: [...visibleGroups, { group, projects: [active] }],
+              ungrouped,
+              visibleCount: countVisible(visibleGroups, ungrouped) + 1
+            }
+          }
+        } else {
+          ungrouped = [active, ...ungrouped]
+        }
+      }
+    }
+  }
+
+  return {
+    groups: visibleGroups,
+    ungrouped,
+    visibleCount: countVisible(visibleGroups, ungrouped)
+  }
+}
+
+function countVisible(
+  groups: Array<{ group: ProjectGroup; projects: ProjectMeta[] }>,
+  ungrouped: ProjectMeta[]
+): number {
+  return ungrouped.length + groups.reduce((sum, g) => sum + g.projects.length, 0)
 }
 
 interface ProjectChipProps {
@@ -41,17 +113,28 @@ interface ProjectChipProps {
   streaming: boolean
   shellExpanded: boolean
   contentExpanded: boolean
+  nested?: boolean
   onClick: () => void
   onSettings: () => void
 }
 
-function ProjectChip({ project, active, unread, streaming, shellExpanded, contentExpanded, onClick, onSettings }: ProjectChipProps) {
+function ProjectChip({
+  project,
+  active,
+  unread,
+  streaming,
+  shellExpanded,
+  contentExpanded,
+  nested,
+  onClick,
+  onSettings
+}: ProjectChipProps) {
   const [hover, setHover] = useState(false)
   const status = streaming ? 'streaming' : unread ? 'unread' : null
 
   return (
     <div
-      className={`gg-rail-chip ${active ? 'is-active' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''}`}
+      className={`gg-rail-chip ${active ? 'is-active' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${nested ? 'is-nested' : ''}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       title={contentExpanded ? project.path : `${project.name}\n${project.path}`}
@@ -89,6 +172,115 @@ function ProjectChip({ project, active, unread, streaming, shellExpanded, conten
   )
 }
 
+interface ProjectGroupBlockProps {
+  group: ProjectGroup
+  projects: ProjectMeta[]
+  activePath: string | null
+  sessions: Record<string, { hasUnread?: boolean; isStreaming?: boolean } | undefined>
+  shellExpanded: boolean
+  contentExpanded: boolean
+  onToggleCollapsed: (group: ProjectGroup) => void
+  onEdit: (group: ProjectGroup) => void
+  onSelectProject: (path: string) => void
+  onProjectSettings: (project: ProjectMeta) => void
+}
+
+function ProjectGroupBlock({
+  group,
+  projects,
+  activePath,
+  sessions,
+  shellExpanded,
+  contentExpanded,
+  onToggleCollapsed,
+  onEdit,
+  onSelectProject,
+  onProjectSettings
+}: ProjectGroupBlockProps) {
+  const t = useT()
+  const [hover, setHover] = useState(false)
+  const expanded = !group.collapsed
+  const hasActive = projects.some(p => p.path === activePath)
+
+  return (
+    <div
+      className={`gg-rail-group ${expanded ? 'is-open' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${hasActive ? 'has-active' : ''}`}
+    >
+      <div
+        className="gg-rail-group-head"
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <button
+          type="button"
+          className="gg-rail-group-toggle"
+          onClick={() => onToggleCollapsed(group)}
+          title={expanded ? t.rail.groupCollapse : t.rail.groupExpand}
+          aria-expanded={expanded}
+        >
+          <svg
+            className={`gg-rail-group-chevron ${expanded ? 'is-open' : ''}`}
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+          <span className="gg-rail-group-icon" aria-hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </span>
+          <span className="gg-rail-group-label" aria-hidden={!contentExpanded}>
+            {group.name}
+          </span>
+          <span className="gg-rail-group-count" aria-hidden={!contentExpanded}>
+            {projects.length}
+          </span>
+        </button>
+        {hover && contentExpanded && (
+          <button
+            type="button"
+            className="gg-rail-group-edit"
+            onClick={e => { e.stopPropagation(); onEdit(group) }}
+            title={t.rail.groupEdit}
+            aria-label={t.rail.groupEdit}
+          >
+            <SettingsGearIcon size={13} />
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="gg-rail-group-body">
+          {projects.map(p => {
+            const session = sessions[p.path]
+            return (
+              <ProjectChip
+                key={p.path}
+                project={p}
+                active={activePath === p.path}
+                unread={!!session?.hasUnread}
+                streaming={!!session?.isStreaming}
+                shellExpanded={shellExpanded}
+                contentExpanded={contentExpanded}
+                nested
+                onClick={() => onSelectProject(p.path)}
+                onSettings={() => onProjectSettings(p)}
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface ProjectRailProps {
   onOpenProjectSettings: (project: ProjectMeta) => void
   onOpenAppSettings: () => void
@@ -102,22 +294,28 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
   const [bootstrapped, setBootstrapped] = useState(false)
   const initialRailExpanded = readRailExpanded()
   const [railExpanded, setRailExpanded] = useState(initialRailExpanded)
-  /** Оболочка rail (padding, ширина toolbar) — сразу при открытии, с задержкой при закрытии */
   const [shellExpanded, setShellExpanded] = useState(initialRailExpanded)
-  /** Контент rail (подписи, строка кнопок) — с задержкой в обе стороны */
   const [contentExpanded, setContentExpanded] = useState(initialRailExpanded)
   const [projectQuery, setProjectQuery] = useState('')
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
   const [showCreateClient, setShowCreateClient] = useState(false)
+  const [groupModal, setGroupModal] = useState<{ mode: 'create' } | { mode: 'edit'; group: ProjectGroup } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  const filteredProjects = useMemo(
-    () => filterProjects(projectList, projectQuery, path),
-    [projectList, projectQuery, path]
+  const railView = useMemo(
+    () => buildRailView(projectGroups, projectList, projectQuery, path),
+    [projectGroups, projectList, projectQuery, path]
   )
   const showSearch = projectList.length >= 2
   const hasActiveFilter = projectQuery.trim().length > 0
   const showSearchTool = !contentExpanded && showSearch
   const toolbarToolCount = 2 + (showSearchTool ? 1 : 0)
+  const listEmpty = railView.visibleCount === 0
+
+  async function refreshGroups() {
+    const list = await window.api.projects.listGroups()
+    setProjectGroups(list)
+  }
 
   function openSearch() {
     setRailExpanded(true)
@@ -145,6 +343,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
   useEffect(() => {
     void (async () => {
       await refreshProjectList()
+      await refreshGroups()
       const state = useProject.getState()
       if (!state.path) {
         const list = state.projectList
@@ -165,9 +364,19 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
   }, [])
   void bootstrapped
 
-  async function handleClientOpened(path: string) {
-    await setProject(path)
+  async function handleClientOpened(projectPath: string) {
+    await setProject(projectPath)
     await refreshProjectList()
+    await refreshGroups()
+  }
+
+  async function handleGroupSaved() {
+    await refreshGroups()
+  }
+
+  async function handleToggleGroupCollapsed(group: ProjectGroup) {
+    const result = await window.api.projects.updateGroup(group.id, { collapsed: !group.collapsed })
+    if (result.ok) await refreshGroups()
   }
 
   return (
@@ -244,7 +453,23 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
         <div className="gg-rail-expand-inner">
           <div className="gg-rail-section-head">
             <span className="gg-rail-section-title">{t.rail.clients}</span>
-            <span className="gg-rail-section-count">{filteredProjects.length}</span>
+            <div className="gg-rail-section-actions">
+              <button
+                type="button"
+                className="gg-rail-section-btn"
+                onClick={() => setGroupModal({ mode: 'create' })}
+                title={t.rail.createGroup}
+                aria-label={t.rail.createGroup}
+                tabIndex={contentExpanded ? 0 : -1}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  <line x1="12" y1="11" x2="12" y2="17" />
+                  <line x1="9" y1="14" x2="15" y2="14" />
+                </svg>
+              </button>
+              <span className="gg-rail-section-count">{railView.visibleCount}</span>
+            </div>
           </div>
           {showSearch && (
             <div className="gg-rail-search-wrap">
@@ -278,10 +503,25 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
       </div>
 
       <div className="gg-rail-list">
-        {filteredProjects.length === 0 && hasActiveFilter && (
+        {listEmpty && hasActiveFilter && (
           <div className="gg-rail-empty">{t.rail.noResults}</div>
         )}
-        {filteredProjects.map(p => {
+        {railView.groups.map(({ group, projects }) => (
+          <ProjectGroupBlock
+            key={group.id}
+            group={group}
+            projects={projects}
+            activePath={path}
+            sessions={sessions}
+            shellExpanded={shellExpanded}
+            contentExpanded={contentExpanded}
+            onToggleCollapsed={g => void handleToggleGroupCollapsed(g)}
+            onEdit={g => setGroupModal({ mode: 'edit', group: g })}
+            onSelectProject={p => { if (path !== p) void setProject(p) }}
+            onProjectSettings={onOpenProjectSettings}
+          />
+        ))}
+        {railView.ungrouped.map(p => {
           const session = sessions[p.path]
           return (
             <ProjectChip
@@ -325,7 +565,16 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
     {showCreateClient && (
       <CreateClientModal
         onClose={() => setShowCreateClient(false)}
-        onOpened={path => void handleClientOpened(path)}
+        onOpened={projectPath => void handleClientOpened(projectPath)}
+        onGroupsChanged={() => void refreshGroups()}
+      />
+    )}
+    {groupModal && (
+      <CreateProjectGroupModal
+        projects={projectList}
+        initialGroup={groupModal.mode === 'edit' ? groupModal.group : null}
+        onClose={() => setGroupModal(null)}
+        onSaved={() => void handleGroupSaved()}
       />
     )}
     </>

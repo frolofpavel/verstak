@@ -35,6 +35,7 @@ import { createChatSessions } from './storage/chat-sessions'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
 import { createProjects } from './storage/projects'
+import { createProjectGroups } from './storage/project-groups'
 import { createUndoStack } from './storage/undo'
 import { registerUndoIpc } from './ipc/undo'
 import { createPlans } from './storage/plans'
@@ -243,6 +244,7 @@ app.whenReady().then(() => {
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
+  const projectGroups = createProjectGroups(db)
   const undoStack = createUndoStack(db)
   const plans = createPlans(db)
   const feedback = createFeedback(db)
@@ -260,7 +262,7 @@ app.whenReady().then(() => {
     console.warn('[skills] initial refresh failed:', err instanceof Error ? err.message : err)
   })
 
-  registerProjectIpc(projects, db)
+  registerProjectIpc(projects, projectGroups, db)
   registerFilesIpc({ getProjectRoot: getActiveProjectPath })
   registerSettingsIpc(settings)
   registerCliAuthIpc(settings)

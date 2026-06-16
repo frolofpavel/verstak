@@ -325,6 +325,52 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('ALTER TABLE projects ADD COLUMN icon_path TEXT')
       }
     }
+  },
+  {
+    version: 13,
+    description: 'project_groups — группы проектов в rail с раскрывающимся списком',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          collapsed INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_group_members (
+          group_id INTEGER NOT NULL,
+          project_path TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (group_id, project_path),
+          FOREIGN KEY (group_id) REFERENCES project_groups(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_group_members_path ON project_group_members(project_path);
+      `)
+    }
+  },
+  {
+    version: 20,
+    description: 'project_groups (retry) — БД уже на schema v14+ без таблиц групп',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          collapsed INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_group_members (
+          group_id INTEGER NOT NULL,
+          project_path TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (group_id, project_path),
+          FOREIGN KEY (group_id) REFERENCES project_groups(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_group_members_path ON project_group_members(project_path);
+      `)
+    }
   }
 ]
 

@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '../i18n'
 import { ProjectAvatar } from './ProjectAvatar'
-import type { ProjectMeta } from '../types/api'
+import type { ProjectGroup, ProjectMeta } from '../types/api'
 
 type Mode = 'choose' | 'create' | 'open'
 
 interface CreateClientModalProps {
   onClose: () => void
   onOpened: (path: string) => void
+  onGroupsChanged?: () => void
 }
 
 function slugFromName(name: string): string {
@@ -20,7 +21,7 @@ function slugFromName(name: string): string {
     .replace(/^[^a-z]+/, '')
 }
 
-export function CreateClientModal({ onClose, onOpened }: CreateClientModalProps) {
+export function CreateClientModal({ onClose, onOpened, onGroupsChanged }: CreateClientModalProps) {
   const t = useT()
   const [mode, setMode] = useState<Mode>('choose')
   const [name, setName] = useState('')
@@ -28,6 +29,8 @@ export function CreateClientModal({ onClose, onOpened }: CreateClientModalProps)
   const [slugTouched, setSlugTouched] = useState(false)
   const [iconPath, setIconPath] = useState<string | null>(null)
   const [clientsRoot, setClientsRoot] = useState('')
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
+  const [selectedGroupId, setSelectedGroupId] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -39,6 +42,7 @@ export function CreateClientModal({ onClose, onOpened }: CreateClientModalProps)
 
   useEffect(() => {
     void window.api.projects.clientsRoot().then(setClientsRoot).catch(() => {})
+    void window.api.projects.listGroups().then(setProjectGroups).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -93,6 +97,15 @@ export function CreateClientModal({ onClose, onOpened }: CreateClientModalProps)
       if (!result.ok) {
         setError(result.error)
         return
+      }
+      if (selectedGroupId !== '') {
+        const group = projectGroups.find(g => g.id === selectedGroupId)
+        if (group) {
+          const groupResult = await window.api.projects.updateGroup(group.id, {
+            projectPaths: [...group.projectPaths, result.path]
+          })
+          if (groupResult.ok) onGroupsChanged?.()
+        }
       }
       onOpened(result.path)
       onClose()
@@ -180,6 +193,26 @@ export function CreateClientModal({ onClose, onOpened }: CreateClientModalProps)
                   </span>
                 )}
               </label>
+
+              {projectGroups.length > 0 && (
+                <label className="gg-create-client-field">
+                  <span className="gg-create-client-label">{t.rail.createGroupLabel}</span>
+                  <select
+                    className="gg-input gg-create-client-select"
+                    value={selectedGroupId === '' ? '' : String(selectedGroupId)}
+                    onChange={e => {
+                      const v = e.target.value
+                      setSelectedGroupId(v === '' ? '' : Number(v))
+                    }}
+                    disabled={busy}
+                  >
+                    <option value="">{t.rail.createGroupNone}</option>
+                    {projectGroups.map(group => (
+                      <option key={group.id} value={group.id}>{group.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <div className="gg-create-client-field">
                 <span className="gg-create-client-label">{t.rail.createImageLabel}</span>

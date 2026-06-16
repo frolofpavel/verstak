@@ -15,7 +15,17 @@ contextBridge.exposeInMainWorld('api', {
     pickIcon: (path: string) => ipcRenderer.invoke('projects:pick-icon', path),
     clearIcon: (path: string) => ipcRenderer.invoke('projects:clear-icon', path),
     remove: (path: string, options?: { deleteData?: boolean }) =>
-      ipcRenderer.invoke('projects:remove', path, options) as Promise<{ ok: boolean; error?: string }>
+      ipcRenderer.invoke('projects:remove', path, options) as Promise<{ ok: boolean; error?: string }>,
+    listGroups: () => ipcRenderer.invoke('projects:list-groups'),
+    createGroup: (name: string, projectPaths: string[]) =>
+      ipcRenderer.invoke('projects:create-group', name, projectPaths),
+    updateGroup: (id: number, patch: {
+      name?: string
+      projectPaths?: string[]
+      collapsed?: boolean
+      sortOrder?: number
+    }) => ipcRenderer.invoke('projects:update-group', id, patch),
+    deleteGroup: (id: number) => ipcRenderer.invoke('projects:delete-group', id)
   },
   app: {
     getHomeDir: () => ipcRenderer.invoke('app:home-dir') as Promise<string>,
