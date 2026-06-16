@@ -91,12 +91,18 @@ export function App() {
     }
   })
   useEffect(() => {
+    let cancelled = false
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) setAuthDone(prev => (prev === null ? false : prev))
+    }, 8000)
+
     void (async () => {
       try {
         const [authVal, profiles] = await Promise.all([
           window.api.settings.getKey('auth_completed'),
           window.api.userProfiles.list(),
         ])
+        if (cancelled) return
         if (authVal === 'true') {
           try { localStorage.setItem(AUTH_CACHE_KEY, '1') } catch { /* ignore */ }
           setAuthDone(true)
@@ -110,10 +116,16 @@ export function App() {
           setAuthDone(false)
         }
       } catch {
+        if (cancelled) return
         try { localStorage.removeItem(AUTH_CACHE_KEY) } catch { /* ignore */ }
         setAuthDone(false)
       }
     })()
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+    }
   }, [])
 
   // Onboarding: показывается при первом запуске пока не помечен completed

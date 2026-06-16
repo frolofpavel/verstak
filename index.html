@@ -5,45 +5,11 @@
     <title>Verstak</title>
     <style>
       html, body { margin: 0; background: #2e3440; color: #eceff4; height: 100%; }
-      #root {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 76px 1fr;
-      }
-      .boot-rail {
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
-        background: linear-gradient(180deg, #3b4252, #2e3440);
-        animation: boot-pulse 1.4s ease-in-out infinite;
-      }
-      .boot-main {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        padding: 28px 32px;
-      }
-      .boot-line {
-        height: 12px;
-        border-radius: 6px;
-        background: #434c5e;
-        animation: boot-pulse 1.4s ease-in-out infinite;
-      }
-      .boot-line--wide { width: min(420px, 70%); }
-      .boot-line--short { width: min(220px, 40%); }
-      @keyframes boot-pulse {
-        0%, 100% { opacity: 0.55; }
-        50% { opacity: 1; }
-      }
+      #root { height: 100%; min-height: 100vh; }
     </style>
   </head>
   <body>
-    <div id="root">
-      <div class="boot-rail" aria-hidden="true"></div>
-      <div class="boot-main" aria-busy="true">
-        <div class="boot-line boot-line--wide"></div>
-        <div class="boot-line"></div>
-        <div class="boot-line boot-line--short"></div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
