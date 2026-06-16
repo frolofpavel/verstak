@@ -90,6 +90,17 @@ interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 
+/** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
+const conversationSupplements = new Map<number, (text: string) => void>()
+
+function registerConversationSupplements(sendId: number, push: (text: string) => void): void {
+  conversationSupplements.set(sendId, push)
+}
+
+function unregisterConversationSupplements(sendId: number): void {
+  conversationSupplements.delete(sendId)
+}
+
 // Track which chats have already received memory injection in this process
 // lifetime. Replaces the old isFirstTurn check so memory is injected on the
 // first ai:send for a chat in this app session — not only on truly-first-ever
@@ -621,6 +632,15 @@ export function registerAiIpc(deps: AiDeps): void {
 
   ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
 
+  ipcMain.handle('ai:append-context', (_e, sendId: number, text: string) => {
+    const trimmed = String(text ?? '').trim()
+    if (!trimmed || sendId <= 0) return { ok: false as const, fallback: 'invalid' as const }
+    const push = conversationSupplements.get(sendId)
+    if (!push) return { ok: false as const, fallback: 'unavailable' as const }
+    push(trimmed)
+    return { ok: true as const }
+  })
+
   ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
     // If renderer knows sendId (it should — Chat.tsx stores it after ai:send),
     // use strict key lookup. Fallback to suffix scan for backward compat with
@@ -931,6 +951,22 @@ async function runApiConversation(
   verifications?: AiDeps['verifications']
 ): Promise<void> {
   const currentMessages = [...initialMessages]
+  const pendingSupplements: string[] = []
+  registerConversationSupplements(sendId, (text: string) => {
+    pendingSupplements.push(text)
+  })
+  const drainSupplements = () => {
+    while (pendingSupplements.length > 0) {
+      const text = pendingSupplements.shift()!
+      currentMessages.push({
+        role: 'user',
+        content: `[Дополнение к текущей задаче]\n${text}`
+      })
+      if (agentRuns && runId) {
+        try { agentRuns.appendEvent(runId, 'user_msg', { detail: text.slice(0, 500) }) } catch { /* best-effort */ }
+      }
+    }
+  }
   // Loop detection: per-signature occurrence counter across the whole agent
   // loop. We block when a single tool+args combination has been called 3 times
   // (the threshold the UI tells the user). Tracking via Map avoids the
@@ -970,6 +1006,7 @@ async function runApiConversation(
   try {
 
   for (let turn = 0; turn < turnsBudget; turn++) {
+    drainSupplements()
     if (signal.aborted) {
       exitReason = 'aborted'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
@@ -1371,6 +1408,7 @@ async function runApiConversation(
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
+    unregisterConversationSupplements(sendId)
     // GUARANTEED journal write on every exit path — completion, abort, error,
     // max-turns, loop-detected, crashed (uncaught). Per Gemini audit Idea B:
     // 'любое завершение runApiConversation обязано вызвать writeSessionJournal'.

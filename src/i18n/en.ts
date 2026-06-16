@@ -226,6 +226,10 @@ export const en = {
   chat: {
     placeholder: 'Describe a task. Enter — send, Shift+Enter — new line, Ctrl+V — paste screenshot.',
     streamingPlaceholder: 'is responding… (Esc — stop)',
+    streamingAppendHint: 'add to the current task context',
+    streamingQueueHint: 'run right after this one finishes',
+    streamingQueueCount: 'Queued: {n}',
+    streamingAppendCliNote: 'CLI models cannot see mid-run additions — will apply on the next request',
     codeReview: 'Code Review',
     gitSummary: 'Git Summary',
     explainCode: 'Explain Code',

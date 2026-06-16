@@ -111,6 +111,10 @@ contextBridge.exposeInMainWorld('api', {
     resolveCommand: (callId: string, accept: boolean, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-command', callId, accept, sendId),
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
+    appendContext: (sendId: number, text: string) =>
+      ipcRenderer.invoke('ai:append-context', sendId, text) as Promise<
+        { ok: true } | { ok: false; fallback: 'invalid' | 'unavailable' }
+      >,
     countTokens: (text: string, projectPath: string | null, historyMessages?: unknown[]) =>
       ipcRenderer.invoke('ai:count-tokens', text, projectPath, historyMessages) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
     onEvent: (cb: (data: { id: number; event: unknown; projectPath: string | null }) => void) => {

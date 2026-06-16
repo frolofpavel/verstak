@@ -223,6 +223,10 @@ declare global {
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
+        /** Дополнить контекст активного API agent-loop (Ctrl+Enter во время стрима). */
+        appendContext: (sendId: number, text: string) => Promise<
+          { ok: true } | { ok: false; fallback: 'invalid' | 'unavailable' }
+        >
         countTokens: (text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => Promise<{ tokens: number; exact: boolean; providerId: string }>
         onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
       }

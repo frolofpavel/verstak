@@ -218,6 +218,10 @@ export const ru: Translations = {
   chat: {
     placeholder: 'Опиши задачу. Enter — отправить, Shift+Enter — новая строка, Ctrl+V — вставить скриншот.',
     streamingPlaceholder: 'отвечает… (Esc — остановить)',
+    streamingAppendHint: 'добавить в контекст текущей задачи',
+    streamingQueueHint: 'выполнить сразу после этой',
+    streamingQueueCount: 'В очереди: {n}',
+    streamingAppendCliNote: 'CLI-модель не видит дополнение в полёте — учтём в следующем запросе',
     codeReview: 'Code Review',
     gitSummary: 'Git Summary',
     explainCode: 'Explain Code',
