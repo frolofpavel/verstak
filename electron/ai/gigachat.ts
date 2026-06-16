@@ -42,10 +42,22 @@ const DEFAULT_MODEL = 'GigaChat'
 // Module-level кеш токена. Между несколькими send() вызовами reuse.
 let cachedToken: { value: string; expiresAt: number } | null = null
 
+// Аудит M3: TLS-верификация GigaChat. По умолчанию false (Sber CA не в Node
+// trust store → голый rejectUnauthorized:true сломал бы провайдера у всех).
+// Пользователь, поставивший Russian Trusted Root CA в системное хранилище,
+// включает проверку настройкой gigachat_tls_verify=true. Module-флаг (как
+// cachedToken) — провайдер создаётся свежим на каждый send и ставит его до
+// первого запроса.
+let gigaTlsVerify = false
+let gigaInsecureWarned = false
+
 export interface GigaChatOptions {
   clientId: string
   clientSecret: string
   model?: string
+  /** Аудит M3: проверять TLS-сертификат сервера (нужен Russian Trusted Root CA
+   *  в системном хранилище). По умолчанию false — иначе CERT_UNTRUSTED. */
+  tlsVerify?: boolean
 }
 
 /**
@@ -78,8 +90,8 @@ function httpsRequestRaw(
       path: u.pathname + u.search,
       method: options.method ?? 'GET',
       headers: options.headers,
-      // Sber CA не в Node trust store — без этого CERT_UNTRUSTED. V2: bundle cert.
-      rejectUnauthorized: false
+      // Аудит M3: проверка TLS по настройке gigachat_tls_verify (см. gigaTlsVerify).
+      rejectUnauthorized: gigaTlsVerify
     }, (res) => {
       const chunks: Buffer[] = []
       res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
@@ -163,7 +175,7 @@ function openChatStream(token: string, body: object, signal?: AbortSignal): Prom
         'Accept': 'text/event-stream',
         'Content-Length': Buffer.byteLength(payload).toString()
       },
-      rejectUnauthorized: false
+      rejectUnauthorized: gigaTlsVerify // Аудит M3
     }, (res) => {
       ;(res as any).__status = res.statusCode ?? 0
       resolve(res as IncomingMessage & { __status: number })
@@ -279,6 +291,14 @@ function buildGigaChatMessages(messages: ChatMessage[]): unknown[] {
 export function createGigaChatProvider(opts: GigaChatOptions): ChatProvider {
   if (!opts.clientId || !opts.clientId.trim()) throw new Error('GigaChat: Client ID не задан')
   if (!opts.clientSecret || !opts.clientSecret.trim()) throw new Error('GigaChat: Client Secret не задан')
+
+  // Аудит M3: ставим TLS-режим до первого запроса. Если проверка выключена —
+  // предупреждаем один раз (раньше insecure был молчаливым и без выхода).
+  gigaTlsVerify = opts.tlsVerify === true
+  if (!gigaTlsVerify && !gigaInsecureWarned) {
+    gigaInsecureWarned = true
+    console.warn('[gigachat] TLS-сертификат сервера НЕ проверяется (gigachat_tls_verify не включён). Для защиты от MITM поставь Russian Trusted Root CA в системное хранилище и включи gigachat_tls_verify=true.')
+  }
 
   const model = opts.model && opts.model.trim() ? opts.model : DEFAULT_MODEL
 

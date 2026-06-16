@@ -178,6 +178,9 @@ export interface CreateOptions {
   yandexFolderId?: string
   /** Для gigachat: client_secret (primary key=clientId; secret в SafeStorage отдельно). */
   gigachatClientSecret?: string
+  /** Аудит M3: проверять TLS-сертификат GigaChat (нужен Russian Trusted Root CA
+   *  в системном хранилище). По умолчанию выкл — иначе CERT_UNTRUSTED. */
+  gigachatTlsVerify?: boolean
   /** Топ-5 воспоминаний проекта — пробрасываются в buildCliPrompt для CLI-провайдеров,
    *  чтобы они получали тот же контекст памяти что и API-провайдеры. */
   memories?: Array<{ type: string; content: string; tags: string[] }>
@@ -231,7 +234,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
     case 'gigachat': {
       if (!opts.apiKey) throw new Error('GigaChat: Client ID не задан')
       if (!opts.gigachatClientSecret) throw new Error('GigaChat: Client Secret не задан (Settings → Провайдеры → GigaChat)')
-      return createGigaChatProvider({ clientId: opts.apiKey, clientSecret: opts.gigachatClientSecret, model: opts.model })
+      return createGigaChatProvider({ clientId: opts.apiKey, clientSecret: opts.gigachatClientSecret, model: opts.model, tlsVerify: opts.gigachatTlsVerify })
     }
     case 'openrouter':
     case 'deepseek':

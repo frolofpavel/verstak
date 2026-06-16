@@ -778,6 +778,7 @@ function buildSubCreateOptions(
     customModels,
     yandexFolderId: providerId === 'yandex-gpt' ? (getSecret?.('yandex_folder_id') ?? undefined) : undefined,
     gigachatClientSecret: providerId === 'gigachat' ? (getSecret?.('gigachat_client_secret') ?? undefined) : undefined,
+    gigachatTlsVerify: providerId === 'gigachat' ? (getSecret?.('gigachat_tls_verify') === 'true') : undefined,
     agentMode: ctx.agentMode
   }
 }

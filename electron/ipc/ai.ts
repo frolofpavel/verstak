@@ -480,6 +480,10 @@ export function registerAiIpc(deps: AiDeps): void {
       const gigachatClientSecret = providerId === 'gigachat'
         ? (deps.getSecret('gigachat_client_secret') ?? undefined)
         : undefined
+      // Аудит M3: TLS-верификация GigaChat по настройке (по умолчанию выкл).
+      const gigachatTlsVerify = providerId === 'gigachat'
+        ? (deps.getSecret('gigachat_tls_verify') === 'true')
+        : undefined
       provider = createProvider(providerId, {
         apiKey,
         model,
@@ -492,6 +496,7 @@ export function registerAiIpc(deps: AiDeps): void {
         customModels,
         yandexFolderId,
         gigachatClientSecret,
+        gigachatTlsVerify,
         memories: descriptor.transport === 'CLI' ? memories : undefined,
         effortLevel: overrides?.effortLevel,
         agentMode: deps.getAgentMode()

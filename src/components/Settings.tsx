@@ -945,6 +945,17 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         }
         modelVals[p.id] = m ?? p.defaultModel
       }))
+      // Аудит: вторичные ключи RU-провайдеров (folder_id / client_secret / tls)
+      // живут вне p.secretKey — грузим явно, иначе input пуст после перезагрузки
+      // и YandexGPT/GigaChat невозможно настроить (теряется 2-й секрет).
+      const [yFolder, gSecret, gTls] = await Promise.all([
+        window.api.settings.getKey('yandex_folder_id'),
+        window.api.settings.getKey('gigachat_client_secret'),
+        window.api.settings.getKey('gigachat_tls_verify')
+      ])
+      if (yFolder) keyVals['yandex_folder_id'] = yFolder
+      if (gSecret) keyVals['gigachat_client_secret'] = gSecret
+      if (gTls) keyVals['gigachat_tls_verify'] = gTls
       setKeys(keyVals)
       setModels(modelVals)
       // 1С connector creds
@@ -1132,6 +1143,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         await window.api.settings.setKey(`model_${p.id}`, models[p.id])
       }
     }
+    // Вторичные ключи RU-провайдеров: основной p.secretKey пишется в цикле выше,
+    // а второй (folder_id / client_secret / tls) — нет. Без этого YandexGPT и
+    // GigaChat невозможно настроить (теряется на перезагрузке).
+    if (keys['yandex_folder_id'] !== undefined) await window.api.settings.setKey('yandex_folder_id', keys['yandex_folder_id'])
+    if (keys['gigachat_client_secret'] !== undefined) await window.api.settings.setKey('gigachat_client_secret', keys['gigachat_client_secret'])
+    if (keys['gigachat_tls_verify'] !== undefined) await window.api.settings.setKey('gigachat_tls_verify', keys['gigachat_tls_verify'])
     await window.api.settings.setKey('onec_base_url', onec.url)
     await window.api.settings.setKey('onec_username', onec.user)
     await window.api.settings.setKey('onec_password', onec.pass)
@@ -2773,10 +2790,19 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
             autoFocus
           />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={keys['gigachat_tls_verify'] === 'true'}
+              onChange={e => setKeys(k => ({ ...k, gigachat_tls_verify: e.target.checked ? 'true' : 'false' }))}
+            />
+            <span style={{ fontSize: 'var(--text-sm)' }}>Проверять TLS-сертификат сервера</span>
+          </label>
           <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
             ⚠ GigaChat использует сертификат Сбера (Russian Trusted Root CA), которого
-            нет в стандартном trust store Node.js. Соединение зашифровано TLS, но
-            CA не проверяется. В следующей версии добавим bundle Russian Trusted CA.
+            нет в стандартном trust store. По умолчанию соединение зашифровано TLS, но
+            CA не проверяется (защита от MITM выключена). Если ты установил Russian
+            Trusted Root CA в системное хранилище — включи галку выше для полной проверки.
           </div>
         </>
       )}
