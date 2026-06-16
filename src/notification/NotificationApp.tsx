@@ -94,6 +94,9 @@ export function NotificationApp() {
               ×
             </button>
           </div>
+          {toast.projectName ? (
+            <div className="gg-app-toast-project">{toast.projectName}</div>
+          ) : null}
           <div className="gg-app-toast-body">{toast.body}</div>
         </article>
       ))}

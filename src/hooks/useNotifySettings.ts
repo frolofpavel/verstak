@@ -65,7 +65,6 @@ export function useNotifySettings(): {
     await notifyResponseReady({
       title: 'Verstak',
       projectName: 'Демо-проект',
-      body: 'Работа завершена',
       force: true
     })
   }, [])

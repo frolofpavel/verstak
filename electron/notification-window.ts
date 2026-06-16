@@ -4,8 +4,8 @@ import { fileURLToPath } from 'url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-const TOAST_W = 392
-const TOAST_H = 240
+const TOAST_W = 440
+const TOAST_H = 320
 const MARGIN = 16
 const BOTTOM = 24
 
