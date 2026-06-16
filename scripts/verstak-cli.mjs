@@ -60,6 +60,11 @@ Verstak CLI — AI-агент в терминале без GUI
   verstak --json "найди все TODO-комментарии"
   node scripts/verstak-cli.mjs "ваш промпт"
 
+Команды (не запускают провайдера):
+  verstak doctor          Проверить настроенные провайдеры (--json для machine-readable)
+  verstak status          То же, что doctor
+  verstak models          Список провайдеров и env-переменных
+
 Опции:
   -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
                    openrouter, deepseek, mistral, groq, ollama, yandexgpt, gigachat
@@ -121,6 +126,20 @@ const ENV_KEYS = {
   'gigachat':      'GIGACHAT_CLIENT_ID',
 }
 
+/** Ключи в .verstak/settings.json для каждого провайдера. */
+const SETTINGS_KEY_MAP = {
+  'gemini-api': 'gemini_api_key',
+  'claude': 'anthropic_api_key',
+  'grok': 'xai_api_key',
+  'openai': 'openai_api_key',
+  'openrouter': 'openrouter_api_key',
+  'deepseek': 'deepseek_api_key',
+  'mistral': 'mistral_api_key',
+  'groq': 'groq_api_key',
+  'yandexgpt': 'yandexgpt_api_key',
+  'gigachat': 'gigachat_client_id',
+}
+
 function resolveApiKey(provider, explicit) {
   if (explicit) return explicit
   const envVar = ENV_KEYS[provider]
@@ -131,19 +150,7 @@ function resolveApiKey(provider, explicit) {
   if (existsSync(settingsPath)) {
     try {
       const s = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const keyMap = {
-        'gemini-api': 'gemini_api_key',
-        'claude': 'anthropic_api_key',
-        'grok': 'xai_api_key',
-        'openai': 'openai_api_key',
-        'openrouter': 'openrouter_api_key',
-        'deepseek': 'deepseek_api_key',
-        'mistral': 'mistral_api_key',
-        'groq': 'groq_api_key',
-        'yandexgpt': 'yandexgpt_api_key',
-        'gigachat': 'gigachat_client_id',
-      }
-      const settingsKey = keyMap[provider]
+      const settingsKey = SETTINGS_KEY_MAP[provider]
       if (settingsKey && s[settingsKey]) return s[settingsKey]
     } catch { /* ignore */ }
   }
@@ -156,6 +163,66 @@ function resolveApiKey(provider, explicit) {
 // ---------------------------------------------------------------------------
 
 const projectPath = resolve(process.cwd(), values.project ?? '.')
+
+// ---------------------------------------------------------------------------
+// Bounded local commands (F14, claw-code parity): doctor / status / models —
+// проверяют конфигурацию ЛОКАЛЬНО, НЕ запускают провайдера и не зависают.
+// Должны идти ДО резолва промпта (иначе "verstak doctor" уйдёт как промпт в API).
+// ---------------------------------------------------------------------------
+
+/** Настроен ли провайдер (ключ в env или .verstak/settings.json) — без throw. */
+function isConfigured(provider) {
+  const envVar = ENV_KEYS[provider]
+  if (envVar === null) return true // ollama — локальный, ключ не нужен
+  if (envVar && process.env[envVar]) return true
+  const settingsPath = resolve(projectPath, '.verstak', 'settings.json')
+  if (existsSync(settingsPath)) {
+    try {
+      const s = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      const k = SETTINGS_KEY_MAP[provider]
+      if (k && s[k]) return true
+    } catch { /* ignore */ }
+  }
+  return false
+}
+
+function providerSource(provider) {
+  const envVar = ENV_KEYS[provider]
+  if (envVar === null) return 'local'
+  if (envVar && process.env[envVar]) return 'env'
+  if (isConfigured(provider)) return 'settings'
+  return 'none'
+}
+
+const COMMAND = positionals[0]
+if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
+  const pkgVersion = (() => {
+    try { return JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8')).version }
+    catch { return 'unknown' }
+  })()
+  const providers = Object.keys(ENV_KEYS).map(p => ({
+    provider: p,
+    envVar: ENV_KEYS[p],
+    configured: isConfigured(p),
+    source: providerSource(p),
+  }))
+  const configuredCount = providers.filter(p => p.configured).length
+  if (values.json) {
+    console.log(JSON.stringify({ ok: true, command: COMMAND, version: pkgVersion, project: projectPath, providersConfigured: configuredCount, providersTotal: providers.length, providers }, null, 2))
+  } else if (COMMAND === 'models') {
+    console.log(`Verstak CLI v${pkgVersion} — провайдеры (флаг -p):`)
+    for (const p of providers) {
+      console.log(`  ${p.configured ? '✓' : '·'} ${p.provider.padEnd(12)} ${p.envVar ? `env: ${p.envVar}` : 'локальный (ollama)'}`)
+    }
+  } else {
+    console.log(`Verstak CLI v${pkgVersion} doctor — проект: ${projectPath}`)
+    console.log(`Настроено провайдеров: ${configuredCount}/${providers.length}`)
+    for (const p of providers) {
+      console.log(`  ${p.configured ? '✓' : '·'} ${p.provider.padEnd(12)} ${p.configured ? `(${p.source})` : (p.envVar ? `задай ${p.envVar} или --key` : '')}`)
+    }
+  }
+  process.exit(0)
+}
 
 // ---------------------------------------------------------------------------
 // Чтение промпта
@@ -1049,6 +1116,14 @@ try {
   })
   process.exit(0)
 } catch (err) {
-  console.error(`\nОшибка: ${err.message}`)
+  // F14 (claw-code parity): при --json отдаём typed error envelope, иначе текст.
+  const code = /API-ключ.*не найден/.test(err.message) ? 'api_key_not_found'
+    : /вне.*проект|outside/i.test(err.message) ? 'path_denied'
+    : 'agent_error'
+  if (values.json) {
+    console.error(JSON.stringify({ ok: false, error_code: code, message: err.message }))
+  } else {
+    console.error(`\nОшибка: ${err.message}`)
+  }
   process.exit(1)
 }
