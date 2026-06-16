@@ -27,4 +27,5 @@ describe('rayner-changelog', () => {
     const merged = mergeReleaseNotes(github, bundled)
     expect(merged.map(n => n.version)).toEqual(['1.5.0', '1.5.1'])
   })
+
 })

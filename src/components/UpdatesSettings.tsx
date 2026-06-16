@@ -219,6 +219,7 @@ export function UpdatesSettings() {
 
       <ReleaseNotesModal
         open={notesOpen}
+        elevated
         onClose={() => setNotesOpen(false)}
         notes={releaseNotes}
         title={notesTitle}

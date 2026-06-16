@@ -173,6 +173,7 @@ export const ru: Translations = {
     pastUpdatesHint: 'Выберите версию, чтобы открыть описание изменений',
     pastUpdatesLoading: 'Загружаю список релизов…',
     pastUpdatesEmpty: 'Список релизов пока недоступен',
+    pastUpdatesBack: 'К списку версий',
     releaseNotesEmpty: 'Описание обновления пока недоступно на GitHub Releases',
   },
 
@@ -226,6 +227,14 @@ export const ru: Translations = {
     autoScrollLabelOff: 'Автопрокрутка: выкл',
     autoScrollOn: 'Автопрокрутка включена — нажми, чтобы чат не прыгал к новым сообщениям',
     autoScrollOff: 'Автопрокрутка выключена — чат остаётся на месте при ответе агента',
+    visionBannerTitle: 'Эта модель не видит изображения',
+    visionBannerBody: '{current} принимает только текст — прикреплённые скриншоты не попадут в запрос. Переключитесь на модель {family} с распознаванием картинок:',
+    visionBannerSwitchTo: 'Модели с vision:',
+    visionBannerSwitchHint: 'Переключить модель и оставить вложения',
+    visionBannerNeedKey: 'Подключите API {family} в Настройки → Модели, чтобы анализировать изображения.',
+    visionBannerNoFamily: 'У этого провайдера нет моделей с vision. Подключите другой API в Настройки → Модели.',
+    visionBannerOpenSettings: 'Открыть настройки моделей',
+    visionBannerDismiss: 'Оставить как есть',
   },
   effort: {
     quick: 'Быстро — короткие ответы',

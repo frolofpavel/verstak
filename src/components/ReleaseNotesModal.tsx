@@ -1,4 +1,5 @@
 import { Markdown } from './Markdown'
+import { ModalPortal } from './ModalPortal'
 import { useT } from '../i18n'
 
 export type ReleaseNote = {
@@ -18,6 +19,10 @@ interface Props {
   emptyText: string
   /** Показывать заголовок vX.Y.Z + дату у каждого блока (пропущенные обновления). */
   showAllVersionHeaders?: boolean
+  /** Поверх Settings и других модалок (portal + z-index). */
+  elevated?: boolean
+  /** Кнопка «назад» вместо только закрытия (история версий). */
+  onBack?: () => void
 }
 
 function formatReleaseDate(iso: string | undefined): string {
@@ -37,6 +42,8 @@ export function ReleaseNotesModal({
   subtitle,
   emptyText,
   showAllVersionHeaders = false,
+  elevated = false,
+  onBack,
 }: Props) {
   const t = useT()
 
@@ -45,8 +52,13 @@ export function ReleaseNotesModal({
   const multi = notes.length > 1 || showAllVersionHeaders
   const primaryUrl = notes.length === 1 ? notes[0].htmlUrl : 'https://github.com/frolofpavel/verstak/releases'
 
-  return (
-    <div className="gg-modal-backdrop" role="dialog" aria-modal="true">
+  const modal = (
+    <div
+      className={`gg-modal-backdrop${elevated ? ' is-elevated' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
       <div className="gg-modal gg-modal-large gg-release-notes-modal" onClick={e => e.stopPropagation()}>
         <div className="gg-modal-header">
           <div>
@@ -89,6 +101,11 @@ export function ReleaseNotesModal({
           )}
         </div>
         <div className="gg-modal-footer">
+          {onBack && (
+            <button type="button" className="gg-btn gg-btn-ghost" onClick={onBack}>
+              {t.settings.pastUpdatesBack}
+            </button>
+          )}
           <button
             type="button"
             className="gg-btn gg-btn-ghost"
@@ -103,4 +120,6 @@ export function ReleaseNotesModal({
       </div>
     </div>
   )
+
+  return elevated ? <ModalPortal>{modal}</ModalPortal> : modal
 }

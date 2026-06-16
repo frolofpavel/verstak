@@ -14,7 +14,7 @@ export interface DependencyMapDTO {
   files: Record<string, { imports: string[]; importedBy: string[]; exports: string[] }>
 }
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
-export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string }
+export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; createdAt: number }
 export type ChatKind = 'main' | 'review'
 export interface ChatSession {

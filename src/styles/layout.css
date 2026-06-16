@@ -572,6 +572,8 @@ html {
   padding: 4px 2px 6px 0;
   gap: 5px;
   scrollbar-gutter: auto;
+  flex: 0 1 auto;
+  overflow-y: visible;
 }
 .gg-rail.is-shell-expanded .gg-rail-list {
   align-items: stretch;
@@ -1482,7 +1484,9 @@ html {
   align-items: center;
   border-top: none;
   padding-top: 0;
+  margin-top: 0;
   gap: 6px;
+  background: transparent;
 }
 .gg-rail:not(.is-expanded) .gg-rail-add {
   width: 36px;
@@ -2373,6 +2377,41 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   color: var(--text-tertiary);
   padding: 0 2px;
 }
+.gg-msg-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-disabled);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  flex-shrink: 0;
+}
+.gg-msg-user .gg-msg-meta {
+  justify-content: flex-end;
+}
+.gg-chat-date-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  user-select: none;
+}
+.gg-chat-date-divider::before,
+.gg-chat-date-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.gg-chat-date-divider-label {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  white-space: nowrap;
+}
 .gg-msg-author {
   display: inline-flex; align-items: center; gap: 6px;
   font-weight: 500;
@@ -2897,18 +2936,32 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-prov-badge.is-missing{ color: var(--warning, #facc15); border-color: var(--warning, #facc15); }
 .gg-prov-badge.is-recommended { color: var(--text-secondary); background: var(--bg-input); }
 
-/* Бейдж возможностей CLI-провайдера в композере (аудит P1 #12). */
+/* Бейдж CLI в композере — в стиле чипов model/mode (аудит P1 #12). */
 .gg-provider-caps-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 6px;
-  border: 1px solid var(--warning, #facc15);
-  color: var(--warning, #facc15);
-  background: transparent;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+  color: var(--text-tertiary);
   cursor: help;
   white-space: nowrap;
-  opacity: 0.85;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.gg-composer-meta .gg-provider-caps-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
 }
 /* Живой инструмент running-прогона в карточке «Задачи» (аудит P0 #3). */
 .gg-run-stat-livetool {
@@ -3395,8 +3448,16 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   color: var(--text-tertiary);
 }
 .gg-composer-meta .gg-provider-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+.gg-composer-meta .gg-provider-dot.cli {
+  background: var(--text-disabled);
+}
+.gg-composer-meta .gg-provider-dot.is-offline {
+  background: var(--warning, #facc15);
+  box-shadow: none;
 }
 /* Тонкий разделитель между группами чипов (status | actions | model).
  * Добавляется через JSX'ом span.gg-composer-sep если нужно. */
@@ -3931,6 +3992,66 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   color: var(--error);
+}
+
+.gg-vision-banner {
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  background: rgba(235, 203, 139, 0.08);
+  border: 1px solid rgba(235, 203, 139, 0.35);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  width: 100%;
+  max-width: 920px;
+}
+.gg-vision-banner-text p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.gg-vision-banner-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-right: 4px;
+}
+.gg-vision-banner-models {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.gg-vision-model-btn {
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.gg-vision-model-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.gg-vision-banner-hint {
+  margin: 8px 0 0;
+  font-size: var(--text-xs);
+  color: var(--warning);
+}
+.gg-vision-banner-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.gg-vision-banner-actions .gg-btn {
+  padding: 4px 12px;
+  font-size: var(--text-xs);
 }
 
 /* Override send button position now that we have actions wrapper */
@@ -5032,6 +5153,9 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   display: flex; align-items: center; justify-content: center;
   z-index: 50;
   animation: gg-fade-in 160ms ease-out;
+}
+.gg-modal-backdrop.is-elevated {
+  z-index: 1200;
 }
 .gg-modal {
   background: var(--bg-elevated);

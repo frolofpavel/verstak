@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useT } from '../i18n'
+import { ModalPortal } from './ModalPortal'
 import { ReleaseNotesModal, type ReleaseNote } from './ReleaseNotesModal'
 
 function formatReleaseDate(iso: string | undefined): string {
@@ -70,9 +71,9 @@ export function PastReleasesModal({ open, onClose }: Props) {
   if (!open) return null
 
   return (
-    <>
+    <ModalPortal>
       {!detailOpen && (
-      <div className="gg-modal-backdrop" role="dialog" aria-modal="true">
+      <div className="gg-modal-backdrop is-elevated" role="dialog" aria-modal="true" onClick={handleClose}>
         <div className="gg-modal gg-modal-large gg-past-releases-modal" onClick={e => e.stopPropagation()}>
           <div className="gg-modal-header">
             <div>
@@ -129,7 +130,9 @@ export function PastReleasesModal({ open, onClose }: Props) {
 
       <ReleaseNotesModal
         open={detailOpen}
+        elevated
         onClose={() => { setDetailOpen(false); setDetailNote(null) }}
+        onBack={() => { setDetailOpen(false); setDetailNote(null) }}
         notes={detailNote ? [detailNote] : []}
         title={detailNote
           ? t.updates.releaseNotesTitleCurrent.replace('{version}', detailNote.version)
@@ -137,6 +140,6 @@ export function PastReleasesModal({ open, onClose }: Props) {
         emptyText={t.settings.releaseNotesEmpty}
         showAllVersionHeaders
       />
-    </>
+    </ModalPortal>
   )
 }

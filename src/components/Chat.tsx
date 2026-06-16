@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { useProject, type PreflightCard } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
@@ -21,6 +21,15 @@ import type { Attachment, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
+import { VisionAttachmentBanner } from './VisionAttachmentBanner'
+import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
+import type { ProviderId } from '../hooks/useProvider'
+import {
+  formatChatDateDivider,
+  formatMessageClock,
+  formatMessageDateTitle,
+  isSameLocalDay,
+} from '../lib/chat-timestamps'
 
 function normalizeProjectPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -129,6 +138,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
+  const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
   const autoScrollEnabledRef = useRef(autoScrollEnabled)
@@ -155,6 +165,31 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setWarning(msg)
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
     warningTimer.current = window.setTimeout(() => setWarning(null), 2500)
+  }
+
+  const hasImageAttachments = attachments.some(a => isImageAttachment(a.mimeType))
+  const showVisionBanner = hasImageAttachments
+    && !providerSupportsVision(provider.id)
+    && !visionBannerDismissed
+
+  useEffect(() => {
+    if (!hasImageAttachments) setVisionBannerDismissed(false)
+  }, [hasImageAttachments])
+
+  useEffect(() => {
+    if (providerSupportsVision(provider.id)) setVisionBannerDismissed(true)
+  }, [provider.id])
+
+  async function switchVisionModel(nextProviderId: ProviderId, model: string) {
+    await provider.setProviderId(nextProviderId)
+    await provider.setModel(model)
+    if (activeChatId != null) {
+      try {
+        await window.api.chatSessions.setModel(activeChatId, nextProviderId, model)
+        await useProject.getState().refreshChatSessions()
+      } catch { /* don't block UX */ }
+    }
+    setVisionBannerDismissed(true)
   }
 
   async function addBlobs(blobs: Array<{ blob: Blob; nameHint: string }>) {
@@ -1152,8 +1187,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
             ? activity.filter(a => a.kind === 'write' && a.status === 'ok').map(a => a.detail ?? '')
             : []
+          const prevMsg = i > 0 ? messages[i - 1] : null
+          const showDateDivider = m.createdAt != null
+            && (prevMsg?.createdAt == null || !isSameLocalDay(prevMsg.createdAt, m.createdAt))
           return (
-            <div key={i} className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}`}>
+            <Fragment key={i}>
+            {showDateDivider && (
+              <div className="gg-chat-date-divider" role="separator" aria-label={formatChatDateDivider(m.createdAt!)}>
+                <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
+              </div>
+            )}
+            <div className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}`}>
               {showActivity && (
                 <div className="gg-activity-list">
                   {activity.map(a => (
@@ -1241,9 +1285,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   </div>
                 )
               })}
-              {m.role === 'assistant' && (
+              {(m.role === 'assistant' || m.role === 'user') && (
                 <div className="gg-msg-meta">
-                  <span className="gg-msg-author">{provider.label}</span>
+                  {m.role === 'assistant' && (
+                    <span className="gg-msg-author">{provider.label}</span>
+                  )}
+                  {m.createdAt != null && (
+                    <time
+                      className="gg-msg-time"
+                      dateTime={new Date(m.createdAt).toISOString()}
+                      title={formatMessageDateTitle(m.createdAt)}
+                    >
+                      {formatMessageClock(m.createdAt)}
+                    </time>
+                  )}
                 </div>
               )}
               <div className="gg-msg-bubble">
@@ -1312,6 +1367,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 </div>
               )}
             </div>
+            </Fragment>
           )
         })}
         </div>
@@ -1341,6 +1397,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               <AttachmentChip key={i} attachment={a} onRemove={() => removeAttachment(i)} />
             ))}
           </div>
+        )}
+        {showVisionBanner && (
+          <VisionAttachmentBanner
+            currentProviderId={provider.id}
+            currentProviderLabel={provider.label}
+            onSwitch={switchVisionModel}
+            onOpenSettings={onOpenSettings}
+            onDismiss={() => setVisionBannerDismissed(true)}
+          />
         )}
         {warning && <div className="gg-composer-warning">{warning}</div>}
         {exhausted && !isStreaming && (
@@ -1567,7 +1632,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 className="gg-provider-caps-badge"
                 title="CLI-провайдер: правки выполняет внешний агент. Контроль Verstak (per-file undo, checkpoint, подтверждение write, mode-policy) не действует. Вложения уходят текстовым хинтом, не картинкой."
               >
-                CLI ⚠
+                CLI
               </span>
             )}
             <TierRecommendation input={input} />
