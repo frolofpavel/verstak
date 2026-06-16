@@ -13,6 +13,17 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: '9d6e2e9',
+    deployed: '17.06.2026 02:40',
+    treeVersion: '1.5.5',
+    title: 'Кнопка «применить» в рекомендации модели',
+    changes: [
+      '«Применить» вписана в pill 28px (18px высота), не вылезает за края.',
+      'Убран голубой accent — нейтральный фон на 1–2 тона светлее плашки, чуть контрастнее текст.',
+      'Контракт анимации rail зафиксирован в коде и skill (84d2ac2).',
+    ],
+  },
+  {
     commit: '7c0b23f',
     deployed: '17.06.2026 02:35',
     treeVersion: '1.5.5',
