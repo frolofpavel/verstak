@@ -187,19 +187,30 @@ function checkWhitelist(chatId: string, ctx: ConnectorContext): { error: string;
     // разрешаем — иначе ни одна операция не получится без manual config.
     return null
   }
+  // Аудит M5: whitelist ЗАДАН — значит пользователь выразил намерение ограничить.
+  // Если он битый/не-массив, fail-OPEN (слать в любой chat_id) противоречит этому
+  // намерению. Fail-CLOSED: пока конфиг не починят, ничего не уходит.
+  let list: unknown
   try {
-    const list = JSON.parse(raw) as Array<string | number>
-    if (!Array.isArray(list)) return null
-    const normalized = list.map(String)
-    if (!normalized.includes(chatId)) {
-      return {
-        error: 'not-whitelisted',
-        message: `chat_id «${chatId}» не в whitelist. Добавь в settings → telegram_chat_whitelist.`
-      }
-    }
+    list = JSON.parse(raw)
   } catch {
-    // Битый whitelist — fail-open, чтобы не блокировать всё из-за typo.
-    console.warn('[telegram] telegram_chat_whitelist JSON parse failed, allowing all')
+    return {
+      error: 'whitelist-invalid',
+      message: 'telegram_chat_whitelist задан, но это невалидный JSON. Отправка заблокирована — почини settings → telegram_chat_whitelist (массив chat_id).'
+    }
+  }
+  if (!Array.isArray(list)) {
+    return {
+      error: 'whitelist-invalid',
+      message: 'telegram_chat_whitelist должен быть JSON-массивом chat_id. Отправка заблокирована.'
+    }
+  }
+  const normalized = list.map(String)
+  if (!normalized.includes(chatId)) {
+    return {
+      error: 'not-whitelisted',
+      message: `chat_id «${chatId}» не в whitelist. Добавь в settings → telegram_chat_whitelist.`
+    }
   }
   return null
 }

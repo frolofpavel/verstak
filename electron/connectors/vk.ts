@@ -80,7 +80,12 @@ async function groupInfo(token: string, args: Record<string, unknown>, ctx: Conn
     group_id: groupId,
     fields: 'members_count,description,activity'
   }, ctx)
-  const group = (Array.isArray(json) ? json[0] : null) as Record<string, any> | null
+  // Аудит M17: с VK API v5.199 groups.getById отдаёт { groups: [...] }, а не
+  // голый массив. Поддерживаем оба формата, иначе любой валидный id → «не найдено».
+  const arr = Array.isArray(json)
+    ? json
+    : (json && Array.isArray((json as { groups?: unknown[] }).groups) ? (json as { groups: unknown[] }).groups : [])
+  const group = (arr[0] ?? null) as Record<string, any> | null
   if (!group) return { found: false, message: `Сообщество «${groupId}» не найдено.` }
   return formatGroup(group)
 }

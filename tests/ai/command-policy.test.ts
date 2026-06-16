@@ -84,7 +84,9 @@ describe('classifyCommand', () => {
     expect(classifyCommand('powershell -EncodedCommand UABzAA==').allowed).toBe(false)
     expect(classifyCommand('powershell -enc abc==').allowed).toBe(false)
     expect(classifyCommand('powershell.exe -e abc').allowed).toBe(false)
-    expect(classifyCommand('pwsh -EncodedCommand x').allowed).toBe(true) // pwsh not in rule — acceptable, user confirms
+    // Аудит M13: pwsh — штатный бинарь PowerShell 7 на Win11, теперь тоже блокируется.
+    expect(classifyCommand('pwsh -EncodedCommand x').allowed).toBe(false)
+    expect(classifyCommand('pwsh -e abc==').allowed).toBe(false)
   })
 
   it('blocks cmd /c with variable expansion (obfuscation)', () => {

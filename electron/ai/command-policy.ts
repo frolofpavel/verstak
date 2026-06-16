@@ -38,14 +38,15 @@ const DENY_RULES: DenyRule[] = [
   { pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,           reason: 'Запрещено: fork-bomb' },
   { pattern: /\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b/i,           reason: 'Запрещено: выключение / перезагрузка системы' },
   { pattern: /\bcurl\b[^|]*\|\s*(sh|bash|zsh|powershell|pwsh|cmd)\b/i,   reason: 'Запрещено: pipe curl-вывода в shell (классический RCE-вектор)' },
-  { pattern: /\b(wget|iwr|invoke-webrequest)\b[^|]*\|\s*(sh|bash|iex|powershell|cmd)\b/i, reason: 'Запрещено: pipe сетевого ответа в shell' },
+  { pattern: /\b(wget|iwr|invoke-webrequest)\b[^|]*\|\s*(sh|bash|iex|powershell|pwsh|cmd)\b/i, reason: 'Запрещено: pipe сетевого ответа в shell' },
   { pattern: /\bbase64\b[\s\S]*?(?:-d|--decode)[\s\S]*?\|\s*(?:sh|bash|zsh|powershell|pwsh|cmd|iex)\b/i, reason: 'Запрещено: декодирование base64 в shell (обфускация RCE)' },
   { pattern: /\bsudo\s+rm\b/i,                                           reason: 'Запрещено: sudo rm' },
   { pattern: /\bgit\s+push\s+.*--force\b/i,                              reason: 'Запрещено: git push --force (фиксить вручную при необходимости)' },
   { pattern: /\bgit\s+(reset\s+--hard\s+HEAD~|clean\s+-fdx|filter-(repo|branch))/i, reason: 'Запрещено: разрушающие git операции' },
   { pattern: /\.ssh|\.ss\*|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\bid_[a-z0-9]*\*|\.aws[\/\\]|\.npmrc|\.netrc|\.gnupg|authorized_keys|known_hosts/i, reason: 'Запрещено: чтение/копирование ключей и токенов' },
-  // PowerShell EncodedCommand bypass: payload is base64, denylist can't inspect contents
-  { pattern: /\bpowershell(\.exe)?\b[^\n]*\s-[eE](?:nc(?:oded(?:command)?)?)?\b/i, reason: 'Запрещено: powershell -EncodedCommand (запутанная команда)' },
+  // PowerShell EncodedCommand bypass: payload is base64, denylist can't inspect contents.
+  // Аудит M13: штатный бинарь PowerShell 7 на Win11 называется pwsh — без него обход.
+  { pattern: /\b(?:powershell|pwsh)(\.exe)?\b[^\n]*\s-[eE](?:nc(?:oded(?:command)?)?)?\b/i, reason: 'Запрещено: powershell/pwsh -EncodedCommand (запутанная команда)' },
   // cmd /c with variable expansion is a common obfuscation pattern
   { pattern: /\bcmd(\.exe)?\s+\/[cC]\b[^\n]*(%[^%\s]+%|![\w]+!)/i,        reason: 'Запрещено: cmd /c с переменными расширения — попытка обфускации' },
   // Invoke-Expression (PowerShell eval) is RCE-by-design
