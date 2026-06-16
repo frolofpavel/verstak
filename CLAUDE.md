@@ -11,7 +11,7 @@
 **Ключевая ценность:** контроль, прозрачность, мульти-провайдерность.
 
 **Базовые фичи:**
-- **8 провайдеров одновременно:** Gemini API / Gemini CLI / Claude API / Claude Code / Grok API / Grok Build / OpenAI API / Codex CLI. Аккаунт упал — переключился, не теряя работу.
+- **18 провайдеров:** база (10) — Gemini API/CLI, Claude API/Code, Grok API/CLI, OpenAI API, Codex CLI, GigaChat, YandexGPT; плюс 8 OpenAI-совместимых (DeepSeek, Qwen, Mistral, Moonshot, Groq, OpenRouter, Ollama, custom endpoint). Аккаунт упал — переключился, не теряя работу.
 - **5 режимов агента** (`ask` / `accept-edits` / `plan` / `auto` / `bypass`) — переключаются 1-5.
 - **Per-chat провайдер + модель.** Multi-chat со снапшотами фоновых стримов.
 - **Explicit Review V1.** Кнопка 🔍 запускает ревью текущего ответа другим провайдером, результат — pill в Timeline, кнопка «↪ Учесть» переписывает в основной чат.
@@ -42,7 +42,7 @@ electron/                  ← main process (Node.js)
 │   ├── skills/              ← V3: skill loader + frontmatter + 3 built-in + loaders registry
 │   ├── artifacts.ts         ← generate_html / generate_docx (docx npm)
 │   ├── charts.ts            ← render_chart — SVG bar/line/pie без зависимостей
-│   ├── registry.ts          сводный список 8 провайдеров
+│   ├── registry.ts          сводный список провайдеров (10 база + 8 OpenAI-совм.)
 │   ├── types.ts             ChatMessage / ChatEvent / ChatProvider
 │   ├── gemini.ts, claude.ts, grok.ts, openai.ts  ← API-провайдеры
 │   ├── *-cli.ts             ← CLI-провайдеры (Claude Code и т.п.)
@@ -224,4 +224,4 @@ npm run dist:win     # NSIS + portable .exe
 
 ---
 
-Последнее обновление: 2026-05-22. Если архитектура изменилась — обнови этот файл.
+Последнее обновление: 2026-06-16. Если архитектура изменилась — обнови этот файл.
