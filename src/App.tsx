@@ -35,6 +35,7 @@ import { FilesPanel } from './components/FilesPanel'
 import { SideChat } from './components/SideChat'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
+import { WindowShell } from './components/TitleBar'
 import { ArtifactPreviewContainer } from './components/ArtifactPreview'
 import { TerminalErrorToast } from './components/TerminalErrorToast'
 import { useProject } from './store/projectStore'
@@ -219,19 +220,24 @@ export function App() {
   if (authDone === null) {
     return (
       <I18nContext.Provider value={getTranslations(lang)}>
-        <div className="gg-app gg-app-booting" aria-busy="true" />
+        <WindowShell>
+          <div className="gg-app gg-app-booting" aria-busy="true" />
+        </WindowShell>
       </I18nContext.Provider>
     )
   }
   // Нужна авторизация — показываем AuthScreen поверх всего
   if (!authDone) return (
     <I18nContext.Provider value={getTranslations(lang)}>
-      <AuthScreen onComplete={() => setAuthDone(true)} onLangChange={setLang} />
+      <WindowShell>
+        <AuthScreen onComplete={() => setAuthDone(true)} onLangChange={setLang} />
+      </WindowShell>
     </I18nContext.Provider>
   )
 
   return (
     <I18nContext.Provider value={getTranslations(lang)}>
+    <WindowShell>
     <div className={`gg-app gg-app-atelier ${!sidebarOpen ? 'is-sidebar-collapsed' : ''}`}>
       <ProjectRail
         onOpenProjectSettings={setProjectSettingsTarget}
@@ -359,6 +365,7 @@ export function App() {
       <WhatsNewModal />
 
     </div>
+    </WindowShell>
     </I18nContext.Provider>
   )
 }

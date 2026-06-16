@@ -1,6 +1,7 @@
 /**
- * Генерирует icon.png + icon.ico из дизайна gg-auth-logo-icon (стартовый экран).
- * Запуск: node scripts/generate-app-icon.mjs
+ * Генерирует icon.png, icon.ico из resources/icon-source.png.
+ * Исходник: мастер 1024×1024 в resources/icon-source.png
+ * Запуск: node scripts/generate-app-icon.mjs  (npm run generate:icon)
  */
 import fs from 'fs'
 import path from 'path'
@@ -10,36 +11,27 @@ import pngToIco from 'png-to-ico'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
+const SOURCE = path.join(ROOT, 'resources', 'icon-source.png')
 
-// Дизайн gg-auth-logo-icon: radius 14/48, gradient 135deg #5865f2 → #9b59ff
-function iconSvg(size) {
-  const r = Math.round((14 / 48) * size)
-  const fontSize = Math.round(size * 0.58)
-  const ls = Math.max(1, Math.round(fontSize * 0.03))
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-  <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#5865f2"/>
-      <stop offset="100%" stop-color="#9b59ff"/>
-    </linearGradient>
-  </defs>
-  <rect width="${size}" height="${size}" rx="${r}" fill="url(#g)"/>
-  <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-    font-family="Segoe UI, system-ui, -apple-system, sans-serif"
-    font-size="${fontSize}" font-weight="800" fill="#ffffff" letter-spacing="-${ls}">V</text>
-</svg>`)
-}
-
-async function pngFromSvg(size) {
-  return sharp(iconSvg(size)).png().toBuffer()
+async function resizePng(size) {
+  return sharp(SOURCE)
+    .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer()
 }
 
 async function main() {
-  const sizes = [16, 32, 48, 64, 128, 256, 512]
-  const pngs = {}
-  for (const s of sizes) {
-    pngs[s] = await pngFromSvg(s)
+  if (!fs.existsSync(SOURCE)) {
+    console.error(`[generate-app-icon] Нет ${SOURCE}`)
+    process.exit(1)
   }
+
+  const meta = await sharp(SOURCE).metadata()
+  console.log(`[generate-app-icon] source ${meta.width}×${meta.height}`)
+
+  const appSizes = [16, 32, 48, 64, 128, 256, 512]
+  const pngs = {}
+  for (const s of appSizes) pngs[s] = await resizePng(s)
 
   const resourcesDir = path.join(ROOT, 'resources')
   const assetsDir = path.join(ROOT, 'src', 'assets')

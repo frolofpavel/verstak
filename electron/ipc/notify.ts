@@ -1,7 +1,9 @@
-import { ipcMain, Notification, BrowserWindow, nativeImage } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { showAppToast } from '../notification-window'
+import type { Settings } from '../storage/settings'
 
 function firstExisting(dir: string, names: string[]): string | null {
   for (const name of names) {
@@ -15,7 +17,7 @@ function windowsPowerShellPath(): string {
   return join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 }
 
-/** Standard Windows notification WAV from %WINDIR%\\Media (sound-only, without toast). */
+/** Standard Windows notification WAV from %WINDIR%\\Media (sound-only, no OS toast). */
 function playWindowsNotificationSound(isError = false): void {
   if (process.platform !== 'win32') return
   const media = join(process.env.WINDIR ?? 'C:\\Windows', 'Media')
@@ -41,7 +43,12 @@ function playWindowsNotificationSound(isError = false): void {
   )
 }
 
-export function registerNotifyIpc(getMainWindow: () => BrowserWindow | null, iconPath: string): void {
+function readTheme(settings: Settings): 'nord' | 'light' {
+  const raw = settings.getSecret('theme')
+  return raw === 'light' ? 'light' : 'nord'
+}
+
+export function registerNotifyIpc(getMainWindow: () => BrowserWindow | null, settings: Settings): void {
   ipcMain.handle('app:is-focused', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     return win?.isFocused() ?? false
@@ -52,29 +59,24 @@ export function registerNotifyIpc(getMainWindow: () => BrowserWindow | null, ico
     return true
   })
 
-  ipcMain.handle('notify:show', (_e, opts: { title: string; body: string }) => {
-    if (!Notification.isSupported()) return false
+  ipcMain.handle('notify:show', (_e, opts: {
+    title?: string
+    body: string
+    projectName?: string
+    isError?: boolean
+  }) => {
     const title = (opts.title ?? 'Verstak').slice(0, 120)
     const body = (opts.body ?? '').slice(0, 240)
-    let icon = nativeImage.createEmpty()
-    try {
-      icon = nativeImage.createFromPath(iconPath)
-    } catch { /* fallback without icon */ }
+    const projectName = opts.projectName?.slice(0, 80)
 
-    const n = new Notification({
+    showAppToast({
       title,
       body,
-      icon,
-      silent: true
+      projectName,
+      isError: !!opts.isError,
+      theme: readTheme(settings)
     })
-    n.on('click', () => {
-      const win = getMainWindow()
-      if (!win) return
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-    })
-    n.show()
+
     return true
   })
 }

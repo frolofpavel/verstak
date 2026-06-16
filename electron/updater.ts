@@ -1,7 +1,8 @@
 import { autoUpdater } from 'electron-updater'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import {
-  fetchReleaseNote,
+  fetchAllReleaseNotesMerged,
+  fetchReleaseNoteMerged,
   fetchReleaseNotesSince,
   fetchRemoteVersion,
   isBenignUpdaterError,
@@ -42,16 +43,20 @@ export function registerReleaseNotesIpc(): void {
     sinceVersion?: string
     upToVersion?: string
     version?: string
+    all?: boolean
   }) => {
     try {
+      if (opts?.all) {
+        return fetchAllReleaseNotesMerged()
+      }
       if (opts?.version) {
-        const note = await fetchReleaseNote(opts.version)
+        const note = await fetchReleaseNoteMerged(opts.version)
         return note ? [note] : []
       }
       if (opts?.sinceVersion && opts?.upToVersion) {
         return fetchReleaseNotesSince(opts.sinceVersion, opts.upToVersion)
       }
-      const note = await fetchReleaseNote(app.getVersion())
+      const note = await fetchReleaseNoteMerged(app.getVersion())
       return note ? [note] : []
     } catch (err) {
       console.warn('[updater] get-release-notes failed:', err)

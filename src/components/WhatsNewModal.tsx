@@ -13,6 +13,8 @@ export function WhatsNewModal() {
   const [open, setOpen] = useState(false)
   const [notes, setNotes] = useState<ReleaseNote[]>([])
   const [version, setVersion] = useState('')
+  const [sinceVersion, setSinceVersion] = useState('')
+  const [skippedCount, setSkippedCount] = useState(0)
 
   useEffect(() => {
     void (async () => {
@@ -42,6 +44,8 @@ export function WhatsNewModal() {
         setNotes(fetched)
         setVersion(current)
         setOpen(true)
+        setSkippedCount(fetched.length)
+        setSinceVersion(last)
       } catch (err) {
         console.warn('[whats-new] skipped:', err)
       }
@@ -56,14 +60,24 @@ export function WhatsNewModal() {
     })()
   }
 
+  const multi = skippedCount > 1
+  const title = multi ? t.updates.whatsNewTitleMulti : t.updates.whatsNewTitle
+  const subtitle = multi
+    ? t.updates.whatsNewSubtitleMulti
+        .replace('{count}', String(skippedCount))
+        .replace('{from}', sinceVersion)
+        .replace('{to}', version)
+    : t.updates.whatsNewSubtitle.replace('{version}', version)
+
   return (
     <ReleaseNotesModal
       open={open}
       onClose={handleClose}
       notes={notes}
-      title={t.updates.whatsNewTitle}
-      subtitle={t.updates.whatsNewSubtitle.replace('{version}', version)}
+      title={title}
+      subtitle={subtitle}
       emptyText={t.settings.releaseNotesEmpty}
+      showAllVersionHeaders={multi}
     />
   )
 }

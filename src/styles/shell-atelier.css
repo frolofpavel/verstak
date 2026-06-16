@@ -40,7 +40,7 @@ html.gg-atelier body {
 
 /* ─── App grid: gaps reveal depth between layers ─── */
 .gg-app-atelier.gg-app {
-  height: 100vh;
+  height: 100%;
   padding: var(--shell-gap);
   column-gap: var(--shell-col-gap);
   row-gap: var(--shell-gap);

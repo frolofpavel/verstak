@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session, dialog, protocol, net } from 'electron'
+import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu } from 'electron'
 import { pathToFileURL } from 'url'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -77,6 +77,8 @@ import { trackToolForPatterns } from './ai/procedural-memory'
 import { registerSuggestionsIpc } from './ipc/suggestions'
 import { initAutoUpdater, registerReleaseNotesIpc } from './updater'
 import { registerNotifyIpc } from './ipc/notify'
+import { bindWindowChromeEvents, registerWindowIpc } from './ipc/window'
+import { initNotificationWindow, registerNotificationWindowIpc } from './notification-window'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
 import { bindUiScaleToWindow } from './ui-scale'
@@ -95,6 +97,7 @@ function createWindow(settings: Settings): BrowserWindow {
     ...mainWindowConstructorOptions(windowState),
     title: 'Verstak',
     icon: iconPath,
+    frame: false,
     webPreferences: {
       preload: join(HERE, '../preload/preload.mjs'),
       // sandbox: false is REQUIRED because our preload is an ESM (.mjs) file.
@@ -112,6 +115,7 @@ function createWindow(settings: Settings): BrowserWindow {
   })
 
   trackMainWindowState(win, settings, windowState)
+  bindWindowChromeEvents(win)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -185,6 +189,10 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+  registerWindowIpc()
+  registerNotificationWindowIpc()
+
   protocol.handle('gg-project-icon', (request) => {
     const prefix = 'gg-project-icon://local/'
     if (!request.url.startsWith(prefix)) return new Response(null, { status: 404 })
@@ -492,8 +500,8 @@ app.whenReady().then(() => {
   registerReleaseNotesIpc()
   registerVoiceIpc()
   const mainWindow = createWindow(settings)
-  const iconPath = join(HERE, '../../resources/icon.png')
-  registerNotifyIpc(() => mainWindow, iconPath)
+  initNotificationWindow(() => mainWindow)
+  registerNotifyIpc(() => mainWindow, settings)
   bindUiScaleToWindow(mainWindow, settings)
 
   if (!process.env.VITE_DEV_SERVER_URL) {

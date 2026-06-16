@@ -28,7 +28,7 @@ html {
   --gg-sidebar-resize-w: 4px;
   display: grid;
   grid-template-columns: var(--gg-rail-w) var(--gg-sidebar-panel-w) var(--gg-sidebar-resize-w) 1fr;
-  height: 100vh;
+  height: 100%;
   background: var(--bg-base);
   overflow: hidden;
   transition:
@@ -482,6 +482,13 @@ html {
 .gg-rail:not(.is-shell-expanded) .gg-rail-group-label,
 .gg-rail:not(.is-shell-expanded) .gg-rail-group-count {
   display: none;
+}
+/* Свёрнутая панель: только иконки папок, без вложенных проектов в группах */
+.gg-rail:not(.is-expanded) .gg-rail-group-body {
+  display: none !important;
+}
+.gg-rail:not(.is-expanded) .gg-rail-group {
+  pointer-events: auto;
 }
 .gg-rail-chip.is-nested .gg-rail-chip-btn {
   min-height: 32px;
@@ -3306,14 +3313,90 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
  * Раньше: gap:4px разнотипными bordered pills — визуальный шум. Теперь: gap:2px,
  * единая высота 22px, прозрачные borders по умолчанию, accent только на hover. */
 .gg-composer-meta {
-  display: inline-flex; align-items: center; gap: 2px;
+  display: inline-flex; align-items: center; gap: 6px;
   flex-wrap: wrap;
 }
 .gg-composer-meta > button,
 .gg-composer-meta > * > button {
-  /* Унифицируем высоту всех chip-кнопок внутри meta — иначе разные компоненты
-   * (SkillPicker / CheckpointButton / etc.) рендерятся с разной геометрией. */
-  min-height: 24px;
+  min-height: 28px;
+}
+
+/* Единый стиль чипов: Инструменты · Режим · Модель (автопрокрутка — отдельно). */
+.gg-composer-meta .gg-tools-pill,
+.gg-composer-meta .gg-mode-pill,
+.gg-composer-meta .gg-model-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 11px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  flex-shrink: 0;
+  margin: 0;
+}
+.gg-composer-meta .gg-tools-pill:hover,
+.gg-composer-meta .gg-mode-pill:hover,
+.gg-composer-meta .gg-model-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+.gg-composer-meta .gg-tools-pill.is-active {
+  background: var(--accent-muted);
+  border-color: var(--accent-border, var(--accent));
+  color: var(--text-primary);
+}
+.gg-composer-meta .gg-mode-pill.is-mode-ask          { border-color: color-mix(in srgb, #4ade80 45%, var(--border-subtle)); }
+.gg-composer-meta .gg-mode-pill.is-mode-accept-edits { border-color: color-mix(in srgb, #60a5fa 45%, var(--border-subtle)); }
+.gg-composer-meta .gg-mode-pill.is-mode-plan         { border-color: color-mix(in srgb, #a8a29e 50%, var(--border-subtle)); color: var(--text-tertiary); }
+.gg-composer-meta .gg-mode-pill.is-mode-auto         { border-color: color-mix(in srgb, #fb923c 50%, var(--border-subtle)); background: color-mix(in srgb, #fb923c 6%, var(--bg-base)); }
+.gg-composer-meta .gg-mode-pill.is-mode-bypass       { border-color: color-mix(in srgb, #f87171 55%, var(--border-subtle)); background: color-mix(in srgb, #f87171 8%, var(--bg-base)); color: color-mix(in srgb, #f87171 90%, var(--text-secondary)); }
+.gg-composer-meta .gg-tools-chevron,
+.gg-composer-meta .gg-mp-chevron {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  line-height: 1;
+  flex-shrink: 0;
+}
+.gg-composer-meta .gg-mp-chevron {
+  margin-left: 2px;
+}
+.gg-composer-meta .gg-mode-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+.gg-composer-meta .gg-mode-label,
+.gg-composer-meta .gg-model-pill-name {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.gg-composer-meta .gg-model-pill-sep {
+  color: var(--text-disabled);
+  opacity: 0.7;
+}
+.gg-composer-meta .gg-model-pill-transport {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.gg-composer-meta .gg-provider-dot {
+  width: 7px;
+  height: 7px;
 }
 /* Тонкий разделитель между группами чипов (status | actions | model).
  * Добавляется через JSX'ом span.gg-composer-sep если нужно. */
@@ -5006,12 +5089,104 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 .gg-release-notes-version {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin: 0 0 14px;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+.gg-release-notes-version-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gg-release-notes-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.gg-release-notes-date {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.gg-updates-notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+.gg-past-releases-modal {
+  max-height: min(88vh, 820px);
+}
+.gg-past-releases-body {
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  padding-top: 4px;
+}
+.gg-past-releases-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gg-past-releases-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.gg-past-releases-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+.gg-past-releases-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.gg-past-releases-version {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+.gg-past-releases-name {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gg-past-releases-date {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.gg-past-releases-chevron {
+  color: var(--text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .gg-release-notes-tag {
   font-family: var(--font-mono);
@@ -6945,10 +7120,10 @@ textarea.gg-input {
 
 /* Root: full-viewport split */
 .gg-auth-root {
-  position: fixed;
-  inset: 0;
+  position: relative;
+  height: 100%;
   display: flex;
-  z-index: 9999;
+  z-index: 1;
   opacity: 1;
   transition: opacity 0.4s ease;
 }
@@ -7041,16 +7216,11 @@ textarea.gg-input {
 .gg-auth-logo-icon {
   width: 48px;
   height: 48px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #5865f2, #9b59ff);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  font-weight: 800;
-  color: white;
-  box-shadow: 0 8px 32px rgba(88, 101, 242, 0.4);
-  letter-spacing: -1px;
+  border-radius: 50%;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 .gg-auth-logo-text {
   font-size: 28px;
@@ -7398,13 +7568,16 @@ textarea.gg-input {
 /* ── Language picker — first launch ── */
 .gg-lang-picker {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100vh; background: #0d1117; color: #c9d1d9;
+  height: 100%; background: #0d1117; color: #c9d1d9;
 }
 .gg-lang-picker-logo {
-  width: 60px; height: 60px; border-radius: 14px;
-  background: linear-gradient(135deg, #5865f2, #7c3aed);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px; font-weight: 700; color: white; margin-bottom: 16px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 .gg-lang-picker h1 { font-size: 28px; margin-bottom: 8px; }
 .gg-lang-picker p { color: #8b949e; margin-bottom: 32px; }

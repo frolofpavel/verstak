@@ -1,0 +1,99 @@
+/* Custom frameless title bar — Windows drag region + app-themed chrome */
+
+.gg-window-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.gg-window-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gg-titlebar {
+  --titlebar-h: 40px;
+  --titlebar-bg: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+
+  height: var(--titlebar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  background: var(--titlebar-bg);
+  backdrop-filter: var(--vol-blur, blur(20px) saturate(1.2));
+  -webkit-backdrop-filter: var(--vol-blur, blur(20px) saturate(1.2));
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent),
+    0 1px 0 color-mix(in srgb, var(--bg-base) 40%, transparent);
+  user-select: none;
+  z-index: 1200;
+}
+
+.gg-titlebar-drag {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 14px;
+  min-width: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.gg-titlebar-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.gg-titlebar-brand {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.gg-titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.gg-titlebar-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gg-titlebar-btn:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+.gg-titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+html[data-theme="light"] .gg-titlebar {
+  --titlebar-bg: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent),
+    0 1px 0 color-mix(in srgb, var(--border-default) 60%, transparent);
+}

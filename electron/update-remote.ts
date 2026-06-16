@@ -114,6 +114,7 @@ export type ReleaseNote = {
   name: string
   body: string
   htmlUrl: string
+  publishedAt?: string
 }
 
 type GithubRelease = {
@@ -121,6 +122,7 @@ type GithubRelease = {
   name?: string
   body?: string
   html_url?: string
+  published_at?: string
   draft?: boolean
   prerelease?: boolean
 }
@@ -138,6 +140,7 @@ function mapRelease(data: GithubRelease): ReleaseNote | null {
     name: data.name || `Verstak ${version}`,
     body: cleanReleaseBody(data.body),
     htmlUrl: data.html_url || `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/tag/v${version}`,
+    publishedAt: data.published_at,
   }
 }
 
@@ -171,8 +174,27 @@ export async function fetchAllReleaseNotes(): Promise<ReleaseNote[]> {
 
 /** Релизы строго после sinceVersion и не новее upToVersion (для whats-new после апдейта). */
 export async function fetchReleaseNotesSince(sinceVersion: string, upToVersion: string): Promise<ReleaseNote[]> {
+  const { getBundledReleaseNotesInRange, mergeReleaseNotes } = await import('./rayner-changelog')
   const all = await fetchAllReleaseNotes()
   const since = normalizeVersion(sinceVersion)
   const upTo = normalizeVersion(upToVersion)
-  return all.filter((note) => semverGt(note.version, since) && !semverGt(upTo, note.version))
+  const github = all.filter((note) => semverGt(note.version, since) && !semverGt(upTo, note.version))
+  const bundled = getBundledReleaseNotesInRange(since, upTo)
+  return mergeReleaseNotes(github, bundled)
+}
+
+/** Все релизы: GitHub + встроенные заметки сборки Rayner. */
+export async function fetchAllReleaseNotesMerged(): Promise<ReleaseNote[]> {
+  const { getAllBundledReleaseNotes, mergeReleaseNotes } = await import('./rayner-changelog')
+  const github = await fetchAllReleaseNotes()
+  return mergeReleaseNotes(github, getAllBundledReleaseNotes())
+}
+
+export async function fetchReleaseNoteMerged(version: string): Promise<ReleaseNote | null> {
+  const { getBundledReleaseNote, mergeReleaseNotes } = await import('./rayner-changelog')
+  const github = await fetchReleaseNote(version)
+  const bundled = getBundledReleaseNote(version)
+  if (!github && !bundled) return null
+  const merged = mergeReleaseNotes(github ? [github] : [], bundled ? [bundled] : [])
+  return merged[0] ?? null
 }

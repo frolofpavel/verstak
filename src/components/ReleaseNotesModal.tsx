@@ -6,6 +6,7 @@ export type ReleaseNote = {
   name: string
   body: string
   htmlUrl: string
+  publishedAt?: string
 }
 
 interface Props {
@@ -15,13 +16,33 @@ interface Props {
   title: string
   subtitle?: string
   emptyText: string
+  /** Показывать заголовок vX.Y.Z + дату у каждого блока (пропущенные обновления). */
+  showAllVersionHeaders?: boolean
 }
 
-export function ReleaseNotesModal({ open, onClose, notes, title, subtitle, emptyText }: Props) {
+function formatReleaseDate(iso: string | undefined): string {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
+export function ReleaseNotesModal({
+  open,
+  onClose,
+  notes,
+  title,
+  subtitle,
+  emptyText,
+  showAllVersionHeaders = false,
+}: Props) {
   const t = useT()
 
   if (!open) return null
 
+  const multi = notes.length > 1 || showAllVersionHeaders
   const primaryUrl = notes.length === 1 ? notes[0].htmlUrl : 'https://github.com/frolofpavel/verstak/releases'
 
   return (
@@ -46,11 +67,20 @@ export function ReleaseNotesModal({ open, onClose, notes, title, subtitle, empty
             <p className="gg-models-required-text">{emptyText}</p>
           ) : (
             notes.map(note => (
-              <section key={note.version} className="gg-release-notes-section">
-                {notes.length > 1 && (
+              <section key={`${note.version}-${note.publishedAt ?? note.name}`} className="gg-release-notes-section">
+                {multi && (
                   <h3 className="gg-release-notes-version">
-                    {note.name}
-                    <span className="gg-release-notes-tag">v{note.version}</span>
+                    <span className="gg-release-notes-version-main">
+                      <span className="gg-release-notes-tag">v{note.version}</span>
+                      {note.name && note.name !== `Verstak ${note.version}` && (
+                        <span className="gg-release-notes-name">{note.name}</span>
+                      )}
+                    </span>
+                    {note.publishedAt && (
+                      <time className="gg-release-notes-date" dateTime={note.publishedAt}>
+                        {formatReleaseDate(note.publishedAt)}
+                      </time>
+                    )}
                   </h3>
                 )}
                 <Markdown text={note.body} />

@@ -36,9 +36,18 @@ export function invalidateNotifyPrefsCache(): void {
   prefsCache = null
 }
 
+function buildBody(opts: {
+  body?: string
+  isError?: boolean
+}): string {
+  if (opts.body) return opts.body
+  return opts.isError ? 'Не удалось завершить работу' : 'Работа завершена'
+}
+
 export async function notifyResponseReady(opts: {
   title?: string
   body?: string
+  projectName?: string
   isError?: boolean
   force?: boolean
 }): Promise<void> {
@@ -53,8 +62,11 @@ export async function notifyResponseReady(opts: {
   if (prefs.sound) void window.api.notify.playSound({ isError: !!opts.isError })
 
   if (prefs.toast) {
-    const title = opts.title ?? (opts.isError ? 'Grok Desktop — ошибка' : 'Grok Desktop')
-    const body = opts.body ?? (opts.isError ? 'Не удалось получить ответ' : 'Ответ готов')
-    void window.api.notify.show({ title, body })
+    void window.api.notify.show({
+      title: opts.title ?? 'Verstak',
+      body: buildBody(opts),
+      projectName: opts.projectName,
+      isError: !!opts.isError
+    })
   }
 }

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ProjectGroup, ProjectMeta } from '../types/api'
-import iconUrl from '../assets/icon.png'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
 import { UpdateNotification } from './UpdateNotification'
@@ -180,6 +179,7 @@ interface ProjectGroupBlockProps {
   shellExpanded: boolean
   contentExpanded: boolean
   onToggleCollapsed: (group: ProjectGroup) => void
+  onExpandRail: () => void
   onEdit: (group: ProjectGroup) => void
   onSelectProject: (path: string) => void
   onProjectSettings: (project: ProjectMeta) => void
@@ -193,14 +193,24 @@ function ProjectGroupBlock({
   shellExpanded,
   contentExpanded,
   onToggleCollapsed,
+  onExpandRail,
   onEdit,
   onSelectProject,
   onProjectSettings
 }: ProjectGroupBlockProps) {
   const t = useT()
   const [hover, setHover] = useState(false)
-  const expanded = !group.collapsed
+  /** Свёрнутая панель → группы визуально закрыты; состояние в БД не трогаем. */
+  const expanded = contentExpanded && !group.collapsed
   const hasActive = projects.some(p => p.path === activePath)
+
+  function handleGroupToggle() {
+    if (!contentExpanded) {
+      onExpandRail()
+      return
+    }
+    onToggleCollapsed(group)
+  }
 
   return (
     <div
@@ -214,8 +224,10 @@ function ProjectGroupBlock({
         <button
           type="button"
           className="gg-rail-group-toggle"
-          onClick={() => onToggleCollapsed(group)}
-          title={expanded ? t.rail.groupCollapse : t.rail.groupExpand}
+          onClick={handleGroupToggle}
+          title={contentExpanded
+            ? (expanded ? t.rail.groupCollapse : t.rail.groupExpand)
+            : `${group.name} (${projects.length})`}
           aria-expanded={expanded}
         >
           <svg
@@ -382,18 +394,6 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
   return (
     <>
     <div className={`gg-rail ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''}`}>
-      <div className="gg-rail-top">
-        <button
-          type="button"
-          className="gg-rail-home"
-          onClick={() => useProject.getState().closeProject()}
-          title="Главная"
-        >
-          <img src={iconUrl} alt="Verstak" />
-        </button>
-        <span className="gg-rail-brand-name" aria-hidden={!contentExpanded}>VERSTAK</span>
-      </div>
-
       <div
         className={`gg-rail-toolbar ${shellExpanded ? 'is-expanded is-row' : ''}`}
         data-tool-count={toolbarToolCount}
@@ -516,6 +516,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, sidebarO
             shellExpanded={shellExpanded}
             contentExpanded={contentExpanded}
             onToggleCollapsed={g => void handleToggleGroupCollapsed(g)}
+            onExpandRail={() => setRailExpanded(true)}
             onEdit={g => setGroupModal({ mode: 'edit', group: g })}
             onSelectProject={p => { if (path !== p) void setProject(p) }}
             onProjectSettings={onOpenProjectSettings}

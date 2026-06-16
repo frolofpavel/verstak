@@ -85,4 +85,14 @@ if (code >= 8) {
   die(`robocopy завершился с кодом ${code}`)
 }
 
+if (process.platform === 'win32') {
+  const sync = spawnSync('node', [path.join(ROOT, 'scripts', 'sync-windows-shortcuts.cjs'), path.join(DEST, 'Verstak.exe')], {
+    stdio: 'inherit',
+    shell: false,
+  })
+  if (sync.status !== 0) {
+    die('sync-windows-shortcuts завершился с ошибкой — ярлыки/иконка не обновлены')
+  }
+}
+
 console.log('[deploy-local] Готово →', DEST)

@@ -36,14 +36,25 @@ export default defineConfig({
     build: {
       outDir: 'out/preload',
       rollupOptions: {
-        input: resolve(__dirname, 'electron/preload.ts'),
+        input: {
+          preload: resolve(__dirname, 'electron/preload.ts'),
+          'preload-notification': resolve(__dirname, 'electron/preload-notification.ts')
+        },
         external: ['electron']
       }
     }
   },
   renderer: {
     root: '.',
-    build: { outDir: 'out/renderer', rollupOptions: { input: resolve(__dirname, 'index.html') } },
+    build: {
+      outDir: 'out/renderer',
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'index.html'),
+          notification: resolve(__dirname, 'notification.html')
+        }
+      }
+    },
     plugins: [react()]
   }
 })

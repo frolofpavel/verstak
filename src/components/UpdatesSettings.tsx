@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../i18n'
+import { PastReleasesModal } from './PastReleasesModal'
 import { ReleaseNotesModal, type ReleaseNote } from './ReleaseNotesModal'
 
 type Status = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error' | 'pending'
@@ -27,6 +28,7 @@ export function UpdatesSettings() {
   const [percent, setPercent] = useState(0)
   const [error, setError] = useState('')
   const [notesOpen, setNotesOpen] = useState(false)
+  const [pastOpen, setPastOpen] = useState(false)
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNote[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
   const [notesTargetVersion, setNotesTargetVersion] = useState('')
@@ -137,16 +139,25 @@ export function UpdatesSettings() {
       <div className="gg-settings-section-title">{t.settings.updates}</div>
       <div className="gg-settings-hint" style={{ marginBottom: 16 }}>{t.settings.updatesHint}</div>
 
-      <div className="gg-settings-row" style={{ marginBottom: 16 }}>
+      <div className="gg-settings-row" style={{ marginBottom: 12 }}>
         <label className="gg-settings-label">{t.settings.releaseNotes}</label>
-        <button
-          type="button"
-          className="gg-btn gg-btn-ghost"
-          onClick={() => void viewReleaseNotes()}
-          disabled={notesLoading || version === '…'}
-        >
-          {notesLoading ? t.settings.viewReleaseNotesLoading : t.settings.viewReleaseNotes}
-        </button>
+        <div className="gg-updates-notes-actions">
+          <button
+            type="button"
+            className="gg-btn gg-btn-ghost"
+            onClick={() => void viewReleaseNotes()}
+            disabled={notesLoading || version === '…'}
+          >
+            {notesLoading ? t.settings.viewReleaseNotesLoading : t.settings.viewReleaseNotes}
+          </button>
+          <button
+            type="button"
+            className="gg-btn gg-btn-ghost"
+            onClick={() => setPastOpen(true)}
+          >
+            {t.settings.viewPastUpdates}
+          </button>
+        </div>
       </div>
 
       <div className="gg-settings-row">
@@ -191,6 +202,7 @@ export function UpdatesSettings() {
         title={notesTitle}
         emptyText={t.settings.releaseNotesEmpty}
       />
+      <PastReleasesModal open={pastOpen} onClose={() => setPastOpen(false)} />
     </div>
   )
 }

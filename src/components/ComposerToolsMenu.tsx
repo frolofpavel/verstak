@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
+import { MULTI_AGENT_LIST } from '../lib/multi-agent-templates'
 
 const PROVIDER_LABELS: Record<string, string> = {
   'gemini-api': 'Gemini (API)',
@@ -15,9 +16,9 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
-type SubId = 'skill' | 'review' | 'checkpoint'
+type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent'
 
-export function ComposerToolsMenu() {
+export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => void }) {
   const path = useProject(s => s.path)
   const messages = useProject(s => s.messages)
   const activeChatId = useProject(s => s.activeChatId)
@@ -195,11 +196,16 @@ export function ComposerToolsMenu() {
       ? 'не установлен'
       : `активен #${checkpointId === 0 ? 'start' : checkpointId}`
 
+  function pickMultiAgent(template: string) {
+    onInject(template)
+    setOpen(false)
+  }
+
   const triggerHint = activeSkill
     ? `Скилл: ${activeSkill.name ?? activeSkill.id}`
     : checkpointId !== null
       ? 'Чекпоинт установлен'
-      : 'Скилл, ревью, чекпоинт'
+      : 'Скилл, ревью, мультиагент, чекпоинт'
 
   return (
     <div className={`gg-tools-wrap ${open ? 'is-open' : ''}`} ref={wrapRef}>
@@ -324,6 +330,39 @@ export function ComposerToolsMenu() {
                   ) : (
                     <div className="gg-tools-empty">Сначала дождитесь ответа агента</div>
                   )}
+                </div>
+              )}
+            </li>
+
+            <li
+              className={`gg-tools-menu-item ${openSub === 'multiagent' ? 'is-submenu-open' : ''}`}
+              role="none"
+            >
+              <button
+                type="button"
+                className="gg-tools-menu-trigger"
+                role="menuitem"
+                aria-expanded={openSub === 'multiagent'}
+                onClick={() => toggleSub('multiagent')}
+              >
+                <span className="gg-tools-menu-label">Мультиагент</span>
+                <span className="gg-tools-menu-meta">{MULTI_AGENT_LIST.length} режима</span>
+                <span className="gg-tools-menu-arrow" aria-hidden>›</span>
+              </button>
+              {openSub === 'multiagent' && (
+                <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
+                  <div className="gg-tools-submenu-title">Мультиагент</div>
+                  {MULTI_AGENT_LIST.map(t => (
+                    <button
+                      key={t.trigger}
+                      type="button"
+                      className="gg-tools-row"
+                      onClick={() => pickMultiAgent(t.template)}
+                    >
+                      <span className="gg-tools-row-label">{t.icon} {t.label}</span>
+                      <span className="gg-tools-row-meta">/{t.trigger}</span>
+                    </button>
+                  ))}
                 </div>
               )}
             </li>

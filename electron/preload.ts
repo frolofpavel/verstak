@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld('api', {
     isFocused: () => ipcRenderer.invoke('app:is-focused') as Promise<boolean>,
     openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url) as Promise<boolean>
   },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize') as Promise<void>,
+    maximize: () => ipcRenderer.invoke('window:maximize') as Promise<boolean>,
+    close: () => ipcRenderer.invoke('window:close') as Promise<void>,
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized') as Promise<boolean>,
+    onMaximizedChanged: (cb: (maximized: boolean) => void) => {
+      const handler = (_e: unknown, maximized: boolean) => cb(maximized)
+      ipcRenderer.on('window:maximized-changed', handler)
+      return () => { ipcRenderer.off('window:maximized-changed', handler) }
+    }
+  },
   notify: {
     show: (opts: { title: string; body: string }) =>
       ipcRenderer.invoke('notify:show', opts) as Promise<boolean>,
@@ -284,7 +295,7 @@ contextBridge.exposeInMainWorld('api', {
 
   updater: {
     install: () => ipcRenderer.invoke('update:install'),
-    getReleaseNotes: (opts?: { sinceVersion?: string; upToVersion?: string; version?: string }) =>
+    getReleaseNotes: (opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }) =>
       ipcRenderer.invoke('update:get-release-notes', opts ?? {}),
     check: () => ipcRenderer.invoke('update:check'),
     getState: () => ipcRenderer.invoke('update:get-state') as Promise<{

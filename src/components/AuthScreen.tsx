@@ -3,6 +3,7 @@ import { useT } from '../i18n'
 import type { Lang } from '../i18n'
 import authBgUrl from '../assets/auth-bg.webp'
 import authVideoUrl from '../assets/auth-bg.mp4'
+import iconUrl from '../assets/icon.png'
 import type { DetectedCli, DetectedLocalServer } from '../types/api'
 import { initEmptyEnabledModelsIfUnset, seedEnabledModelsIfUnset } from '../lib/enabled-models'
 
@@ -214,7 +215,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   if (langChosen === false) {
     return (
       <div className="gg-lang-picker">
-        <div className="gg-lang-picker-logo">V</div>
+        <img src={iconUrl} alt="" className="gg-lang-picker-logo" width={60} height={60} />
         <h1>Verstak</h1>
         <p>Choose your language / Выберите язык</p>
         <div className="gg-lang-buttons">
@@ -254,7 +255,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
         {/* Контент поверх */}
         <div className="gg-auth-left-content">
           <div className="gg-auth-logo-wrap">
-            <div className="gg-auth-logo-icon">V</div>
+            <img src={iconUrl} alt="" className="gg-auth-logo-icon" width={48} height={48} />
             <span className="gg-auth-logo-text">Verstak</span>
           </div>
           <p className="gg-auth-tagline">{t.auth.tagline}</p>

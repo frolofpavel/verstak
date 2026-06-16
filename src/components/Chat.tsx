@@ -9,12 +9,8 @@ import { ModePicker } from './ModePicker'
 import { VoiceInput } from './VoiceInput'
 import { TimelineBar } from './TimelineBar'
 import { ReviewPanel } from './ReviewPills'
-import { CheckpointButton } from './CheckpointButton'
 import { DevTaskBadge } from './DevTaskBadge'
 import { ResumeBanner } from './ResumeBanner'
-import { ReviewButton } from './ReviewButton'
-import { SkillPicker } from './SkillPicker'
-import { MultiAgentPicker } from './MultiAgentPicker'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
@@ -26,10 +22,15 @@ import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
 
+function normalizeProjectPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
 
-function chatLabel(chatId: number): string {
-  const title = useProject.getState().chatSessions.find(s => s.id === chatId)?.title
-  return title ? `Ответ готов — ${title}` : 'Ответ готов'
+function projectNameForPath(projectPath: string | null | undefined): string | undefined {
+  if (!projectPath) return undefined
+  const norm = normalizeProjectPath(projectPath)
+  const meta = useProject.getState().projectList.find(p => normalizeProjectPath(p.path) === norm)
+  return meta?.name ?? projectPath.split(/[/\\]/).pop() ?? undefined
 }
 
 const MAX_BYTES_PER_FILE = 5 * 1024 * 1024  // 5 MB
@@ -212,9 +213,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         // мапа растёт при каждом переключении проекта во время активного
         // стрима в фоне.
         if (event.type === 'done') {
-          void notifyResponseReady({ body: 'Ответ готов — фоновый проект' })
+          void notifyResponseReady({ projectName: projectNameForPath(projectPath) })
         } else if (event.type === 'error') {
-          void notifyResponseReady({ body: 'Ошибка в фоновом проекте', isError: true })
+          void notifyResponseReady({ projectName: projectNameForPath(projectPath), isError: true })
         }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
@@ -224,9 +225,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if (owner?.kind === 'chat' && owner.chatId !== store.activeChatId) {
         store.applyEventToChat(owner.chatId, event as unknown as { type: string; [k: string]: unknown })
         if (event.type === 'done') {
-          void notifyResponseReady({ body: chatLabel(owner.chatId) })
+          void notifyResponseReady({ projectName: projectNameForPath(store.path) })
         } else if (event.type === 'error') {
-          void notifyResponseReady({ body: `Ошибка — ${chatLabel(owner.chatId)}`, isError: true })
+          void notifyResponseReady({ projectName: projectNameForPath(store.path), isError: true })
         }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
@@ -458,8 +459,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         }
         setStreaming(false)
         store.forgetSendOwner(id)
-        const chatTitle = store.activeChatId != null ? chatLabel(store.activeChatId) : 'Ответ готов'
-        void notifyResponseReady({ body: chatTitle })
+        void notifyResponseReady({ projectName: projectNameForPath(store.path) })
       }
       else if (event.type === 'error') {
         // If a plan step was running, mark it failed
@@ -480,8 +480,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         }
         setStreaming(false)
         store.forgetSendOwner(id)
-        const errChat = store.activeChatId != null ? chatLabel(store.activeChatId) : 'Ошибка ответа'
-        void notifyResponseReady({ body: errChat, isError: true })
+        void notifyResponseReady({ projectName: projectNameForPath(store.path), isError: true })
       }
     })
     return off
@@ -1554,12 +1553,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             >
               {autoScrollEnabled ? t.chat.autoScrollLabelOn : t.chat.autoScrollLabelOff}
             </button>
-            <SkillPicker />
-            <MultiAgentPicker onInject={injectTemplate} />
-            <CheckpointButton />
             <DevTaskBadge />
-            <ReviewButton />
-            <ComposerToolsMenu />
+            <ComposerToolsMenu onInject={injectTemplate} />
             <ModePicker mode={agentMode} onChange={setAgentMode} />
             <ModelPicker onOpenSettings={onOpenSettings} />
             {/* Бейдж возможностей провайдера (аудит P1 #12): у CLI-провайдеров

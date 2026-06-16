@@ -21,6 +21,7 @@
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
     "dist:all": "npm run build && electron-builder --win --linux --mac",
     "deploy:local": "node scripts/deploy-local.cjs",
+    "sync:shortcuts": "node scripts/sync-windows-shortcuts.cjs",
     "sync:changelog": "node scripts/sync-verstak-changelog.cjs",
     "generate:icon": "node scripts/generate-app-icon.mjs"
   },

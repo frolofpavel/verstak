@@ -154,8 +154,20 @@ declare global {
         isFocused: () => Promise<boolean>
         openExternal: (url: string) => Promise<boolean>
       }
+      window: {
+        minimize: () => Promise<void>
+        maximize: () => Promise<boolean>
+        close: () => Promise<void>
+        isMaximized: () => Promise<boolean>
+        onMaximizedChanged: (cb: (maximized: boolean) => void) => () => void
+      }
       notify: {
-        show: (opts: { title: string; body: string }) => Promise<boolean>
+        show: (opts: {
+          title?: string
+          body: string
+          projectName?: string
+          isError?: boolean
+        }) => Promise<boolean>
         playSound: (opts?: { isError?: boolean }) => Promise<boolean>
       }
       voice: {
@@ -393,11 +405,12 @@ declare global {
       }
       updater: {
         install(): Promise<void>
-        getReleaseNotes(opts?: { sinceVersion?: string; upToVersion?: string; version?: string }): Promise<Array<{
+        getReleaseNotes(opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }): Promise<Array<{
           version: string
           name: string
           body: string
           htmlUrl: string
+          publishedAt?: string
         }>>
         check(): Promise<{ available: boolean; version?: string; error?: string; phase?: string; pendingRelease?: boolean }>
         getState(): Promise<{ phase: string; version?: string; percent?: number; error?: string; pendingRelease?: boolean }>
