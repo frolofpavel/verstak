@@ -13,6 +13,17 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'b31bf5f',
+    deployed: '17.06.2026',
+    treeVersion: '1.5.5',
+    title: 'Toast → проект; терминал и параллельный чат внизу слева',
+    changes: [
+      'Клик по toast «готов ответ» переключает на тот проект, где завершился стрим.',
+      'Убрано меню «файлы/терминал/чат» сверху; файлы только в сайдбаре.',
+      'Внизу слева отдельные кнопки «Терминал» и «Параллельный чат».',
+    ],
+  },
+  {
     commit: '4163e46',
     deployed: '17.06.2026',
     treeVersion: '1.5.5',
