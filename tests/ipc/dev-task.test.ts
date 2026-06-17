@@ -180,4 +180,61 @@ describe('dev-task ipc (Фаза 2)', () => {
       expect(res.error ?? '').not.toMatch(/dod-gate/)
     })
   })
+
+  // Ревью (тест-дыры): критичные пути Фазы 3-4 branch→package→PR без тестов.
+  describe('branch / buildPackage / createPr (ревью — тест-дыры)', () => {
+    it('setBranch: пишет workBranch + state→in_progress (раньше ветка=null навсегда)', async () => {
+      const task = await invoke<Promise<DevTask | null>>('devtask:open', { title: 'ветка' })
+      const after = invoke<DevTask | null>('devtask:setBranch', task!.id, 'verstak/feat-x')
+      expect(after?.workBranch).toBe('verstak/feat-x')
+      expect(after?.state).toBe('in_progress')
+      // get подтверждает персист — кнопка «Создать PR» (гейт на workBranch) теперь достижима.
+      const got = invoke<{ task: DevTask | null }>('devtask:get', task!.id)
+      expect(got.task?.workBranch).toBe('verstak/feat-x')
+    })
+
+    it('buildPackage: гоняет проверки, замораживает пакет, state→packaged', async () => {
+      const task = await invoke<Promise<DevTask | null>>('devtask:open', { title: 'пакет' })
+      const pkg = await invoke<Promise<{ checks: unknown[]; changedFiles: unknown[] } | null>>('devtask:buildPackage', task!.id, { runChecks: true, checks: ['echo ok'] })
+      expect(pkg).not.toBeNull()
+      expect(Array.isArray(pkg!.checks)).toBe(true)
+      const got = invoke<{ task: DevTask | null }>('devtask:get', task!.id)
+      expect(got.task?.state).toBe('packaged')
+    })
+
+    it('createPr: без github-коннектора → connectors-unavailable (гейт)', async () => {
+      const task = await invoke<Promise<DevTask | null>>('devtask:open', { title: 'pr' })
+      const res = await invoke<Promise<{ ok: boolean; error?: string }>>('devtask:createPr', task!.id, { repo: 'o/r', base: 'main' })
+      expect(res.ok).toBe(false)
+      expect(res.error).toBe('connectors-unavailable')
+    })
+
+    it('createPr: с github-стабом, но без workBranch → no-work-branch', async () => {
+      const task = await invoke<Promise<DevTask | null>>('devtask:open', { title: 'pr2' })
+      // Перерегистрируем с github-стабами (гейт workBranch срабатывает ДО вызова коннектора).
+      handlers.clear()
+      registerDevTaskIpc({
+        tasks, getProjectRoot: () => dir, undoStack: createUndoStack(db),
+        runCheck: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+        connectorQuery: async () => ({ result: '{}' }),
+        getSecret: (k) => (k === 'github_token' ? 'gho_test' : null)
+      })
+      const res = await invoke<Promise<{ ok: boolean; error?: string }>>('devtask:createPr', task!.id, { repo: 'o/r', base: 'main' })
+      expect(res.error).toBe('no-work-branch')
+    })
+
+    it('createPr: workBranch есть, но repo/base пусты → repo-and-base-required', async () => {
+      const task = await invoke<Promise<DevTask | null>>('devtask:open', { title: 'pr3' })
+      invoke<DevTask | null>('devtask:setBranch', task!.id, 'verstak/x')
+      handlers.clear()
+      registerDevTaskIpc({
+        tasks, getProjectRoot: () => dir, undoStack: createUndoStack(db),
+        runCheck: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+        connectorQuery: async () => ({ result: '{}' }),
+        getSecret: (k) => (k === 'github_token' ? 'gho_test' : null)
+      })
+      const res = await invoke<Promise<{ ok: boolean; error?: string }>>('devtask:createPr', task!.id, { repo: '', base: '' })
+      expect(res.error).toBe('repo-and-base-required')
+    })
+  })
 })
