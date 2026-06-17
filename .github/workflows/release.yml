@@ -1,9 +1,12 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  # Авто-триггер на тег ОТКЛЮЧЁН: релизы выкатываются ВРУЧНУЮ (dist:win + GitHub
+  # REST API, см. memory/verstak-release-process). Этот CI собирал win/linux/mac
+  # с --publish never, но Linux-сборка падала на нативных модулях → шквал
+  # «Run failed» писем на каждый тег, а publish-джоба конфликтовала бы с ручным
+  # релизом. Оставлен ТОЛЬКО ручной запуск (Actions → Run workflow) — на случай,
+  # если понадобится кросс-платформенная сборка.
   workflow_dispatch:
 
 permissions:
