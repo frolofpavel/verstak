@@ -57,6 +57,8 @@ Memory is visible and editable in Settings → Memory.
 - **Loop detection** — same tool + args called 3× triggers supervisor break; max turns per send configurable
 - **Exponential backoff** — automatic retry on 429 / 503 / ECONNRESET
 
+> **API vs CLI — honest scope:** the agent capabilities above (Verstak-controlled tools, verification artifact, live timeline, multi-agent, crash-resume guard) run under Verstak's control on **API providers**. **CLI providers** (Claude Code, Codex, Gemini CLI, Grok Build) run their own tooling internally — Verstak relays the conversation, but the control layer is reduced (tools/verification/timeline live inside the CLI, not in Verstak). The model picker marks CLI as "limited control". Full matrix: [`docs/PROVIDER_CAPABILITIES.md`](docs/PROVIDER_CAPABILITIES.md).
+
 ---
 
 ### UI / UX

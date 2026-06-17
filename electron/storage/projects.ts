@@ -68,7 +68,9 @@ export function createProjects(db: Database): Projects {
       }
       const name = basename(path) || path
       const color = pickColor(path)
-      db.prepare('INSERT INTO projects (path, name, color, icon_path, last_opened_at) VALUES (?, ?, ?, NULL, ?)').run(path, name, color, now)
+      // hidden задаём явно (а не полагаемся на DEFAULT 0 миграции) — ревью:
+      // явное значение надёжнее при изменении дефолтов в будущем.
+      db.prepare('INSERT INTO projects (path, name, color, icon_path, last_opened_at, hidden) VALUES (?, ?, ?, NULL, ?, 0)').run(path, name, color, now)
       return { path, name, color, iconPath: null, lastOpenedAt: now, hidden: false }
     },
     touch(path) {
