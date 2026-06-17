@@ -13,6 +13,18 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'b901cf6',
+    deployed: '17.06.2026',
+    treeVersion: '1.5.5',
+    title: 'Параллельный чат: UX, сохранение модели, мягкий дизайн',
+    changes: [
+      'Терминал в шапке — иконка + подпись «Терминал».',
+      'Параллельный чат: заголовок и иконка, подсказка над вводом (скрывается после 1-го сообщения).',
+      'Модель параллельного чата сохраняется в сессии (patchChatSession + refresh при открытии).',
+      'Мягче фон/граница боковой панели — заметное отделение без резкого контраста.',
+    ],
+  },
+  {
     commit: '2f4f3f0',
     deployed: '17.06.2026',
     treeVersion: '1.5.5',
