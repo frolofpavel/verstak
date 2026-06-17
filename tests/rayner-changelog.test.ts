@@ -9,6 +9,19 @@ describe('rayner-changelog', () => {
     expect(notes[0]?.publishedAt).toBeTruthy()
   })
 
+  // since эксклюзивно, upTo инклюзивно (комментарий update-remote.ts:175 «строго после
+  // since и не новее upTo»). Регресс на инвертированную верхнюю границу: промежуточные
+  // версии не должны выпадать, версии выше upTo не должны протекать.
+  it('range is since-exclusive, upTo-inclusive (no intermediate drop, no future leak)', () => {
+    const versions = getBundledReleaseNotesInRange('1.5.1', '1.5.4').map(n => n.version)
+    expect(versions).toEqual(['1.5.4', '1.5.3', '1.5.2']) // не 1.5.1 (since эксклюзивно), не 1.5.5 (> upTo)
+  })
+
+  it('upTo-version itself is included (boundary)', () => {
+    const versions = getBundledReleaseNotesInRange('1.5.3', '1.5.5').map(n => n.version)
+    expect(versions).toEqual(['1.5.5', '1.5.4'])
+  })
+
   it('mergeReleaseNotes combines github and bundled by version', () => {
     const github: ReleaseNote[] = [{
       version: '1.5.0',

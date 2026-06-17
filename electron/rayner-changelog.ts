@@ -123,7 +123,7 @@ const RAYNER_NOTES: ReleaseNote[] = [
 
 function inVersionRange(note: ReleaseNote, since: string, upTo: string): boolean {
   const v = normalizeVersion(note.version)
-  return semverGt(v, since) && !semverGt(upTo, v)
+  return semverGt(v, since) && !semverGt(v, upTo)
 }
 
 export function getAllBundledReleaseNotes(): ReleaseNote[] {

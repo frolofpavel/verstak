@@ -178,7 +178,7 @@ export async function fetchReleaseNotesSince(sinceVersion: string, upToVersion: 
   const all = await fetchAllReleaseNotes()
   const since = normalizeVersion(sinceVersion)
   const upTo = normalizeVersion(upToVersion)
-  const github = all.filter((note) => semverGt(note.version, since) && !semverGt(upTo, note.version))
+  const github = all.filter((note) => semverGt(note.version, since) && !semverGt(note.version, upTo))
   const bundled = getBundledReleaseNotesInRange(since, upTo)
   const { polishReleaseNotes } = await import('./release-notes-official')
   return polishReleaseNotes(mergeReleaseNotes(github, bundled))
