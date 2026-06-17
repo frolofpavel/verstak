@@ -64,9 +64,9 @@ audit**) → PR (github). Покрыт интеграционными теста
 
 - **Proof Pack V1.2+** — PDF-экспорт, авто-proof в конце прогона (по настройке),
   generate_proof_pack как tool.
-- **Mandatory DoD mode** — гейт ГОТОВ (настройка `dod_mode`: off/warn/block,
-  дефолт warn; block запрещает обход overrideReason). TODO: UI-тумблер +
-  per-project область вместо глобальной.
+- **Mandatory DoD mode** — ГОТОВ: гейт (настройка `dod_mode`: off/warn/block,
+  дефолт warn; block запрещает обход) + UI-тумблер (Настройки → «Что разрешено»).
+  TODO: per-project область вместо глобальной.
 - **Tier-router цены** — авто-маршрут дешёвый/frontier/RU по сложности (есть
   recommendTier-инфра, нет авто).
 - **Tasks 2.0** — полный 3→1 редизайн экранов задач (F15 сделал срез имён).

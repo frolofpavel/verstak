@@ -388,6 +388,7 @@ const POLICY_DECISION_META: Record<PolicyDecision, { label: string; cls: string 
 function PolicyTab() {
   const [matrix, setMatrix] = useState<PolicyMatrixDTO | null>(null)
   const [currentMode, setCurrentMode] = useState<AgentModeId | null>(null)
+  const [dodMode, setDodMode] = useState<string>('warn')
 
   useEffect(() => {
     void (async () => {
@@ -395,8 +396,15 @@ function PolicyTab() {
       setMatrix(m)
       const mode = await window.api.settings.getKey('agent_mode')
       setCurrentMode((mode as AgentModeId) || 'ask')
+      const dm = await window.api.settings.getKey('dod_mode')
+      setDodMode(dm || 'warn')
     })()
   }, [])
+
+  const changeDod = async (v: string) => {
+    setDodMode(v)
+    await window.api.settings.setKey('dod_mode', v)
+  }
 
   if (!matrix) {
     return <div className="gg-settings-extra"><div className="gg-settings-hint">Загрузка политики…</div></div>
@@ -469,7 +477,17 @@ function PolicyTab() {
         ))}
       </ul>
 
-      <div className="gg-policy-note">
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>✅ Доказательство выполнения (DoD)</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Гейт коммита dev-задачи при не-зелёных проверках. <strong>Предупреждать</strong> — блок с возможностью обойти (причина пишется в журнал аудита). <strong>Обязательно</strong> — обход запрещён, коммит только при зелёных проверках. <strong>Выкл</strong> — без гейта.
+      </div>
+      <select className="gg-input" value={dodMode} onChange={e => void changeDod(e.target.value)} style={{ maxWidth: 320 }}>
+        <option value="warn">Предупреждать (по умолчанию)</option>
+        <option value="block">Обязательно (Mandatory DoD)</option>
+        <option value="off">Выкл</option>
+      </select>
+
+      <div className="gg-policy-note" style={{ marginTop: 18 }}>
         Риск по конкретным MCP-инструментам (per-server) — на вкладке <strong>MCP</strong>. Здесь он не дублируется.
       </div>
     </div>
