@@ -67,7 +67,8 @@ Verstak CLI — AI-агент в терминале без GUI
 
 Опции:
   -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
-                   openrouter, deepseek, mistral, groq, ollama, yandexgpt, gigachat
+                   openrouter, deepseek, mistral, groq, ollama
+                   (YandexGPT/GigaChat — только в GUI, не в CLI)
   -m, --model      Имя модели (по умолч: дефолтная провайдера)
   -k, --key        API-ключ (или через env: GEMINI_API_KEY, ANTHROPIC_API_KEY, …)
   --project        Директория проекта (по умолч: текущая)
@@ -89,8 +90,6 @@ Env-переменные:
   DEEPSEEK_API_KEY     DeepSeek
   MISTRAL_API_KEY      Mistral
   GROQ_API_KEY         Groq
-  YANDEXGPT_API_KEY    YandexGPT (формат: folderID:iamToken)
-  GIGACHAT_CLIENT_ID   GigaChat (Client ID для OAuth)
 
 Примеры:
   GEMINI_API_KEY=xxx node scripts/verstak-cli.mjs "list all TODO"
@@ -122,8 +121,8 @@ const ENV_KEYS = {
   'mistral':       'MISTRAL_API_KEY',
   'groq':          'GROQ_API_KEY',
   'ollama':        null,  // локальный, ключ не нужен
-  'yandexgpt':     'YANDEXGPT_API_KEY',
-  'gigachat':      'GIGACHAT_CLIENT_ID',
+  // YandexGPT/GigaChat намеренно НЕ в CLI: getProviderStream их не реализует
+  // (нужны спец-провайдеры с folder-id/OAuth). RU-провайдеры — через GUI.
 }
 
 /** Ключи в .verstak/settings.json для каждого провайдера. */
@@ -136,8 +135,6 @@ const SETTINGS_KEY_MAP = {
   'deepseek': 'deepseek_api_key',
   'mistral': 'mistral_api_key',
   'groq': 'groq_api_key',
-  'yandexgpt': 'yandexgpt_api_key',
-  'gigachat': 'gigachat_client_id',
 }
 
 function resolveApiKey(provider, explicit) {

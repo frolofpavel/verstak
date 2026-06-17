@@ -179,7 +179,7 @@ export function ReviewPanel() {
     const chosen = selected.length > 0 ? selected : review.findings
     if (chosen.length === 0) { setPlanNotice('Нет находок для сохранения.'); return }
     const steps = findingsToPlanSteps(chosen)
-    const title = `Ревью от ${label} · ${chosen.length} ${chosen.length === 1 ? 'находка' : 'находок'}`
+    const title = `Ревью от ${label} · ${chosen.length} ${plural(chosen.length, 'находка', 'находки', 'находок')}`
     try {
       const plan = await window.api.plans.create(path, title, steps)
       void window.api.journal.append(path, 'note', `📋 Находки ревью → план «${title}»`,

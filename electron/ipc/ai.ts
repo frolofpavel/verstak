@@ -1456,7 +1456,12 @@ async function runApiConversation(
           fallbackOpts.triedProviders.add(nextId)
           // Передаём tools из замыкания — они привязаны к projectPath и signal, не к провайдеру.
           const fallbackTools = createFileTools(projectPath, signal)
-          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos)
+          // Ревью P0: agentRuns/runId — undefined НАМЕРЕННО (finish пишется ровно
+          // раз во внешнем finally, см. ниже). НО verifications и toolsAllow
+          // прокидываем РЕАЛЬНЫЕ: capability-фильтр (M4, безопасность — read-only
+          // скилл не должен получить write/run_command в fallback-прогоне) и
+          // индексация attest-артефактов обязаны действовать и при фолбэке.
+          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, undefined, undefined, verifications, toolsAllow)
         }
       }
     }
@@ -1479,8 +1484,9 @@ async function runApiConversation(
     // Multi-agent Manager (Фаза 2): завершаем прогон — статус из exitReason,
     // счётчики из того что уже накоплено в прогоне (tool/files/agents),
     // стоимость из costGuard. Best-effort: ошибка storage не ломает loop.
-    // agentRuns/runId не прокидываются в рекурсивный fallback-вызов → finish
-    // пишется ровно раз (этот внешний finally).
+    // agentRuns/runId не прокидываются в рекурсивный fallback-вызов (undefined) →
+    // finish пишется ровно раз (этот внешний finally), даже если был фолбэк.
+    // (toolsAllow/verifications в fallback прокидываются — они не про финализацию.)
     if (agentRuns && runId) {
       try {
         // DoD-принуждение (аудит P1 #8): прогон завершён успешно и менял файлы,

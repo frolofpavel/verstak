@@ -138,6 +138,17 @@ function shortProviderTag(id: string): string {
   if (id === 'grok-cli') return 'GB'
   if (id === 'openai') return 'GPT'
   if (id === 'codex-cli') return 'CDX'
+  // RU + OpenAI-совместимые (ревью: без явных тэгов давали невнятные YAN/GIG/DEE).
+  if (id === 'yandex-gpt') return 'YGP'
+  if (id === 'gigachat') return 'GIG'
+  if (id === 'deepseek') return 'DSK'
+  if (id === 'qwen') return 'QWN'
+  if (id === 'mistral') return 'MST'
+  if (id === 'moonshot') return 'MSH'
+  if (id === 'groq') return 'GRQ'
+  if (id === 'openrouter') return 'OPR'
+  if (id === 'ollama') return 'OLM'
+  if (id === 'custom-openai') return 'CST'
   return id.slice(0, 3).toUpperCase()
 }
 

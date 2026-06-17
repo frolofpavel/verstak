@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('api', {
     setCurrent: (path: string | null) => ipcRenderer.invoke('projects:set-current', path),
     list: () => ipcRenderer.invoke('projects:list'),
     rename: (path: string, name: string) => ipcRenderer.invoke('projects:rename', path, name),
-    updateMeta: (path: string, patch: { name?: string }) =>
+    updateMeta: (path: string, patch: { name?: string; hidden?: boolean }) =>
       ipcRenderer.invoke('projects:update-meta', path, patch),
     pickIcon: (path: string) => ipcRenderer.invoke('projects:pick-icon', path),
     clearIcon: (path: string) => ipcRenderer.invoke('projects:clear-icon', path),
