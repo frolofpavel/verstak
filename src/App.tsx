@@ -20,7 +20,6 @@ import { CommandConfirm } from './components/CommandConfirm'
 
 import { UpdateAvailableModal } from './components/UpdateAvailableModal'
 import { WhatsNewModal } from './components/WhatsNewModal'
-import { FilesPanel } from './components/FilesPanel'
 import { SideChat } from './components/SideChat'
 import { prefetchDetectedClis } from './lib/prefetch-cli'
 import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
@@ -84,8 +83,8 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'models' | undefined>()
   const [modelPromptRecheck, setModelPromptRecheck] = useState(0)
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectMeta | null>(null)
-  // Right docked panel: one of terminal / files / sidechat / none (Codex-style selector).
-  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'files' | 'sidechat'>('none')
+  // Right docked panel: terminal or parallel side-chat.
+  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat'>('none')
   // Lazily-created dedicated side-chat session id. Created on first open of the
   // side-chat panel, reused while the panel stays open within a project.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
@@ -156,7 +155,18 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand } = useProject()
+  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setProject } = useProject()
+
+  useEffect(() => {
+    if (!authDone) return
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    const off = window.api.notify.onOpenProject((projectPath) => {
+      if (!projectPath) return
+      if (path && norm(path) === norm(projectPath)) return
+      void setProject(projectPath)
+    })
+    return off
+  }, [authDone, path, setProject])
   // Panels require an open project (the terminal/file tree are project-scoped).
   const effectiveRightPanel = path ? rightPanel : 'none'
 
@@ -330,9 +340,6 @@ export function App() {
                   </Suspense>
                 </div>
               </div>
-            )}
-            {effectiveRightPanel === 'files' && (
-              <FilesPanel onClose={() => setRightPanel('none')} />
             )}
             {effectiveRightPanel === 'sidechat' && sideChatId != null && (
               <SideChat sideChatId={sideChatId} onClose={() => setRightPanel('none')} />

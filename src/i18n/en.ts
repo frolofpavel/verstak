@@ -358,6 +358,8 @@ export const en = {
     autoScrollLabelOff: 'Auto-scroll: off',
     autoScrollOn: 'Auto-scroll on — click to keep your scroll position while the agent replies',
     autoScrollOff: 'Auto-scroll off — the chat will not jump to new messages',
+    dockTerminal: 'Terminal',
+    dockSideChat: 'Parallel chat',
     visionBannerTitle: 'Images are not sent to this model',
     visionBannerBody: '{current} only receives text — attached screenshots will not be analyzed. Switch to a vision-capable {family} model:',
     visionBannerSwitchTo: 'Vision models:',
