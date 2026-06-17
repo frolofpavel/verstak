@@ -737,9 +737,26 @@ export const useProject = create<ProjectState>((set, get) => ({
       model: currentModel ?? null
     })
     const list = await window.api.chatSessions.list(s.path)
+    // Снапшотим уходящий активный чат — как switchChatSession. Иначе при создании
+    // нового чата во время стрима частичный ответ старого чата теряется, а его
+    // фоновые события (включая финальный done) уходят в пустой freshSnapshot (#8).
+    const nextSnapshots = { ...s.chatSnapshots }
+    if (s.activeChatId != null && s.activeChatId !== created.id) {
+      nextSnapshots[s.activeChatId] = {
+        messages: s.messages,
+        isStreaming: s.isStreaming,
+        pendingWrites: s.pendingWrites,
+        pendingCommand: s.pendingCommand,
+        activity: s.activity,
+        sessionUsage: s.sessionUsage,
+        runningPlanStep: s.runningPlanStep,
+        hasUnread: false
+      }
+    }
     set({
       chatSessions: list,
       activeChatId: created.id,
+      chatSnapshots: nextSnapshots,
       messages: [],
       activity: [],
       pendingWrites: [],

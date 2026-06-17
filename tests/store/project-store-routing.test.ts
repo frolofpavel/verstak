@@ -230,3 +230,42 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     expect(st.lookupSendOwner(3)).toEqual({ kind: 'chat', chatId: 20 })
   })
 })
+
+describe('newChatSession — снапшот уходящего стримящего чата (#8)', () => {
+  it('создание нового чата во время стрима снапшотит старый чат (не теряет ответ)', async () => {
+    // Расширенный window stub: newChatSession читает settings + chatSessions.
+    vi.stubGlobal('window', {
+      api: {
+        chats: { append: appendSpy },
+        settings: { getKey: async () => null },
+        chatSessions: {
+          create: async () => ({ id: 99 }),
+          list: async () => [{ id: 1 }, { id: 99 }]
+        }
+      }
+    })
+    useProject.setState({
+      path: 'C:/proj',
+      activeChatId: 1,
+      isStreaming: true,
+      messages: [
+        { role: 'user', content: 'вопрос' },
+        { role: 'assistant', content: 'частичный ответ' }
+      ] as ChatMessage[],
+      chatSnapshots: {}
+    }, false)
+
+    await useProject.getState().newChatSession()
+
+    const st = useProject.getState()
+    // активный чат переключился на новый
+    expect(st.activeChatId).toBe(99)
+    // снапшот старого чата 1 СОХРАНЁН (раньше был undefined → потеря ответа)
+    expect(st.chatSnapshots[1]).toBeDefined()
+    expect(st.chatSnapshots[1].messages).toEqual([
+      { role: 'user', content: 'вопрос' },
+      { role: 'assistant', content: 'частичный ответ' }
+    ])
+    expect(st.chatSnapshots[1].isStreaming).toBe(true)
+  })
+})
