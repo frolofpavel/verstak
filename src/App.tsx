@@ -72,7 +72,7 @@ export function App() {
   // side-chat panel, reused while the panel stays open within a project.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
-  const [lang, setLang] = useState<Lang>('en')
+  const [lang, setLang] = useState<Lang>('ru')
 
   useEffect(() => {
     window.api.settings.getKey('app_language').then(v => {

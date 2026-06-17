@@ -6,6 +6,7 @@ import authVideoUrl from '../assets/auth-bg.mp4'
 import iconUrl from '../assets/icon.png'
 import type { DetectedCli, DetectedLocalServer } from '../types/api'
 import { initEmptyEnabledModelsIfUnset, seedEnabledModelsIfUnset } from '../lib/enabled-models'
+import { DetectedProvidersList } from './DetectedProvidersList'
 
 /**
  * AuthScreen — экран регистрации/входа. Показывается ПЕРЕД основным приложением
@@ -142,7 +143,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   async function connectLocalServer(server: DetectedLocalServer) {
     const model = server.models[0] ?? ''
     if (!model) {
-      setError(`${server.name}: сервер найден, но список моделей пуст`)
+      setError(t.auth.emptyModels.replace('{name}', server.name))
       return
     }
 
@@ -275,54 +276,15 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
             </li>
           </ul>
 
-          {(scanLoading || clis.length > 0 || localServers.length > 0) && (
-            <div className="gg-auth-detected">
-              <div className="gg-auth-detected-title">
-                {scanLoading ? 'Сканирую ПК...' : 'Найдено на твоём ПК'}
-              </div>
-              {clis.map(c => (
-                <div key={c.id} className="gg-auth-detected-item">
-                  <span className={`gg-auth-detected-dot${c.status === 'found' ? ' is-yellow' : ''}`} />
-                  <span className="gg-auth-detected-main">
-                    <span>{c.name}</span>
-                    <span className="gg-auth-detected-version">{c.version}</span>
-                  </span>
-                  {['claude-cli', 'codex-cli', 'gemini-cli', 'grok-cli'].includes(c.id) && (
-                    <button
-                      type="button"
-                      className="gg-auth-connect"
-                      onClick={() => void connectCli(c)}
-                      disabled={busy}
-                    >
-                      {connectingId === c.id ? '...' : 'Подключить'}
-                    </button>
-                  )}
-                </div>
-              ))}
-              {localServers.map(server => (
-                <div key={server.id} className="gg-auth-detected-item">
-                  <span className="gg-auth-detected-dot is-local" />
-                  <span className="gg-auth-detected-main">
-                    <span>
-                      {server.name}
-                      <span className="gg-auth-local-badge">LOCAL</span>
-                    </span>
-                    <span className="gg-auth-detected-version">
-                      {server.models.length} моделей · {server.models.slice(0, 2).join(', ')}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    className="gg-auth-connect"
-                    onClick={() => void connectLocalServer(server)}
-                    disabled={busy || server.models.length === 0}
-                  >
-                    {connectingId === server.id ? '...' : 'Подключить'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <DetectedProvidersList
+            clis={clis}
+            localServers={localServers}
+            scanLoading={scanLoading}
+            busy={busy}
+            connectingId={connectingId}
+            onConnectCli={cli => void connectCli(cli)}
+            onConnectLocal={server => void connectLocalServer(server)}
+          />
         </div>
       </div>
 

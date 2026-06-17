@@ -6868,6 +6868,9 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   line-height: 1.55;
   margin: 0 0 18px;
 }
+.gg-onboarding-detected {
+  margin-bottom: 14px;
+}
 .gg-onboarding-hint {
   font-size: 12px;
   color: var(--text-tertiary);
@@ -9507,6 +9510,34 @@ textarea.gg-input {
   color: var(--text-primary);
 }
 .gg-run-card-head:hover { background: var(--bg-hover); }
+.gg-run-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 10px;
+  margin-top: -2px;
+  font-size: 11px;
+  color: var(--accent);
+  line-height: 1.4;
+}
+.gg-run-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: gg-run-live-pulse 1.2s ease-in-out infinite;
+}
+.gg-run-live-text {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes gg-run-live-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
 .gg-run-card-title {
   font-weight: 600;
   font-size: 13px;
