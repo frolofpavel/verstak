@@ -7510,12 +7510,25 @@ textarea.gg-input {
 .gg-connector-cost-cap {
   margin-bottom: 8px;
 }
-.gg-connector-grid {
+.gg-connector-grid,
+.gg-connector-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 16px 0;
   max-width: 100%;
+}
+.gg-connector-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gg-connector-item.is-expanded {
+  grid-column: 1 / -1;
+}
+.gg-connector-item .gg-connector-card {
+  width: 100%;
 }
 .gg-connector-card {
   display: flex;
@@ -7595,7 +7608,7 @@ textarea.gg-input {
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 20px;
-  margin-top: 8px;
+  margin-top: 0;
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;

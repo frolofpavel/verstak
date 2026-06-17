@@ -895,12 +895,10 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [connectorHealthMsg, setConnectorHealthMsg] = useState<Record<string, string>>({})
   const [connectorApplying, setConnectorApplying] = useState<string | null>(null)
   const [openConnector, setOpenConnector] = useState<string | null>(null)
-  // Детали коннектора рендерятся ПОД гридом из 31 карточки — при клике по
-  // карточке вверху панель появлялась за экраном («ничего не происходит»).
-  // Скроллим к ней, чтобы поля настройки сразу были видны.
+  // Форма коннектора раскрывается сразу под карточкой — скроллим к ней при открытии.
   const connectorDetailRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (openConnector) connectorDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (openConnector) connectorDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [openConnector])
   // Custom OpenAI-compatible: base URL + список моделей через запятую.
   // Сохраняется в settings.custom_openai_baseurl / custom_openai_models.
@@ -2133,7 +2131,43 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             const configuredList = CONNECTORS.filter(c => configuredConnectors.has(c.id))
             const availableList = CONNECTORS.filter(c => !configuredConnectors.has(c.id))
 
-            const renderConnectorCard = (c: ConnectorDef) => {
+            const renderConnectorDetail = (id: string) => (
+              <div
+                className="gg-connector-detail"
+                ref={openConnector === id ? connectorDetailRef : undefined}
+              >
+                <div className="gg-connector-detail-header">
+                  {(() => {
+                    const def = CONNECTORS.find(c => c.id === id)
+                    return def ? <><def.icon size={20} /> {def.name}</> : null
+                  })()}
+                  <button className="gg-connector-detail-close" onClick={() => setOpenConnector(null)}>×</button>
+                </div>
+                <div className="gg-connector-detail-body">
+                  {renderConnectorForm(id)}
+                  <div className="gg-connector-detail-actions">
+                    {connectorApplying === id && <div className="gg-connector-progress" aria-hidden />}
+                    <div className="gg-connector-detail-actions-row">
+                      <button
+                        type="button"
+                        className="gg-btn gg-btn-primary"
+                        disabled={connectorApplying === id}
+                        onClick={() => void applyConnector(id)}
+                      >
+                        {connectorApplying === id ? t.connectors.applying : t.connectors.apply}
+                      </button>
+                      {connectorHealthMsg[id] && connectorApplying !== id && (
+                        <span className={`gg-connector-test-msg ${connectorHealth[id] === 'ok' ? 'is-ok' : connectorHealth[id] === 'error' ? 'is-error' : ''}`}>
+                          {connectorHealthMsg[id]}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+
+            const renderConnectorItem = (c: ConnectorDef) => {
               const configured = configuredConnectors.has(c.id)
               const health = connectorHealth[c.id] ?? 'unknown'
               const healthTitle = connectorHealthMsg[c.id]
@@ -2141,30 +2175,34 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                   : health === 'ok' ? t.connectors.healthOk
                   : health === 'error' ? t.connectors.healthError
                   : '')
+              const isOpen = openConnector === c.id
               return (
-                <button
-                  key={c.id}
-                  className={`gg-connector-card ${configured ? 'is-connected' : ''} ${openConnector === c.id ? 'is-open' : ''}`}
-                  onClick={() => setOpenConnector(openConnector === c.id ? null : c.id)}
-                >
-                  <div className="gg-connector-card-icon"><c.icon size={32} /></div>
-                  <div className="gg-connector-card-body">
-                    <div className="gg-connector-card-name">{c.name}</div>
-                    <div className="gg-connector-card-desc">{c.description}</div>
-                  </div>
-                  <div className="gg-connector-card-status">
-                    {configured && (
-                      <span
-                        className={`gg-connector-health ${health === 'ok' ? 'is-ok' : health === 'error' ? 'is-error' : health === 'checking' ? 'is-checking' : ''}`}
-                        title={healthTitle}
-                        aria-label={healthTitle}
-                      />
-                    )}
-                    {configured
-                      ? <span className="gg-badge-connected">&#10003;</span>
-                      : <span className="gg-badge-add">+</span>}
-                  </div>
-                </button>
+                <div key={c.id} className={`gg-connector-item${isOpen ? ' is-expanded' : ''}`}>
+                  <button
+                    type="button"
+                    className={`gg-connector-card ${configured ? 'is-connected' : ''} ${isOpen ? 'is-open' : ''}`}
+                    onClick={() => setOpenConnector(isOpen ? null : c.id)}
+                  >
+                    <div className="gg-connector-card-icon"><c.icon size={32} /></div>
+                    <div className="gg-connector-card-body">
+                      <div className="gg-connector-card-name">{c.name}</div>
+                      <div className="gg-connector-card-desc">{c.description}</div>
+                    </div>
+                    <div className="gg-connector-card-status">
+                      {configured && (
+                        <span
+                          className={`gg-connector-health ${health === 'ok' ? 'is-ok' : health === 'error' ? 'is-error' : health === 'checking' ? 'is-checking' : ''}`}
+                          title={healthTitle}
+                          aria-label={healthTitle}
+                        />
+                      )}
+                      {configured
+                        ? <span className="gg-badge-connected">&#10003;</span>
+                        : <span className="gg-badge-add">+</span>}
+                    </div>
+                  </button>
+                  {isOpen && renderConnectorDetail(c.id)}
+                </div>
               )
             }
 
@@ -2173,8 +2211,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                 {configuredList.length > 0 && (
                   <>
                     <div className="gg-connector-section-title">{t.connectors.sectionConfigured}</div>
-                    <div className="gg-connector-grid">
-                      {configuredList.map(renderConnectorCard)}
+                    <div className="gg-connector-list">
+                      {configuredList.map(renderConnectorItem)}
                     </div>
                     {availableList.length > 0 && <div className="gg-connector-section-divider" />}
                   </>
@@ -2182,45 +2220,14 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                 {availableList.length > 0 && (
                   <>
                     <div className="gg-connector-section-title">{t.connectors.sectionAvailable}</div>
-                    <div className="gg-connector-grid">
-                      {availableList.map(renderConnectorCard)}
+                    <div className="gg-connector-list">
+                      {availableList.map(renderConnectorItem)}
                     </div>
                   </>
                 )}
               </>
             )
           })()}
-
-          {/* Expanded settings panel below the grid */}
-          {openConnector && (
-            <div className="gg-connector-detail" ref={connectorDetailRef}>
-              <div className="gg-connector-detail-header">
-                {(() => { const def = CONNECTORS.find(c => c.id === openConnector); return def ? <><def.icon size={20} /> {def.name}</> : null })()}
-                <button className="gg-connector-detail-close" onClick={() => setOpenConnector(null)}>×</button>
-              </div>
-              <div className="gg-connector-detail-body">
-                {renderConnectorForm(openConnector)}
-                <div className="gg-connector-detail-actions">
-                  {connectorApplying === openConnector && <div className="gg-connector-progress" aria-hidden />}
-                  <div className="gg-connector-detail-actions-row">
-                    <button
-                      type="button"
-                      className="gg-btn gg-btn-primary"
-                      disabled={connectorApplying === openConnector}
-                      onClick={() => void applyConnector(openConnector)}
-                    >
-                      {connectorApplying === openConnector ? t.connectors.applying : t.connectors.apply}
-                    </button>
-                    {connectorHealthMsg[openConnector] && connectorApplying !== openConnector && (
-                      <span className={`gg-connector-test-msg ${connectorHealth[openConnector] === 'ok' ? 'is-ok' : connectorHealth[openConnector] === 'error' ? 'is-error' : ''}`}>
-                        {connectorHealthMsg[openConnector]}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
         )}
 
