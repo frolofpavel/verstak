@@ -13,6 +13,18 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'cfbd88c',
+    deployed: '17.06.2026',
+    treeVersion: '1.5.5',
+    title: 'UX: Ещё в меню, CLI-полоска, бейджи моделей, фикс обновлений',
+    changes: [
+      'Сайдбар: основные пункты + «Ещё»; «Видео» с бейджем Скоро (заглушка).',
+      'Composer: янтарная полоска при CLI-провайдере; Настройки → Модели/Провайдеры — бейджи API vs CLI.',
+      'Убран дублирующий onboarding-wizard; prefetch CLI — нет вспышки «Обнаруженные CLI» в настройках.',
+      'Обновления: явный downloadUpdate после available; текст «начинаю скачивание».',
+    ],
+  },
+  {
     commit: '0bf3b12',
     deployed: '17.06.2026',
     treeVersion: '1.5.5',

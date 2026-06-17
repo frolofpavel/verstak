@@ -22,7 +22,7 @@ import { UpdateAvailableModal } from './components/UpdateAvailableModal'
 import { WhatsNewModal } from './components/WhatsNewModal'
 import { FilesPanel } from './components/FilesPanel'
 import { SideChat } from './components/SideChat'
-import { OnboardingWizard } from './components/OnboardingWizard'
+import { prefetchDetectedClis } from './lib/prefetch-cli'
 import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
 import { WindowShell } from './components/TitleBar'
 import { ArtifactPreviewContainer } from './components/ArtifactPreview'
@@ -128,17 +128,9 @@ export function App() {
     }
   }, [])
 
-  // Onboarding: показывается при первом запуске пока не помечен completed
-  // в settings. После — больше не появляется.
-  const [showOnboarding, setShowOnboarding] = useState(false)
   useEffect(() => {
     if (!authDone) return
-    void (async () => {
-      try {
-        const done = await window.api.settings.getKey('onboarding_completed')
-        if (!done) setShowOnboarding(true)
-      } catch { /* первый запуск, settings ещё нет */ setShowOnboarding(true) }
-    })()
+    void prefetchDetectedClis()
   }, [authDone])
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const stored = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '0', 10)
@@ -396,7 +388,7 @@ export function App() {
         </Suspense>
       )}
       <ModelRequiredPrompt
-        active={authDone === true && !showOnboarding && !showSettings}
+        active={authDone === true && !showSettings}
         recheckToken={modelPromptRecheck}
         onOpenModelsSettings={() => {
           setSettingsInitialTab('models')
@@ -410,7 +402,7 @@ export function App() {
           onProjectUpdated={setProjectSettingsTarget}
         />
       )}
-      {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
+
       <ArtifactPreviewContainer />
       <TerminalErrorToast />
       <DiffView />

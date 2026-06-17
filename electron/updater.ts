@@ -224,6 +224,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
         releaseDate: info.releaseDate,
         pendingRelease: false,
       })
+      void autoUpdater.downloadUpdate().catch((err: Error) => {
+        console.warn('[updater] downloadUpdate failed:', err.message)
+      })
     })
 
     autoUpdater.on('update-not-available', () => {

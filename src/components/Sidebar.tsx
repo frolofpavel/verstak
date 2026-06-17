@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { useProject, type ViewId } from '../store/projectStore'
 import { ModelPicker } from './ModelPicker'
 import { CreateClientModal } from './CreateClientModal'
@@ -343,28 +343,40 @@ interface SidebarProps {
   'aria-hidden'?: boolean
 }
 
+const MORE_VIEW_IDS = new Set<ViewId>([
+  'inspector', 'project-map', 'tasks-manager', 'task', 'agents', 'memory-gov', 'workflow', 'video', 'feedback',
+])
+
 export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarProps) {
   const { path, tree, setProject, activeView, setActiveView, refreshProjectList } = useProject()
   const t = useT()
   const [showCreateClient, setShowCreateClient] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(() => MORE_VIEW_IDS.has(activeView))
 
-  const NAV: NavItem[] = [
+  const PRIMARY_NAV: NavItem[] = [
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
-    { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
-    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon },
-    { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
-    { id: 'task',     label: t.sidebar.task,    icon: DevTaskIcon },
-    { id: 'agents',   label: t.sidebar.agents,  icon: AgentsIcon },
-    { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
-    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon },
     { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'browser',  label: t.sidebar.browser,  icon: BrowserIcon },
     { id: 'design',   label: t.sidebar.design,   icon: DesignIcon },
-    { id: 'video',    label: t.sidebar.video,    icon: VideoIcon },
-    { id: 'feedback', label: t.sidebar.feedback, icon: FeedbackIcon }
   ]
+
+  const MORE_NAV: NavItem[] = [
+    { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
+    { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
+    { id: 'agents',   label: t.sidebar.agents,  icon: AgentsIcon },
+    { id: 'task',     label: t.sidebar.task,    icon: DevTaskIcon },
+    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon },
+    { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
+    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon },
+    { id: 'video',    label: t.sidebar.video,    icon: VideoIcon, badge: t.sidebar.soon },
+    { id: 'feedback', label: t.sidebar.feedback, icon: FeedbackIcon },
+  ]
+
+  useEffect(() => {
+    if (MORE_VIEW_IDS.has(activeView)) setMoreOpen(true)
+  }, [activeView])
 
   async function handleClientOpened(clientPath: string) {
     await setProject(clientPath)
@@ -394,10 +406,36 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
           <>
             <ChatNavSection />
             <div className="gg-nav">
-              {NAV.map(item => (
+              {PRIMARY_NAV.map(item => (
                 <button
                   key={item.id}
-                  className={`gg-nav-item ${activeView === item.id ? 'is-active' : ''} ${item.badge ? 'is-disabled' : ''}`}
+                  className={`gg-nav-item ${activeView === item.id ? 'is-active' : ''}`}
+                  onClick={() => setActiveView(item.id)}
+                >
+                  <span className="gg-nav-icon">{item.icon}</span>
+                  <span className="gg-nav-label">{item.label}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`gg-nav-item gg-nav-more-toggle ${moreOpen ? 'is-open' : ''}`}
+                onClick={() => setMoreOpen(v => !v)}
+                aria-expanded={moreOpen}
+              >
+                <span className="gg-nav-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                    <circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                    <circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <span className="gg-nav-label">{t.sidebar.more}</span>
+                <span className="gg-nav-caret">{moreOpen ? '▾' : '▸'}</span>
+              </button>
+              {moreOpen && MORE_NAV.map(item => (
+                <button
+                  key={item.id}
+                  className={`gg-nav-item is-nested ${activeView === item.id ? 'is-active' : ''} ${item.badge ? 'is-disabled' : ''}`}
                   onClick={() => { if (!item.badge) setActiveView(item.id) }}
                 >
                   <span className="gg-nav-icon">{item.icon}</span>

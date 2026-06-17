@@ -1840,6 +1840,14 @@ html {
   padding: 1px 6px;
   border-radius: 999px;
 }
+.gg-nav-more-toggle .gg-nav-caret {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.gg-nav-item.is-nested {
+  padding-left: 28px;
+  font-size: 12px;
+}
 
 /* Chat nav section (collapsible list of chat sessions) */
 .gg-chat-nav-head {
@@ -2269,6 +2277,13 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   border-top: 1px solid var(--border-subtle);
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-elevated);
+  min-height: 52px;
+}
+.gg-sidebar-footer .gg-model-picker-trigger,
+.gg-sidebar-footer .gg-provider-badge-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
 }
 .gg-provider-badge {
   display: flex; align-items: center; gap: 8px;
@@ -2596,6 +2611,19 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-composer > * {
   width: 100%;
   max-width: 920px;
+}
+.gg-composer-cli-strip {
+  font-size: 11px;
+  line-height: 1.4;
+  color: #d8a657;
+  background: color-mix(in srgb, #d8a657 12%, transparent);
+  border: 1px solid color-mix(in srgb, #d8a657 28%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  margin-bottom: 8px;
+}
+.gg-composer.has-cli-strip .gg-composer-inner {
+  border-color: color-mix(in srgb, #d8a657 35%, var(--border-default));
 }
 .gg-composer-inner {
   position: relative;
@@ -3173,6 +3201,46 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
+}
+.gg-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--text-secondary);
+}
+.gg-empty-state-icon { font-size: 28px; line-height: 1; opacity: 0.85; }
+.gg-empty-state-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.gg-empty-state-hint {
+  font-size: var(--text-xs);
+  max-width: 360px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+.gg-models-caps-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+}
+.gg-models-caps-badge.is-api {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gg-models-caps-badge.is-cli {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 35%, transparent);
+  background: color-mix(in srgb, #d8a657 10%, transparent);
 }
 .gg-models-card-transport {
   font-size: 10px;
@@ -4424,6 +4492,8 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   background: var(--bg-base);
 }
 .gg-panel-header {
+  gap: 8px;
+  padding: 12px 14px 10px;
   padding: 18px 28px 14px;
   border-bottom: 1px solid var(--border-subtle);
   display: flex; align-items: baseline; justify-content: space-between;
@@ -9027,7 +9097,13 @@ textarea.gg-input {
 }
 
 /* === Agents Panel (Фаза 2 — мультиагентность: суб-сессии + очередь) === */
-.gg-agents-toolbar { align-items: center; }
+.gg-agents-toolbar,
+.gg-inspector-toolbar {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  min-height: 44px;
+}
 .gg-agents-select {
   height: 28px;
   padding: 0 8px;

@@ -1452,7 +1452,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       <TimelineBar />
       <ReviewPanel />
 
-      <div className="gg-composer">
+      <div className={`gg-composer${provider.id.endsWith('-cli') ? ' has-cli-strip' : ''}`}>
+        {provider.id.endsWith('-cli') && (
+          <div className="gg-composer-cli-strip" role="note">
+            {t.chat.cliStrip}
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="gg-attach-row">
             {attachments.map((a, i) => (

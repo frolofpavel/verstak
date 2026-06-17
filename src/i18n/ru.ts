@@ -130,6 +130,8 @@ export const ru: Translations = {
     agents: 'Агенты',
     memory: 'Память',
     workflow: 'Workflows',
+    more: 'Ещё',
+    soon: 'Скоро',
   },
   agentRuns: {
     title: 'Задачи',
@@ -235,6 +237,11 @@ export const ru: Translations = {
     noMemories: 'Нет сохранённых воспоминаний для этого проекта',
     clearAll: 'Очистить всё',
     detectedCli: 'Обнаруженные CLI',
+    capsFull: 'Полный контроль',
+    capsFullHint: 'API: undo, checkpoint, подтверждение правок и tools внутри Verstak',
+    capsCli: 'Внешний агент',
+    capsCliHint: 'CLI: правки выполняет внешняя программа — контроль Verstak ограничен',
+    updateStarting: 'Версия {version} — начинаю скачивание…',
     application: 'Приложение',
     server: 'Сервер',
     resizeDrag: 'Перетащи чтобы изменить ширину',
@@ -313,6 +320,7 @@ export const ru: Translations = {
     later: 'Позже',
   },
   chat: {
+    cliStrip: 'Внешний агент — без undo, checkpoint и подтверждения правок в Verstak',
     placeholder: 'Опишите задачу…',
     streamingPlaceholder: 'отвечает… (Esc — остановить)',
     streamingAppendHint: 'добавить в контекст текущей задачи',

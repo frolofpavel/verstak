@@ -4,6 +4,7 @@ import { useT } from '../i18n'
 import type { Translations } from '../i18n'
 import type { AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO } from '../types/api'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
+import { EmptyState } from './EmptyState'
 
 function fmtDuration(start: number, end: number | null): string {
   const ms = (end ?? Date.now()) - start
@@ -353,11 +354,12 @@ export function AgentRunsPanel() {
 
       <div className="gg-panel-body">
         {filtered.length === 0 ? (
-          <div className="gg-agents-empty">
-            <div className="gg-agents-empty-icon">🗂️</div>
-            <div className="gg-agents-empty-title">{t.agentRuns.emptyTitle}</div>
-            <div className="gg-agents-empty-hint">{t.agentRuns.emptyHint}</div>
-          </div>
+          <EmptyState
+            icon="🗂️"
+            title={t.agentRuns.emptyTitle}
+            hint={t.agentRuns.emptyHint}
+            className="gg-agents-empty"
+          />
         ) : (
           <div className="gg-run-list">
             {filtered.map(r => (

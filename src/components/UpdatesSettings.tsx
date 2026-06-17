@@ -195,7 +195,7 @@ export function UpdatesSettings() {
           </button>
           {status === 'current' && <span className="gg-settings-hint">{t.settings.upToDate}</span>}
           {status === 'available' && remoteVersion && (
-            <span className="gg-settings-hint">{t.settings.updateAvailable.replace('{version}', remoteVersion)}</span>
+            <span className="gg-settings-hint">{t.settings.updateStarting.replace('{version}', remoteVersion)}</span>
           )}
           {status === 'pending' && remoteVersion && (
             <span className="gg-settings-hint">{t.settings.updatePendingRelease.replace('{version}', remoteVersion)}</span>

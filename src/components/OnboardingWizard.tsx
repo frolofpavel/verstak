@@ -52,7 +52,7 @@ export function OnboardingWizard({ onComplete }: Props) {
       } catch { /* */ }
     })()
     Promise.all([
-      window.api.cli.detect().catch(() => [] as DetectedCli[]),
+      import('../lib/prefetch-cli').then(m => m.getDetectedClisCached()),
       window.api.localModels.scan().catch(() => [] as DetectedLocalServer[]),
     ]).then(([cliList, serverList]) => {
       setClis(cliList)

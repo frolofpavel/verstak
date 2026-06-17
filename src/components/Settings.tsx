@@ -2457,6 +2457,7 @@ type CliId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
 type CliStatusMap = Record<CliId, { installed: boolean; loggedIn: boolean; credPath?: string }>
 
 function ProvidersPage(props: ProvidersPageProps) {
+  const t = useT()
   const { providers, keys, setKeys, activeProvider, setActiveProvider,
           customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
           customOpenaiModels, setCustomOpenaiModels } = props
@@ -2468,7 +2469,7 @@ function ProvidersPage(props: ProvidersPageProps) {
   // null = ещё не загружено (показываем "Среда" по дефолту).
   const [cliStatus, setCliStatus] = useState<CliStatusMap | null>(null)
   // Обнаруженные CLI-инструменты на компьютере пользователя.
-  const [detectedClis, setDetectedClis] = useState<DetectedCli[] | null>(null)
+  const [detectedClis, setDetectedClis] = useState<DetectedCli[]>([])
 
   async function loadCliStatus() {
     try {
@@ -2478,7 +2479,7 @@ function ProvidersPage(props: ProvidersPageProps) {
   }
   useEffect(() => {
     void loadCliStatus()
-    window.api.cli.detect().then(setDetectedClis).catch(() => {})
+    void import('../lib/prefetch-cli').then(m => m.getDetectedClisCached().then(setDetectedClis))
   }, [])
 
   // «Подключён» = доступен для отправки запросов:
@@ -2615,6 +2616,12 @@ function ProvidersPage(props: ProvidersPageProps) {
               <div className="gg-prov-card-main">
                 <div className="gg-prov-card-name">
                   {p.name}
+                  <span
+                    className={`gg-models-caps-badge ${p.transport === 'CLI' ? 'is-cli' : 'is-api'}`}
+                    title={p.transport === 'CLI' ? t.settings.capsCliHint : t.settings.capsFullHint}
+                  >
+                    {p.transport === 'CLI' ? t.settings.capsCli : t.settings.capsFull}
+                  </span>
                   <span className={`gg-prov-badge is-${badge.tone}`} title={badge.title}>{badge.label}</span>
                 </div>
                 <div className="gg-prov-card-desc">{p.description}</div>
@@ -2670,7 +2677,16 @@ function ProvidersPage(props: ProvidersPageProps) {
         {available.map(p => (
           <div key={p.id} className="gg-prov-card">
             <div className="gg-prov-card-main">
-              <div className="gg-prov-card-name">{p.name}<span className="gg-prov-badge is-recommended">Рекомендуемый</span></div>
+              <div className="gg-prov-card-name">
+                {p.name}
+                <span
+                  className={`gg-models-caps-badge is-api`}
+                  title={t.settings.capsFullHint}
+                >
+                  {t.settings.capsFull}
+                </span>
+                <span className="gg-prov-badge is-recommended">Рекомендуемый</span>
+              </div>
               <div className="gg-prov-card-desc">{p.description}</div>
             </div>
             <div className="gg-prov-card-actions">
@@ -2700,7 +2716,7 @@ function ProvidersPage(props: ProvidersPageProps) {
         CLI-провайдеры (Gemini CLI / Claude Code / Grok Build / Codex) подключаются установкой соответствующего CLI вне приложения и логином через подписку. После этого они появляются как «Среда».
       </div>
 
-      {detectedClis !== null && detectedClis.length > 0 && (
+      {detectedClis.length > 0 && (
         <div className="gg-prov-detected">
           <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Обнаруженные CLI</div>
           <div className="gg-prov-detected-list">
@@ -2866,6 +2882,7 @@ interface ModelsPageProps {
 type ModelsCliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
 function ModelsPage(props: ModelsPageProps) {
+  const t = useT()
   const {
     providers, enabledModels, setEnabledModels, models, setModels,
     activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onGoToProviders
@@ -3024,7 +3041,12 @@ function ModelsPage(props: ModelsPageProps) {
               <div className="gg-models-card-head">
                 <div className="gg-models-card-title">
                   <span className="gg-models-card-name">{p.name}</span>
-                  <span className={`gg-models-card-transport is-${p.transport.toLowerCase()}`}>{p.transport}</span>
+                  <span
+                    className={`gg-models-caps-badge ${p.transport === 'CLI' ? 'is-cli' : 'is-api'}`}
+                    title={p.transport === 'CLI' ? t.settings.capsCliHint : t.settings.capsFullHint}
+                  >
+                    {p.transport === 'CLI' ? t.settings.capsCli : t.settings.capsFull}
+                  </span>
                   {isActiveProvider && <span className="gg-models-card-active">текущий</span>}
                 </div>
                 <div className="gg-models-card-meta">

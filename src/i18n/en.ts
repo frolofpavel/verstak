@@ -131,6 +131,8 @@ export const en = {
     agents: 'Agents',
     memory: 'Memory',
     workflow: 'Workflows',
+    more: 'More',
+    soon: 'Soon',
   },
 
   agentRuns: {
@@ -240,6 +242,11 @@ export const en = {
     noMemories: 'No saved memories for this project',
     clearAll: 'Clear all',
     detectedCli: 'Detected CLI tools',
+    capsFull: 'Full control',
+    capsFullHint: 'API: undo, checkpoint, write confirmation and tools inside Verstak',
+    capsCli: 'External agent',
+    capsCliHint: 'CLI: an external program applies edits — Verstak control is limited',
+    updateStarting: 'Version {version} — starting download…',
     application: 'Application',
     server: 'Server',
     resizeDrag: 'Drag to resize',
@@ -323,6 +330,7 @@ export const en = {
 
   // Chat
   chat: {
+    cliStrip: 'External agent — no undo, checkpoint, or write confirmation in Verstak',
     placeholder: 'Describe your task…',
     streamingPlaceholder: 'is responding… (Esc — stop)',
     streamingAppendHint: 'add to the current task context',
