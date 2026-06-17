@@ -76,7 +76,8 @@ import { registerCommandsIpc } from './ipc/commands'
 import { registerMcpIpc } from './ipc/mcp'
 import { mcpClient } from './mcp/client'
 import { registerAuditIpc } from './ipc/audit'
-import { appendAudit } from './storage/audit-log'
+import { appendAudit, queryAudit } from './storage/audit-log'
+import { registerProofIpc } from './ipc/proof'
 import { registerDebugIpc } from './ipc/debug'
 import { saveRunInput } from './storage/run-inputs'
 import { trackToolForPatterns } from './ai/procedural-memory'
@@ -478,6 +479,13 @@ app.whenReady().then(() => {
   registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend, agentRunsReconciledAt)
   // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
   registerVerificationsIpc(verifications)
+  // Proof Pack — доказательство выполнения прогона (proof.json + proof.html).
+  registerProofIpc({
+    agentRuns,
+    verifications,
+    getProjectRoot: getActiveProjectPath,
+    queryAuditForRun: (runId) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp }))
+  })
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)

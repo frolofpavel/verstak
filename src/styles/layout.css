@@ -9597,6 +9597,10 @@ textarea.gg-input {
   background: var(--bg-secondary);
 }
 .gg-run-section { display: flex; flex-direction: column; gap: 6px; }
+/* Proof Pack — кнопка сборки доказательства прогона. */
+.gg-run-proof { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gg-btn-sm { font-size: var(--text-xs); padding: 4px 10px; }
+.gg-run-proof-msg { font-size: var(--text-xs); color: var(--success, #3a9d5a); }
 .gg-run-section-title {
   font-size: 11px;
   text-transform: uppercase;

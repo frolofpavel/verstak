@@ -331,6 +331,10 @@ declare global {
         updateStep: (id: number, patch: { status?: StepStatus; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) => Promise<void>
         remove: (id: number) => Promise<void>
       }
+      /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html). */
+      proof: {
+        generate: (runId: string) => Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; html?: string; error?: string }>
+      }
       workflows: {
         list: () => Promise<WorkflowSummary[]>
         start: (workflowId: string, projectPath: string, brief: string) => Promise<WorkflowStartResult | { error: string; message: string }>

@@ -209,6 +209,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('plans:update-step', id, patch),
     remove: (id: number) => ipcRenderer.invoke('plans:remove', id)
   },
+  proof: {
+    generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<
+      { ok: boolean; jsonPath?: string; htmlPath?: string; html?: string; error?: string }
+    >
+  },
   workflows: {
     list: () => ipcRenderer.invoke('workflows:list'),
     start: (workflowId: string, projectPath: string, brief: string) =>

@@ -70,6 +70,25 @@ function eventIcon(kind: string): string {
 function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id: string | null) => string }) {
   const [detail, setDetail] = useState<AgentRunDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [proofMsg, setProofMsg] = useState<string | null>(null)
+  const [proofBusy, setProofBusy] = useState(false)
+
+  // Proof Pack — собрать доказательство выполнения прогона в proof.json + .html.
+  const genProof = useCallback(async () => {
+    setProofBusy(true); setProofMsg(null)
+    try {
+      const res = await window.api.proof.generate(runId)
+      if (res.ok && res.htmlPath) {
+        void window.api.files.revealInExplorer(res.htmlPath).catch(() => {})
+        setProofMsg('✓ Proof Pack собран — файл открыт в проводнике')
+      } else {
+        setProofMsg(`Не удалось собрать: ${res.error ?? 'ошибка'}`)
+      }
+    } catch {
+      setProofMsg('Не удалось собрать Proof Pack')
+    }
+    setProofBusy(false)
+  }, [runId])
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +126,18 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
 
   return (
     <div className="gg-run-detail">
+      <div className="gg-run-proof">
+        <button
+          type="button"
+          className="gg-btn gg-btn-sm"
+          onClick={() => void genProof()}
+          disabled={proofBusy}
+          title="Собрать доказательство выполнения: изменённые файлы, проверки (DoD), стоимость, таймлайн, решения — в proof.json + proof.html"
+        >
+          🔏 {proofBusy ? 'Собираю…' : 'Proof Pack'}
+        </button>
+        {proofMsg && <span className="gg-run-proof-msg">{proofMsg}</span>}
+      </div>
       {/* (1) Timeline событий */}
       <div className="gg-run-section">
         <div className="gg-run-section-title">Timeline</div>
