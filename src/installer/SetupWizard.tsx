@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { InstallDefaults, InstallProgress } from '../../electron/installer/types'
 import iconUrl from '../assets/icon.png'
+import { MODEL_PROVIDER_COUNT } from './constants'
 
 type Step = 'welcome' | 'directory' | 'installing' | 'finish'
 
 const FEATURES = [
-  'AI-агенты и модели',
+  `${MODEL_PROVIDER_COUNT} провайдеров AI-моделей`,
   'Проекты и память',
   'Skills и артефакты',
 ]
@@ -80,15 +81,24 @@ export function SetupWizard() {
 
   function renderContent() {
     if (!defaults) {
-      return <p className="gg-installer-text">Загрузка…</p>
+      return (
+        <div className="gg-installer-boot">
+          <div className="gg-installer-boot-spinner" aria-hidden="true" />
+          <p className="gg-installer-boot-title">Загрузка установщика…</p>
+          <p className="gg-installer-text">Сканирование пакета приложения.</p>
+        </div>
+      )
     }
 
     if (step === 'welcome') {
       return (
         <>
           <h1 className="gg-installer-title">Добро пожаловать в Verstak</h1>
+          <p className="gg-installer-lead">
+            IDE для AI-агентов с {MODEL_PROVIDER_COUNT} провайдерами моделей
+          </p>
           <p className="gg-installer-text">
-            Мастер установит Verstak — IDE для AI-агентов — на ваш компьютер.{'\n\n'}
+            Мастер установит Verstak на ваш компьютер.{'\n\n'}
             Рекомендуется закрыть другие приложения перед продолжением.
           </p>
         </>
@@ -141,8 +151,11 @@ export function SetupWizard() {
     return (
       <>
         <h1 className="gg-installer-title">Verstak установлен</h1>
+        <p className="gg-installer-lead">
+          {MODEL_PROVIDER_COUNT} провайдеров моделей готовы к подключению
+        </p>
         <p className="gg-installer-text">
-          IDE для AI-агентов готова к работе. Ярлык появится в меню «Пуск» и на рабочем столе.
+          Ярлык появится в меню «Пуск» и на рабочем столе.
         </p>
         <label className="gg-installer-check">
           <input type="checkbox" checked={runAfter} onChange={(e) => setRunAfter(e.target.checked)} />
@@ -205,7 +218,8 @@ export function SetupWizard() {
         </div>
         <div className="gg-installer-mode">
           <div className="gg-installer-mode-title">УСТАНОВКА</div>
-          <div className="gg-installer-mode-sub">IDE для AI-агентов</div>
+          <div className="gg-installer-mode-stat">{MODEL_PROVIDER_COUNT}</div>
+          <div className="gg-installer-mode-sub">провайдеров AI-моделей</div>
         </div>
         <div className="gg-installer-features">
           {FEATURES.map((text) => (

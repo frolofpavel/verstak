@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, stat, writeFile } from 'fs/promises'
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { dirname, join, relative } from 'path'
 import { homedir } from 'os'
 import type { InstallDefaults, InstallProgress, InstallResult } from './types'
@@ -35,9 +35,22 @@ export async function collectPayloadStats(payloadRoot: string): Promise<{ fileCo
   }
 }
 
+async function readPayloadManifest(payloadRoot: string): Promise<{ fileCount: number; payloadBytes: number } | null> {
+  try {
+    const raw = await readFile(join(payloadRoot, 'payload-manifest.json'), 'utf8')
+    const parsed = JSON.parse(raw) as { fileCount?: number; payloadBytes?: number }
+    if (typeof parsed.fileCount === 'number' && typeof parsed.payloadBytes === 'number') {
+      return { fileCount: parsed.fileCount, payloadBytes: parsed.payloadBytes }
+    }
+  } catch {
+    // fall back to directory walk
+  }
+  return null
+}
+
 export async function getInstallDefaults(version: string, productName: string): Promise<InstallDefaults> {
   const payloadRoot = resolvePayloadRoot()
-  const stats = await collectPayloadStats(payloadRoot)
+  const stats = (await readPayloadManifest(payloadRoot)) ?? await collectPayloadStats(payloadRoot)
   return {
     version,
     productName,

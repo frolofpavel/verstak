@@ -29,10 +29,29 @@ function die(msg) {
   process.exit(1)
 }
 
+const PAYLOAD_SKIP = new Set(['app-payload', 'locales'])
+
+function computePayloadManifest(dir) {
+  let fileCount = 0
+  let payloadBytes = 0
+  function walk(current) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const abs = path.join(current, entry.name)
+      if (entry.isDirectory()) walk(abs)
+      else if (entry.isFile()) {
+        fileCount += 1
+        payloadBytes += fs.statSync(abs).size
+      }
+    }
+  }
+  walk(dir)
+  return { fileCount, payloadBytes }
+}
+
 function copyDirFiltered(src, dest) {
   fs.mkdirSync(dest, { recursive: true })
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    if (entry.name === 'app-payload') continue
+    if (PAYLOAD_SKIP.has(entry.name)) continue
     const from = path.join(src, entry.name)
     const to = path.join(dest, entry.name)
     if (entry.isDirectory()) copyDirFiltered(from, to)
@@ -76,6 +95,15 @@ if (!fs.existsSync(path.join(UNPACKED, 'Verstak.exe'))) {
 console.log('[build-setup] prepare app-payload-staging')
 fs.rmSync(STAGING, { recursive: true, force: true })
 copyDirFiltered(UNPACKED, STAGING)
+const manifest = computePayloadManifest(STAGING)
+fs.writeFileSync(
+  path.join(STAGING, 'payload-manifest.json'),
+  `${JSON.stringify(manifest, null, 2)}\n`,
+)
+console.log(`[build-setup] payload: ${(manifest.payloadBytes / (1024 * 1024)).toFixed(1)} MB, ${manifest.fileCount} files`)
+
+console.log('[build-setup] installer splash bmp')
+require('./generate-installer-splash.cjs')
 
 console.log('[build-setup] vite build (installer)')
 run(NPX, ['electron-vite', 'build', '--config', 'electron.vite.installer.config.ts'])

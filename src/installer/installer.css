@@ -10,7 +10,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 164px 1fr;
+  grid-template-columns: 220px 1fr;
 }
 
 .gg-installer-sidebar {
@@ -35,7 +35,7 @@
 }
 
 .gg-installer-brand {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.22em;
   color: var(--text-secondary);
@@ -64,16 +64,27 @@
 }
 
 .gg-installer-mode-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.18em;
   color: var(--accent);
 }
 
+.gg-installer-mode-stat {
+  margin-top: 10px;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
 .gg-installer-mode-sub {
-  margin-top: 4px;
-  font-size: 8px;
-  color: var(--text-tertiary);
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-secondary);
 }
 
 .gg-installer-features {
@@ -86,11 +97,18 @@
 
 .gg-installer-feature {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 8.5px;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.gg-installer-feature:first-child {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .gg-installer-feature:last-child {
@@ -144,9 +162,45 @@
 
 .gg-installer-title {
   margin: 0 0 10px;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.gg-installer-lead {
+  margin: 0 0 14px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--accent);
+}
+
+.gg-installer-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.gg-installer-boot-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: gg-installer-spin 0.9s linear infinite;
+}
+
+.gg-installer-boot-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+@keyframes gg-installer-spin {
+  to { transform: rotate(360deg); }
 }
 
 .gg-installer-text {

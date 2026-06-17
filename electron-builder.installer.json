@@ -38,6 +38,7 @@
     "signAndEditExecutable": false
   },
   "portable": {
-    "artifactName": "Verstak-Setup-${version}-${arch}.${ext}"
+    "artifactName": "Verstak-Setup-${version}-${arch}.${ext}",
+    "splashImage": "resources/installer-splash.bmp"
   }
 }
