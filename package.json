@@ -15,7 +15,9 @@
     "electron-rebuild": "electron-rebuild -f -o better-sqlite3",
     "predev": "npm run electron-rebuild",
     "dist": "npm run electron-rebuild && npm run build && electron-builder",
-    "dist:win": "npm run generate:icon && npm run electron-rebuild && npm run build && electron-builder --win --x64",
+    "dist:win": "npm run generate:icon && npm run electron-rebuild && npm run build && electron-builder --win --x64 && node scripts/build-setup.cjs",
+    "build:setup": "node scripts/build-setup.cjs",
+    "dev:installer": "node scripts/dev-installer.cjs",
     "patch:exe-icon": "node scripts/patch-exe-icon.cjs",
     "dist:linux": "npm run build && electron-builder --linux --x64",
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
@@ -51,7 +53,7 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "dir",
           "arch": [
             "x64"
           ]
@@ -65,16 +67,6 @@
       ],
       "icon": "resources/icon.ico",
       "signAndEditExecutable": false
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Verstak",
-      "artifactName": "Verstak-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
       "artifactName": "Verstak-Portable-${version}-${arch}.${ext}"

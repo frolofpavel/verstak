@@ -1,0 +1,243 @@
+.gg-installer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.gg-installer-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 164px 1fr;
+}
+
+.gg-installer-sidebar {
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-base) 55%, #262b33 100%);
+  border-right: 1px solid var(--border-subtle);
+  padding: 14px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+
+.gg-installer-sidebar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+.gg-installer-brand {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--text-secondary);
+  padding-left: 6px;
+}
+
+.gg-installer-logo-wrap {
+  margin: 8px auto 0;
+  width: 128px;
+  height: 128px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-overlay) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-default) 65%, transparent);
+  display: grid;
+  place-items: center;
+}
+
+.gg-installer-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.gg-installer-mode {
+  text-align: center;
+}
+
+.gg-installer-mode-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.gg-installer-mode-sub {
+  margin-top: 4px;
+  font-size: 8px;
+  color: var(--text-tertiary);
+}
+
+.gg-installer-features {
+  margin-top: auto;
+  padding: 10px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--border-subtle);
+}
+
+.gg-installer-feature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 8.5px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.gg-installer-feature:last-child {
+  margin-bottom: 0;
+}
+
+.gg-installer-feature-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  flex-shrink: 0;
+}
+
+.gg-installer-steps {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.gg-installer-step {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  opacity: 0.55;
+}
+
+.gg-installer-step.is-active {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+.gg-installer-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-base);
+}
+
+.gg-installer-content {
+  flex: 1;
+  min-height: 0;
+  padding: 28px 32px 16px;
+  overflow: auto;
+}
+
+.gg-installer-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gg-installer-text {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-line;
+}
+
+.gg-installer-field {
+  margin-top: 22px;
+}
+
+.gg-installer-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.gg-installer-path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.gg-installer-path-row .gg-input {
+  flex: 1;
+}
+
+.gg-installer-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.gg-installer-check input {
+  accent-color: var(--accent);
+}
+
+.gg-installer-progress {
+  margin-top: 24px;
+}
+
+.gg-installer-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.gg-installer-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 180ms ease;
+}
+
+.gg-installer-progress-meta {
+  margin-top: 10px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.gg-installer-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--error-muted);
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  color: #f0b0b6;
+  font-size: var(--text-sm);
+}
+
+.gg-installer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-elevated) 40%, var(--bg-base));
+}
+
+.gg-installer-footer .gg-btn {
+  min-width: 96px;
+  height: 34px;
+}
+
+.gg-installer-footer .gg-btn-primary {
+  min-width: 120px;
+}
