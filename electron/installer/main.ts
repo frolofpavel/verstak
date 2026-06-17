@@ -27,14 +27,17 @@ function readAppVersion(): string {
 let mainWindow: BrowserWindow | null = null
 
 function resolvePreload(): string {
-  return join(HERE, '../preload/installer.mjs')
+  if (process.env.ELECTRON_RENDERER_URL) {
+    return join(HERE, '../preload/installer.mjs')
+  }
+  return join(app.getAppPath(), 'out/preload/installer.mjs')
 }
 
 function resolveRenderer(): string {
   if (process.env.ELECTRON_RENDERER_URL) {
     return `${process.env.ELECTRON_RENDERER_URL}/installer.html`
   }
-  return join(HERE, '../renderer/installer.html')
+  return join(app.getAppPath(), 'out/renderer/installer.html')
 }
 
 function createWindow(): void {
@@ -46,7 +49,7 @@ function createWindow(): void {
     resizable: false,
     maximizable: false,
     frame: false,
-    show: false,
+    show: true,
     backgroundColor: '#2e3440',
     title: PRODUCT_NAME,
     webPreferences: {
@@ -57,12 +60,18 @@ function createWindow(): void {
     },
   })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
   const target = resolveRenderer()
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+    dialog.showErrorBox('Verstak Setup', `Не удалось загрузить интерфейс (${code}): ${description}\n${url}`)
+    app.quit()
+  })
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(target)
   } else {
-    void mainWindow.loadFile(target)
+    void mainWindow.loadFile(target).catch((err: Error) => {
+      dialog.showErrorBox('Verstak Setup', `loadFile: ${err.message}\n${target}`)
+      app.quit()
+    })
   }
 
   mainWindow.on('maximize', () => mainWindow?.webContents.send('installer:window:maximized', true))
