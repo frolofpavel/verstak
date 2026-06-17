@@ -72,15 +72,20 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   const [loading, setLoading] = useState(true)
   const [proofMsg, setProofMsg] = useState<string | null>(null)
   const [proofBusy, setProofBusy] = useState(false)
+  const recordArtifact = useProject(s => s.recordArtifact)
+  const setPreviewArtifact = useProject(s => s.setPreviewArtifact)
 
-  // Proof Pack — собрать доказательство выполнения прогона в proof.json + .html.
+  // Proof Pack — собрать доказательство прогона (proof.json + .html) и показать
+  // его в embedded-preview приложения (как html-артефакт).
   const genProof = useCallback(async () => {
     setProofBusy(true); setProofMsg(null)
     try {
       const res = await window.api.proof.generate(runId)
       if (res.ok && res.htmlPath) {
-        void window.api.files.revealInExplorer(res.htmlPath).catch(() => {})
-        setProofMsg('✓ Proof Pack собран — файл открыт в проводнике')
+        const filename = res.htmlPath.split(/[/\\]/).pop() ?? 'proof.html'
+        recordArtifact({ kind: 'html', filename, path: res.htmlPath, sizeBytes: res.html?.length ?? 0 })
+        setPreviewArtifact(res.htmlPath)
+        setProofMsg('✓ Proof Pack собран')
       } else {
         setProofMsg(`Не удалось собрать: ${res.error ?? 'ошибка'}`)
       }
@@ -88,7 +93,7 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
       setProofMsg('Не удалось собрать Proof Pack')
     }
     setProofBusy(false)
-  }, [runId])
+  }, [runId, recordArtifact, setPreviewArtifact])
 
   const load = useCallback(async () => {
     try {
