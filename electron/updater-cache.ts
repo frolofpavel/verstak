@@ -91,8 +91,16 @@ export async function reconcileCachedDownload(
       const meta = JSON.parse(readFileSync(infoPath, 'utf8')) as PendingUpdateMeta
       const cached = join(pending, meta.fileName)
       if (existsSync(cached)) {
-        const hash = await hashFileSha512Base64(cached)
-        if (hash === sha512) return cached
+        const size = statSync(cached).size
+        if (expectedSize > 0 && size !== expectedSize) {
+          /* broken pending — fall through */
+        } else if (!sha512 || meta.sha512 === sha512) {
+          // Уже валидный pending-кэш electron-updater — не перечитываем 250+ МБ на sha512.
+          return cached
+        } else {
+          const hash = await hashFileSha512Base64(cached)
+          if (hash === sha512) return cached
+        }
       }
     } catch { /* fall through */ }
   }

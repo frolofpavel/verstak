@@ -24,6 +24,8 @@ autoUpdater.disableDifferentialDownload = true
 
 const PERIODIC_CHECK_MS = 4 * 60 * 60 * 1000
 const DOWNLOAD_STALL_MS = 3 * 60 * 1000
+const CHECK_TIMEOUT_MS = 45_000
+const UPDATER_RPC_TIMEOUT_MS = 20_000
 
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
 
@@ -45,6 +47,17 @@ let lastProgressAt = 0
 let stallTimer: ReturnType<typeof setTimeout> | null = null
 let releaseNotesIpcRegistered = false
 let updaterIpcRegistered = false
+let checkPromise: Promise<void> | null = null
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout`)), ms)
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
 
 function isNewerThanInstalled(target: string | null | undefined): boolean {
   if (!target) return false
@@ -270,45 +283,82 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     return { newer: true, version: remote, pendingRelease: !hasArtifacts }
   }
 
-  const runCheck = async () => {
-    if (checkInFlight) return
+  const finalizeIfStillChecking = () => {
+    if (snapshot.phase !== 'checking') return
+    const remote = snapshot.version ?? lastProbeVersion
+    if (remote && isNewerThanInstalled(remote)) {
+      announceAvailable(remote, snapshot.pendingRelease ?? true)
+      return
+    }
+    announceNotAvailable()
+  }
+
+  const runCheckBody = async () => {
     if (downloadInFlight) return
-    checkInFlight = true
     if (!downloadInFlight) resetFeedToGithub()
 
-    try {
-      setSnapshot({ phase: 'checking' })
-      sendToRenderer(mainWindow, 'update:checking')
+    setSnapshot({ phase: 'checking' })
+    sendToRenderer(mainWindow, 'update:checking')
 
-      const probe = await evaluateProbe()
+    const probe = await evaluateProbe()
 
-      if (!probe.newer || !probe.version) {
-        announceNotAvailable()
-        return
-      }
-
-      if (await tryAnnounceCachedDownload(probe.version)) return
-
-      if (probe.pendingRelease) {
-        announceAvailable(probe.version, true)
-        return
-      }
-
-      const feedReady = await tryUseReleaseFeed(probe.version)
-      if (!feedReady) {
-        announceAvailable(probe.version, true)
-        return
-      }
-
-      try {
-        await autoUpdater.checkForUpdates()
-      } catch (err) {
-        console.warn('[updater] checkForUpdates failed:', err)
-        await ensureDownload(probe.version)
-      }
-    } finally {
-      checkInFlight = false
+    if (!probe.newer || !probe.version) {
+      announceNotAvailable()
+      return
     }
+
+    if (await tryAnnounceCachedDownload(probe.version)) return
+
+    if (probe.pendingRelease) {
+      announceAvailable(probe.version, true)
+      return
+    }
+
+    const feedReady = await tryUseReleaseFeed(probe.version)
+    if (!feedReady) {
+      announceAvailable(probe.version, true)
+      return
+    }
+
+    try {
+      await withTimeout(
+        autoUpdater.checkForUpdates(),
+        UPDATER_RPC_TIMEOUT_MS,
+        'checkForUpdates',
+      )
+    } catch (err) {
+      console.warn('[updater] checkForUpdates failed:', err)
+      await ensureDownload(probe.version)
+    } finally {
+      finalizeIfStillChecking()
+    }
+  }
+
+  const runCheck = async () => {
+    if (checkInFlight && checkPromise) {
+      await checkPromise
+      return
+    }
+    checkInFlight = true
+    checkPromise = withTimeout(runCheckBody(), CHECK_TIMEOUT_MS, 'update check')
+      .catch((err) => {
+        console.warn('[updater] runCheck failed:', err)
+        if (snapshot.phase === 'checking') {
+          const remote = lastProbeVersion
+          if (remote && isNewerThanInstalled(remote)) {
+            void tryAnnounceCachedDownload(remote).then((ok) => {
+              if (!ok) announceAvailable(remote, true)
+            })
+          } else {
+            announceNotAvailable()
+          }
+        }
+      })
+      .finally(() => {
+        checkInFlight = false
+        checkPromise = null
+      })
+    await checkPromise
   }
 
   if (!updaterIpcRegistered) {

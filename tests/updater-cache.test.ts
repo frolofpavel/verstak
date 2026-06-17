@@ -48,6 +48,22 @@ describe('updater-cache', () => {
     expect(existsSync(join(root, 'pending', 'update-info.json'))).toBe(true)
   })
 
+  it('reconcileCachedDownload trusts valid pending without re-hash', async () => {
+    const { getUpdaterCacheRoot, reconcileCachedDownload } = await import('../electron/updater-cache')
+    const root = getUpdaterCacheRoot()
+    const pending = join(root, 'pending')
+    mkdirSync(pending, { recursive: true })
+    const payload = 'pending-ready-payload'
+    const sha512 = createHash('sha512').update(payload).digest('base64')
+    const fileName = 'Verstak-Setup-1.5.7-x64.exe'
+    writeFileSync(join(pending, fileName), payload)
+    writeFileSync(join(pending, 'update-info.json'), JSON.stringify({ fileName, sha512 }))
+
+    const repaired = await reconcileCachedDownload(fileName, sha512, payload.length)
+
+    expect(repaired).toBe(join(pending, fileName))
+  })
+
   it('reconcileCachedDownload repairs installer.exe in cache root', async () => {
     const {
       getUpdaterCacheRoot,

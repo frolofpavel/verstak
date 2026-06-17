@@ -143,13 +143,26 @@ export function UpdatesSettings() {
     }
   }, [remoteVersion, status, version])
 
-  const check = useCallback(async () => {
-    setStatus('checking')
-    setError('')
-    const result = await window.api.updater.check()
+  const applyCheckResult = useCallback((result: {
+    available: boolean
+    version?: string
+    phase?: string
+    error?: string
+    pendingRelease?: boolean
+  }) => {
     if (result.error) {
       setError(friendlyUpdateError(result.error, t.settings.updateError, t.settings.updateNoRelease))
       setStatus('error')
+      return
+    }
+    if (result.phase === 'downloaded') {
+      if (result.version) setRemoteVersion(result.version)
+      setStatus('ready')
+      return
+    }
+    if (result.phase === 'downloading') {
+      if (result.version) setRemoteVersion(result.version)
+      setStatus('downloading')
       return
     }
     if (!result.available) {
@@ -158,7 +171,19 @@ export function UpdatesSettings() {
     }
     if (result.version) setRemoteVersion(result.version)
     setStatus(result.pendingRelease ? 'pending' : 'available')
-  }, [])
+  }, [t.settings.updateError, t.settings.updateNoRelease])
+
+  const check = useCallback(async () => {
+    setStatus('checking')
+    setError('')
+    try {
+      const result = await window.api.updater.check()
+      applyCheckResult(result)
+    } catch {
+      setError(t.settings.updateError)
+      setStatus('error')
+    }
+  }, [applyCheckResult, t.settings.updateError])
 
   const notesTitle = notesTargetVersion && remoteVersion === notesTargetVersion && status !== 'current'
     ? t.updates.releaseNotesTitleAvailable.replace('{version}', notesTargetVersion)
