@@ -34,31 +34,41 @@
   }
   .wrap {
     width: 380px;
-    height: 150px;
+    height: 168px;
     box-sizing: border-box;
-    padding: 22px 24px 18px;
+    padding: 24px 28px 20px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+  }
+  .head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
   }
   .brand {
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.24em;
     color: #81a1c1;
+    line-height: 1.4;
   }
   .title {
     font-size: 17px;
     font-weight: 600;
+    line-height: 1.35;
   }
   .status {
     font-size: 13px;
     color: #d8dee9;
     min-height: 18px;
+    line-height: 1.45;
   }
   .hint {
     font-size: 11px;
     color: #a7b0c0;
+    margin-top: 12px;
+    line-height: 1.4;
   }
   .track {
     height: 6px;
@@ -84,7 +94,7 @@
 </style>
 <script type="text/javascript">
   var W = 380;
-  var H = 150;
+  var H = 168;
   var msgs = ['Распаковка файлов', 'Подготовка мастера', 'Запуск установщика'];
   var msgIndex = 0;
   var statusEl;
@@ -149,9 +159,11 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="brand">VERSTAK</div>
-    <div class="title">Подготовка установщика</div>
-    <div id="status" class="status">Распаковка файлов</div>
+    <div class="head">
+      <div class="brand">VERSTAK</div>
+      <div class="title">Подготовка установщика</div>
+      <div id="status" class="status">Распаковка файлов</div>
+    </div>
     <div class="track"><div class="shimmer"></div></div>
     <div class="hint">Обычно 10–20 секунд</div>
   </div>
