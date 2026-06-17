@@ -1113,6 +1113,22 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               <span className="gg-chat-project-chat">{activeChatTitle}</span>
             </>
           )}
+          {activePath && (
+            <div className="gg-chat-project-actions">
+              <button
+                type="button"
+                className={`gg-terminal-toggle ${rightPanel === 'terminal' ? 'is-open' : ''}`}
+                onClick={() => onSelectRightPanel(rightPanel === 'terminal' ? 'none' : 'terminal')}
+                title={t.chat.dockTerminal}
+                aria-label={t.chat.dockTerminal}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1717,26 +1733,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       </div>
 
       {activePath && (
-        <div className="gg-chat-corner-dock" aria-label={t.chat.panelDockLabel}>
+        <div className="gg-chat-sidechat-dock">
           <button
             type="button"
-            className={`gg-chat-corner-dock-btn is-sidechat ${rightPanel === 'sidechat' ? 'is-active' : ''}`}
+            className={`gg-chat-sidechat-dock-btn ${rightPanel === 'sidechat' ? 'is-active' : ''}`}
             onClick={() => {
               if (rightPanel === 'sidechat') onSelectRightPanel('none')
               else onOpenSideChat()
             }}
             title={t.chat.dockSideChat}
-            aria-label={t.chat.dockSideChat}
           >
-            <span className="gg-chat-corner-dock-icon" aria-hidden>💬</span>
-          </button>
-          <button
-            type="button"
-            className={`gg-chat-corner-dock-btn is-terminal ${rightPanel === 'terminal' ? 'is-active' : ''}`}
-            onClick={() => onSelectRightPanel(rightPanel === 'terminal' ? 'none' : 'terminal')}
-            title={t.chat.dockTerminal}
-          >
-            {t.chat.dockTerminal}
+            <svg className="gg-chat-sidechat-dock-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="4" width="8" height="16" rx="1.5" />
+              <path d="M13 8h6a2 2 0 0 1 2 2v8l-3-2.5H13a2 2 0 0 1-2-2V8z" />
+            </svg>
+            <span>{t.chat.dockSideChat}</span>
           </button>
         </div>
       )}

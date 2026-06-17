@@ -2392,6 +2392,13 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 /* Кнопка-действие в хедере (тоггл терминала) — прижата в правый верхний угол. */
 .gg-chat-project-action { margin-left: auto; }
+.gg-chat-project-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .gg-chat-project-icon { font-size: 14px; opacity: 0.85; }
 .gg-chat-project-name { font-weight: 600; color: var(--text-primary); }
 .gg-chat-project-sep { color: var(--text-disabled); }
@@ -2822,23 +2829,19 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-send-btn:disabled { background: var(--border-default); cursor: not-allowed; }
 .gg-send-btn.gg-stop-btn { background: var(--error); }
 .gg-send-btn.gg-stop-btn:hover { background: #ff8a8d; }
-/* Левый нижний угол чата: параллельный чат (иконка) + терминал (подпись). */
-.gg-chat-corner-dock {
+/* Правый нижний угол: параллельный чат с подписью. */
+.gg-chat-sidechat-dock {
   position: absolute;
-  left: 20px;
+  right: 20px;
   bottom: 20px;
   z-index: 45;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
   pointer-events: none;
 }
-.gg-chat-corner-dock-btn {
+.gg-chat-sidechat-dock-btn {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   min-height: 34px;
   padding: 0 14px;
   border: 1px solid var(--border-default);
@@ -2853,21 +2856,16 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   box-shadow: var(--shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.12));
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
-.gg-chat-corner-dock-btn.is-sidechat {
-  width: 40px;
-  min-width: 40px;
-  padding: 0;
+.gg-chat-sidechat-dock-icon {
+  flex-shrink: 0;
+  opacity: 0.9;
 }
-.gg-chat-corner-dock-icon {
-  font-size: 16px;
-  line-height: 1;
-}
-.gg-chat-corner-dock-btn:hover {
+.gg-chat-sidechat-dock-btn:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong, var(--border-default));
   color: var(--text-primary);
 }
-.gg-chat-corner-dock-btn.is-active {
+.gg-chat-sidechat-dock-btn.is-active {
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent-muted, var(--bg-hover)) 45%, var(--bg-elevated));
