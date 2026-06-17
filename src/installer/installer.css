@@ -188,39 +188,6 @@
   text-align: center;
 }
 
-.gg-installer-loader-icon-wrap {
-  position: relative;
-  width: 84px;
-  height: 84px;
-  display: grid;
-  place-items: center;
-}
-
-.gg-installer-loader-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  border-top-color: var(--accent);
-  border-right-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  animation: gg-installer-spin 1.1s linear infinite;
-}
-
-.gg-installer-loader-ring-2 {
-  inset: 10px;
-  border-top-color: color-mix(in srgb, var(--accent) 70%, white);
-  border-right-color: transparent;
-  animation: gg-installer-spin 1.6s linear infinite reverse;
-}
-
-.gg-installer-loader-icon {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  z-index: 1;
-  animation: gg-installer-pulse 2s ease-in-out infinite;
-}
-
 .gg-installer-loader-title {
   margin: 0;
   font-size: 20px;
@@ -298,15 +265,6 @@
 .gg-installer-text-muted {
   color: var(--text-tertiary);
   font-size: var(--text-sm);
-}
-
-@keyframes gg-installer-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes gg-installer-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(0.96); opacity: 0.9; }
 }
 
 @keyframes gg-installer-slide {

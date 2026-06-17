@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { existsSync, readFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { fileURLToPath, pathToFileURL } from 'url'
+import { fileURLToPath } from 'url'
 import { getInstallDefaults, launchInstalledApp, runInstall } from './engine'
+import { dismissPortableSplash } from './shell'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PRODUCT_NAME = 'Verstak Setup'
@@ -24,7 +25,6 @@ function readAppVersion(): string {
   return '0.0.0'
 }
 
-let splashWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
 
 function resolvePreload(): string {
@@ -39,59 +39,6 @@ function resolveRenderer(): string {
     return `${process.env.ELECTRON_RENDERER_URL}/installer.html`
   }
   return join(app.getAppPath(), 'out/renderer/installer.html')
-}
-
-function resolveSplashBundle(): { html: string; icon: string } {
-  const candidates = [
-    {
-      html: join(app.getAppPath(), 'splash', 'installer-splash.html'),
-      icon: join(app.getAppPath(), 'splash', 'icon.png'),
-    },
-    {
-      html: join(HERE, '../../resources/installer-splash.html'),
-      icon: join(HERE, '../../resources/icon.png'),
-    },
-  ]
-  for (const bundle of candidates) {
-    if (existsSync(bundle.html)) return bundle
-  }
-  throw new Error('Не найден installer-splash.html')
-}
-
-function createSplashWindow(): void {
-  const { html, icon } = resolveSplashBundle()
-  splashWindow = new BrowserWindow({
-    width: 420,
-    height: 300,
-    frame: false,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    center: true,
-    show: true,
-    alwaysOnTop: true,
-    skipTaskbar: false,
-    backgroundColor: '#2e3440',
-    title: PRODUCT_NAME,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  })
-
-  const iconUrl = pathToFileURL(icon).href
-  void splashWindow.loadFile(html, { query: { icon: iconUrl } })
-  splashWindow.on('closed', () => {
-    splashWindow = null
-  })
-}
-
-function closeSplashWindow(): void {
-  if (!splashWindow) return
-  const win = splashWindow
-  splashWindow = null
-  win.close()
 }
 
 function createWindow(): void {
@@ -116,7 +63,7 @@ function createWindow(): void {
 
   const target = resolveRenderer()
   mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
-    closeSplashWindow()
+    dismissPortableSplash()
     dialog.showErrorBox('Verstak Setup', `Не удалось загрузить интерфейс (${code}): ${description}\n${url}`)
     app.quit()
   })
@@ -124,14 +71,14 @@ function createWindow(): void {
     void mainWindow.loadURL(target)
   } else {
     void mainWindow.loadFile(target).catch((err: Error) => {
-      closeSplashWindow()
+      dismissPortableSplash()
       dialog.showErrorBox('Verstak Setup', `loadFile: ${err.message}\n${target}`)
       app.quit()
     })
   }
 
   mainWindow.once('ready-to-show', () => {
-    closeSplashWindow()
+    dismissPortableSplash()
     mainWindow?.show()
     mainWindow?.focus()
   })
@@ -163,14 +110,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    try {
-      createSplashWindow()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dialog.showErrorBox('Verstak Setup', message)
-      app.quit()
-      return
-    }
+    dismissPortableSplash()
     createWindow()
 
     ipcMain.handle('installer:getDefaults', async () => getInstallDefaults(readAppVersion(), 'Verstak'))
@@ -210,7 +150,7 @@ if (!gotLock) {
 }
 
 process.on('uncaughtException', (err) => {
-  closeSplashWindow()
+  dismissPortableSplash()
   dialog.showErrorBox('Verstak Setup', err.message)
   app.quit()
 })

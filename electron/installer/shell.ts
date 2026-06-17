@@ -1,5 +1,21 @@
 import { spawnSync } from 'child_process'
 
+/** Закрывает HTA-splash portable-установщика, если он ещё висит. */
+export function dismissPortableSplash(): void {
+  if (process.platform !== 'win32') return
+  spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      "Get-CimInstance Win32_Process -Filter \"Name='mshta.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*portable-splash.hta*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+    ],
+    { windowsHide: true, shell: false },
+  )
+}
+
 export function psQuote(value: string): string {
   return String(value).replace(/'/g, "''")
 }

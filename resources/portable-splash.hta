@@ -5,10 +5,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <hta:application
   id="app"
-  applicationname="Verstak Setup"
+  applicationname="Verstak Setup Loader"
   border="dialog"
   borderstyle="normal"
-  caption="yes"
+  caption="no"
   contextmenu="no"
   innerborder="no"
   maximizebutton="no"
@@ -16,18 +16,16 @@
   navigable="no"
   scroll="no"
   selection="no"
-  showintaskbar="yes"
+  showintaskbar="no"
   singleinstance="yes"
   sysmenu="no"
   version="1.0"
   windowstate="normal"
 />
-<title>Verstak Setup</title>
+<title>Verstak Setup Loader</title>
 <style>
   html, body {
     margin: 0;
-    width: 460px;
-    height: 250px;
     overflow: hidden;
     background: #2e3440;
     color: #eceff4;
@@ -35,12 +33,13 @@
     user-select: none;
   }
   .wrap {
-    height: 100%;
+    width: 380px;
+    height: 150px;
     box-sizing: border-box;
-    padding: 28px 28px 24px;
+    padding: 22px 24px 18px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
   }
   .brand {
     font-size: 10px;
@@ -49,20 +48,20 @@
     color: #81a1c1;
   }
   .title {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
   }
   .status {
     font-size: 13px;
     color: #d8dee9;
-    min-height: 20px;
+    min-height: 18px;
   }
   .hint {
-    font-size: 12px;
+    font-size: 11px;
     color: #a7b0c0;
   }
   .track {
-    height: 8px;
+    height: 6px;
     border-radius: 999px;
     background: #3b4252;
     border: 1px solid #4c566a;
@@ -78,36 +77,29 @@
     background: linear-gradient(90deg, transparent, #88c0d0, #81a1c1, transparent);
     animation: slide 1.35s ease-in-out infinite;
   }
-  .spinner-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 2px;
-  }
-  .spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid #4c566a;
-    border-top-color: #88c0d0;
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
-    flex-shrink: 0;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes slide {
     0% { left: -45%; }
     100% { left: 105%; }
   }
 </style>
 <script type="text/javascript">
-  var msgs = [
-    'Распаковка файлов',
-    'Подготовка мастера',
-    'Запуск установщика'
-  ];
+  var W = 380;
+  var H = 150;
+  var msgs = ['Распаковка файлов', 'Подготовка мастера', 'Запуск установщика'];
   var msgIndex = 0;
   var statusEl;
   var dots = 0;
+  var started = new Date().getTime();
+
+  function layoutWindow() {
+    try {
+      window.resizeTo(W, H);
+      window.moveTo(
+        Math.round((screen.availWidth - W) / 2),
+        Math.round((screen.availHeight - H) / 2)
+      );
+    } catch (e) {}
+  }
 
   function setStatus(text) {
     if (statusEl) statusEl.innerHTML = text;
@@ -115,24 +107,29 @@
 
   function hasSetupProcess() {
     try {
-      var wmi = GetObject('winmgmts:\\\\.\\root\\cimv2');
-      var items = wmi.ExecQuery("SELECT Name FROM Win32_Process WHERE Name='VerstakSetup.exe'");
+      var locator = new ActiveXObject('WbemScripting.SWbemLocator');
+      var service = locator.ConnectServer('.', 'root\\cimv2');
+      var items = service.ExecQuery("SELECT Name FROM Win32_Process WHERE Name='VerstakSetup.exe'");
       var e = new Enumerator(items);
       for (; !e.atEnd(); e.moveNext()) return true;
     } catch (err) {}
     return false;
   }
 
+  function shouldClose() {
+    if (hasSetupProcess()) return true;
+    return (new Date().getTime() - started) > 120000;
+  }
+
   function tick() {
+    if (shouldClose()) {
+      window.close();
+      return;
+    }
     dots = (dots + 1) % 4;
     var tail = '';
     for (var i = 0; i < dots; i++) tail += '.';
     setStatus(msgs[msgIndex] + tail);
-
-    if (hasSetupProcess()) {
-      window.close();
-      return;
-    }
   }
 
   function rotateMsg() {
@@ -140,12 +137,9 @@
   }
 
   function init() {
+    layoutWindow();
     statusEl = document.getElementById('status');
-    try {
-      var shell = new ActiveXObject('WScript.Shell');
-      shell.RegWrite('HKCU\\Software\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION\\mshta.exe', 11001, 'REG_DWORD');
-    } catch (e) {}
-    window.setInterval(tick, 350);
+    window.setInterval(tick, 400);
     window.setInterval(rotateMsg, 2200);
     tick();
   }
@@ -157,12 +151,9 @@
   <div class="wrap">
     <div class="brand">VERSTAK</div>
     <div class="title">Подготовка установщика</div>
-    <div class="spinner-row">
-      <div class="spinner"></div>
-      <div id="status" class="status">Распаковка файлов</div>
-    </div>
+    <div id="status" class="status">Распаковка файлов</div>
     <div class="track"><div class="shimmer"></div></div>
-    <div class="hint">Обычно 10–20 секунд. Не закрывайте это окно.</div>
+    <div class="hint">Обычно 10–20 секунд</div>
   </div>
 </body>
 </html>

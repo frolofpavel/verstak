@@ -9,7 +9,7 @@
     width: 100%; height: 100%;
     background: #2e3440;
     color: #eceff4;
-    font: 500 13px/1.45 Inter, "Segoe UI", system-ui, sans-serif;
+    font: 500 13px/1.45 "Segoe UI", system-ui, sans-serif;
     user-select: none;
     overflow: hidden;
   }
@@ -19,9 +19,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    padding: 28px 32px;
-    border: 1px solid #3b4252;
+    gap: 14px;
+    padding: 24px 28px;
   }
   .brand {
     font-size: 10px;
@@ -29,43 +28,18 @@
     letter-spacing: 0.24em;
     color: #81a1c1;
   }
-  .icon-wrap {
-    position: relative;
-    width: 80px;
-    height: 80px;
-    display: grid;
-    place-items: center;
-  }
-  .ring {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    border-top-color: #88c0d0;
-    border-right-color: #5e81ac;
-    animation: spin 1.1s linear infinite;
-  }
-  .ring-2 {
-    inset: 8px;
-    border-top-color: #81a1c1;
-    border-right-color: transparent;
-    animation: spin 1.6s linear infinite reverse;
-  }
   .icon {
-    width: 52px;
-    height: 52px;
+    width: 48px;
+    height: 48px;
     border-radius: 12px;
     object-fit: contain;
-    z-index: 1;
-    animation: pulse 2s ease-in-out infinite;
   }
   .title {
-    font-size: 19px;
+    font-size: 18px;
     font-weight: 600;
-    letter-spacing: 0.01em;
   }
   .status {
-    min-height: 20px;
+    min-height: 18px;
     font-size: 13px;
     color: #d8dee9;
     text-align: center;
@@ -75,7 +49,7 @@
     animation: dots 1.4s steps(4, end) infinite;
   }
   .track {
-    width: min(300px, 88vw);
+    width: 280px;
     height: 6px;
     border-radius: 999px;
     background: #3b4252;
@@ -91,26 +65,9 @@
     background: linear-gradient(90deg, transparent, #88c0d0, #81a1c1, transparent);
     animation: slide 1.35s ease-in-out infinite;
   }
-  .bar-glow {
-    width: min(300px, 88vw);
-    height: 2px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, transparent, #88c0d0, transparent);
-    opacity: 0.55;
-    animation: glow 1.35s ease-in-out infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(0.96); opacity: 0.88; }
-  }
   @keyframes slide {
     0% { transform: translateX(-120%); }
     100% { transform: translateX(280%); }
-  }
-  @keyframes glow {
-    0%, 100% { opacity: 0.25; transform: scaleX(0.7); }
-    50% { opacity: 0.8; transform: scaleX(1); }
   }
   @keyframes dots {
     0% { content: ''; }
@@ -123,33 +80,20 @@
 <body>
   <div class="panel">
     <div class="brand">VERSTAK</div>
-    <div class="icon-wrap">
-      <div class="ring"></div>
-      <div class="ring ring-2"></div>
-      <img class="icon" id="icon" alt="" />
-    </div>
+    <img class="icon" id="icon" alt="" />
     <div class="title">Установка Verstak</div>
-    <div class="status"><span id="msg">Запуск установщика</span><span class="dots"></span></div>
+    <div class="status"><span id="msg">Запуск</span><span class="dots"></span></div>
     <div class="track" aria-hidden="true"></div>
-    <div class="bar-glow" aria-hidden="true"></div>
   </div>
   <script>
-    const msgs = [
-      'Запуск установщика',
-      'Распаковка файлов',
-      'Подготовка интерфейса',
-      'Почти готово',
-    ]
     const icon = document.getElementById('icon')
     const msg = document.getElementById('msg')
     const params = new URLSearchParams(location.search)
     const iconPath = params.get('icon')
     if (iconPath) icon.src = iconPath
+    const msgs = ['Запуск', 'Подготовка', 'Почти готово']
     let i = 0
-    setInterval(() => {
-      i = (i + 1) % msgs.length
-      msg.textContent = msgs[i]
-    }, 2200)
+    setInterval(() => { i = (i + 1) % msgs.length; msg.textContent = msgs[i] }, 2200)
   </script>
 </body>
 </html>

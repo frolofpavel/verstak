@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import iconUrl from '../assets/icon.png'
 import { INSTALLER_BOOT_MESSAGES } from './constants'
 
 type InstallerLoaderProps = {
@@ -19,11 +18,6 @@ export function InstallerLoader({ title, hint }: InstallerLoaderProps) {
 
   return (
     <div className="gg-installer-loader" role="status" aria-live="polite">
-      <div className="gg-installer-loader-icon-wrap" aria-hidden="true">
-        <span className="gg-installer-loader-ring" />
-        <span className="gg-installer-loader-ring gg-installer-loader-ring-2" />
-        <img src={iconUrl} alt="" className="gg-installer-loader-icon" />
-      </div>
       <p className="gg-installer-loader-title">{title}</p>
       <p className="gg-installer-loader-status">
         {INSTALLER_BOOT_MESSAGES[msgIndex]}
