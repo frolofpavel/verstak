@@ -116,6 +116,7 @@ export const en = {
     video: 'Video',
     feedback: 'Feedback',
     files: 'Files',
+    inRoot: '{count} in root',
     mainChat: 'Main chat',
     project: 'Project',
     workSection: 'Work',

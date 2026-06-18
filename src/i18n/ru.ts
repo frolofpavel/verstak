@@ -115,6 +115,7 @@ export const ru: Translations = {
     video: 'Видео',
     feedback: 'Обратная связь',
     files: 'Файлы',
+    inRoot: '{count} в корне',
     mainChat: 'Основной чат',
     project: 'Проект',
     workSection: 'Работа',

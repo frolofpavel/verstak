@@ -26,4 +26,9 @@ describe('chat-session-title', () => {
     expect(titleFromFirstMessage('```ts\nconst x = 1\n```\n\nДобавь кнопку в трей'))
       .toBe('Добавь кнопку в трей')
   })
+
+  it('берёт ТОЛЬКО первую строку многострочного сообщения, не склеивает', () => {
+    expect(titleFromFirstMessage('Почини кнопку логина\nвот трейс ошибки:\nTypeError: x is undefined'))
+      .toBe('Почини кнопку логина')
+  })
 })

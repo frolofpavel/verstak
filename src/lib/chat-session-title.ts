@@ -19,12 +19,15 @@ const MAX_TITLE_LEN = 52
 
 /** Короткое русскоязычное имя ветки из первого запроса пользователя. */
 export function titleFromFirstMessage(text: string): string | null {
-  const raw = text
-    .replace(/```[\s\S]*?```/g, ' ')
+  // Код-блок → перенос строки (а не пробел): иначе он бы склеил соседние строки.
+  // Сначала вычленяем ПЕРВУЮ непустую строку, и только потом схлопываем пробелы
+  // внутри неё — раньше \s+→' ' убивал все \n до split, и заголовок многострочного
+  // сообщения склеивался в одну строку вместо «только первая строка».
+  const stripped = text
+    .replace(/```[\s\S]*?```/g, '\n')
     .replace(/`[^`]+`/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const line = (raw.split('\n').find(l => l.trim()) ?? '').trim()
+  const firstLine = stripped.split('\n').map(l => l.trim()).find(Boolean) ?? ''
+  const line = firstLine.replace(/\s+/g, ' ').trim()
   if (!line) return null
 
   let title = line

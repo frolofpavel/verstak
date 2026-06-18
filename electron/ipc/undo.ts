@@ -30,7 +30,7 @@ export async function revertToCheckpoint(
   const toRevert = all.filter(e => e.id > checkpointId)
   if (toRevert.length === 0) return { ok: true, restored: [], count: 0 }
   const restored: string[] = []
-  const failed: Array<{ id: number; filePath: string; before: string; after: string; reason: string }> = []
+  const failed: Array<{ id: number; filePath: string; before: string | null; after: string; reason: string }> = []
   // Newest first — undo entries reflect chronological writes; reversing
   // them restores files in their proper rollback order.
   for (const entry of toRevert) {
@@ -54,7 +54,7 @@ export async function revertToCheckpoint(
       failed.push({
         id: popped.id,
         filePath: popped.filePath,
-        before: popped.beforeContent ?? '',
+        before: popped.beforeContent,
         after: popped.afterContent ?? '',
         reason: err instanceof Error ? err.message : String(err)
       })
@@ -128,7 +128,7 @@ export function registerUndoIpc(stack: UndoStack): void {
       return { ok: true, filePath: entry.filePath }
     } catch (err) {
       // Put it back on the stack so the user can retry
-      stack.push(projectPath, entry.filePath, entry.beforeContent ?? '', entry.afterContent ?? '')
+      stack.push(projectPath, entry.filePath, entry.beforeContent, entry.afterContent ?? '')
       return { ok: false, reason: err instanceof Error ? err.message : String(err) }
     }
   })

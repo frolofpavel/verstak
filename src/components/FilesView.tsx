@@ -61,7 +61,7 @@ export function FilesView() {
     <div className="gg-panel">
       <div className="gg-panel-header">
         <h2 className="gg-panel-title">{t.sidebar.files}</h2>
-        <div className="gg-panel-meta">{tree.length} в корне</div>
+        <div className="gg-panel-meta">{t.sidebar.inRoot.replace('{count}', String(tree.length))}</div>
       </div>
       <div className="gg-panel-body">
         {tree.length === 0 ? (
