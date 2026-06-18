@@ -37,7 +37,7 @@ describe('openDb', () => {
     const version = reopened.prepare('SELECT version FROM schema_version WHERE id = 1').get() as { version: number }
     expect(groups).toEqual({ name: 'project_groups' })
     expect(members).toEqual({ name: 'project_group_members' })
-    expect(version.version).toBe(21)
+    expect(version.version).toBe(22)
     const hiddenCol = (reopened.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>)
       .some(c => c.name === 'hidden')
     expect(hiddenCol).toBe(true)

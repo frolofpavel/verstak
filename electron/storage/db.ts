@@ -545,6 +545,28 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0')
       }
     }
+  },
+  {
+    version: 22,
+    description: 'pipeline_runs — сквозной сценарий Brief→Plan→Execute→Verify→Proof (Pipeline спек)',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          agent_run_id TEXT,
+          mode TEXT NOT NULL,
+          workflow_id TEXT,
+          step TEXT NOT NULL,
+          brief_json TEXT NOT NULL,
+          plan_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project ON pipeline_runs(project_path);
+      `)
+    }
   }
 ]
 
