@@ -13,6 +13,17 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'TBD',
+    deployed: '19.06.2026',
+    treeVersion: '1.5.15',
+    title: 'Описание обновлений без GitHub API',
+    changes: [
+      'Release notes больше не тянутся только с api.github.com: встроенный каталог из журнала (1.5.0–1.5.15).',
+      'Работает при лимите GitHub API и когда у Павла на Releases пустое описание.',
+      'Генерация: node scripts/generate-official-changelog.cjs (авто при sync:changelog).',
+    ],
+  },
+  {
     commit: 'cc54f98',
     deployed: '19.06.2026',
     treeVersion: '1.5.15',
@@ -1427,6 +1438,7 @@ async function main() {
   const buf = await Packer.toBuffer(doc)
   const docxPath = path.join(OUT_DIR, `${BASE_NAME}.docx`)
   fs.writeFileSync(docxPath, buf)
+  require('./generate-official-changelog.cjs')
   console.log('OK:', docxPath)
 }
 

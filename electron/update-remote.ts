@@ -365,7 +365,7 @@ export async function fetchAllReleaseNotes(): Promise<ReleaseNote[]> {
 
 /** Релизы строго после sinceVersion и не новее upToVersion (для whats-new после апдейта). */
 export async function fetchReleaseNotesSince(sinceVersion: string, upToVersion: string): Promise<ReleaseNote[]> {
-  const { getBundledReleaseNotesInRange, mergeReleaseNotes } = await import('./rayner-changelog')
+  const { getBundledReleaseNotesInRange, mergeReleaseNotes } = await import('./bundled-changelog')
   const all = await fetchAllReleaseNotes()
   const since = normalizeVersion(sinceVersion)
   const upTo = normalizeVersion(upToVersion)
@@ -377,14 +377,14 @@ export async function fetchReleaseNotesSince(sinceVersion: string, upToVersion: 
 
 /** Все релизы: GitHub + встроенные заметки сборки Rayner. */
 export async function fetchAllReleaseNotesMerged(): Promise<ReleaseNote[]> {
-  const { getAllBundledReleaseNotes, mergeReleaseNotes } = await import('./rayner-changelog')
+  const { getAllBundledReleaseNotes, mergeReleaseNotes } = await import('./bundled-changelog')
   const github = await fetchAllReleaseNotes()
   const { polishReleaseNotes } = await import('./release-notes-official')
   return polishReleaseNotes(mergeReleaseNotes(github, getAllBundledReleaseNotes()))
 }
 
 export async function fetchReleaseNoteMerged(version: string): Promise<ReleaseNote | null> {
-  const { getBundledReleaseNote, mergeReleaseNotes } = await import('./rayner-changelog')
+  const { getBundledReleaseNote, mergeReleaseNotes } = await import('./bundled-changelog')
   const github = await fetchReleaseNote(version)
   const bundled = getBundledReleaseNote(version)
   if (!github && !bundled) return null
