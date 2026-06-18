@@ -13,6 +13,18 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'cc54f98',
+    deployed: '19.06.2026',
+    treeVersion: '1.5.15',
+    title: 'Upstream 1.5.15 + фикс установщика (app-payload.7z)',
+    changes: [
+      'Подтянут релиз Павла 1.5.15: справка, черновики композера, вкладка «Файлы», умное автообновление.',
+      'Локальные правки сохранены: таймер ответа, markdown code blocks, native-fix SQLite, deploy:local.',
+      'Установщик: payload упакован в app-payload.7z — исправлен ENOENT на app.asar при установке в Programs\\Verstak.',
+      'Собран Verstak-Setup-1.5.15-x64.exe с распаковкой payload в runtime.',
+    ],
+  },
+  {
     commit: 'a5ef302',
     deployed: '19.06.2026',
     treeVersion: '1.5.14',
