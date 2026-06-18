@@ -6,6 +6,8 @@ interface ToastPayload {
   body: string
   projectName?: string
   projectPath?: string
+  isHelp?: boolean
+  helpProjectPath?: string
   isError?: boolean
   theme?: 'nord' | 'light'
 }
@@ -64,8 +66,12 @@ export function NotificationApp() {
     })
   }
 
-  function openMain(id: number, projectPath?: string) {
-    window.toastApi.focusMain(projectPath)
+  function openMain(id: number, toast: ToastItem) {
+    if (toast.isHelp) {
+      window.toastApi.focusMain(toast.helpProjectPath, true)
+    } else {
+      window.toastApi.focusMain(toast.projectPath)
+    }
     dismiss(id)
   }
 
@@ -79,7 +85,7 @@ export function NotificationApp() {
           className={`gg-app-toast ${toast.isError ? 'is-error' : 'is-ok'}`}
           data-theme={toast.theme ?? 'nord'}
           role="alert"
-          onClick={() => openMain(toast.id, toast.projectPath)}
+          onClick={() => openMain(toast.id, toast)}
         >
           <div className="gg-app-toast-head">
             <div className="gg-app-toast-brand">
@@ -98,7 +104,7 @@ export function NotificationApp() {
           {toast.projectName ? (
             <div className="gg-app-toast-project">{toast.projectName}</div>
           ) : null}
-          <div className="gg-app-toast-body">{toast.body}</div>
+          {toast.body ? <div className="gg-app-toast-body">{toast.body}</div> : null}
         </article>
       ))}
     </div>

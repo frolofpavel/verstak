@@ -160,12 +160,18 @@ export function App() {
   useEffect(() => {
     if (!authDone) return
     const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-    const off = window.api.notify.onOpenProject((projectPath) => {
+    const offProject = window.api.notify.onOpenProject((projectPath) => {
       if (!projectPath) return
       if (path && norm(path) === norm(projectPath)) return
       void setProject(projectPath)
     })
-    return off
+    const offHelp = window.api.notify.onOpenHelp((projectPath) => {
+      void useProject.getState().openHelpChat(projectPath)
+    })
+    return () => {
+      offProject()
+      offHelp()
+    }
   }, [authDone, path, setProject])
   // Panels require an open project (the terminal/file tree are project-scoped).
   const effectiveRightPanel = path ? rightPanel : 'none'

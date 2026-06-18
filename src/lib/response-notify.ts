@@ -1,3 +1,5 @@
+import { getTranslations, type Lang } from '../i18n'
+
 export const NOTIFY_SOUND_KEY = 'notify_sound'
 export const NOTIFY_TOAST_KEY = 'notify_toast'
 export const NOTIFY_UNFOCUSED_ONLY_KEY = 'notify_unfocused_only'
@@ -36,6 +38,11 @@ export function invalidateNotifyPrefsCache(): void {
   prefsCache = null
 }
 
+async function currentLang(): Promise<Lang> {
+  const raw = await window.api.settings.getKey('language')
+  return raw === 'en' ? 'en' : 'ru'
+}
+
 function buildBody(opts: {
   body?: string
   isError?: boolean
@@ -49,6 +56,8 @@ export async function notifyResponseReady(opts: {
   body?: string
   projectName?: string
   projectPath?: string
+  isHelp?: boolean
+  helpProjectPath?: string
   isError?: boolean
   force?: boolean
 }): Promise<void> {
@@ -63,11 +72,17 @@ export async function notifyResponseReady(opts: {
   if (prefs.sound) void window.api.notify.playSound({ isError: !!opts.isError })
 
   if (prefs.toast) {
+    const t = getTranslations(await currentLang())
+    const isHelp = !!opts.isHelp
     void window.api.notify.show({
       title: opts.title ?? 'Verstak',
-      body: buildBody(opts),
-      projectName: opts.projectName,
-      projectPath: opts.projectPath,
+      body: isHelp && !opts.isError ? '' : buildBody(opts),
+      projectName: isHelp
+        ? (opts.isError ? t.help.notifyError : t.help.notifyReady)
+        : opts.projectName,
+      projectPath: isHelp ? undefined : opts.projectPath,
+      isHelp,
+      helpProjectPath: isHelp ? opts.helpProjectPath : undefined,
       isError: !!opts.isError
     })
   }

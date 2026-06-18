@@ -5,6 +5,8 @@ export interface ToastPayload {
   body: string
   projectName?: string
   projectPath?: string
+  isHelp?: boolean
+  helpProjectPath?: string
   isError?: boolean
   theme?: 'nord' | 'light'
 }
@@ -15,6 +17,8 @@ contextBridge.exposeInMainWorld('toastApi', {
     ipcRenderer.on('toast:show', handler)
     return () => { ipcRenderer.removeListener('toast:show', handler) }
   },
-  focusMain: (projectPath?: string) => { ipcRenderer.send('toast:focus-main', projectPath) },
+  focusMain: (projectPath?: string, openHelp?: boolean) => {
+    ipcRenderer.send('toast:focus-main', openHelp ? { projectPath, openHelp: true } : projectPath)
+  },
   hideWindow: () => { ipcRenderer.send('toast:hide-window') }
 })

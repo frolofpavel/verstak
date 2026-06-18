@@ -17,6 +17,8 @@ export interface ToastPayload {
   body: string
   projectName?: string
   projectPath?: string
+  isHelp?: boolean
+  helpProjectPath?: string
   isError?: boolean
   theme?: 'nord' | 'light'
 }
@@ -143,14 +145,23 @@ export function showAppToast(payload: ToastPayload): void {
 }
 
 export function registerNotificationWindowIpc(): void {
-  ipcMain.on('toast:focus-main', (_e, projectPath?: unknown) => {
+  ipcMain.on('toast:focus-main', (_e, arg?: unknown) => {
     const main = getMainWindow?.()
     if (!main || main.isDestroyed()) return
     if (main.isMinimized()) main.restore()
     main.show()
     main.focus()
-    if (typeof projectPath === 'string' && projectPath.trim()) {
-      main.webContents.send('notify:open-project', projectPath.trim())
+    if (typeof arg === 'string') {
+      if (arg.trim()) main.webContents.send('notify:open-project', arg.trim())
+      return
+    }
+    if (arg && typeof arg === 'object') {
+      const { projectPath, openHelp } = arg as { projectPath?: string; openHelp?: boolean }
+      if (openHelp) {
+        main.webContents.send('notify:open-help', projectPath?.trim() || undefined)
+      } else if (projectPath?.trim()) {
+        main.webContents.send('notify:open-project', projectPath.trim())
+      }
     }
   })
 

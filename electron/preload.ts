@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('api', {
       body: string
       projectName?: string
       projectPath?: string
+      isHelp?: boolean
+      helpProjectPath?: string
       isError?: boolean
     }) => ipcRenderer.invoke('notify:show', opts) as Promise<boolean>,
     playSound: (opts?: { isError?: boolean }) =>
@@ -58,6 +60,11 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_e: unknown, projectPath: string) => cb(projectPath)
       ipcRenderer.on('notify:open-project', handler)
       return () => { ipcRenderer.removeListener('notify:open-project', handler) }
+    },
+    onOpenHelp: (cb: (projectPath?: string) => void) => {
+      const handler = (_e: unknown, projectPath?: string) => cb(projectPath)
+      ipcRenderer.on('notify:open-help', handler)
+      return () => { ipcRenderer.removeListener('notify:open-help', handler) }
     }
   },
   voice: {

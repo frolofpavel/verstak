@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useProject, type PreflightCard } from '../store/projectStore'
+import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
@@ -55,6 +55,37 @@ function projectNameForPath(projectPath: string | null | undefined): string | un
   const norm = normalizeProjectPath(projectPath)
   const meta = useProject.getState().projectList.find(p => normalizeProjectPath(p.path) === norm)
   return meta?.name ?? projectPath.split(/[/\\]/).pop() ?? undefined
+}
+
+function registerChatSendOwner(sendId: number, chatId: number): void {
+  const store = useProject.getState()
+  const isHelp = store.helpChatId != null && chatId === store.helpChatId
+  store.registerSendOwner(sendId, {
+    kind: 'chat',
+    chatId,
+    ...(isHelp ? { isHelp: true, helpProjectPath: store.path ?? undefined } : {})
+  })
+}
+
+function notifyAgentFinished(
+  owner: SendOwner | null,
+  projectPath: string | null | undefined,
+  isError?: boolean
+): void {
+  const isHelp = owner?.kind === 'chat' && owner.isHelp
+  if (isHelp && owner.kind === 'chat') {
+    void notifyResponseReady({
+      isHelp: true,
+      helpProjectPath: owner.helpProjectPath ?? projectPath ?? undefined,
+      isError
+    })
+    return
+  }
+  void notifyResponseReady({
+    projectName: projectNameForPath(projectPath),
+    projectPath: projectPath ?? undefined,
+    isError
+  })
 }
 
 const MAX_BYTES_PER_FILE = 5 * 1024 * 1024  // 5 MB
@@ -276,9 +307,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         // мапа растёт при каждом переключении проекта во время активного
         // стрима в фоне.
         if (event.type === 'done') {
-          void notifyResponseReady({ projectName: projectNameForPath(projectPath), projectPath })
+          notifyAgentFinished(owner, projectPath)
         } else if (event.type === 'error') {
-          void notifyResponseReady({ projectName: projectNameForPath(projectPath), projectPath, isError: true })
+          notifyAgentFinished(owner, projectPath, true)
         }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
@@ -288,9 +319,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if (owner?.kind === 'chat' && owner.chatId !== store.activeChatId) {
         store.applyEventToChat(owner.chatId, event as unknown as { type: string; [k: string]: unknown })
         if (event.type === 'done') {
-          void notifyResponseReady({ projectName: projectNameForPath(store.path), projectPath: store.path ?? undefined })
+          notifyAgentFinished(owner, store.path)
         } else if (event.type === 'error') {
-          void notifyResponseReady({ projectName: projectNameForPath(store.path), projectPath: store.path ?? undefined, isError: true })
+          notifyAgentFinished(owner, store.path, true)
         }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
@@ -524,7 +555,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         setPendingSupplements([])
         setPendingBarExpanded(false)
         store.forgetSendOwner(id)
-        void notifyResponseReady({ projectName: projectNameForPath(store.path), projectPath: store.path ?? undefined })
+        notifyAgentFinished(owner, store.path)
         flushQueueRef.current()
       }
       else if (event.type === 'error') {
@@ -548,7 +579,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         setPendingSupplements([])
         setPendingBarExpanded(false)
         store.forgetSendOwner(id)
-        void notifyResponseReady({ projectName: projectNameForPath(store.path), projectPath: store.path ?? undefined, isError: true })
+        notifyAgentFinished(owner, store.path, true)
         flushQueueRef.current()
       }
     })
@@ -859,7 +890,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const msgs = [...useProject.getState().messages].slice(0, -1)
     const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
     if (activeChatId != null) {
-      useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+      registerChatSendOwner(sendId, activeChatId)
     }
   }
 
@@ -1055,7 +1086,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // another chat mid-stream, the event handler will route events into
     // chatSnapshots[activeChatId] rather than corrupting the new active chat.
     if (activeChatId != null) {
-      useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+      registerChatSendOwner(sendId, activeChatId)
     }
   }
 
@@ -1110,7 +1141,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         </div>
       )}
 
-      {projectName && (
+      {isHelpChat ? (
+        <div className="gg-chat-project-bar gg-chat-project-bar-help" role="note">
+          <span className="gg-chat-project-icon" aria-hidden>❓</span>
+          <span className="gg-chat-project-name">{t.help.emptyTitle}</span>
+        </div>
+      ) : projectName ? (
         <div className="gg-chat-project-bar" title={activePath ?? ''}>
           <span className="gg-chat-project-icon">📁</span>
           <span className="gg-chat-project-name">{projectName}</span>
@@ -1137,7 +1173,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       <div className="gg-chat-stream-area">
         <div className="gg-chat-stream" ref={streamRef}>

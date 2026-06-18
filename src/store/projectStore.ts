@@ -56,7 +56,7 @@ export type ViewId = 'chat' | 'tasks' | 'journal' | 'plan' | 'workflow' | 'calen
  * - 'review': sub-chat ревьюера. parentChatId — какой main-чат он ревьюит.
  */
 export type SendOwner =
-  | { kind: 'chat'; chatId: number }
+  | { kind: 'chat'; chatId: number; isHelp?: boolean; helpProjectPath?: string }
   | { kind: 'review'; reviewChatId: number; parentChatId: number }
 
 /**
@@ -223,7 +223,7 @@ interface ProjectState {
   /** Create a new chat session in the active project and switch to it. */
   newChatSession: (title?: string) => Promise<ChatSession | null>
   /** Открыть чат справки по интерфейсу Verstak (скилл verstak-guide). */
-  openHelpChat: () => Promise<void>
+  openHelpChat: (forPath?: string) => Promise<void>
   /** Подгрузить review sub-chats для указанного main-чата из БД. */
   refreshReviewsFor: (parentChatId: number) => Promise<void>
   /** Начать новое ревью текущего main-чата. Возвращает reviewChatId. */
@@ -396,7 +396,9 @@ export const useProject = create<ProjectState>((set, get) => ({
       openedReviewId: null,
       artifacts: [],
       // Crash-resume: сбрасываем баннер предыдущего проекта; перезагрузим ниже.
-      resumableRuns: []
+      resumableRuns: [],
+      // Справка привязана к проекту в БД — id чата сбрасываем при смене проекта.
+      helpChatId: null,
     })
     if (needsDbHydrate && activeChatId != null) {
       const hydrateChatId = activeChatId
@@ -779,10 +781,14 @@ export const useProject = create<ProjectState>((set, get) => ({
     })
     return created
   },
-  openHelpChat: async () => {
+  openHelpChat: async (forPath?: string) => {
     const s = get()
-    if (!s.path) return
-    const help = await window.api.chatSessions.getOrCreateHelp(s.path)
+    const targetPath = forPath ?? s.path
+    if (!targetPath) return
+    if (s.path !== targetPath) {
+      await get().setProject(targetPath)
+    }
+    const help = await window.api.chatSessions.getOrCreateHelp(targetPath)
     set({ helpChatId: help.id, activeView: 'chat' })
     useSkills.getState().setActiveSkill('verstak-guide')
     await get().switchChatSession(help.id)

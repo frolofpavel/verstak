@@ -232,6 +232,8 @@ export const en = {
     emptyHint: 'Ask how the sidebar, agent modes, message queue, skills, or model settings work.',
     exampleQuestions: 'Example questions',
     noProject: 'Open a project first — help is per project but does not modify files.',
+    notifyReady: 'Help mode — response ready',
+    notifyError: 'Help mode — error',
   },
   settings: {
     title: 'Settings',

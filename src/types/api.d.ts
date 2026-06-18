@@ -168,10 +168,13 @@ declare global {
           body: string
           projectName?: string
           projectPath?: string
+          isHelp?: boolean
+          helpProjectPath?: string
           isError?: boolean
         }) => Promise<boolean>
         playSound: (opts?: { isError?: boolean }) => Promise<boolean>
         onOpenProject: (cb: (projectPath: string) => void) => () => void
+        onOpenHelp: (cb: (projectPath?: string) => void) => () => void
       }
       voice: {
         status: () => Promise<{ ready: boolean; loading: boolean; label: string }>
