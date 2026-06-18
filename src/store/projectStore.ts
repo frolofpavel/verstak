@@ -26,6 +26,7 @@ import {
   pruneComposerDraftsForProject,
   type ComposerDraft,
 } from '../lib/composer-drafts'
+import { stampDurationOnStreamEnd } from '../lib/response-duration'
 
 /** Preflight-карточка: агент объявил план перед сложной/деструктивной задачей.
  *  Эфемерное — живёт только в активной сессии, чистится как activity. */
@@ -101,6 +102,7 @@ interface ProjectState {
   tree: FileNode[]
   messages: ChatMessage[]
   isStreaming: boolean
+  streamStartedAt: number | null
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   activity: ActivityEntry[]
@@ -290,6 +292,10 @@ interface ProjectState {
   setComposerDraft: (key: string, draft: ComposerDraft) => void
   getComposerDraft: (key: string) => ComposerDraft
   clearComposerDraft: (key: string) => void
+  /** Зафиксировать длительность ответа и сбросить таймер активного проектного чата. */
+  finalizeActiveStreamDuration: () => void
+  /** То же для глобальной справки. */
+  finalizeHelpStreamDuration: () => void
 }
 
 // Monotonic token used by setProject to cancel its own stale concurrent runs.
@@ -318,6 +324,7 @@ export const useProject = create<ProjectState>((set, get) => ({
   tree: [],
   messages: [],
   isStreaming: false,
+  streamStartedAt: null,
   pendingWrites: [],
   pendingCommand: null,
   activity: [],
@@ -357,6 +364,18 @@ export const useProject = create<ProjectState>((set, get) => ({
   }),
   getComposerDraft: (key) => get().composerDrafts[key] ?? EMPTY_COMPOSER_DRAFT,
   clearComposerDraft: (key) => get().setComposerDraft(key, EMPTY_COMPOSER_DRAFT),
+  finalizeActiveStreamDuration: () => set(s => {
+    const stamped = stampDurationOnStreamEnd({
+      messages: s.messages,
+      isStreaming: s.isStreaming,
+      streamStartedAt: s.streamStartedAt,
+    })
+    return { ...stamped }
+  }),
+  finalizeHelpStreamDuration: () => set(s => {
+    const stamped = stampDurationOnStreamEnd(s.help)
+    return { help: { ...s.help, ...stamped } }
+  }),
   setProject: async (path) => {
     const myToken = ++setProjectToken
     const s = get()
@@ -419,6 +438,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       tree: [],
       messages: initialMessages,
       isStreaming: target.isStreaming,
+      streamStartedAt: target.streamStartedAt,
       pendingWrites: target.pendingWrites,
       pendingCommand: target.pendingCommand,
       activity: target.activity,
@@ -527,7 +547,10 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
     return { messages: msgs }
   }),
-  setStreaming: (v) => set({ isStreaming: v }),
+  setStreaming: (v) => set(s => ({
+    isStreaming: v,
+    streamStartedAt: v ? Date.now() : s.streamStartedAt,
+  })),
   addPendingWrite: (w) => set(s => ({ pendingWrites: [...s.pendingWrites, w] })),
   resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => set({ pendingWrites: [] }),
@@ -588,7 +611,6 @@ export const useProject = create<ProjectState>((set, get) => ({
       }
       next.messages = msgs
     } else if (t === 'done' || t === 'error') {
-      next.isStreaming = false
       if (t === 'error' && typeof event.message === 'string') {
         const msgs = [...next.messages]
         const last = msgs[msgs.length - 1]
@@ -597,6 +619,7 @@ export const useProject = create<ProjectState>((set, get) => ({
         }
         next.messages = msgs
       }
+      Object.assign(next, stampDurationOnStreamEnd(next))
     } else if (t === 'pending-write' && typeof event.callId === 'string') {
       next.pendingWrites = [...next.pendingWrites, {
         callId: event.callId,
@@ -643,6 +666,7 @@ export const useProject = create<ProjectState>((set, get) => ({
         activeChatId: id,
         messages: [],
         isStreaming: false,
+        streamStartedAt: null,
         pendingWrites: [],
         pendingCommand: null,
         activity: [],
@@ -708,7 +732,6 @@ export const useProject = create<ProjectState>((set, get) => ({
       }
       next.messages = msgs
     } else if (t === 'done' || t === 'error') {
-      next.isStreaming = false
       if (t === 'error' && typeof event.message === 'string') {
         const msgs = [...next.messages]
         const last = msgs[msgs.length - 1]
@@ -717,6 +740,7 @@ export const useProject = create<ProjectState>((set, get) => ({
         }
         next.messages = msgs
       }
+      Object.assign(next, stampDurationOnStreamEnd(next))
       // Persist the completed assistant message to DB so it survives reload
       const lastMsg = next.messages[next.messages.length - 1]
       if (lastMsg?.role === 'assistant' && lastMsg.content && s.path) {
@@ -745,6 +769,7 @@ export const useProject = create<ProjectState>((set, get) => ({
           ...existing,
           messages: [...existing.messages, { role: 'user', content }, { role: 'assistant', content: '' }],
           isStreaming: true,
+          streamStartedAt: Date.now(),
           hasUnread: false
         }
       }
@@ -809,6 +834,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       pendingCommand: null,
       runningPlanStep: null,
       isStreaming: false,
+      streamStartedAt: null,
       touchedFiles: {},
       checkpointId: null,
       artifacts: []
@@ -829,6 +855,7 @@ export const useProject = create<ProjectState>((set, get) => ({
         helpMode: false,
         messages: snap.messages,
         isStreaming: inflight && snap.isStreaming,
+        streamStartedAt: inflight && snap.isStreaming ? snap.streamStartedAt : null,
         pendingWrites: snap.pendingWrites,
         pendingCommand: snap.pendingCommand,
         activity: snap.activity,
@@ -838,13 +865,17 @@ export const useProject = create<ProjectState>((set, get) => ({
       })
       return
     }
-    set({ helpMode: false, isStreaming: false })
+    set({ helpMode: false, isStreaming: false, streamStartedAt: null })
   },
   markHelpRead: () => set(s => ({
     help: { ...s.help, hasUnread: false }
   })),
   setHelpStreaming: (v) => set(s => ({
-    help: { ...s.help, isStreaming: v }
+    help: {
+      ...s.help,
+      isStreaming: v,
+      streamStartedAt: v ? Date.now() : s.help.streamStartedAt,
+    }
   })),
   addHelpMessage: (msg) => set(s => ({
     help: { ...s.help, messages: [...s.help.messages, msg] }
@@ -907,7 +938,6 @@ export const useProject = create<ProjectState>((set, get) => ({
       }
       next.messages = msgs
     } else if (t === 'done' || t === 'error') {
-      next.isStreaming = false
       if (t === 'error' && typeof event.message === 'string') {
         const msgs = [...next.messages]
         const last = msgs[msgs.length - 1]
@@ -916,6 +946,7 @@ export const useProject = create<ProjectState>((set, get) => ({
         }
         next.messages = msgs
       }
+      Object.assign(next, stampDurationOnStreamEnd(next))
       const lastMsg = next.messages[next.messages.length - 1]
       const chatId = s.helpChatId
       if (lastMsg?.role === 'assistant' && lastMsg.content && chatId != null) {
@@ -952,6 +983,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       nextSnapshots[s.activeChatId] = {
         messages: s.messages,
         isStreaming: s.isStreaming,
+        streamStartedAt: s.streamStartedAt,
         pendingWrites: s.pendingWrites,
         pendingCommand: s.pendingCommand,
         activity: s.activity,
@@ -964,6 +996,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       set({
         chatSnapshots: nextSnapshots,
         isStreaming: false,
+        streamStartedAt: null,
         pendingWrites: [],
         pendingCommand: null,
       })

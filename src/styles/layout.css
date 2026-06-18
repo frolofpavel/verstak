@@ -2866,6 +2866,21 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   cursor: default;
   flex-shrink: 0;
 }
+.gg-msg-duration {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.gg-msg-duration.is-live {
+  color: var(--accent);
+  animation: gg-duration-pulse 2s ease-in-out infinite;
+}
+@keyframes gg-duration-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 .gg-msg-user .gg-msg-meta {
   justify-content: flex-end;
 }

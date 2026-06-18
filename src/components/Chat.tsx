@@ -24,6 +24,7 @@ import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_AGENT_MODE, HELP_CHAT_SEND_OVERRIDES, HELP_PROJECT_PATH } from '../lib/help-scope'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
+import { formatDuration } from '../lib/format-duration'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import { resolveSkillOverride } from '../lib/skill-override'
@@ -49,7 +50,8 @@ import {
   isLegacyDoc,
 } from '../lib/chat-attachments'
 
-function normalizeProjectPath(p: string): string {
+
+function normalizeProjectPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
@@ -160,7 +162,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const {
     helpMode, help, helpChatId,
     messages: projectMessages, addMessage, insertMessageBeforeLast, updateLastAssistant,
-    isStreaming: projectIsStreaming, setStreaming,
+    isStreaming: projectIsStreaming, setStreaming, streamStartedAt: projectStreamStartedAt,
+    finalizeActiveStreamDuration, finalizeHelpStreamDuration,
     activity: projectActivity, preflights, subagentRuns,
     sessionUsage: projectSessionUsage,
     path: activePath, chatSessions, activeChatId,
@@ -173,8 +176,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const isHelpChat = helpMode
   const messages = helpMode ? help.messages : projectMessages
   const isStreaming = helpMode ? help.isStreaming : projectIsStreaming
+  const streamStartedAt = helpMode ? help.streamStartedAt : projectStreamStartedAt
   const activity = helpMode ? help.activity : projectActivity
   const sessionUsage = helpMode ? help.sessionUsage : projectSessionUsage
+  const [tickNow, setTickNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!isStreaming || streamStartedAt == null) return
+    setTickNow(Date.now())
+    const id = window.setInterval(() => setTickNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [isStreaming, streamStartedAt])
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode()
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
   const activeChatTitle = isHelpChat
@@ -623,6 +634,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           })
           store.setRunningPlanStep(null)
         }
+        store.finalizeActiveStreamDuration()
         setStreaming(false)
         setPendingSupplements([])
         setPendingBarExpanded(false)
@@ -647,6 +659,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           void window.api.journal.append(store.path, 'note', 'AI-ошибка',
             ('message' in event ? event.message : '').slice(0, 600))
         }
+        store.finalizeActiveStreamDuration()
         setStreaming(false)
         setPendingSupplements([])
         setPendingBarExpanded(false)
@@ -1230,8 +1243,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const id = currentSendIdRef.current
     if (id == null) return
     await window.api.ai.stop(id)
-    if (useProject.getState().helpMode) setHelpStreaming(false)
-    else setStreaming(false)
+    const st = useProject.getState()
+    if (st.helpMode) {
+      st.finalizeHelpStreamDuration()
+      setHelpStreaming(false)
+    } else {
+      st.finalizeActiveStreamDuration()
+      setStreaming(false)
+    }
     setPendingSupplements([])
     setPendingBarExpanded(false)
     // sendOwners cleanup: stop() = главное место где renderer знает, что
@@ -1554,6 +1573,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                     >
                       {formatMessageClock(m.createdAt)}
                     </time>
+                  )}
+                  {isStreamingAssistant && streamStartedAt != null && (
+                    <span className="gg-msg-duration is-live" title={t.chat.responseRunningTitle}>
+                      {t.chat.responseRunning.replace('{duration}', formatDuration(tickNow - streamStartedAt))}
+                    </span>
+                  )}
+                  {!isStreamingAssistant && m.responseDurationMs != null && (
+                    <span className="gg-msg-duration" title={t.chat.responseDoneTitle}>
+                      {t.chat.responseDone.replace('{duration}', formatDuration(m.responseDurationMs))}
+                    </span>
                   )}
                 </div>
               )}

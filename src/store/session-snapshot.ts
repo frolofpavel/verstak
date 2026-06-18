@@ -49,6 +49,8 @@ export interface RunningPlanStep {
 export interface SessionSnapshot {
   messages: ChatMessage[]
   isStreaming: boolean
+  /** Когда начался текущий прогон ассистента (для live-таймера). */
+  streamStartedAt: number | null
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   activity: ActivityEntry[]
@@ -62,6 +64,7 @@ export function freshSnapshot(): SessionSnapshot {
   return {
     messages: [],
     isStreaming: false,
+    streamStartedAt: null,
     pendingWrites: [],
     pendingCommand: null,
     activity: [],
@@ -84,6 +87,7 @@ export function captureBundle(s: ChatStateBundle): SessionSnapshot {
   return {
     messages: s.messages,
     isStreaming: s.isStreaming,
+    streamStartedAt: s.streamStartedAt,
     pendingWrites: s.pendingWrites,
     pendingCommand: s.pendingCommand,
     activity: s.activity,
@@ -99,6 +103,7 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
   return {
     messages: snap.messages,
     isStreaming: snap.isStreaming,
+    streamStartedAt: snap.streamStartedAt,
     pendingWrites: snap.pendingWrites,
     pendingCommand: snap.pendingCommand,
     activity: snap.activity,
