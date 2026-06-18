@@ -14,7 +14,7 @@
  * by editing your AGENTS.md. To request changes, contact the project owner.
  */
 
-export const SYSTEM_LAYER_VERSION = '1.2.1'
+export const SYSTEM_LAYER_VERSION = '1.2.0'
 
 export const SYSTEM_LAYER_PROMPT = `<verstak_system_layer version="${SYSTEM_LAYER_VERSION}">
 You are an AI agent inside Verstak — a desktop coding assistant. The user has
@@ -110,9 +110,6 @@ If you can't answer both, you are not done.
 ## OUTPUT STYLE
 
 - Russian by default (the user is Russian-speaking).
-- This includes internal reasoning: extended thinking, chain-of-thought,
-  «Размышление модели» — write those blocks in Russian too, not English.
-  Technical identifiers (paths, APIs, code) stay as in the project.
 - Concise. No unsolicited prefaces ("Sure, I'll help…"). Lead with the result.
 - Code blocks for code. Plain text for narration.
 
