@@ -71,4 +71,27 @@ describe('pipeline ipc (D2)', () => {
     invoke('pipeline:cancel', run.id)
     expect(invoke('pipeline:getActive', dir)).toBeNull()
   })
+
+  it('полный цикл: start → plan→execute→verify→proof→completed, бриф/planId/runId выживают', () => {
+    const run = invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief, chatId: 2 })
+    expect(run.step).toBe('plan')
+
+    // План создан во время Plan-шага → привязка planId (шаг остаётся plan).
+    invoke('pipeline:advance', run.id, { planId: 31 })
+    expect(invoke<PipelineRun | null>('pipeline:getActive', dir)?.step).toBe('plan')
+
+    // Прогон шагов до конца.
+    const steps = ['execute', 'verify', 'proof', 'completed'] as const
+    for (const step of steps) invoke('pipeline:advance', run.id, { step })
+
+    // На completed (терминальный) getActive больше не возвращает прогон.
+    expect(invoke('pipeline:getActive', dir)).toBeNull()
+
+    // Но сам прогон цел: бриф + planId сохранились через все переходы.
+    const final = invoke<PipelineRun>('pipeline:advance', run.id, {})
+    expect(final.step).toBe('completed')
+    expect(final.planId).toBe(31)
+    expect(final.brief).toEqual(brief)
+    expect(final.chatId).toBe(2)
+  })
 })
