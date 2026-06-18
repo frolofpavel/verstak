@@ -400,6 +400,16 @@ declare global {
         createPr(id: number, opts: { repo: string; base: string; draft?: boolean }): Promise<{ ok: boolean; url?: string; number?: number; error?: string }>
         setBranch(id: number, branch: string): Promise<DevTask | null>
       }
+      pipeline: {
+        /** Создать прогон Brief→Proof для активного проекта (step='plan'). */
+        start(opts: { mode: PipelineMode; brief: PipelineBrief; chatId?: number | null; workflowId?: string | null }): Promise<PipelineRun | null>
+        /** Продвинуть шаг / привязать planId / runId. */
+        advance(id: number, patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null }): Promise<PipelineRun | null>
+        /** Активный (НЕтерминальный) прогон проекта для resume-баннера. */
+        getActive(projectPath: string): Promise<PipelineRun | null>
+        /** Отменить прогон (step='cancelled'). */
+        cancel(id: number): Promise<void>
+      }
       term: {
         spawn: (cwd: string) => Promise<number>
         write: (id: number, data: string) => Promise<void>
@@ -817,6 +827,29 @@ export interface DevTaskCheck {
 export interface DevTaskDetail {
   task: DevTask | null
   checks: DevTaskCheck[]
+}
+
+/** Pipeline Brief→Proof (спек). Зеркало типов electron/storage/pipeline-runs.ts —
+ *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
+export type PipelineMode = 'dev' | 'agency'
+export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'proof' | 'completed' | 'cancelled'
+export interface PipelineBrief {
+  goal: string
+  constraints: string
+  dod: string
+}
+export interface PipelineRun {
+  id: number
+  projectPath: string
+  chatId: number | null
+  agentRunId: string | null
+  mode: PipelineMode
+  workflowId: string | null
+  step: PipelineStep
+  brief: PipelineBrief
+  planId: number | null
+  createdAt: number
+  updatedAt: number
 }
 
 /** Conventional-группа коммита (commit-planner, Фаза 4). */

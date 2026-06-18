@@ -285,6 +285,14 @@ contextBridge.exposeInMainWorld('api', {
     createPr: (id: number, opts: { repo: string; base: string; draft?: boolean }) => ipcRenderer.invoke('devtask:createPr', id, opts),
     setBranch: (id: number, branch: string) => ipcRenderer.invoke('devtask:setBranch', id, branch)
   },
+  pipeline: {
+    start: (opts: { mode: 'dev' | 'agency'; brief: { goal: string; constraints: string; dod: string }; chatId?: number | null; workflowId?: string | null }) =>
+      ipcRenderer.invoke('pipeline:start', opts),
+    advance: (id: number, patch: { step?: string; planId?: number | null; agentRunId?: string | null; chatId?: number | null }) =>
+      ipcRenderer.invoke('pipeline:advance', id, patch),
+    getActive: (projectPath: string) => ipcRenderer.invoke('pipeline:getActive', projectPath),
+    cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id)
+  },
   autonomous: {
     status: () => ipcRenderer.invoke('autonomous:status') as Promise<{ enabled: boolean; intervalMin: number; lastRunAt: number | null; lastRunSuggestions: number; lastRunError: string | null; nextRunAt: number | null }>,
     runOnce: () => ipcRenderer.invoke('autonomous:run-once') as Promise<{ enabled: boolean; intervalMin: number; lastRunAt: number | null; lastRunSuggestions: number; lastRunError: string | null; nextRunAt: number | null }>,
