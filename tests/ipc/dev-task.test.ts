@@ -113,7 +113,7 @@ describe('dev-task ipc (Фаза 2)', () => {
     // Симулируем правку файла агентом: реальный файл + undo-запись.
     const file = join(dir, 'edited.txt')
     writeFileSync(file, 'НОВОЕ содержимое', 'utf8')
-    undoStack.push(dir, 'edited.txt', '', 'НОВОЕ содержимое')  // before='' → revert удалит файл
+    undoStack.push(dir, 'edited.txt', null, 'НОВОЕ содержимое')  // before=null (файла не было) → revert удалит
 
     const ok = await invoke<Promise<boolean>>('devtask:revert', task!.id)
     expect(ok).toBe(true)
