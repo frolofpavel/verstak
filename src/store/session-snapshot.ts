@@ -106,3 +106,21 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
     runningPlanStep: snap.runningPlanStep
   }
 }
+
+/** «leaveChat»: положить активный чат в фон. Возвращает новую копию карты
+ *  снапшотов с активным чатом, снятым в bundle. No-op (свежая копия без
+ *  изменений), если активного чата нет или переключаемся на него же. Единый
+ *  путь ухода для switchChatSession + newChatSession (раньше — две копии
+ *  одного if + literal). */
+export function backgroundActiveChat(
+  snapshots: Record<number, SessionSnapshot>,
+  activeChatId: number | null,
+  movingToId: number | null,
+  active: ChatStateBundle
+): Record<number, SessionSnapshot> {
+  const next = { ...snapshots }
+  if (activeChatId != null && activeChatId !== movingToId) {
+    next[activeChatId] = captureBundle(active)
+  }
+  return next
+}

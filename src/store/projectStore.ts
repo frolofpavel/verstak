@@ -7,6 +7,7 @@ import {
   freshSnapshot,
   captureBundle,
   restoreBundle,
+  backgroundActiveChat,
   TOUCH_PRIORITY,
   type PendingWrite,
   type PendingCommand,
@@ -554,10 +555,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     const myToken = ++switchChatSessionToken
     const s = get()
     if (!s.path) return
-    const nextSnapshots = { ...s.chatSnapshots }
-    if (s.activeChatId != null && s.activeChatId !== id) {
-      nextSnapshots[s.activeChatId] = captureBundle(s)
-    }
+    const nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, id, s)
     const restored = nextSnapshots[id]
     const session = s.chatSessions.find(c => c.id === id)
 
@@ -715,10 +713,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     // Снапшотим уходящий активный чат — как switchChatSession. Иначе при создании
     // нового чата во время стрима частичный ответ старого чата теряется, а его
     // фоновые события (включая финальный done) уходят в пустой freshSnapshot (#8).
-    const nextSnapshots = { ...s.chatSnapshots }
-    if (s.activeChatId != null && s.activeChatId !== created.id) {
-      nextSnapshots[s.activeChatId] = captureBundle(s)
-    }
+    const nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, created.id, s)
     set({
       chatSessions: list,
       activeChatId: created.id,
