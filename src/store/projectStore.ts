@@ -16,6 +16,7 @@ import {
   type RunningPlanStep,
   type SessionSnapshot
 } from './session-snapshot'
+import { HELP_PROJECT_PATH } from '../lib/help-scope'
 
 /** Preflight-карточка: агент объявил план перед сложной/деструктивной задачей.
  *  Эфемерное — живёт только в активной сессии, чистится как activity. */
@@ -56,7 +57,7 @@ export type ViewId = 'chat' | 'tasks' | 'journal' | 'plan' | 'workflow' | 'calen
  * - 'review': sub-chat ревьюера. parentChatId — какой main-чат он ревьюит.
  */
 export type SendOwner =
-  | { kind: 'chat'; chatId: number; isHelp?: boolean; helpProjectPath?: string }
+  | { kind: 'chat'; chatId: number; isHelp?: boolean }
   | { kind: 'review'; reviewChatId: number; parentChatId: number }
 
 /**
@@ -119,8 +120,12 @@ interface ProjectState {
   chatSessions: ChatSession[]
   /** Currently active chat session id within the project. */
   activeChatId: number | null
-  /** Чат справки (kind=help) — скрыт из сайдбара, открывается кнопкой «?». */
+  /** Глобальный чат справки (kind=help) — отдельно от проектов. */
   helpChatId: number | null
+  /** Пользователь смотрит экран справки, а не рабочий чат проекта. */
+  helpMode: boolean
+  /** Состояние справки: сообщения, стрим, активность. */
+  help: SessionSnapshot
   /** Per-project session snapshots for backgrounded projects. */
   sessions: Record<string, SessionSnapshot>
   /** Per-chat snapshots within active project — preserve state when switching
@@ -222,8 +227,20 @@ interface ProjectState {
   autoTitleChatSession: (chatId: number, firstUserText: string) => Promise<void>
   /** Create a new chat session in the active project and switch to it. */
   newChatSession: (title?: string) => Promise<ChatSession | null>
-  /** Открыть чат справки по интерфейсу Verstak (скилл verstak-guide). */
-  openHelpChat: (forPath?: string) => Promise<void>
+  /** Открыть глобальный чат справки (скилл verstak-guide). */
+  openHelpChat: () => Promise<void>
+  /** Выйти из экрана справки в рабочий чат проекта. */
+  leaveHelpMode: () => void
+  applyEventToHelp: (event: { type: string; [k: string]: unknown }) => void
+  markHelpRead: () => void
+  setHelpStreaming: (v: boolean) => void
+  addHelpMessage: (msg: ChatMessage) => void
+  insertHelpMessageBeforeLast: (msg: ChatMessage) => void
+  updateHelpLastAssistant: (text: string) => void
+  appendHelpLastAssistantThinking: (text: string) => void
+  clearHelpActivity: () => void
+  pushHelpActivity: (entry: ActivityEntry) => void
+  addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
   /** Подгрузить review sub-chats для указанного main-чата из БД. */
   refreshReviewsFor: (parentChatId: number) => Promise<void>
   /** Начать новое ревью текущего main-чата. Возвращает reviewChatId. */
@@ -293,6 +310,8 @@ export const useProject = create<ProjectState>((set, get) => ({
   chatSessions: [],
   activeChatId: null,
   helpChatId: null,
+  helpMode: false,
+  help: freshSnapshot(),
   sessions: {},
   chatSnapshots: {},
   sendOwners: {},
@@ -305,6 +324,7 @@ export const useProject = create<ProjectState>((set, get) => ({
   setProject: async (path) => {
     const myToken = ++setProjectToken
     const s = get()
+    if (s.helpMode) get().leaveHelpMode()
     // 1) Snapshot current session before switching (so background streams keep their state)
     let nextSessions = s.sessions
     if (s.path && s.path !== path) {
@@ -397,8 +417,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       artifacts: [],
       // Crash-resume: сбрасываем баннер предыдущего проекта; перезагрузим ниже.
       resumableRuns: [],
-      // Справка привязана к проекту в БД — id чата сбрасываем при смене проекта.
-      helpChatId: null,
+      helpMode: false,
     })
     if (needsDbHydrate && activeChatId != null) {
       const hydrateChatId = activeChatId
@@ -575,10 +594,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     const myToken = ++switchChatSessionToken
     const s = get()
     if (!s.path) return
-    const helpId = s.helpChatId
-    if (helpId != null && s.activeChatId === helpId && id !== helpId) {
-      useSkills.getState().setActiveSkill(null)
-    }
+    get().leaveHelpMode()
     const nextSnapshots = { ...s.chatSnapshots }
     if (s.activeChatId != null && s.activeChatId !== id) {
       nextSnapshots[s.activeChatId] = {
@@ -781,17 +797,144 @@ export const useProject = create<ProjectState>((set, get) => ({
     })
     return created
   },
-  openHelpChat: async (forPath?: string) => {
+  leaveHelpMode: () => {
     const s = get()
-    const targetPath = forPath ?? s.path
-    if (!targetPath) return
-    if (s.path !== targetPath) {
-      await get().setProject(targetPath)
+    if (!s.helpMode) return
+    useSkills.getState().setActiveSkill(null)
+    set({ helpMode: false })
+  },
+  markHelpRead: () => set(s => ({
+    help: { ...s.help, hasUnread: false }
+  })),
+  setHelpStreaming: (v) => set(s => ({
+    help: { ...s.help, isStreaming: v }
+  })),
+  addHelpMessage: (msg) => set(s => ({
+    help: { ...s.help, messages: [...s.help.messages, msg] }
+  })),
+  insertHelpMessageBeforeLast: (msg) => set(s => {
+    const msgs = [...s.help.messages]
+    if (msgs.length === 0) return { help: { ...s.help, messages: [msg] } }
+    msgs.splice(msgs.length - 1, 0, msg)
+    return { help: { ...s.help, messages: msgs } }
+  }),
+  updateHelpLastAssistant: (text) => set(s => {
+    const msgs = [...s.help.messages]
+    const last = msgs[msgs.length - 1]
+    if (last?.role === 'assistant') {
+      msgs[msgs.length - 1] = { ...last, content: text }
     }
-    const help = await window.api.chatSessions.getOrCreateHelp(targetPath)
-    set({ helpChatId: help.id, activeView: 'chat' })
+    return { help: { ...s.help, messages: msgs } }
+  }),
+  appendHelpLastAssistantThinking: (text) => set(s => {
+    const msgs = [...s.help.messages]
+    const last = msgs[msgs.length - 1]
+    if (last?.role === 'assistant') {
+      msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + text }
+    }
+    return { help: { ...s.help, messages: msgs } }
+  }),
+  clearHelpActivity: () => set(s => ({
+    help: { ...s.help, activity: [] }
+  })),
+  pushHelpActivity: (entry) => set(s => ({
+    help: { ...s.help, activity: [...s.help.activity, entry] }
+  })),
+  addHelpUsage: (delta) => set(s => ({
+    help: {
+      ...s.help,
+      sessionUsage: {
+        inputTokens: s.help.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
+        outputTokens: s.help.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
+        cachedInputTokens: s.help.sessionUsage.cachedInputTokens + (delta.cachedInputTokens ?? 0)
+      }
+    }
+  })),
+  applyEventToHelp: (event) => set(s => {
+    const next = { ...s.help, hasUnread: s.helpMode ? false : true }
+    const t = event.type
+    if (t === 'text' && typeof event.text === 'string') {
+      const msgs = [...next.messages]
+      const last = msgs[msgs.length - 1]
+      if (last?.role === 'assistant') {
+        msgs[msgs.length - 1] = { ...last, content: last.content + event.text }
+      } else {
+        msgs.push({ role: 'assistant', content: event.text })
+      }
+      next.messages = msgs
+    } else if (t === 'thought' && typeof event.text === 'string') {
+      const msgs = [...next.messages]
+      const last = msgs[msgs.length - 1]
+      if (last?.role === 'assistant') {
+        msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + event.text }
+      }
+      next.messages = msgs
+    } else if (t === 'done' || t === 'error') {
+      next.isStreaming = false
+      if (t === 'error' && typeof event.message === 'string') {
+        const msgs = [...next.messages]
+        const last = msgs[msgs.length - 1]
+        if (last?.role === 'assistant') {
+          msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n[Ошибка: ${event.message}]` }
+        }
+        next.messages = msgs
+      }
+      const lastMsg = next.messages[next.messages.length - 1]
+      const chatId = s.helpChatId
+      if (lastMsg?.role === 'assistant' && lastMsg.content && chatId != null) {
+        void window.api.chats.append(chatId, HELP_PROJECT_PATH, 'assistant', lastMsg.content).catch(() => {})
+      }
+    } else if (t === 'usage' && event.usage && typeof event.usage === 'object') {
+      const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
+      next.sessionUsage = {
+        inputTokens: next.sessionUsage.inputTokens + (u.inputTokens ?? 0),
+        outputTokens: next.sessionUsage.outputTokens + (u.outputTokens ?? 0),
+        cachedInputTokens: next.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0)
+      }
+    } else if (t === 'info' && typeof event.text === 'string') {
+      next.activity = [...next.activity, {
+        id: `info-${Date.now()}`,
+        kind: 'read',
+        label: event.text,
+        detail: '',
+        status: 'ok',
+        timestamp: Date.now()
+      }]
+    }
+    return { help: next }
+  }),
+  openHelpChat: async () => {
+    const s = get()
+    const helpSession = await window.api.chatSessions.getOrCreateHelp()
+    if (s.path && s.activeChatId != null && !s.helpMode) {
+      const nextSnapshots = { ...s.chatSnapshots }
+      nextSnapshots[s.activeChatId] = {
+        messages: s.messages,
+        isStreaming: s.isStreaming,
+        pendingWrites: s.pendingWrites,
+        pendingCommand: s.pendingCommand,
+        activity: s.activity,
+        sessionUsage: s.sessionUsage,
+        runningPlanStep: s.runningPlanStep,
+        hasUnread: false
+      }
+      set({ chatSnapshots: nextSnapshots })
+    }
+    let helpState = s.help
+    if (helpState.messages.length === 0) {
+      const history = await window.api.chats.list(helpSession.id)
+      helpState = {
+        ...helpState,
+        messages: history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt }))
+      }
+    }
+    set({
+      helpChatId: helpSession.id,
+      helpMode: true,
+      help: { ...helpState, hasUnread: false },
+      activeView: 'chat'
+    })
     useSkills.getState().setActiveSkill('verstak-guide')
-    await get().switchChatSession(help.id)
   },
   refreshReviewsFor: async (parentChatId) => {
     try {

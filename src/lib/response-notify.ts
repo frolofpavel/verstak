@@ -57,7 +57,6 @@ export async function notifyResponseReady(opts: {
   projectName?: string
   projectPath?: string
   isHelp?: boolean
-  helpProjectPath?: string
   isError?: boolean
   force?: boolean
 }): Promise<void> {
@@ -82,7 +81,6 @@ export async function notifyResponseReady(opts: {
         : opts.projectName,
       projectPath: isHelp ? undefined : opts.projectPath,
       isHelp,
-      helpProjectPath: isHelp ? opts.helpProjectPath : undefined,
       isError: !!opts.isError
     })
   }

@@ -13,6 +13,17 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    commit: 'pending',
+    deployed: '18.06.2026',
+    treeVersion: '1.5.5',
+    title: 'Справка — глобально отдельно от проектов',
+    changes: [
+      'Один чат справки на всё приложение (__verstak_help__), не привязан к папке клиента.',
+      'Своё состояние (сообщения, стрим): индикатор ответа на кнопке «?», не на проекте Zapret и др.',
+      'Уведомления и клик по тосту открывают справку; проект при этом не подсвечивается активным.',
+    ],
+  },
+  {
     commit: '7a84069',
     deployed: '18.06.2026',
     treeVersion: '1.5.5',

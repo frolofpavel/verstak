@@ -18,7 +18,6 @@ export interface ToastPayload {
   projectName?: string
   projectPath?: string
   isHelp?: boolean
-  helpProjectPath?: string
   isError?: boolean
   theme?: 'nord' | 'light'
 }

@@ -68,7 +68,7 @@ export function NotificationApp() {
 
   function openMain(id: number, toast: ToastItem) {
     if (toast.isHelp) {
-      window.toastApi.focusMain(toast.helpProjectPath, true)
+      window.toastApi.focusMain(undefined, true)
     } else {
       window.toastApi.focusMain(toast.projectPath)
     }

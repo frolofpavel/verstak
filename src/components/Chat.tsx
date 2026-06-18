@@ -22,6 +22,7 @@ import type { Attachment, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
+import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import type { ProviderId } from '../hooks/useProvider'
@@ -57,13 +58,11 @@ function projectNameForPath(projectPath: string | null | undefined): string | un
   return meta?.name ?? projectPath.split(/[/\\]/).pop() ?? undefined
 }
 
-function registerChatSendOwner(sendId: number, chatId: number): void {
-  const store = useProject.getState()
-  const isHelp = store.helpChatId != null && chatId === store.helpChatId
-  store.registerSendOwner(sendId, {
+function registerChatSendOwner(sendId: number, chatId: number, isHelp: boolean): void {
+  useProject.getState().registerSendOwner(sendId, {
     kind: 'chat',
     chatId,
-    ...(isHelp ? { isHelp: true, helpProjectPath: store.path ?? undefined } : {})
+    ...(isHelp ? { isHelp: true } : {})
   })
 }
 
@@ -72,13 +71,8 @@ function notifyAgentFinished(
   projectPath: string | null | undefined,
   isError?: boolean
 ): void {
-  const isHelp = owner?.kind === 'chat' && owner.isHelp
-  if (isHelp && owner.kind === 'chat') {
-    void notifyResponseReady({
-      isHelp: true,
-      helpProjectPath: owner.helpProjectPath ?? projectPath ?? undefined,
-      isError
-    })
+  if (owner?.kind === 'chat' && owner.isHelp) {
+    void notifyResponseReady({ isHelp: true, isError })
     return
   }
   void notifyResponseReady({
@@ -161,8 +155,22 @@ Out of scope: общие best practices, рефакторинги ради кр�
 
 export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSideChat }: ChatProps) {
   const t = useT()
-  const { messages, addMessage, insertMessageBeforeLast, updateLastAssistant, isStreaming, setStreaming, activity, preflights, subagentRuns, sessionUsage, path: activePath, chatSessions, activeChatId, helpChatId } = useProject()
-  const isHelpChat = helpChatId != null && activeChatId === helpChatId
+  const {
+    helpMode, help, helpChatId,
+    messages: projectMessages, addMessage, insertMessageBeforeLast, updateLastAssistant,
+    isStreaming: projectIsStreaming, setStreaming,
+    activity: projectActivity, preflights, subagentRuns,
+    sessionUsage: projectSessionUsage,
+    path: activePath, chatSessions, activeChatId,
+    addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
+    setHelpStreaming, clearHelpActivity, pushHelpActivity, addHelpUsage,
+    appendHelpLastAssistantThinking,
+  } = useProject()
+  const isHelpChat = helpMode
+  const messages = helpMode ? help.messages : projectMessages
+  const isStreaming = helpMode ? help.isStreaming : projectIsStreaming
+  const activity = helpMode ? help.activity : projectActivity
+  const sessionUsage = helpMode ? help.sessionUsage : projectSessionUsage
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode()
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
   const activeChatTitle = isHelpChat
@@ -282,6 +290,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       //  - 'chat' → если не активный, в chatSnapshots; если активный, в
       //             основное состояние ниже по логике
       const owner = store.lookupSendOwner(id)
+      if (owner?.kind === 'chat' && owner.isHelp) {
+        store.applyEventToHelp(event as { type: string; [k: string]: unknown })
+        if (event.type === 'done' || event.type === 'error') {
+          notifyAgentFinished(owner, null, event.type === 'error')
+          store.forgetSendOwner(id)
+          if (store.helpMode) {
+            setHelpStreaming(false)
+            flushQueueRef.current()
+          }
+        }
+        return
+      }
       if (owner?.kind === 'review') {
         const reviewChatId = owner.reviewChatId
         if (event.type === 'text' && typeof (event as { text?: string }).text === 'string') {
@@ -884,14 +904,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const newBudget = Math.min(exhausted.maxBudget, exhausted.used + exhausted.suggestedAdd)
     setExhausted(null)
     armAutoScrollForOutgoing()
+    if (store.helpMode) {
+      addHelpMessage({ role: 'assistant', content: '' })
+      setHelpStreaming(true)
+      const msgs = [...store.help.messages].slice(0, -1)
+      const sendId = await window.api.ai.sendWithBudget(msgs, null, newBudget, store.helpChatId != null ? String(store.helpChatId) : undefined)
+      if (store.helpChatId != null) registerChatSendOwner(sendId, store.helpChatId, true)
+      return
+    }
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
-    // Send everything except the empty placeholder we just pushed
     const msgs = [...useProject.getState().messages].slice(0, -1)
     const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
-    if (activeChatId != null) {
-      registerChatSendOwner(sendId, activeChatId)
-    }
+    if (activeChatId != null) registerChatSendOwner(sendId, activeChatId, false)
   }
 
   async function ensureProjectForChat(): Promise<{ path: string; activeChatId: number } | null> {
@@ -919,7 +944,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
   async function flushMessageQueue() {
     if (queuedMessagesRef.current.length === 0) return
-    if (useProject.getState().isStreaming) return
+    const st = useProject.getState()
+    if (st.helpMode ? st.help.isStreaming : st.isStreaming) return
     const [next, ...rest] = queuedMessagesRef.current
     setQueuedMessagesState(rest)
     await send({ text: next.text, fromQueue: true })
@@ -979,6 +1005,77 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     if (!text && attachments.length === 0) return
     if (!opts?.fromQueue && isStreaming) return
     const store = useProject.getState()
+
+    if (store.helpMode) {
+      const helpChatId = store.helpChatId
+      if (helpChatId == null) return
+      const userAttachments = attachments
+      store.clearHelpActivity()
+      setExhausted(null)
+      setCrossVerify(null)
+      if (!opts?.text) {
+        setInput('')
+        setAttachments([])
+      }
+      const summary = userAttachments.length > 0
+        ? `${text}${text ? '\n\n' : ''}📎 ${userAttachments.map(a => a.name).join(', ')}`
+        : text
+      let enrichedText = text
+      const activeSkillForLoad = useSkillsStore.getState().activeSkillId
+        ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
+        : null
+      if (activeSkillForLoad?.context_loaders?.length) {
+        try {
+          const loaded = await window.api.skills.runLoaders(activeSkillForLoad.id, {
+            trigger: !store.help.messages.some(m => m.role === 'user') ? 'chat_open' : 'slash_arg',
+            projectPath: null,
+            arg: text.split(/\s+/)[0]
+          })
+          if (loaded.context) enrichedText = `${loaded.context}\n\n---\n\n${text}`
+        } catch (err) {
+          console.warn('[help] skill loaders failed:', err)
+        }
+      }
+      armAutoScrollForOutgoing()
+      addHelpMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
+      await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'user', summary)
+      addHelpMessage({ role: 'assistant', content: '' })
+      setHelpStreaming(true)
+      const allMessages = [...useProject.getState().help.messages].slice(0, -1)
+      const activeSkill = useSkillsStore.getState().activeSkillId
+        ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
+        : null
+      let sendId: number
+      const antiStallNudge = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
+      if (activeSkill) {
+        const currentProvider = await window.api.settings.getKey('provider')
+        const skillProvider = activeSkill.default_provider
+        const family = (p: string | null | undefined): string =>
+          (p ?? '').replace(/-cli$|-api$/, '').replace(/^gemini.*$/, 'gemini')
+              .replace(/^(claude|grok|openai|codex).*$/, '$1')
+        const overrideProvider = skillProvider && family(skillProvider) !== family(currentProvider)
+          ? skillProvider
+          : undefined
+        const overrideModel = overrideProvider ? (activeSkill.default_model ?? null) : null
+        sendId = await window.api.ai.sendWithOverrides(allMessages, null, {
+          systemPrompt: activeSkill.systemPrompt + antiStallNudge,
+          ...(overrideProvider ? { providerId: overrideProvider } : {}),
+          ...(overrideModel !== null ? { model: overrideModel } : {}),
+          effortLevel: store.effortLevel
+        }, String(helpChatId))
+      } else {
+        const effort = store.effortLevel
+        if (effort !== 'standard') {
+          sendId = await window.api.ai.sendWithOverrides(allMessages, null, { effortLevel: effort }, String(helpChatId))
+        } else {
+          sendId = await window.api.ai.send(allMessages, null, String(helpChatId))
+        }
+      }
+      currentSendIdRef.current = sendId
+      registerChatSendOwner(sendId, helpChatId, true)
+      return
+    }
+
     const ctx = await ensureProjectForChat()
     if (!ctx) {
       flashWarning('Сначала открой папку проекта слева — без неё переписка не сохраняется.')
@@ -1086,7 +1183,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // another chat mid-stream, the event handler will route events into
     // chatSnapshots[activeChatId] rather than corrupting the new active chat.
     if (activeChatId != null) {
-      registerChatSendOwner(sendId, activeChatId)
+      registerChatSendOwner(sendId, activeChatId, false)
     }
   }
 
@@ -1094,7 +1191,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const id = currentSendIdRef.current
     if (id == null) return
     await window.api.ai.stop(id)
-    setStreaming(false)
+    if (useProject.getState().helpMode) setHelpStreaming(false)
+    else setStreaming(false)
     setPendingSupplements([])
     setPendingBarExpanded(false)
     // sendOwners cleanup: stop() = главное место где renderer знает, что

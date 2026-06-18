@@ -328,7 +328,7 @@ interface ProjectRailProps {
 
 export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHelp, sidebarOpen, onToggleSidebar }: ProjectRailProps) {
   const t = useT()
-  const { path, projectList, sessions, setProject, refreshProjectList } = useProject()
+  const { path, projectList, sessions, setProject, refreshProjectList, helpMode, help } = useProject()
   const [bootstrapped, setBootstrapped] = useState(false)
   const initialRailExpanded = readRailExpanded()
   const [railExpanded, setRailExpanded] = useState(initialRailExpanded)
@@ -541,14 +541,14 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
             key={group.id}
             group={group}
             projects={projects}
-            activePath={path}
+            activePath={helpMode ? null : path}
             sessions={sessions}
             shellExpanded={shellExpanded}
             contentExpanded={contentExpanded}
             onToggleCollapsed={g => void handleToggleGroupCollapsed(g)}
             onExpandRail={() => setRailExpanded(true)}
             onEdit={g => setGroupModal({ mode: 'edit', group: g })}
-            onSelectProject={p => { if (path !== p) void setProject(p) }}
+            onSelectProject={p => { if (helpMode || path !== p) void setProject(p) }}
             onProjectSettings={onOpenProjectSettings}
           />
         ))}
@@ -558,12 +558,12 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
             <ProjectChip
               key={p.path}
               project={p}
-              active={path === p.path}
+              active={!helpMode && path === p.path}
               unread={!!session?.hasUnread}
               streaming={!!session?.isStreaming}
               shellExpanded={shellExpanded}
               contentExpanded={contentExpanded}
-              onClick={() => { if (path !== p.path) void setProject(p.path) }}
+              onClick={() => { if (helpMode || path !== p.path) void setProject(p.path) }}
               onSettings={() => onOpenProjectSettings(p)}
             />
           )
@@ -597,13 +597,13 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
                 <ProjectChip
                   key={p.path}
                   project={p}
-                  active={path === p.path}
+                  active={!helpMode && path === p.path}
                   unread={!!session?.hasUnread}
                   streaming={!!session?.isStreaming}
                   shellExpanded={shellExpanded}
                   contentExpanded={contentExpanded}
                   nested
-                  onClick={() => { if (path !== p.path) void setProject(p.path) }}
+                  onClick={() => { if (helpMode || path !== p.path) void setProject(p.path) }}
                   onSettings={() => onOpenProjectSettings(p)}
                 />
               )
@@ -637,13 +637,21 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
           </button>
           <button
             type="button"
-            className="gg-rail-help-btn"
+            className={`gg-rail-help-btn ${helpMode ? 'is-active' : ''}`}
             onClick={onOpenHelp}
-            disabled={!path}
-            title={path ? t.help.title : t.help.noProject}
+            title={t.help.title}
             aria-label={t.help.title}
+            aria-pressed={helpMode}
           >
-            <span className="gg-rail-help-icon" aria-hidden>?</span>
+            <span className="gg-rail-help-status-wrap">
+              <span className="gg-rail-help-icon" aria-hidden>?</span>
+              {(help.isStreaming || help.hasUnread) && (
+                <span
+                  className={`gg-rail-status ${help.isStreaming ? 'is-streaming' : 'is-unread'}`}
+                  title={help.isStreaming ? 'Справка: ответ готовится' : 'Справка: новый ответ'}
+                />
+              )}
+            </span>
           </button>
         </div>
       </div>

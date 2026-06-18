@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import { HELP_PROJECT_PATH } from './help-scope'
 
 /**
  * `kind` распределяет чаты на две группы:
@@ -26,8 +27,8 @@ export interface ChatSession {
 export interface ChatSessions {
   /** Только main-чаты — для рендера в Sidebar. */
   list: (projectPath: string) => ChatSession[]
-  /** Один чат справки на проект — скрыт из Sidebar. */
-  getOrCreateHelp: (projectPath: string) => ChatSession
+  /** Единый глобальный чат справки — скрыт из Sidebar. */
+  getOrCreateHelp: () => ChatSession
   /** Все review-чаты, относящиеся к одному родителю. */
   listReviews: (parentChatId: number) => ChatSession[]
   get: (id: number) => ChatSession | null
@@ -77,12 +78,12 @@ export function createChatSessions(db: Database): ChatSessions {
         `${SELECT} WHERE parent_chat_id = ? AND kind = 'review' ORDER BY created_at ASC`
       ).all(parentChatId) as Row[]
     },
-    getOrCreateHelp(projectPath) {
+    getOrCreateHelp() {
       const existing = db.prepare(
         `${SELECT} WHERE project_path = ? AND kind = 'help' LIMIT 1`
-      ).get(projectPath) as Row | undefined
+      ).get(HELP_PROJECT_PATH) as Row | undefined
       if (existing) return existing
-      return sessions.create(projectPath, { title: 'Справка Verstak', kind: 'help' })
+      return sessions.create(HELP_PROJECT_PATH, { title: 'Справка Verstak', kind: 'help' })
     },
     get(id) {
       const row = db.prepare(`${SELECT} WHERE id = ?`).get(id) as Row | undefined

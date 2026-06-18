@@ -231,7 +231,7 @@ export const en = {
     emptyTitle: 'Verstak help',
     emptyHint: 'Ask how the sidebar, agent modes, message queue, skills, or model settings work.',
     exampleQuestions: 'Example questions',
-    noProject: 'Open a project first — help is per project but does not modify files.',
+    noProject: 'Verstak help — separate from projects; does not touch client files.',
     notifyReady: 'Help mode — response ready',
     notifyError: 'Help mode — error',
   },

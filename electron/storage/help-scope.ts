@@ -1,0 +1,1 @@
+export const HELP_PROJECT_PATH = '__verstak_help__'

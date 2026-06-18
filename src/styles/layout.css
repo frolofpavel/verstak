@@ -1621,6 +1621,24 @@ html {
   align-items: center;
   width: auto;
 }
+.gg-rail-help-btn.is-active {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--accent-muted) 70%, var(--bg-elevated));
+  color: var(--accent);
+}
+.gg-rail-help-status-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.gg-rail-help-status-wrap .gg-rail-status {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+}
 .gg-rail-help-btn {
   flex: 1 1 0;
   min-width: 36px;

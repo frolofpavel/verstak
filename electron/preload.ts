@@ -51,7 +51,6 @@ contextBridge.exposeInMainWorld('api', {
       projectName?: string
       projectPath?: string
       isHelp?: boolean
-      helpProjectPath?: string
       isError?: boolean
     }) => ipcRenderer.invoke('notify:show', opts) as Promise<boolean>,
     playSound: (opts?: { isError?: boolean }) =>
@@ -153,7 +152,7 @@ contextBridge.exposeInMainWorld('api', {
       kind?: 'main' | 'review' | 'help'
       parentChatId?: number | null
     }) => ipcRenderer.invoke('chat-sessions:create', projectPath, opts),
-    getOrCreateHelp: (projectPath: string) => ipcRenderer.invoke('chat-sessions:get-or-create-help', projectPath),
+    getOrCreateHelp: () => ipcRenderer.invoke('chat-sessions:get-or-create-help'),
     rename: (id: number, title: string) => ipcRenderer.invoke('chat-sessions:rename', id, title),
     setModel: (id: number, providerId: string | null, model: string | null) =>
       ipcRenderer.invoke('chat-sessions:set-model', id, providerId, model),

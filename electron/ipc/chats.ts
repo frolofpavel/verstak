@@ -10,7 +10,7 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
   ipcMain.handle('chat-sessions:list', (_e, projectPath: string) => sessions.list(projectPath))
   /** Review sub-chats для родительского — для рендера pills в Timeline. */
   ipcMain.handle('chat-sessions:list-reviews', (_e, parentChatId: number) => sessions.listReviews(parentChatId))
-  ipcMain.handle('chat-sessions:get-or-create-help', (_e, projectPath: string) => sessions.getOrCreateHelp(projectPath))
+  ipcMain.handle('chat-sessions:get-or-create-help', () => sessions.getOrCreateHelp())
   ipcMain.handle('chat-sessions:create', (_e, projectPath: string, opts?: {
     title?: string
     providerId?: string | null

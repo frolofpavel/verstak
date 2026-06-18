@@ -169,7 +169,6 @@ declare global {
           projectName?: string
           projectPath?: string
           isHelp?: boolean
-          helpProjectPath?: string
           isError?: boolean
         }) => Promise<boolean>
         playSound: (opts?: { isError?: boolean }) => Promise<boolean>
@@ -253,7 +252,7 @@ declare global {
         rename: (id: number, title: string) => Promise<void>
         setModel: (id: number, providerId: string | null, model: string | null) => Promise<void>
         remove: (id: number) => Promise<void>
-        getOrCreateHelp: (projectPath: string) => Promise<ChatSession>
+        getOrCreateHelp: () => Promise<ChatSession>
       }
       chats: {
         list: (sessionId: number) => Promise<StoredChatMessage[]>

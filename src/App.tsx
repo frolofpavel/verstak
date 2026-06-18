@@ -165,8 +165,8 @@ export function App() {
       if (path && norm(path) === norm(projectPath)) return
       void setProject(projectPath)
     })
-    const offHelp = window.api.notify.onOpenHelp((projectPath) => {
-      void useProject.getState().openHelpChat(projectPath)
+    const offHelp = window.api.notify.onOpenHelp(() => {
+      void useProject.getState().openHelpChat()
     })
     return () => {
       offProject()
