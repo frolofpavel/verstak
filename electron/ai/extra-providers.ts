@@ -19,7 +19,7 @@ import type { ChatProvider } from './types'
 
 export interface ExtraProviderSpec {
   /** ID для use в registry. */
-  id: 'openrouter' | 'deepseek' | 'moonshot' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai'
+  id: 'openrouter' | 'deepseek' | 'moonshot' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway'
   /** Человекочитаемое имя. */
   name: string
   /** Описание для UI карточки. */
@@ -39,6 +39,27 @@ export interface ExtraProviderSpec {
 }
 
 export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
+  {
+    id: 'verstak-gateway',
+    name: 'Verstak Gateway',
+    description: 'Единый AI-баланс Verstak: модели, лимиты, расходы и маршрутизация через AGI IRI Gateway. Рубли, без чужих карт и VPN. Один ключ vsk_live_ → понятные пресеты вместо сотни моделей.',
+    secretKey: 'verstak_gateway_api_key',
+    keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
+    keyHint: 'vsk_live_...',
+    // Пресеты вместо зоопарка моделей — в API уходит id (verstak/...), в UI —
+    // русские названия (см. GATEWAY_PRESET_LABELS). Gateway маршрутизирует на
+    // реальный upstream. Fusion-пресеты — Phase 4 (нужен gateway-pipeline).
+    models: [
+      'verstak/economy',
+      'verstak/balanced',
+      'verstak/coder',
+      'verstak/long',
+      'verstak/fast',
+      'verstak/private'
+    ],
+    defaultModel: 'verstak/balanced',
+    baseUrl: 'https://api.agi-iri.ru/v1'
+  },
   {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -179,6 +200,19 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     baseUrl: null // Из settings.custom_openai_baseurl
   }
 ]
+
+/**
+ * Русские названия пресетов Verstak Gateway для UI. В API уходит id (ключ),
+ * пользователю показываем человекочитаемое (значение). Fusion — Phase 4.
+ */
+export const GATEWAY_PRESET_LABELS: Record<string, string> = {
+  'verstak/economy': 'Эконом',
+  'verstak/balanced': 'Баланс',
+  'verstak/coder': 'Кодинг',
+  'verstak/long': 'Длинный контекст',
+  'verstak/fast': 'Быстро',
+  'verstak/private': 'Приватно',
+}
 
 /**
  * Builder для extra-провайдера. Принимает providerId и runtime-конфиг

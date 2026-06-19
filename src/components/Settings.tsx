@@ -134,6 +134,18 @@ const PROVIDERS: ProviderConfig[] = [
   // OpenAI-compatible extra-провайдеры (zеркало EXTRA_PROVIDERS из electron/ai/extra-providers.ts).
   // При обновлении расширений — обновляй ОБА файла; renderer не имеет доступа к main.
   {
+    id: 'verstak-gateway',
+    name: 'Verstak Gateway',
+    transport: 'API',
+    description: 'Единый AI-баланс Verstak: рубли, без чужих карт и VPN. Один ключ → понятные пресеты (Эконом/Баланс/Кодинг/…). Маршрутизация через AGI IRI Gateway.',
+    models: ['verstak/economy', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
+    defaultModel: 'verstak/balanced',
+    secretKey: 'verstak_gateway_api_key',
+    keyHint: 'vsk_live_...',
+    keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
+    supportsTools: true
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     transport: 'API',

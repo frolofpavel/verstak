@@ -286,6 +286,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
     case 'mistral':
     case 'groq':
     case 'ollama':
+    case 'verstak-gateway':
     case 'custom-openai': {
       // Для Ollama (local) ключ необязателен; для остальных — нужен.
       const spec = EXTRA_PROVIDERS.find(p => p.id === id)!
