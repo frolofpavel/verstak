@@ -198,7 +198,9 @@ contextBridge.exposeInMainWorld('api', {
     refresh: () => ipcRenderer.invoke('skills:refresh'),
     status: () => ipcRenderer.invoke('skills:status'),
     runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
-      ipcRenderer.invoke('skills:run-loaders', skillId, opts)
+      ipcRenderer.invoke('skills:run-loaders', skillId, opts),
+    capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
+      ipcRenderer.invoke('skills:capture', input)
   },
   cliAuth: {
     logout: (providerId: string) => ipcRenderer.invoke('cli-auth:logout', providerId),

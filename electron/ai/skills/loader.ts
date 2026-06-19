@@ -20,7 +20,7 @@ import type { Skill, SkillFrontmatter } from './types'
 import type { ProviderId } from '../registry'
 import type { AgentMode } from '../mode-policy'
 
-const USER_SKILLS_DIR = join(homedir(), '.verstak', 'skills')
+export const USER_SKILLS_DIR = join(homedir(), '.verstak', 'skills')
 /** Папка скиллов Claude Code — для migration / sharing. Если у пользователя там
  *  уже лежат скиллы из Claude Code, они автоматически появятся в Verstak без
  *  копирования. Помечаются source='user'. Если в обоих директориях есть

@@ -10,8 +10,13 @@
  */
 
 import { ipcMain } from 'electron'
+import { writeFile, mkdir } from 'fs/promises'
+import { existsSync } from 'fs'
+import { join } from 'path'
 import type { SkillRegistry } from '../ai/skills/types'
 import { lookupLoader } from '../ai/skills/loaders'
+import { buildCapturedSkill, deriveSkillId } from '../ai/skills/capture'
+import { USER_SKILLS_DIR } from '../ai/skills/loader'
 
 interface RunLoadersDeps {
   getSecret?: (key: string) => string | null
@@ -22,6 +27,33 @@ export function registerSkillsIpc(registry: SkillRegistry, deps: RunLoadersDeps 
   ipcMain.handle('skills:get', (_e, id: string) => registry.get(id))
   ipcMain.handle('skills:refresh', () => registry.refresh())
   ipcMain.handle('skills:status', () => registry.status())
+
+  /**
+   * Skill Capture: сохранить успешный прогон как скилл-скаффолд в
+   * ~/.verstak/skills/<id>.md (human-approve — на стороне UI до вызова).
+   * Дедупит id при коллизии, обновляет реестр. Возвращает { ok, id, path }.
+   */
+  ipcMain.handle('skills:capture', async (_e, input: { title: string; summary?: string; toolsAllow?: string[] }) => {
+    try {
+      const base = deriveSkillId(input?.title ?? '')
+      await mkdir(USER_SKILLS_DIR, { recursive: true })
+      let id = base
+      for (let n = 2; existsSync(join(USER_SKILLS_DIR, `${id}.md`)); n++) id = `${base}-${n}`
+      const skill = buildCapturedSkill({
+        title: input?.title ?? '',
+        summary: input?.summary,
+        toolsAllow: input?.toolsAllow,
+        capturedAt: new Date().toISOString().slice(0, 10),
+        id,
+      })
+      const filePath = join(USER_SKILLS_DIR, skill.filename)
+      await writeFile(filePath, skill.markdown, 'utf8')
+      await registry.refresh()
+      return { ok: true as const, id: skill.id, path: filePath }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   /**
    * Запустить context loaders для указанного скилла. Возвращает собранный

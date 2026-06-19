@@ -56,6 +56,8 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   const [loading, setLoading] = useState(true)
   const [proofMsg, setProofMsg] = useState<string | null>(null)
   const [proofBusy, setProofBusy] = useState(false)
+  const [captureMsg, setCaptureMsg] = useState<string | null>(null)
+  const [captureBusy, setCaptureBusy] = useState(false)
   const recordArtifact = useProject(s => s.recordArtifact)
   const setPreviewArtifact = useProject(s => s.setPreviewArtifact)
 
@@ -78,6 +80,25 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
     }
     setProofBusy(false)
   }, [runId, recordArtifact, setPreviewArtifact])
+
+  // Skill Capture: сохранить этот прогон как скилл-скаффолд в ~/.verstak/skills/.
+  // Это черновик — пользователь правит перед использованием (human-approve).
+  const captureSkill = useCallback(async () => {
+    const title = detail?.run?.title
+    if (!title) return
+    setCaptureBusy(true); setCaptureMsg(null)
+    try {
+      const touched = Array.from(new Set(
+        (detail?.events ?? []).filter(e => e.kind === 'file_write').map(e => e.ref ?? e.label).filter((p): p is string => !!p)
+      ))
+      const summary = touched.length ? `Изменил файлы: ${touched.slice(0, 8).join(', ')}.` : undefined
+      const res = await window.api.skills.capture({ title, summary })
+      setCaptureMsg(res.ok ? `✓ Скилл «${res.id}» сохранён — поправь в ~/.verstak/skills/` : `Не удалось: ${res.error}`)
+    } catch {
+      setCaptureMsg('Не удалось сохранить скилл')
+    }
+    setCaptureBusy(false)
+  }, [detail])
 
   const load = useCallback(async () => {
     try {
@@ -121,7 +142,17 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
         >
           🔏 {proofBusy ? 'Собираю…' : 'Proof Pack'}
         </button>
+        <button
+          type="button"
+          className="gg-btn gg-btn-sm"
+          onClick={() => void captureSkill()}
+          disabled={captureBusy || !detail?.run?.title}
+          title="Сохранить этот прогон как скилл-скаффолд в ~/.verstak/skills/ — черновик для редактирования (human approve)"
+        >
+          ⭐ {captureBusy ? 'Сохраняю…' : 'В скилл'}
+        </button>
         {proofMsg && <span className="gg-run-proof-msg">{proofMsg}</span>}
+        {captureMsg && <span className="gg-run-proof-msg">{captureMsg}</span>}
       </div>
       {/* (1) Timeline событий */}
       <div className="gg-run-section">

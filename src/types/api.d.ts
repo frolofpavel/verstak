@@ -299,6 +299,9 @@ declare global {
         status: () => Promise<{ lastRefreshAt: number | null; serverReachable: boolean; total: number }>
         runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
           Promise<{ context: string; labels: string[] }>
+        /** Skill Capture: сохранить прогон как скилл-скаффолд в ~/.verstak/skills/. */
+        capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
+          Promise<{ ok: true; id: string; path: string } | { ok: false; error: string }>
       }
       cliAuth: {
         logout: (providerId: string) => Promise<{
