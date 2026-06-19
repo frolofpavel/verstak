@@ -1558,22 +1558,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 >
                   🗺 Карта проекта
                 </button>
-                {/* Мультиагент: быстрый старт оркестрации и роя — тот же шаблон,
-                    что у slash-команд /orchestrate /swarm. Цель дописывает юзер. */}
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput(MULTI_AGENT_TEMPLATES.orchestrate.template)}
-                  title="Разбить цель на подзадачи по ролям и выполнить параллельно (orchestrate)"
-                >
-                  📊 Оркестровать задачу
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput(MULTI_AGENT_TEMPLATES.swarm.template)}
-                  title="Несколько агентов разными стратегиями + арбитр сведёт консенсус (swarm)"
-                >
-                  🐝 Запустить рой
-                </button>
+                {/* Мультиагент (orchestrate/swarm) — НЕ кнопки. Агент сам решает
+                    разбить многогранную задачу на параллельные подзадачи и
+                    вызывает delegate_parallel/orchestrate/swarm (см. промпт-правило
+                    fan-out в compose-system). Юзер описывает результат, не стратегию. */}
               </div>
             )}
             {suggestions.length > 0 && (

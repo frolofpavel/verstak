@@ -103,9 +103,10 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
     userLayer = { path: userLayer.path, content: userLayer.content + karpathyHint }
   }
 
-  // Подсказка про мультиагентные роли в delegate_parallel.
+  // Fan-out: агент САМ решает разбить многогранную задачу на параллельные
+  // подзадачи (не пользователь кнопкой). Правило решения + капабилити.
   if (userLayer.content !== undefined) {
-    const delegateHint = '\n\n<!-- delegate_parallel_roles_hint -->\ndelegate_parallel поддерживает роли: planner (разбей задачу), critic (найди проблемы), executor (сделай), verifier (проверь), researcher (исследуй код). Роли опциональны.'
+    const delegateHint = '\n\n<!-- fan_out_decision -->\n## Когда разбивать на параллельные подзадачи (сам, без спроса)\nЕсли задача состоит из НЕСКОЛЬКИХ независимых частей («сделай X и проверь Y и собери Z», несколько файлов/модулей/каналов) — НЕ делай всё одним потоком. Разбей и выполни параллельно через delegate_parallel (несколько исполнителей разом). Для расходящихся стратегий одной цели — swarm (несколько подходов + арбитр). Для сложной декомпозиции — orchestrate. Роли: planner (разбей), executor (сделай), verifier (проверь), critic (найди проблемы), researcher (исследуй). Это твоё решение по характеру задачи — пользователь описывает результат, стратегию выбираешь ты.'
     userLayer = { path: userLayer.path, content: userLayer.content + delegateHint }
   }
 
