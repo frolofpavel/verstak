@@ -5,6 +5,7 @@ import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
+import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
@@ -1183,10 +1184,18 @@ export async function runApiConversation(
     // Аудит M4: tools_allow скилла применяется ЗДЕСЬ — модель видит только
     // разрешённые инструменты (read-only скилл физически не получит write_file/
     // run_command). Фильтруем и стандартные, и MCP (см. selectAllowedToolDefs).
-    const allToolDefs = selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
+    // v3 Шаг D: max-steps hard-stop (вдохновлено OpenCode). На ПОСЛЕДНЕМ turn'е
+    // (сюда доходят только зацикленные прогоны — нормальные финишируют раньше)
+    // убираем тулзы и инжектим инструкцию отчёта: модель обязана отчитаться
+    // структурой «сделано/не доделано/дальше», а не молча упереться в лимит.
+    const isLastTurn = turnsBudget > 1 && turn === turnsBudget - 1
+    const allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
+    const messagesToSend = isLastTurn
+      ? [...messagesForProvider, { role: 'user' as const, content: MAX_STEPS_REPORT }]
+      : messagesForProvider
 
     for await (const event of withInitialRetry(
-      () => provider.send(messagesForProvider, allToolDefs, undefined, signal),
+      () => provider.send(messagesToSend, allToolDefs, undefined, signal),
       {
         label: `turn-${turnNum}`,
         signal,

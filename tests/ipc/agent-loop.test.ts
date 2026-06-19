@@ -152,4 +152,31 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(turn).toBeGreaterThanOrEqual(2)                       // turn перезапустился
     expect(received[1]).toContain('СРОЧНАЯ-ДОБАВКА')             // добавка дошла до хода 2
   }, 15000)
+
+  // v3 Шаг D: max-steps hard-stop. Зацикленный прогон (модель всегда зовёт tool)
+  // упирается в turnsBudget=5. На ПОСЛЕДНЕМ turn'е тулзы убраны + инжектится
+  // инструкция отчёта — модель не молчит в лимит, а отчитывается структурой.
+  it('max-steps hard-stop: на последнем turn тулзы сняты + инжектится отчёт', async () => {
+    const runs = mockRuns()
+    const captured: Array<{ toolCount: number; hasReport: boolean }> = []
+    const p: ChatProvider = {
+      id: 'p1', name: 'p1', models: ['p1'],
+      async *send(messages: ChatMessage[], tools): AsyncGenerator<ChatEvent> {
+        const hasReport = messages.some(m => typeof m.content === 'string' && m.content.includes('ЛИМИТ ШАГОВ'))
+        captured.push({ toolCount: (tools as unknown[]).length, hasReport })
+        // Всегда зовём tool (РАЗНЫЙ путь — иначе сработает loop-detector) —
+        // сами не финишируем, упираемся в turnsBudget.
+        yield { type: 'tool-call', call: { id: `c${captured.length}`, name: 'read_file', args: { path: `nope${captured.length}.txt` } } }
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+
+    expect(captured.length).toBe(5)                    // turnsBudget=5
+    expect(captured[0].toolCount).toBeGreaterThan(0)   // обычные turn'ы — с тулзами
+    expect(captured[0].hasReport).toBe(false)
+    const last = captured[captured.length - 1]
+    expect(last.toolCount).toBe(0)                     // последний — без тулзов
+    expect(last.hasReport).toBe(true)                  // и с инструкцией отчёта
+  }, 15000)
 })
