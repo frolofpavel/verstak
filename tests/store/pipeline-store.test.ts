@@ -57,6 +57,20 @@ describe('projectStore — Pipeline state', () => {
     expect(advance).not.toHaveBeenCalled()
   })
 
+  it('completed → activePipeline обнуляется (иначе скрыта кнопка ▶ Pipeline)', async () => {
+    useProject.getState().startPipeline(run({ id: 5 }))
+    advance.mockResolvedValueOnce(run({ id: 5, step: 'completed' }))
+    await useProject.getState().advancePipeline({ step: 'completed' })
+    expect(useProject.getState().activePipeline).toBeNull()
+  })
+
+  it('blocked НЕ обнуляет — баннер остаётся для вмешательства', async () => {
+    useProject.getState().startPipeline(run({ id: 6 }))
+    advance.mockResolvedValueOnce(run({ id: 6, step: 'blocked' }))
+    await useProject.getState().advancePipeline({ step: 'blocked' })
+    expect(useProject.getState().activePipeline?.step).toBe('blocked')
+  })
+
   it('cancelPipeline очищает стейт и зовёт cancel(id)', async () => {
     useProject.getState().startPipeline(run({ id: 4 }))
     await useProject.getState().cancelPipeline()

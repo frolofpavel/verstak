@@ -620,7 +620,11 @@ export const useProject = create<ProjectState>((set, get) => ({
       const updated = await window.api.pipeline.advance(cur.id, patch)
       // Применяем только если тот же прогон ещё активен (не переключились).
       if (get().activePipeline?.id !== cur.id) return
-      set({ activePipeline: updated })
+      // Завершённый/отменённый прогон обнуляем, иначе он висит в activePipeline и
+      // скрывает кнопку ▶ Pipeline (она рендерится при !activePipeline). 'blocked'
+      // НЕ терминальный — баннер должен оставаться видимым для вмешательства.
+      const isTerminal = updated == null || updated.step === 'completed' || updated.step === 'cancelled'
+      set({ activePipeline: isTerminal ? null : updated })
     } catch { /* best-effort */ }
   },
   cancelPipeline: async () => {
