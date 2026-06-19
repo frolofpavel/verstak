@@ -426,6 +426,15 @@ declare global {
         /** Отменить прогон (step='cancelled'). */
         cancel(id: number): Promise<void>
       }
+      /** Project Brain — мозг проекта (warmup, состояние, решения). */
+      brain: {
+        /** Прогреть проект: скан → summaries → context-packs → Brain. */
+        warmup(): Promise<{ filesScanned: number; filesSummarized: number; packs: Array<{ type: 'short' | 'medium' | 'long'; tokenEstimate: number | null }> } | null>
+        /** Состояние мозга активного проекта (null если не прогрет). */
+        get(): Promise<ProjectBrain | null>
+        decisionsList(): Promise<DecisionRecord[]>
+        decisionsSave(rec: NewDecisionRecord): Promise<DecisionRecord | null>
+      }
       term: {
         spawn: (cwd: string) => Promise<number>
         write: (id: number, data: string) => Promise<void>
@@ -849,6 +858,41 @@ export interface DevTaskDetail {
  *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
 export type PipelineMode = 'dev' | 'agency'
 export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'proof' | 'completed' | 'cancelled' | 'blocked'
+
+// Project Brain (зеркало electron/storage/project-brain.ts — renderer без main).
+export interface ProjectBrain {
+  id: number
+  projectPath: string
+  version: number
+  overview: string | null
+  architectureSummary: string | null
+  importantFiles: string[]
+  entities: string[]
+  projectRules: string | null
+  createdAt: number
+  updatedAt: number
+  lastWarmupAt: number | null
+}
+export type Confidence = 'low' | 'medium' | 'high'
+export interface DecisionRecord {
+  id: number
+  projectPath: string
+  sourceMessageId: string | null
+  title: string
+  userRequest: string | null
+  finalDecision: string | null
+  why: string | null
+  keyArguments: string[]
+  objections: string[]
+  risks: string[]
+  alternativesRejected: string[]
+  nextActions: string[]
+  confidence: Confidence | null
+  revisitDate: number | null
+  createdAt: number
+  updatedAt: number
+}
+export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'projectPath' | 'createdAt' | 'updatedAt'>
 export interface PipelineBrief {
   goal: string
   constraints: string

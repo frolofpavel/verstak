@@ -296,6 +296,12 @@ contextBridge.exposeInMainWorld('api', {
     getActive: (projectPath: string) => ipcRenderer.invoke('pipeline:getActive', projectPath),
     cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id)
   },
+  brain: {
+    warmup: () => ipcRenderer.invoke('brain:warmup'),
+    get: () => ipcRenderer.invoke('brain:get'),
+    decisionsList: () => ipcRenderer.invoke('brain:decisions-list'),
+    decisionsSave: (rec: unknown) => ipcRenderer.invoke('brain:decisions-save', rec)
+  },
   autonomous: {
     status: () => ipcRenderer.invoke('autonomous:status') as Promise<{ enabled: boolean; intervalMin: number; lastRunAt: number | null; lastRunSuggestions: number; lastRunError: string | null; nextRunAt: number | null }>,
     runOnce: () => ipcRenderer.invoke('autonomous:run-once') as Promise<{ enabled: boolean; intervalMin: number; lastRunAt: number | null; lastRunSuggestions: number; lastRunError: string | null; nextRunAt: number | null }>,

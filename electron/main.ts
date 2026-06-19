@@ -50,6 +50,8 @@ import { registerGitIpc } from './ipc/git'
 import { registerDevTaskIpc, isActiveDevTask } from './ipc/dev-task'
 import { createPipelineRuns } from './storage/pipeline-runs'
 import { registerPipelineIpc } from './ipc/pipeline'
+import { registerBrainIpc } from './ipc/project-brain'
+import { createProjectBrainStore } from './storage/project-brain'
 import { registerAgentsIpc } from './ipc/agents'
 import { registerAgentRunsIpc } from './ipc/agent-runs'
 import { registerVerificationsIpc } from './ipc/verifications'
@@ -339,6 +341,7 @@ app.whenReady().then(() => {
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
   registerPipelineIpc({ pipeline: createPipelineRuns(db), getProjectRoot: getActiveProjectPath })
+  registerBrainIpc({ store: createProjectBrainStore(db), getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
