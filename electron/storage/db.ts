@@ -594,6 +594,101 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('ALTER TABLE pipeline_runs ADD COLUMN verify_attempts INTEGER NOT NULL DEFAULT 0')
       }
     }
+  },
+  {
+    version: 25,
+    description: 'Project Brain — мозг проекта: overview/summaries/context-packs/decisions (+ stubs scoreboard/hive)',
+    run: (db: DB) => {
+      // Ядро продукта: интеллект живёт в проекте (ключ — project_path), а не в
+      // модели. JSON-поля хранятся как TEXT. Все таблицы идемпотентны (IF NOT EXISTS).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_brain (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL UNIQUE,
+          version INTEGER NOT NULL DEFAULT 1,
+          overview TEXT,
+          architecture_summary TEXT,
+          important_files TEXT,        -- json string[]
+          entities TEXT,               -- json string[]
+          project_rules TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_warmup_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS file_summary (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          file_hash TEXT,
+          summary TEXT,
+          key_exports TEXT,            -- json string[]
+          key_dependencies TEXT,       -- json string[]
+          risks TEXT,
+          token_estimate INTEGER,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(project_path, file_path)
+        );
+        CREATE TABLE IF NOT EXISTS context_pack (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          type TEXT NOT NULL,          -- short | medium | long
+          content TEXT NOT NULL,
+          token_estimate INTEGER,
+          source_files TEXT,           -- json string[]
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(project_path, type)
+        );
+        CREATE TABLE IF NOT EXISTS decision_record (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          source_message_id TEXT,
+          title TEXT NOT NULL,
+          user_request TEXT,
+          final_decision TEXT,
+          why TEXT,
+          key_arguments TEXT,          -- json string[]
+          objections TEXT,             -- json string[]
+          risks TEXT,                  -- json string[]
+          alternatives_rejected TEXT,  -- json string[]
+          next_actions TEXT,           -- json string[]
+          confidence TEXT,             -- low | medium | high
+          revisit_date INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_brain_project ON project_brain(project_path);
+        CREATE INDEX IF NOT EXISTS idx_filesum_project ON file_summary(project_path);
+        CREATE INDEX IF NOT EXISTS idx_ctxpack_project ON context_pack(project_path);
+        CREATE INDEX IF NOT EXISTS idx_decision_project ON decision_record(project_path);
+        -- Stubs (Phase будущего): schema без логики. Заложены, чтобы место в
+        -- архитектуре было, но MVP их не наполняет.
+        CREATE TABLE IF NOT EXISTS model_scoreboard (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          task_type TEXT,
+          success_score REAL,
+          cost_score REAL,
+          latency_score REAL,
+          notes TEXT,
+          updated_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS agency_hive_mind (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          organization_id TEXT,
+          source_project_path TEXT,
+          decision_record_id INTEGER,
+          anonymized_pattern TEXT,
+          problem_pattern TEXT,
+          solution_pattern TEXT,
+          risk_pattern TEXT,
+          reuse_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
+      `)
+    }
   }
 ]
 
