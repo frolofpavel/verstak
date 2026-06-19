@@ -20,6 +20,7 @@ import { join } from 'path'
 import { getProjectMap, projectMapToText, getDependencyMap, computeDependencyHubs } from './project-map'
 import type { DependencyMap, ProjectMap } from './project-map'
 import { detectCrossProjectPaths } from './grounding'
+import { buildProfileBlock, loadProjectProfile, type ProjectProfile } from './project-profile'
 // Re-export for backward compatibility — tests still import from here.
 export { detectCrossProjectPaths }
 
@@ -57,6 +58,9 @@ export interface ContextPackInput {
    *  из кэша (getDependencyMap дёшев на тёплом кэше после warm на открытии).
    *  Передавать явно стоит только чтобы не дёргать кэш дважды. */
   dependencyMap?: DependencyMap
+  /** v3 Шаг C: machine-readable профиль проекта (из брифа/автоскана). Инжектится
+   *  как постоянный блок, чтобы модель не собирала контекст заново. */
+  profile?: ProjectProfile
 }
 
 /**
@@ -108,6 +112,13 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   if (input.isFirstTurn) {
     parts.push(`first_turn: true — для вопросов про архитектуру/структуру/стек проекта СНАЧАЛА вызови get_project_map (это дешевле чем несколько read_file). Для конкретных задач — действуй как обычно.`)
   }
+
+  // 0. Профиль проекта (v3 Шаг C) — постоянный machine-readable снимок. Идёт
+  //    в начало: модель сразу знает суть/стек/конвенции, не собирая контекст заново.
+  //    input.profile (тесты) имеет приоритет; иначе сам читаем .verstak/profile.json.
+  const profile = input.profile ?? await loadProjectProfile(projectPath)
+  const profileBlock = buildProfileBlock(profile)
+  if (profileBlock) parts.push(profileBlock)
 
   // 0. Cross-project path warning — if user mentioned an absolute path that
   //    isn't inside this project, the AI can't access it. We surface this so
