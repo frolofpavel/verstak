@@ -90,6 +90,47 @@ export function recommendModel(providerId: string, complexity: TaskComplexity): 
   return model
 }
 
+/**
+ * Гибридный роутинг API↔CLI (Сценарий Б). Детектит, требует ли задача
+ * «терминального цикла» — выполнить команду, прочитать вывод, итеративно
+ * править, перезапустить (сборка/типы/тесты/локальный прогон). Такие задачи
+ * автономнее делает CLI-агент (Claude Code/Codex), чем чистый API-чат.
+ *
+ * Возвращает {reason} если задача терминальная, иначе null. Чистая функция —
+ * вызывающий решает, ЧТО делать с подсказкой (info-event / pill / delegate).
+ */
+export function detectCliWorthiness(messages: ChatMessage[]): { reason: string } | null {
+  const lastUser = messages.filter(m => m.role === 'user').pop()
+  if (!lastUser) return null
+  const text = lastUser.content.toLowerCase()
+
+  // Сигналы терминального цикла: запуск/наблюдение/итерация. RU + EN.
+  // Сгруппированы по смыслу — для каждой группы своя человекочитаемая причина.
+  const GROUPS: Array<{ reason: string; patterns: RegExp }> = [
+    {
+      reason: 'сборка/компиляция (нужно читать вывод и итеративно править)',
+      patterns: /(падает|сломал|чинит?|почему).{0,30}(сборк|билд|компил)|tsc|type ?check|типизац|build (fail|error|break)|compile error|сборка не/,
+    },
+    {
+      reason: 'прогон тестов (нужен цикл запуск→правка→перезапуск)',
+      patterns: /(запусти|прогон|почини|fix).{0,30}(тест|test)|npm (run )?test|vitest|jest|pytest|тесты (не )?(проход|падают)|failing test|make tests? pass/,
+    },
+    {
+      reason: 'итеративная отладка по выводу инструментов',
+      patterns: /(почему|why).{0,40}(падае|fail|crash|краш|ошибк|error|не работает)|debug|трассир|stack ?trace|воспроизвед|reproduce/,
+    },
+    {
+      reason: 'локальное окружение/команды (установка, запуск, линт)',
+      patterns: /npm (install|run|ci)|yarn |pnpm |запусти локально|подними (окруж|сервер)|run the (app|server|dev)|lint|eslint --fix|migrate (db|database)|прогони миграц/,
+    },
+  ]
+
+  for (const g of GROUPS) {
+    if (g.patterns.test(text)) return { reason: g.reason }
+  }
+  return null
+}
+
 /** Человекочитаемая метка для info-события. */
 export function complexityLabel(complexity: TaskComplexity): string {
   switch (complexity) {

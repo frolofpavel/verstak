@@ -20,7 +20,7 @@ import { captureToolObservation } from '../ai/memory-hooks'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
 import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
-import { estimateComplexity, recommendModel, complexityLabel } from '../ai/smart-router'
+import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
@@ -420,6 +420,23 @@ export function registerAiIpc(deps: AiDeps): void {
           event: {
             type: 'info',
             text: `📊 ${complexityLabel(complexity)} → using ${suggested} (smart routing)`
+          }
+        })
+      }
+    }
+
+    // Гибридный роутинг API↔CLI (Сценарий Б). Если активен API-провайдер, а
+    // задача «терминальная» (сборка/тесты/итеративная отладка) — подсказываем,
+    // что автономнее её сделает CLI-агент. Поведение НЕ меняем: молчаливого
+    // свитча нет (контроль/прозрачность — ядро Verstak), только info-подсказка.
+    if (smartRoutingEnabled && descriptor.transport === 'API') {
+      const cliHint = detectCliWorthiness(messages)
+      if (cliHint) {
+        taggedSender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'info',
+            text: `🔧 Похоже на терминальную задачу: ${cliHint.reason}. Автономнее справится CLI-агент (Claude Code/Codex) — переключи провайдер в селекторе или попроси делегировать шаг на CLI.`
           }
         })
       }
