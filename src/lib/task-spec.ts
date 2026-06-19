@@ -20,30 +20,5 @@ export const TASK_SPEC_CONTRACT = [
   '- 3–10 конкретных строк на шаг. Без общих фраз «улучшить»/«оптимизировать»/«доработать».',
 ].join('\n')
 
-export interface TaskSpecScore {
-  ok: boolean
-  /** Чего не хватает по контракту (для предупреждения/гейта). */
-  missing: string[]
-}
-
-/**
- * Оценить описание шага против контракта. Эвристика: путь к файлу + критерий
- * готовности + достаточная детальность. Возвращает чего не хватает.
- */
-export function scoreTaskSpec(detail: string | null | undefined): TaskSpecScore {
-  const d = (detail ?? '').trim()
-  const missing: string[] = []
-
-  // 1. Конкретные файлы/пути: что-то вроде foo.ts, src/bar, a/b.css.
-  const hasPath = /[\w@.-]+\.[a-z]{1,5}\b/i.test(d) || /\b[\w-]+\/[\w-]+/.test(d)
-  if (!hasPath) missing.push('конкретные файлы/пути')
-
-  // 2. Критерий готовности — что значит «сделано».
-  const hasAcceptance = /критери|готов|done|acceptance|ожида|проверь|провер|должен|тест|works?|пройд/i.test(d)
-  if (!hasAcceptance) missing.push('критерий готовности («сделано» = что)')
-
-  // 3. Детальность — не одна строка-заглушка.
-  if (d.length < 40) missing.push('детальность (минимум пара конкретных предложений)')
-
-  return { ok: missing.length === 0, missing }
-}
+// Проверка качества ТЗ (scoreTaskSpec) живёт в electron/ai/task-spec-check.ts —
+// она применяется на сервере при create_plan (enforcement), а не в renderer.

@@ -31,6 +31,7 @@ import { join, resolve, relative, isAbsolute } from 'path'
 import type { Attachment, ToolCall, ToolResult } from '../ai/types'
 import { applySearchReplaceBlocks, type FileTools } from '../ai/tools'
 import { decide, blockReason, type AgentMode } from '../ai/mode-policy'
+import { planSpecFeedback } from '../ai/task-spec-check'
 import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../ai/mcp-policy'
 import { getRolePrompt } from '../ai/agent-roles'
 import { invalidateProjectMap, markFileDirty } from '../ai/project-map'
@@ -2264,7 +2265,10 @@ const createPlanHandler: ToolHandler = {
       const plan = ctx.recordPlan(ctx.projectPath, title, steps)
       try { ctx.recordJournal(ctx.projectPath, 'note', `План: ${title}`, `${steps.length} шагов`) } catch { /* journal not critical */ }
       ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'plan-created', planId: plan.id, title, stepCount: steps.length } })
-      return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.` }
+      // v3 Шаг B (enforcement): фидбэк по тонким ТЗ-шагам — модель уточнит, чтобы
+      // дешёвая модель-исполнитель получила точную инструкцию, а не «улучшить X».
+      const specFeedback = planSpecFeedback(steps)
+      return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.${specFeedback}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
