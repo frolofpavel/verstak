@@ -14,7 +14,7 @@
 - ✅ **A. Ядро надёжности** (4b8e771) — verify-gate: модель не вправе сказать «готово», провал → авто-починка, лимит → честный стоп `blocked`. pipeline-gate (6 тестов) + миграция 24.
 - ✅ **B. Task-spec контракт** (aba770c) — дорогая модель пишет детальные ТЗ-задачи → дешёвая исполняет. TASK_SPEC_CONTRACT в buildPlanPrompt/create_plan + scoreTaskSpec (6 тестов). **Рычаг «Opus на дешёвой».**
 - ✅ **C. Профиль проекта** (97d7d55) — machine-readable `.verstak/profile.json`, self-load в context-pack каждой сессии (8 тестов).
-- 🔵 **D. Промпт-пресеты + beast + max-steps** (fd298da) — beast-автономность для auto/bypass готова (4 теста). Остаток: max-steps hard-stop (инвазив в loop), per-family тюнинг, CLI-паритет.
+- ✅ **D. Промпт-пресеты + beast + max-steps** (fd298da + d653b77) — beast-автономность (auto/bypass) + max-steps hard-stop (последний turn: тулзы off + отчёт). 10 тестов. Минор-остаток: per-family тюнинг, CLI-паритет.
 - ⬜ **E. Доказательство Opus-на-DeepSeek** — 1 реальный сценарий end-to-end, 9/10. **Живая проверка.**
 - ⬜ Бонус: LSP-тул + per-role профили.
 
