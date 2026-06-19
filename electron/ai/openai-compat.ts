@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { formatVerstakMeta, mapGatewayError } from './gateway-meta'
 
 export interface OpenAiCompatOptions {
   id: string
@@ -123,7 +124,15 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
         }, signal ? { signal } : undefined)
 
         let usageSent = false
+        let verstakSent = false
         for await (const chunk of stream) {
+          // Verstak Gateway: доп-метадата (cost_rub/balance_rub/cache) в чанке —
+          // показываем компактной плашкой. Хармлесс для остальных (поля нет).
+          if (!verstakSent) {
+            const vmeta = (chunk as { verstak?: Parameters<typeof formatVerstakMeta>[0] }).verstak
+            const line = formatVerstakMeta(vmeta)
+            if (line) { verstakSent = true; yield { type: 'info', text: line } }
+          }
           // Final chunk may carry only usage (no choices)
           if ((chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } }).usage && !usageSent) {
             const u = (chunk as { usage: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } }).usage
@@ -180,7 +189,13 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
         }
         yield { type: 'done' }
       } catch (err) {
-        yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
+        // Verstak Gateway — человеко-читаемые ошибки по статусу/коду (нет баланса,
+        // лимит, ключ). Для остальных провайдеров — обычное сообщение.
+        const e = err as { status?: number; code?: string; error?: { code?: string } }
+        const friendly = opts.id === 'verstak-gateway'
+          ? mapGatewayError(e.status, e.code ?? e.error?.code)
+          : null
+        yield { type: 'error', message: friendly ?? (err instanceof Error ? err.message : String(err)) }
       }
     }
   }

@@ -41,8 +41,20 @@ function isCliProvider(id: string): boolean {
   return id.endsWith('-cli')
 }
 
+// Verstak Gateway: пресеты показываем по-русски (в API уходит id verstak/...).
+// Зеркало GATEWAY_PRESET_LABELS из electron/ai/extra-providers.ts (renderer без main).
+const GATEWAY_PRESET_LABELS: Record<string, string> = {
+  'verstak/economy': 'Эконом',
+  'verstak/balanced': 'Баланс',
+  'verstak/coder': 'Кодинг',
+  'verstak/long': 'Длинный контекст',
+  'verstak/fast': 'Быстро',
+  'verstak/private': 'Приватно',
+}
+
 function shortModel(m: string): string {
   if (m === 'auto') return 'auto'
+  if (GATEWAY_PRESET_LABELS[m]) return GATEWAY_PRESET_LABELS[m]
   const dateMatch = m.match(/(.*)-\d{8}$/)
   if (dateMatch) return dateMatch[1]
   return m
