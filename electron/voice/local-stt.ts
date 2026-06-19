@@ -17,10 +17,6 @@ let pipelinePromise: Promise<AsrPipeline> | null = null
 let loadError: string | null = null
 let loading = false
 
-export function getLocalSttModelLabel(): string {
-  return MODEL_LABEL
-}
-
 export function getLocalSttStatus(): { available: boolean; ready: boolean; loading: boolean; error: string | null; model: string } {
   return {
     available: true,

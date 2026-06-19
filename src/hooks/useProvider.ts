@@ -83,11 +83,6 @@ export function isModelValidForProvider(providerId: string, model: string): bool
   return meta.models.includes(model)
 }
 
-/** Получить secretKey провайдера (для ModelPicker). null = CLI, ключ не нужен. */
-export function getProviderSecretKey(id: string): string | null {
-  return _providerCache?.[id]?.secretKey ?? null
-}
-
 const KNOWN_IDS: ProviderId[] = [
   'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli',
   'yandex-gpt', 'gigachat',

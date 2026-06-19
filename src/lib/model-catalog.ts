@@ -191,12 +191,3 @@ export function isProviderAuthorized(
  * Fuzzy-ish search: term должен встретиться как substring в любом из:
  * model name, provider name, tags. Регистронезависимо. Пусто = всё.
  */
-export function filterCatalog(entries: ModelEntry[], term: string, tagFilter: ModelTag | null): ModelEntry[] {
-  const t = term.trim().toLowerCase()
-  return entries.filter(e => {
-    if (tagFilter && !e.tags.includes(tagFilter)) return false
-    if (!t) return true
-    const hay = `${e.model} ${e.providerName} ${e.tags.join(' ')}`.toLowerCase()
-    return hay.includes(t)
-  })
-}

@@ -32,6 +32,7 @@ import { isImageAttachment, providerSupportsVision } from '../lib/vision-support
 import { resolveSkillOverride } from '../lib/skill-override'
 import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, SAMPLE_BRIEF } from '../lib/pipeline-brief'
 import { isCliProvider } from '../lib/model-catalog'
+import { toProjectAbsPath } from '../lib/project-path'
 import type { PipelineRun, PipelineStep, PipelineBrief } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import {
@@ -442,13 +443,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           status: 'pending',
           timestamp: Date.now()
         })
-        // Same relative→absolute conversion as for read_file (see tool-activity
-        // handler below). Tools emit project-relative paths; tree keys by abs.
+        // Tools emit project-relative paths; tree keys by abs (toProjectAbsPath).
         if (event.path && store.path) {
-          const clean = event.path.replace(/^\.[\\/]/, '')
-          const sep = store.path.includes('\\') ? '\\' : '/'
-          const abs = `${store.path}${sep}${clean.replace(/[\\/]/g, sep)}`
-          store.markFileTouched(abs, 'write')
+          store.markFileTouched(toProjectAbsPath(store.path, event.path), 'write')
         }
       }
       else if (event.type === 'pending-command') {
@@ -498,10 +495,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         if (event.status === 'ok' && event.detail && store.path) {
           const rel = event.detail.split(' · ')[0]?.trim()
           if (rel) {
-            // Strip any leading "./" so join doesn't double up
-            const clean = rel.replace(/^\.[\\/]/, '')
-            const sep = store.path.includes('\\') ? '\\' : '/'
-            const abs = `${store.path}${sep}${clean.replace(/[\\/]/g, sep)}`
+            const abs = toProjectAbsPath(store.path, rel)
             if (event.name === 'read_file') store.markFileTouched(abs, 'read')
             else if (event.name === 'list_directory') store.markFileTouched(abs, 'list')
           }

@@ -219,7 +219,3 @@ export function createExtraProvider(
     model: opts.model
   })
 }
-
-export function isExtraProvider(id: string): id is ExtraProviderSpec['id'] {
-  return EXTRA_PROVIDERS.some(p => p.id === id)
-}
