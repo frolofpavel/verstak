@@ -28,7 +28,9 @@ export async function loadNotifyPrefs(): Promise<NotifyPrefs> {
   prefsCache = {
     sound: flagOn(sound, true),
     toast: flagOn(toast, true),
-    unfocusedOnly: flagOn(unfocusedOnly, false)
+    // Дефолт true: при открытом и сфокусированном окне попап-уведомление не нужно
+    // (результат и так виден). Кому надо «всегда» — выключают в Настройках.
+    unfocusedOnly: flagOn(unfocusedOnly, true)
   }
   prefsLoadedAt = Date.now()
   return prefsCache

@@ -35,7 +35,7 @@ export function useNotifySettings(): {
   const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>({
     sound: true,
     toast: true,
-    unfocusedOnly: false
+    unfocusedOnly: true
   })
 
   useEffect(() => {
