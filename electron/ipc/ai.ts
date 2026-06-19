@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { createFileTools, TOOL_DEFS } from '../ai/tools'
+import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { McpClient } from '../mcp/client'
@@ -628,7 +628,7 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     if (useToolsPath) {
-      const tools = createFileTools(projectPath, ctrl.signal)
+      const tools = createToolsForProject(projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {
@@ -1568,7 +1568,7 @@ export async function runApiConversation(
           })
           fallbackOpts.triedProviders.add(nextId)
           // Передаём tools из замыкания — они привязаны к projectPath и signal, не к провайдеру.
-          const fallbackTools = createFileTools(projectPath, signal)
+          const fallbackTools = createToolsForProject(projectPath, signal)
           // #7: модель fallback-провайдера, а не упавшего — иначе cost-guard/журнал
           // считаются по тарифу чужой модели (cost cap не срабатывает).
           const nextModel = fallbackOpts.getProviderModel(nextId) ?? model

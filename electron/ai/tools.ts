@@ -10,6 +10,9 @@ import { isForbiddenPath, scanText } from './secret-scanner'
 import { getProjectMap, invalidateProjectMap, markFileDirty, projectMapToText, getDependencyMap, invalidateDependencyMap } from './project-map'
 import { safeRealJoin } from './path-policy'
 import { treeKill } from './child-kill'
+import { isDangerousCommand } from '../connectors/ssh'
+import { shq } from '../projects/ssh-fs'
+import { parseSshProjectPath, makeSshExec, createSshBackend, type SshBackend } from '../projects/ssh-backend'
 
 const execFileAsync = promisify(execFile)
 
@@ -1104,5 +1107,76 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
       }
       throw new Error(`Неизвестный tool: ${name}`)
     }
+  }
+}
+
+/**
+ * FileTools для удалённого ssh-проекта (Вариант B): тот же контракт, но операции
+ * идут на сервер через SshBackend. Подменяет createFileTools, когда проект ssh —
+ * хендлеры и confirm-flow не меняются (они ходят через ctx.tools.execute).
+ *
+ * Безопасность: classifyCommand усилен ssh-denylist'ом; read/write проходят
+ * escape-guard в backend; запись подтверждается mode-policy как у локальных.
+ */
+/**
+ * Выбрать FileTools по project_path: ssh://… → удалённый ssh-backend (Вариант B),
+ * иначе локальная ФС. Единая точка — agent-loop зовёт её вместо createFileTools.
+ */
+export function createToolsForProject(projectPath: string, signal?: AbortSignal): FileTools {
+  const target = parseSshProjectPath(projectPath)
+  if (target) {
+    return createSshFileTools(createSshBackend(target.remoteRoot, makeSshExec(target, signal)))
+  }
+  return createFileTools(projectPath, signal)
+}
+
+export function createSshFileTools(backend: SshBackend): FileTools {
+  return {
+    classifyCommand(command: string) {
+      const danger = isDangerousCommand(command)
+      if (danger) return { allowed: false, reason: `ssh-denylist: ${danger}` }
+      return classifyCommand(command)
+    },
+    async runCommand(command: string) {
+      const r = await backend.runCommand(command)
+      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode ?? 1 }
+    },
+    async execute(name, args) {
+      if (name === 'read_file') {
+        const raw = await backend.readFile(String(args.path))
+        const scan = scanText(raw)
+        return scan.hits.length > 0
+          ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`
+          : raw
+      }
+      if (name === 'list_directory') {
+        return backend.listDir(String(args.path ?? '.'))
+      }
+      if (name === 'write_file') {
+        await backend.writeFile(String(args.path), String(args.content ?? ''))
+        return { ok: true }
+      }
+      if (name === 'apply_patch') {
+        const before = await backend.readFile(String(args.path))
+        const anchorHash = args.anchor_hash ? String(args.anchor_hash) : undefined
+        const after = applySearchReplaceBlocks(before, String(args.diff), anchorHash)
+        await backend.writeFile(String(args.path), after)
+        return { ok: true, before, after }
+      }
+      if (name === 'run_command') {
+        throw new Error('run_command нельзя вызывать напрямую — он проходит через подтверждение пользователя')
+      }
+      if (name === 'search_project') {
+        const query = String(args.query ?? '')
+        if (!query) throw new Error('search_project: пустой query')
+        // fixed-string по умолчанию (экранируем как -F, но через -E для -n line-numbers).
+        const pattern = args.regex ? query : query.replace(/[.[\]*+?^${}()|\\/]/g, '\\$&')
+        const ic = args.ignoreCase !== false ? 'i' : ''
+        const r = await backend.runCommand(`grep -rn${ic}E -- ${shq(pattern)} . 2>/dev/null | head -100`)
+        const scan = scanText(r.stdout)
+        return (scan.redacted.trim() || 'Ничего не найдено.')
+      }
+      throw new Error(`Удалённый ssh-проект: инструмент «${name}» пока не поддержан (доступны read_file/write_file/apply_patch/list_directory/search_project/run_command).`)
+    },
   }
 }
