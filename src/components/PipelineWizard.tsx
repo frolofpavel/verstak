@@ -66,11 +66,12 @@ export function PipelineWizard({ chatId, initialBrief, onClose, onStarted }: Pip
 
           <label className="gg-create-client-field">
             <span className="gg-create-client-label">{t.pipeline.goalLabel}</span>
-            <input
-              className="gg-input"
+            <textarea
+              className="gg-input gg-pipeline-textarea"
               value={brief.goal}
               onChange={e => patch('goal', e.target.value)}
               placeholder={t.pipeline.goalPlaceholder}
+              rows={3}
               autoFocus
               disabled={busy}
             />
