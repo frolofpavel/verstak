@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  isExcludedPath, selectImportantFiles, summarizeFileStub, buildContextPack, estimateTokens, runWarmup,
+  isExcludedPath, selectImportantFiles, summarizeFileStub, buildContextPack, estimateTokens, runWarmup, pickPackType,
 } from '../../electron/ai/project-brain/warmup'
 import type { ProjectBrainStore, FileSummary, ContextPack } from '../../electron/storage/project-brain'
 
@@ -50,6 +50,21 @@ describe('warmup — summary + packs', () => {
     expect(short.content.length).toBeLessThan(long.content.length) // long детальнее
     expect(short.sourceFiles.length).toBeGreaterThan(0)
     expect(long.content).toMatch(/экспорт:/) // long включает экспорты
+  })
+})
+
+describe('pickPackType — выбор слоя по задаче (Итер.4)', () => {
+  it('короткий запрос → short', () => {
+    expect(pickPackType('поправь опечатку')).toBe('short')
+    expect(pickPackType('2+2?')).toBe('short')
+  })
+  it('план/обзор → medium', () => {
+    expect(pickPackType('спроектируй подход к авторизации')).toBe('medium')
+    expect(pickPackType('дай обзор где лежит логика роутинга')).toBe('medium')
+  })
+  it('архитектура/глубокий разбор → long', () => {
+    expect(pickPackType('как устроен весь проект целиком?')).toBe('long')
+    expect(pickPackType('большой рефактор всего кода')).toBe('long')
   })
 })
 

@@ -47,6 +47,8 @@ export interface PrepareSystemInput {
   skillPrompt?: string | null
   /** v3 Шаг D: режим агента — для beast-пресета автономности (auto/bypass). */
   agentMode?: AgentMode
+  /** Project Brain (Итер.4): прогретый ContextPack проекта (грузит вызывающий). */
+  brainContext?: string | null
 }
 
 export interface PreparedParts {
@@ -128,7 +130,8 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
         latestUserMessage: lastUser?.content ?? '',
         isFirstTurn,
         memories,
-        coreMemory
+        coreMemory,
+        brainContext: input.brainContext
       })
     } catch (err) {
       // Visible failure — previously this was silent and made debugging hard.

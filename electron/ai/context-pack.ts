@@ -61,6 +61,9 @@ export interface ContextPackInput {
   /** v3 Шаг C: machine-readable профиль проекта (из брифа/автоскана). Инжектится
    *  как постоянный блок, чтобы модель не собирала контекст заново. */
   profile?: ProjectProfile
+  /** Project Brain (Итер.4): готовый ContextPack (short/medium/long) прогретого
+   *  проекта. Инжектится вместо повторной сборки всего контекста. */
+  brainContext?: string | null
 }
 
 /**
@@ -119,6 +122,12 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   const profile = input.profile ?? await loadProjectProfile(projectPath)
   const profileBlock = buildProfileBlock(profile)
   if (profileBlock) parts.push(profileBlock)
+
+  // Project Brain (Итер.4): прогретый ContextPack — модель сразу видит контекст
+  // проекта, не собирая его заново (экономия токенов). Идёт сразу после профиля.
+  if (input.brainContext && input.brainContext.trim()) {
+    parts.push(`## Мозг проекта (прогретый контекст)\n${input.brainContext.trim()}`)
+  }
 
   // 0. Cross-project path warning — if user mentioned an absolute path that
   //    isn't inside this project, the AI can't access it. We surface this so

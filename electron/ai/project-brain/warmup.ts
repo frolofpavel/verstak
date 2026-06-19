@@ -112,6 +112,17 @@ export function buildContextPack(type: ContextPack['type'], overview: string, su
   return { type, content, tokenEstimate: estimateTokens(content), sourceFiles: used }
 }
 
+/**
+ * Выбрать слой ContextPack под задачу (Итер.4): короткий запрос → short,
+ * план/архитектура → medium, глубокий разбор проекта → long.
+ */
+export function pickPackType(message: string | null | undefined): ContextPack['type'] {
+  const t = (message ?? '').toLowerCase()
+  if (/архитектур|как устроен|весь проект|целиком|рефактор|глубок|across the (codebase|project)|весь код/.test(t)) return 'long'
+  if (/план|спроектир|design|подход|обзор|карт[аы]|где (реализ|лежит|искать)|почему/.test(t) || t.length > 300) return 'medium'
+  return 'short'
+}
+
 export interface WarmupDeps {
   /** project-relative пути всех файлов проекта. */
   listFiles: () => Promise<string[]>

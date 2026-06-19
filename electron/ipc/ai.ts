@@ -40,6 +40,8 @@ interface AiDeps {
   recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
   /** Fetch the N most recent accepted writes for the Context Pack. */
   recentWrites: (projectPath: string, limit: number) => Array<{ filePath: string; createdAt: number }>
+  /** Project Brain (Итер.4): прогретый ContextPack под задачу. null если не прогрет. */
+  getBrainContext?: (projectPath: string, lastUserMessage: string) => { content: string; packType: string } | null
   /** Persist a plan emitted by the AI. */
   recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
   /** Auto-append a brief entry to the dev journal (file write, command, plan, session summary). */
@@ -343,6 +345,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // (CLI строит свой промпт внутри buildCliPrompt — снапшот там пока не делаем) и
     // для reviewer override.
     let composedSystem: string | null = null
+    let brain: { content: string; packType: string } | null = null
     // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
     // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
     // независимый разбор. Давать ему system-layer + user-layer = заставить
@@ -358,6 +361,12 @@ export function registerAiIpc(deps: AiDeps): void {
       const projectSystemPrompt = projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null
       // Core memory загружается при каждом turn'е — MEMORY.md + USER.md всегда актуальны.
       const coreMemory = projectPath ? loadCoreMemory(projectPath) : { memory: '', user: '' }
+      // Project Brain (Итер.4): если проект прогрет и не выключено — инжектим
+      // готовый ContextPack под задачу (вместо сборки всего контекста заново).
+      const brainOn = deps.getSecret('use_project_brain') !== 'false'
+      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
+      brain = (brainOn && projectPath && deps.getBrainContext)
+        ? deps.getBrainContext(projectPath, lastUserMsg) : null
       // Skill override — НАСЛОЕНИЕ, а не замена. Промпт скилла (overrides.systemPrompt)
       // дописывается ПОВЕРХ базового промпта секцией <skill_layer> внутри
       // composeSystemPrompt. Так скилл уточняет роль агента, но базовый протокол
@@ -371,6 +380,7 @@ export function registerAiIpc(deps: AiDeps): void {
         memories,
         coreMemory,
         agentMode,
+        brainContext: brain?.content ?? null,
         skillPrompt: overrides?.systemPrompt
       })
       composedSystem = composed.system
@@ -386,6 +396,10 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     const taggedSender = tagSender(e.sender, projectPath)
+    // Project Brain (Итер.4): бейдж «использован прогретый контекст».
+    if (brain) {
+      taggedSender.send('ai:event', { id: sendId, event: { type: 'info', text: `🧠 Мозг проекта · контекст: ${brain.packType}` } })
+    }
 
     // Resolve API key (or null for CLI)
     const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null

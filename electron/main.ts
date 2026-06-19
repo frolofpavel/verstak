@@ -52,6 +52,7 @@ import { createPipelineRuns } from './storage/pipeline-runs'
 import { registerPipelineIpc } from './ipc/pipeline'
 import { registerBrainIpc } from './ipc/project-brain'
 import { createProjectBrainStore } from './storage/project-brain'
+import { pickPackType } from './ai/project-brain/warmup'
 import { registerAgentsIpc } from './ipc/agents'
 import { registerAgentRunsIpc } from './ipc/agent-runs'
 import { registerVerificationsIpc } from './ipc/verifications'
@@ -341,7 +342,8 @@ app.whenReady().then(() => {
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
   registerPipelineIpc({ pipeline: createPipelineRuns(db), getProjectRoot: getActiveProjectPath })
-  registerBrainIpc({ store: createProjectBrainStore(db), getProjectRoot: getActiveProjectPath })
+  const brainStore = createProjectBrainStore(db)
+  registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
@@ -406,6 +408,12 @@ app.whenReady().then(() => {
     recentWrites: (projectPath, limit) => {
       const list = undoStack.list(projectPath)
       return list.slice(0, limit).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
+    },
+    getBrainContext: (projectPath, lastUserMessage) => {
+      // Project Brain: пакет под задачу (long/medium/short), с откатом на short.
+      const type = pickPackType(lastUserMessage)
+      const pack = brainStore.getContextPack(projectPath, type) ?? brainStore.getContextPack(projectPath, 'short')
+      return pack ? { content: pack.content, packType: pack.type } : null
     },
     recordPlan: (projectPath, title, steps) => {
       const plan = plans.create(projectPath, title, steps)
