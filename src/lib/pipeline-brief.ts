@@ -1,4 +1,5 @@
 import type { PipelineBrief, PipelineStep, VerificationOverall } from '../types/api'
+import { TASK_SPEC_CONTRACT } from './task-spec'
 
 /** Тон Verify-шага + можно ли переходить к Proof. passed → зелёный путь;
  *  partial/not_run → жёлтый (дожать); failed → красный (фикс/откат). */
@@ -52,6 +53,8 @@ export function buildPlanPrompt(brief: PipelineBrief): string {
     '',
     'Составь план из 3–7 шагов. НЕ вноси изменений в файлы.',
     'Вызови create_plan. В конце — риски и список файлов которые затронешь.',
+    '',
+    TASK_SPEC_CONTRACT,
   ].join('\n')
 }
 
@@ -62,6 +65,7 @@ export function buildPlanPrompt(brief: PipelineBrief): string {
 export function buildExecutePrompt(brief: PipelineBrief, planId: number): string {
   return [
     `Выполни утверждённый план (plan id=${planId}).`,
+    'Иди по шагам ПО ОДНОМУ, строго по detail-ТЗ каждого шага (файлы, что сделать, критерий готовности). Не перескакивай и не объединяй шаги.',
     `DoD: ${brief.dod.trim()}`,
     'По завершении ОБЯЗАТЕЛЬНО вызови attest_verification с task_summary и checks из DoD.',
   ].join('\n')
