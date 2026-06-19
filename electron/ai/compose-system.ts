@@ -21,6 +21,8 @@ import { buildContextPack } from './context-pack'
 import { composeSystemPrompt, type ComposedPrompt } from './compose-prompt'
 import type { ChatMessage } from './types'
 import type { CoreMemoryBlocks } from './core-memory'
+import { buildModePreset } from './model-presets'
+import type { AgentMode } from './mode-policy'
 
 export interface PrepareSystemInput {
   projectPath: string | null
@@ -43,6 +45,8 @@ export interface PrepareSystemInput {
    *  специализации, а НЕ заменяет его. Скилл уточняет роль агента, но базовый
    *  протокол выполнения (7-шаговый цикл, работа с тулзами) остаётся в силе. */
   skillPrompt?: string | null
+  /** v3 Шаг D: режим агента — для beast-пресета автономности (auto/bypass). */
+  agentMode?: AgentMode
 }
 
 export interface PreparedParts {
@@ -103,6 +107,13 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
   if (userLayer.content !== undefined) {
     const delegateHint = '\n\n<!-- delegate_parallel_roles_hint -->\ndelegate_parallel поддерживает роли: planner (разбей задачу), critic (найди проблемы), executor (сделай), verifier (проверь), researcher (исследуй код). Роли опциональны.'
     userLayer = { path: userLayer.path, content: userLayer.content + delegateHint }
+  }
+
+  // v3 Шаг D: beast-пресет автономности для режимов auto/bypass — «не сдавайся,
+  // проверяй жёстко». Пусто для подтверждающих режимов.
+  const modePreset = input.agentMode ? buildModePreset(input.agentMode) : ''
+  if (modePreset && userLayer.content !== undefined) {
+    userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n${modePreset}` }
   }
 
   let contextPack = ''

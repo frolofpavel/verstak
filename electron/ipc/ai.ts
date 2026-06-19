@@ -369,6 +369,7 @@ export function registerAiIpc(deps: AiDeps): void {
         projectSystemPrompt,
         memories,
         coreMemory,
+        agentMode,
         skillPrompt: overrides?.systemPrompt
       })
       composedSystem = composed.system
