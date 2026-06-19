@@ -48,7 +48,7 @@
 
 - ✅ **Фаза 1**: `detectCliWorthiness` в smart-router (детектор терминальных задач) + honest info-подсказка при API-провайдере. 7 тестов. Решение: подсказка, НЕ молчаливый свитч (контроль/прозрачность).
 - ⬜ Фаза 2: UI-pill «Терминальная задача → Claude Code?» в один клик (Илья + живая проверка Сценария А end-to-end).
-- ⬜ Фаза 3: docrutить `delegate_task` → CLI-провайдер вживую (транспорт спроектирован).
+- ✅ **Фаза 3 (транспорт)**: delegate→CLI проверен и зафиксирован тестами — `buildSubCreateOptions` строит опции claude-cli (oauth+cwd), `claude-cli.send` сериализует через `buildCliPrompt`, `runSubAgentLoop` корректно ловит CLI-стиль (текст без tool-call → completed), usage учитывается в cost-guard. 3 регресс-теста `sub-agent-cli-delegate`. Остался только **живой прогон CLI-бинаря** (нужен сконфигурированный Claude Code).
 - 🟡 Честность DoD: CLI обходит denylist Verstak (свой sandbox) — задокументировано, не обещаем обратное.
 
 ## 📋 Бэклог (стратегический — на отдельные сессии, по приоритету)
