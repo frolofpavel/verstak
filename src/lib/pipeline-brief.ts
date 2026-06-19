@@ -13,7 +13,7 @@ export function verifyState(overall: VerificationOverall | null | undefined): {
 
 /** Шаги «N/5» для баннера: brief(1) собирается в визарде, дальше plan→proof. */
 const STEP_ORDER: Record<PipelineStep, number> = {
-  brief: 1, plan: 2, execute: 3, verify: 4, proof: 5, completed: 5, cancelled: 5,
+  brief: 1, plan: 2, execute: 3, verify: 4, proof: 5, completed: 5, cancelled: 5, blocked: 4,
 }
 
 /** {index 1-based, total} шага для баннера «Pipeline · N/5». */

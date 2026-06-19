@@ -31,6 +31,7 @@ import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import { resolveSkillOverride } from '../lib/skill-override'
 import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, SAMPLE_BRIEF } from '../lib/pipeline-brief'
+import { decidePipelineGate, type VerifyOutcome } from '../lib/pipeline-gate'
 import { isCliProvider } from '../lib/model-catalog'
 import { toProjectAbsPath } from '../lib/project-path'
 import type { PipelineRun, PipelineStep, PipelineBrief } from '../types/api'
@@ -955,7 +956,24 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     } else if (step === 'execute') {
       void store.advancePipeline({ step: 'verify' })  // Verify-панель — D6
     } else if (step === 'verify') {
-      void store.advancePipeline({ step: 'proof' })   // Proof-шаг — D7
+      // Ядро надёжности v3 (Шаг A): модель НЕ вправе сказать «готово» — решает
+      // verify. pass → proof; провал → авто-возврат на execute (само-починка);
+      // лимит попыток → честный стоп 'blocked', а не тихое 'completed'.
+      const v = await window.api.verifications.latest(pipeline.projectPath, pipeline.chatId ?? null).catch(() => null)
+      const outcome: VerifyOutcome =
+        v == null || v.overall === 'not_run' ? 'unknown'
+          : v.overall === 'passed' ? 'pass' : 'fail'
+      const thisAttempt = pipeline.verifyAttempts + 1
+      const decision = decidePipelineGate(outcome, thisAttempt)
+      if (decision.action === 'proof') {
+        void store.advancePipeline({ step: 'proof' })   // Proof-шаг — D7
+      } else if (decision.action === 'retry') {
+        // Авто-починка: назад на execute (счётчик попытки) + повторный Execute-промпт.
+        await store.advancePipeline({ step: 'execute', verifyAttempts: thisAttempt })
+        dispatchPipelineSend('execute', pipeline.brief, pipeline.planId)
+      } else {
+        void store.advancePipeline({ step: 'blocked' }) // честный стоп
+      }
     } else if (step === 'proof') {
       // Собрать Proof Pack: runId привязанный/последний прогон → proof.generate →
       // preview HTML inline + pipeline completed.

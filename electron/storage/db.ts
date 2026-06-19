@@ -584,6 +584,16 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('ALTER TABLE projects ADD COLUMN remote_json TEXT')
       }
     }
+  },
+  {
+    version: 24,
+    description: 'pipeline_runs.verify_attempts — ядро надёжности v3 (verify-gate авто-починки)',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(pipeline_runs)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('verify_attempts')) {
+        db.exec('ALTER TABLE pipeline_runs ADD COLUMN verify_attempts INTEGER NOT NULL DEFAULT 0')
+      }
+    }
   }
 ]
 

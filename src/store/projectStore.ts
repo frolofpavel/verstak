@@ -210,7 +210,7 @@ interface ProjectState {
   /** Pipeline: подгрузить активный прогон проекта из БД (resume-баннер). */
   loadActivePipeline: (projectPath: string) => Promise<void>
   /** Pipeline: продвинуть шаг / привязать planId / runId — пишет в БД + стейт. */
-  advancePipeline: (patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null }) => Promise<void>
+  advancePipeline: (patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null; verifyAttempts?: number }) => Promise<void>
   /** Pipeline: отменить активный прогон (step='cancelled') + очистить стейт. */
   cancelPipeline: () => Promise<void>
   addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void

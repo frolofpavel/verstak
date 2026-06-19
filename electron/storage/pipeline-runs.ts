@@ -24,8 +24,10 @@ export type PipelineStep =
   | 'proof'
   | 'completed'
   | 'cancelled'
+  | 'blocked'   // v3: verify провалился после лимита попыток — честный стоп, не «готово»
 
-/** Терминальные шаги — getActive их игнорирует. */
+/** Терминальные шаги — getActive их игнорирует. 'blocked' НЕ терминальный:
+ *  прогон остаётся активным/видимым в баннере, чтобы пользователь вмешался. */
 const TERMINAL_STEPS: ReadonlySet<PipelineStep> = new Set(['completed', 'cancelled'])
 
 /** Бриф пользователя: цель / границы / Definition of Done. Хранится как JSON. */
@@ -45,6 +47,8 @@ export interface PipelineRun {
   step: PipelineStep
   brief: PipelineBrief
   planId: number | null
+  /** v3 verify-gate: сколько раз прогоняли verify (для лимита авто-починок). */
+  verifyAttempts: number
   createdAt: number
   updatedAt: number
 }
@@ -64,6 +68,7 @@ export interface AdvancePipelinePatch {
   planId?: number | null
   agentRunId?: string | null
   chatId?: number | null
+  verifyAttempts?: number
 }
 
 export interface PipelineRuns {
@@ -85,6 +90,7 @@ interface PipelineRow {
   step: string
   brief_json: string
   plan_id: number | null
+  verify_attempts: number
   created_at: number
   updated_at: number
 }
@@ -109,13 +115,14 @@ function mapRow(row: PipelineRow): PipelineRun {
     step: row.step as PipelineStep,
     brief: safeBrief(row.brief_json),
     planId: row.plan_id,
+    verifyAttempts: row.verify_attempts ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
 const SELECT = `SELECT id, project_path, chat_id, agent_run_id, mode, workflow_id,
-  step, brief_json, plan_id, created_at, updated_at FROM pipeline_runs`
+  step, brief_json, plan_id, verify_attempts, created_at, updated_at FROM pipeline_runs`
 
 export function createPipelineRuns(db: Database): PipelineRuns {
   return {
@@ -156,6 +163,7 @@ export function createPipelineRuns(db: Database): PipelineRuns {
       if (patch.planId !== undefined) { sets.push('plan_id = ?'); vals.push(patch.planId) }
       if (patch.agentRunId !== undefined) { sets.push('agent_run_id = ?'); vals.push(patch.agentRunId) }
       if (patch.chatId !== undefined) { sets.push('chat_id = ?'); vals.push(patch.chatId) }
+      if (patch.verifyAttempts !== undefined) { sets.push('verify_attempts = ?'); vals.push(patch.verifyAttempts) }
       if (sets.length === 0) return this.get(id)
       sets.push('updated_at = ?'); vals.push(Date.now())
       vals.push(id)

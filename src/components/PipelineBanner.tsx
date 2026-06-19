@@ -43,6 +43,7 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
     execute: t.pipeline.stepExecute,
     verify: t.pipeline.stepVerify,
     proof: t.pipeline.stepProof,
+    blocked: t.pipeline.stepBlocked,
   }
   const primaryLabel: Partial<Record<PipelineStep, string>> = {
     plan: t.pipeline.planOk,
@@ -84,7 +85,7 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
               {t.pipeline.reattest}
             </button>
             <button type="button" className="gg-btn gg-btn-ghost gg-btn-xs" onClick={() => onPrimary('verify')}>
-              {t.pipeline.proceedAnyway}
+              {t.pipeline.fixRetry}
             </button>
           </>
         )

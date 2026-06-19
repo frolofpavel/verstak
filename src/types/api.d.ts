@@ -420,7 +420,7 @@ declare global {
         /** Создать прогон Brief→Proof для активного проекта (step='plan'). */
         start(opts: { mode: PipelineMode; brief: PipelineBrief; chatId?: number | null; workflowId?: string | null }): Promise<PipelineRun | null>
         /** Продвинуть шаг / привязать planId / runId. */
-        advance(id: number, patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null }): Promise<PipelineRun | null>
+        advance(id: number, patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null; verifyAttempts?: number }): Promise<PipelineRun | null>
         /** Активный (НЕтерминальный) прогон проекта для resume-баннера. */
         getActive(projectPath: string): Promise<PipelineRun | null>
         /** Отменить прогон (step='cancelled'). */
@@ -848,7 +848,7 @@ export interface DevTaskDetail {
 /** Pipeline Brief→Proof (спек). Зеркало типов electron/storage/pipeline-runs.ts —
  *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
 export type PipelineMode = 'dev' | 'agency'
-export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'proof' | 'completed' | 'cancelled'
+export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'proof' | 'completed' | 'cancelled' | 'blocked'
 export interface PipelineBrief {
   goal: string
   constraints: string
@@ -864,6 +864,7 @@ export interface PipelineRun {
   step: PipelineStep
   brief: PipelineBrief
   planId: number | null
+  verifyAttempts: number
   createdAt: number
   updatedAt: number
 }
