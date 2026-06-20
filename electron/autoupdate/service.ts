@@ -265,8 +265,15 @@ export class AutoUpdateService {
     const state = readState()
     const version = state?.version
     if (!version) return
+    // recoverReadyPayload зовётся только на старте app. Если на диске статус
+    // 'installing'/'install_requested' — установка ПРЕРВАЛАСЬ (успешная увела бы
+    // app.quit + перезапуск новой версии). Раньше этот статус исключался из
+    // восстановления → вечный disabled-спиннер «…» на старой версии. Теперь:
+    // payload цел → возвращаем рабочую кнопку «Установить»; payload пропал →
+    // понятная ошибка, а не зомби.
+    const stuckInstalling = state.status === 'installing' || state.status === 'install_requested'
     const verifiedMeta = readVerifiedPayload(version)
-    if (verifiedMeta && state.status !== 'payload_ready' && state.status !== 'installing') {
+    if (verifiedMeta && state.status !== 'payload_ready') {
       logAutoUpdate('service.recover.verified_metadata', { version, verifiedMeta, previousStatus: state.status })
       this.setState({
         status: 'payload_ready',
@@ -284,7 +291,7 @@ export class AutoUpdateService {
     if (verifiedMeta) return
     const root = payloadRoot(version)
     const verified = verifyPayloadRoot(root, version)
-    if (verified.ok && state.status !== 'payload_ready' && state.status !== 'installing') {
+    if (verified.ok && state.status !== 'payload_ready') {
       this.setState({
         status: 'payload_ready',
         version,
@@ -293,6 +300,18 @@ export class AutoUpdateService {
         step: 'done',
         canInstall: true,
         canRetry: true,
+      })
+      return
+    }
+    // Застряли в installing, но payload не найден — установка прервалась без отката.
+    if (stuckInstalling) {
+      logAutoUpdate('service.recover.stuck_install_no_payload', { version, previousStatus: state.status })
+      this.setState({
+        status: 'failed_recoverable',
+        version,
+        error: 'Установка обновления прервалась. Проверьте обновления ещё раз или скачайте версию вручную.',
+        canRetry: true,
+        canInstall: false,
       })
     }
   }
@@ -408,6 +427,10 @@ export class AutoUpdateService {
         unlock()
       }
     } catch (err) {
+      // Параллельная загрузка (авто + ручная) держит lock — это НЕ ошибка: вторая
+      // ветка просто ждёт. Без guard'а busy превращался бы в failed_recoverable +
+      // ложный тост «Ошибка обновления» поверх идущей загрузки (check() guard уже имеет).
+      if (String(err).includes('busy')) return { ok: false, reason: 'busy', phase: toUiSnapshot(readState()).phase }
       const failed = this.fail(version, err, true, String(err).includes('payload') ? 'invalid-payload' : 'network')
       return { ok: false, reason: failed.error, phase: 'error' }
     }
@@ -415,7 +438,7 @@ export class AutoUpdateService {
 
   private async extract(version: string, installerPath: string): Promise<void> {
     const node = resolveSystemNode()
-    if (!node) throw new Error('Не найден system node.exe для распаковки обновления')
+    if (!node) throw new Error('Не удалось подготовить обновление автоматически. Скачайте новую версию вручную со страницы релизов на GitHub.')
     if (!existsSync(helperPath())) throw new Error('Не найден helper автообновления')
     if (!existsSync(sevenZipPath())) throw new Error('Не найден 7za.exe')
     this.setState({ status: 'extracting', version, installerPath, percent: 0, step: 'extract' })
@@ -449,6 +472,13 @@ export class AutoUpdateService {
   async install(): Promise<{ ok: boolean; reason?: string }> {
     const state = readState()
     logAutoUpdate('install.request', { state, installDir: currentInstallDir(), helperPath: helperPath() })
+    // Идемпотентность: install() не под lock (UI-кнопки disabled, но IPC-канал не гейтится).
+    // Двойной вызов (двойной клик / тост+Settings гонка) спавнил бы два хелпера в один
+    // installDir → порча установки. Если уже идёт — ничего не делаем.
+    if (state?.status === 'install_requested' || state?.status === 'installing') {
+      logAutoUpdate('install.reject', { reason: 'already-installing', status: state.status })
+      return { ok: true, reason: 'already-installing' }
+    }
     const version = state?.version
     if (!version) {
       logAutoUpdate('install.reject', { reason: 'no-version' })
@@ -468,7 +498,7 @@ export class AutoUpdateService {
     }
     const node = resolveSystemNode()
     if (!node) {
-      this.fail(version, 'Не найден system node.exe для тихой установки', true, 'install-failed')
+      this.fail(version, 'Не удалось установить обновление автоматически. Скачайте новую версию вручную со страницы релизов на GitHub.', true, 'install-failed')
       return { ok: false, reason: 'node-missing' }
     }
     if (!existsSync(helperPath())) {

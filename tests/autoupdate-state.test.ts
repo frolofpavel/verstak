@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createRequire } from 'module'
-import { autoUpdateRoot, payloadRoot } from '../electron/autoupdate/paths'
+import { autoUpdateRoot, payloadRoot, payloadVersionDir } from '../electron/autoupdate/paths'
 import { acquireLock, readState, resetState, writeState } from '../electron/autoupdate/state'
 import { verifyPayloadRoot } from '../electron/autoupdate/payload'
-import { toUiSnapshot } from '../electron/autoupdate/service'
+import { AutoUpdateService, toUiSnapshot } from '../electron/autoupdate/service'
 
 const require = createRequire(import.meta.url)
 const asar = require('@electron/asar') as { createPackage(src: string, dest: string): Promise<void> }
@@ -112,5 +112,60 @@ describe('autoupdate state machine', () => {
     resetState()
     expect(readState()?.status).toBe('idle')
     expect(verifyPayloadRoot(rootPayload, '1.5.22').ok).toBe(true)
+  })
+})
+
+// Фиксы по ревью автообновления (зона F): восстановление из застрявшего installing
+// + идемпотентность install. recoverReadyPayload и install зовут только state/payload
+// модули (не electron app), поэтому тестируются с mock-окном.
+describe('autoupdate service: recovery + idempotency', () => {
+  const previousLocalAppData = process.env.LOCALAPPDATA
+  let root = ''
+  const mockWindow = { isDestroyed: () => false, webContents: { send: () => { /* noop */ } } } as never
+
+  beforeEach(() => {
+    root = join(tmpdir(), `verstak-autoupdate-svc-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    process.env.LOCALAPPDATA = root
+    mkdirSync(autoUpdateRoot(), { recursive: true })
+  })
+  afterEach(() => {
+    process.env.LOCALAPPDATA = previousLocalAppData
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  async function setupVerifiedPayload(version: string): Promise<void> {
+    const payRoot = payloadRoot(version)
+    mkdirSync(join(payRoot, 'resources'), { recursive: true })
+    writeFileSync(join(payRoot, 'Verstak.exe'), 'exe-bytes')
+    await writeVersionedAsar(join(payRoot, 'resources', 'app.asar'), version)
+    writeFileSync(join(payloadVersionDir(version), 'verified.json'), JSON.stringify({
+      version,
+      payloadRoot: payRoot,
+      appAsarSize: statSync(join(payRoot, 'resources', 'app.asar')).size,
+      exeSize: statSync(join(payRoot, 'Verstak.exe')).size,
+      verifiedAt: Date.now(),
+    }))
+  }
+
+  it('recover: застрявший installing + валидный payload → payload_ready (рабочая кнопка)', async () => {
+    await setupVerifiedPayload('1.5.23')
+    writeState({ schemaVersion: 1, status: 'installing', version: '1.5.23', updatedAt: Date.now() })
+    ;(new AutoUpdateService(mockWindow) as unknown as { recoverReadyPayload(): void }).recoverReadyPayload()
+    expect(readState()?.status).toBe('payload_ready')
+  })
+
+  it('recover: застрявший installing БЕЗ payload → failed_recoverable (не вечный спиннер)', () => {
+    writeState({ schemaVersion: 1, status: 'installing', version: '1.5.23', updatedAt: Date.now() })
+    ;(new AutoUpdateService(mockWindow) as unknown as { recoverReadyPayload(): void }).recoverReadyPayload()
+    const s = readState()
+    expect(s?.status).toBe('failed_recoverable')
+    expect(s?.error).toMatch(/прервалась/i)
+  })
+
+  it('install идемпотентен: повторный вызов в статусе installing не спавнит второй хелпер', async () => {
+    writeState({ schemaVersion: 1, status: 'installing', version: '1.5.23', updatedAt: Date.now() })
+    const result = await new AutoUpdateService(mockWindow).install()
+    expect(result).toEqual({ ok: true, reason: 'already-installing' })
+    expect(readState()?.status).toBe('installing')
   })
 })

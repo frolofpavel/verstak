@@ -8,7 +8,8 @@ export function resolveSystemNode(): string | null {
     const result = spawnSync('where.exe', ['node'], { encoding: 'utf8', windowsHide: true })
     if (result.status === 0 && result.stdout) {
       for (const line of result.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean)) {
-        if (existsSync(line)) return line
+        // Только настоящий node.exe — отбрасываем .cmd/.bat-врапперы (spawn без shell их не запустит).
+        if (line.toLowerCase().endsWith('node.exe') && existsSync(line)) return line
       }
     }
   } catch {
