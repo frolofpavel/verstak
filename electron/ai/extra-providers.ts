@@ -58,7 +58,12 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
       'verstak/private'
     ],
     defaultModel: 'verstak/balanced',
-    baseUrl: 'https://api.agi-iri.ru/v1'
+    // РФ-релей: api.agi-iri.ru (Амстердам) недостижим стабильно для крупных
+    // агентных тел запроса с РФ last-mile (DPI/instability рвёт long-lived HTTPS
+    // на ~19-60с). Релей на РФ-сервере (Москва) терминирует юзера коротким
+    // стабильным хопом и форвардит S2S в Амстердам (проверено: 100КБ за <1.5с,
+    // стабильно). Бридж на sslip.io; постоянный поддомен api-ru.agi-iri.ru — позже.
+    baseUrl: 'https://194-87-187-234.sslip.io/v1'
   },
   {
     id: 'openrouter',

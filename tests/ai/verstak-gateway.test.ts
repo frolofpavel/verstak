@@ -6,7 +6,7 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
 
   it('зарегистрирован в EXTRA_PROVIDERS с правильным baseUrl/ключом', () => {
     expect(spec).toBeDefined()
-    expect(spec!.baseUrl).toBe('https://api.agi-iri.ru/v1')
+    expect(spec!.baseUrl).toBe('https://194-87-187-234.sslip.io/v1') // РФ-релей (бридж)
     expect(spec!.secretKey).toBe('verstak_gateway_api_key')
     expect(spec!.keyHint).toBe('vsk_live_...')
   })
