@@ -7,6 +7,7 @@ import {
   normalizeVersion,
   parseGithubRateLimit,
   parseLatestYmlArtifact,
+  parseReleaseTagFromUrl,
   pickInstallableUpdate,
   rateLimitWaitMinutes,
   releaseFeedBase,
@@ -71,6 +72,22 @@ describe('pickInstallableUpdate', () => {
       hasArtifacts: (v) => v === '1.5.11',
     })
     expect(result).toEqual({ installable: '1.5.11', pendingVersion: null })
+  })
+
+  it('installs latest published when package.json on main is ahead without installer', () => {
+    const result = pickInstallableUpdate({
+      installed: '1.5.17',
+      repoMax: '1.5.20',
+      latestRelease: '1.5.19',
+      hasArtifacts: (v) => v === '1.5.19',
+    })
+    expect(result).toEqual({ installable: '1.5.19', pendingVersion: null })
+  })
+})
+
+describe('parseReleaseTagFromUrl', () => {
+  it('extracts semver from releases/latest redirect url', () => {
+    expect(parseReleaseTagFromUrl('https://github.com/frolofpavel/verstak/releases/tag/v1.5.19')).toBe('1.5.19')
   })
 })
 

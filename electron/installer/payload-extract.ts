@@ -6,6 +6,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 const REQUIRED_FILES = ['Verstak.exe', join('resources', 'app.asar')]
+const APP_ASAR_MIN_BYTES = 10_000_000
 
 function sevenZipExe(): string {
   const bundled = join(process.resourcesPath, '7za.exe')
@@ -30,6 +31,9 @@ export function verifyPayloadRoot(root: string): void {
       throw new Error(`Повреждён архив приложения: отсутствует ${rel}. Перезапустите установщик.`)
     }
     const size = statSync(abs).size
+    if (rel.includes('app.asar') && size < APP_ASAR_MIN_BYTES) {
+      throw new Error(`Повреждён архив приложения: пустой файл ${rel}. Перезапустите установщик.`)
+    }
     if (size <= 0) {
       throw new Error(`Повреждён архив приложения: пустой файл ${rel}. Перезапустите установщик.`)
     }

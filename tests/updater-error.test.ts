@@ -18,4 +18,9 @@ describe('formatUpdaterError', () => {
     expect(formatUpdaterError({ errorCode: 'github-rate-limit', rateLimitMinutes: 60 }, t))
       .toBe('Wait hour (60 min)')
   })
+
+  it('hides electron-updater Please check update first', () => {
+    expect(formatUpdaterError({ error: 'Please check update first' }, t))
+      .toBe('Network error')
+  })
 })

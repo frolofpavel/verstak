@@ -6195,6 +6195,12 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   flex: 1;
   min-width: 0;
 }
+.gg-past-releases-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .gg-past-releases-version {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -7804,6 +7810,59 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   display: flex; gap: 8px;
 }
 
+/* Плашка «обновление готово» — правый нижний угол */
+.gg-update-ready-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--accent, #6ea8fe);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 14px 16px;
+  z-index: 85;
+  animation: gg-toast-slide-in 220ms ease-out;
+}
+.gg-update-ready-toast-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.gg-update-ready-toast-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.gg-update-ready-toast-close {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.gg-update-ready-toast-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.gg-update-ready-toast-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+.gg-update-ready-toast-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /* ─── Crash-resume: баннер «сессия прервана» (вверху чата) ─── */
 .gg-resume-banner-stack {
   display: flex;
@@ -8850,6 +8909,58 @@ textarea.gg-input {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.gg-updates-settings-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 420px;
+}
+.gg-updates-settings-progress-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+.gg-updates-settings-progress {
+  margin-top: 0;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.gg-updates-up-to-date {
+  width: 100%;
+  max-width: 420px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--success, #22c55e) 58%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+  color: var(--success, #22c55e);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.gg-updates-settings-progress.is-indeterminate .gg-update-progress {
+  width: 38%;
+  animation: gg-updates-settings-indeterminate 1.35s ease-in-out infinite;
+}
+@keyframes gg-updates-settings-indeterminate {
+  0% { margin-left: 0; }
+  50% { margin-left: 62%; }
+  100% { margin-left: 0; }
+}
+.gg-past-releases-current {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-muted, rgba(88, 101, 242, 0.15));
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 
 

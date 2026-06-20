@@ -24,9 +24,10 @@ function sortNewestFirst(notes: ReleaseNote[]): ReleaseNote[] {
 interface Props {
   open: boolean
   onClose: () => void
+  installedVersion?: string
 }
 
-export function PastReleasesModal({ open, onClose }: Props) {
+export function PastReleasesModal({ open, onClose, installedVersion = '' }: Props) {
   const t = useT()
   const [loading, setLoading] = useState(false)
   const [releases, setReleases] = useState<ReleaseNote[]>([])
@@ -41,7 +42,30 @@ export function PastReleasesModal({ open, onClose }: Props) {
       try {
         const list = await window.api.updater.getReleaseNotes({ all: true })
         if (!alive) return
-        setReleases(sortNewestFirst(list))
+        let merged = sortNewestFirst(list)
+        const installed = installedVersion.replace(/^v/, '')
+        if (installed && !merged.some(note => note.version === installed)) {
+          try {
+            const current = await window.api.updater.getReleaseNotes({ version: installed })
+            if (current[0]) merged = sortNewestFirst([current[0], ...merged])
+            else {
+              merged = sortNewestFirst([{
+                version: installed,
+                name: `Verstak ${installed}`,
+                body: '',
+                htmlUrl: '',
+              }, ...merged])
+            }
+          } catch {
+            merged = sortNewestFirst([{
+              version: installed,
+              name: `Verstak ${installed}`,
+              body: '',
+              htmlUrl: '',
+            }, ...merged])
+          }
+        }
+        setReleases(merged)
       } catch {
         if (alive) setReleases([])
       } finally {
@@ -49,7 +73,7 @@ export function PastReleasesModal({ open, onClose }: Props) {
       }
     })()
     return () => { alive = false }
-  }, [open])
+  }, [installedVersion, open])
 
   const list = useMemo(() => releases, [releases])
 
@@ -104,7 +128,12 @@ export function PastReleasesModal({ open, onClose }: Props) {
                       onClick={() => void openRelease(note)}
                     >
                       <span className="gg-past-releases-item-main">
-                        <span className="gg-past-releases-version">v{note.version}</span>
+                        <span className="gg-past-releases-version-row">
+                          <span className="gg-past-releases-version">v{note.version}</span>
+                          {installedVersion.replace(/^v/, '') === note.version && (
+                            <span className="gg-past-releases-current">{t.settings.pastUpdatesCurrent}</span>
+                          )}
+                        </span>
                         <span className="gg-past-releases-name">{note.name}</span>
                       </span>
                       {note.publishedAt && (

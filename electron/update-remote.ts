@@ -152,6 +152,25 @@ async function fetchVersionFromLatestYml(): Promise<string | null> {
   }
 }
 
+/** Версия из URL releases/latest → /releases/tag/vX.Y.Z (fallback без latest.yml). */
+export function parseReleaseTagFromUrl(url: string): string | null {
+  const m = url.match(/\/releases\/tag\/v?(\d+\.\d+\.\d+)/i)
+  return m ? normalizeVersion(m[1]) : null
+}
+
+/** Последний опубликованный релиз на GitHub Releases (не package.json на main). */
+export async function fetchLatestPublishedReleaseVersion(): Promise<string | null> {
+  const fromYml = await fetchVersionFromLatestYml()
+  if (fromYml) return fromYml
+
+  const res = await fetchWithTimeout(
+    `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`,
+    { headers: { 'User-Agent': 'Verstak-Updater' }, redirect: 'follow' },
+  )
+  if (!res?.ok) return null
+  return parseReleaseTagFromUrl(res.url)
+}
+
 async function fetchRemoteVersionOnce(): Promise<RemoteVersionProbeResult> {
   const candidates: string[] = []
   let rateLimit: GithubRateLimitInfo | null = null
@@ -204,6 +223,7 @@ export function isBenignUpdaterError(message: string): boolean {
     || m.includes('latest.yml')
     || m.includes('no published')
     || m.includes('cannot find')
+    || m.includes('please check update first')
     || m.includes('net::')
     || m.includes('httperror')
   )
@@ -254,28 +274,42 @@ export function pickInstallableUpdate(params: {
   hasArtifacts: (version: string) => boolean
 }): { installable: string | null; pendingVersion: string | null } {
   const { installed, repoMax, latestRelease, hasArtifacts } = params
+  const candidates = new Set<string>()
+  if (latestRelease) candidates.add(normalizeVersion(latestRelease))
+  if (repoMax) candidates.add(normalizeVersion(repoMax))
 
-  if (latestRelease && semverGt(latestRelease, installed) && hasArtifacts(latestRelease)) {
-    return { installable: latestRelease, pendingVersion: null }
+  const ordered = [...candidates].sort((a, b) => {
+    if (semverGt(a, b)) return -1
+    if (semverGt(b, a)) return 1
+    return 0
+  })
+
+  let installable: string | null = null
+  for (const version of ordered) {
+    if (!semverGt(version, installed)) continue
+    if (hasArtifacts(version)) {
+      installable = version
+      break
+    }
   }
 
-  if (repoMax && semverGt(repoMax, installed) && hasArtifacts(repoMax)) {
-    return { installable: repoMax, pendingVersion: null }
+  if (installable) {
+    return { installable, pendingVersion: null }
   }
 
   if (repoMax && semverGt(repoMax, installed)) {
-    return { installable: null, pendingVersion: repoMax }
+    return { installable: null, pendingVersion: normalizeVersion(repoMax) }
   }
 
   return { installable: null, pendingVersion: null }
 }
 
-/** Версия для скачивания: latest.yml на Releases, даже если package.json на main впереди. */
+/** Версия для скачивания: последний Release с артефактами, даже если package.json на main впереди. */
 export async function resolveInstallableUpdate(
   installedVersion: string,
   repoMaxVersion: string | null,
 ): Promise<{ installable: string | null; pendingVersion: string | null }> {
-  const latestRelease = await fetchVersionFromLatestYml()
+  const latestPublished = await fetchLatestPublishedReleaseVersion()
   const artifactCache = new Map<string, boolean>()
 
   const hasArtifacts = async (version: string): Promise<boolean> => {
@@ -286,15 +320,25 @@ export async function resolveInstallableUpdate(
     return ready
   }
 
-  if (latestRelease && semverGt(latestRelease, installedVersion) && await hasArtifacts(latestRelease)) {
-    return { installable: latestRelease, pendingVersion: null }
+  const candidates = new Set<string>()
+  if (latestPublished) candidates.add(normalizeVersion(latestPublished))
+  if (repoMaxVersion) candidates.add(normalizeVersion(repoMaxVersion))
+
+  const ordered = [...candidates].sort((a, b) => {
+    if (semverGt(a, b)) return -1
+    if (semverGt(b, a)) return 1
+    return 0
+  })
+
+  for (const version of ordered) {
+    if (!semverGt(version, installedVersion)) continue
+    if (await hasArtifacts(version)) {
+      return { installable: version, pendingVersion: null }
+    }
   }
 
   if (repoMaxVersion && semverGt(repoMaxVersion, installedVersion)) {
-    if (await hasArtifacts(repoMaxVersion)) {
-      return { installable: repoMaxVersion, pendingVersion: null }
-    }
-    return { installable: null, pendingVersion: repoMaxVersion }
+    return { installable: null, pendingVersion: normalizeVersion(repoMaxVersion) }
   }
 
   return { installable: null, pendingVersion: null }

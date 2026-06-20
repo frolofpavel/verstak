@@ -37,5 +37,9 @@ export function formatUpdaterError(
     return t.updateNoRelease
   }
 
+  if (m.includes('please check update first')) {
+    return t.updateError
+  }
+
   return raw.length > 160 ? t.updateError : raw
 }

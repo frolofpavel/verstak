@@ -346,22 +346,15 @@ contextBridge.exposeInMainWorld('api', {
 
   updater: {
     install: () => ipcRenderer.invoke('update:install'),
+    ensureDownload: () => ipcRenderer.invoke('update:ensure-download'),
     getReleaseNotes: (opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }) =>
       ipcRenderer.invoke('update:get-release-notes', opts ?? {}),
     check: () => ipcRenderer.invoke('update:check'),
-    clearCache: () => ipcRenderer.invoke('update:clear-cache') as Promise<{
-      ok: boolean
-      available: boolean
-      version?: string
-      installedVersion?: string
-      phase?: string
-      error?: string
-      pendingRelease?: boolean
-    }>,
     getState: () => ipcRenderer.invoke('update:get-state') as Promise<{
       phase: string
       version?: string
       percent?: number
+      stagingStep?: 'setup' | 'payload' | 'verify' | 'done'
       error?: string
       errorCode?: string
       rateLimitMinutes?: number
@@ -373,6 +366,7 @@ contextBridge.exposeInMainWorld('api', {
       phase: string
       version?: string
       percent?: number
+      stagingStep?: 'setup' | 'payload' | 'verify' | 'done'
       error?: string
       errorCode?: string
       rateLimitMinutes?: number
@@ -382,6 +376,7 @@ contextBridge.exposeInMainWorld('api', {
         phase: string
         version?: string
         percent?: number
+        stagingStep?: 'setup' | 'payload' | 'verify' | 'done'
         error?: string
         errorCode?: string
         rateLimitMinutes?: number
@@ -400,8 +395,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('update:downloaded', handler)
       return () => { ipcRenderer.off('update:downloaded', handler) }
     },
-    onProgress: (cb: (data: { percent: number }) => void) => {
-      const handler = (_e: unknown, data: { percent: number }) => cb(data)
+    onReady: (cb: (data: { version: string }) => void) => {
+      const handler = (_e: unknown, data: { version: string }) => cb(data)
+      ipcRenderer.on('update:ready', handler)
+      return () => { ipcRenderer.off('update:ready', handler) }
+    },
+    onProgress: (cb: (data: { percent: number; transferred?: number; total?: number }) => void) => {
+      const handler = (_e: unknown, data: { percent: number; transferred?: number; total?: number }) => cb(data)
       ipcRenderer.on('update:progress', handler)
       return () => { ipcRenderer.off('update:progress', handler) }
     },

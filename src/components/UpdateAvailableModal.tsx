@@ -18,6 +18,7 @@ export function UpdateAvailableModal() {
   const [phase, setPhase] = useState<ModalPhase>('available')
   const [percent, setPercent] = useState(0)
   const [currentVersion, setCurrentVersion] = useState('')
+  const [installError, setInstallError] = useState('')
 
   useEffect(() => {
     void window.api.app.getVersion().then(setCurrentVersion).catch(() => {})
@@ -43,7 +44,7 @@ export function UpdateAvailableModal() {
         setPercent(100)
         return
       }
-      if (state.phase === 'downloaded' && state.version) {
+      if ((state.phase === 'ready' || state.phase === 'downloaded') && state.version) {
         if (!isNewerThanInstalled(state.version)) return
         showUpdate('ready', state.version)
         setPercent(100)
@@ -77,16 +78,42 @@ export function UpdateAvailableModal() {
       showUpdate('ready', v)
       setPercent(100)
     })
+    const offReady = window.api.updater.onReady(({ version: v }) => {
+      if (!isNewerThanInstalled(v)) return
+      showUpdate('ready', v)
+      setPercent(100)
+    })
+
+    const kickDownload = () => { void window.api.updater.ensureDownload().catch(() => {}) }
+    kickDownload()
+    const offAvailableKick = window.api.updater.onAvailable(() => { kickDownload() })
 
     return () => {
       offState()
       offAvailable()
       offProgress()
       offDownloaded()
+      offReady()
+      offAvailableKick()
     }
   }, [dismissed, currentVersion])
 
   if (!visible || dismissed) return null
+
+  const installNow = async () => {
+    setInstallError('')
+    setPhase('installing')
+    try {
+      const result = await window.api.updater.install()
+      if (result?.ok === false) {
+        setPhase('ready')
+        setInstallError(result.reason || t.settings.updateError)
+      }
+    } catch (err) {
+      setPhase('ready')
+      setInstallError(err instanceof Error ? err.message : t.settings.updateError)
+    }
+  }
 
   const body =
     phase === 'installing'
@@ -115,6 +142,7 @@ export function UpdateAvailableModal() {
         </div>
         <div className="gg-modal-body">
           <p className="gg-models-required-text">{body}</p>
+          {installError && <p className="gg-models-required-text" style={{ color: 'var(--error)' }}>{installError}</p>}
           {phase === 'downloading' && (
             <div className="gg-update-modal-progress">
               <div className="gg-update-progress" style={{ width: `${percent}%` }} />
@@ -129,7 +157,7 @@ export function UpdateAvailableModal() {
             <button
               type="button"
               className="gg-btn gg-btn-primary"
-              onClick={() => void window.api.updater.install()}
+              onClick={() => void installNow()}
               disabled={phase === 'installing'}
             >
               {phase === 'installing' ? '…' : t.updates.install}

@@ -482,7 +482,8 @@ declare global {
         scan(): Promise<DetectedLocalServer[]>
       }
       updater: {
-        install(): Promise<void>
+        install(): Promise<{ ok: boolean; reason?: string }>
+        ensureDownload(): Promise<{ ok: boolean; reason?: string; phase?: string }>
         getReleaseNotes(opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }): Promise<Array<{
           version: string
           name: string
@@ -491,12 +492,12 @@ declare global {
           publishedAt?: string
         }>>
         check(): Promise<{ available: boolean; version?: string; installedVersion?: string; error?: string; errorCode?: string; rateLimitMinutes?: number; phase?: string; pendingRelease?: boolean }>
-        clearCache(): Promise<{ ok: boolean; available: boolean; version?: string; installedVersion?: string; error?: string; errorCode?: string; rateLimitMinutes?: number; phase?: string; pendingRelease?: boolean }>
-        getState(): Promise<{ phase: string; version?: string; percent?: number; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string }>
-        onState(cb: (data: { phase: string; version?: string; percent?: number; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean }) => void): () => void
+        getState(): Promise<{ phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string }>
+        onState(cb: (data: { phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean }) => void): () => void
         onAvailable(cb: (data: { version: string; pendingRelease?: boolean }) => void): () => void
         onDownloaded(cb: (data: { version: string }) => void): () => void
-        onProgress(cb: (data: { percent: number }) => void): () => void
+        onReady(cb: (data: { version: string }) => void): () => void
+        onProgress(cb: (data: { percent: number; transferred?: number; total?: number }) => void): () => void
         onNotAvailable(cb: () => void): () => void
         onError(cb: (data: { error: string; errorCode?: string; rateLimitMinutes?: number }) => void): () => void
       }

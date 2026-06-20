@@ -19,7 +19,7 @@ import { ProjectMapPanel } from './components/ProjectMapPanel'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
 
-import { UpdateAvailableModal } from './components/UpdateAvailableModal'
+import { UpdateReadyToast } from './components/UpdateReadyToast'
 import { WhatsNewModal } from './components/WhatsNewModal'
 import { SideChat } from './components/SideChat'
 import { prefetchDetectedClis } from './lib/prefetch-cli'
@@ -439,7 +439,7 @@ export function App() {
       <TerminalErrorToast />
       <DiffView />
       <CommandConfirm />
-      <UpdateAvailableModal />
+      <UpdateReadyToast />
       <WhatsNewModal />
 
     </div>
