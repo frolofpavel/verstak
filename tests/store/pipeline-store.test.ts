@@ -77,4 +77,18 @@ describe('projectStore — Pipeline state', () => {
     expect(cancel).toHaveBeenCalledWith(4)
     expect(useProject.getState().activePipeline).toBeNull()
   })
+
+  // §5 распил: страж композиции — pipeline-slice реально подмёржен в единый
+  // стор, а main-поля не затёрты спредом. Ловит потерю/задвоение ключей слайса.
+  it('pipeline-slice подмёржен в стор, main-поля целы', () => {
+    const s = useProject.getState()
+    expect(s.activePipeline).toBeNull()
+    for (const m of ['startPipeline', 'loadActivePipeline', 'advancePipeline', 'cancelPipeline'] as const) {
+      expect(typeof s[m]).toBe('function')
+    }
+    expect('path' in s).toBe(true)
+    expect('messages' in s).toBe(true)
+    expect(typeof s.setProject).toBe('function')
+    expect(typeof s.startReview).toBe('function')
+  })
 })
