@@ -19,6 +19,7 @@ import {
   type RunningPlanStep,
   type SessionSnapshot
 } from './session-snapshot'
+import { applySnapshotEvent } from './apply-snapshot-event'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import {
   EMPTY_COMPOSER_DRAFT,
@@ -644,43 +645,18 @@ export const useProject = create<ProjectState>((set, get) => ({
   setRunningPlanStep: (s) => set({ runningPlanStep: s }),
   applyEventToSession: (projectPath, event) => set(s => {
     const existing = s.sessions[projectPath] ?? freshSnapshot()
-    const next = { ...existing, hasUnread: true }
+    let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    // pending-write/command — специфика фоновой ПРОЕКТНОЙ сессии (не в общем ядре).
     const t = event.type
-    if (t === 'text' && typeof event.text === 'string') {
-      const msgs = [...next.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + event.text }
-      } else {
-        msgs.push({ role: 'assistant', content: event.text })
-      }
-      next.messages = msgs
-    } else if (t === 'done' || t === 'error') {
-      if (t === 'error' && typeof event.message === 'string') {
-        const msgs = [...next.messages]
-        const last = msgs[msgs.length - 1]
-        if (last?.role === 'assistant') {
-          msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n[Ошибка: ${event.message}]` }
-        }
-        next.messages = msgs
-      }
-      Object.assign(next, stampDurationOnStreamEnd(next))
-    } else if (t === 'pending-write' && typeof event.callId === 'string') {
-      next.pendingWrites = [...next.pendingWrites, {
+    if (t === 'pending-write' && typeof event.callId === 'string') {
+      next = { ...next, pendingWrites: [...next.pendingWrites, {
         callId: event.callId,
         path: String(event.path ?? ''),
         before: String(event.before ?? ''),
         after: String(event.after ?? '')
-      }]
+      }] }
     } else if (t === 'pending-command' && typeof event.callId === 'string') {
-      next.pendingCommand = { callId: event.callId, command: String(event.command ?? '') }
-    } else if (t === 'usage' && event.usage && typeof event.usage === 'object') {
-      const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
-      next.sessionUsage = {
-        inputTokens: next.sessionUsage.inputTokens + (u.inputTokens ?? 0),
-        outputTokens: next.sessionUsage.outputTokens + (u.outputTokens ?? 0),
-        cachedInputTokens: next.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0)
-      }
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? '') } }
     }
     return { sessions: { ...s.sessions, [projectPath]: next } }
   }),
@@ -758,45 +734,12 @@ export const useProject = create<ProjectState>((set, get) => ({
   }),
   applyEventToChat: (chatId, event) => set(s => {
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
-    const next = { ...existing, hasUnread: true }
-    const t = event.type
-    if (t === 'text' && typeof event.text === 'string') {
-      const msgs = [...next.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + event.text }
-      } else {
-        msgs.push({ role: 'assistant', content: event.text })
-      }
-      next.messages = msgs
-    } else if (t === 'thought' && typeof event.text === 'string') {
-      const msgs = [...next.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + event.text }
-      }
-      next.messages = msgs
-    } else if (t === 'done' || t === 'error') {
-      if (t === 'error' && typeof event.message === 'string') {
-        const msgs = [...next.messages]
-        const last = msgs[msgs.length - 1]
-        if (last?.role === 'assistant') {
-          msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n[Ошибка: ${event.message}]` }
-        }
-        next.messages = msgs
-      }
-      Object.assign(next, stampDurationOnStreamEnd(next))
-      // Persist the completed assistant message to DB so it survives reload
+    const next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    // Персист завершённого assistant-сообщения в БД (переживёт reload).
+    if ((event.type === 'done' || event.type === 'error') && s.path) {
       const lastMsg = next.messages[next.messages.length - 1]
-      if (lastMsg?.role === 'assistant' && lastMsg.content && s.path) {
+      if (lastMsg?.role === 'assistant' && lastMsg.content) {
         void window.api.chats.append(chatId, s.path, 'assistant', lastMsg.content).catch(() => {})
-      }
-    } else if (t === 'usage' && event.usage && typeof event.usage === 'object') {
-      const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
-      next.sessionUsage = {
-        inputTokens: next.sessionUsage.inputTokens + (u.inputTokens ?? 0),
-        outputTokens: next.sessionUsage.outputTokens + (u.outputTokens ?? 0),
-        cachedInputTokens: next.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0)
       }
     }
     return { chatSnapshots: { ...s.chatSnapshots, [chatId]: next } }
@@ -964,55 +907,25 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
   })),
   applyEventToHelp: (event) => set(s => {
-    const next = { ...s.help, hasUnread: s.helpMode ? false : true }
+    const next = applySnapshotEvent({ ...s.help, hasUnread: s.helpMode ? false : true }, event)
     const t = event.type
-    if (t === 'text' && typeof event.text === 'string') {
-      const msgs = [...next.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + event.text }
-      } else {
-        msgs.push({ role: 'assistant', content: event.text })
-      }
-      next.messages = msgs
-    } else if (t === 'thought' && typeof event.text === 'string') {
-      const msgs = [...next.messages]
-      const last = msgs[msgs.length - 1]
-      if (last?.role === 'assistant') {
-        msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + event.text }
-      }
-      next.messages = msgs
-    } else if (t === 'done' || t === 'error') {
-      if (t === 'error' && typeof event.message === 'string') {
-        const msgs = [...next.messages]
-        const last = msgs[msgs.length - 1]
-        if (last?.role === 'assistant') {
-          msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n[Ошибка: ${event.message}]` }
-        }
-        next.messages = msgs
-      }
-      Object.assign(next, stampDurationOnStreamEnd(next))
+    if (t === 'done' || t === 'error') {
+      // Персист завершённого assistant-сообщения справки в БД.
       const lastMsg = next.messages[next.messages.length - 1]
       const chatId = s.helpChatId
       if (lastMsg?.role === 'assistant' && lastMsg.content && chatId != null) {
         void window.api.chats.append(chatId, HELP_PROJECT_PATH, 'assistant', lastMsg.content).catch(() => {})
       }
-    } else if (t === 'usage' && event.usage && typeof event.usage === 'object') {
-      const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
-      next.sessionUsage = {
-        inputTokens: next.sessionUsage.inputTokens + (u.inputTokens ?? 0),
-        outputTokens: next.sessionUsage.outputTokens + (u.outputTokens ?? 0),
-        cachedInputTokens: next.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0)
-      }
     } else if (t === 'info' && typeof event.text === 'string') {
-      next.activity = [...next.activity, {
+      // info → активити-плашка (специфика справки, не в общем ядре).
+      return { help: { ...next, activity: [...next.activity, {
         id: `info-${Date.now()}`,
         kind: 'read',
         label: event.text,
         detail: '',
         status: 'ok',
         timestamp: Date.now()
-      }]
+      }] } }
     }
     return { help: next }
   }),
