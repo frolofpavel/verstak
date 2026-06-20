@@ -20,6 +20,45 @@ const MAX_READ_BYTES = 2 * 1024 * 1024  // 2 MB
 const MAX_SEARCH_HITS = 80
 const MAX_LINE_CHARS = 220
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'out', 'dist', '.next', '.vite', '.verstak-data', '.superpowers', '__pycache__', 'venv', '.venv', 'target', 'build'])
+const REMOTE_SEARCH_EXCLUDE_DIRS = [
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  'out',
+  'venv',
+  '.venv',
+  '__pycache__',
+  '.next',
+  'target',
+  'coverage'
+]
+
+function escapeExtendedGrepLiteral(value: string): string {
+  return value.replace(/[.[\]*+?^${}()|\\/]/g, '\\$&')
+}
+
+export function buildRemoteSearchCommand(
+  query: string,
+  opts: { regex?: boolean; ignoreCase?: boolean } = {}
+): string {
+  const regex = opts.regex === true
+  const ignoreCase = opts.ignoreCase !== false
+  const rgFlags = ['-n', '--color', 'never']
+  if (ignoreCase) rgFlags.push('-i')
+  if (!regex) rgFlags.push('-F')
+
+  const rgGlobs = REMOTE_SEARCH_EXCLUDE_DIRS
+    .map(dir => `-g ${shq(`!${dir}/**`)}`)
+    .join(' ')
+  const grepFlags = `-rn${ignoreCase ? 'i' : ''}E`
+  const grepPattern = regex ? query : escapeExtendedGrepLiteral(query)
+  const grepExcludes = REMOTE_SEARCH_EXCLUDE_DIRS
+    .map(dir => `--exclude-dir=${shq(dir)}`)
+    .join(' ')
+
+  return `if command -v rg >/dev/null 2>&1; then rg ${rgFlags.join(' ')} ${rgGlobs} -- ${shq(query)} .; else grep ${grepFlags} ${grepExcludes} -- ${shq(grepPattern)} . 2>/dev/null; fi | head -100`
+}
 
 export const TOOL_DEFS: ToolDefinition[] = [
   {
@@ -1169,10 +1208,10 @@ export function createSshFileTools(backend: SshBackend): FileTools {
       if (name === 'search_project') {
         const query = String(args.query ?? '')
         if (!query) throw new Error('search_project: пустой query')
-        // fixed-string по умолчанию (экранируем как -F, но через -E для -n line-numbers).
-        const pattern = args.regex ? query : query.replace(/[.[\]*+?^${}()|\\/]/g, '\\$&')
-        const ic = args.ignoreCase !== false ? 'i' : ''
-        const r = await backend.runCommand(`grep -rn${ic}E -- ${shq(pattern)} . 2>/dev/null | head -100`)
+        const r = await backend.runCommand(buildRemoteSearchCommand(query, {
+          regex: args.regex === true,
+          ignoreCase: args.ignoreCase !== false
+        }))
         const scan = scanText(r.stdout)
         return (scan.redacted.trim() || 'Ничего не найдено.')
       }

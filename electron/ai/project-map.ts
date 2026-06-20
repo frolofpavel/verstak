@@ -26,7 +26,7 @@ const IGNORE_DIRS = new Set([
   'target', 'build', '.cache', '.turbo', '.parcel-cache'
 ])
 
-const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
+const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.rs'])
 const MAX_FILE_SCAN_BYTES = 256 * 1024
 const MAX_TOTAL_FILES = 2000
 
@@ -60,10 +60,40 @@ export interface ProjectMap {
  * Regex symbol extractor. Not as accurate as a real parser but fast (~5x
  * faster than spawning tsc) and good enough to give AI a structural map.
  */
-function extractSymbols(content: string): FileSymbol[] {
+function extractSymbols(content: string, ext = ''): FileSymbol[] {
   const lines = content.split('\n')
   const out: FileSymbol[] = []
   const seen = new Set<string>()
+  if (ext === '.py') {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      let m = /^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\s*\(/.exec(line)
+      if (m) { addSym('function', m[1], i + 1); continue }
+      m = /^\s*class\s+([A-Za-z_][\w]*)\b/.exec(line)
+      if (m) { addSym('class', m[1], i + 1); continue }
+    }
+    return out.slice(0, 50)
+  }
+  if (ext === '.go') {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      let m = /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][\w]*)\s*\(/.exec(line)
+      if (m) { addSym('function', m[1], i + 1); continue }
+      m = /^\s*type\s+([A-Za-z_][\w]*)\s+(?:struct|interface|func|\w+)/.exec(line)
+      if (m) { addSym('type', m[1], i + 1); continue }
+    }
+    return out.slice(0, 50)
+  }
+  if (ext === '.rs') {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      let m = /^\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][\w]*)\s*\(/.exec(line)
+      if (m) { addSym('function', m[1], i + 1); continue }
+      m = /^\s*pub\s+(?:struct|enum|trait)\s+([A-Za-z_][\w]*)\b/.exec(line)
+      if (m) { addSym('type', m[1], i + 1); continue }
+    }
+    return out.slice(0, 50)
+  }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     // export function / export async function
@@ -124,7 +154,7 @@ export async function buildProjectMap(root: string): Promise<ProjectMap> {
         try { content = await readFile(abs, 'utf8') } catch { continue }
         const lines = content.split('\n').length
         totalLines += lines
-        const symbols = extractSymbols(content)
+        const symbols = extractSymbols(content, ext)
         files.push({ path: rel, lines, symbols })
       } else {
         // Non-code or oversized: just record path

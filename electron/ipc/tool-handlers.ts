@@ -40,6 +40,7 @@ import { safeRealJoin } from '../ai/path-policy'
 import type { McpClient } from '../mcp/client'
 import type { ProviderId, CreateOptions } from '../ai/registry'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../ai/verification'
+import { createSshBackend, makeSshExec, parseSshProjectPath } from '../projects/ssh-backend'
 
 const execFileAsync = promisify(execFile)
 
@@ -2459,10 +2460,86 @@ function parseTscLine(line: string): { path: string; line: number; col: number; 
   return { path: m[1], line: parseInt(m[2], 10), col: parseInt(m[3], 10), code: m[4], message: m[5] }
 }
 
+export function buildRemoteTscCommand(): string {
+  return [
+    'if [ ! -f tsconfig.json ]; then',
+    'echo __VERSTAK_NO_TSCONFIG__;',
+    'elif [ -x ./node_modules/.bin/tsc ]; then',
+    './node_modules/.bin/tsc --noEmit --pretty false;',
+    'else',
+    'npx tsc --noEmit --pretty false;',
+    'fi'
+  ].join(' ')
+}
+
 const checkDiagnosticsHandler: ToolHandler = {
   mode: 'parallel-read',
   async handle(call, ctx) {
     const fileFilter = call.args.file ? String(call.args.file) : null
+    const sshTarget = parseSshProjectPath(ctx.projectPath)
+
+    if (sshTarget) {
+      let stdout = ''
+      let stderr = ''
+      let exitCode: number | null = 0
+
+      try {
+        const backend = createSshBackend(sshTarget.remoteRoot, makeSshExec(sshTarget, ctx.signal))
+        const res = await backend.runCommand(buildRemoteTscCommand())
+        stdout = res.stdout
+        stderr = res.stderr
+        exitCode = res.exitCode
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        emitActivity(ctx, call, 'error', 'check_diagnostics', msg)
+        return { id: call.id, name: call.name, result: '', error: `Не удалось выполнить SSH TypeScript diagnostics: ${msg}` }
+      }
+
+      if (stdout.includes('__VERSTAK_NO_TSCONFIG__')) {
+        emitActivity(ctx, call, 'ok', 'check_diagnostics', 'SSH: нет tsconfig.json')
+        return { id: call.id, name: call.name, result: 'SSH-проект: tsconfig.json не найден на удалённой стороне. TypeScript diagnostics пропущена.' }
+      }
+
+      const allOutput = (stdout + '\n' + stderr).split('\n')
+      const errors = allOutput
+        .map(parseTscLine)
+        .filter((e): e is NonNullable<typeof e> => e !== null)
+
+      const filtered = fileFilter
+        ? errors.filter(e => e.path.replace(/\\/g, '/').includes(fileFilter.replace(/\\/g, '/')))
+        : errors
+
+      const raw = (stdout + '\n' + stderr).trim()
+      if (filtered.length === 0 && exitCode !== 0) {
+        const detail = raw.slice(0, 4000) || `exitCode=${exitCode ?? 'unknown'}`
+        emitActivity(ctx, call, 'error', 'check_diagnostics', 'SSH: tsc не выполнен')
+        try {
+          ctx.recordRunEvent?.('verify', {
+            label: 'check_diagnostics',
+            detail: 'SSH TypeScript diagnostics не выполнена',
+            status: 'fail'
+          })
+        } catch { /* best-effort */ }
+        return { id: call.id, name: call.name, result: `SSH TypeScript diagnostics не выполнена или не дала распознаваемых ошибок:\n\n${detail}` }
+      }
+
+      emitActivity(ctx, call, 'ok', 'check_diagnostics', `SSH: ${filtered.length} ошибок${fileFilter ? ` в ${fileFilter}` : ''}`)
+      try {
+        ctx.recordRunEvent?.('verify', {
+          label: 'check_diagnostics',
+          detail: `SSH: ${filtered.length} ошибок TypeScript${fileFilter ? ` в ${fileFilter}` : ''}`,
+          status: filtered.length === 0 ? 'pass' : 'fail'
+        })
+      } catch { /* best-effort */ }
+
+      if (filtered.length === 0) {
+        return { id: call.id, name: call.name, result: '✅ Нет ошибок TypeScript на SSH-проекте.' }
+      }
+
+      const lines = filtered.map(e => `${e.path}:${e.line}:${e.col} — ${e.code}: ${e.message}`)
+      const header = `Found ${filtered.length} error${filtered.length === 1 ? '' : 's'}:`
+      return { id: call.id, name: call.name, result: `${header}\n\n${lines.join('\n')}` }
+    }
 
     // Проверяем наличие tsconfig.json — если нет, возвращаем понятное сообщение
     const tsconfigPath = join(ctx.projectPath, 'tsconfig.json')

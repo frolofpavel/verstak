@@ -13,6 +13,19 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    version: '1.5.20',
+    build: '20.06.2026',
+    deployed: '20.06.2026',
+    title: 'Remote Reliability Pack: SSH diagnostics, быстрый поиск, polyglot Project Brain',
+    changes: [
+      'SSH-проекты больше не проверяются локальным tsc: check_diagnostics уходит на удалённую сторону через SSH-бэкенд и честно сообщает, если там нет tsconfig.json или tsc/npx.',
+      'Удалённый search_project сначала использует rg, а fallback grep исключает тяжёлые каталоги: node_modules, .git, dist, build, out, venv, __pycache__, target и coverage.',
+      'Project Brain научился извлекать ключевые символы и импорты из Python, Go и Rust: def/class/import, func/type/import, pub fn/pub struct/pub enum/use.',
+      'Project Map теперь индексирует .py, .go и .rs файлы, поэтому агент видит структуру не только TypeScript/JavaScript-проектов.',
+      'Добавлены регрессионные тесты на SSH-команды, polyglot summary и polyglot project-map; быстрый набор тестов проходит полностью.',
+    ],
+  },
+  {
     version: '1.5.19',
     build: '20.06.2026',
     deployed: '20.06.2026',

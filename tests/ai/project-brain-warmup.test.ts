@@ -109,3 +109,26 @@ describe('runWarmup — оркестратор (моки)', () => {
     expect(res.filesSummarized).toBe(1)
   })
 })
+
+describe('warmup polyglot summary', () => {
+  it('summarizeFileStub: Python def/class/import', () => {
+    const content = `# Service module\nimport os\nfrom .cache import get_cache\nasync def fetch_user():\n    pass\nclass UserService:\n    pass`
+    const s = summarizeFileStub('app/service.py', content)
+    expect(s.keyExports).toEqual(expect.arrayContaining(['fetch_user', 'UserService']))
+    expect(s.keyDependencies).toEqual(expect.arrayContaining(['os', '.cache']))
+  })
+
+  it('summarizeFileStub: Go func/type/import', () => {
+    const content = `package worker\n\nimport (\n  "context"\n  "github.com/acme/app/internal/jobs"\n)\n\nfunc RunWorker(ctx context.Context) {}\ntype JobQueue struct {}`
+    const s = summarizeFileStub('cmd/worker/main.go', content)
+    expect(s.keyExports).toEqual(expect.arrayContaining(['RunWorker', 'JobQueue']))
+    expect(s.keyDependencies).toEqual(expect.arrayContaining(['context', 'github.com/acme/app/internal/jobs']))
+  })
+
+  it('summarizeFileStub: Rust pub fn/pub struct/pub enum', () => {
+    const content = `use crate::state::AppState;\n\npub fn run_worker() {}\npub struct Worker {}\npub enum WorkerState { Idle }`
+    const s = summarizeFileStub('src/worker.rs', content)
+    expect(s.keyExports).toEqual(expect.arrayContaining(['run_worker', 'Worker', 'WorkerState']))
+    expect(s.keyDependencies).toContain('crate::state::AppState')
+  })
+})

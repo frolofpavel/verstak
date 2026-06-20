@@ -62,6 +62,76 @@ export function estimateTokens(text: string): number {
   return Math.ceil((text?.length ?? 0) / 4)
 }
 
+function fileExt(filePath: string): string {
+  const i = filePath.lastIndexOf('.')
+  return i >= 0 ? filePath.slice(i).toLowerCase() : ''
+}
+
+function uniqueLimited(values: string[], limit: number): string[] {
+  return Array.from(new Set(values.filter(Boolean))).slice(0, limit)
+}
+
+function collectRegexGroup(content: string, patterns: RegExp[]): string[] {
+  const out: string[] = []
+  for (const pattern of patterns) {
+    for (const m of content.matchAll(pattern)) out.push(m[1])
+  }
+  return out
+}
+
+function extractStubExports(filePath: string, content: string, symbols?: string[]): string[] {
+  if (symbols && symbols.length > 0) return symbols.slice(0, 8)
+  const ext = fileExt(filePath)
+  if (ext === '.py') {
+    return uniqueLimited(collectRegexGroup(content, [
+      /^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\s*\(/gm,
+      /^\s*class\s+([A-Za-z_][\w]*)\b/gm
+    ]), 8)
+  }
+  if (ext === '.go') {
+    return uniqueLimited(collectRegexGroup(content, [
+      /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][\w]*)\s*\(/gm,
+      /^\s*type\s+([A-Za-z_][\w]*)\s+(?:struct|interface|func|\w+)/gm
+    ]), 8)
+  }
+  if (ext === '.rs') {
+    return uniqueLimited(collectRegexGroup(content, [
+      /^\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][\w]*)\s*\(/gm,
+      /^\s*pub\s+(?:struct|enum|trait)\s+([A-Za-z_][\w]*)\b/gm
+    ]), 8)
+  }
+  return uniqueLimited(
+    Array.from(content.matchAll(/export\s+(?:async\s+)?(?:function|const|class|interface|type|enum)\s+([A-Za-z0-9_]+)/g)).map(m => m[1]),
+    8
+  )
+}
+
+function extractStubDeps(filePath: string, content: string): string[] {
+  const ext = fileExt(filePath)
+  if (ext === '.py') {
+    return uniqueLimited([
+      ...collectRegexGroup(content, [/^\s*import\s+([A-Za-z_][\w.]*|\.[\w.]+)\b/gm]),
+      ...collectRegexGroup(content, [/^\s*from\s+([A-Za-z_][\w.]*|\.[\w.]+)\s+import\s+/gm])
+    ], 6)
+  }
+  if (ext === '.go') {
+    return uniqueLimited(collectRegexGroup(content, [
+      /^\s*import\s+"([^"]+)"/gm,
+      /^\s*"([^"]+)"\s*$/gm
+    ]), 6)
+  }
+  if (ext === '.rs') {
+    return uniqueLimited(collectRegexGroup(content, [
+      /^\s*(?:pub\s+)?use\s+((?:crate|super|self)::[^;]+);/gm,
+      /^\s*extern\s+crate\s+([A-Za-z_][\w]*)\s*;/gm
+    ]), 6)
+  }
+  return uniqueLimited(
+    Array.from(content.matchAll(/(?:import|from)\s+['"]([^'"]+)['"]/g)).map(m => m[1]).filter(d => d.startsWith('.')),
+    6
+  )
+}
+
 /**
  * Эвристический stub-summary файла (MVP). Реальный AI-summarizer подключится
  * этой же сигнатурой. Берёт первый осмысленный комментарий/строку + символы.
@@ -71,10 +141,8 @@ export function summarizeFileStub(filePath: string, content: string, symbols?: s
   // Первая содержательная строка комментария/описания.
   const firstDoc = lines.find(l => /^\s*(\/\/|\*|#|\/\*)/.test(l) && l.replace(/[^a-zа-я0-9]/gi, '').length > 8)
   const head = (firstDoc ?? lines.find(l => l.trim().length > 0) ?? '').replace(/^[\s/*#-]+/, '').trim().slice(0, 160)
-  const exports = (symbols && symbols.length > 0)
-    ? symbols.slice(0, 8)
-    : Array.from(content.matchAll(/export\s+(?:async\s+)?(?:function|const|class|interface|type)\s+([A-Za-z0-9_]+)/g)).map(m => m[1]).slice(0, 8)
-  const deps = Array.from(content.matchAll(/(?:import|from)\s+['"]([^'"]+)['"]/g)).map(m => m[1]).filter(d => d.startsWith('.')).slice(0, 6)
+  const exports = extractStubExports(filePath, content, symbols)
+  const deps = extractStubDeps(filePath, content)
   return {
     filePath,
     fileHash: null,

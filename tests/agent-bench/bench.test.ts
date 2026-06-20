@@ -30,6 +30,24 @@ describe('agent-bench: 10 эталонных регрессий', () => {
     writeFileSync(join(dir, 'src', 'foo.ts'), `export function hello() { return 'world' }
 export const Widget = () => null
 `)
+    writeFileSync(join(dir, 'src', 'service.py'), `import os
+from .cache import get_cache
+
+def fetch_user():
+    pass
+
+class UserService:
+    pass
+`)
+    writeFileSync(join(dir, 'src', 'worker.go'), `package worker
+
+func RunWorker() {}
+type JobQueue struct {}
+`)
+    writeFileSync(join(dir, 'src', 'worker.rs'), `pub fn run_worker() {}
+pub struct Worker {}
+pub enum WorkerState { Idle }
+`)
     writeFileSync(join(dir, '.env'), 'SECRET_KEY=sk-proj-abcdefghijklmnopqrstuvwx\n')
   })
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
@@ -142,5 +160,13 @@ export const Widget = () => null
     expect(pack).toContain('product_stack:')
     expect(pack).toMatch(/python/)
     expect(pack).toMatch(/fastapi/)
+  })
+
+  it('[15] project-map extracts Python, Go and Rust symbols', async () => {
+    const map = await buildProjectMap(dir)
+    const byPath = new Map(map.files.map(f => [f.path, f.symbols.map(s => s.name).sort()]))
+    expect(byPath.get('src/service.py')).toEqual(['UserService', 'fetch_user'])
+    expect(byPath.get('src/worker.go')).toEqual(['JobQueue', 'RunWorker'])
+    expect(byPath.get('src/worker.rs')).toEqual(['Worker', 'WorkerState', 'run_worker'])
   })
 })

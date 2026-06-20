@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.20',
+    name: 'Verstak 1.5.20',
+    publishedAt: '2026-06-20T12:00:00Z',
+    body: '### Remote Reliability Pack: SSH diagnostics, быстрый поиск, polyglot Project Brain\n- SSH-проекты больше не проверяются локальным tsc: check_diagnostics уходит на удалённую сторону через SSH-бэкенд и честно сообщает, если там нет tsconfig.json или tsc/npx.\n- Удалённый search_project сначала использует rg, а fallback grep исключает тяжёлые каталоги: node_modules, .git, dist, build, out, venv, __pycache__, target и coverage.\n- Project Brain научился извлекать ключевые символы и импорты из Python, Go и Rust: def/class/import, func/type/import, pub fn/pub struct/pub enum/use.\n- Project Map теперь индексирует .py, .go и .rs файлы, поэтому агент видит структуру не только TypeScript/JavaScript-проектов.\n- Добавлены регрессионные тесты на SSH-команды, polyglot summary и polyglot project-map; быстрый набор тестов проходит полностью.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.20'
+  },
+  {
     version: '1.5.19',
     name: 'Verstak 1.5.19',
     publishedAt: '2026-06-20T12:00:00Z',
