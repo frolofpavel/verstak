@@ -23,6 +23,7 @@ import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfigur
 import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
+import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
@@ -267,6 +268,11 @@ export function registerAiIpc(deps: AiDeps): void {
     toolsAllow?: string[]
     /** Режим агента для этого send; по умолчанию — из settings. */
     agentMode?: AgentMode
+    /** Crash-resume Фаза 2: возобновить прерванный прогон по его runId. Если у
+     *  прогона есть чекпойнт — loop продолжится с накопленным контекстом (полная
+     *  история сообщений), а не с turn 0. Невалидный/отсутствующий чекпойнт —
+     *  мягкий фоллбэк на обычный старт по incomingMessages. */
+    resumeFromRunId?: string
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -277,6 +283,13 @@ export function registerAiIpc(deps: AiDeps): void {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
     }
     const messages = await expandOfficeAttachments(incomingMessages)
+    // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
+    // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
+    // (она уже содержит system + все turn'ы), минуя пере-сборку system ниже.
+    // Невалидный/отсутствующий снапшот → null → обычный старт по incomingMessages.
+    const resumedMessages = overrides?.resumeFromRunId
+      ? parseResumeCheckpoint(deps.agentRuns?.latestCheckpoint(overrides.resumeFromRunId)?.messagesJson ?? null)
+      : null
     const providerId = overrides?.providerId ?? deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
@@ -351,7 +364,12 @@ export function registerAiIpc(deps: AiDeps): void {
     // независимый разбор. Давать ему system-layer + user-layer = заставить
     // вести себя как сам агент, а не как критик → теряется смысл кросс-ревью.
     // Поэтому reviewer-промпт остаётся единственной системной инструкцией.
-    if (overrides?.useReviewerPrompt) {
+    if (resumedMessages) {
+      // Crash-resume Фаза 2: чекпойнт уже содержит system + полную историю прогона
+      // — подаём как есть, минуя пере-сборку контекста. composedSystem остаётся
+      // null (Debug-снапшот системы для возобновления не делаем — это продолжение).
+      messagesWithSystem = resumedMessages
+    } else if (overrides?.useReviewerPrompt) {
       messagesWithSystem = [{ role: 'system', content: REVIEWER_SYSTEM_PROMPT }, ...messages]
     } else if (descriptor.transport === 'API') {
       // Same assembly path as CLI providers — see ai/compose-system.ts.
