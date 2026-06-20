@@ -58,6 +58,8 @@ const DEFAULT_BATCH_COST_CAP_CENTS = 300
 
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
 import { emitActivity, awaitCommandConfirm } from './tool-handlers/shared'
+import { screenCaptureHandler, screenInfoHandler } from './tool-handlers/screen'
+import { mcpToolHandler } from './tool-handlers/mcp'
 import { todoCreateHandler, todoUpdateHandler, todoListHandler } from './tool-handlers/todos'
 import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler } from './tool-handlers/shared'
 // Реэкспорт типов для внешних импортов (sub-agent-loop импортит ToolContext отсюда).
@@ -2476,161 +2478,9 @@ const impactAnalysisHandler: ToolHandler = {
   }
 }
 
-// ============================================================================
-// Screen: screen_capture / screen_info
-// ============================================================================
-
-const screenCaptureHandler: ToolHandler = {
-  mode: 'parallel-read',
-  async handle(call, ctx) {
-    try {
-      // desktopCapturer and screen are Electron main-process APIs — they are
-      // not available in Node.js / vitest environments, so we guard carefully.
-      const { desktopCapturer, screen: electronScreen } = await import('electron')
-      const target = call.args.target === 'window' ? 'window' : 'screen'
-
-      let dataUrl: string | null = null
-      let width = 0
-      let height = 0
-
-      if (target === 'screen') {
-        const sources = await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: { width: 1920, height: 1080 }
-        })
-        if (sources.length === 0) {
-          return { id: call.id, name: call.name, result: 'Не удалось захватить экран — источников не найдено' }
-        }
-        const img = sources[0].thumbnail
-        dataUrl = img.toDataURL()
-        const sz = img.getSize()
-        width = sz.width
-        height = sz.height
-      } else {
-        // window — захват окна Verstak через screen source
-        const primary = electronScreen.getPrimaryDisplay()
-        const sources = await desktopCapturer.getSources({
-          types: ['window'],
-          thumbnailSize: { width: primary.size.width, height: primary.size.height }
-        })
-        // Ищем окно Verstak по имени (title / FileDescription: VERSTAK, Verstak, Electron в dev)
-        const win = sources.find(s => /verstak|electron/i.test(s.name)) ?? sources[0]
-        if (!win) {
-          return { id: call.id, name: call.name, result: 'Не найдено окно для захвата' }
-        }
-        const img = win.thumbnail
-        dataUrl = img.toDataURL()
-        const sz = img.getSize()
-        width = sz.width
-        height = sz.height
-      }
-
-      // Attach image to next AI message (same pattern as browser_screenshot)
-      if (dataUrl && dataUrl.startsWith('data:image/')) {
-        const m = /^data:(image\/[\w+-]+);base64,(.+)$/.exec(dataUrl)
-        if (m) {
-          ctx.pendingAttachments.push({
-            name: `screen-${Date.now()}.png`,
-            mimeType: m[1],
-            data: m[2],
-            size: Math.floor(m[2].length * 0.75)
-          })
-        }
-      }
-
-      emitActivity(ctx, call, 'ok', 'screen_capture', `${target} ${width}x${height}`)
-      return {
-        id: call.id,
-        name: call.name,
-        result: { target, width, height, attached: true, timestamp: Date.now() }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      emitActivity(ctx, call, 'error', 'screen_capture', msg)
-      return { id: call.id, name: call.name, result: '', error: `screen_capture недоступен: ${msg}` }
-    }
-  }
-}
-
-const screenInfoHandler: ToolHandler = {
-  mode: 'parallel-read',
-  async handle(call, ctx) {
-    try {
-      const { screen: electronScreen } = await import('electron')
-      const primary = electronScreen.getPrimaryDisplay()
-      const displays = electronScreen.getAllDisplays()
-      const lines = displays.map((d, i) => {
-        const tag = d.id === primary.id ? ' [primary]' : ''
-        return `Monitor ${i + 1}: ${d.size.width}x${d.size.height} (scale ${d.scaleFactor}x) pos=(${d.bounds.x},${d.bounds.y})${tag}`
-      })
-      const result = lines.join('\n')
-      emitActivity(ctx, call, 'ok', 'screen_info', `${displays.length} мониторов`)
-      return { id: call.id, name: call.name, result }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      emitActivity(ctx, call, 'error', 'screen_info', msg)
-      return { id: call.id, name: call.name, result: '', error: `screen_info недоступен: ${msg}` }
-    }
-  }
-}
 
 // ============================================================================
 // MCP tool handler — роутит вызов к mcpClient
-// ============================================================================
-
-const mcpToolHandler: ToolHandler = {
-  mode: 'sequential',
-  async handle(call, ctx) {
-    if (!ctx.mcpClient) {
-      return { id: call.id, name: call.name, result: '', error: 'MCP client not available' }
-    }
-    // Определяем serverId: ищем tool среди всех подключённых серверов по имени
-    const allMcpTools = ctx.mcpClient.getAllTools()
-    const matchedTool = allMcpTools.find(t => t.name === call.name)
-    if (!matchedTool) {
-      return { id: call.id, name: call.name, result: '', error: `MCP tool "${call.name}" not found in connected servers` }
-    }
-    // Mode policy: внешние MCP-тулзы — не локальные правки, а side-effects на чужих
-    // серверах. Гейтим их так же, как connector_query: scope тулза классифицируем
-    // по name + description (read → авто, write/command/network/unknown → команда),
-    // затем mcpDecision(scope, mode) даёт block/confirm/auto-accept.
-    const scope = classifyMcpToolScope(matchedTool.name, matchedTool.description)
-    const decision = mcpDecision(scope, ctx.agentMode)
-    // Короткая сводка аргументов для модалки подтверждения (без раскрытия больших значений)
-    const argKeys = Object.keys(call.args ?? {})
-    const argsSummary = argKeys.length ? argKeys.join(', ') : ''
-    const summary = `MCP ${call.name}${argsSummary ? ` · ${argsSummary}` : ''}`
-    if (decision === 'block') {
-      const reason = mcpBlockReason(call.name, scope, ctx.agentMode)
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'tool-blocked', callId: call.id, name: call.name, command: summary, reason }
-      })
-      return { id: call.id, name: call.name, result: '', error: reason }
-    }
-    if (decision === 'confirm') {
-      // 'confirm' — переиспользуем pending-command поток (та же модалка подтверждения)
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary } })
-      const accepted = await awaitCommandConfirm(ctx, call.id)
-      if (!accepted) {
-        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })
-        return { id: call.id, name: call.name, result: summary, error: 'User rejected' }
-      }
-    }
-    try {
-      emitActivity(ctx, call, 'ok', `mcp:${call.name}`, matchedTool.serverId)
-      const result = await ctx.mcpClient.callTool(matchedTool.serverId, call.name, call.args)
-      // Редактируем вывод внешнего MCP-сервера — он не доверенный, может вернуть
-      // токены/ключи, которые иначе утекут в контекст модели.
-      const raw = typeof result === 'string' ? result : JSON.stringify(result)
-      return { id: call.id, name: call.name, result: scanText(raw).redacted }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      emitActivity(ctx, call, 'error', `mcp:${call.name}`, scanText(msg).redacted)
-      return { id: call.id, name: call.name, result: '', error: scanText(msg).redacted }
-    }
-  }
-}
 
 // ============================================================================
 // Office: read_spreadsheet / read_document / edit_spreadsheet — «beyond code»
