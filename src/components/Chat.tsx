@@ -251,6 +251,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const [dragOver, setDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [queueNotice, setQueueNotice] = useState<string | null>(null)
+  const [handoffBusy, setHandoffBusy] = useState(false)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
@@ -300,6 +301,28 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setQueueNotice(msg)
     if (queueNoticeTimer.current) window.clearTimeout(queueNoticeTimer.current)
     queueNoticeTimer.current = window.setTimeout(() => setQueueNotice(null), 2500)
+  }
+
+  async function saveHandoffToDownloads() {
+    if (activeChatId == null || handoffBusy) return
+    setHandoffBusy(true)
+    try {
+      const result = await window.api.handoff.saveToDownloads(activeChatId)
+      if (!result.ok) {
+        flashQueueNotice(`Handoff не сохранён: ${result.error}`)
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(result.markdown)
+        flashQueueNotice('Handoff сохранён в Загрузки и скопирован')
+      } catch {
+        flashQueueNotice('Handoff сохранён в Загрузки')
+      }
+    } catch (err) {
+      flashQueueNotice(`Handoff не сохранён: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setHandoffBusy(false)
+    }
   }
 
   const hasImageAttachments = attachments.some(a => isImageAttachment(a.mimeType))
@@ -1464,6 +1487,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           )}
           {activePath && (
             <div className="gg-chat-project-actions">
+              <button
+                type="button"
+                className="gg-terminal-bar-btn"
+                onClick={() => void saveHandoffToDownloads()}
+                disabled={handoffBusy || activeChatId == null}
+                title="Сохранить handoff в Загрузки и скопировать для другого агента"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>{handoffBusy ? 'Сохраняю' : 'Handoff'}</span>
+              </button>
               <button
                 type="button"
                 className={`gg-terminal-bar-btn ${rightPanel === 'terminal' ? 'is-open' : ''}`}

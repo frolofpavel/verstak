@@ -291,6 +291,10 @@ declare global {
       }
       handoff: {
         generate: (sessionId: number, parentId?: string | null) => Promise<string>
+        saveToDownloads: (sessionId: number, parentId?: string | null) => Promise<
+          | { ok: true; path: string; markdown: string }
+          | { ok: false; error: string }
+        >
       }
       tasks: {
         list: (projectPath: string) => Promise<Task[]>

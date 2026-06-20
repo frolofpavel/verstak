@@ -4701,6 +4701,15 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   border-color: var(--border-default);
   color: var(--text-primary);
 }
+.gg-terminal-bar-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.gg-terminal-bar-btn:disabled:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
 .gg-terminal-bar-btn.is-open {
   border-color: var(--success);
   color: var(--success);
