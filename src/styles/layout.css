@@ -4342,6 +4342,31 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   margin-right: 4px;
 }
 .gg-mode-pill:hover { background: var(--bg-hover); border-color: var(--border-default); }
+
+/* ── Тумблер интенсивности Простой/Турбо (ось машинерии, ортогональна режимам) ── */
+.gg-intensity-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 120ms ease;
+  margin-right: 4px;
+}
+.gg-intensity-pill:hover { background: var(--bg-hover); border-color: var(--border-default); }
+.gg-intensity-pill.is-turbo {
+  color: #f59e0b;
+  border-color: #f59e0b80;
+  background: #f59e0b14;
+}
+.gg-intensity-pill.is-turbo:hover { border-color: #f59e0b; background: #f59e0b22; }
+.gg-intensity-icon { font-size: 11px; line-height: 1; }
+
 .gg-mode-pill.is-locked {
   cursor: default;
   opacity: 0.92;

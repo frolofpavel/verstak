@@ -7,6 +7,7 @@ import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
 import { TierRecommendation } from './TierRecommendation'
 import { ModePicker } from './ModePicker'
+import { IntensityToggle } from './IntensityToggle'
 import { VoiceInput } from './VoiceInput'
 import { TimelineBar } from './TimelineBar'
 import { ReviewPanel } from './ReviewPills'
@@ -2177,6 +2178,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 onChange={setAgentMode}
                 locked={isHelpChat}
               />
+              {!isHelpChat && <IntensityToggle />}
               <ModelPicker onOpenSettings={onOpenSettings} />
               {/* Бейдж возможностей провайдера (аудит P1 #12): у CLI-провайдеров
                   правки делает внешний агент в субпроцессе — контрольные гарантии
