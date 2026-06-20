@@ -1,6 +1,6 @@
-import type { ChatMessage } from '../types/api'
 import type { SessionSnapshot } from './session-snapshot'
 import { stampDurationOnStreamEnd } from '../lib/response-duration'
+import { appendOrStartAssistant, appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
 
 /** Стрим-событие из main (ai:event) — минимум полей для роутинга в снапшот. */
 export interface SnapshotEvent {
@@ -22,14 +22,14 @@ export interface SnapshotEvent {
 export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent): SessionSnapshot {
   const t = event.type
   if (t === 'text' && typeof event.text === 'string') {
-    return { ...snap, messages: appendAssistant(snap.messages, event.text) }
+    return { ...snap, messages: appendOrStartAssistant(snap.messages, event.text) }
   }
   if (t === 'thought' && typeof event.text === 'string') {
-    return { ...snap, messages: appendThinking(snap.messages, event.text) }
+    return { ...snap, messages: appendThinkingToLastAssistant(snap.messages, event.text) }
   }
   if (t === 'done' || t === 'error') {
     const messages = (t === 'error' && typeof event.message === 'string')
-      ? appendErrorNote(snap.messages, event.message)
+      ? appendToLastAssistant(snap.messages, `\n\n[Ошибка: ${event.message}]`)
       : snap.messages
     const base = { ...snap, messages }
     return { ...base, ...stampDurationOnStreamEnd(base) }
@@ -46,36 +46,4 @@ export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent):
     }
   }
   return snap
-}
-
-/** text: добить последний assistant или создать новый. */
-function appendAssistant(messages: ChatMessage[], text: string): ChatMessage[] {
-  const msgs = [...messages]
-  const last = msgs[msgs.length - 1]
-  if (last?.role === 'assistant') {
-    msgs[msgs.length - 1] = { ...last, content: last.content + text }
-  } else {
-    msgs.push({ role: 'assistant', content: text })
-  }
-  return msgs
-}
-
-/** thought: дописать chain-of-thought к последнему assistant (если он есть). */
-function appendThinking(messages: ChatMessage[], text: string): ChatMessage[] {
-  const msgs = [...messages]
-  const last = msgs[msgs.length - 1]
-  if (last?.role === 'assistant') {
-    msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + text }
-  }
-  return msgs
-}
-
-/** error: добавить пометку об ошибке в конец последнего assistant. */
-function appendErrorNote(messages: ChatMessage[], message: string): ChatMessage[] {
-  const msgs = [...messages]
-  const last = msgs[msgs.length - 1]
-  if (last?.role === 'assistant') {
-    msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n[Ошибка: ${message}]` }
-  }
-  return msgs
 }

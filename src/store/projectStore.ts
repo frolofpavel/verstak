@@ -20,6 +20,7 @@ import {
   type SessionSnapshot
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
+import { appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import {
   EMPTY_COMPOSER_DRAFT,
@@ -550,20 +551,8 @@ export const useProject = create<ProjectState>((set, get) => ({
     msgs.splice(at, 0, stamped)
     return { messages: msgs }
   }),
-  updateLastAssistant: (text) => set(s => {
-    const msgs = [...s.messages]
-    const last = msgs[msgs.length - 1]
-    if (last?.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content + text }
-    return { messages: msgs }
-  }),
-  appendLastAssistantThinking: (text) => set(s => {
-    const msgs = [...s.messages]
-    const last = msgs[msgs.length - 1]
-    if (last?.role === 'assistant') {
-      msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + text }
-    }
-    return { messages: msgs }
-  }),
+  updateLastAssistant: (text) => set(s => ({ messages: appendToLastAssistant(s.messages, text) })),
+  appendLastAssistantThinking: (text) => set(s => ({ messages: appendThinkingToLastAssistant(s.messages, text) })),
   setStreaming: (v) => set(s => ({
     isStreaming: v,
     streamStartedAt: v ? Date.now() : s.streamStartedAt,
@@ -882,14 +871,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
     return { help: { ...s.help, messages: msgs } }
   }),
-  appendHelpLastAssistantThinking: (text) => set(s => {
-    const msgs = [...s.help.messages]
-    const last = msgs[msgs.length - 1]
-    if (last?.role === 'assistant') {
-      msgs[msgs.length - 1] = { ...last, thinking: (last.thinking ?? '') + text }
-    }
-    return { help: { ...s.help, messages: msgs } }
-  }),
+  appendHelpLastAssistantThinking: (text) => set(s => ({ help: { ...s.help, messages: appendThinkingToLastAssistant(s.help.messages, text) } })),
   clearHelpActivity: () => set(s => ({
     help: { ...s.help, activity: [] }
   })),
