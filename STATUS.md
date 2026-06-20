@@ -89,7 +89,8 @@
 | 🔴 нужна живая проверка | **Pipeline v1.1** — Agency-режим (через WorkflowsPanel + баннер) | hero для агентств | M |
 | 🟠 Electron-coupled | **Proof Pack → PDF + Telegram** — printToPDF (нужен Electron) + отправка | B2B / agency sales | M |
 | 🟠 большая инфра | **Remote Pulse** — TG-бот: статус run, approve write, доставка Proof Pack | контроль с телефона | L |
-| — | Heatmap файлов в FilesView · DoD Commit Guard · mandatory DoD setting · deep-interview (Gajae) | разное | S–L |
+| ✅ | ~~DoD Commit Guard + mandatory DoD setting~~ — СДЕЛАНО и покрыто (dev-task `devtask:commit`, `dod_mode` warn/block/off + override + audit; F2-тесты) | надёжность | — |
+| — | Heatmap файлов в FilesView · deep-interview (Gajae) | разное (UI → живая проверка) | S–L |
 
 ---
 
