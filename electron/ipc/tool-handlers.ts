@@ -58,6 +58,8 @@ const DEFAULT_BATCH_COST_CAP_CENTS = 300
 
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
 import { emitActivity, awaitCommandConfirm, summarizeToolCall } from './tool-handlers/shared'
+import { runCommandHandler } from './tool-handlers/command'
+import { browserHandler } from './tool-handlers/browser'
 import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
 import { readJournalHandler } from './tool-handlers/journal'
@@ -77,149 +79,7 @@ import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './
 
 
 
-// ============================================================================
-// Command: run_command
-// ============================================================================
 
-const runCommandHandler: ToolHandler = {
-  mode: 'sequential',
-  async handle(call, ctx) {
-    const command = String(call.args.command ?? '')
-    const verdict = ctx.tools.classifyCommand(command)
-    if (!verdict.allowed) {
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason: verdict.reason ?? 'denylist' }
-      })
-      return {
-        id: call.id, name: call.name,
-        result: `Command: ${command}`,
-        error: `Blocked by safety policy: ${verdict.reason ?? 'denylist'}`
-      }
-    }
-    // Mode policy: plan blocks, ask confirms, auto/bypass auto-accept,
-    // accept-edits still confirms commands (only edits auto-pass).
-    const decision = decide('run_command', ctx.agentMode)
-    if (decision === 'block') {
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason: blockReason('run_command', ctx.agentMode) }
-      })
-      return { id: call.id, name: call.name, result: '', error: blockReason('run_command', ctx.agentMode) }
-    }
-    let accepted: boolean
-    if (decision === 'auto-accept') {
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'tool-activity', callId: call.id, name: 'run_command', label: 'run_command (авто)', detail: command, status: 'ok' }
-      })
-      accepted = true
-    } else {
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command } })
-      accepted = await awaitCommandConfirm(ctx, call.id)
-    }
-    if (!accepted) {
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command, status: 'rejected' } })
-      return { id: call.id, name: call.name, result: `Command: ${command}`, error: 'User rejected' }
-    }
-    try {
-      const result = await ctx.tools.runCommand(command)
-      // Редактируем оба потока через secret-scanner ДО отправки в UI и
-      // возврата модели — иначе ключи/токены из stdout/stderr утекают в
-      // контекст и в Timeline.
-      const stdout = scanText(result.stdout).redacted
-      const stderr = scanText(result.stderr).redacted
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'command-result', callId: call.id, command, status: 'ok', exitCode: result.exitCode, stdout, stderr }
-      })
-      // Timeline задачи (Фаза 4): run_command не идёт через emitActivity, поэтому
-      // пишем событие здесь, рядом с command-result. exitCode≠0 → status='error'.
-      try { ctx.recordRunEvent?.('tool_call', { label: 'run_command', detail: command, status: result.exitCode === 0 ? 'ok' : 'error' }) } catch { /* best-effort */ }
-      return { id: call.id, name: call.name, result: { stdout, stderr, exitCode: result.exitCode } }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'command-result', callId: call.id, command, status: 'error', error: msg }
-      })
-      try { ctx.recordRunEvent?.('tool_call', { label: 'run_command', detail: msg, status: 'error' }) } catch { /* best-effort */ }
-      return { id: call.id, name: call.name, result: '', error: msg }
-    }
-  }
-}
-
-// ============================================================================
-// Browser: navigate / read_page / screenshot
-// ============================================================================
-
-async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
-  try {
-    // Args are JSON-stringified once and embedded via JSON.stringify(JSON.stringify(...))
-    // so the runtime JSON.parse is the only thing that touches LLM-supplied data.
-    const argsLiteral = JSON.stringify(JSON.stringify(call.args ?? {}))
-    let action: string
-    if (call.name === 'browser_navigate') {
-      action = `return await api.navigate(String(a.url ?? ''));`
-    } else if (call.name === 'browser_read_page') {
-      action = `const text = await api.readPage(a.selector ? String(a.selector) : undefined);
-                return { url: api.getURL(), title: api.getTitle(), text };`
-    } else {
-      action = `const dataUrl = await api.screenshot();
-                return { url: api.getURL(), dataUrl };`
-    }
-    const snippet = `(async () => {
-      const api = window.verstakBrowser;
-      if (!api) return { __err: 'Вкладка Browser не открыта — попроси пользователя открыть её' };
-      const a = JSON.parse(${argsLiteral});
-      ${action}
-    })()`
-    const result = await ctx.sender.exec(snippet)
-    if (result && typeof result === 'object' && '__err' in result) {
-      return { id: call.id, name: call.name, result: '', error: String((result as { __err: unknown }).__err) }
-    }
-    return { id: call.id, name: call.name, result: result ?? '' }
-  } catch (err) {
-    return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-const browserHandler: ToolHandler = {
-  mode: 'sequential',
-  async handle(call, ctx) {
-    const result = await dispatchBrowser(call, ctx)
-    // Journal what AI looked at on the web
-    try {
-      if (!result.error) {
-        const url = String(call.args.url ?? '')
-        const label = call.name === 'browser_navigate' ? `Браузер → ${url}`
-                    : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
-                    : `Браузер: скриншот`
-        ctx.recordJournal(ctx.projectPath, 'tool', label, null)
-      }
-    } catch { /* journal not critical */ }
-    // Screenshot → queue as attachment for next user message
-    if (call.name === 'browser_screenshot' && !result.error) {
-      const r = result.result as { dataUrl?: string; url?: string } | string
-      const dataUrl = typeof r === 'object' && r ? r.dataUrl : undefined
-      if (dataUrl && dataUrl.startsWith('data:image/')) {
-        const m = /^data:(image\/[\w+-]+);base64,(.+)$/.exec(dataUrl)
-        if (m) {
-          ctx.pendingAttachments.push({
-            name: `screenshot-${Date.now()}.png`,
-            mimeType: m[1],
-            data: m[2],
-            size: Math.floor(m[2].length * 0.75)
-          })
-          result.result = { url: typeof r === 'object' ? r.url : null, attached: true }
-        }
-      }
-    }
-    const s = summarizeToolCall(call.name, call.args, undefined)
-    if (s) emitActivity(ctx, call, result.error ? 'error' : 'ok', s.label, s.detail)
-    return result
-  }
-}
 
 
 // ============================================================================
