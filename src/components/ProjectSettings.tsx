@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
-import type { ProjectMeta } from '../types/api'
+import type { ProjectMeta, RemoteDoctorResult, RemoteDoctorStatus } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
 import { DeleteCountdownButton } from './DeleteCountdownButton'
 import { useT } from '../i18n'
@@ -25,10 +25,15 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [remoteDoctorBusy, setRemoteDoctorBusy] = useState(false)
+  const [remoteDoctor, setRemoteDoctor] = useState<RemoteDoctorResult | null>(null)
+  const [remoteDoctorError, setRemoteDoctorError] = useState<string | null>(null)
 
   useEffect(() => {
     setDisplayName(project.name)
     setLocalProject(project)
+    setRemoteDoctor(null)
+    setRemoteDoctorError(null)
   }, [project])
 
   useEffect(() => {
@@ -136,6 +141,21 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
     }
   }
 
+  async function handleRemoteDoctor() {
+    setRemoteDoctorBusy(true)
+    setRemoteDoctorError(null)
+    try {
+      const result = await window.api.projects.remoteDoctor(project.path)
+      setRemoteDoctor(result)
+    } catch (err) {
+      setRemoteDoctorError(err instanceof Error ? err.message : 'Не удалось выполнить проверку')
+    } finally {
+      setRemoteDoctorBusy(false)
+    }
+  }
+
+  const isSshProject = localProject.kind === 'ssh' || localProject.remote?.kind === 'ssh' || /^ssh:\/\//i.test(project.path)
+
   return createPortal(
     <>
     <div className="gg-modal-backdrop" onClick={onClose}>
@@ -218,6 +238,56 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
               >↗</button>
             </div>
           </section>
+
+          {isSshProject && (
+            <section className="gg-ps-section gg-ps-remote-section">
+              <div className="gg-ps-section-label">
+                Remote Doctor
+                <span className="gg-ps-section-hint">SSH live: Linux/macOS remote host</span>
+              </div>
+              <div className={`gg-ps-remote-summary ${remoteDoctor ? `is-${remoteDoctor.status}` : 'is-idle'}`}>
+                <div>
+                  <div className="gg-ps-remote-summary-title">
+                    {remoteDoctor ? remoteDoctor.summary : 'Сервер ещё не проверен'}
+                  </div>
+                  <div className="gg-ps-remote-summary-detail">
+                    {remoteDoctor
+                      ? `${remoteDoctor.target.user ? `${remoteDoctor.target.user}@` : ''}${remoteDoctor.target.host}${remoteDoctor.target.remoteRoot}`
+                      : 'Проверка доступа, shell, git, node/npm/npx, rg, tsc и прав записи.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="gg-ps-action-btn"
+                  onClick={() => void handleRemoteDoctor()}
+                  disabled={remoteDoctorBusy}
+                >
+                  {remoteDoctorBusy ? 'Проверяю...' : 'Проверить сервер'}
+                </button>
+              </div>
+              {remoteDoctorError && <div className="gg-ps-remote-error" role="alert">{remoteDoctorError}</div>}
+              {remoteDoctor && (
+                <>
+                  <div className="gg-ps-remote-checks">
+                    {remoteDoctor.checks.map(check => (
+                      <div key={check.id} className={`gg-ps-remote-check is-${check.status}`}>
+                        <span className="gg-ps-remote-check-dot">{remoteStatusMark(check.status)}</span>
+                        <span className="gg-ps-remote-check-main">
+                          <span className="gg-ps-remote-check-label">{check.label}</span>
+                          {check.detail && <span className="gg-ps-remote-check-detail">{check.detail}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {remoteDoctor.notes.length > 0 && (
+                    <div className="gg-ps-remote-notes">
+                      {remoteDoctor.notes.map(note => <div key={note}>{note}</div>)}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          )}
 
           <section className="gg-ps-section">
             <div className="gg-ps-section-label">
@@ -319,4 +389,10 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
     </>,
     document.body
   )
+}
+
+function remoteStatusMark(status: RemoteDoctorStatus): string {
+  if (status === 'pass') return '✓'
+  if (status === 'warn') return '!'
+  return '×'
 }

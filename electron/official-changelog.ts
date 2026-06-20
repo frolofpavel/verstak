@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.21',
+    name: 'Verstak 1.5.21',
+    publishedAt: '2026-06-20T12:00:00Z',
+    body: '### Remote Doctor Lite: проверка SSH-проекта до старта работы\n- В настройках SSH-проекта появилась кнопка Remote Doctor: проверяет SSH-доступ, Unix shell, корень проекта, права чтения/записи, git, node, npm/npx, rg, tsc, package.json и tsconfig.json.\n- Результат сразу показывает зелёный, жёлтый или красный статус: можно понять, почему агент может упасть ещё до запуска задачи.\n- Проверка не устанавливает пакеты и не меняет проект: только создаёт временный probe-файл в корне и сразу удаляет его.\n- Для SSH-live явно показано ограничение: поддерживаются Linux/macOS remote hosts, Windows SSH shell пока считается неподдержанным.\n- Агентный context-pack теперь помечает SSH-live проект как удалённый Unix shell и просит прогнать Remote Doctor при ранних ошибках команд.\n- Добавлены регрессионные тесты на зелёный сервер, жёлтые отсутствующие утилиты, недоступный SSH и Windows-like shell.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.21'
+  },
+  {
     version: '1.5.20',
     name: 'Verstak 1.5.20',
     publishedAt: '2026-06-20T12:00:00Z',

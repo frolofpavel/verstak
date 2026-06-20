@@ -1077,6 +1077,10 @@ html {
   transition: border-color 0.15s;
 }
 .gg-ps-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+.gg-ps-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .gg-ps-action-btn.gg-ps-pick-icon-btn {
   font-weight: 600;
   line-height: 1.35;
@@ -1103,6 +1107,118 @@ html {
 .gg-ps-action-btn.gg-ps-pick-icon-btn:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+.gg-ps-remote-section {
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+}
+.gg-ps-remote-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+}
+.gg-ps-remote-summary.is-pass {
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+}
+.gg-ps-remote-summary.is-warn {
+  border-color: color-mix(in srgb, #d89b2b 46%, var(--border));
+}
+.gg-ps-remote-summary.is-fail {
+  border-color: color-mix(in srgb, var(--error) 42%, var(--border));
+}
+.gg-ps-remote-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.gg-ps-remote-summary-detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.gg-ps-remote-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.gg-ps-remote-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-base) 28%, transparent);
+}
+.gg-ps-remote-check.is-pass {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+}
+.gg-ps-remote-check.is-warn {
+  border-color: color-mix(in srgb, #d89b2b 34%, var(--border));
+}
+.gg-ps-remote-check.is-fail {
+  border-color: color-mix(in srgb, var(--error) 36%, var(--border));
+}
+.gg-ps-remote-check-dot {
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+.gg-ps-remote-check.is-pass .gg-ps-remote-check-dot {
+  color: var(--success);
+}
+.gg-ps-remote-check.is-warn .gg-ps-remote-check-dot {
+  color: #d89b2b;
+}
+.gg-ps-remote-check.is-fail .gg-ps-remote-check-dot {
+  color: var(--error);
+}
+.gg-ps-remote-check-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gg-ps-remote-check-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.gg-ps-remote-check-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.gg-ps-remote-notes,
+.gg-ps-remote-error {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.gg-ps-remote-error {
+  color: var(--error);
 }
 .gg-ps-danger-zone {
   border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);

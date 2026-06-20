@@ -137,6 +137,10 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
     parts.push(`⚠ cross_project_paths: пользователь упомянул пути вне активного проекта (${projectPath}): ${crossProject.join('; ')}. Активный проект — другой. Сначала сообщи пользователю и предложи переключить проект в сайдбаре, либо переформулировать задачу.`)
   }
 
+  if (/^ssh:\/\//i.test(projectPath)) {
+    parts.push('remote_project: ssh-live. File tools and commands run on the remote project through a Unix shell. Linux/macOS remote hosts are supported; Windows SSH shell is not supported yet. If commands fail before work starts, ask the user to run Remote Doctor in project settings.')
+  }
+
   // 1. Git status (branch + dirty file list). Skipped silently if not a git repo.
   const git = await readGitStatus(projectPath)
   if (git) parts.push(`git: ${git}`)

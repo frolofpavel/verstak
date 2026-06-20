@@ -1,6 +1,6 @@
 {
   "name": "verstak",
-  "version": "1.5.20",
+  "version": "1.5.21",
   "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
   "main": "out/main/main.mjs",
   "scripts": {

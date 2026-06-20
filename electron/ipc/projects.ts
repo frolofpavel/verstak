@@ -4,6 +4,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
 import { parseRemoteSource, isRemoteSource, remoteProjectPath } from '../projects/remote-source'
+import { runRemoteDoctor } from '../projects/remote-doctor'
 import { setActiveProjectPath } from '../state/project-state'
 import { ensureUserLayer } from '../ai/user-layer'
 import { warmProjectMaps } from '../ai/project-map'
@@ -96,6 +97,8 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
     setActiveProjectPath(path)
     return { ok: true, path, meta }
   })
+
+  ipcMain.handle('projects:remote-doctor', (_e, projectPath: string) => runRemoteDoctor(projectPath))
 
   ipcMain.handle('projects:set-current', (_e, path: string | null) => {
     setActiveProjectPath(path)

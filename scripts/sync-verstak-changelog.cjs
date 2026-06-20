@@ -13,6 +13,20 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    version: '1.5.21',
+    build: '20.06.2026',
+    deployed: '20.06.2026',
+    title: 'Remote Doctor Lite: проверка SSH-проекта до старта работы',
+    changes: [
+      'В настройках SSH-проекта появилась кнопка Remote Doctor: проверяет SSH-доступ, Unix shell, корень проекта, права чтения/записи, git, node, npm/npx, rg, tsc, package.json и tsconfig.json.',
+      'Результат сразу показывает зелёный, жёлтый или красный статус: можно понять, почему агент может упасть ещё до запуска задачи.',
+      'Проверка не устанавливает пакеты и не меняет проект: только создаёт временный probe-файл в корне и сразу удаляет его.',
+      'Для SSH-live явно показано ограничение: поддерживаются Linux/macOS remote hosts, Windows SSH shell пока считается неподдержанным.',
+      'Агентный context-pack теперь помечает SSH-live проект как удалённый Unix shell и просит прогнать Remote Doctor при ранних ошибках команд.',
+      'Добавлены регрессионные тесты на зелёный сервер, жёлтые отсутствующие утилиты, недоступный SSH и Windows-like shell.',
+    ],
+  },
+  {
     version: '1.5.20',
     build: '20.06.2026',
     deployed: '20.06.2026',

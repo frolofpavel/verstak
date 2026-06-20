@@ -62,6 +62,23 @@ export interface ProjectMeta {
   remote: RemoteSource | null
 }
 
+export type RemoteDoctorStatus = 'pass' | 'warn' | 'fail'
+export interface RemoteDoctorCheck {
+  id: string
+  label: string
+  status: RemoteDoctorStatus
+  detail?: string
+}
+export interface RemoteDoctorResult {
+  ok: boolean
+  status: RemoteDoctorStatus
+  target: { user: string | null; host: string; remoteRoot: string }
+  checkedAt: number
+  summary: string
+  checks: RemoteDoctorCheck[]
+  notes: string[]
+}
+
 export interface ProjectGroup {
   id: number
   name: string
@@ -138,6 +155,7 @@ declare global {
         addRemote: (input: string) => Promise<
           { ok: true; path: string; meta: ProjectMeta } | { ok: false; error: string }
         >
+        remoteDoctor: (path: string) => Promise<RemoteDoctorResult>
         create: (input: { name: string; folderSlug: string; iconSourcePath?: string | null }) => Promise<
           { ok: true; path: string; meta: ProjectMeta } | { ok: false; error: string }
         >
