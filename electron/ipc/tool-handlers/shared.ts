@@ -182,3 +182,49 @@ export function awaitCommandConfirm(ctx: ToolContext, callId: string): Promise<b
     ctx.signal.addEventListener('abort', onAbort, { once: true })
   })
 }
+
+
+export function summarizeToolCall(name: string, args: Record<string, unknown>, result: unknown): { label: string; detail: string } | null {
+  if (name === 'read_file') {
+    const p = String(args.path ?? '')
+    const len = typeof result === 'string' ? result.length : 0
+    return { label: 'read_file', detail: `${p} · ${len} символов` }
+  }
+  if (name === 'list_directory') {
+    const p = String(args.path ?? '.')
+    const count = Array.isArray(result) ? result.length : 0
+    return { label: 'list_directory', detail: `${p} · ${count} элементов` }
+  }
+  if (name === 'search_project') {
+    const q = String(args.query ?? '')
+    const r = result as { matches?: unknown[] } | undefined
+    const hits = Array.isArray(r?.matches) ? r!.matches!.length : 0
+    return { label: 'search_project', detail: `"${q}" · ${hits} совпадений` }
+  }
+  if (name === 'find_files') {
+    const pattern = String(args.pattern ?? '')
+    const r = result as { files?: unknown[] } | undefined
+    const hits = Array.isArray(r?.files) ? r!.files!.length : 0
+    return { label: 'find_files', detail: `${pattern} · ${hits} файлов` }
+  }
+  if (name === 'list_connectors') {
+    const arr = typeof result === 'string' ? JSON.parse(result) as Array<{ label?: string }> : []
+    return { label: 'list_connectors', detail: `${arr.length} коннекторов` }
+  }
+  if (name === 'connector_query') {
+    return { label: 'connector_query', detail: `${String(args.id ?? '?')}${args.entity ? ` · ${args.entity}` : ''}` }
+  }
+  if (name === 'browser_navigate') {
+    return { label: 'browser_navigate', detail: String(args.url ?? '') }
+  }
+  if (name === 'browser_read_page') {
+    return { label: 'browser_read_page', detail: args.selector ? String(args.selector) : '(вся страница)' }
+  }
+  if (name === 'browser_screenshot') {
+    return { label: 'browser_screenshot', detail: '' }
+  }
+  if (name === 'get_project_map' || name === 'refresh_project_map') {
+    return { label: name, detail: '' }
+  }
+  return null
+}

@@ -57,7 +57,9 @@ const SUB_TASK_TIMEOUT_MS = 180_000
 const DEFAULT_BATCH_COST_CAP_CENTS = 300
 
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
-import { emitActivity, awaitCommandConfirm } from './tool-handlers/shared'
+import { emitActivity, awaitCommandConfirm, summarizeToolCall } from './tool-handlers/shared'
+import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
+import { readJournalHandler } from './tool-handlers/journal'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -72,50 +74,6 @@ import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler }
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
 
-export function summarizeToolCall(name: string, args: Record<string, unknown>, result: unknown): { label: string; detail: string } | null {
-  if (name === 'read_file') {
-    const p = String(args.path ?? '')
-    const len = typeof result === 'string' ? result.length : 0
-    return { label: 'read_file', detail: `${p} · ${len} символов` }
-  }
-  if (name === 'list_directory') {
-    const p = String(args.path ?? '.')
-    const count = Array.isArray(result) ? result.length : 0
-    return { label: 'list_directory', detail: `${p} · ${count} элементов` }
-  }
-  if (name === 'search_project') {
-    const q = String(args.query ?? '')
-    const r = result as { matches?: unknown[] } | undefined
-    const hits = Array.isArray(r?.matches) ? r!.matches!.length : 0
-    return { label: 'search_project', detail: `"${q}" · ${hits} совпадений` }
-  }
-  if (name === 'find_files') {
-    const pattern = String(args.pattern ?? '')
-    const r = result as { files?: unknown[] } | undefined
-    const hits = Array.isArray(r?.files) ? r!.files!.length : 0
-    return { label: 'find_files', detail: `${pattern} · ${hits} файлов` }
-  }
-  if (name === 'list_connectors') {
-    const arr = typeof result === 'string' ? JSON.parse(result) as Array<{ label?: string }> : []
-    return { label: 'list_connectors', detail: `${arr.length} коннекторов` }
-  }
-  if (name === 'connector_query') {
-    return { label: 'connector_query', detail: `${String(args.id ?? '?')}${args.entity ? ` · ${args.entity}` : ''}` }
-  }
-  if (name === 'browser_navigate') {
-    return { label: 'browser_navigate', detail: String(args.url ?? '') }
-  }
-  if (name === 'browser_read_page') {
-    return { label: 'browser_read_page', detail: args.selector ? String(args.selector) : '(вся страница)' }
-  }
-  if (name === 'browser_screenshot') {
-    return { label: 'browser_screenshot', detail: '' }
-  }
-  if (name === 'get_project_map' || name === 'refresh_project_map') {
-    return { label: name, detail: '' }
-  }
-  return null
-}
 
 // ============================================================================
 // Default handler for read-only / pure-info tools
@@ -437,149 +395,9 @@ const browserHandler: ToolHandler = {
   }
 }
 
-// ============================================================================
-// Connectors: list_connectors, connector_query
-// ============================================================================
-
-const listConnectorsHandler: ToolHandler = {
-  mode: 'sequential',
-  async handle(call, ctx) {
-    const list = ctx.connectors.list()
-    const result = JSON.stringify(list)
-    const s = summarizeToolCall(call.name, call.args, result)
-    if (s) emitActivity(ctx, call, 'ok', s.label, s.detail)
-    return { id: call.id, name: call.name, result }
-  }
-}
-
-const connectorQueryHandler: ToolHandler = {
-  mode: 'sequential',
-  async handle(call, ctx) {
-    try {
-      const cid = String(call.args.id ?? '')
-      if (!cid) {
-        return { id: call.id, name: call.name, result: '', error: 'connector_query: id обязателен' }
-      }
-      // Mode policy: коннекторы трогают внешние системы (SSH, HTTP POST, Telegram,
-      // публикация), поэтому гейтятся как команда — plan блокирует, ask подтверждает,
-      // auto/bypass авто-принимают. Описание запроса показываем пользователю в модалке.
-      const entity = call.args.entity ? ` · ${call.args.entity}` : ''
-      const path = call.args.path ? ` · ${call.args.path}` : ''
-      const summary = `Коннектор ${cid}${entity}${path}`
-      const decision = decide('connector_query', ctx.agentMode)
-      if (decision === 'block') {
-        const reason = blockReason('connector_query', ctx.agentMode)
-        ctx.sender.send('ai:event', {
-          id: ctx.sendId,
-          event: { type: 'tool-blocked', callId: call.id, name: 'connector_query', command: summary, reason }
-        })
-        return { id: call.id, name: call.name, result: '', error: reason }
-      }
-      let accepted: boolean
-      if (decision === 'auto-accept') {
-        accepted = true
-      } else {
-        // 'confirm' — переиспользуем pending-command поток (та же модалка подтверждения)
-        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary } })
-        accepted = await awaitCommandConfirm(ctx, call.id)
-      }
-      if (!accepted) {
-        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })
-        return { id: call.id, name: call.name, result: summary, error: 'User rejected' }
-      }
-      const { id: _omit, ...rest } = call.args as Record<string, unknown> & { id?: unknown }
-      void _omit
-      // Я.Диск upload читает локальный файл по local_path. Без guard'а агент мог
-      // выгрузить ЛЮБОЙ файл системы (включая .env/.ssh/creds) в облако клиента.
-      // Загоняем local_path в границы проекта (тем же safeRealJoin, что и tools),
-      // отсекаем выход за корень и секретные файлы. Артефакты в
-      // {project}/.verstak/artifacts проходят автоматически — они внутри корня.
-      if (cid === 'yandex_disk' && rest.local_path != null) {
-        if (!ctx.projectPath) {
-          return { id: call.id, name: call.name, result: '', error: 'Я.Диск upload запрещён без открытого проекта' }
-        }
-        const lp = String(rest.local_path)
-        const relCheck = relative(ctx.projectPath, resolve(ctx.projectPath, lp))
-        if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
-          return { id: call.id, name: call.name, result: '', error: 'Я.Диск upload: путь вне проекта запрещён' }
-        }
-        const safe = await safeRealJoin(ctx.projectPath, lp)  // бросит при symlink-escape
-        if (isForbiddenPath(relative(ctx.projectPath, safe))) {
-          return { id: call.id, name: call.name, result: '', error: 'Я.Диск upload: секретные файлы (.env/.key/creds) запрещены' }
-        }
-        rest.local_path = safe
-      }
-      // Аудит B4: у коннекторов нет собственного таймаута — зависший хост
-      // (медленный 1С / упавший OAuth-endpoint) повесил бы весь agent-loop до
-      // ручного Stop. Комбинируем ctx.signal (ручной Stop / отмена роя) с
-      // 30-секундным таймаутом запроса. Чинит все 31 коннектора разом.
-      const connAc = new AbortController()
-      const onParentAbort = () => connAc.abort()
-      const connTimeout = setTimeout(() => connAc.abort(), 30_000)
-      ctx.signal.addEventListener('abort', onParentAbort, { once: true })
-      if (ctx.signal.aborted) connAc.abort()
-      let result: unknown
-      try {
-        result = await ctx.connectors.query(cid, rest, connAc.signal)
-      } catch (e) {
-        if (connAc.signal.aborted && !ctx.signal.aborted) {
-          return { id: call.id, name: call.name, result: '', error: `Коннектор ${cid}: таймаут запроса (30с) — хост не ответил` }
-        }
-        throw e
-      } finally {
-        clearTimeout(connTimeout)
-        ctx.signal.removeEventListener('abort', onParentAbort)
-      }
-      const s = summarizeToolCall(call.name, call.args, undefined)
-      if (s) emitActivity(ctx, call, 'ok', s.label, s.detail)
-      // Journal connector queries
-      try {
-        const entity = call.args.entity ? ` · ${call.args.entity}` : ''
-        const path = call.args.path ? ` · ${call.args.path}` : ''
-        ctx.recordJournal(ctx.projectPath, 'tool', `Коннектор ${cid}${entity}${path}`, null)
-      } catch { /* journal not critical */ }
-      // Аудит M2: тело коннектора и его ошибки могут содержать эхо токена
-      // (многие API отражают auth-параметр). scanText — последний рубеж перед
-      // тем, как результат уйдёт в контекст модели и transcript.
-      const rawResult = typeof result === 'string' ? result : JSON.stringify(result)
-      return { id: call.id, name: call.name, result: scanText(rawResult).redacted }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      const safeMsg = scanText(msg).redacted
-      emitActivity(ctx, call, 'error', call.name, safeMsg)
-      try { ctx.recordJournal(ctx.projectPath, 'tool', `Коннектор упал: ${String(call.args.id ?? '?')}`, safeMsg) } catch { /* journal not critical */ }
-      return { id: call.id, name: call.name, result: '', error: safeMsg }
-    }
-  }
-}
 
 // ============================================================================
 // Plans: create_plan
-// ============================================================================
-
-const readJournalHandler: ToolHandler = {
-  mode: 'parallel-read',
-  async handle(call, ctx) {
-    const requestedLimit = typeof call.args.limit === 'number' ? Math.max(1, Math.min(100, Math.floor(call.args.limit))) : 30
-    const kindFilter = typeof call.args.kind === 'string' ? call.args.kind : null
-    try {
-      const all = ctx.readJournal(ctx.projectPath, requestedLimit * 3)
-      const filtered = kindFilter ? all.filter(e => e.kind === kindFilter) : all
-      const result = filtered.slice(0, requestedLimit).map(e => ({
-        kind: e.kind,
-        title: e.title,
-        detail: e.detail ? e.detail.slice(0, 500) : null,  // cap so journal doesn't blow context
-        when: new Date(e.createdAt).toISOString()
-      }))
-      emitActivity(ctx, call, 'ok', 'read_journal', `${result.length} записей${kindFilter ? ` · kind=${kindFilter}` : ''}`)
-      return { id: call.id, name: call.name, result: JSON.stringify(result) }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      emitActivity(ctx, call, 'error', call.name, msg)
-      return { id: call.id, name: call.name, result: '', error: msg }
-    }
-  }
-}
 
 // ============================================================================
 // Sub-provider create-options — добор секретов под 18 провайдеров (Фаза 1)
