@@ -229,6 +229,23 @@ export interface AgentRuns {
    * без снапшота прогон не предлагается. autoResumable — гард деструктива.
    */
   findResumable: (projectPath: string, reconciledAt: number, getUserRequest: (runId: string) => string | null) => ResumableRun[]
+  /**
+   * Crash-resume Фаза 2: сохранить снапшот истории сообщений loop'а на текущем
+   * turn. UPSERT по run_id — один чекпойнт на прогон (последний turn перетирает
+   * предыдущий). Best-effort: вызывается на каждом turn рядом с tick().
+   */
+  saveCheckpoint: (runId: string, turnIndex: number, messagesJson: string, undoHead?: number | null) => void
+  /** Последний чекпойнт прогона (для возобновления с полным контекстом) или null. */
+  latestCheckpoint: (runId: string) => RunCheckpoint | null
+  /** Удалить чекпойнт прогона (на чистом завершении возобновлять нечего). */
+  clearCheckpoint: (runId: string) => void
+}
+
+/** Снапшот состояния агентного цикла для возобновления (Crash-resume Фаза 2). */
+export interface RunCheckpoint {
+  turnIndex: number
+  messagesJson: string
+  undoHead: number | null
 }
 
 const SELECT_RUN = `
@@ -381,6 +398,27 @@ export function createAgentRuns(db: Database): AgentRuns {
         })
       }
       return out
+    },
+    saveCheckpoint(runId, turnIndex, messagesJson, undoHead) {
+      db.prepare(
+        `INSERT INTO agent_run_checkpoints (run_id, turn_index, messages_json, undo_head, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           turn_index = excluded.turn_index,
+           messages_json = excluded.messages_json,
+           undo_head = excluded.undo_head,
+           created_at = excluded.created_at`
+      ).run(runId, turnIndex, messagesJson, undoHead ?? null, Date.now())
+    },
+    latestCheckpoint(runId) {
+      const row = db.prepare(
+        `SELECT turn_index as turnIndex, messages_json as messagesJson, undo_head as undoHead
+         FROM agent_run_checkpoints WHERE run_id = ?`
+      ).get(runId) as RunCheckpoint | undefined
+      return row ?? null
+    },
+    clearCheckpoint(runId) {
+      db.prepare('DELETE FROM agent_run_checkpoints WHERE run_id = ?').run(runId)
     }
   }
 }

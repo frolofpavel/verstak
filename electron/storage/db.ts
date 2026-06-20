@@ -689,6 +689,25 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         );
       `)
     }
+  },
+  {
+    version: 26,
+    description: 'Crash-resume Фаза 2: agent_run_checkpoints — снапшот истории сообщений loop\'а для возобновления с полным контекстом',
+    run: (db: DB) => {
+      // Один чекпойнт на прогон (run_id PRIMARY KEY) — UPSERT затирает прошлый
+      // turn. Хранит сериализованный currentMessages, чтобы прерванная крахом
+      // сессия возобновилась с накопленным контекстом, а не с turn 0. Пишется на
+      // каждом turn, чистится на чистом завершении — остаётся только у прерванных.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
+          run_id TEXT PRIMARY KEY,
+          turn_index INTEGER NOT NULL,
+          messages_json TEXT NOT NULL,
+          undo_head INTEGER,
+          created_at INTEGER NOT NULL
+        );
+      `)
+    }
   }
 ]
 
