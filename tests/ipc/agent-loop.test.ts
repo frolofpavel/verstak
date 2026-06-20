@@ -59,7 +59,7 @@ function args(dir: string, o: Overrides): unknown[] {
 }
 
 function mockRuns() {
-  return { finish: vi.fn(), appendEvent: vi.fn() }
+  return { finish: vi.fn(), appendEvent: vi.fn(), tick: vi.fn(), saveCheckpoint: vi.fn(), clearCheckpoint: vi.fn() }
 }
 
 describe('agent-loop (runApiConversation) — харнес', () => {
@@ -73,6 +73,25 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
     expect(runs.finish).toHaveBeenCalledTimes(1)
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  })
+
+  // Crash-resume Фаза 2: turn с tool-call снапшотит историю (saveCheckpoint),
+  // чистое завершение — чистит (clearCheckpoint). Прерванная сессия возобновится
+  // с накопленным контекстом, доведённая — нет.
+  it('checkpoint: tool-turn сохраняет снапшот истории, completed чистит', async () => {
+    const runs = mockRuns()
+    const p = provider('p1', (turn) => turn === 1
+      ? [{ type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'foo.txt' } } }, { type: 'done' }]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+    // turn с tool-call → снапшот сохранён с сериализованной историей (turnIndex=1)
+    expect(runs.saveCheckpoint).toHaveBeenCalled()
+    const [rid, turnIdx, msgsJson] = runs.saveCheckpoint.mock.calls[0]
+    expect(rid).toBe('r1')
+    expect(turnIdx).toBe(1)
+    expect(Array.isArray(JSON.parse(msgsJson))).toBe(true)   // валидный JSON истории
+    // completed → снапшот вычищен
+    expect(runs.clearCheckpoint).toHaveBeenCalledWith('r1')
   })
 
   // #15 + #7: упавший провайдер → fallback успешен. run финализируется как 'done'

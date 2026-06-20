@@ -1531,6 +1531,13 @@ export async function runApiConversation(
           agentsCount: agentCounter.count
         })
       } catch { /* best-effort — tick живого прогресса не критичен */ }
+      // Crash-resume Фаза 2: снапшот полной истории loop'а (currentMessages уже
+      // содержит результаты этого turn'а + следующий user-msg). На возобновлении
+      // прерванной сессии грузим его и продолжаем с накопленным контекстом, а не
+      // с turn 0. UPSERT — одна строка на прогон. Best-effort.
+      try {
+        agentRuns.saveCheckpoint(runId, turn + 1, JSON.stringify(currentMessages))
+      } catch { /* снапшот не критичен — resume просто не предложит контекст */ }
     }
 
     // Авто-компакшн: после каждого turn'а проверяем не исчерпали ли 95%
@@ -1673,6 +1680,12 @@ export async function runApiConversation(
           agentsCount: agentCounter.count,
           error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
         })
+        // Crash-resume Фаза 2: на чистом завершении снапшот не нужен — чистим,
+        // чтобы resume не предлагал возобновить доведённую сессию. Прерванные
+        // (crashed/error/aborted/max-turns/loop) сохраняют чекпойнт для resume.
+        if (exitReason === 'completed') {
+          agentRuns.clearCheckpoint(runId)
+        }
       } catch (err) {
         console.warn('[agent-runs] finish (api) failed:', err instanceof Error ? err.message : err)
       }
