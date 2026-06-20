@@ -213,6 +213,8 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     // unrelated chat 20 send must survive.
     useProject.getState().registerSendOwner(3, { kind: 'chat', chatId: 20 })
     useProject.setState({
+      path: 'C:/proj',
+      messages: [{ role: 'user', content: 'жив' }],
       reviews: {
         55: { reviewChatId: 55, parentChatId: 10, providerId: 'grok', model: null, content: '', status: 'streaming', createdAt: 1, noteCount: -1, findings: [], accepted: [] }
       }
@@ -228,6 +230,10 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     expect(st.lookupSendOwner(2)).toBeNull()
     // unrelated chat 20 owner survives
     expect(st.lookupSendOwner(3)).toEqual({ kind: 'chat', chatId: 20 })
+    // §5 распил, страж partial-merge: cleanupReviewsFor (review-slice) пишет
+    // sendOwners (поле MainSlice) одним set — main-поля НЕ должны обнулиться.
+    expect(st.path).toBe('C:/proj')
+    expect(st.messages).toEqual([{ role: 'user', content: 'жив' }])
   })
 })
 
