@@ -565,6 +565,10 @@ export function registerAiIpc(deps: AiDeps): void {
         if (modelsRaw) {
           customModels = modelsRaw.split(',').map(s => s.trim()).filter(Boolean)
         }
+      } else if (providerId === 'verstak-gateway') {
+        // Override РФ-релея без релиза (kill-switch): задан verstak_gateway_baseurl —
+        // используем его вместо дефолтного релея. Пусто → дефолт из spec.
+        customBaseUrl = deps.getSecret('verstak_gateway_baseurl') ?? undefined
       }
       // YandexGPT и GigaChat имеют по второму секрету: yandex_folder_id и
       // gigachat_client_secret. Они хранятся отдельно в SafeStorage и

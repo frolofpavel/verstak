@@ -36,6 +36,10 @@ export interface ExtraProviderSpec {
   defaultModel: string
   /** baseUrl для OpenAI SDK. Для Custom — из settings.custom_openai_baseurl. */
   baseUrl: string | null
+  /** Запасной baseUrl: при сетевой недоступности основного хоста (релей лёг)
+   *  повторяем запрос сюда тем же ключом. Для verstak-gateway — прямой Амстердам
+   *  в обход РФ-релея (страховка от падения релей-бокса). */
+  fallbackBaseUrl?: string
 }
 
 export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
@@ -63,7 +67,12 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     // на ~19-60с). Релей на РФ-сервере (Москва) терминирует юзера коротким
     // стабильным хопом и форвардит S2S в Амстердам (проверено: 100КБ за <1.5с,
     // стабильно). Бридж на sslip.io; постоянный поддомен api-ru.agi-iri.ru — позже.
-    baseUrl: 'https://194-87-187-234.sslip.io/v1'
+    baseUrl: 'https://194-87-187-234.sslip.io/v1',
+    // Страховка от падения релей-бокса: лёг релей → пробуем прямой Амстердам тем
+    // же ключом (vsk_live_ принимается обоими хостами). Для мелких/средних запросов
+    // спасает; крупное агентное тело по прямому РФ→NL может тоже не дойти — это
+    // inherent-лимит, ради него релей и существует.
+    fallbackBaseUrl: 'https://api.agi-iri.ru/v1'
   },
   {
     id: 'openrouter',
@@ -228,7 +237,8 @@ export function createExtraProvider(
   opts: {
     apiKey: string
     model?: string
-    /** Для custom-openai: переопределённый baseUrl из settings. */
+    /** Переопределённый baseUrl из settings: для custom-openai обязателен,
+     *  для verstak-gateway — опциональный override РФ-релея (kill-switch без релиза). */
     customBaseUrl?: string
     /** Для custom-openai: список моделей из settings (comma-separated парсится в caller'е). */
     customModels?: string[]
@@ -237,7 +247,7 @@ export function createExtraProvider(
   const spec = EXTRA_PROVIDERS.find(p => p.id === id)
   if (!spec) throw new Error(`Unknown extra provider: ${id}`)
 
-  const baseUrl = id === 'custom-openai' ? opts.customBaseUrl : spec.baseUrl
+  const baseUrl = opts.customBaseUrl ?? spec.baseUrl
   if (!baseUrl) {
     throw new Error(`${spec.name}: baseUrl не настроен. Открой Settings → Провайдеры → ${spec.name}.`)
   }
@@ -255,6 +265,7 @@ export function createExtraProvider(
     defaultModel,
     apiKey: opts.apiKey,
     baseUrl,
+    fallbackBaseUrl: spec.fallbackBaseUrl,
     model: opts.model
   })
 }

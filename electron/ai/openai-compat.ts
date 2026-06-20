@@ -10,6 +10,9 @@ export interface OpenAiCompatOptions {
   defaultModel: string
   apiKey: string
   baseUrl?: string
+  /** Запасной хост: при сетевом сбое соединения с baseUrl повторяем запрос сюда
+   *  тем же ключом (страховка от падения РФ-релея). */
+  fallbackBaseUrl?: string
   model?: string
   effortLevel?: 'quick' | 'standard' | 'deep'
 }
@@ -81,6 +84,11 @@ function buildOpenAiMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletio
 export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvider {
   const model = opts.model ?? opts.defaultModel
   const client = new OpenAI({ apiKey: opts.apiKey, baseURL: opts.baseUrl })
+  // Фолбэк-клиент на запасной хост — строим только если он задан и отличается от
+  // основного. Используется лишь при сбое соединения с основным (см. send).
+  const fallbackClient = opts.fallbackBaseUrl && opts.fallbackBaseUrl !== opts.baseUrl
+    ? new OpenAI({ apiKey: opts.apiKey, baseURL: opts.fallbackBaseUrl })
+    : null
   const effortLevel = opts.effortLevel ?? 'standard'
 
   return {
@@ -114,14 +122,34 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
         : { max_tokens: maxTokens }
 
       try {
-        const stream = await client.chat.completions.create({
+        const createParams: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
           model,
           messages: apiMessages,
           stream: true,
           ...tokenParam,
           stream_options: { include_usage: true },
           ...(apiTools ? { tools: apiTools } : {})
-        }, signal ? { signal } : undefined)
+        }
+        const reqOpts = signal ? { signal } : undefined
+        // Авто-фолбэк: если основной хост (релей) недостижим на этапе соединения —
+        // повторяем на запасном (прямой Амстердам) тем же ключом. Триггерим ТОЛЬКО
+        // на сетевой сбой «не достучались» (нет HTTP-статуса) и не на отмену юзером;
+        // HTTP-ошибки апстрима (4xx/5xx) фолбэком не лечатся — апстрим жив.
+        let usedFallback = false
+        const openStream = async () => {
+          try {
+            return await client.chat.completions.create(createParams, reqOpts)
+          } catch (primaryErr) {
+            const pe = primaryErr as { status?: number }
+            if (fallbackClient && !signal?.aborted && typeof pe.status !== 'number') {
+              usedFallback = true
+              return await fallbackClient.chat.completions.create(createParams, reqOpts)
+            }
+            throw primaryErr
+          }
+        }
+        const stream = await openStream()
+        if (usedFallback) yield { type: 'info', text: 'Релей РФ недоступен — прямой канал' }
 
         let usageSent = false
         let verstakSent = false
