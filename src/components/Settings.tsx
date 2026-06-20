@@ -48,7 +48,7 @@ const PROVIDERS: ProviderConfig[] = [
     models: ['verstak/economy', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
     defaultModel: 'verstak/balanced',
     secretKey: 'verstak_gateway_api_key',
-    keyHint: 'sk-iri-...',
+    keyHint: 'vsk_live_...',
     keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
     supportsTools: true
   },

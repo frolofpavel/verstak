@@ -8,7 +8,7 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
     expect(spec).toBeDefined()
     expect(spec!.baseUrl).toBe('https://api.agi-iri.ru/v1')
     expect(spec!.secretKey).toBe('verstak_gateway_api_key')
-    expect(spec!.keyHint).toBe('sk-iri-...')
+    expect(spec!.keyHint).toBe('vsk_live_...')
   })
 
   it('пресеты вместо зоопарка моделей (Эконом/Баланс/Кодинг/…)', () => {
@@ -27,7 +27,7 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
   })
 
   it('createExtraProvider строит провайдер (OpenAI-совместимый, как DeepSeek)', () => {
-    const p = createExtraProvider('verstak-gateway', { apiKey: 'sk-iri-test' })
+    const p = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_test' })
     expect(p.id).toBe('verstak-gateway')
     expect(p.models).toContain('verstak/balanced')
   })

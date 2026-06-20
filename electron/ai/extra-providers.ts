@@ -45,7 +45,7 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     description: 'Единый AI-баланс Verstak: модели, лимиты, расходы и маршрутизация через AGI IRI Gateway. Рубли, без чужих карт и VPN. Один ключ vsk_live_ → понятные пресеты вместо сотни моделей.',
     secretKey: 'verstak_gateway_api_key',
     keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
-    keyHint: 'sk-iri-...',
+    keyHint: 'vsk_live_...',
     // Пресеты вместо зоопарка моделей — в API уходит id (verstak/...), в UI —
     // русские названия (см. GATEWAY_PRESET_LABELS). Gateway маршрутизирует на
     // реальный upstream. Fusion-пресеты — Phase 4 (нужен gateway-pipeline).
