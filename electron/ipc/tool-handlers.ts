@@ -23,30 +23,7 @@
  *                     ONE modal for all writes in a turn.
  */
 
-import { randomUUID } from 'crypto'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-import { existsSync } from 'fs'
-import { join, resolve, relative, isAbsolute } from 'path'
-import type { Attachment, ToolCall, ToolResult } from '../ai/types'
-import { applySearchReplaceBlocks, type FileTools } from '../ai/tools'
-import { decide, blockReason, type AgentMode } from '../ai/mode-policy'
-import { planSpecFeedback } from '../ai/task-spec-check'
-import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../ai/mcp-policy'
-import { getRolePrompt } from '../ai/agent-roles'
-import { invalidateProjectMap, markFileDirty } from '../ai/project-map'
-import { scanText, isForbiddenPath } from '../ai/secret-scanner'
-import { safeRealJoin } from '../ai/path-policy'
-import type { McpClient } from '../mcp/client'
-import type { ProviderId, CreateOptions } from '../ai/registry'
-import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../ai/verification'
-import { createSshBackend, makeSshExec, parseSshProjectPath } from '../projects/ssh-backend'
-
-const execFileAsync = promisify(execFile)
-
-
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
-import { emitActivity, awaitCommandConfirm, summarizeToolCall } from './tool-handlers/shared'
 import { delegateTaskHandler, delegateParallelHandler, orchestrateHandler, swarmHandler } from './tool-handlers/delegation'
 export { dedupeTaskIds, parseDecomposition, decomposeGoal, buildSwarmRoster } from './tool-handlers/delegation'
 import { runCommandHandler } from './tool-handlers/command'
@@ -67,40 +44,6 @@ import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 // Реэкспорт типов для внешних импортов (sub-agent-loop импортит ToolContext отсюда).
 export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler }
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
-
-
-
-
-
-
-// ============================================================================
-// Plans: create_plan
-
-// ============================================================================
-// Sub-provider create-options — добор секретов под 18 провайдеров (Фаза 1)
-
-// ============================================================================
-
-
-
-
-
-// ============================================================================
-// MCP tool handler — роутит вызов к mcpClient
-
-// ============================================================================
-// Office: read_spreadsheet / read_document / edit_spreadsheet — «beyond code»
-// ============================================================================
-
-// Чтение xlsx/docx — pure-info, идёт через generic readHandler (ctx.tools.execute).
-// Здесь только edit_spreadsheet: WRITE-операция, гейтится mode-policy как write_file.
-// Diff текстом не показываем (xlsx бинарный) — подтверждаем через ту же модалку
-// команды (pending-command), показывая список правок ячеек.
-
-
-// ============================================================================
-// Registry — single source of truth for tool dispatch
-// ============================================================================
 
 const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Confirm-write — go through the diff modal
