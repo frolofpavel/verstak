@@ -4,6 +4,7 @@
  * Требует готовый release/win-unpacked (без вложенного app-payload).
  */
 const { spawnSync } = require('child_process')
+const { createHash } = require('crypto')
 const fs = require('fs')
 const path = require('path')
 
@@ -120,6 +121,39 @@ function restorePortableNsisTemplate() {
   }
 }
 
+function hashFileSha512Base64(filePath) {
+  const hash = createHash('sha512')
+  const fd = fs.openSync(filePath, 'r')
+  const buf = Buffer.allocUnsafe(4 * 1024 * 1024)
+  try {
+    let read = 0
+    while ((read = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, read))
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+  return hash.digest('base64')
+}
+
+function writeLatestYml(version, setupPath) {
+  const setupName = path.basename(setupPath)
+  const stat = fs.statSync(setupPath)
+  const sha512 = hashFileSha512Base64(setupPath)
+  const body = [
+    `version: ${version}`,
+    'files:',
+    `  - url: ${setupName}`,
+    `    sha512: ${sha512}`,
+    `    size: ${stat.size}`,
+    `path: ${setupName}`,
+    `sha512: ${sha512}`,
+    `releaseDate: '${new Date().toISOString()}'`,
+    '',
+  ].join('\n')
+  fs.writeFileSync(path.join(ROOT, 'release', 'latest.yml'), body)
+}
+
 if (!fs.existsSync(path.join(UNPACKED, 'Verstak.exe'))) {
   die('Нет release/win-unpacked — сначала соберите приложение (electron-builder --win --x64).')
 }
@@ -178,4 +212,5 @@ const built = path.join(INSTALLER_OUT, setupName)
 const dest = path.join(ROOT, 'release', setupName)
 if (!fs.existsSync(built)) die(`Не найден ${built}`)
 fs.copyFileSync(built, dest)
+writeLatestYml(pkg.version, dest)
 console.log(`[build-setup] OK → release/${setupName}`)

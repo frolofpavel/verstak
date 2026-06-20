@@ -13,6 +13,18 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    version: '1.5.19',
+    build: '20.06.2026',
+    deployed: '20.06.2026',
+    title: 'Proof Pack: строгая связь с агентным прогоном',
+    changes: [
+      'Proof Pack теперь привязан к конкретному runId: нельзя случайно подтянуть чужую проверку из другого запуска.',
+      'Pipeline больше не считает неизвестный результат доказательством готовности: unknown блокирует финал до явной проверки.',
+      'Бриф больше не подставляет самый свежий прогон проекта без связи с текущим чатом — меньше ложных «готово».',
+      'Добавлены тесты на Proof Pack, verification lookup, pipeline gate и pipeline brief; полный быстрый набор тестов проходит.',
+    ],
+  },
+  {
     version: '1.5.18',
     build: '19.06.2026',
     deployed: '19.06.2026',

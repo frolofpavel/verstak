@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.19',
+    name: 'Verstak 1.5.19',
+    publishedAt: '2026-06-20T12:00:00Z',
+    body: '### Proof Pack: строгая связь с агентным прогоном\n- Proof Pack теперь привязан к конкретному runId: нельзя случайно подтянуть чужую проверку из другого запуска.\n- Pipeline больше не считает неизвестный результат доказательством готовности: unknown блокирует финал до явной проверки.\n- Бриф больше не подставляет самый свежий прогон проекта без связи с текущим чатом — меньше ложных «готово».\n- Добавлены тесты на Proof Pack, verification lookup, pipeline gate и pipeline brief; полный быстрый набор тестов проходит.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.19'
+  },
+  {
     version: '1.5.18',
     name: 'Verstak 1.5.18',
     publishedAt: '2026-06-19T12:00:00Z',
