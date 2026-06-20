@@ -24,6 +24,7 @@ import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
+import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
@@ -290,6 +291,11 @@ export function registerAiIpc(deps: AiDeps): void {
     const resumedMessages = overrides?.resumeFromRunId
       ? parseResumeCheckpoint(deps.agentRuns?.latestCheckpoint(overrides.resumeFromRunId)?.messagesJson ?? null)
       : null
+    // Ось интенсивности (Простой/Турбо). Простой = сегодняшнее поведение (standard
+    // effort, без наслоения). Турбо = deep effort + подсказка «вся машинерия на
+    // задачу». Явный overrides.effortLevel (из UI) имеет приоритет над пресетом.
+    const intCfg = intensityConfig(parseIntensity(deps.getSecret('intensity')))
+    const resolvedEffort = overrides?.effortLevel ?? intCfg.effortLevel
     const providerId = overrides?.providerId ?? deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
@@ -401,8 +407,11 @@ export function registerAiIpc(deps: AiDeps): void {
         brainContext: brain?.content ?? null,
         skillPrompt: overrides?.systemPrompt
       })
-      composedSystem = composed.system
-      messagesWithSystem = [{ role: 'system', content: composed.system }, ...messages]
+      // Наслоение интенсивности (<intensity>) поверх собранного промпта — стерёт
+      // поведение под Простой/Турбо. Простой-подсказка нейтральна к сегодняшнему
+      // поведению (один прямой путь), Турбо — поощряет всю машинерию.
+      composedSystem = composed.system + '\n\n' + intCfg.systemHint
+      messagesWithSystem = [{ role: 'system', content: composedSystem }, ...messages]
     } else if (overrides?.systemPrompt) {
       // Не-API (CLI) транспорт со скилл-override. CLI-провайдеры строят свой
       // системный промпт внутри buildCliPrompt и игнорируют system-сообщение в
@@ -442,7 +451,7 @@ export function registerAiIpc(deps: AiDeps): void {
       smartRoutingEnabled &&
       !overrides?.model &&
       !overrides?.providerId &&          // не в Explicit Review
-      (overrides?.effortLevel ?? 'standard') === 'standard' &&
+      resolvedEffort === 'standard' &&
       descriptor.transport === 'API'
     ) {
       const complexity = estimateComplexity(messages, [])
@@ -584,7 +593,7 @@ export function registerAiIpc(deps: AiDeps): void {
         gigachatClientSecret,
         gigachatTlsVerify,
         memories: descriptor.transport === 'CLI' ? memories : undefined,
-        effortLevel: overrides?.effortLevel,
+        effortLevel: resolvedEffort,
         agentMode
       })
     } catch (err) {
