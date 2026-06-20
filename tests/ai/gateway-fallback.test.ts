@@ -33,7 +33,7 @@ async function* okStream(text: string) {
   yield { choices: [{ delta: { content: text } }] }
 }
 
-const RELAY = 'https://194-87-187-234.sslip.io/v1'
+const RELAY = 'https://api-ru.agi-iri.ru/v1'
 const DIRECT = 'https://api.agi-iri.ru/v1'
 
 describe('Verstak Gateway: авто-фолбэк релея + override baseUrl', () => {
@@ -47,7 +47,7 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
 
   it('сетевой сбой релея (нет HTTP-статуса) → фолбэк на прямой + info-плашка + ответ доходит', async () => {
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('sslip.io')) throw {} // нет .status = сбой соединения
+      if (baseURL?.includes('api-ru')) throw {} // нет .status = сбой соединения
       return okStream('привет')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })
@@ -60,7 +60,7 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
   it('HTTP-ошибка апстрима (429) → НЕ фолбэк, человеко-читаемая ошибка', async () => {
     let relayCalls = 0
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('sslip.io')) { relayCalls++; throw { status: 429 } }
+      if (baseURL?.includes('api-ru')) { relayCalls++; throw { status: 429 } }
       throw new Error('фолбэк не должен вызываться при HTTP-ошибке')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })
@@ -72,7 +72,7 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
 
   it('отмена юзером (signal aborted) при сбое → НЕ фолбэк', async () => {
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('sslip.io')) throw {}
+      if (baseURL?.includes('api-ru')) throw {}
       throw new Error('фолбэк не должен вызываться при отмене')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })
