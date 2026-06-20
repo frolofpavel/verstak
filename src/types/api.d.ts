@@ -257,7 +257,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass' },
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>

@@ -274,6 +274,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const flushQueueRef = useRef<() => void>(() => {})
   // Resume задачи (Фаза 4): взводится при gg-resume-send, эффект ниже шлёт send().
   const resumeAutoSendRef = useRef(false)
+  // Crash-resume Фаза 2: runId прерванного прогона для re-send с полным контекстом
+  // (взводится из gg-resume-send с объектом-detail; консьюмится в send()).
+  const resumeFromRunIdRef = useRef<string | null>(null)
   // Pipeline (спек D5): авто-send шага. Держит желаемый режим — авто-send
   // срабатывает только когда agentMode реально применился (без race).
   const pipelineSendModeRef = useRef<'plan' | 'accept-edits' | null>(null)
@@ -902,9 +905,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   // текст в ввод и взводим флаг, эффект ниже автоматически вызывает send().
   useEffect(() => {
     function onResume(e: Event) {
-      const ev = e as CustomEvent<string>
-      if (typeof ev.detail === 'string' && ev.detail.trim()) {
-        setInput(ev.detail)
+      // detail: либо строка (legacy — AgentRunsPanel/PipelineBanner), либо объект
+      // { text, resumeFromRunId } (ResumeBanner Фаза 2 — re-send с полным контекстом).
+      const ev = e as CustomEvent<string | { text: string; resumeFromRunId?: string }>
+      const d = ev.detail
+      const text = typeof d === 'string' ? d : d?.text
+      const resumeRunId = typeof d === 'string' ? null : (d?.resumeFromRunId ?? null)
+      if (typeof text === 'string' && text.trim()) {
+        setInput(text)
+        resumeFromRunIdRef.current = resumeRunId
         resumeAutoSendRef.current = true
       }
     }
@@ -1371,6 +1380,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
       : null
     let sendId: number
+    // Crash-resume Фаза 2: re-send прерванного прогона → прокидываем runId, чтобы
+    // ai:send продолжил с накопленным контекстом из чекпойнта. Консьюмим ref однократно.
+    const resumeFromRunId = resumeFromRunIdRef.current
+    resumeFromRunIdRef.current = null
     if (activeSkill) {
       // Узнаём текущий provider пользователя — чтобы решить override или нет
       const currentProvider = await window.api.settings.getKey('provider')
@@ -1390,7 +1403,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         ...(overrideModel ? { model: overrideModel } : {}),
         // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
         ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
-        effortLevel: useProject.getState().effortLevel
+        effortLevel: useProject.getState().effortLevel,
+        ...(resumeFromRunId ? { resumeFromRunId } : {})
+      })
+    } else if (resumeFromRunId) {
+      // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
+      const effort = useProject.getState().effortLevel
+      sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
+        resumeFromRunId,
+        ...(effort !== 'standard' ? { effortLevel: effort } : {})
       })
     } else {
       const effort = useProject.getState().effortLevel

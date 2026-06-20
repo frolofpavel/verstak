@@ -39,7 +39,10 @@ export function ResumeBanner() {
     setActiveView('chat')
     // Следующий тик — даём чату перерендериться на нужной сессии до автоотправки.
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: run.lastUserRequest }))
+      // Фаза 2: передаём runId — Chat прокинет resumeFromRunId, и ai:send продолжит
+      // с накопленным контекстом из чекпойнта (нет чекпойнта → мягкий фоллбэк на
+      // обычный re-send текста).
+      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: { text: run.lastUserRequest, resumeFromRunId: run.runId } }))
     }, 0)
     dismissResumableRun(run.runId)
   }
