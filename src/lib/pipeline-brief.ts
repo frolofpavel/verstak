@@ -73,7 +73,8 @@ export function buildExecutePrompt(brief: PipelineBrief, planId: number): string
 
 /**
  * runId для Proof Pack: приоритет — привязанный к прогону pipeline; иначе
- * последний прогон того же чата; иначе самый свежий прогон проекта; иначе null.
+ * прогон того же чата; иначе null. На свежайший прогон проекта не падаем:
+ * для Proof это слишком слабая связка.
  * runs — список agent_runs проекта новейшими первыми (agentRuns.list).
  */
 export function resolveProofRunId(
@@ -83,10 +84,10 @@ export function resolveProofRunId(
 ): string | null {
   if (agentRunId) return agentRunId
   const sameChat = runs.find(r => r.chatId === chatId)
-  return sameChat?.runId ?? runs[0]?.runId ?? null
+  return sameChat?.runId ?? null
 }
 
-/** runId для pipeline после Execute: приоритет — уже привязанный, затем sendId, затем fallback. */
+/** runId для pipeline после Execute: приоритет — уже привязанный, затем sendId, затем тот же чат. */
 export function resolvePipelineRunId(
   agentRunId: string | null,
   sendId: number | null,

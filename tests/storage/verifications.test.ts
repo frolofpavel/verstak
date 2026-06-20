@@ -88,6 +88,21 @@ describe('verifications (migration 17)', () => {
     db.close()
   })
 
+  it('latestByRunId возвращает только проверку конкретного прогона', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const v = createVerifications(db)
+    v.insert(baseRow({ runId: 'r1', taskSummary: 'старая r1', createdAt: 1000 }))
+    v.insert(baseRow({ runId: 'r2', taskSummary: 'чужой run того же чата', createdAt: 3000 }))
+    v.insert(baseRow({ runId: 'r1', taskSummary: 'свежая r1', createdAt: 2000 }))
+
+    const latest = v.latestByRunId('/p', 'r1')
+    expect(latest).not.toBeNull()
+    expect(latest!.taskSummary).toBe('свежая r1')
+    expect(v.latestByRunId('/p', 'missing')).toBeNull()
+    expect(v.latestByRunId('/other', 'r1')).toBeNull()
+    db.close()
+  })
+
   it('list: новейшие первыми, в пределах проекта', () => {
     const db = openDb(join(dir, 'test.db'))
     const v = createVerifications(db)

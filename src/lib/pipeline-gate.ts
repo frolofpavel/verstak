@@ -34,10 +34,14 @@ export function decidePipelineGate(
   // pass → проверка решила «готово», идём к proof.
   if (verify === 'pass') return { action: 'proof' }
 
-  // unknown → проверки в проекте нет/не настроена: гейтить нечем, не блокируем
-  // пользователя (сохраняем прежний UX для проектов без тестов). Это осознанный
-  // компромисс — «без verify нет гейта», а не «верим модели».
-  if (verify === 'unknown') return { action: 'proof' }
+  // unknown → нет доказуемой проверки для этого прогона. Для Proof Pack лучше
+  // остановиться честно, чем выпустить красивое, но неподтверждённое «готово».
+  if (verify === 'unknown') {
+    return {
+      action: 'blocked',
+      reason: 'Проверка для этого прогона не найдена. Нужен attest_verification или ручная проверка.',
+    }
+  }
 
   // fail → НЕ идём в proof. Пока есть попытки — назад на execute (само-починка).
   if (attempt < maxAttempts) return { action: 'retry', nextAttempt: attempt + 1 }

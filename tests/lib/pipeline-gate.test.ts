@@ -23,8 +23,10 @@ describe('decidePipelineGate — verify-gate ядра надёжности (v3 �
     expect(decidePipelineGate('fail', 3, 3).action).toBe('blocked')
   })
 
-  it('нет проверки в проекте (unknown) → не гейтим, к proof (прежний UX)', () => {
-    expect(decidePipelineGate('unknown', 1)).toEqual({ action: 'proof' })
+  it('нет проверки для прогона (unknown) → честный стоп, не proof', () => {
+    const d = decidePipelineGate('unknown', 1)
+    expect(d.action).toBe('blocked')
+    if (d.action === 'blocked') expect(d.reason).toMatch(/Проверка/)
   })
 
   it('КЛЮЧЕВОЕ: провал НИКОГДА не ведёт в proof', () => {

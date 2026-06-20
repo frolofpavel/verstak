@@ -7,10 +7,21 @@ import { createProjectBrainStore } from '../../electron/storage/project-brain'
 
 describe('Project Brain storage (Итерация 2 — data layer)', () => {
   let dir: string
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-brain-')) })
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+  let dbs: Array<ReturnType<typeof openDb>>
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'gg-brain-'))
+    dbs = []
+  })
+  afterEach(() => {
+    for (const db of dbs) db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
 
-  function store() { return createProjectBrainStore(openDb(join(dir, 't.db'))) }
+  function store() {
+    const db = openDb(join(dir, 't.db'))
+    dbs.push(db)
+    return createProjectBrainStore(db)
+  }
   const P = 'C:/proj'
 
   it('createBrain → getBrain: пустой мозг с version=1', () => {

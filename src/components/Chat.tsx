@@ -959,7 +959,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       // Ядро надёжности v3 (Шаг A): модель НЕ вправе сказать «готово» — решает
       // verify. pass → proof; провал → авто-возврат на execute (само-починка);
       // лимит попыток → честный стоп 'blocked', а не тихое 'completed'.
-      const v = await window.api.verifications.latest(pipeline.projectPath, pipeline.chatId ?? null).catch(() => null)
+      const v = pipeline.agentRunId
+        ? await window.api.verifications.latestByRunId(pipeline.projectPath, pipeline.agentRunId).catch(() => null)
+        : await window.api.verifications.latest(pipeline.projectPath, pipeline.chatId ?? null).catch(() => null)
       const outcome: VerifyOutcome =
         v == null || v.overall === 'not_run' ? 'unknown'
           : v.overall === 'passed' ? 'pass' : 'fail'
@@ -975,18 +977,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         void store.advancePipeline({ step: 'blocked' }) // честный стоп
       }
     } else if (step === 'proof') {
-      // Собрать Proof Pack: runId привязанный/последний прогон → proof.generate →
-      // preview HTML inline + pipeline completed.
+      // Собрать Proof Pack: нужен точный runId. Без него не завершаем pipeline,
+      // иначе можно получить красивый Proof по чужому/случайному прогону.
       const runs = pipeline.agentRunId ? [] : await window.api.agentRuns.list(pipeline.projectPath, { limit: 5 })
       const runId = resolveProofRunId(pipeline.agentRunId, pipeline.chatId, runs)
-      if (runId) {
-        try {
-          const res = await window.api.proof.generate(runId)
-          if (res.ok && res.htmlPath) {
-            store.recordArtifact({ kind: 'html', filename: 'proof.html', path: res.htmlPath, sizeBytes: 0 })
-            store.setPreviewArtifact(res.htmlPath)
-          }
-        } catch { /* proof best-effort */ }
+      if (!runId) {
+        void store.advancePipeline({ step: 'blocked' })
+        return
+      }
+      try {
+        const res = await window.api.proof.generate(runId)
+        if (!res.ok || !res.htmlPath) {
+          void store.advancePipeline({ step: 'blocked' })
+          return
+        }
+        store.recordArtifact({ kind: 'html', filename: 'proof.html', path: res.htmlPath, sizeBytes: 0 })
+        store.setPreviewArtifact(res.htmlPath)
+      } catch {
+        void store.advancePipeline({ step: 'blocked' })
+        return
       }
       void store.advancePipeline({ step: 'completed' })
     }

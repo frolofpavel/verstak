@@ -34,6 +34,8 @@ export interface Verifications {
   list: (projectPath: string, limit?: number) => VerificationRow[]
   /** Свежайшая верификация проекта; если задан chatId — только этого чата. */
   latest: (projectPath: string, chatId?: number | null) => VerificationRow | null
+  /** Свежайшая верификация конкретного agent run. Для Proof Pack это строгая связка. */
+  latestByRunId: (projectPath: string, runId: string) => VerificationRow | null
   get: (id: number) => VerificationRow | null
 }
 
@@ -84,6 +86,12 @@ export function createVerifications(db: Database): Verifications {
       const row = db.prepare(
         `${SELECT} WHERE project_path = ? ORDER BY created_at DESC, id DESC LIMIT 1`
       ).get(projectPath) as VerificationRow | undefined
+      return row ?? null
+    },
+    latestByRunId(projectPath, runId) {
+      const row = db.prepare(
+        `${SELECT} WHERE project_path = ? AND run_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`
+      ).get(projectPath, runId) as VerificationRow | undefined
       return row ?? null
     },
     get(id) {

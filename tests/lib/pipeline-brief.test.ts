@@ -74,15 +74,15 @@ describe('pipeline-brief', () => {
     expect(verifyState(null)).toEqual({ tone: 'warn', canProof: false })
   })
 
-  it('resolveProofRunId: привязанный → он; иначе прогон чата; иначе свежайший; иначе null', () => {
+  it('resolveProofRunId: привязанный → он; иначе прогон чата; без точной связки → null', () => {
     const runs = [{ runId: 'r-new', chatId: 9 }, { runId: 'r-chat', chatId: 5 }]
     expect(resolveProofRunId('r-pinned', 5, runs)).toBe('r-pinned')
     expect(resolveProofRunId(null, 5, runs)).toBe('r-chat')
-    expect(resolveProofRunId(null, 99, runs)).toBe('r-new')
+    expect(resolveProofRunId(null, 99, runs)).toBeNull()
     expect(resolveProofRunId(null, 1, [])).toBeNull()
   })
 
-  it('resolvePipelineRunId: sendId точнее fallback по чату', () => {
+  it('resolvePipelineRunId: sendId точнее связки по чату, без точной связки → null', () => {
     const runs = [
       { runId: 'r-exec', chatId: 5, sendId: 42 },
       { runId: 'r-other', chatId: 5, sendId: 7 },
@@ -90,5 +90,6 @@ describe('pipeline-brief', () => {
     expect(resolvePipelineRunId(null, 42, 5, runs)).toBe('r-exec')
     expect(resolvePipelineRunId('r-pinned', 42, 5, runs)).toBe('r-pinned')
     expect(resolvePipelineRunId(null, 99, 5, runs)).toBe('r-exec')
+    expect(resolvePipelineRunId(null, 99, 9, runs)).toBeNull()
   })
 })

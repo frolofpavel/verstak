@@ -512,6 +512,8 @@ declare global {
         list(projectPath: string, limit?: number): Promise<VerificationRow[]>
         /** Свежайшая верификация проекта; chatId сужает до конкретного чата (Review DoD). */
         latest(projectPath: string, chatId?: number | null): Promise<VerificationRow | null>
+        /** Свежайшая верификация конкретного agent run. Использовать для Proof/Pipeline integrity. */
+        latestByRunId(projectPath: string, runId: string): Promise<VerificationRow | null>
         get(id: number): Promise<VerificationRow | null>
       }
       suggestions: {

@@ -449,6 +449,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('verifications:list', projectPath, limit),
     latest: (projectPath: string, chatId?: number | null) =>
       ipcRenderer.invoke('verifications:latest', projectPath, chatId),
+    latestByRunId: (projectPath: string, runId: string) =>
+      ipcRenderer.invoke('verifications:latest-by-run', projectPath, runId),
     get: (id: number) => ipcRenderer.invoke('verifications:get', id)
   },
   suggestions: {

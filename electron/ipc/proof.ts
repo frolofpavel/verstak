@@ -10,7 +10,7 @@ import type { Verifications } from '../storage/verifications'
 /**
  * Proof Pack IPC — собирает доказательство выполнения прогона в пару файлов
  * proof.json + proof.html (в той же .verstak/artifacts/{дата}/). Данные тянутся
- * из готовых источников: agent_runs + events, verifications.latest, git diff,
+ * из готовых источников: agent_runs + events, verifications.latestByRunId, git diff,
  * audit_log. Чистая сборка/рендер — в ai/proof-pack.ts.
  */
 export interface ProofDeps {
@@ -37,13 +37,15 @@ export function registerProofIpc(deps: ProofDeps): void {
 
     const run = deps.agentRuns.get(runId)
     if (!run) return { ok: false, error: 'no-run' }
+    if (run.projectPath !== projectPath) return { ok: false, error: 'run-project-mismatch' }
     const events = deps.agentRuns.getEvents(runId)
 
-    // Verification: latest по чату прогона (chat-keyed; для V1 — самый релевантный).
-    const verRow = deps.verifications.latest(projectPath, run.chatId)
+    // Verification: строгая связка по runId. Proof Pack не должен подхватывать
+    // свежую проверку другого прогона из того же чата.
+    const verRow = deps.verifications.latestByRunId(projectPath, runId)
     const verification = verRow
       ? { overall: verRow.overall, checksTotal: verRow.checksTotal, checksPassed: verRow.checksPassed, taskSummary: verRow.taskSummary }
-      : null
+      : { overall: 'not_run' as const, checksTotal: 0, checksPassed: 0, taskSummary: null }
 
     let changedFiles: Array<{ path: string; added: number; removed: number; status: string }> = []
     try { changedFiles = await readDiffStat(projectPath) } catch { /* не git / нет правок */ }
