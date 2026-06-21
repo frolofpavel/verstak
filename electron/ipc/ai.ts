@@ -18,6 +18,7 @@ import type { AgentMode } from '../ai/mode-policy'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 import { captureToolObservation } from '../ai/memory-hooks'
+import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
 import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
@@ -52,6 +53,8 @@ interface AiDeps {
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   /** Сохранить запись в долговременную память проекта. */
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string }
+  /** Сохранить структурированное Decision Record в Decision Memory (project-brain). */
+  saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
   /** Поиск по долговременной памяти проекта. */
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
   /** Полнотекстовый поиск по истории разговоров проекта. */
@@ -705,7 +708,7 @@ export function registerAiIpc(deps: AiDeps): void {
       // Инспектор группирует по runId; этот маркер также даёт точку отсчёта run'а
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
       if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
-      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, agentMode, turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
+      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.saveDecision, deps.searchMemories, deps.searchConversations, deps.connectors, agentMode, turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
         deps.mcpClient,
         auditFn,
@@ -1107,6 +1110,7 @@ export async function runApiConversation(
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void,
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>,
   saveMemory: AiDeps['saveMemory'],
+  saveDecision: AiDeps['saveDecision'],
   searchMemories: AiDeps['searchMemories'],
   searchConversations: AiDeps['searchConversations'],
   connectors: {
@@ -1391,7 +1395,7 @@ export async function runApiConversation(
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-      recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors,
+      recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
       pendingAttachments, pendingWrites, pendingCommands, scopedKey,
       agentMode, skillRegistry, getSecretForDelegate,
       currentProviderId: providerId,
@@ -1656,7 +1660,7 @@ export async function runApiConversation(
           // handedOff. verifications/toolsAllow — capability-фильтр (M4) и индексация
           // attest обязаны действовать и при фолбэке.
           handedOff = true
-          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, nextModel, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow)
+          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, nextModel, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow)
         }
       }
     }

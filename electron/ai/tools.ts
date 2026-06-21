@@ -506,6 +506,27 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'save_decision',
+    description: 'Сохраняет структурированное Decision Record в Decision Memory проекта (отдельный стор, не общая память). Используй в конце разбора решения / работы AI-штаба: фиксируешь ЧТО решили, ПОЧЕМУ, какие риски и когда пересмотреть — чтобы потом можно было вспомнить ход решения.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Короткий заголовок решения (1 строка)' },
+        decision: { type: 'string', description: 'РЕШЕНИЕ — что именно решено делать' },
+        user_request: { type: 'string', description: 'Исходный вопрос/запрос пользователя' },
+        why: { type: 'string', description: 'ПОЧЕМУ — 1-3 главные причины' },
+        key_arguments: { type: 'array', items: { type: 'string' }, description: 'Ключевые аргументы за' },
+        objections: { type: 'array', items: { type: 'string' }, description: 'Возражения/контраргументы (скептик)' },
+        risks: { type: 'array', items: { type: 'string' }, description: 'Главные риски' },
+        alternatives_rejected: { type: 'array', items: { type: 'string' }, description: 'Отвергнутые альтернативы' },
+        next_actions: { type: 'array', items: { type: 'string' }, description: 'Следующие действия' },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Уверенность в решении' },
+        revisit_days: { type: 'number', description: 'Через сколько дней пересмотреть решение (опционально)' }
+      },
+      required: ['title', 'decision']
+    }
+  },
+  {
     name: 'memory_search',
     description: 'Ищет в долговременной памяти агента релевантные факты о проекте. Используй в начале сессии или при столкновении с незнакомой частью кода.',
     parameters: {

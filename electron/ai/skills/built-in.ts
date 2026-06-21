@@ -615,7 +615,7 @@ name: AI-штаб
 description: Совет бизнес-ролей по решению → Decision Record (решение/почему/риски/пересмотр)
 icon: 🎯
 slash: board
-tools_allow: [delegate_parallel, delegate_task, read_file, list_directory, search_project, find_files, get_project_map, memory_save, memory_search]
+tools_allow: [delegate_parallel, delegate_task, read_file, list_directory, search_project, find_files, get_project_map, save_decision, memory_search]
 suggested_prompts:
   - Стоит ли нам брать этот проект/клиента?
   - Оцени идею фичи и стоит ли её делать
@@ -640,7 +640,7 @@ suggested_prompts:
 
 4. Покажи пользователю: сначала Decision Record (главное и крупно), потом — свёрнутый разбор по ролям (1-2 строки на роль).
 
-5. Если решение значимое — сохрани его в память (memory_save) с Decision Record, чтобы потом можно было вспомнить «что и почему решили».
+5. Если решение значимое — сохрани его через save_decision (структурированно: title / decision / why / risks / next_actions / confidence / revisit_days). Оно ляжет в Decision Memory проекта — потом можно вспомнить «что и почему решили».
 
 Роли советуют, файлы не правят. Твоя ценность — не одно мнение, а столкновение шести независимых линз + честный синтез в одно действие.`
 

@@ -430,6 +430,7 @@ app.whenReady().then(() => {
     saveMemory: (projectPath, type, content, tags) => {
       return saveMemory(db, projectPath, type as import('./storage/memories').MemoryType, content, tags)
     },
+    saveDecision: (projectPath, rec) => brainStore.saveDecisionRecord(projectPath, rec),
     searchMemories: (projectPath, query, limit) => {
       return searchMemories(db, projectPath, query, limit)
     },

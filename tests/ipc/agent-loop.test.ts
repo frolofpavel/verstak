@@ -43,14 +43,14 @@ type Overrides = {
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
 
-// Позиционная сборка 33 аргументов runApiConversation.
+// Позиционная сборка 34 аргументов runApiConversation.
 function args(dir: string, o: Overrides): unknown[] {
   const signal = new AbortController().signal
   return [
     makeSender(), 1, o.provider, createFileTools(dir, signal), dir,
     o.messages ?? [{ role: 'user', content: 'hi' }], signal,
     vi.fn(), vi.fn(() => ({ id: 1 })), vi.fn(), vi.fn(() => []),
-    vi.fn(() => ({ id: 'm' })), vi.fn(() => []), vi.fn(() => []),
+    vi.fn(() => ({ id: 'm' })), vi.fn(() => ({ id: 1 })), vi.fn(() => []), vi.fn(() => []),
     { list: () => [], query: async () => ({}) }, 'bypass', 5,
     undefined, () => null, o.costGuard, o.providerId, o.model, o.fallbackOpts,
     undefined, undefined, undefined, null, undefined, undefined,

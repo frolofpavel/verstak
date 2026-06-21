@@ -23,6 +23,45 @@ export const memorySaveHandler: ToolHandler = {
   }
 }
 
+/** save_decision — пишет структурированное Decision Record в Decision Memory
+ *  (project-brain decision_record). Питает AI-штаб (/board) и будущий UI решений. */
+export const saveDecisionHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const a = call.args
+      const title = String(a.title ?? '').trim()
+      const decision = String(a.decision ?? '').trim()
+      if (!title || !decision) {
+        return { id: call.id, name: call.name, result: '', error: 'save_decision: title и decision обязательны' }
+      }
+      const strArr = (v: unknown): string[] => Array.isArray(v) ? v.map(String).filter(Boolean) : []
+      const conf = a.confidence === 'low' || a.confidence === 'medium' || a.confidence === 'high' ? a.confidence : null
+      const revisitDays = typeof a.revisit_days === 'number' && a.revisit_days > 0 ? a.revisit_days : null
+      const saved = ctx.saveDecision(ctx.projectPath, {
+        sourceMessageId: null,
+        title,
+        userRequest: a.user_request ? String(a.user_request) : null,
+        finalDecision: decision,
+        why: a.why ? String(a.why) : null,
+        keyArguments: strArr(a.key_arguments),
+        objections: strArr(a.objections),
+        risks: strArr(a.risks),
+        alternativesRejected: strArr(a.alternatives_rejected),
+        nextActions: strArr(a.next_actions),
+        confidence: conf,
+        revisitDate: revisitDays ? Date.now() + revisitDays * 86_400_000 : null,
+      })
+      emitActivity(ctx, call, 'ok', 'save_decision', title.slice(0, 60))
+      return { id: call.id, name: call.name, result: `Решение сохранено в Decision Memory (#${saved.id}): ${title}` }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
 export const memorySearchHandler: ToolHandler = {
   mode: 'parallel-read',
   async handle(call, ctx) {
@@ -125,4 +164,4 @@ export const coreMemoryRemoveHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
-}
+}

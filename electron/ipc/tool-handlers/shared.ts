@@ -5,6 +5,7 @@ import type { FileTools } from '../../ai/tools'
 import type { AgentMode } from '../../ai/mode-policy'
 import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
+import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-brain'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -33,6 +34,8 @@ export interface ToolContext {
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   /** Сохранить запись в долговременную память проекта. */
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string }
+  /** Сохранить структурированное Decision Record в Decision Memory (project-brain). */
+  saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
   /** Поиск по долговременной памяти проекта. */
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
   /** Полнотекстовый поиск по истории разговоров проекта. */
@@ -227,4 +230,4 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
     return { label: name, detail: '' }
   }
   return null
-}
+}
