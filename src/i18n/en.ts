@@ -136,6 +136,7 @@ export const en = {
     tasksManager: 'Runs',
     task: 'Dev task',
     agents: 'Agents',
+    decisions: 'Decisions',
     memory: 'Memory',
     workflow: 'Workflows',
     more: 'More',

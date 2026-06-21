@@ -135,6 +135,7 @@ export const ru: Translations = {
     tasksManager: 'Прогоны',
     task: 'Задача',
     agents: 'Агенты',
+    decisions: 'Решения',
     memory: 'Память',
     workflow: 'Workflows',
     more: 'Ещё',

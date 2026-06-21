@@ -6028,6 +6028,25 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
 .gg-feedback-entry-remove:hover { background: var(--error-muted); color: var(--error); }
 .gg-feedback-entry-message { font-size: var(--text-sm); color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; }
 
+/* ─── Decisions panel (память решений штаба /board) ─── */
+.gg-decisions-list { display: flex; flex-direction: column; gap: 10px; }
+.gg-decision {
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.gg-decision-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.gg-decision-title { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); flex: 1; }
+.gg-decision-conf {
+  font-size: var(--text-xs); padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border-subtle); color: var(--text-tertiary); white-space: nowrap;
+}
+.gg-decision-date { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
+.gg-decision-row { font-size: var(--text-sm); color: var(--text-primary); line-height: 1.5; margin-top: 4px; }
+.gg-decision-row b { font-weight: 600; }
+.gg-decision-revisit { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 6px; }
+
 /* ─── Drag-and-drop overlay ─── */
 .gg-chat { position: relative; }
 .gg-drop-overlay {

@@ -376,7 +376,7 @@ function NavButtons({ items, activeView, onSelect }: {
 }
 
 const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'tasks-manager', 'inspector', 'agents'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'tasks-manager', 'inspector', 'agents', 'decisions'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -475,6 +475,13 @@ const TasksManagerIcon = (
     <line x1="7" y1="18" x2="7" y2="18" />
   </svg>
 )
+const DecisionsIcon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+    <rect x="9" y="3" width="6" height="4" rx="1" />
+    <path d="M9 14l2 2 4-4" />
+  </svg>
+)
 const ProjectMapIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="1 6 8 3 16 6 23 3 23 18 16 21 8 18 1 21 1 6" />
@@ -508,6 +515,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },
+    { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon },
   ]
 
   const PROJECT_NAV: NavItem[] = [
