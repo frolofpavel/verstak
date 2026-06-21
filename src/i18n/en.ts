@@ -138,6 +138,7 @@ export const en = {
     agents: 'Agents',
     decisions: 'Decisions',
     memory: 'Memory',
+    brain: 'Brain',
     workflow: 'Workflows',
     more: 'More',
     soon: 'Soon',

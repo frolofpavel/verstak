@@ -377,7 +377,7 @@ function NavButtons({ items, activeView, onSelect }: {
 
 const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
 const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'tasks-manager', 'inspector', 'agents', 'decisions'])
-const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files'])
+const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
 const ChatIcon = (
@@ -482,6 +482,13 @@ const DecisionsIcon = (
     <path d="M9 14l2 2 4-4" />
   </svg>
 )
+const BrainIcon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+  </svg>
+)
 const ProjectMapIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="1 6 8 3 16 6 23 3 23 18 16 21 8 18 1 21 1 6" />
@@ -520,6 +527,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
 
   const PROJECT_NAV: NavItem[] = [
     { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon },
+    { id: 'brain', label: t.sidebar.brain, icon: BrainIcon },
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'files', label: t.sidebar.files, icon: FilesIcon },
   ]

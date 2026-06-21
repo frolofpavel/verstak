@@ -6047,6 +6047,27 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
 .gg-decision-row b { font-weight: 600; }
 .gg-decision-revisit { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 6px; }
 
+/* ─── Brain panel (мозг проекта: прогрев + статус) ─── */
+.gg-brain-error { font-size: var(--text-sm); color: var(--danger, #e24b4a); padding: 0 16px 8px; }
+.gg-brain-warm {
+  margin: 0 0 12px; padding: 8px 12px; font-size: var(--text-xs);
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); color: var(--text-tertiary);
+}
+.gg-brain { display: flex; flex-direction: column; gap: 12px; }
+.gg-brain-meta { font-size: var(--text-xs); color: var(--text-tertiary); }
+.gg-brain-block {
+  padding: 10px 12px; background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+}
+.gg-brain-label { font-size: var(--text-xs); color: var(--text-tertiary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .03em; }
+.gg-brain-text { font-size: var(--text-sm); color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; }
+.gg-brain-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.gg-brain-tag {
+  font-size: var(--text-xs); padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border-subtle); color: var(--text-primary);
+}
+
 /* ─── Drag-and-drop overlay ─── */
 .gg-chat { position: relative; }
 .gg-drop-overlay {

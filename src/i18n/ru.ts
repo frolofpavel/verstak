@@ -137,6 +137,7 @@ export const ru: Translations = {
     agents: 'Агенты',
     decisions: 'Решения',
     memory: 'Память',
+    brain: 'Мозг',
     workflow: 'Workflows',
     more: 'Ещё',
     soon: 'Скоро',

@@ -17,6 +17,7 @@ import { AgentRunsPanel } from './components/AgentRunsPanel'
 import { DevTaskPanel } from './components/DevTaskPanel'
 import { ProjectMapPanel } from './components/ProjectMapPanel'
 import { DecisionsPanel } from './components/DecisionsPanel'
+import { BrainPanel } from './components/BrainPanel'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
 
@@ -361,6 +362,7 @@ export function App() {
         {activeView === 'task' && <DevTaskPanel />}
         {activeView === 'project-map' && <ProjectMapPanel />}
         {activeView === 'decisions' && <DecisionsPanel />}
+        {activeView === 'brain' && <BrainPanel />}
         {activeView === 'files' && <FilesView />}
         {activeView === 'memory-gov' && (
           <Suspense fallback={<ViewFallback />}><MemoryGovernance /></Suspense>
