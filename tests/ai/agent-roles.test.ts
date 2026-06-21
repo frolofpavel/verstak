@@ -49,4 +49,14 @@ describe('AI-штаб (Shadow Team) — бизнес-роли Phase 2', () => {
       expect(AGENT_ROLES[id], id).toBeDefined()
     }
   })
+
+  it('Fusion: роль judge определена и read-only (оценивает, не правит)', () => {
+    expect(AGENT_ROLES.judge).toBeDefined()
+    expect(getRolePrompt('judge')).toMatch(/судья/i)
+    const toolset = getRoleToolset('judge')
+    expect(toolset).toContain('read_file')
+    for (const w of WRITE_TOOLS) expect(toolset, `judge даёт ${w}`).not.toContain(w)
+    expect(toolset).not.toContain('run_command')
+    expect(toolset).not.toContain('delegate_task')
+  })
 })
