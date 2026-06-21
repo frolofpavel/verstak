@@ -413,7 +413,7 @@ app.whenReady().then(() => {
       // Project Brain: пакет под задачу (long/medium/short), с откатом на short.
       const type = pickPackType(lastUserMessage)
       const pack = brainStore.getContextPack(projectPath, type) ?? brainStore.getContextPack(projectPath, 'short')
-      return pack ? { content: pack.content, packType: pack.type } : null
+      return pack ? { content: pack.content, packType: pack.type, tokenEstimate: pack.tokenEstimate } : null
     },
     recordPlan: (projectPath, title, steps) => {
       const plan = plans.create(projectPath, title, steps)

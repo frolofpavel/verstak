@@ -44,7 +44,7 @@ interface AiDeps {
   /** Fetch the N most recent accepted writes for the Context Pack. */
   recentWrites: (projectPath: string, limit: number) => Array<{ filePath: string; createdAt: number }>
   /** Project Brain (Итер.4): прогретый ContextPack под задачу. null если не прогрет. */
-  getBrainContext?: (projectPath: string, lastUserMessage: string) => { content: string; packType: string } | null
+  getBrainContext?: (projectPath: string, lastUserMessage: string) => { content: string; packType: string; tokenEstimate?: number | null } | null
   /** Persist a plan emitted by the AI. */
   recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
   /** Auto-append a brief entry to the dev journal (file write, command, plan, session summary). */
@@ -367,7 +367,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // (CLI строит свой промпт внутри buildCliPrompt — снапшот там пока не делаем) и
     // для reviewer override.
     let composedSystem: string | null = null
-    let brain: { content: string; packType: string } | null = null
+    let brain: { content: string; packType: string; tokenEstimate?: number | null } | null = null
     // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
     // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
     // независимый разбор. Давать ему system-layer + user-layer = заставить
@@ -426,9 +426,15 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     const taggedSender = tagSender(e.sender, projectPath)
-    // Project Brain (Итер.4): бейдж «использован прогретый контекст».
+    // Project Brain (Итер.4 + Phase 3): бейдж «использован прогретый контекст» +
+    // метрика экономии — сколько токенов контекста мозг дал готовыми (агент не
+    // пере-сканировал проект). Честный показатель ценности прогрева.
     if (brain) {
-      taggedSender.send('ai:event', { id: sendId, event: { type: 'info', text: `🧠 Мозг проекта · контекст: ${brain.packType}` } })
+      const te = brain.tokenEstimate
+      const saved = te && te > 0
+        ? ` · ~${te >= 1000 ? (te / 1000).toFixed(1) + 'k' : String(te)} токенов контекста готовы`
+        : ''
+      taggedSender.send('ai:event', { id: sendId, event: { type: 'info', text: `🧠 Мозг проекта · ${brain.packType}${saved}` } })
     }
 
     // Resolve API key (or null for CLI)
