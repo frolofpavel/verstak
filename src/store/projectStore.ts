@@ -628,7 +628,22 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   }),
   applyEventToChat: (chatId, event) => set(s => {
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
-    const next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    // 5.1 (review P0): pending-write/command фонового чата — в его snapshot (как
+    // applyEventToSession). Иначе после switchChatSession confirm-модалка не
+    // всплывёт (restoreBundle поднимает pending из снапшота в top-level) и main
+    // зависнет на resolveWrite/resolveCommand.
+    const t = event.type
+    if (t === 'pending-write' && typeof event.callId === 'string') {
+      next = { ...next, pendingWrites: [...next.pendingWrites, {
+        callId: event.callId,
+        path: String(event.path ?? ''),
+        before: String(event.before ?? ''),
+        after: String(event.after ?? '')
+      }] }
+    } else if (t === 'pending-command' && typeof event.callId === 'string') {
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? '') } }
+    }
     // Персист завершённого assistant-сообщения в БД (переживёт reload).
     if ((event.type === 'done' || event.type === 'error') && s.path) {
       const lastMsg = next.messages[next.messages.length - 1]

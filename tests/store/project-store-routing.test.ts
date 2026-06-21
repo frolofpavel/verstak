@@ -178,6 +178,30 @@ describe('Pending writes / commands — scoping и очистка', () => {
     // Активный чат без pending; фоновый имеет своё.
     expect(useProject.getState().pendingCommand).toBeNull()
   })
+
+  // 5.1 (review P0): фоновый чат должен СОХРАНЯТЬ pending-write/command в свой
+  // snapshot — иначе после switchChatSession confirm-модалка не всплывёт (DiffView
+  // читает top-level, restoreBundle поднимает из снапшота) и main зависнет на
+  // resolveWrite. Тест выше проверял лишь что активный не загрязнён — это скрывало
+  // потерю pending у фонового чата.
+  it('5.1: pending-write фонового чата сохраняется в его snapshot', () => {
+    useProject.setState({ activeChatId: 1, pendingCommand: null, pendingWrites: [] }, false)
+    useProject.getState().applyEventToChat(2, { type: 'pending-write', callId: 'bgw', path: 'a.ts', before: '', after: 'x' })
+    const snap = useProject.getState().chatSnapshots[2]
+    expect(snap.pendingWrites).toHaveLength(1)
+    expect(snap.pendingWrites[0].callId).toBe('bgw')
+    expect(snap.pendingWrites[0].path).toBe('a.ts')
+    expect(useProject.getState().pendingWrites).toEqual([])
+  })
+
+  it('5.1: pending-command фонового чата сохраняется в его snapshot', () => {
+    useProject.setState({ activeChatId: 1, pendingCommand: null, pendingWrites: [] }, false)
+    useProject.getState().applyEventToChat(2, { type: 'pending-command', callId: 'bgc', command: 'ls' })
+    const snap = useProject.getState().chatSnapshots[2]
+    expect(snap.pendingCommand?.callId).toBe('bgc')
+    expect(snap.pendingCommand?.command).toBe('ls')
+    expect(useProject.getState().pendingCommand).toBeNull()
+  })
 })
 
 describe('clearActivity — сброс activity + preflights на новом send', () => {
