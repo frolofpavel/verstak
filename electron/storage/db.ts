@@ -708,6 +708,30 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         );
       `)
     }
+  },
+  {
+    version: 27,
+    description: 'project reminders: scheduled notifications or chat messages (мёрдж ветки Ильи — перенумеровано после v26, т.к. v24 уже в проде)',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS reminders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT,
+          due_at INTEGER NOT NULL,
+          target TEXT NOT NULL CHECK(target IN ('notification','chat')),
+          chat_id INTEGER,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','delivered','dismissed')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          delivered_at INTEGER,
+          dismissed_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_reminders_project ON reminders(project_path, due_at);
+        CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(status, due_at);
+      `)
+    }
   }
 ]
 

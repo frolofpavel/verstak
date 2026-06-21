@@ -20,6 +20,10 @@ export interface ToastPayload {
   isHelp?: boolean
   isError?: boolean
   theme?: 'nord' | 'light'
+  reminderId?: number
+  chatId?: number
+  kind?: 'reminder' | 'chat-reminder-sent'
+  persistent?: boolean
 }
 
 let toastWin: BrowserWindow | null = null
@@ -28,6 +32,11 @@ let pending: ToastPayload[] = []
 let ipcReady = false
 let toastShutdown = false
 let onDisplayMetricsChanged: (() => void) | null = null
+let reminderActions: {
+  snooze: (id: number) => void
+  dismiss: (id: number) => void
+  open: (id: number) => void
+} | null = null
 
 function positionToastWindow(win: BrowserWindow): void {
   const { workArea } = screen.getPrimaryDisplay()
@@ -155,9 +164,14 @@ export function registerNotificationWindowIpc(): void {
       return
     }
     if (arg && typeof arg === 'object') {
-      const { projectPath, openHelp } = arg as { projectPath?: string; openHelp?: boolean }
+      const { projectPath, openHelp, chatId } = arg as { projectPath?: string; openHelp?: boolean; chatId?: number }
       if (openHelp) {
         main.webContents.send('notify:open-help', projectPath?.trim() || undefined)
+      } else if (typeof chatId === 'number') {
+        main.webContents.send('notify:open-chat', {
+          projectPath: projectPath?.trim() || undefined,
+          chatId
+        })
       } else if (projectPath?.trim()) {
         main.webContents.send('notify:open-project', projectPath.trim())
       }
@@ -167,4 +181,24 @@ export function registerNotificationWindowIpc(): void {
   ipcMain.on('toast:hide-window', () => {
     if (toastWin && !toastWin.isDestroyed()) toastWin.hide()
   })
+
+  ipcMain.on('toast:reminder-snooze', (_e, id: unknown) => {
+    if (typeof id === 'number') reminderActions?.snooze(id)
+  })
+
+  ipcMain.on('toast:reminder-dismiss', (_e, id: unknown) => {
+    if (typeof id === 'number') reminderActions?.dismiss(id)
+  })
+
+  ipcMain.on('toast:reminder-open', (_e, id: unknown) => {
+    if (typeof id === 'number') reminderActions?.open(id)
+  })
+}
+
+export function bindReminderToastActions(actions: {
+  snooze: (id: number) => void
+  dismiss: (id: number) => void
+  open: (id: number) => void
+}): void {
+  reminderActions = actions
 }

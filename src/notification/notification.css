@@ -131,3 +131,26 @@ html, body, #root {
   color: var(--toast-muted);
   line-height: 1.5;
 }
+
+.gg-app-toast-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.gg-app-toast-actions button {
+  border: 1px solid var(--toast-border);
+  background: color-mix(in srgb, var(--toast-accent) 14%, transparent);
+  color: var(--toast-text);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gg-app-toast-actions button:hover {
+  background: color-mix(in srgb, var(--toast-accent) 24%, transparent);
+}

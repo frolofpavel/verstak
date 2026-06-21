@@ -66,6 +66,21 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_e: unknown, projectPath?: string) => cb(projectPath)
       ipcRenderer.on('notify:open-help', handler)
       return () => { ipcRenderer.removeListener('notify:open-help', handler) }
+    },
+    onOpenReminders: (cb: (projectPath?: string) => void) => {
+      const handler = (_e: unknown, projectPath?: string) => cb(projectPath)
+      ipcRenderer.on('notify:open-reminders', handler)
+      return () => { ipcRenderer.removeListener('notify:open-reminders', handler) }
+    },
+    onOpenChat: (cb: (payload: { projectPath?: string; chatId: number }) => void) => {
+      const handler = (_e: unknown, payload: { projectPath?: string; chatId: number }) => cb(payload)
+      ipcRenderer.on('notify:open-chat', handler)
+      return () => { ipcRenderer.removeListener('notify:open-chat', handler) }
+    },
+    onSendChatReminder: (cb: (payload: { reminderId: number; projectPath: string; chatId: number; text: string }) => void) => {
+      const handler = (_e: unknown, payload: { reminderId: number; projectPath: string; chatId: number; text: string }) => cb(payload)
+      ipcRenderer.on('notify:send-chat-reminder', handler)
+      return () => { ipcRenderer.removeListener('notify:send-chat-reminder', handler) }
     }
   },
   voice: {
@@ -180,12 +195,23 @@ contextBridge.exposeInMainWorld('api', {
   },
   journal: {
     list: (projectPath: string, limit?: number) => ipcRenderer.invoke('journal:list', projectPath, limit),
+    currentSession: (projectPath: string) => ipcRenderer.invoke('journal:currentSession', projectPath),
     append: (projectPath: string, kind: string, title: string, detail?: string | null) =>
-      ipcRenderer.invoke('journal:append', projectPath, kind, title, detail),
-    updateManual: (id: number, title: string, detail?: string | null) =>
-      ipcRenderer.invoke('journal:updateManual', id, title, detail),
-    remove: (id: number) => ipcRenderer.invoke('journal:remove', id),
-    clear: (projectPath: string) => ipcRenderer.invoke('journal:clear', projectPath)
+      ipcRenderer.invoke('journal:append', projectPath, kind, title, detail)
+  },
+  reminders: {
+    list: (projectPath: string, limit?: number) => ipcRenderer.invoke('reminders:list', projectPath, limit),
+    create: (input: {
+      projectPath: string
+      title: string
+      body?: string | null
+      dueAt: number
+      target: 'notification' | 'chat'
+      chatId?: number | null
+    }) => ipcRenderer.invoke('reminders:create', input),
+    snooze: (id: number, minutes?: number) => ipcRenderer.invoke('reminders:snooze', id, minutes),
+    dismiss: (id: number) => ipcRenderer.invoke('reminders:dismiss', id),
+    remove: (id: number) => ipcRenderer.invoke('reminders:remove', id)
   },
   undo: {
     list: (projectPath: string) => ipcRenderer.invoke('undo:list', projectPath),

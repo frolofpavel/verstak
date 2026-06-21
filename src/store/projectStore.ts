@@ -59,7 +59,7 @@ export interface SubagentRunCard {
   toolCount?: number
 }
 
-export type ViewId = 'chat' | 'tasks' | 'journal' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser' | 'skills' | 'design' | 'video' | 'inspector' | 'memory-gov' | 'agents' | 'tasks-manager' | 'project-map' | 'task' | 'files' | 'decisions' | 'brain'
+export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser' | 'skills' | 'design' | 'video' | 'inspector' | 'memory-gov' | 'agents' | 'tasks-manager' | 'project-map' | 'task' | 'files' | 'decisions' | 'brain'
 
 /**
  * Owner для in-flight sendId. Заменил собой 2 параллельных мапа
@@ -196,7 +196,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** Push a user message + empty assistant placeholder into a background CHAT
    *  snapshot. Used by SideChat's composer — streamed assistant text then lands
    *  via applyEventToChat (text events append to the last assistant message). */
-  pushUserToChatSnapshot: (chatId: number, content: string) => void
+  pushUserToChatSnapshot: (chatId: number, content: string, meta?: Partial<ChatMessage>) => void
   /** Switch to a different chat session within the active project. */
   switchChatSession: (id: number) => Promise<void>
   /** Refresh the chat sessions list (after create/rename/delete). */
@@ -657,14 +657,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
     return { chatSnapshots: { ...s.chatSnapshots, [chatId]: { ...existing, messages } } }
   }),
-  pushUserToChatSnapshot: (chatId, content) => set(s => {
+  pushUserToChatSnapshot: (chatId, content, meta) => set(s => {
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
     return {
       chatSnapshots: {
         ...s.chatSnapshots,
         [chatId]: {
           ...existing,
-          messages: [...existing.messages, { role: 'user', content }, { role: 'assistant', content: '' }],
+          messages: [...existing.messages, { ...meta, role: 'user', content }, { role: 'assistant', content: '' }],
           isStreaming: true,
           streamStartedAt: Date.now(),
           hasUnread: false

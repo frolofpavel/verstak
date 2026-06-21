@@ -108,6 +108,7 @@ export const ru: Translations = {
     chat: 'Чат',
     tasks: 'Чеклист',
     journal: 'Журнал',
+    reminders: 'Напоминания',
     plan: 'План',
     skills: 'Скиллы',
     browser: 'Браузер',

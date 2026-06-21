@@ -22,6 +22,7 @@ import { registerProjectMapIpc } from './ipc/project-map'
 import { registerFilesIpc } from './ipc/files'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerJournalIpc } from './ipc/journal'
+import { registerRemindersIpc } from './ipc/reminders'
 import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerConnectorsIpc } from './ipc/connectors'
@@ -58,6 +59,7 @@ import { registerAgentRunsIpc } from './ipc/agent-runs'
 import { registerVerificationsIpc } from './ipc/verifications'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
+import { createReminders } from './storage/reminders'
 import { createProjects } from './storage/projects'
 import { createProjectGroups } from './storage/project-groups'
 import { createUndoStack } from './storage/undo'
@@ -92,7 +94,8 @@ import { registerSuggestionsIpc } from './ipc/suggestions'
 import { initAutoUpdater, registerReleaseNotesIpc } from './updater'
 import { registerNotifyIpc } from './ipc/notify'
 import { bindWindowChromeEvents, registerWindowIpc } from './ipc/window'
-import { initNotificationWindow, registerNotificationWindowIpc } from './notification-window'
+import { bindReminderToastActions, initNotificationWindow, registerNotificationWindowIpc } from './notification-window'
+import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
 import { bindUiScaleToWindow } from './ui-scale'
@@ -346,6 +349,31 @@ app.whenReady().then(() => {
   registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
   const journal = createJournal(db)
+  const reminders = createReminders(db)
+  let journalRolloverTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleJournalRollover = () => {
+    const now = new Date()
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
+    journalRolloverTimer = setTimeout(() => {
+      try {
+        journal.flushDailyRollovers()
+      } catch (err) {
+        console.warn('[journal] daily rollover failed:', err instanceof Error ? err.message : err)
+      } finally {
+        scheduleJournalRollover()
+      }
+    }, Math.max(1_000, nextMidnight - now.getTime()))
+  }
+  scheduleJournalRollover()
+  app.once('before-quit', () => {
+    if (journalRolloverTimer) clearTimeout(journalRolloverTimer)
+    try {
+      journal.flushDailyRollovers()
+      journal.flushSessionSummaries('close')
+    } catch (err) {
+      console.warn('[journal] session flush failed:', err instanceof Error ? err.message : err)
+    }
+  })
   const projects = createProjects(db)
   const projectGroups = createProjectGroups(db)
   const undoStack = createUndoStack(db)
@@ -389,6 +417,20 @@ app.whenReady().then(() => {
   bindMainWindowLifecycle(mainWindow)
   bindUiScaleToWindow(mainWindow, settings)
   initNotificationWindow(() => mainWindow)
+  const reminderService = createReminderService({
+    reminders,
+    chats,
+    chatSessions,
+    settings,
+    getMainWindow: () => mainWindow
+  })
+  bindReminderToastActions({
+    snooze: (id) => { reminderService.snooze(id) },
+    dismiss: (id) => { reminderService.dismiss(id) },
+    open: (id) => { reminderService.open(id) }
+  })
+  app.once('before-quit', () => reminderService.stop())
+  reminderService.start()
 
   // Release notes + updater IPC до первого кадра renderer (WhatsNew / Update* на mount).
   registerReleaseNotesIpc()
@@ -521,6 +563,7 @@ app.whenReady().then(() => {
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)
+  registerRemindersIpc(reminders, reminderService)
   registerUndoIpc(undoStack)
   registerPlansIpc(plans)
   registerWorkflowsIpc({
