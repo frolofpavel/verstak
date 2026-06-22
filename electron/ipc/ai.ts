@@ -714,19 +714,23 @@ export function registerAiIpc(deps: AiDeps): void {
       // Инспектор группирует по runId; этот маркер также даёт точку отсчёта run'а
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
       if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
-      void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.saveDecision, deps.searchMemories, deps.searchConversations, deps.connectors, agentMode, turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
-        deps.mcpClient,
-        auditFn,
-        deps.trackToolPattern,
-        chatId ? Number(chatId) : null,
-        deps.subSessions,
-        deps.sessionTodos,
-        deps.agentRuns,
-        runId,
-        deps.verifications,
-        overrides?.toolsAllow ?? null
-      ).finally(cleanup)
+      void runApiConversation({
+        sender: taggedSender, sendId, provider, tools, projectPath,
+        initialMessages: messagesWithSystem, signal: ctrl.signal,
+        recordWrite: deps.recordWrite, recordPlan: deps.recordPlan,
+        recordJournal: deps.recordJournal, readJournal: deps.readJournal,
+        saveMemory: deps.saveMemory, saveDecision: deps.saveDecision,
+        searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
+        connectors: deps.connectors, agentMode, turnsBudget,
+        skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
+        providerId, model,
+        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
+        mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
+        parentChatId: chatId ? Number(chatId) : null,
+        subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
+        agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
+        toolsAllow: overrides?.toolsAllow ?? null,
+      }).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
@@ -1103,45 +1107,61 @@ export function selectAllowedToolDefs<T extends { name: string }>(
   return mcp.length > 0 ? [...base, ...mcp] : [...base]
 }
 
-export async function runApiConversation(
-  sender: TaggedSender,
-  sendId: number,
-  provider: ChatProvider,
-  tools: ReturnType<typeof createFileTools>,
-  projectPath: string,
-  initialMessages: ChatMessage[],
-  signal: AbortSignal,
-  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void,
-  recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number },
-  recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void,
-  readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>,
-  saveMemory: AiDeps['saveMemory'],
-  saveDecision: AiDeps['saveDecision'],
-  searchMemories: AiDeps['searchMemories'],
-  searchConversations: AiDeps['searchConversations'],
+/**
+ * Контекст одного агентного прогона. Заменил 34 позиционных параметра
+ * runApiConversation — один сдвиг аргумента давал silent type-compatible bug
+ * (многие поля — опциональные функции схожих сигнатур), а fallback-рекурсия
+ * повторяла все 34 вручную. Теперь сборка одна (в ai:send), fallback = {...ctx}.
+ */
+export interface AgentRunContext {
+  sender: TaggedSender
+  sendId: number
+  provider: ChatProvider
+  tools: ReturnType<typeof createFileTools>
+  projectPath: string
+  initialMessages: ChatMessage[]
+  signal: AbortSignal
+  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
+  recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
+  recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
+  readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
+  saveMemory: AiDeps['saveMemory']
+  saveDecision: AiDeps['saveDecision']
+  searchMemories: AiDeps['searchMemories']
+  searchConversations: AiDeps['searchConversations']
   connectors: {
     list: () => Array<{ id: string; label: string; kind: string; status: string; detail?: string }>
     query: (id: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>
-  },
-  agentMode: AgentMode,
-  turnsBudget: number = DEFAULT_AGENT_TURNS,
-  skillRegistry?: AiDeps['skillRegistry'],
-  getSecretForDelegate?: AiDeps['getSecret'],
-  costGuard?: ReturnType<typeof createCostGuard>,
-  providerId?: ProviderId,
-  model?: string,
-  fallbackOpts?: FallbackOpts,
-  mcpClientRef?: McpClient,
-  appendAuditFn?: (action: string, detail: string) => void,
-  trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void,
-  parentChatId?: number | null,
-  subSessions?: AiDeps['subSessions'],
-  sessionTodos?: AiDeps['sessionTodos'],
-  agentRuns?: AgentRuns,
-  runId?: string,
-  verifications?: AiDeps['verifications'],
+  }
+  agentMode: AgentMode
+  turnsBudget?: number
+  skillRegistry?: AiDeps['skillRegistry']
+  getSecretForDelegate?: AiDeps['getSecret']
+  costGuard?: ReturnType<typeof createCostGuard>
+  providerId?: ProviderId
+  model?: string
+  fallbackOpts?: FallbackOpts
+  mcpClientRef?: McpClient
+  appendAuditFn?: (action: string, detail: string) => void
+  trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
+  parentChatId?: number | null
+  subSessions?: AiDeps['subSessions']
+  sessionTodos?: AiDeps['sessionTodos']
+  agentRuns?: AgentRuns
+  runId?: string
+  verifications?: AiDeps['verifications']
   toolsAllow?: string[] | null
-): Promise<void> {
+}
+
+export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
+  const {
+    sender, sendId, provider, tools, projectPath, initialMessages, signal,
+    recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision,
+    searchMemories, searchConversations, connectors, agentMode,
+    turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
+    providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
+    parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+  } = ctx
   const currentMessages = [...initialMessages]
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
@@ -1669,7 +1689,7 @@ export async function runApiConversation(
           // 6.2: fallback продолжает с НАКОПЛЕННОЙ истории (currentMessages с
           // проделанными tool-результатами), а не с initialMessages — иначе
           // downstream-провайдер переделывает работу и повторно пишет файлы.
-          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, currentMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, nextModel, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow)
+          return runApiConversation({ ...ctx, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
         }
       }
     }

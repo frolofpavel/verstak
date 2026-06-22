@@ -43,19 +43,25 @@ type Overrides = {
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
 
-// Позиционная сборка 34 аргументов runApiConversation.
+// Сборка AgentRunContext (один объект) для runApiConversation. Возвращаем как
+// 1-элементный массив, чтобы существующий спред `...(args() as Parameters<...>)`
+// в вызовах работал без правок (Parameters теперь = [AgentRunContext]).
 function args(dir: string, o: Overrides): unknown[] {
   const signal = new AbortController().signal
-  return [
-    makeSender(), 1, o.provider, createFileTools(dir, signal), dir,
-    o.messages ?? [{ role: 'user', content: 'hi' }], signal,
-    vi.fn(), vi.fn(() => ({ id: 1 })), vi.fn(), vi.fn(() => []),
-    vi.fn(() => ({ id: 'm' })), vi.fn(() => ({ id: 1 })), vi.fn(() => []), vi.fn(() => []),
-    { list: () => [], query: async () => ({}) }, 'bypass', 5,
-    undefined, () => null, o.costGuard, o.providerId, o.model, o.fallbackOpts,
-    undefined, undefined, undefined, null, undefined, undefined,
-    o.agentRuns, o.runId, undefined, null,
-  ]
+  const ctx = {
+    sender: makeSender(), sendId: 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
+    initialMessages: o.messages ?? [{ role: 'user', content: 'hi' }], signal,
+    recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: vi.fn(), readJournal: vi.fn(() => []),
+    saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
+    searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
+    connectors: { list: () => [], query: async () => ({}) }, agentMode: 'bypass', turnsBudget: 5,
+    skillRegistry: undefined, getSecretForDelegate: () => null, costGuard: o.costGuard,
+    providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
+    mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
+    parentChatId: null, subSessions: undefined, sessionTodos: undefined,
+    agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: null,
+  }
+  return [ctx]
 }
 
 function mockRuns() {
