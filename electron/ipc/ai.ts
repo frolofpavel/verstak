@@ -12,6 +12,7 @@ import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory } from '../ai/compact-history'
 import { estimateTokens } from '../ai/context-limits'
 import { withInitialRetry } from '../ai/with-retry'
+import { classifyProviderError } from '../ai/provider-error'
 import { createCostGuard } from '../ai/cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
@@ -1024,7 +1025,7 @@ async function runPlainConversation(
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
-      event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      event: { type: 'error', message: classifyProviderError(err).userMessage }
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
@@ -1696,7 +1697,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
-      event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      event: { type: 'error', message: classifyProviderError(err).userMessage }
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
