@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.26',
+    name: 'Verstak 1.5.26',
+    publishedAt: '2026-06-22T12:00:00Z',
+    body: '### Напоминания и журнал сессий (дизайн Ильи)\n- Напоминания: запланируй уведомление или сообщение в чат на нужное время — всплывёт отдельным окном поверх рабочего стола или придёт в чат. Новая вкладка «Напоминания».\n- Журнал сессий: переработанный журнал событий проекта — наглядная история того, что и когда делалось.\n- Системные уведомления Verstak в отдельном окне (не зависят от фокуса приложения).',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.26'
+  },
+  {
     version: '1.5.25',
     name: 'Verstak 1.5.25',
     publishedAt: '2026-06-22T12:00:00Z',
