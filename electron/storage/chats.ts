@@ -39,6 +39,19 @@ export function createChats(db: Database): Chats {
       ).all(projectPath) as ChatMessage[]
     },
     appendToSession(sessionId, projectPath, role, content) {
+      // 5.2 (review P0): один финальный assistant-ответ может прийти в append
+      // дважды (active-чат Chat.tsx + snapshot-путь applyEventToChat) — голый
+      // INSERT плодил дубль. Дедупим ПОВТОР того же assistant-сообщения, если
+      // последнее сообщение сессии идентично. User не трогаем — там нет
+      // двойного персиста, а намеренный повтор пользователя терять нельзя.
+      if (role === 'assistant') {
+        const last = db.prepare(
+          'SELECT role, content FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT 1'
+        ).get(sessionId) as { role: string; content: string } | undefined
+        if (last && last.role === 'assistant' && last.content === content) {
+          return
+        }
+      }
       const now = Date.now()
       db.prepare(
         'INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)'

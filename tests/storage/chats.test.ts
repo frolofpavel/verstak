@@ -59,4 +59,37 @@ describe('chats', () => {
     chats.appendToSession(s2.id, '/p', 'user', 'second')
     expect(chats.list('/p')).toHaveLength(2)
   })
+
+  // 5.2 (review P0): один финальный assistant-ответ может прийти в append дважды
+  // (active-чат Chat.tsx + snapshot-путь applyEventToChat) — голый INSERT плодил
+  // дубль-строки. appendToSession теперь дедупит ПОВТОР того же assistant-сообщения.
+  it('дедуп: повторный append того же assistant-ответа не плодит дубль', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db)
+    const chats = createChats(db)
+    const s = sessions.create('/p')
+    chats.appendToSession(s.id, '/p', 'assistant', 'готовый ответ')
+    chats.appendToSession(s.id, '/p', 'assistant', 'готовый ответ')
+    expect(chats.listBySession(s.id)).toHaveLength(1)
+  })
+
+  it('дедуп НЕ срабатывает на разный assistant-контент', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db)
+    const chats = createChats(db)
+    const s = sessions.create('/p')
+    chats.appendToSession(s.id, '/p', 'assistant', 'ответ 1')
+    chats.appendToSession(s.id, '/p', 'assistant', 'ответ 2')
+    expect(chats.listBySession(s.id)).toHaveLength(2)
+  })
+
+  it('user-сообщения НЕ дедупятся — намеренный повтор сохраняется', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db)
+    const chats = createChats(db)
+    const s = sessions.create('/p')
+    chats.appendToSession(s.id, '/p', 'user', 'давай')
+    chats.appendToSession(s.id, '/p', 'user', 'давай')
+    expect(chats.listBySession(s.id)).toHaveLength(2)
+  })
 })
