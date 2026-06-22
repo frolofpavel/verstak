@@ -1203,6 +1203,12 @@ export function createSshFileTools(backend: SshBackend): FileTools {
     },
     async execute(name, args) {
       if (name === 'read_file') {
+        // Безопасность (ревью): SSH-ветка обходила isForbiddenPath, который есть в
+        // локальной (1036) — секреты .env/.key/creds внутри remote-дерева утекали
+        // модели (scanText ловит лишь стандартные паттерны). Закрываем симметрично.
+        if (isForbiddenPath(String(args.path))) {
+          throw new Error(`Доступ запрещён политикой безопасности: ${String(args.path)} (secrets/credentials)`)
+        }
         const raw = await backend.readFile(String(args.path))
         const scan = scanText(raw)
         return scan.hits.length > 0
@@ -1210,13 +1216,20 @@ export function createSshFileTools(backend: SshBackend): FileTools {
           : raw
       }
       if (name === 'list_directory') {
-        return backend.listDir(String(args.path ?? '.'))
+        const entries = await backend.listDir(String(args.path ?? '.'))
+        return entries.filter(e => !isForbiddenPath(e.replace(/\/$/, '')))  // прячем секретные имена
       }
       if (name === 'write_file') {
+        if (isForbiddenPath(String(args.path))) {
+          throw new Error(`Запись запрещена политикой безопасности: ${String(args.path)} (secrets/credentials)`)
+        }
         await backend.writeFile(String(args.path), String(args.content ?? ''))
         return { ok: true }
       }
       if (name === 'apply_patch') {
+        if (isForbiddenPath(String(args.path))) {
+          throw new Error(`Запись запрещена политикой безопасности: ${String(args.path)} (secrets/credentials)`)
+        }
         const before = await backend.readFile(String(args.path))
         const anchorHash = args.anchor_hash ? String(args.anchor_hash) : undefined
         const after = applySearchReplaceBlocks(before, String(args.diff), anchorHash)

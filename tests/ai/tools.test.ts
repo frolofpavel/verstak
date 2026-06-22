@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { createFileTools } from '../../electron/ai/tools'
+import { createFileTools, createSshFileTools } from '../../electron/ai/tools'
 
 describe('file tools', () => {
   let root: string
@@ -44,5 +44,48 @@ describe('file tools', () => {
     const { stdout } = await tools.runCommand('node cyr.js')
     expect(stdout).not.toContain('�')
     expect(stdout).toContain('Привет мир')
+  })
+})
+
+// Безопасность (ревью): SSH-ветка файл-тулзов обходила isForbiddenPath, который
+// есть в локальной — секреты внутри remote-дерева утекали/перезаписывались.
+describe('createSshFileTools — isForbiddenPath guard (security)', () => {
+  function makeBackend() {
+    return {
+      readFile: vi.fn(async () => 'SECRET_CONTENT'),
+      writeFile: vi.fn(async () => {}),
+      listDir: vi.fn(async () => ['.env', 'src/', 'creds.json', 'app.ts', 'config.key']),
+      runCommand: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    }
+  }
+  it('read_file на секретном пути бросает, backend.readFile НЕ вызывается', async () => {
+    const b = makeBackend(); const t = createSshFileTools(b as never)
+    await expect(t.execute('read_file', { path: '.env' })).rejects.toThrow(/политикой безопасности/)
+    await expect(t.execute('read_file', { path: 'deploy/creds.json' })).rejects.toThrow()
+    await expect(t.execute('read_file', { path: '.ssh/id_ed25519' })).rejects.toThrow()
+    await expect(t.execute('read_file', { path: 'secret.key' })).rejects.toThrow()
+    expect(b.readFile).not.toHaveBeenCalled()
+  })
+  it('write_file/apply_patch на секретном пути бросают, backend.writeFile НЕ вызывается', async () => {
+    const b = makeBackend(); const t = createSshFileTools(b as never)
+    await expect(t.execute('write_file', { path: '.env', content: 'x' })).rejects.toThrow(/запрещена политикой/)
+    await expect(t.execute('apply_patch', { path: 'creds.json', diff: '' })).rejects.toThrow(/запрещена политикой/)
+    expect(b.writeFile).not.toHaveBeenCalled()
+  })
+  it('list_directory прячет секретные имена', async () => {
+    const b = makeBackend(); const t = createSshFileTools(b as never)
+    const out = await t.execute('list_directory', { path: '.' }) as string[]
+    expect(out).not.toContain('.env')
+    expect(out).not.toContain('creds.json')
+    expect(out).not.toContain('config.key')
+    expect(out).toContain('app.ts')
+    expect(out).toContain('src/')
+  })
+  it('обычный файл — читается и пишется без блокировки', async () => {
+    const b = makeBackend(); const t = createSshFileTools(b as never)
+    await t.execute('read_file', { path: 'src/app.ts' })
+    expect(b.readFile).toHaveBeenCalled()
+    await t.execute('write_file', { path: 'src/app.ts', content: 'x' })
+    expect(b.writeFile).toHaveBeenCalled()
   })
 })
