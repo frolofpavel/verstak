@@ -9,6 +9,7 @@ import { Chat } from './components/Chat'
 import { TasksView } from './components/TasksView'
 import { FilesView } from './components/FilesView'
 import { JournalView } from './components/JournalView'
+import { RemindersView } from './components/RemindersView'
 import { PlanView } from './components/PlanView'
 import { FeedbackView } from './components/FeedbackView'
 import { StubView } from './components/StubView'
@@ -31,6 +32,7 @@ import { ArtifactPreviewContainer } from './components/ArtifactPreview'
 import { TerminalErrorToast } from './components/TerminalErrorToast'
 import { useProject } from './store/projectStore'
 import { useSkills as useSkillsStore } from './store/skillStore'
+import { readAgentMode, writeAgentMode } from './hooks/useAgentMode'
 
 const AUTH_CACHE_KEY = 'gg.auth_completed'
 
@@ -170,9 +172,33 @@ export function App() {
     const offHelp = window.api.notify.onOpenHelp(() => {
       void useProject.getState().openHelpChat()
     })
+    const offReminders = window.api.notify.onOpenReminders((projectPath) => {
+      void (async () => {
+        if (projectPath && (!path || norm(path) !== norm(projectPath))) {
+          await setProject(projectPath)
+        }
+        useProject.getState().setActiveView('reminders')
+      })()
+    })
+    const offChat = window.api.notify.onOpenChat(({ projectPath, chatId }) => {
+      void (async () => {
+        if (!chatId) return
+        if (projectPath && (!path || norm(path) !== norm(projectPath))) {
+          await setProject(projectPath)
+        }
+        const store = useProject.getState()
+        if (!store.chatSessions.some(c => c.id === chatId)) {
+          await store.refreshChatSessions()
+        }
+        await useProject.getState().switchChatSession(chatId)
+        useProject.getState().setActiveView('chat')
+      })()
+    })
     return () => {
       offProject()
       offHelp()
+      offReminders()
+      offChat()
     }
   }, [authDone, path, setProject])
   // Panels require an open project (the terminal/file tree are project-scoped).
@@ -205,10 +231,11 @@ export function App() {
         e.preventDefault()
         const modes: Array<'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'> = ['ask', 'accept-edits', 'plan', 'auto', 'bypass']
         void (async () => {
-          const current = (await window.api.settings.getKey('agent_mode')) as typeof modes[number] | null
+          const state = useProject.getState()
+          const current = await readAgentMode(state.activeChatId, state.helpMode)
           const idx = modes.indexOf(current ?? 'ask')
           const next = modes[(idx + 1) % modes.length]
-          await window.api.settings.setKey('agent_mode', next)
+          await writeAgentMode(state.activeChatId, state.helpMode, next)
         })()
       } else if (e.key === 'Escape' && e.shiftKey) {
         // Shift+Esc = emergency abort. Tell main to kill every active stream
@@ -354,6 +381,7 @@ export function App() {
         </div>
         {activeView === 'tasks' && <TasksView />}
         {activeView === 'journal' && <JournalView />}
+        {activeView === 'reminders' && <RemindersView />}
         {activeView === 'inspector' && (
           <Suspense fallback={<ViewFallback />}><AgentRunInspector /></Suspense>
         )}

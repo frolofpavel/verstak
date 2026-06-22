@@ -20,8 +20,8 @@ function clampChatMenuPos(x: number, y: number): { left: number; top: number } {
 
 function ChatNavSection() {
   const t = useT()
-  const { chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject()
-  const [open, setOpen] = useState(true)
+  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject()
+  const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [contextMenu, setContextMenu] = useState<ChatContextMenuState | null>(null)
@@ -30,6 +30,10 @@ function ChatNavSection() {
   const editOriginalRef = useRef('')
 
   const isActiveSection = activeView === 'chat'
+
+  useEffect(() => {
+    setOpen(false)
+  }, [path])
 
   useEffect(() => {
     if (!open && editingId != null) void commitEdit()
@@ -376,7 +380,7 @@ function NavButtons({ items, activeView, onSelect }: {
 }
 
 const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'tasks-manager', 'inspector', 'agents', 'decisions'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'reminders', 'tasks-manager', 'inspector', 'agents', 'decisions'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -519,6 +523,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
 
   const CONTROL_NAV: NavItem[] = [
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
+    { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },

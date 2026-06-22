@@ -5,7 +5,6 @@ import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
-import { TierRecommendation } from './TierRecommendation'
 import { ModePicker } from './ModePicker'
 import { IntensityToggle } from './IntensityToggle'
 import { VoiceInput } from './VoiceInput'
@@ -20,8 +19,8 @@ import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
-import { useAgentMode } from '../hooks/useAgentMode'
-import type { Attachment, Suggestion } from '../types/api'
+import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
+import type { Attachment, ChatMessage, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
@@ -92,6 +91,12 @@ function notifyAgentFinished(
     projectPath: projectPath ?? undefined,
     isError
   })
+}
+
+function compactMessagesForSend(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .filter(m => m.content.trim())
+    .map(m => ({ role: m.role, content: m.content }))
 }
 
 const MAX_BYTES_PER_FILE = 5 * 1024 * 1024  // 5 MB
@@ -194,7 +199,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const id = window.setInterval(() => setTickNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [isStreaming, streamStartedAt])
-  const { mode: agentMode, setMode: setAgentMode } = useAgentMode()
+  const { mode: agentMode, setMode: setAgentMode } = useAgentMode(activeChatId, helpMode)
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
   const activeChatTitle = isHelpChat
     ? t.help.emptyTitle
@@ -287,6 +292,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const pipelineExecuteSendIdRef = useRef<number | null>(null)
   const [pipelineWizardOpen, setPipelineWizardOpen] = useState(false)
   const [pipelineInitialBrief, setPipelineInitialBrief] = useState<PipelineBrief | undefined>(undefined)
+  const [composerSettingsOpen, setComposerSettingsOpen] = useState(false)
+  const composerSettingsRef = useRef<HTMLDivElement | null>(null)
   const activePipeline = useProject(s => s.activePipeline)
   const [undoCount, setUndoCount] = useState(0)
   // Cross-verify: результат авто-ревью другим провайдером после изменения файлов.
@@ -333,6 +340,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const showVisionBanner = hasImageAttachments
     && !providerSupportsVision(provider.id)
     && !visionBannerDismissed
+
+  useEffect(() => {
+    if (!composerSettingsOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (composerSettingsRef.current?.contains(e.target as Node)) return
+      setComposerSettingsOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setComposerSettingsOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [composerSettingsOpen])
 
   useEffect(() => {
     if (!hasImageAttachments) setVisionBannerDismissed(false)
@@ -1364,14 +1388,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if (isFirstUserMessage) {
         void store.autoTitleChatSession(activeChatId, text || summary)
       }
-      // log the start of a session — title is the first 80 chars of the request
-      const journalTitle = text.length > 80 ? text.slice(0, 80) + '…' : (text || 'Сообщение с вложением')
-      void window.api.journal.append(path, 'session', journalTitle,
-        userAttachments.length > 0 ? `Вложений: ${userAttachments.length} (${userAttachments.map(a => a.name).join(', ')})` : null)
     }
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
+    const sendAgentMode = await readAgentMode(activeChatId, false)
     // Skill override: если активен скилл — system prompt берётся из его тела.
     // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
     // несовместим с тем что предлагает скилл. Например: скилл говорит 'claude'
@@ -1405,6 +1426,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
         ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
         effortLevel: useProject.getState().effortLevel,
+        agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {})
       })
     } else if (resumeFromRunId) {
@@ -1412,15 +1434,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       const effort = useProject.getState().effortLevel
       sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
         resumeFromRunId,
+        agentMode: sendAgentMode,
         ...(effort !== 'standard' ? { effortLevel: effort } : {})
       })
     } else {
       const effort = useProject.getState().effortLevel
-      if (effort !== 'standard') {
-        sendId = await window.api.ai.sendWithOverrides(allMessages, path, { effortLevel: effort })
-      } else {
-        sendId = await window.api.ai.send(allMessages, path)
-      }
+      sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
+        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+        agentMode: sendAgentMode
+      })
     }
     currentSendIdRef.current = sendId
     if (pipelineAutoSendStepRef.current === 'execute') {
@@ -1433,6 +1455,97 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       registerChatSendOwner(sendId, activeChatId, false)
     }
   }
+
+  useEffect(() => {
+    const off = window.api.notify.onSendChatReminder((payload) => {
+      void (async () => {
+        const text = payload.text?.trim()
+        if (!text || !payload.projectPath || !payload.chatId) return
+
+        try {
+          let store = useProject.getState()
+          if (!store.path || normalizeProjectPath(store.path) !== normalizeProjectPath(payload.projectPath)) {
+            await store.setProject(payload.projectPath)
+          }
+
+          store = useProject.getState()
+          if (!store.chatSessions.some(c => c.id === payload.chatId)) {
+            await store.refreshChatSessions()
+          }
+
+          store = useProject.getState()
+          if (!store.chatSessions.some(c => c.id === payload.chatId)) {
+            console.warn('[reminders] target chat not found:', payload.chatId)
+            return
+          }
+
+          const isActiveTarget = !store.helpMode && store.activeChatId === payload.chatId
+          let priorMessages: ChatMessage[] | undefined = isActiveTarget
+            ? store.messages
+            : store.chatSnapshots[payload.chatId]?.messages
+
+          if (!priorMessages) {
+            const history = await window.api.chats.list(payload.chatId)
+            priorMessages = history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt }))
+            useProject.getState().seedChatSnapshot(payload.chatId, priorMessages)
+          }
+
+          const isFirstUserMessage = !priorMessages.some(m => m.role === 'user' && m.content.trim())
+          const history = compactMessagesForSend(priorMessages)
+          const userMsg: ChatMessage = { role: 'user', content: text, source: 'reminder' }
+
+          await window.api.chats.append(payload.chatId, payload.projectPath, 'user', text)
+
+          store = useProject.getState()
+          if (isActiveTarget) {
+            store.clearActivity()
+            setExhausted(null)
+            setCrossVerify(null)
+            armAutoScrollForOutgoing()
+            store.addMessage(userMsg)
+            store.addMessage({ role: 'assistant', content: '' })
+            store.setStreaming(true)
+          } else {
+            store.pushUserToChatSnapshot(payload.chatId, text, { source: 'reminder' })
+          }
+
+          if (isFirstUserMessage) {
+            void useProject.getState().autoTitleChatSession(payload.chatId, text)
+          }
+
+          const effort = useProject.getState().effortLevel
+          const sendId = await window.api.ai.sendWithOverrides(
+            [...history, userMsg],
+            payload.projectPath,
+            {
+              ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+              agentMode: await readAgentMode(payload.chatId, false)
+            },
+            String(payload.chatId)
+          )
+
+          if (sendId > 0) {
+            useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: payload.chatId })
+            if (isActiveTarget) {
+              currentSendIdRef.current = sendId
+            }
+          } else if (isActiveTarget) {
+            useProject.getState().updateLastAssistant('\n\n[Ошибка: провайдер недоступен]')
+            useProject.getState().setStreaming(false)
+          } else {
+            useProject.getState().applyEventToChat(payload.chatId, {
+              type: 'error',
+              message: 'Провайдер недоступен'
+            })
+          }
+
+        } catch (err) {
+          console.error('[reminders] failed to send chat reminder:', err)
+        }
+      })()
+    })
+    return off
+  }, [])
 
   async function stop() {
     const id = currentSendIdRef.current
@@ -1836,6 +1949,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                     : null
                 }
               </div>
+              {m.role === 'user' && m.source === 'reminder' && (
+                <div className="gg-msg-source-note">Отправлено автоматически из раздела Напоминания</div>
+              )}
               {m.content && !isStreamingAssistant && (
                 <MessageActions text={m.content} />
               )}
@@ -2083,7 +2199,24 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           />
         </div>
         <div className="gg-composer-hint">
-          {isStreaming && input.trim() && (
+          {isStreaming && input.trim() ? (
+            <div className="gg-composer-insights">
+              {isStreaming && input.trim() && (
+                <div className="gg-composer-streaming-hint">
+                  <span>
+                    <kbd className="gg-kbd">Ctrl+Enter</kbd>
+                    {' вЂ” '}
+                    {t.chat.streamingAppendHint}
+                    {' В· '}
+                    <kbd className="gg-kbd">Enter</kbd>
+                    {' вЂ” '}
+                    {t.chat.streamingQueueHint}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {false && isStreaming && input.trim() && (
             <div className="gg-composer-streaming-hint">
               <span>
                 <kbd className="gg-kbd">Ctrl+Enter</kbd>
@@ -2161,6 +2294,64 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               <DevTaskBadge />
             </div>
             <div className="gg-composer-meta-cluster gg-composer-meta-cluster--end">
+              <div className="gg-chat-settings-wrap" ref={composerSettingsRef}>
+                <button
+                  type="button"
+                  className={`gg-chat-settings-btn ${composerSettingsOpen ? 'is-active' : ''}`}
+                  onClick={() => setComposerSettingsOpen(v => !v)}
+                  title="Инструменты чата"
+                  aria-expanded={composerSettingsOpen}
+                >
+                  <span>Инструменты чата</span>
+                </button>
+                {composerSettingsOpen && (
+                  <div className="gg-chat-settings-popover">
+                    <div className="gg-chat-settings-grid">
+                      <div className="gg-chat-settings-item">
+                        <span className="gg-chat-settings-label">Режим</span>
+                        <ModePicker
+                          mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
+                          onChange={setAgentMode}
+                          locked={isHelpChat}
+                        />
+                      </div>
+                      <div className="gg-chat-settings-item">
+                        <span className="gg-chat-settings-label">Модель</span>
+                        <ModelPicker onOpenSettings={onOpenSettings} />
+                      </div>
+                      {!isHelpChat && (
+                        <div className="gg-chat-settings-item">
+                          <span className="gg-chat-settings-label">Скиллы</span>
+                          <ComposerToolsMenu onInject={injectTemplate} />
+                        </div>
+                      )}
+                      {!isHelpChat && !activePipeline && (
+                        <div className="gg-chat-settings-item">
+                          <span className="gg-chat-settings-label">Pipeline</span>
+                          <button
+                            type="button"
+                            className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
+                            onClick={() => {
+                              setComposerSettingsOpen(false)
+                              setPipelineWizardOpen(true)
+                            }}
+                            disabled={isCliProvider(provider.id)}
+                            title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
+                          >
+                            ▶ Pipeline
+                          </button>
+                        </div>
+                      )}
+                      {provider.id.endsWith('-cli') && (
+                        <div className="gg-chat-settings-item">
+                          <span className="gg-chat-settings-label">CLI</span>
+                          <CliComposerBadge hint={t.chat.cliStrip} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               {!isHelpChat && !activePipeline && (
                 <button
                   type="button"
@@ -2188,7 +2379,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               {provider.id.endsWith('-cli') && (
                 <CliComposerBadge hint={t.chat.cliStrip} />
               )}
-              <TierRecommendation input={input} />
             </div>
           </div>
         </div>

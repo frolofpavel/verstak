@@ -4,6 +4,7 @@ import { useProvider } from '../hooks/useProvider'
 import type { ProviderDescriptorDTO } from '../types/api'
 import { Markdown } from './Markdown'
 import { useT } from '../i18n'
+import { readAgentMode } from '../hooks/useAgentMode'
 
 interface SideChatProps {
   /** Set after the first user message creates a chat session in the sidebar. */
@@ -200,7 +201,7 @@ export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProp
     const sendId = await window.api.ai.sendWithOverrides(
       [...history, userMsg],
       path,
-      { providerId: sideProviderId ?? undefined, model: sideModel },
+      { providerId: sideProviderId ?? undefined, model: sideModel, agentMode: await readAgentMode(chatId, false) },
       String(chatId)
     )
     sendIdRef.current = sendId

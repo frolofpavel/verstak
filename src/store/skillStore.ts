@@ -45,14 +45,6 @@ export const useSkills = create<SkillState>((set, get) => ({
   },
   setActiveSkill(id) {
     set({ activeSkillId: id })
-    // B2: скилл с default_mode переключает режим агента (sticky). agent_mode —
-    // глобальная настройка; useAgentMode (UI) и ai.ts (исполнение) читают её из
-    // settings. Раньше default_mode парсился, но нигде не применялся — скилл,
-    // заявляющий plan, не активировал заявленную безопасность.
-    if (id) {
-      const skill = get().skills.find(s => s.id === id)
-      if (skill?.default_mode) void window.api.settings.setKey('agent_mode', skill.default_mode)
-    }
   },
   resolve(idOrSlash) {
     const s = get().skills

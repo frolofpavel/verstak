@@ -14,7 +14,7 @@ export interface DependencyMapDTO {
   files: Record<string, { imports: string[]; importedBy: string[]; exports: string[] }>
 }
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
-export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
+export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; createdAt: number }
 export type ChatKind = 'main' | 'review' | 'help'
 export interface ChatSession {
@@ -31,6 +31,22 @@ export interface ChatSession {
 export interface Task { id: number; text: string; done: boolean; createdAt: number; doneAt: number | null }
 export type JournalKind = 'manual' | 'session' | 'tool' | 'note'
 export interface JournalEntry { id: number; kind: JournalKind; title: string; detail: string | null; createdAt: number }
+export type ReminderTarget = 'notification' | 'chat'
+export type ReminderStatus = 'pending' | 'delivered' | 'dismissed'
+export interface Reminder {
+  id: number
+  projectPath: string
+  title: string
+  body: string | null
+  dueAt: number
+  target: ReminderTarget
+  chatId: number | null
+  status: ReminderStatus
+  createdAt: number
+  updatedAt: number
+  deliveredAt: number | null
+  dismissedAt: number | null
+}
 export interface UndoEntry { id: number; filePath: string; beforeContent: string | null; afterContent: string | null; createdAt: number }
 export type PlanStatus = 'draft' | 'running' | 'done' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
@@ -205,6 +221,9 @@ declare global {
         playSound: (opts?: { isError?: boolean }) => Promise<boolean>
         onOpenProject: (cb: (projectPath: string) => void) => () => void
         onOpenHelp: (cb: (projectPath?: string) => void) => () => void
+        onOpenReminders: (cb: (projectPath?: string) => void) => () => void
+        onOpenChat: (cb: (payload: { projectPath?: string; chatId: number }) => void) => () => void
+        onSendChatReminder: (cb: (payload: { reminderId: number; projectPath: string; chatId: number; text: string }) => void) => () => void
       }
       voice: {
         status: () => Promise<{ ready: boolean; loading: boolean; label: string }>
@@ -305,10 +324,22 @@ declare global {
       }
       journal: {
         list: (projectPath: string, limit?: number) => Promise<JournalEntry[]>
+        currentSession: (projectPath: string) => Promise<JournalEntry | null>
         append: (projectPath: string, kind: JournalKind, title: string, detail?: string | null) => Promise<JournalEntry>
-        updateManual: (id: number, title: string, detail?: string | null) => Promise<JournalEntry | null>
+      }
+      reminders: {
+        list: (projectPath: string, limit?: number) => Promise<Reminder[]>
+        create: (input: {
+          projectPath: string
+          title: string
+          body?: string | null
+          dueAt: number
+          target: ReminderTarget
+          chatId?: number | null
+        }) => Promise<Reminder>
+        snooze: (id: number, minutes?: number) => Promise<Reminder | null>
+        dismiss: (id: number) => Promise<Reminder | null>
         remove: (id: number) => Promise<void>
-        clear: (projectPath: string) => Promise<number>
       }
       undo: {
         list: (projectPath: string) => Promise<UndoEntry[]>

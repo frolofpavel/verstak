@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Skill } from '../../src/types/api'
 
-/**
- * B2: скилл с default_mode (например receivables → plan) раньше НЕ переключал
- * режим агента — заявленная скиллом безопасность не активировалась. Теперь
- * setActiveSkill пишет agent_mode в settings (sticky; useAgentMode/ai.ts читают оттуда).
- */
 const setKey = vi.fn(async () => {})
 const windowStub = { api: { settings: { setKey } } }
 vi.stubGlobal('window', windowStub)
@@ -16,17 +11,18 @@ function skill(partial: Partial<Skill>): Skill {
   return { id: 'x', name: 'X', source: 'built-in', systemPrompt: '', ...partial } as unknown as Skill
 }
 
-describe('skillStore setActiveSkill — применяет default_mode (B2)', () => {
+describe('skillStore setActiveSkill', () => {
   beforeEach(() => {
     vi.stubGlobal('window', windowStub)
     setKey.mockClear()
     useSkills.setState({ activeSkillId: null, skills: [] }, false)
   })
 
-  it('скилл с default_mode → пишет agent_mode в settings', () => {
+  it('скилл с default_mode не пишет глобальный agent_mode', () => {
     useSkills.setState({ skills: [skill({ id: 'receivables', default_mode: 'plan' })] }, false)
     useSkills.getState().setActiveSkill('receivables')
-    expect(setKey).toHaveBeenCalledWith('agent_mode', 'plan')
+    expect(useSkills.getState().activeSkillId).toBe('receivables')
+    expect(setKey).not.toHaveBeenCalled()
   })
 
   it('скилл без default_mode → режим не трогается', () => {

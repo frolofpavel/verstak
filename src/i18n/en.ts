@@ -109,6 +109,7 @@ export const en = {
     chat: 'Chat',
     tasks: 'Checklist',
     journal: 'Journal',
+    reminders: 'Reminders',
     plan: 'Plan',
     skills: 'Skills',
     browser: 'Browser',
