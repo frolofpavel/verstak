@@ -439,13 +439,37 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     void get().loadActivePipeline(path)
   },
   closeProject: () => set({
+    // 5.3 (review P0): нет проекта = чистый лист. Раньше сбрасывалась лишь часть
+    // полей → sendOwners/helpMode/sessions/snapshots/preflights/subagentRuns/
+    // reviews утекали в следующий открытый проект. Полный сброс эфемерного
+    // состояния сессии/чата (projectList/composerDrafts — кросс-проектные, не трогаем).
     path: null,
     tree: [],
     messages: [],
-    activity: [],
+    isStreaming: false,
+    streamStartedAt: null,
     pendingWrites: [],
     pendingCommand: null,
+    activity: [],
+    preflights: [],
+    subagentRuns: [],
+    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+    runningPlanStep: null,
+    activeChatId: null,
+    chatSessions: [],
+    chatSnapshots: {},
+    sessions: {},
+    sendOwners: {},
+    reviews: {},
+    openedReviewId: null,
+    touchedFiles: {},
+    checkpointId: null,
+    artifacts: [],
+    resumableRuns: [],
     activePipeline: null,
+    activeDevTaskId: null,
+    devTask: null,
+    helpMode: false,
   }),
   refreshProjectList: async () => {
     const projectList = await window.api.projects.list()

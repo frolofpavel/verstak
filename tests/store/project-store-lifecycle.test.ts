@@ -176,3 +176,39 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.runningPlanStep).toBe(a.runningPlanStep)
   })
 })
+
+// 5.3 (review P0): closeProject сбрасывал лишь часть полей → sendOwners/helpMode/
+// sessions/snapshots/preflights/subagentRuns/reviews утекали в следующий открытый
+// проект. Нет проекта = чистый лист.
+describe('closeProject — полный сброс эфемерного состояния (5.3)', () => {
+  it('очищает sendOwners/helpMode/sessions/snapshots/preflights/subagentRuns/reviews', () => {
+    useProject.setState({
+      path: 'C:/proj',
+      sendOwners: { 1: { kind: 'chat', chatId: 5 } },
+      helpMode: true,
+      sessions: { 'C:/proj': distinctiveBundle('S') },
+      chatSnapshots: { 2: distinctiveBundle('C') },
+      subagentRuns: [{ callId: 'sr1', label: 'l', task: 't', status: 'running' }],
+      reviews: { 9: { reviewChatId: 9, parentChatId: 1, providerId: 'grok', model: null, content: '', status: 'streaming', createdAt: 1, noteCount: -1, findings: [], accepted: [] } },
+      openedReviewId: 9,
+      activeChatId: 3,
+      pendingWrites: [{ callId: 'w', path: 'a', before: '', after: 'b' }],
+    }, false)
+    useProject.getState().pushPreflight({ callId: 'p1', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] })
+
+    useProject.getState().closeProject()
+
+    const st = useProject.getState()
+    expect(st.path).toBeNull()
+    expect(st.sendOwners).toEqual({})
+    expect(st.helpMode).toBe(false)
+    expect(st.sessions).toEqual({})
+    expect(st.chatSnapshots).toEqual({})
+    expect(st.preflights).toEqual([])
+    expect(st.subagentRuns).toEqual([])
+    expect(st.reviews).toEqual({})
+    expect(st.openedReviewId).toBeNull()
+    expect(st.activeChatId).toBeNull()
+    expect(st.pendingWrites).toEqual([])
+  })
+})
