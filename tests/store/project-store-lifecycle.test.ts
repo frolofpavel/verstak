@@ -126,6 +126,31 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.chatSnapshots[2]).toBeUndefined()
   })
 
+  // review fix: ветка restored не сбрасывала top-level поля (touchedFiles/checkpointId/
+  // artifacts/previewArtifactId) — они утекали от уходящего чата. Особенно опасен
+  // checkpointId: откат снёс бы правки относительно ЧУЖОЙ отметки.
+  it('restore сбрасывает per-chat top-level поля, не утекая от уходящего чата', async () => {
+    const saved = distinctiveBundle('B')
+    useProject.setState({
+      activeChatId: 1,
+      chatSnapshots: { 2: saved },
+      // состояние УХОДЯЩЕГО чата 1 — НЕ должно протечь в чат 2:
+      touchedFiles: { 'a.ts': { before: '', after: 'x' } },
+      checkpointId: 999,
+      artifacts: [{ id: 'art-A', kind: 'html', title: 't', content: 'c', createdAt: 1 }],
+      previewArtifactId: 'art-A',
+    } as never, false)
+
+    await useProject.getState().switchChatSession(2)
+
+    const st = useProject.getState()
+    expect(st.activeChatId).toBe(2)
+    expect(st.touchedFiles).toEqual({})
+    expect(st.checkpointId).toBeNull()
+    expect(st.artifacts).toEqual([])
+    expect(st.previewArtifactId).toBeNull()
+  })
+
   it('переключение на чат БЕЗ снапшота даёт чистое состояние + гидратацию из БД', async () => {
     listSpy.mockResolvedValueOnce([{ role: 'user', content: 'из БД', createdAt: 7 }])
     useProject.setState({

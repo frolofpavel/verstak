@@ -60,6 +60,8 @@ export async function revertToCheckpoint(
       })
     }
   }
+  // Чекпоинт израсходован — снимаем защиту от prune (review fix #4).
+  stack.clearProtection(projectPath)
   // Re-push the failed ones so the user can see / retry
   for (const f of failed) {
     stack.push(projectPath, f.filePath, f.before, f.after)
@@ -73,7 +75,7 @@ export async function revertToCheckpoint(
 export function registerUndoIpc(stack: UndoStack): void {
   ipcMain.handle('undo:list', (_e, projectPath: string) => stack.list(projectPath))
   ipcMain.handle('undo:count', (_e, projectPath: string) => stack.count(projectPath))
-  ipcMain.handle('undo:clear', (_e, projectPath: string) => stack.clear(projectPath))
+  ipcMain.handle('undo:clear', (_e, projectPath: string) => { stack.clearProtection(projectPath); return stack.clear(projectPath) })
 
   /**
    * Snap a checkpoint at the current top of the undo stack. Returns the id
@@ -83,7 +85,11 @@ export function registerUndoIpc(stack: UndoStack): void {
    */
   ipcMain.handle('undo:checkpoint', (_e, projectPath: string) => {
     const list = stack.list(projectPath)
-    return list.length > 0 ? list[0].id : 0
+    const id = list.length > 0 ? list[0].id : 0
+    // Защитить все будущие записи этой сессии (id > id) от prune, чтобы откат к
+    // чекпоинту был полным даже при >50 правках (review fix #4).
+    stack.protectFrom(projectPath, id)
+    return id
   })
 
   /**

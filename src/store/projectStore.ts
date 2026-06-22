@@ -598,7 +598,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         ...restoreBundle(restored),
         activeChatId: id,
         chatSnapshots: nextSnapshots,
-        openedReviewId: null
+        openedReviewId: null,
+        // Эти поля НЕ входят в bundle (top-level стора) — без явного сброса они
+        // утекают от предыдущего активного чата (артефакты/маркеры/checkpoint/preview).
+        // Особенно опасен checkpointId: откат снёс бы правки относительно ЧУЖОЙ отметки.
+        // Симметрично else-ветке ниже (review fix).
+        touchedFiles: {},
+        checkpointId: null,
+        artifacts: [],
+        previewArtifactId: null
       })
     } else {
       set({
@@ -615,7 +623,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         openedReviewId: null,
         touchedFiles: {},
         checkpointId: null,
-        artifacts: []
+        artifacts: [],
+        previewArtifactId: null
       })
       void (async () => {
         const history = await window.api.chats.list(id)
