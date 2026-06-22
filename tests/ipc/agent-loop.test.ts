@@ -123,6 +123,53 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(recordSpy).toHaveBeenCalledWith('claude', 'claude-opus-4-5', 1000, 1000, 0)
   }, 15000)
 
+  // 6.2 (ревью + конкурентный разбор): fallback ПОСЛЕ накопленной работы должен
+  // получить currentMessages (с проделанными tool-результатами), а не initialMessages.
+  // Иначе downstream-провайдер начинает с нуля → переделывает = повторно пишет файлы.
+  it('fallback получает накопленную историю (currentMessages), не исходную (6.2)', async () => {
+    const runs = mockRuns()
+    // Провайдер A: turn 1 — read_file (накапливает assistant+tool-результат), turn 2 — падает.
+    let aTurn = 0
+    const failing: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-api'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        aTurn++
+        if (aTurn === 1) {
+          yield { type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'foo.txt' } } }
+          yield { type: 'done' }
+        } else {
+          throw new Error('503 Service Unavailable')
+        }
+      },
+    }
+    // Fallback-провайдер каптурит полученную историю.
+    let captured: ChatMessage[] | null = null
+    const fallback: ChatProvider = {
+      id: 'claude', name: 'claude', models: ['claude'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        captured = messages
+        yield { type: 'text', text: 'ответ от fallback' }
+        yield { type: 'done' }
+      },
+    }
+    const fallbackOpts = {
+      getNextProvider: () => fallback,
+      getProviderModel: () => 'claude-opus-4-5',
+      configuredProviders: new Set(['gemini-api', 'claude']),
+      triedProviders: new Set(['gemini-api']),
+    }
+    await runApiConversation(...(args(dir, {
+      provider: failing, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', fallbackOpts,
+      messages: [{ role: 'user', content: 'сделай' }],
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(captured).not.toBeNull()
+    // С багом fallback получил бы только [{user:'сделай'}] (длина 1, без assistant).
+    expect(captured!.length).toBeGreaterThan(1)
+    expect(captured!.some(m => m.role === 'assistant')).toBe(true)
+  }, 15000)
+
   // #12: принятые propose_edits попадают в filesTouched → finish.filesCount > 0.
   it('propose_edits (accepted) → filesTouched учтён в finish', async () => {
     const runs = mockRuns()

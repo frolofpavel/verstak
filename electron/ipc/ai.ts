@@ -1666,7 +1666,10 @@ export async function runApiConversation(
           // handedOff. verifications/toolsAllow — capability-фильтр (M4) и индексация
           // attest обязаны действовать и при фолбэке.
           handedOff = true
-          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, nextModel, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow)
+          // 6.2: fallback продолжает с НАКОПЛЕННОЙ истории (currentMessages с
+          // проделанными tool-результатами), а не с initialMessages — иначе
+          // downstream-провайдер переделывает работу и повторно пишет файлы.
+          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, currentMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, nextModel, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn, parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow)
         }
       }
     }
