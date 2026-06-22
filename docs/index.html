@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verstak — AI-агент для кода под вашим контролем</title>
+<meta name="description" content="Verstak — десктопный AI-помощник для кода. 18 провайдеров, полный контроль, работает локально без VPN. Скачайте установщик для Windows.">
+<meta property="og:title" content="Verstak — AI-агент для кода">
+<meta property="og:description" content="Десктопный AI-помощник для кода. 18 провайдеров, контроль, без VPN. Скачать для Windows.">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#13171c; --panel2:#1a1f26; --line:#262d36;
+    --txt:#e8edf2; --mut:#9aa7b4; --accent:#f97316; --accent2:#fb923c; --ok:#34d399;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Inter',sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(1100px 520px at 50% -8%, rgba(249,115,22,.12), transparent 60%);
+  }
+  .wrap{max-width:1040px;margin:0 auto;padding:0 22px}
+  header{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:19px;letter-spacing:-.02em}
+  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;box-shadow:0 6px 18px rgba(249,115,22,.35)}
+  .logo svg{width:20px;height:20px}
+  .ghlink{color:var(--mut);text-decoration:none;font-size:14px;border:1px solid var(--line);padding:8px 14px;border-radius:10px;transition:.15s}
+  .ghlink:hover{color:var(--txt);border-color:#3a444f}
+
+  .hero{text-align:center;padding:54px 0 30px}
+  .badge{display:inline-block;font-size:13px;color:var(--accent2);background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.25);padding:6px 14px;border-radius:100px;margin-bottom:22px}
+  h1{font-size:clamp(34px,6vw,56px);line-height:1.05;letter-spacing:-.03em;font-weight:850;margin-bottom:18px}
+  h1 .grad{background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(16px,2.4vw,20px);color:var(--mut);max-width:600px;margin:0 auto 34px}
+
+  .cta{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .dlbtn{
+    display:inline-flex;align-items:center;gap:13px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#1a1206;
+    font-size:18px;font-weight:800;text-decoration:none;
+    padding:17px 34px;border-radius:14px;border:0;cursor:pointer;
+    box-shadow:0 12px 34px rgba(249,115,22,.4);transition:.18s;
+  }
+  .dlbtn:hover{transform:translateY(-2px);box-shadow:0 16px 42px rgba(249,115,22,.5)}
+  .dlbtn svg{width:22px;height:22px}
+  .dlmeta{font-size:14px;color:var(--mut)}
+  .dlmeta b{color:var(--txt)}
+
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:64px 0 20px}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .step .n{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);display:grid;place-items:center;font-weight:800;color:var(--accent2);margin-bottom:14px}
+  .step h3{font-size:16px;margin-bottom:6px}
+  .step p{font-size:14px;color:var(--mut)}
+
+  .section-title{text-align:center;font-size:26px;font-weight:800;letter-spacing:-.02em;margin:70px 0 28px}
+  .feats{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .feat{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .feat .ico{font-size:24px;margin-bottom:10px}
+  .feat h3{font-size:17px;margin-bottom:6px}
+  .feat p{font-size:14px;color:var(--mut)}
+
+  .req{text-align:center;color:var(--mut);font-size:14px;margin:46px 0}
+  .req b{color:var(--txt)}
+
+  footer{border-top:1px solid var(--line);margin-top:60px;padding:30px 0 50px;text-align:center;color:var(--mut);font-size:13px}
+  footer a{color:var(--accent2);text-decoration:none}
+
+  @media(max-width:720px){
+    .steps{grid-template-columns:1fr}
+    .feats{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M3 17l6-6 4 4 8-8" stroke="#1a1206" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 7h7v7" stroke="#1a1206" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      Verstak
+    </div>
+    <a class="ghlink" href="https://github.com/frolofpavel/verstak" target="_blank" rel="noopener">Для разработчиков →</a>
+  </header>
+
+  <section class="hero">
+    <span class="badge">Десктопное приложение для Windows</span>
+    <h1>AI-агент для кода<br><span class="grad">под вашим контролем</span></h1>
+    <p class="sub">18 моделей в одном окне, полная прозрачность каждого действия, работает локально — без VPN и подписок на чужие сервисы.</p>
+
+    <div class="cta">
+      <a class="dlbtn" id="dl" href="https://github.com/frolofpavel/verstak/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 19h16" stroke="#1a1206" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Скачать для Windows
+      </a>
+      <div class="dlmeta" id="meta">Бесплатно · Windows 10/11 · 64-bit</div>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="step"><div class="n">1</div><h3>Скачайте</h3><p>Нажмите кнопку выше — загрузится один установочный файл <code>.exe</code>. Больше ничего искать не нужно.</p></div>
+    <div class="step"><div class="n">2</div><h3>Запустите</h3><p>Откройте скачанный файл двойным кликом. Установщик сам распакует и поставит Verstak, создаст ярлык.</p></div>
+    <div class="step"><div class="n">3</div><h3>Готово</h3><p>Запускайте с рабочего стола как обычную программу. Добавьте свой ключ провайдера — и работайте.</p></div>
+  </section>
+
+  <h2 class="section-title">Почему Verstak</h2>
+  <section class="feats">
+    <div class="feat"><div class="ico">🔌</div><h3>18 провайдеров в одном окне</h3><p>Gemini, Claude, GPT, DeepSeek, Grok, GigaChat, YandexGPT, Qwen и другие. Упал один аккаунт — переключился, не теряя работу.</p></div>
+    <div class="feat"><div class="ico">🔍</div><h3>Полный контроль</h3><p>Видно каждое действие агента: какой файл правит, какую команду запускает. Подтверждение перед записью. Откат любой сессии одной кнопкой.</p></div>
+    <div class="feat"><div class="ico">🇷🇺</div><h3>Без VPN, локально</h3><p>Работает на вашем компьютере с российскими и мировыми моделями. Заточен под реалии 2026 — без обходных путей.</p></div>
+    <div class="feat"><div class="ico">💸</div><h3>Контроль расходов</h3><p>Счётчик стоимости в реальном времени. Свои ключи — платите провайдеру напрямую по себестоимости, без наценки посредника.</p></div>
+  </section>
+
+  <p class="req">Системные требования: <b>Windows 10 или 11</b>, 64-bit. Обновления приходят автоматически.</p>
+
+  <footer>
+    Verstak · сделано в России · <a href="https://github.com/frolofpavel/verstak" target="_blank" rel="noopener">исходный код на GitHub</a><br>
+    <span id="verline" style="opacity:.7"></span>
+  </footer>
+</div>
+
+<script>
+// Авто-определение последней версии установщика через GitHub API.
+// Кнопка всегда ведёт на свежий Verstak-Setup-*.exe, без ручного обновления ссылки.
+(function(){
+  var API='https://api.github.com/repos/frolofpavel/verstak/releases/latest';
+  fetch(API).then(function(r){return r.ok?r.json():null;}).then(function(rel){
+    if(!rel||!rel.assets) return;
+    var setup=rel.assets.find(function(a){return /Verstak-Setup-.*x64\.exe$/i.test(a.name);})
+            || rel.assets.find(function(a){return /Setup.*\.exe$/i.test(a.name);});
+    var ver=rel.tag_name||'';
+    if(setup){
+      var btn=document.getElementById('dl');
+      btn.href=setup.browser_download_url;
+      var mb=setup.size?Math.round(setup.size/1048576):null;
+      document.getElementById('meta').innerHTML='Бесплатно · Windows 10/11 · 64-bit'+(mb?' · <b>'+mb+' МБ</b>':'')+(ver?' · версия <b>'+ver.replace(/^v/,'')+'</b>':'');
+    }
+    if(ver) document.getElementById('verline').textContent='Актуальная версия: '+ver.replace(/^v/,'');
+  }).catch(function(){/* оставляем фолбэк-ссылку на releases/latest */});
+})();
+</script>
+</body>
+</html>
