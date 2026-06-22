@@ -29,6 +29,9 @@
 const MAX_ATTEMPTS = 4
 const BASE_DELAY_MS = 800
 const MAX_DELAY_MS = 8_000
+// Retry-After провайдера авторитетен, но клампим: если провайдер просит ждать
+// дольше — выгоднее исчерпать попытки и уйти на smart-fallback, чем висеть.
+const RETRY_AFTER_CAP_MS = 30_000
 
 const RETRIABLE_HTTP_CODES = new Set([408, 429, 500, 502, 503, 504, 522, 524])
 const RETRIABLE_ERR_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE', 'UND_ERR_SOCKET'])
@@ -71,6 +74,47 @@ function nextDelay(attempt: number): number {
   return Math.floor(Math.random() * exp)
 }
 
+/** Достаёт заголовок (case-insensitive) из Headers-инстанса или plain-объекта. */
+function readHeader(headers: unknown, name: string): string | null {
+  if (!headers || typeof headers !== 'object') return null
+  const get = (headers as { get?: unknown }).get
+  if (typeof get === 'function') {
+    const v = (headers as Headers).get(name)
+    return v ?? null
+  }
+  for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+    if (k.toLowerCase() === name) return v == null ? null : String(v)
+  }
+  return null
+}
+
+/**
+ * Извлекает Retry-After из ошибки провайдера → задержка в ms (или null).
+ * Поддержка: прямые поля retryAfter/retry_after (секунды-число), заголовок
+ * `retry-after` секундами (int) ИЛИ HTTP-date. Headers-инстанс и plain-объект.
+ */
+export function parseRetryAfter(err: unknown): number | null {
+  if (!err || typeof err !== 'object') return null
+  const e = err as { headers?: unknown; retryAfter?: unknown; retry_after?: unknown }
+  const direct = typeof e.retryAfter === 'number' ? e.retryAfter
+    : typeof e.retry_after === 'number' ? e.retry_after : null
+  if (direct != null && Number.isFinite(direct) && direct >= 0) return Math.round(direct * 1000)
+  const raw = readHeader(e.headers, 'retry-after')
+  if (raw == null) return null
+  const trimmed = raw.trim()
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10) * 1000   // секунды
+  const dateMs = Date.parse(trimmed)                               // HTTP-date
+  if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now())
+  return null
+}
+
+/** Задержка перед ретраем: Retry-After провайдера (клампится) выигрывает над jitter. */
+export function computeRetryDelay(attempt: number, err: unknown): number {
+  const ra = parseRetryAfter(err)
+  if (ra != null) return Math.min(RETRY_AFTER_CAP_MS, ra)
+  return nextDelay(attempt)
+}
+
 export interface RetryOptions {
   /** Имя для логов. */
   label?: string
@@ -110,7 +154,7 @@ export async function* withInitialRetry<T>(
       }
       if (!isRetriableError(err)) throw err
       if (attempt === maxAttempts - 1) throw err
-      const delayMs = nextDelay(attempt)
+      const delayMs = computeRetryDelay(attempt, err)
       opts.onRetry?.({ attempt, delayMs, error: err })
       await sleep(delayMs, opts.signal)
     }

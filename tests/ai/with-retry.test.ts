@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRetriableError, withInitialRetry } from '../../electron/ai/with-retry'
+import { isRetriableError, withInitialRetry, parseRetryAfter, computeRetryDelay } from '../../electron/ai/with-retry'
 
 describe('isRetriableError', () => {
   it('429 → retriable', () => {
@@ -145,5 +145,46 @@ describe('withInitialRetry', () => {
     })) { /* */ }
     expect(retries).toHaveLength(1)
     expect(retries[0].attempt).toBe(0)
+  })
+})
+
+// Retry-After (конкурентный разбор OpenCode): провайдер в заголовке говорит,
+// сколько ждать — раньше игнорировали (jitter ретраил слишком рано, жёг попытки).
+describe('parseRetryAfter / computeRetryDelay', () => {
+  it('заголовок retry-after секундами → ms', () => {
+    expect(parseRetryAfter({ headers: { 'retry-after': '5' } })).toBe(5000)
+    expect(parseRetryAfter({ headers: { 'Retry-After': '0' } })).toBe(0)
+  })
+  it('Headers-инстанс, case-insensitive', () => {
+    const h = new Headers(); h.set('Retry-After', '3')
+    expect(parseRetryAfter({ headers: h })).toBe(3000)
+  })
+  it('прямые поля retryAfter/retry_after (секунды)', () => {
+    expect(parseRetryAfter({ retryAfter: 2 })).toBe(2000)
+    expect(parseRetryAfter({ retry_after: 1.5 })).toBe(1500)
+  })
+  it('HTTP-date → ms от now (примерно)', () => {
+    const future = new Date(Date.now() + 10_000).toUTCString()
+    const ms = parseRetryAfter({ headers: { 'retry-after': future } })!
+    expect(ms).toBeGreaterThan(8_000)
+    expect(ms).toBeLessThanOrEqual(10_000)
+  })
+  it('нет заголовка / мусор / не-объект → null', () => {
+    expect(parseRetryAfter({ status: 429 })).toBeNull()
+    expect(parseRetryAfter({ headers: { 'retry-after': 'скоро' } })).toBeNull()
+    expect(parseRetryAfter(null)).toBeNull()
+    expect(parseRetryAfter('строка')).toBeNull()
+  })
+  it('computeRetryDelay: Retry-After выигрывает над jitter (детерминирован)', () => {
+    // jitter для attempt 0 ∈ [0,800); 7000 невозможно из jitter → точно из заголовка
+    expect(computeRetryDelay(0, { headers: { 'retry-after': '7' } })).toBe(7000)
+  })
+  it('computeRetryDelay: огромный Retry-After клампится до 30с', () => {
+    expect(computeRetryDelay(0, { headers: { 'retry-after': '9999' } })).toBe(30_000)
+  })
+  it('computeRetryDelay: без Retry-After → jitter в окне attempt 0', () => {
+    const d = computeRetryDelay(0, { status: 503 })
+    expect(d).toBeGreaterThanOrEqual(0)
+    expect(d).toBeLessThan(800)
   })
 })
