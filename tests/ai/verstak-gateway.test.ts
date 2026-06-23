@@ -13,7 +13,7 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
 
   it('пресеты вместо зоопарка моделей (Эконом/Баланс/Кодинг/…)', () => {
     expect(spec!.models).toEqual([
-      'verstak/economy', 'verstak/balanced', 'verstak/coder',
+      'verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder',
       'verstak/long', 'verstak/fast', 'verstak/private',
     ])
     expect(spec!.defaultModel).toBe('verstak/balanced')

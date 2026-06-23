@@ -55,6 +55,10 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     // реальный upstream. Fusion-пресеты — Phase 4 (нужен gateway-pipeline).
     models: [
       'verstak/economy',
+      // Trial-пресет воронки: новый юзер пробует Gateway за 0₽ до пополнения
+      // баланса → конверсия. Шлюз отдаёт verstak/free в публичном /v1/models.
+      // Ставим вторым (economy остаётся models[0] — внутр. дефолт не меняется).
+      'verstak/free',
       'verstak/balanced',
       'verstak/coder',
       'verstak/long',
@@ -223,6 +227,7 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
  */
 export const GATEWAY_PRESET_LABELS: Record<string, string> = {
   'verstak/economy': 'Эконом',
+  'verstak/free': '🎁 Бесплатно — проба',
   'verstak/balanced': 'Баланс',
   'verstak/coder': 'Кодинг',
   'verstak/long': 'Длинный контекст',
