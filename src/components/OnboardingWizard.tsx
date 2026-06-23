@@ -9,7 +9,7 @@ interface Props {
 }
 
 type Role = 'developer' | 'designer' | 'manager' | 'student'
-type ApiProvider = 'gemini-api' | 'anthropic' | 'yandexgpt'
+type ApiProvider = 'verstak-gateway' | 'gemini-api' | 'anthropic' | 'yandexgpt'
 
 const ROLE_PRESETS: Record<Role, {
   labelKey: 'roleDeveloper' | 'roleDesigner' | 'roleManager' | 'roleStudent'
@@ -24,6 +24,8 @@ const ROLE_PRESETS: Record<Role, {
 }
 
 const API_KEYS: Record<ApiProvider, { settingKey: string; provider: string; model: string }> = {
+  // Рекомендованный для РФ: один ключ vsk_live_ → все модели, рубли, без VPN.
+  'verstak-gateway': { settingKey: 'verstak_gateway_api_key', provider: 'verstak-gateway', model: 'verstak/balanced' },
   'gemini-api': { settingKey: 'gemini_api_key', provider: 'gemini-api', model: 'gemini-2.5-flash' },
   anthropic: { settingKey: 'anthropic_api_key', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
   yandexgpt: { settingKey: 'yandex_api_key', provider: 'yandexgpt', model: 'yandexgpt/latest' },
@@ -34,7 +36,7 @@ export function OnboardingWizard({ onComplete }: Props) {
   const [step, setStep] = useState(1)
   const [name, setName] = useState('')
   const [role, setRole] = useState<Role>('developer')
-  const [apiProvider, setApiProvider] = useState<ApiProvider>('gemini-api')
+  const [apiProvider, setApiProvider] = useState<ApiProvider>('verstak-gateway')
   const [apiKey, setApiKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -186,11 +188,13 @@ export function OnboardingWizard({ onComplete }: Props) {
     ? t.onboarding.roleHintSkills.replace('{list}', preset.skills.join(', '))
     : ''
 
-  const apiPlaceholder = apiProvider === 'gemini-api'
-    ? t.onboarding.apiGeminiPlaceholder
-    : apiProvider === 'anthropic'
-      ? t.onboarding.apiAnthropicPlaceholder
-      : t.onboarding.apiYandexPlaceholder
+  const apiPlaceholder = apiProvider === 'verstak-gateway'
+    ? t.onboarding.apiVerstakGatewayPlaceholder
+    : apiProvider === 'gemini-api'
+      ? t.onboarding.apiGeminiPlaceholder
+      : apiProvider === 'anthropic'
+        ? t.onboarding.apiAnthropicPlaceholder
+        : t.onboarding.apiYandexPlaceholder
 
   return (
     <div className="gg-onboarding-overlay">
@@ -273,6 +277,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                     setApiKey('')
                   }}
                 >
+                  <option value="verstak-gateway">{t.onboarding.apiVerstakGateway}</option>
                   <option value="gemini-api">{t.onboarding.apiGemini}</option>
                   <option value="anthropic">{t.onboarding.apiAnthropic}</option>
                   <option value="yandexgpt">{t.onboarding.apiYandex}</option>
@@ -287,6 +292,9 @@ export function OnboardingWizard({ onComplete }: Props) {
                   onChange={e => setApiKey(e.target.value)}
                 />
               </div>
+              {apiProvider === 'verstak-gateway' && (
+                <div className="gg-onboarding-hint">{t.onboarding.apiVerstakGatewayHint}</div>
+              )}
               <div className="gg-onboarding-hint">{t.onboarding.apiHint}</div>
             </>
           )}
