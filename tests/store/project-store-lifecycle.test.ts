@@ -174,6 +174,38 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.messages).toEqual([{ role: 'user', content: 'из БД', createdAt: 7 }])
   })
 
+  // Ревью Verstak 23.06 (finding 3): preflights/subagentRuns эфемерны и НЕ входят
+  // в bundle. Restore/else ветки switchChatSession их не сбрасывали → карточки
+  // уходящего чата залипали при переключении. Должны сбрасываться (как touchedFiles).
+  it('finding 3: restore-ветка сбрасывает эфемерные preflights/subagentRuns уходящего чата', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      chatSnapshots: { 2: distinctiveBundle('B') },
+      preflights: [{ callId: 'p-A', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] }],
+      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
+    } as never, false)
+
+    await useProject.getState().switchChatSession(2)
+
+    const st = useProject.getState()
+    expect(st.preflights).toEqual([])
+    expect(st.subagentRuns).toEqual([])
+  })
+
+  it('finding 3: else-ветка (чат без снапшота) тоже сбрасывает preflights/subagentRuns', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      preflights: [{ callId: 'p-A', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] }],
+      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
+    } as never, false)
+
+    await useProject.getState().switchChatSession(9)
+
+    const st = useProject.getState()
+    expect(st.preflights).toEqual([])
+    expect(st.subagentRuns).toEqual([])
+  })
+
   it('roundtrip: A→B→A возвращает исходный bundle чата A без потерь', async () => {
     const a = distinctiveBundle('roundtrip')
     useProject.setState({

@@ -413,6 +413,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       reviews: {},
       openedReviewId: null,
       artifacts: [],
+      // Эфемерные карточки активности чата — не тащим в новый проект (finding 3).
+      preflights: [],
+      subagentRuns: [],
       // Crash-resume: сбрасываем баннер предыдущего проекта; перезагрузим ниже.
       resumableRuns: [],
       // Pipeline: не тащим прогон другого проекта; подгрузим активный для path.
@@ -602,11 +605,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         // Эти поля НЕ входят в bundle (top-level стора) — без явного сброса они
         // утекают от предыдущего активного чата (артефакты/маркеры/checkpoint/preview).
         // Особенно опасен checkpointId: откат снёс бы правки относительно ЧУЖОЙ отметки.
-        // Симметрично else-ветке ниже (review fix).
+        // Симметрично else-ветке ниже (review fix). preflights/subagentRuns —
+        // эфемерные карточки активности, тоже сбрасываем, иначе залипают от
+        // уходящего чата (ревью Verstak 23.06, finding 3).
         touchedFiles: {},
         checkpointId: null,
         artifacts: [],
-        previewArtifactId: null
+        previewArtifactId: null,
+        preflights: [],
+        subagentRuns: []
       })
     } else {
       set({
@@ -624,7 +631,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         touchedFiles: {},
         checkpointId: null,
         artifacts: [],
-        previewArtifactId: null
+        previewArtifactId: null,
+        preflights: [],
+        subagentRuns: []
       })
       void (async () => {
         const history = await window.api.chats.list(id)
@@ -767,7 +776,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       streamStartedAt: null,
       touchedFiles: {},
       checkpointId: null,
-      artifacts: []
+      artifacts: [],
+      // Эфемерные карточки активности уходящего чата — не тащим в новый (finding 3).
+      preflights: [],
+      subagentRuns: []
     })
     return created
   },
