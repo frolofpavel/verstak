@@ -132,21 +132,32 @@ export interface ScanResult {
  *  (проактивно), дополняя value-based scanText: опаковые токены/UUID в ?token=/
  *  ?key=/?secret= не матчат форматные паттерны, но имя параметра выдаёт секрет.
  *  (Ревью 23.06 vs OpenClaw redact-sensitive-url.) */
-const SENSITIVE_URL_PARAM = /^(token|api[_-]?key|apikey|key|secret|bearer|authorization|auth|password|passwd|pwd|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|sig|signature|x-amz-signature|sas|session[_-]?id)$/i
+const SENSITIVE_URL_PARAM = /^(token|token[_-]?id|api[_-]?(?:key|token)|apikey|key|secret|bearer|authorization|auth|password|passwd|pwd|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|credentials?|private[_-]?key|sig|signature|x-amz-signature|sas|session[_-]?id)$/i
+
+function redactParams(params: URLSearchParams): boolean {
+  let changed = false
+  for (const name of [...params.keys()]) {
+    if (SENSITIVE_URL_PARAM.test(name)) { params.set(name, '[REDACTED]'); changed = true }
+  }
+  return changed
+}
 
 /**
- * Редактирует значения чувствительных query-параметров в URL по ИМЕНИ. Возвращает
- * url без изменений если не URL или нет чувствительных параметров. Применяется к
- * `url`, который коннектор возвращает модели — чтобы токен из ?token=… не утёк в
- * контекст (value-based scanText такие опаковые значения не ловит).
+ * Редактирует значения чувствительных параметров в URL по ИМЕНИ — в query, в
+ * #fragment (OAuth implicit-flow кладёт access_token туда), и пароль в userinfo
+ * (user:pass@host). Возвращает url без изменений если не URL или нет секретов.
+ * Применяется к `url`, который коннектор возвращает модели, чтобы токен не утёк
+ * в контекст (value-based scanText опаковые значения не ловит). Ревью 23.06.
  */
 export function redactUrlSecrets(url: string): string {
   try {
     const u = new URL(url)
-    let changed = false
-    for (const name of [...u.searchParams.keys()]) {
-      if (SENSITIVE_URL_PARAM.test(name)) { u.searchParams.set(name, '[REDACTED]'); changed = true }
+    let changed = redactParams(u.searchParams)
+    if (u.hash.length > 1) {
+      const frag = new URLSearchParams(u.hash.slice(1))
+      if (redactParams(frag)) { u.hash = '#' + frag.toString(); changed = true }
     }
+    if (u.password) { u.password = '[REDACTED]'; changed = true }
     return changed ? u.toString() : url
   } catch {
     return url

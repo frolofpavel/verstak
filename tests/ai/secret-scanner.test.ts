@@ -11,6 +11,21 @@ describe('redactUrlSecrets', () => {
   it('не трогает несекретные параметры (возвращает оригинал без изменений)', () => {
     expect(redactUrlSecrets('https://x.com?page=2&limit=50')).toBe('https://x.com?page=2&limit=50')
   })
+  it('редактирует token в #fragment (OAuth implicit-flow)', () => {
+    const out = redactUrlSecrets('https://app.x.com/cb#access_token=secretXYZ&token_type=bearer&state=abc')
+    expect(out).toContain('access_token=%5BREDACTED%5D')
+    expect(out).toContain('state=abc')        // не-секрет сохранён
+    expect(out).not.toContain('secretXYZ')
+  })
+  it('редактирует пароль в userinfo (user:pass@host)', () => {
+    const out = redactUrlSecrets('https://user:hunter2@api.x.com/v1')
+    expect(out).not.toContain('hunter2')
+    expect(out).toContain('user:')
+  })
+  it('ловит расширенные имена (credentials, private_key, api_token, token_id)', () => {
+    expect(redactUrlSecrets('https://x.com?credentials=c1&private_key=k1&api_token=t1&token_id=i1'))
+      .toMatch(/credentials=%5BREDACTED%5D.*private_key=%5BREDACTED%5D.*api_token=%5BREDACTED%5D.*token_id=%5BREDACTED%5D/)
+  })
   it('не-URL → без изменений', () => {
     expect(redactUrlSecrets('not a url')).toBe('not a url')
   })
