@@ -203,7 +203,7 @@ export const ru: Translations = {
     apiOptional: 'API-ключ (необязательно)',
     apiVerstakGateway: 'Verstak Gateway — рубли, без VPN (рекомендуем)',
     apiVerstakGatewayPlaceholder: 'vsk_live_…',
-    apiVerstakGatewayHint: 'Получить ключ за 30 сек: agi-iri.ru/gateway',
+    apiVerstakGatewayHint: 'Получить ключ за 30 сек:',
     apiGemini: 'Gemini API key',
     apiAnthropic: 'Anthropic API key',
     apiYandex: 'YandexGPT API key',

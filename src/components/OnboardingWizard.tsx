@@ -293,7 +293,13 @@ export function OnboardingWizard({ onComplete }: Props) {
                 />
               </div>
               {apiProvider === 'verstak-gateway' && (
-                <div className="gg-onboarding-hint">{t.onboarding.apiVerstakGatewayHint}</div>
+                <div className="gg-onboarding-hint">
+                  {t.onboarding.apiVerstakGatewayHint}{' '}
+                  <a
+                    href="https://agi-iri.ru/gateway"
+                    onClick={e => { e.preventDefault(); void window.api.app.openExternal('https://agi-iri.ru/gateway') }}
+                  >agi-iri.ru/gateway</a>
+                </div>
               )}
               <div className="gg-onboarding-hint">{t.onboarding.apiHint}</div>
             </>

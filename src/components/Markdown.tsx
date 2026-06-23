@@ -106,6 +106,20 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
           },
           pre({ children }) {
             return <>{children}</>
+          },
+          // Ссылки в чате открываем в системном браузере, а не уводим окно
+          // приложения (Electron-footgun). Бэкенд app:open-external пускает
+          // только http/https.
+          a({ href, children }) {
+            return (
+              <a
+                href={href}
+                onClick={e => {
+                  e.preventDefault()
+                  if (href) void window.api.app.openExternal(href)
+                }}
+              >{children}</a>
+            )
           }
         }}
       >

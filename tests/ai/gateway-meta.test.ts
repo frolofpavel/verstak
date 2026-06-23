@@ -24,6 +24,10 @@ describe('mapGatewayError', () => {
     expect(mapGatewayError(402)).toMatch(/баланс/i)
     expect(mapGatewayError(500, 'insufficient_balance')).toMatch(/баланс/i)
   })
+  it('ссылка пополнения — кликабельная (https:// → markdown автолинк)', () => {
+    expect(mapGatewayError(402)).toContain('https://agi-iri.ru/gateway')
+    expect(mapGatewayError(500, 'insufficient_balance')).toContain('https://agi-iri.ru/gateway')
+  })
   it('401/403 → про ключ', () => {
     expect(mapGatewayError(401)).toMatch(/ключ/i)
     expect(mapGatewayError(403)).toMatch(/ключ/i)

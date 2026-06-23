@@ -32,14 +32,14 @@ export function formatVerstakMeta(v: VerstakMeta | null | undefined): string | n
  */
 export function mapGatewayError(status: number | undefined, code?: string | undefined): string | null {
   if (code === 'insufficient_balance') {
-    return 'Недостаточно баланса Verstak Gateway. Пополните баланс: agi-iri.ru/gateway'
+    return 'Недостаточно баланса Verstak Gateway. Пополните баланс: https://agi-iri.ru/gateway'
   }
   switch (status) {
     case 401:
     case 403:
       return 'Ключ Verstak Gateway неверный или отключён. Проверьте API-ключ в Настройках.'
     case 402:
-      return 'Недостаточно баланса Verstak Gateway. Пополните баланс: agi-iri.ru/gateway'
+      return 'Недостаточно баланса Verstak Gateway. Пополните баланс: https://agi-iri.ru/gateway'
     case 429:
       return 'Превышен лимит Verstak Gateway. Попробуйте позже или увеличьте лимит.'
     case 503:

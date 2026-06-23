@@ -206,7 +206,7 @@ export const en = {
     apiOptional: 'API key (optional)',
     apiVerstakGateway: 'Verstak Gateway — rubles, no VPN (recommended)',
     apiVerstakGatewayPlaceholder: 'vsk_live_…',
-    apiVerstakGatewayHint: 'Get a key in 30 sec: agi-iri.ru/gateway',
+    apiVerstakGatewayHint: 'Get a key in 30 sec:',
     apiGemini: 'Gemini API key',
     apiAnthropic: 'Anthropic API key',
     apiYandex: 'YandexGPT API key',
