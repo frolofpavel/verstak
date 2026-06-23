@@ -130,4 +130,19 @@ x = 99
     expect(after).toContain('footer   \r\n')
     expect(after).not.toContain('return 1;')
   })
+
+  // Ревью 23.06 #7 (vs OpenClaw/Hermes — они теряют байты): защищаем нашу силу
+  // position-map'а на ДЛИННЫХ строках (>2000 симв) — gigantская нетронутая строка
+  // в CRLF-проекте должна сохранить и \r, и trailing ws, и весь контент целиком.
+  it('whitespace fallback: длинные строки (>2000) сохраняют CRLF + контент целиком', () => {
+    const longHeader = 'H'.repeat(2500)
+    const longFooter = 'F'.repeat(2500)
+    const before = `${longHeader}   \r\nfunction foo() {\r\n  return 1;\r\n}\r\n${longFooter}   \r\n`
+    const diff = '<<<<<<< SEARCH\nfunction foo() {\n  return 1;\n}\n=======\nfunction foo() {\n  return 42;\n}\n>>>>>>> REPLACE'
+    const after = applySearchReplaceBlocks(before, diff)
+    expect(after).toContain('return 42')
+    expect(after).toContain(`${longHeader}   \r\n`) // длинная строка целиком + CRLF + trailing ws
+    expect(after).toContain(`${longFooter}   \r\n`)
+    expect(after.length).toBeGreaterThan(5000)       // строки не усохли
+  })
 })

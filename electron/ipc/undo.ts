@@ -45,7 +45,13 @@ export async function revertToCheckpoint(
         try {
           await stat(abs)
           await unlink(abs)
-        } catch { /* already gone */ }
+        } catch (err) {
+          // ENOENT = файла уже нет → цель (отсутствие) достигнута, ОК. Любая
+          // ДРУГАЯ ошибка (EACCES/EBUSY/EPERM — файл залочен/каталог) НЕ глотается:
+          // пробрасываем в outer catch → попадёт в failed[]/ok:false для видимости
+          // и ретрая (раньше молча помечалось restored — ревью 23.06 #1).
+          if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
+        }
       } else {
         await writeFile(abs, before, 'utf8')
       }
@@ -128,7 +134,13 @@ export function registerUndoIpc(stack: UndoStack): void {
         try {
           await stat(abs)
           await unlink(abs)
-        } catch { /* already gone */ }
+        } catch (err) {
+          // ENOENT = файла уже нет → цель (отсутствие) достигнута, ОК. Любая
+          // ДРУГАЯ ошибка (EACCES/EBUSY/EPERM — файл залочен/каталог) НЕ глотается:
+          // пробрасываем в outer catch → попадёт в failed[]/ok:false для видимости
+          // и ретрая (раньше молча помечалось restored — ревью 23.06 #1).
+          if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
+        }
       } else {
         await writeFile(abs, before, 'utf8')
       }

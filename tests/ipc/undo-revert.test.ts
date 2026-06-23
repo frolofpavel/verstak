@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -64,6 +64,29 @@ describe('revertToCheckpoint (safety-критичный откат)', () => {
     expect(res.count).toBe(1)                                   // откачен только e2
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('v1') // к e2.before, не дальше v0
     expect(stack.list(dir).some(e => e.id === e1.id)).toBe(true) // e1 не тронут
+  })
+
+  // Усиление 23.06 (#1, ревью vs OpenClaw/OpenCode): inner catch глотал ВСЕ ошибки
+  // unlink, не только ENOENT. При залоченном файле (EACCES/EBUSY/EPERM) запись
+  // помечалась restored, хотя файл на месте → грязное дерево, ретрая нет.
+  it('unlink-ошибка (не-ENOENT) → запись в failed[], НЕ restored', async () => {
+    // before=null → revert хочет unlink. Делаем путь не-удаляемым: это каталог
+    // (unlink каталога падает EPERM/EISDIR ≠ ENOENT). Должно уйти в failed[].
+    mkdirSync(join(dir, 'locked.txt'))
+    stack.push(dir, 'locked.txt', null, 'content')
+    const res = await revertToCheckpoint(stack, dir, 0)
+    expect(res.ok).toBe(false)
+    expect(res.restored).not.toContain('locked.txt')
+    expect(res.failed?.some(f => f.filePath === 'locked.txt')).toBe(true)
+    expect(existsSync(join(dir, 'locked.txt'))).toBe(true) // не «удалён»
+  })
+
+  // ENOENT (файл уже отсутствует) по-прежнему = успех: цель (файла нет) достигнута.
+  it('unlink ENOENT (файл уже отсутствует) → restored (цель достигнута)', async () => {
+    stack.push(dir, 'ghost.txt', null, 'content') // файла НЕТ на диске
+    const res = await revertToCheckpoint(stack, dir, 0)
+    expect(res.ok).toBe(true)
+    expect(res.restored).toContain('ghost.txt')
   })
 
   it('нечего откатывать (checkpoint = текущий top) → count 0', async () => {

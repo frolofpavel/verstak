@@ -138,3 +138,21 @@ describe('shouldAutoCompact — учёт args tool-вызовов', () => {
     expect(shouldAutoCompact(msgs, 'moonshot-v1-8k')).toBe(true)
   })
 })
+
+describe('shouldAutoCompact — резерв output-бюджета (ревью #5)', () => {
+  it('срабатывает раньше полного limit*0.95 (резерв под вывод модели)', () => {
+    // gpt-4o limit=128000 → effectiveLimit=115200, порог 109440. Полный limit*0.95=121600.
+    // 115000 токенов попадает МЕЖДУ: раньше (от полного лимита) НЕ сжимал, теперь сжимает.
+    const big = 'x'.repeat(46_000) // ~11500 токенов на сообщение
+    const msgs: ChatMessage[] = Array.from({ length: 10 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant', content: big,
+    }))
+    expect(shouldAutoCompact(msgs, 'gpt-4o')).toBe(true)
+  })
+
+  it('не срабатывает заметно ниже порога', () => {
+    const small = 'x'.repeat(4_000) // ~1000 токенов
+    const msgs: ChatMessage[] = Array.from({ length: 10 }, () => ({ role: 'user' as const, content: small }))
+    expect(shouldAutoCompact(msgs, 'gpt-4o')).toBe(false)
+  })
+})

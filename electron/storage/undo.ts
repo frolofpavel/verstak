@@ -65,11 +65,15 @@ export function createUndoStack(db: Database): UndoStack {
       return { id: Number(info.lastInsertRowid), filePath, beforeContent: before, afterContent: after, createdAt: now }
     },
     protectFrom(projectPath, floorId) {
-      floors.add(projectPath, floorId)
+      // DB-first (ревью 23.06 #3): сперва персист, потом in-memory. При сбое INSERT
+      // исключение пробрасывается ДО floors.add → нет расхождения память↔БД (раньше
+      // floors.add шёл первым: при сбое INSERT память «знала» floor, которого нет в БД).
       db.prepare('INSERT INTO undo_floors (project_path, floor_id) VALUES (?, ?)').run(projectPath, floorId)
+      floors.add(projectPath, floorId)
     },
     clearProtection(projectPath, floorId) {
-      floors.remove(projectPath, floorId)
+      // DB-first: удаляем из БД, потом из памяти. При сбое DELETE память не «забудет»
+      // floor раньше БД (иначе после рестарта floor воскрес бы из недоудалённой БД).
       if (floorId === undefined) {
         db.prepare('DELETE FROM undo_floors WHERE project_path = ?').run(projectPath)
       } else {
@@ -77,6 +81,7 @@ export function createUndoStack(db: Database): UndoStack {
         // одном id — например оба чекпоинтят на пустом стеке id=0 — не схлопнуть).
         db.prepare('DELETE FROM undo_floors WHERE rowid = (SELECT rowid FROM undo_floors WHERE project_path = ? AND floor_id = ? LIMIT 1)').run(projectPath, floorId)
       }
+      floors.remove(projectPath, floorId)
     },
     list(projectPath) {
       const rows = db.prepare(`
@@ -97,8 +102,9 @@ export function createUndoStack(db: Database): UndoStack {
     clear(projectPath) {
       const info = db.prepare('DELETE FROM file_undo WHERE project_path = ?').run(projectPath)
       // Чистим и floor'ы проекта — иначе остались бы сироты на удалённые записи.
-      floors.remove(projectPath)
+      // DB-first, потом память (ревью 23.06 #3).
       db.prepare('DELETE FROM undo_floors WHERE project_path = ?').run(projectPath)
+      floors.remove(projectPath)
       return info.changes
     },
     count(projectPath) {

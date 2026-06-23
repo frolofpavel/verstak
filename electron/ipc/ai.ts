@@ -1200,6 +1200,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // остановиться. 1 = один шанс на восстановление, потом hard-stop (bounded).
   const MAX_LOOP_NUDGES = 1
   let loopNudges = 0
+  // Анти-трэш авто-компакшна (ревью 23.06 #4): не сжимаем повторно в течение
+  // COMPACT_COOLDOWN_TURNS turn'ов после последнего сжатия — иначе сжал → резюме
+  // снова пересекло порог → опять сжал → зацикливание на малых окнах.
+  const COMPACT_COOLDOWN_TURNS = 3
+  let lastCompactTurn = -COMPACT_COOLDOWN_TURNS
   // Accumulate token usage across all turns of this session for the final journal entry.
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
@@ -1630,16 +1635,32 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // отдельных tool results.
     // auto_compact = 'false' отключает фичу; по умолчанию включена.
     const autoCompactEnabled = getSecretForDelegate?.('auto_compact') !== 'false'
-    if (autoCompactEnabled && model && shouldAutoCompact(currentMessages, model)) {
+    const compactCooldownOk = turn - lastCompactTurn >= COMPACT_COOLDOWN_TURNS
+    if (autoCompactEnabled && model && compactCooldownOk && shouldAutoCompact(currentMessages, model)) {
       try {
         // Получаем резюме от той же модели — один non-streamed вызов
         const summaryMessages = buildCompactSummaryPrompt(currentMessages)
         let summaryText = ''
+        let summaryDone = false
         for await (const ev of provider.send(summaryMessages, [], undefined, signal)) {
           if (ev.type === 'text') summaryText += ev.text
-          if (ev.type === 'done' || ev.type === 'error') break
+          else if (ev.type === 'usage') {
+            // Учёт стоимости summary-вызова в cost-guard (раньше usage этого вызова
+            // терялся → утечка 5-7к токенов/компакшн мимо лимита). Ревью 23.06 #4.
+            sessionUsage.inputTokens += ev.usage.inputTokens ?? 0
+            sessionUsage.outputTokens += ev.usage.outputTokens ?? 0
+            sessionUsage.cachedInputTokens += ev.usage.cachedInputTokens ?? 0
+            if (costGuard && providerId) {
+              costGuard.recordAndCheck(providerId, model ?? '', ev.usage.inputTokens ?? 0, ev.usage.outputTokens ?? 0, ev.usage.cachedInputTokens ?? 0)
+            }
+          }
+          else if (ev.type === 'done') { summaryDone = true; break }
+          else if (ev.type === 'error') break // summaryDone остаётся false
         }
-        if (summaryText.trim()) {
+        // Применяем резюме ТОЛЬКО при чистом done: при error mid-stream summaryText
+        // частичный-но-truthy и раньше затирал историю усечённым резюме. Ревью #4.
+        if (summaryDone && summaryText.trim()) {
+          lastCompactTurn = turn
           const beforeLen = currentMessages.length
           const compacted = createCompactedHistory(summaryText, currentMessages)
           currentMessages.length = 0

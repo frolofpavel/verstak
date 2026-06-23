@@ -29,6 +29,7 @@
 
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
 import { readBodyWithLimit } from './types'
+import { isBlockedHost } from './ip-guard'
 
 const MAX_ENDPOINTS = 4
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -161,14 +162,8 @@ export function createHttpConnector(): Connector {
           message: `Путь "${finalUrl.pathname}" не входит в allow-list эндпоинта "${cfg.name}" (после нормализации "..", сырой путь "${path}"). Разрешены: ${cfg.paths.join(', ') || '(пусто)'}`
         }
       }
-      // Also block requests to loopback / link-local / private metadata services
-      // EVEN if the user configured them as base (defence in depth — a user
-      // misconfig shouldn't auto-grant the AI access to 169.254.169.254 etc.)
-      const host = finalUrl.hostname.toLowerCase()
-      if (host === 'metadata.google.internal' || host === '169.254.169.254' || host === '100.100.100.200') {
-        return { error: 'ssrf-blocked', message: `Запрещено: метаданные облака.` }
-      }
       url = finalUrl.toString()
+      // SSRF-guard для базы И каждого редиректа — в fetch-цикле ниже (ip-guard.ts).
 
       // Headers: user-supplied first, then auth header from config (auth wins).
       const headers: Record<string, string> = { 'Accept': 'application/json, text/*;q=0.9, */*;q=0.5' }
@@ -191,22 +186,42 @@ export function createHttpConnector(): Connector {
         }
       }
 
+      // SSRF-guard с ручным следованием редиректам: на КАЖДОМ хопе проверяем хост.
+      // hop 0 = сконфигурированная база (loopback/private разрешены — документированы
+      // как «custom internal services»); редиректы (hop 1+) блокируют ВСЁ внутреннее
+      // (внешний API, редиректящий на 127.0.0.1/169.254 — атака). Ревью 23.06 #8.
+      const MAX_REDIRECTS = 5
+      let currentUrl = url
       try {
-        const res = await fetch(url, { method, headers, body, signal: ctx.signal })
-        const bodyText = await readBodyWithLimit(res)
-        return {
-          status: res.status,
-          ok: res.ok,
-          url,
-          method,
-          contentType: res.headers.get('content-type') ?? '',
-          body: bodyText
+        for (let hop = 0; ; hop++) {
+          const hopHost = new URL(currentUrl).hostname
+          if (isBlockedHost(hopHost, { allowLocalAndPrivate: hop === 0 })) {
+            return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес${hop > 0 ? ' (через редирект)' : ''}.`, url: currentUrl, method }
+          }
+          const res = await fetch(currentUrl, { method, headers, body, signal: ctx.signal, redirect: 'manual' })
+          const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+          if (loc) {
+            if (hop >= MAX_REDIRECTS) {
+              return { error: 'fetch-failed', message: 'Слишком много редиректов.', url: currentUrl, method }
+            }
+            currentUrl = new URL(loc, currentUrl).toString()
+            continue
+          }
+          const bodyText = await readBodyWithLimit(res)
+          return {
+            status: res.status,
+            ok: res.ok,
+            url: currentUrl,
+            method,
+            contentType: res.headers.get('content-type') ?? '',
+            body: bodyText
+          }
         }
       } catch (err) {
         return {
           error: 'fetch-failed',
           message: err instanceof Error ? err.message : String(err),
-          url,
+          url: currentUrl,
           method
         }
       }

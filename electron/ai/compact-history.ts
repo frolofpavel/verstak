@@ -219,8 +219,12 @@ function estimateTotalTokens(messages: ChatMessage[]): number {
 export function shouldAutoCompact(messages: ChatMessage[], model: string): boolean {
   if (messages.length < 10) return false
   const limit = getContextLimit(model)
+  // Резервируем бюджет под ВЫВОД модели: вход + ожидаемый output не должны пробить
+  // окно. Раньше порог брался от ПОЛНОГО лимита → на 95% входа модель уже не могла
+  // сгенерить ответ без переполнения. Резерв = 10% лимита, кап 16k (ревью 23.06 #5).
+  const effectiveLimit = limit - Math.min(Math.floor(limit * 0.1), 16_000)
   const used = estimateTotalTokens(messages)
-  return used > limit * COMPACT_THRESHOLD
+  return used > effectiveLimit * COMPACT_THRESHOLD
 }
 
 /**
