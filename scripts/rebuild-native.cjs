@@ -27,7 +27,18 @@ try { electronVer = require(path.join(root, 'node_modules', 'electron', 'package
 
 function rebuild(target) {
   console.log('[rebuild-native] electron-rebuild -f -o', target)
-  execFileSync('npx', ['electron-rebuild', '-f', '-o', target], { cwd: root, env, stdio: 'inherit', shell: true })
+  try {
+    execFileSync('npx', ['electron-rebuild', '-f', '-o', target], { cwd: root, env, stdio: 'inherit', shell: true })
+  } catch {
+    // execFileSync иначе бросает голый Node-стектрейс. Самая частая причина
+    // провала на Windows — ОТКРЫТО приложение Verstak (или `npm run dev`): оно
+    // лочит .node-файл, unlink падает EPERM/EBUSY. Даём внятную подсказку вместо
+    // криптового дампа (safe-rebuild.cjs детектит лок симметрично).
+    console.error(`\n[rebuild-native] ✖ Пересборка "${target}" провалилась.`)
+    console.error('[rebuild-native] Частая причина — открыто приложение Verstak (или npm run dev): оно лочит .node (EPERM/EBUSY на unlink).')
+    console.error('[rebuild-native] Закрой приложение Verstak ПОЛНОСТЬЮ и запусти сборку заново.')
+    process.exit(1)
+  }
 }
 
 // 1) better-sqlite3 — всегда (быстрая компиляция, тесты флипают его ABI).

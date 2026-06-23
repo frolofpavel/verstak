@@ -11,6 +11,9 @@ build/*.bmp
 
 .worktrees/
 
+# Артефакт Playwright MCP (скриншоты/трейсы сессии)
+.playwright-mcp/
+
 # Unrelated experiments in this folder
 Gemini.bat
 GeminiStudio.ps1
