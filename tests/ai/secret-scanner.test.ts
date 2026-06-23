@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { isForbiddenPath, scanText } from '../../electron/ai/secret-scanner'
+import { isForbiddenPath, scanText, redactUrlSecrets } from '../../electron/ai/secret-scanner'
+
+describe('redactUrlSecrets', () => {
+  it('редактирует значения чувствительных параметров по имени', () => {
+    expect(redactUrlSecrets('https://api.x.com/v1?token=abc123opaque')).toBe('https://api.x.com/v1?token=%5BREDACTED%5D')
+    expect(redactUrlSecrets('https://x.com?api_key=u-u-i-d&q=public')).toContain('api_key=%5BREDACTED%5D')
+    expect(redactUrlSecrets('https://x.com?api_key=u-u-i-d&q=public')).toContain('q=public')
+    expect(redactUrlSecrets('https://x.com?secret=s&bearer=b&password=p')).toMatch(/secret=%5BREDACTED%5D.*bearer=%5BREDACTED%5D.*password=%5BREDACTED%5D/)
+  })
+  it('не трогает несекретные параметры (возвращает оригинал без изменений)', () => {
+    expect(redactUrlSecrets('https://x.com?page=2&limit=50')).toBe('https://x.com?page=2&limit=50')
+  })
+  it('не-URL → без изменений', () => {
+    expect(redactUrlSecrets('not a url')).toBe('not a url')
+  })
+})
 
 describe('isForbiddenPath', () => {
   it('blocks .env and variants', () => {

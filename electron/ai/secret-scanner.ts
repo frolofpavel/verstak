@@ -128,6 +128,31 @@ export interface ScanResult {
   hits: string[]
 }
 
+/** Имена query-параметров, чьи значения — секреты. Редактируем ПО ИМЕНИ
+ *  (проактивно), дополняя value-based scanText: опаковые токены/UUID в ?token=/
+ *  ?key=/?secret= не матчат форматные паттерны, но имя параметра выдаёт секрет.
+ *  (Ревью 23.06 vs OpenClaw redact-sensitive-url.) */
+const SENSITIVE_URL_PARAM = /^(token|api[_-]?key|apikey|key|secret|bearer|authorization|auth|password|passwd|pwd|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|sig|signature|x-amz-signature|sas|session[_-]?id)$/i
+
+/**
+ * Редактирует значения чувствительных query-параметров в URL по ИМЕНИ. Возвращает
+ * url без изменений если не URL или нет чувствительных параметров. Применяется к
+ * `url`, который коннектор возвращает модели — чтобы токен из ?token=… не утёк в
+ * контекст (value-based scanText такие опаковые значения не ловит).
+ */
+export function redactUrlSecrets(url: string): string {
+  try {
+    const u = new URL(url)
+    let changed = false
+    for (const name of [...u.searchParams.keys()]) {
+      if (SENSITIVE_URL_PARAM.test(name)) { u.searchParams.set(name, '[REDACTED]'); changed = true }
+    }
+    return changed ? u.toString() : url
+  } catch {
+    return url
+  }
+}
+
 /** Scan text and return a redacted copy + names of patterns that matched. */
 export function scanText(input: string): ScanResult {
   if (!input) return { redacted: input, hits: [] }

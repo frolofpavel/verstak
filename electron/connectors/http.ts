@@ -30,6 +30,7 @@
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
 import { readBodyWithLimit } from './types'
 import { isBlockedHost } from './ip-guard'
+import { redactUrlSecrets } from '../ai/secret-scanner'
 
 const MAX_ENDPOINTS = 4
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -196,13 +197,13 @@ export function createHttpConnector(): Connector {
         for (let hop = 0; ; hop++) {
           const hopHost = new URL(currentUrl).hostname
           if (isBlockedHost(hopHost, { allowLocalAndPrivate: hop === 0 })) {
-            return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес${hop > 0 ? ' (через редирект)' : ''}.`, url: currentUrl, method }
+            return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес${hop > 0 ? ' (через редирект)' : ''}.`, url: redactUrlSecrets(currentUrl), method }
           }
           const res = await fetch(currentUrl, { method, headers, body, signal: ctx.signal, redirect: 'manual' })
           const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
           if (loc) {
             if (hop >= MAX_REDIRECTS) {
-              return { error: 'fetch-failed', message: 'Слишком много редиректов.', url: currentUrl, method }
+              return { error: 'fetch-failed', message: 'Слишком много редиректов.', url: redactUrlSecrets(currentUrl), method }
             }
             currentUrl = new URL(loc, currentUrl).toString()
             continue
@@ -211,7 +212,7 @@ export function createHttpConnector(): Connector {
           return {
             status: res.status,
             ok: res.ok,
-            url: currentUrl,
+            url: redactUrlSecrets(currentUrl),
             method,
             contentType: res.headers.get('content-type') ?? '',
             body: bodyText
@@ -221,7 +222,7 @@ export function createHttpConnector(): Connector {
         return {
           error: 'fetch-failed',
           message: err instanceof Error ? err.message : String(err),
-          url: currentUrl,
+          url: redactUrlSecrets(currentUrl),
           method
         }
       }
