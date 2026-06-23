@@ -1,0 +1,5 @@
+#!/bin/sh
+# Pre-commit гейт Verstak — type-check + тесты (см. scripts/precommit.cjs).
+# Активируется через `npm install` (prepare → core.hooksPath .githooks).
+# Обойти осознанно: git commit --no-verify
+node scripts/precommit.cjs

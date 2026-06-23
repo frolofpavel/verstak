@@ -4,6 +4,8 @@
   "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
   "main": "out/main/main.mjs",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || exit 0",
+    "precommit": "node scripts/precommit.cjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "pretest": "node scripts/safe-rebuild.cjs",
