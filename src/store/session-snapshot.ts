@@ -46,6 +46,35 @@ export interface RunningPlanStep {
   title: string
 }
 
+/** Preflight-карточка: агент объявил план перед сложной/деструктивной задачей.
+ *  Эфемерное в рамках чата — чистится на новом send (как activity), но путешествует
+ *  с чатом при уходе в фон / возврате (входит в bundle). */
+export interface PreflightCard {
+  callId: string
+  summary: string
+  affectedZones: string[]
+  risk: 'low' | 'medium' | 'high'
+  riskReason: string
+  verifyAfter: string[]
+  outOfScope: string[]
+}
+
+/** Sub-agent run card (fan-out V1): delegate_task делегировал подзадачу.
+ *  Эфемерное в рамках чата — чистится на новом send как preflights. Upsert по
+ *  callId (running → done/error). Входит в bundle (per-chat). */
+export interface SubagentRunCard {
+  callId: string
+  label: string
+  provider?: string
+  skill?: string
+  task: string
+  status: 'running' | 'done' | 'error'
+  result?: string
+  role?: string
+  /** Сколько tool-вызовов выполнил субагент (Фаза 1 — субы используют tools). */
+  toolCount?: number
+}
+
 export interface SessionSnapshot {
   messages: ChatMessage[]
   isStreaming: boolean
@@ -56,6 +85,14 @@ export interface SessionSnapshot {
   activity: ActivityEntry[]
   sessionUsage: SessionUsage
   runningPlanStep: RunningPlanStep | null
+  /** Undo entry ID точки «📍 Чекпоинт» этого чата — кнопка отката. Per-chat:
+   *  раньше зануляли на restore (anti-leak), из-за чего кнопка отката пропадала
+   *  при переключении чатов. Теперь носим в bundle → сохраняется per-chat, при
+   *  этом чужой checkpoint не утекает (каждый чат восстанавливает свой). */
+  checkpointId: number | null
+  /** Эфемерные карточки активности чата — путешествуют с ним (per-chat). */
+  preflights: PreflightCard[]
+  subagentRuns: SubagentRunCard[]
   /** True when bg session got new content since user last viewed it. */
   hasUnread: boolean
 }
@@ -70,6 +107,9 @@ export function freshSnapshot(): SessionSnapshot {
     activity: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
     runningPlanStep: null,
+    checkpointId: null,
+    preflights: [],
+    subagentRuns: [],
     hasUnread: false
   }
 }
@@ -93,6 +133,9 @@ export function captureBundle(s: ChatStateBundle): SessionSnapshot {
     activity: s.activity,
     sessionUsage: s.sessionUsage,
     runningPlanStep: s.runningPlanStep,
+    checkpointId: s.checkpointId,
+    preflights: s.preflights,
+    subagentRuns: s.subagentRuns,
     hasUnread: false
   }
 }
@@ -108,7 +151,10 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
     pendingCommand: snap.pendingCommand,
     activity: snap.activity,
     sessionUsage: snap.sessionUsage,
-    runningPlanStep: snap.runningPlanStep
+    runningPlanStep: snap.runningPlanStep,
+    checkpointId: snap.checkpointId,
+    preflights: snap.preflights,
+    subagentRuns: snap.subagentRuns
   }
 }
 

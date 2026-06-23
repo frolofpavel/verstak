@@ -732,6 +732,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(status, due_at);
       `)
     }
+  },
+  {
+    version: 28,
+    description: 'undo_floors: персист защищённых floor\'ов чекпоинтов. Раньше FloorTracker был in-memory → после краха защита терялась и prune съедал пост-чекпоинт записи (ревью Verstak 23.06, finding 1)',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS undo_floors (
+          project_path TEXT NOT NULL,
+          floor_id INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_undo_floors_project ON undo_floors(project_path);
+      `)
+    }
   }
 ]
 

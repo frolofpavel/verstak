@@ -22,8 +22,9 @@ import { useProject } from '../../src/store/projectStore'
 import type { SessionSnapshot } from '../../src/store/session-snapshot'
 import type { ChatMessage } from '../../src/types/api'
 
-// Различимый bundle со ВСЕМИ 7 полями заполненными — roundtrip обязан сохранить
-// каждое. Если рефактор уронит хоть одно поле — тест покраснеет.
+// Различимый bundle со ВСЕМИ полями заполненными — roundtrip обязан сохранить
+// каждое. Если рефактор уронит хоть одно поле — тест покраснеет. checkpointId/
+// preflights/subagentRuns добавлены в bundle (finding 2/3 — per-chat preserve).
 function distinctiveBundle(tag: string): SessionSnapshot {
   return {
     messages: [{ role: 'assistant', content: `msg-${tag}` }] as ChatMessage[],
@@ -34,6 +35,9 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     activity: [{ id: `act-${tag}`, kind: 'read', label: 'r', status: 'ok', timestamp: 1 }],
     sessionUsage: { inputTokens: 11, outputTokens: 22, cachedInputTokens: 3 },
     runningPlanStep: { planId: 1, stepId: 2, title: `plan-${tag}` },
+    checkpointId: 500,
+    preflights: [{ callId: `pf-${tag}`, summary: `s-${tag}`, affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
+    subagentRuns: [{ callId: `sr-${tag}`, label: `l-${tag}`, task: 't', status: 'running' }],
     hasUnread: false,
   }
 }
@@ -67,7 +71,7 @@ beforeEach(() => {
 })
 
 describe('switchChatSession — snapshot уходящего чата', () => {
-  it('переключение прочь снапшотит ВСЕ 7 полей активного чата в chatSnapshots[oldId]', async () => {
+  it('переключение прочь снапшотит ВСЕ поля активного чата в chatSnapshots[oldId]', async () => {
     const active = distinctiveBundle('A')
     useProject.setState({
       activeChatId: 1,
@@ -78,6 +82,9 @@ describe('switchChatSession — snapshot уходящего чата', () => {
       activity: active.activity,
       sessionUsage: active.sessionUsage,
       runningPlanStep: active.runningPlanStep,
+      checkpointId: active.checkpointId,
+      preflights: active.preflights,
+      subagentRuns: active.subagentRuns,
     }, false)
 
     await useProject.getState().switchChatSession(2)
@@ -91,6 +98,10 @@ describe('switchChatSession — snapshot уходящего чата', () => {
     expect(snap.activity).toBe(active.activity)
     expect(snap.sessionUsage).toBe(active.sessionUsage)
     expect(snap.runningPlanStep).toBe(active.runningPlanStep)
+    // finding 2/3: checkpointId/preflights/subagentRuns теперь тоже в снапшоте.
+    expect(snap.checkpointId).toBe(active.checkpointId)
+    expect(snap.preflights).toBe(active.preflights)
+    expect(snap.subagentRuns).toBe(active.subagentRuns)
     // hasUnread снапшота уходящего чата всегда false (пользователь его только что смотрел).
     expect(snap.hasUnread).toBe(false)
   })
@@ -103,7 +114,7 @@ describe('switchChatSession — snapshot уходящего чата', () => {
 })
 
 describe('switchChatSession — restore входящего чата', () => {
-  it('переключение на чат СО снапшотом восстанавливает ВСЕ 7 полей в top-level', async () => {
+  it('переключение на чат СО снапшотом восстанавливает ВСЕ поля в top-level', async () => {
     const saved = distinctiveBundle('B')
     useProject.setState({
       activeChatId: 1,
@@ -122,21 +133,27 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.activity).toBe(saved.activity)
     expect(st.sessionUsage).toBe(saved.sessionUsage)
     expect(st.runningPlanStep).toBe(saved.runningPlanStep)
+    // finding 2/3: checkpointId/preflights/subagentRuns восстанавливаются per-chat.
+    expect(st.checkpointId).toBe(saved.checkpointId)
+    expect(st.preflights).toBe(saved.preflights)
+    expect(st.subagentRuns).toBe(saved.subagentRuns)
     // Восстановленный чат убирается из карты снапшотов (он теперь активный).
     expect(st.chatSnapshots[2]).toBeUndefined()
   })
 
-  // review fix: ветка restored не сбрасывала top-level поля (touchedFiles/checkpointId/
-  // artifacts/previewArtifactId) — они утекали от уходящего чата. Особенно опасен
-  // checkpointId: откат снёс бы правки относительно ЧУЖОЙ отметки.
-  it('restore сбрасывает per-chat top-level поля, не утекая от уходящего чата', async () => {
-    const saved = distinctiveBundle('B')
+  // finding 2/3 (ревью Verstak 23.06): checkpointId/preflights/subagentRuns теперь
+  // per-chat в bundle — НЕ утекают от уходящего чата (восстанавливается СВОЁ чата 2),
+  // а НЕ-bundle поля (touchedFiles/artifacts/previewArtifactId) по-прежнему сбрасываются.
+  it('restore: bundle-поля = СВОИ чата 2, не утекают от уходящего; не-bundle сброшены', async () => {
+    const saved = distinctiveBundle('B')  // checkpointId=500, pf-B, sr-B
     useProject.setState({
       activeChatId: 1,
       chatSnapshots: { 2: saved },
       // состояние УХОДЯЩЕГО чата 1 — НЕ должно протечь в чат 2:
       touchedFiles: { 'a.ts': { before: '', after: 'x' } },
       checkpointId: 999,
+      preflights: [{ callId: 'pf-A', summary: 's', affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
+      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
       artifacts: [{ id: 'art-A', kind: 'html', title: 't', content: 'c', createdAt: 1 }],
       previewArtifactId: 'art-A',
     } as never, false)
@@ -145,8 +162,12 @@ describe('switchChatSession — restore входящего чата', () => {
 
     const st = useProject.getState()
     expect(st.activeChatId).toBe(2)
+    // bundle-поля = СВОИ чата 2 (не 999/pf-A/sr-A уходящего):
+    expect(st.checkpointId).toBe(500)
+    expect(st.preflights).toBe(saved.preflights)
+    expect(st.subagentRuns).toBe(saved.subagentRuns)
+    // не-bundle поля сброшены:
     expect(st.touchedFiles).toEqual({})
-    expect(st.checkpointId).toBeNull()
     expect(st.artifacts).toEqual([])
     expect(st.previewArtifactId).toBeNull()
   })
@@ -174,25 +195,9 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.messages).toEqual([{ role: 'user', content: 'из БД', createdAt: 7 }])
   })
 
-  // Ревью Verstak 23.06 (finding 3): preflights/subagentRuns эфемерны и НЕ входят
-  // в bundle. Restore/else ветки switchChatSession их не сбрасывали → карточки
-  // уходящего чата залипали при переключении. Должны сбрасываться (как touchedFiles).
-  it('finding 3: restore-ветка сбрасывает эфемерные preflights/subagentRuns уходящего чата', async () => {
-    useProject.setState({
-      activeChatId: 1,
-      chatSnapshots: { 2: distinctiveBundle('B') },
-      preflights: [{ callId: 'p-A', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] }],
-      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
-    } as never, false)
-
-    await useProject.getState().switchChatSession(2)
-
-    const st = useProject.getState()
-    expect(st.preflights).toEqual([])
-    expect(st.subagentRuns).toEqual([])
-  })
-
-  it('finding 3: else-ветка (чат без снапшота) тоже сбрасывает preflights/subagentRuns', async () => {
+  // finding 3: чат БЕЗ снапшота (else-ветка) = чистый старт — preflights/subagentRuns
+  // уходящего чата не утекают (фолбэк на fresh-значения, не bundle).
+  it('switch на чат без снапшота даёт пустые preflights/subagentRuns (не утекают от уходящего)', async () => {
     useProject.setState({
       activeChatId: 1,
       preflights: [{ callId: 'p-A', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] }],
@@ -206,7 +211,7 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.subagentRuns).toEqual([])
   })
 
-  it('roundtrip: A→B→A возвращает исходный bundle чата A без потерь', async () => {
+  it('roundtrip: A→B→A возвращает исходный bundle чата A без потерь (вкл. checkpointId/preflights)', async () => {
     const a = distinctiveBundle('roundtrip')
     useProject.setState({
       activeChatId: 1,
@@ -217,6 +222,9 @@ describe('switchChatSession — restore входящего чата', () => {
       activity: a.activity,
       sessionUsage: a.sessionUsage,
       runningPlanStep: a.runningPlanStep,
+      checkpointId: 111,           // distinct от B (500) — проверяем, что вернётся СВОЙ
+      preflights: a.preflights,
+      subagentRuns: a.subagentRuns,
       chatSnapshots: { 2: distinctiveBundle('B') },
     }, false)
 
@@ -231,6 +239,10 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.activity).toBe(a.activity)
     expect(st.sessionUsage).toBe(a.sessionUsage)
     expect(st.runningPlanStep).toBe(a.runningPlanStep)
+    // finding 2/3: checkpointId/preflights/subagentRuns чата A пережили roundtrip.
+    expect(st.checkpointId).toBe(111)
+    expect(st.preflights).toBe(a.preflights)
+    expect(st.subagentRuns).toBe(a.subagentRuns)
   })
 })
 

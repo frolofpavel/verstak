@@ -16,7 +16,9 @@ import {
   type TouchKind,
   type SessionUsage,
   type RunningPlanStep,
-  type SessionSnapshot
+  type SessionSnapshot,
+  type PreflightCard,
+  type SubagentRunCard
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
 import { appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
@@ -31,33 +33,9 @@ import {
 } from '../lib/composer-drafts'
 import { stampDurationOnStreamEnd } from '../lib/response-duration'
 
-/** Preflight-карточка: агент объявил план перед сложной/деструктивной задачей.
- *  Эфемерное — живёт только в активной сессии, чистится как activity. */
-export interface PreflightCard {
-  callId: string
-  summary: string
-  affectedZones: string[]
-  risk: 'low' | 'medium' | 'high'
-  riskReason: string
-  verifyAfter: string[]
-  outOfScope: string[]
-}
-
-/** Sub-agent run card (fan-out V1): delegate_task делегировал подзадачу.
- *  Эфемерное — чистится на новом send как preflights. Upsert по callId
- *  (running → done/error). */
-export interface SubagentRunCard {
-  callId: string
-  label: string
-  provider?: string
-  skill?: string
-  task: string
-  status: 'running' | 'done' | 'error'
-  result?: string
-  role?: string
-  /** Сколько tool-вызовов выполнил субагент (Фаза 1 — субы используют tools). */
-  toolCount?: number
-}
+// PreflightCard / SubagentRunCard перенесены в session-snapshot.ts (store-agnostic),
+// т.к. теперь входят в per-chat bundle. Re-export для существующих импортов (Chat.tsx).
+export type { PreflightCard, SubagentRunCard } from './session-snapshot'
 
 export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser' | 'skills' | 'design' | 'video' | 'inspector' | 'memory-gov' | 'agents' | 'tasks-manager' | 'project-map' | 'task' | 'files' | 'decisions' | 'brain'
 
@@ -392,15 +370,19 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       activity: target.activity,
       sessionUsage: target.sessionUsage,
       runningPlanStep: target.runningPlanStep,
+      // checkpointId/preflights/subagentRuns теперь per-chat в bundle —
+      // восстанавливаем сохранённое для активного чата нового проекта (finding 2/3).
+      checkpointId: target.checkpointId,
+      preflights: target.preflights,
+      subagentRuns: target.subagentRuns,
       activeView: 'chat',
       projectList,
       chatSessions,
       activeChatId,
       sessions: nextSessions,
-      // Reset per-session UI markers when switching project — they're scoped
-      // to the active conversation, not the project itself.
+      // touchedFiles/artifacts НЕ в bundle — сбрасываем при смене проекта
+      // (scoped to active conversation, не к проекту).
       touchedFiles: {},
-      checkpointId: null,
       // Dev Task Flow (Фаза 2): активная задача привязана к чату/проекту —
       // сбрасываем при смене проекта (бейдж переразрешит её для нового контекста).
       activeDevTaskId: null,
@@ -413,9 +395,6 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       reviews: {},
       openedReviewId: null,
       artifacts: [],
-      // Эфемерные карточки активности чата — не тащим в новый проект (finding 3).
-      preflights: [],
-      subagentRuns: [],
       // Crash-resume: сбрасываем баннер предыдущего проекта; перезагрузим ниже.
       resumableRuns: [],
       // Pipeline: не тащим прогон другого проекта; подгрузим активный для path.
@@ -604,16 +583,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         openedReviewId: null,
         // Эти поля НЕ входят в bundle (top-level стора) — без явного сброса они
         // утекают от предыдущего активного чата (артефакты/маркеры/checkpoint/preview).
-        // Особенно опасен checkpointId: откат снёс бы правки относительно ЧУЖОЙ отметки.
-        // Симметрично else-ветке ниже (review fix). preflights/subagentRuns —
-        // эфемерные карточки активности, тоже сбрасываем, иначе залипают от
-        // уходящего чата (ревью Verstak 23.06, finding 3).
+        // touchedFiles/artifacts/previewArtifactId НЕ входят в bundle — сбрасываем
+        // явно, иначе утекут от уходящего чата. А checkpointId/preflights/
+        // subagentRuns теперь в bundle (restoreBundle выше) → восстанавливаются
+        // per-chat, чужие не утекают (finding 2/3, ревью Verstak 23.06).
         touchedFiles: {},
-        checkpointId: null,
         artifacts: [],
-        previewArtifactId: null,
-        preflights: [],
-        subagentRuns: []
+        previewArtifactId: null
       })
     } else {
       set({
@@ -795,14 +771,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const inflight = hasInflightChatSend(s.sendOwners, chatId, false)
       set({
         helpMode: false,
-        messages: snap.messages,
+        // restoreBundle — единая форма восстановления (вкл. checkpointId/preflights/
+        // subagentRuns per-chat). Стрим переопределяем ниже: восстанавливаем только
+        // если он реально ещё в полёте (иначе залипает баннер «отвечает»).
+        ...restoreBundle(snap),
         isStreaming: inflight && snap.isStreaming,
         streamStartedAt: inflight && snap.isStreaming ? snap.streamStartedAt : null,
-        pendingWrites: snap.pendingWrites,
-        pendingCommand: snap.pendingCommand,
-        activity: snap.activity,
-        sessionUsage: snap.sessionUsage,
-        runningPlanStep: snap.runningPlanStep,
         chatSnapshots: nextSnapshots,
       })
       return
@@ -885,17 +859,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const helpSession = await window.api.chatSessions.getOrCreateHelp()
     if (s.path && s.activeChatId != null) {
       const nextSnapshots = { ...s.chatSnapshots }
-      nextSnapshots[s.activeChatId] = {
-        messages: s.messages,
-        isStreaming: s.isStreaming,
-        streamStartedAt: s.streamStartedAt,
-        pendingWrites: s.pendingWrites,
-        pendingCommand: s.pendingCommand,
-        activity: s.activity,
-        sessionUsage: s.sessionUsage,
-        runningPlanStep: s.runningPlanStep,
-        hasUnread: false
-      }
+      // captureBundle вместо рукописного литерала — единый источник формы снапшота
+      // (вкл. checkpointId/preflights/subagentRuns), чтобы не забыть поле (#8/#17).
+      nextSnapshots[s.activeChatId] = captureBundle(s)
       // Стрим проекта уходит в chatSnapshots; в корне сбрасываем — иначе после
       // выхода из справки send блокируется, пока фоновый прогон не завершится.
       set({
