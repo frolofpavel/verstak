@@ -27,6 +27,15 @@ export async function detectVerifyScriptsForHint(projectPath: string): Promise<s
   return hints
 }
 
+/**
+ * Write a brief journal summary for the just-finished agent session.
+ * Skipped if nothing meaningful happened (no text, no files, no commands).
+ *
+ * ВНИМАНИЕ: тело этой функции было случайно выпилено в void-стаб (регрессия
+ * 4f94c72 «session journal updates») — журнал сессии тихо не писался, хотя
+ * ai.ts гарантирует запись на каждом exit-пути (Gemini audit Idea B).
+ * Восстановлено по 3401bdc (ревью 23.06).
+ */
 export function writeSessionJournal(
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void,
   projectPath: string,
@@ -36,11 +45,39 @@ export function writeSessionJournal(
   usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number },
   reason: ExitReason = 'completed'
 ): void {
-  void recordJournal
-  void projectPath
-  void lastAssistantText
-  void filesTouched
-  void commandsRun
-  void usage
-  void reason
+  const hasFiles = filesTouched.size > 0
+  const hasCommands = commandsRun.length > 0
+  const text = lastAssistantText.trim()
+  const hasUsage = usage && ((usage.inputTokens ?? 0) > 0 || (usage.outputTokens ?? 0) > 0)
+  // For non-completed reasons we ALWAYS write the entry, even empty — closes
+  // Gemini audit 2.2: previously aborted/crashed sessions left no trail.
+  const hasMaterial = hasFiles || hasCommands || hasUsage || text.length >= 40
+  if (reason === 'completed' && !hasMaterial) return
+  // Title prefix communicates outcome at a glance
+  const tag = reason === 'completed' ? '' :
+              reason === 'aborted' ? '⏹ Прерывание · ' :
+              reason === 'error' ? '✗ Ошибка · ' :
+              reason === 'max-turns' ? '⏸ Лимит ходов · ' :
+              reason === 'loop-detected' ? '🔁 Зацикливание · ' :
+              '💥 Крах · '
+  const firstLine = text.split(/\n+/)[0] ?? ''
+  const baseTitle = firstLine.length > 0 ? firstLine : 'AI-сессия'
+  const title = (tag + baseTitle).slice(0, 100)
+  const detailLines: string[] = []
+  if (hasFiles) detailLines.push(`Файлы (${filesTouched.size}): ${[...filesTouched].slice(0, 8).join(', ')}${filesTouched.size > 8 ? ' …' : ''}`)
+  if (hasCommands) detailLines.push(`Команды (${commandsRun.length}): ${commandsRun.slice(0, 5).join(' · ')}${commandsRun.length > 5 ? ' …' : ''}`)
+  if (hasUsage) {
+    const i = usage!.inputTokens ?? 0
+    const o = usage!.outputTokens ?? 0
+    const c = usage!.cachedInputTokens ?? 0
+    detailLines.push(`Токены: ↑${i} ↓${o}${c > 0 ? ` ⟲${c}` : ''}`)
+  }
+  if (text && text.length > firstLine.length) {
+    const rest = text.slice(firstLine.length).trim()
+    if (rest) detailLines.push(rest.slice(0, 600))
+  }
+  if (reason !== 'completed') {
+    detailLines.unshift(`Состояние: ${reason}`)
+  }
+  try { recordJournal(projectPath, 'session', title, detailLines.join('\n') || null) } catch { /* journal not critical */ }
 }

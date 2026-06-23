@@ -60,8 +60,9 @@ export async function revertToCheckpoint(
       })
     }
   }
-  // Чекпоинт израсходован — снимаем защиту от prune (review fix #4).
-  stack.clearProtection(projectPath)
+  // Чекпоинт израсходован — снимаем защиту ИМЕННО этого чекпоинта (review fix #4).
+  // floorId = checkpointId: при мульти-чате защиты других чекпоинтов остаются (F3).
+  stack.clearProtection(projectPath, checkpointId)
   // Re-push the failed ones so the user can see / retry
   for (const f of failed) {
     stack.push(projectPath, f.filePath, f.before, f.after)

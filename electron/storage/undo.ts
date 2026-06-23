@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import { createFloorTracker } from './undo-floors'
 
 export interface UndoEntry {
   id: number
@@ -16,12 +17,12 @@ export interface UndoStack {
   count: (projectPath: string) => number
   /** Защитить от prune все записи с id > floorId (активный чекпоинт). См. push. */
   protectFrom: (projectPath: string, floorId: number) => void
-  /** Снять защиту чекпоинта (после отката/очистки). */
-  clearProtection: (projectPath: string) => void
+  /** Снять защиту чекпоинта (после отката/очистки). floorId — конкретный чекпоинт;
+   *  без него — снять ВСЕ floor'ы проекта (undo:clear). */
+  clearProtection: (projectPath: string, floorId?: number) => void
 }
 
 const MAX_PER_PROJECT = 50
-const NO_FLOOR = Number.MAX_SAFE_INTEGER
 
 interface Row {
   id: number
@@ -32,11 +33,13 @@ interface Row {
 }
 
 export function createUndoStack(db: Database): UndoStack {
-  // Защищённый floor на проект: записи с id > floor НЕ пруньются (review fix #4).
-  // Без него сессия с >50 write'ами после чекпоинта теряла ранние undo-записи →
+  // Защищённые floor'ы чекпоинтов: записи с id > floor НЕ пруньются (review fix #4).
+  // Без этого сессия с >50 write'ами после чекпоинта теряла ранние undo-записи →
   // revertToCheckpoint молча откатывал лишь последние 50 (частичный откат без сигнала),
   // подрывая гарантию «откат любой агентной сессии одной кнопкой» (CLAUDE.md §1).
-  const floors = new Map<string, number>()
+  // Мульти-чат: несколько чекпоинтов в одном проекте → защищаем по МИНИМУМУ из
+  // активных floor'ов, чтобы регион ни одного чата не оголился (F3, ревью 23.06).
+  const floors = createFloorTracker()
   return {
     push(projectPath, filePath, before, after) {
       const now = Date.now()
@@ -45,7 +48,8 @@ export function createUndoStack(db: Database): UndoStack {
       ).run(projectPath, filePath, before, after, now)
       // Prune за пределами MAX_PER_PROJECT, НО никогда не трогаем записи новее
       // активного чекпоинта (id > floor): иначе откат к чекпоинту был бы неполным.
-      const floor = floors.get(projectPath) ?? NO_FLOOR
+      // floor = минимум активных чекпоинтов проекта (или NO_FLOOR если нет).
+      const floor = floors.effective(projectPath)
       db.prepare(`
         DELETE FROM file_undo
         WHERE project_path = ?
@@ -54,8 +58,8 @@ export function createUndoStack(db: Database): UndoStack {
       `).run(projectPath, projectPath, MAX_PER_PROJECT, floor)
       return { id: Number(info.lastInsertRowid), filePath, beforeContent: before, afterContent: after, createdAt: now }
     },
-    protectFrom(projectPath, floorId) { floors.set(projectPath, floorId) },
-    clearProtection(projectPath) { floors.delete(projectPath) },
+    protectFrom(projectPath, floorId) { floors.add(projectPath, floorId) },
+    clearProtection(projectPath, floorId) { floors.remove(projectPath, floorId) },
     list(projectPath) {
       const rows = db.prepare(`
         SELECT id, file_path as filePath, before_content as beforeContent, after_content as afterContent, created_at as createdAt

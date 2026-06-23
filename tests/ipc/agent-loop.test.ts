@@ -39,6 +39,9 @@ type Overrides = {
   runId?: string
   fallbackOpts?: unknown
   messages?: ChatMessage[]
+  sender?: ReturnType<typeof makeSender>
+  signal?: AbortSignal
+  recordJournal?: ReturnType<typeof vi.fn>
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -47,11 +50,11 @@ function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefine
 // 1-элементный массив, чтобы существующий спред `...(args() as Parameters<...>)`
 // в вызовах работал без правок (Parameters теперь = [AgentRunContext]).
 function args(dir: string, o: Overrides): unknown[] {
-  const signal = new AbortController().signal
+  const signal = o.signal ?? new AbortController().signal
   const ctx = {
-    sender: makeSender(), sendId: 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
+    sender: o.sender ?? makeSender(), sendId: 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
     initialMessages: o.messages ?? [{ role: 'user', content: 'hi' }], signal,
-    recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: vi.fn(), readJournal: vi.fn(() => []),
+    recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: o.recordJournal ?? vi.fn(), readJournal: vi.fn(() => []),
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
     searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
     connectors: { list: () => [], query: async () => ({}) }, agentMode: 'bypass', turnsBudget: 5,
@@ -251,4 +254,81 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(last.toolCount).toBe(0)                     // последний — без тулзов
     expect(last.hasReport).toBe(true)                  // и с инструкцией отчёта
   }, 15000)
+
+  // Ревью 23.06 (#1): стоп пользователя ВО ВРЕМЯ backoff-retry. sleep() в
+  // withInitialRetry бросает Error('aborted'), которая вылетает мимо per-event
+  // abort-проверок прямо в внешний catch. Без guard'а это падало в ветку
+  // 'crashed' → пользователь видел СТРАШНЫЙ error-тост и run писался 'failed',
+  // хотя он сам нажал Стоп. Должно быть: чистый 'aborted' → finish('stopped'),
+  // никакого error-события.
+  it('stop во время retry-backoff → aborted/stopped, без error-события', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const ctrl = new AbortController()
+    // Retriable-ошибка с Retry-After=10s → backoff заснёт на 10с (не jitter).
+    const retryErr = Object.assign(new Error('503 service unavailable'), { retryAfter: 10 })
+    const p = provider('p1', () => [], retryErr)
+    // Пользователь жмёт Стоп во время сна (через ~20мс, задолго до 10с).
+    setTimeout(() => ctrl.abort(), 20)
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1',
+      sender, signal: ctrl.signal,
+    }) as Parameters<typeof runApiConversation>))
+
+    // Штатный стоп — НИКАКОГО error-события пользователю.
+    const errorEvents = sender.send.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { event?: { type?: string } })?.event?.type === 'error'
+    )
+    expect(errorEvents).toHaveLength(0)
+    // Run финализируется как 'stopped' (aborted), не 'failed' (crashed).
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'stopped', expect.anything())
+  }, 15000)
+
+  // Ревью 23.06 (#3): supervisor-нота при зацикливании БЫЛА мёртвым кодом —
+  // пушилась в currentMessages и тут же return, модель её не видела. Должно:
+  // нота скармливается модели (шанс сменить подход), и только при повторном
+  // зацикливании — hard-stop.
+  it('loop-detected: модель получает supervisor-ноту, затем hard-stop', async () => {
+    const runs = mockRuns()
+    const received: string[] = []
+    // Провайдер всегда зовёт ОДИН И ТОТ ЖЕ read_file → детектор зацикливания.
+    const p: ChatProvider = {
+      id: 'p1', name: 'p1', models: ['p1'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(messages))
+        yield { type: 'tool-call', call: { id: `c${received.length}`, name: 'read_file', args: { path: 'same.txt' } } }
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1',
+    }) as Parameters<typeof runApiConversation>))
+
+    // Нота «смените подход» дошла до провайдера (раньше — мёртвый код, никогда).
+    expect(received.some(m => m.includes('Смените подход'))).toBe(true)
+    // Цикл всё равно завершается штатно (hard-stop после нуджа): loop-detected → done.
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  }, 15000)
+
+  // Ревью 23.06 (F2): writeSessionJournal был выпилен в void-стаб (регрессия
+  // 4f94c72) — журнал сессии на завершении НЕ писался, хотя ai.ts гарантирует
+  // запись на каждом exit. Сессия с изменением файла обязана оставить
+  // 'session'-запись в журнале.
+  it('session journal: завершение с изменениями пишет session-запись (F2 восстановление)', async () => {
+    const runs = mockRuns()
+    const recordJournal = vi.fn()
+    const p = provider('p1', (turn) => turn === 1
+      ? [{ type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'note.txt', content: 'hi' } } }, { type: 'done' }]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', recordJournal,
+    }) as Parameters<typeof runApiConversation>))
+
+    // Раньше (void-стаб) recordJournal не вызывался ни разу. Теперь — 'session'-запись.
+    const sessionCalls = recordJournal.mock.calls.filter((c: unknown[]) => c[1] === 'session')
+    expect(sessionCalls.length).toBeGreaterThan(0)
+  }, 20000)
 })

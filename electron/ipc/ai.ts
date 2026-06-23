@@ -1196,6 +1196,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // sliding-window eviction problem of the previous flat-array approach.
   const signatureCounts = new Map<string, number>()
   const LOOP_THRESHOLD = 3
+  // Сколько раз скармливаем supervisor-ноту «смени подход» прежде чем жёстко
+  // остановиться. 1 = один шанс на восстановление, потом hard-stop (bounded).
+  const MAX_LOOP_NUDGES = 1
+  let loopNudges = 0
   // Accumulate token usage across all turns of this session for the final journal entry.
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
@@ -1390,16 +1394,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     currentMessages.push({ role: 'assistant', content: assistantText, toolCalls })
 
     if (loopHits.length > 0) {
-      sender.send('ai:event', {
-        id: sendId,
-        event: {
-          type: 'tool-blocked',
-          callId: loopHits[0].id,
-          name: loopHits[0].name,
-          reason: `Зацикливание: один и тот же вызов повторён 3+ раза подряд. Цикл остановлен.`
-        }
-      })
-      // Feed back a supervisor note instead of executing again
+      // Feed back a supervisor note instead of executing again. Раньше нота тут же
+      // терялась (push + немедленный return → модель её НЕ видела, мёртвый код).
+      // Теперь скармливаем её модели и даём ОДИН шанс сменить подход (continue),
+      // и только при повторном зацикливании — hard-stop. Bounded MAX_LOOP_NUDGES.
+      // (Ревью 23.06)
       currentMessages.push({
         role: 'user',
         content: '',
@@ -1409,6 +1408,28 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           result: '',
           error: 'Supervisor: вы зациклились — этот же вызов повторён несколько раз. Смените подход или сообщите пользователю что нужна помощь.'
         }))
+      })
+      if (loopNudges < MAX_LOOP_NUDGES) {
+        loopNudges++
+        sender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'tool-blocked',
+            callId: loopHits[0].id,
+            name: loopHits[0].name,
+            reason: `Зацикливание: один и тот же вызов повторён 3+ раза. Прошу сменить подход.`
+          }
+        })
+        continue turnLoop
+      }
+      sender.send('ai:event', {
+        id: sendId,
+        event: {
+          type: 'tool-blocked',
+          callId: loopHits[0].id,
+          name: loopHits[0].name,
+          reason: `Зацикливание продолжается после подсказки — цикл остановлен.`
+        }
       })
       exitReason = 'loop-detected'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
@@ -1663,6 +1684,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   })
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } catch (err) {
+    // Стоп пользователя ВО ВРЕМЯ backoff-retry: sleep() в withInitialRetry бросает
+    // Error('aborted'), которая вылетает мимо per-event abort-проверок прямо сюда.
+    // Без этого guard'а штатный стоп падал в ветку 'crashed' ниже → пользователь
+    // видел страшный error-тост, а run писался 'failed'. signal.aborted = он сам
+    // нажал Стоп → чистое завершение, без error-события и без фолбэка. (Ревью 23.06)
+    if (signal.aborted) {
+      exitReason = 'aborted'
+      sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+      return
+    }
     // Smart fallback для API-агентного пути: если withInitialRetry исчерпал
     // попытки и ошибка всё ещё retriable — переключаемся на следующего провайдера.
     if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {

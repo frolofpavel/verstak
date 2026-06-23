@@ -27,7 +27,16 @@ const FALLBACK_PATTERNS = [
 /** Решает, стоит ли переключаться на другого провайдера при этой ошибке. */
 export function shouldFallback(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase()
-  return FALLBACK_PATTERNS.some(p => msg.includes(p.toLowerCase()))
+  if (FALLBACK_PATTERNS.some(p => msg.includes(p.toLowerCase()))) return true
+  // Сетевые ошибки несут код в .code (ECONNRESET/ETIMEDOUT/ECONNREFUSED), а
+  // обёрнутая/кастомная ошибка может НЕ содержать текст-паттерн в message — тогда
+  // фолбэк ошибочно не срабатывал. Зеркалит isRetriableError (with-retry). (F1, ревью 23.06)
+  const code = (error && typeof error === 'object') ? (error as { code?: unknown }).code : null
+  if (typeof code === 'string') {
+    const c = code.toLowerCase()
+    return FALLBACK_PATTERNS.some(p => c.includes(p.toLowerCase()))
+  }
+  return false
 }
 
 /**
