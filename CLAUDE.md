@@ -3,7 +3,7 @@
 Файл читается user_layer'ом Verstak и Claude Code как «правила работы с этим проектом». См. `electron/ai/user-layer.ts` — порядок поиска: AGENTS.md → CLAUDE.md → GEMINI.md → .verstak/RULES.md.
 
 > **📋 ЖИВОЙ ПЛАН РАБОТ.** Источник, который видит Павел — **Планы внутри Verstak** (вкладка «План», проект `verstak`, таблица `plans`/`plan_steps` в `%APPDATA%/verstak/storage/verstak.db`). Зеркало в git — `STATUS.md` в корне (чтобы не терялось и я мог читать без БД). В начале сессии прочитать STATUS.md; после закрытого блока — ОБНОВИТЬ оба: строки в «Сделано», дата/версия сверху. Павел не должен держать это в голове.
-> **Как обновить Планы в Verstak:** через `node --experimental-sqlite` + `node:sqlite` (DatabaseSync), `PRAGMA busy_timeout`, INSERT/UPDATE в `plans`/`plan_steps` (project_path = `C:\Users\Pavel\Progetc\Проекты\verstak`). НЕ через `require('better-sqlite3')` — его ABI скачет между Node(тесты) и Electron(сборка). После записи UI обновляется при ре-открытии вкладки «План».
+> **Как обновить Планы в Verstak:** через `node --experimental-sqlite` + `node:sqlite` (DatabaseSync), `PRAGMA busy_timeout`, INSERT/UPDATE в `plans`/`plan_steps`. **`project_path` брать из `process.cwd()`** (скрипт запускать из корня проекта), НЕ из JS-литерала с бэкслешами — `"...\verstak"` ломается escape'ами (`\v`=vertical tab, `\U` и т.п.) и план оседает с битым путём, невидимый под проектом (так осиротел план #10, чинено 23.06). НЕ через `require('better-sqlite3')` — его ABI скачет между Node(тесты) и Electron(сборка). После записи UI обновляется при ре-открытии вкладки «План».
 
 ---
 
