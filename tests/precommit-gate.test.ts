@@ -19,6 +19,10 @@ describe('hasNonAbiFailures', () => {
   it('чистый вывод → false', () => {
     expect(hasNonAbiFailures('Tests  10 passed (10)')).toBe(false)
   })
+  it('многострочная better-sqlite3 ABI-ошибка → false (Error: на одной строке, NODE_MODULE_VERSION на другой)', () => {
+    const out = ` FAIL tests/storage/agent-runs.test.ts\nError: The module '\\\\?\\C:\\...\\better_sqlite3.node'\nwas compiled against a different Node.js version using\nNODE_MODULE_VERSION 143. This version of Node.js requires\nNODE_MODULE_VERSION 137.`
+    expect(hasNonAbiFailures(out)).toBe(false)
+  })
 })
 
 describe('decideTestGate', () => {

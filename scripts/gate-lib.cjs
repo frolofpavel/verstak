@@ -16,6 +16,7 @@ function hasNonAbiFailures(output) {
     if (!/AssertionError|Expected|ReferenceError:|SyntaxError|TypeError:|Error:/.test(l)) return false
     if (/NODE_MODULE_VERSION/.test(l)) return false           // прямой ABI-mismatch
     if (/reading 'close'/.test(l)) return false               // вторичный каскад (db.close на undefined из-за ABI)
+    if (/better_sqlite3|compiled against a different|was compiled against/i.test(l)) return false // первая строка многострочной ABI-ошибки (NODE_MODULE_VERSION на следующей строке)
     return true
   })
 }

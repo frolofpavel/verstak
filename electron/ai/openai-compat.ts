@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { formatVerstakMeta, mapGatewayError } from './gateway-meta'
+import { parseTextToolCalls } from './tool-call-repair'
 
 export interface OpenAiCompatOptions {
   id: string
@@ -153,6 +154,8 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
 
         let usageSent = false
         let verstakSent = false
+        let fullText = ''
+        let emittedToolCall = false
         for await (const chunk of stream) {
           // Verstak Gateway: доп-метадата (cost_rub/balance_rub/cache) в чанке —
           // показываем компактной плашкой. Хармлесс для остальных (поля нет).
@@ -178,6 +181,7 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
           const delta = chunk.choices?.[0]?.delta
           if (!delta) continue
           if (typeof delta.content === 'string' && delta.content.length > 0) {
+            fullText += delta.content
             yield { type: 'text', text: delta.content }
           }
           if (Array.isArray(delta.tool_calls)) {
@@ -198,6 +202,7 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
               let args: Record<string, unknown> = {}
               try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {} }
               yield { type: 'tool-call', call: { id: t.id, name: t.name, args } }
+              emittedToolCall = true
             }
             // Clear so next turn starts fresh if reused
             for (const k of Object.keys(inProgress)) delete inProgress[Number(k)]
@@ -214,6 +219,15 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
           let args: Record<string, unknown> = {}
           try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {} }
           yield { type: 'tool-call', call: { id: t.id, name: t.name, args } }
+          emittedToolCall = true
+        }
+        // T1.5 repair: модель отдала вызов ТЕКСТОМ (не structured tool_calls) —
+        // восстанавливаем, чтобы тулза исполнилась, а не упала в чат прозой.
+        // Срабатывает только для слабых/RU-моделей; сильные шлют structured.
+        if (!emittedToolCall && fullText.trim()) {
+          for (const rc of parseTextToolCalls(fullText)) {
+            yield { type: 'tool-call', call: { id: randomUUID(), name: rc.name, args: rc.args } }
+          }
         }
         yield { type: 'done' }
       } catch (err) {
