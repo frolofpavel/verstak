@@ -34,6 +34,13 @@ export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent):
     const base = { ...snap, messages }
     return { ...base, ...stampDurationOnStreamEnd(base) }
   }
+  // command-result → команда зарезолвлена в main ЛЮБЫМ путём (подтверждение/stop/
+  // ошибка). Снять pendingCommand этого callId, иначе в Inbox висит ghost-approval
+  // на уже завершённую команду (ревью 24.06). Покрывает все callers ядра.
+  if (t === 'command-result' && snap.pendingCommand
+      && (typeof event.callId !== 'string' || snap.pendingCommand.callId === event.callId)) {
+    return { ...snap, pendingCommand: null }
+  }
   if (t === 'usage' && event.usage && typeof event.usage === 'object') {
     const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
     return {

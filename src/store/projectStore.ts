@@ -568,7 +568,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         after: String(event.after ?? '')
       }] }
     } else if (t === 'pending-command' && typeof event.callId === 'string') {
-      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? '') } }
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
     }
     return { sessions: { ...s.sessions, [projectPath]: next } }
   }),
@@ -672,7 +672,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         after: String(event.after ?? '')
       }] }
     } else if (t === 'pending-command' && typeof event.callId === 'string') {
-      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? '') } }
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
     }
     // Персист завершённого assistant-сообщения в БД (переживёт reload).
     if ((event.type === 'done' || event.type === 'error') && s.path) {

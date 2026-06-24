@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { selectInboxApprovals } from '../../src/store/session-snapshot'
+import { selectInboxApprovals, freshSnapshot } from '../../src/store/session-snapshot'
+import { applySnapshotEvent } from '../../src/store/apply-snapshot-event'
 
 // T1.3 Inbox: все ожидающие подтверждения команды по ВСЕМ чатам (активный +
 // фоновые снапшоты) в одном списке — одобрять/отклонять не заходя в каждый чат.
@@ -37,5 +38,20 @@ describe('selectInboxApprovals', () => {
       chatSnapshots: { 20: { pendingCommand: cmd('b', 'git push') } },
     })
     expect(r).toEqual([{ chatId: 20, command: cmd('b', 'git push') }])
+  })
+})
+
+// Ревью 24.06: команда, зарезолвленная в main (stop/reject/ошибка), оставляла
+// snapshot.pendingCommand → ghost-approval в Inbox. command-result теперь чистит.
+describe('ghost-approval — command-result снимает pendingCommand', () => {
+  it('command-result того же callId → pendingCommand=null', () => {
+    const snap = { ...freshSnapshot(), pendingCommand: cmd('c1', 'rm x') }
+    const next = applySnapshotEvent(snap, { type: 'command-result', callId: 'c1', status: 'rejected' })
+    expect(next.pendingCommand).toBeNull()
+  })
+  it('command-result другого callId → pendingCommand цел', () => {
+    const snap = { ...freshSnapshot(), pendingCommand: cmd('c1', 'rm x') }
+    const next = applySnapshotEvent(snap, { type: 'command-result', callId: 'c2', status: 'ok' })
+    expect(next.pendingCommand?.callId).toBe('c1')
   })
 })
