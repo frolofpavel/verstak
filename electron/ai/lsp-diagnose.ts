@@ -14,6 +14,7 @@ import { pathToFileURL } from 'url'
 import { LspClient, type LspTransport } from './lsp/client'
 import { LspDecoder } from './lsp/framing'
 import { resolveLangServer, extractErrorDiagnostics, type LspDiagItem } from './lang-servers'
+import { treeKill } from './child-kill'
 
 const DEFAULT_TIMEOUT_MS = 8_000
 
@@ -54,7 +55,10 @@ export async function runLspDiagnostics(opts: {
           for (const msg of decoder.push(chunk)) cb(msg)
         })
       },
-      close: () => { try { child?.kill() } catch { /* уже мёртв */ } },
+      // treeKill, НЕ child.kill: на Windows shell:true спавнит cmd.exe → реальный
+      // сервер (node.exe pyright) ВНУК; child.kill убьёт только cmd.exe, внук осиротеет
+      // (см. child-kill.ts). Конвенция проекта для всех shell:true-спавнов.
+      close: () => { if (child) treeKill(child) },
     }
     client = new LspClient(transport)
 
@@ -97,6 +101,8 @@ export async function runLspDiagnostics(opts: {
   } finally {
     if (timer) clearTimeout(timer)
     try { client?.dispose() } catch { /* noop */ }
-    try { child?.kill() } catch { /* noop */ }
+    // treeKill и здесь (client мог быть null — spawn упал до его создания → дерево
+    // процессов не закрыто через transport.close).
+    if (child) { try { treeKill(child) } catch { /* noop */ } }
   }
 }

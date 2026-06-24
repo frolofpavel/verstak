@@ -76,4 +76,13 @@ describe('runPtcCode', () => {
     const r = await runPtcCode({ code: 'log(typeof log.constructor)', tools: {} })
     expect(r.output).not.toContain('function')
   })
+  // Ревью фиксов 24.06: async-тулза возвращала host-Promise → tools.x().then.constructor
+  // вёл на host Function → побег. Теперь промис vm-native.
+  it('async-вектор закрыт: tools.x().then.constructor не достаёт host process', async () => {
+    const r = await runPtcCode({
+      code: 'try { const p = tools.f({}); const F = p.then.constructor; const proc = F("return process")(); log(proc ? "ESCAPED:"+(proc.pid||"") : "null") } catch(e) { log("blocked") }',
+      tools: { f: async () => 'data' },
+    })
+    expect(r.output).not.toContain('ESCAPED')
+  })
 })

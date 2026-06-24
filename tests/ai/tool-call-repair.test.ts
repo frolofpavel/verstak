@@ -61,4 +61,14 @@ describe('parseTextToolCalls', () => {
   it('bare JSON c обёрткой arguments → вызов (легитимный)', () => {
     expect(parseTextToolCalls('{"name": "read_file", "arguments": {"path": "x"}}')).toEqual([{ name: 'read_file', args: { path: 'x' } }])
   })
+
+  // Ревью фиксов 24.06: проза-объяснение с примером РЕАЛЬНОЙ тулзы + обёрткой
+  // проходила сужение и валидацию имени. Format 5 теперь требует доминирования JSON.
+  it('объёмная проза с fenced-примером реальной тулзы → НЕ вызов (это объяснение)', () => {
+    const t = 'Чтобы прочитать файл, агент отправляет вызов инструмента в таком формате. Например, вот так выглядит вызов чтения:\n```json\n{"name": "read_file", "arguments": {"path": "config.yaml"}}\n```\nЭто вернёт содержимое файла целиком.'
+    expect(parseTextToolCalls(t)).toEqual([])
+  })
+  it('fenced-вызов с коротким лид-ином → вызов (доминирует)', () => {
+    expect(parseTextToolCalls('Вот вызов:\n```json\n{"tool": "list_files", "parameters": {"dir": "."}}\n```')).toEqual([{ name: 'list_files', args: { dir: '.' } }])
+  })
 })

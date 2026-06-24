@@ -60,35 +60,49 @@ export async function runPtcCode(opts: {
     }
   }
 
-  // ХАРДИНГ ПОБЕГА: НЕ инъектируем хост-реалм Object/Array/Promise/JSON/Math/… —
-  // vm-контекст имеет СВОИ интринзики (код использует их нативно). Инъекция живого
-  // хост-объекта/функции даёт мост в реалм Node: injected.constructor.constructor ===
-  // хостовый Function → Function('return process')() уводит из песочницы. Поэтому
-  // кладём ТОЛЬКО tools+log, c null-прототипом (чтобы .constructor не вёл на host
-  // Function), а тулзы оборачиваем так, чтобы хостовая ошибка не утекла в vm.
-  // ВАЖНО: vm — НЕ граница безопасности (доки Node). Настоящий контроль — execute_code
-  // гейтится КАК КОМАНДА (trust run_command, confirm в ask) в хендлере + mode-policy;
-  // хардинг лишь поднимает планку, гарантией не является.
+  // ХАРДИНГ ПОБЕГА. vm — НЕ формальная граница безопасности (доки Node): любой ЖИВОЙ
+  // хост-объект/функция, достижимая из кода, — мост в реалм Node через
+  // .constructor.constructor === хостовый Function → Function('return process')().
+  // Закрываем известные векторы:
+  //  • НЕ инъектируем хост-интринзики (Object/Array/Promise/JSON/Math) — у vm-контекста
+  //    свои, код пользуется ими нативно;
+  //  • log/tools/console — null-прототип (.constructor === undefined);
+  //  • тулзы возвращают vm-NATIVE Promise (конструктор Promise ИЗ контекста), а не
+  //    host-Promise — иначе tools.x().then.constructor вёл бы на host Function
+  //    (ревью фиксов 24.06: именно этот async-вектор оставался открыт).
+  // Всё равно ОСНОВНОЙ контроль — гейтинг execute_code КАК КОМАНДЫ (trust = run_command,
+  // confirm в ask) в хендлере + mode-policy: даже при гипотетическом побеге привилегий
+  // не больше, чем у уже доступного агенту run_command. vm-хардинг — defense-in-depth.
   Object.setPrototypeOf(log, null)
-  const tools: Record<string, unknown> = Object.create(null)
-  for (const [name, fn] of Object.entries(opts.tools)) {
-    const wrapped = async (args: Record<string, unknown>) => {
-      toolCalls++
-      try { return await fn(args ?? {}) }
-      catch (e) { return `[tool error: ${e instanceof Error ? e.message : String(e)}]` }
-    }
-    Object.setPrototypeOf(wrapped, null)
-    tools[name] = wrapped
-  }
   const consoleObj: Record<string, unknown> = Object.create(null)
   consoleObj.log = log
-  const sandbox = { tools, log, console: consoleObj }
-  const wrapped = `(async () => {\n${opts.code}\n})()`
+  const toolsObj: Record<string, unknown> = Object.create(null)
+  const sandbox: Record<string, unknown> = { tools: toolsObj, log, console: consoleObj }
+  const codeWrapped = `(async () => {\n${opts.code}\n})()`
 
   try {
     const ctx = vm.createContext(sandbox)
+    // Конструктор Promise ИЗ vm-реалма → промисы тулз vm-native (их .then/.constructor
+    // не выводят на host Function). toolsObj — живой объект из sandbox, заполняем ПОСЛЕ
+    // createContext (vm видит свежие свойства) и ДО запуска кода.
+    const VmPromise = vm.runInContext('Promise', ctx) as PromiseConstructor
+    for (const [name, fn] of Object.entries(opts.tools)) {
+      const wrappedTool = (args: Record<string, unknown>) => {
+        toolCalls++
+        let settle: (v: string) => void = () => {}
+        const p = new VmPromise<string>(res => { settle = res })
+        // .then(()=>fn()) — sync-throw тулзы становится rejection, не утекает в vm.
+        Promise.resolve().then(() => fn(args ?? {})).then(
+          v => settle(typeof v === 'string' ? v : safeStringify(v)),
+          e => settle(`[tool error: ${e instanceof Error ? e.message : String(e)}]`)
+        )
+        return p
+      }
+      Object.setPrototypeOf(wrappedTool, null)
+      toolsObj[name] = wrappedTool
+    }
     // timeout здесь ловит СИНХРОННЫЙ зацикл (while(true)); async-зависание — race ниже.
-    const ran = vm.runInContext(wrapped, ctx, { timeout: timeoutMs }) as Promise<unknown>
+    const ran = vm.runInContext(codeWrapped, ctx, { timeout: timeoutMs }) as Promise<unknown>
     const result = await Promise.race([
       Promise.resolve(ran),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`PTC таймаут (${timeoutMs}мс)`)), timeoutMs)),

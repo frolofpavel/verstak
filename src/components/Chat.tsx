@@ -512,6 +512,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         })
       }
       else if (event.type === 'command-result') {
+        // Снять модалку CommandConfirm, если команда зарезолвлена НЕ кликом по модалке,
+        // а извне (Stop/таймаут/ошибка) — иначе висит ghost-бэкдроп на завершённую
+        // команду (ревью 24.06; фоновые чаты уже покрыты applySnapshotEvent).
+        if (store.pendingCommand?.callId === event.callId) store.setPendingCommand(null)
         const status: 'ok' | 'error' | 'rejected' = event.status
         store.updateActivity(event.callId, {
           status,
@@ -1565,6 +1569,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // больше событий по этому sendId не придёт. Без этого owner повисал бы
     // в мапе, потому что done event на abort иногда теряется.
     useProject.getState().forgetSendOwner(id)
+    // Снять висящую модалку CommandConfirm этого прогона: Stop во время ожидания
+    // подтверждения команды → main зарезолвил pendingCommand в false, но command-result
+    // мог дропнуться (owner забыт выше) → модалка осталась бы (ревью 24.06).
+    const cur = useProject.getState()
+    if (cur.pendingCommand?.sendId === id) cur.setPendingCommand(null)
     currentSendIdRef.current = null
     flushQueueRef.current()
   }

@@ -131,7 +131,14 @@ export function parseTextToolCalls(text: string): RepairedCall[] {
       const name = pickName(obj)
       const hasWrapper = ['arguments', 'parameters', 'args', 'input'].some(k => k in obj)
       const explicitToolKey = typeof obj.tool === 'string' || typeof obj.tool_name === 'string'
-      if (name && (hasWrapper || explicitToolKey)) out.push({ name, args: pickArgs(obj) })
+      // ДОМИНИРОВАНИЕ (ревью 24.06): вокруг JSON не должно быть объёмной прозы —
+      // иначе это ПРИМЕР в объяснении (модель рассказывает про свои тулзы с реальным
+      // именем + обёрткой → проходит и сужение, и валидацию имени). Format 5 (bare/
+      // fenced JSON) низко-достоверный; тег-форматы 1-4 — control-токены, им доверяем.
+      const outside = (fence ? s.replace(fence[0], '') : s.replace(json, '')).trim()
+      if (name && (hasWrapper || explicitToolKey) && outside.length <= 80) {
+        out.push({ name, args: pickArgs(obj) })
+      }
     }
   }
   return out
