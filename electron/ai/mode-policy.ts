@@ -37,7 +37,9 @@ export type ToolDecision =
  */
 export function decide(toolName: string, mode: AgentMode): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
-  const isCommand = toolName === 'run_command' || toolName === 'connector_query'
+  // execute_code (PTC) исполняет произвольный JS — vm НЕ граница безопасности, поэтому
+  // trust = run_command: confirm в ask, block в plan. Без эскалации привилегий.
+  const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
 
   if (!isEdit && !isCommand) return 'auto-accept'  // reads always pass
 

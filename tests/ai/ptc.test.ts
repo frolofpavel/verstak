@@ -65,4 +65,15 @@ describe('runPtcCode', () => {
     const r = await runPtcCode({ code: 'await tools.write_file({path:"x"})', tools: fakeTools })
     expect(r.error).toBeTruthy()
   })
+
+  // Хардинг побега (ревью 24.06, critical): инъекция хост-конструкторов давала
+  // Object.constructor('return process')() → реальный host process → RCE.
+  it('классический vm-побег через Object.constructor не достаёт host process', async () => {
+    const r = await runPtcCode({ code: 'try { const p = Object.constructor("return process")(); log(p ? "ESCAPED:"+(p.pid||"") : "null") } catch(e) { log("blocked") }', tools: {} })
+    expect(r.output).not.toContain('ESCAPED')
+  })
+  it('инъектированный log имеет null-прото → log.constructor не выводит на host Function', async () => {
+    const r = await runPtcCode({ code: 'log(typeof log.constructor)', tools: {} })
+    expect(r.output).not.toContain('function')
+  })
 })

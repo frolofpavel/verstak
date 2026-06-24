@@ -8,11 +8,14 @@
  * собери все TODO») это кратно меньше входных токенов → дешевле (РФ-козырь «Opus
  * на дешёвой»).
  *
- * БЕЗОПАСНОСТЬ: исполняем в vm.createContext — ФРЕШ-контекст без process/require/fs/
- * global. Инъектим только read-only тулзы (через lookupHandler в хендлере) + log +
- * безопасные билтины. Таймаут на sync (vm option) И на async (Promise.race). Модель
- * угроз не нова: агент УЖЕ умеет run_command (любой код), здесь возможностей МЕНЬШЕ
- * (только чтение). Скрипт не может писать файлы/запускать команды.
+ * БЕЗОПАСНОСТЬ: исполняем в vm.createContext с инъекцией ТОЛЬКО tools+log (без хост-
+ * конструкторов — см. хардинг ниже), таймаут на sync (vm option) И на async (race).
+ * ВАЖНО: vm — НЕ граница безопасности (доки Node): из песочницы возможен побег через
+ * .constructor живых хост-объектов. Поэтому НАСТОЯЩИЙ контроль не в vm, а в том, что
+ * execute_code гейтится КАК КОМАНДА (trust = run_command: confirm в ask, block в plan)
+ * в execute-code.ts + mode-policy. Т.е. execute_code не даёт привилегий БОЛЬШЕ, чем
+ * уже имеющийся у агента run_command. Хардинг vm (null-прото инъекций, без хост-
+ * интринзиков) поднимает планку, но гарантией изоляции не является.
  */
 
 import vm from 'node:vm'
@@ -57,22 +60,29 @@ export async function runPtcCode(opts: {
     }
   }
 
-  // Прокси тулз: считаем вызовы, прозрачно отдаём результат.
-  const tools: Record<string, unknown> = {}
+  // ХАРДИНГ ПОБЕГА: НЕ инъектируем хост-реалм Object/Array/Promise/JSON/Math/… —
+  // vm-контекст имеет СВОИ интринзики (код использует их нативно). Инъекция живого
+  // хост-объекта/функции даёт мост в реалм Node: injected.constructor.constructor ===
+  // хостовый Function → Function('return process')() уводит из песочницы. Поэтому
+  // кладём ТОЛЬКО tools+log, c null-прототипом (чтобы .constructor не вёл на host
+  // Function), а тулзы оборачиваем так, чтобы хостовая ошибка не утекла в vm.
+  // ВАЖНО: vm — НЕ граница безопасности (доки Node). Настоящий контроль — execute_code
+  // гейтится КАК КОМАНДА (trust run_command, confirm в ask) в хендлере + mode-policy;
+  // хардинг лишь поднимает планку, гарантией не является.
+  Object.setPrototypeOf(log, null)
+  const tools: Record<string, unknown> = Object.create(null)
   for (const [name, fn] of Object.entries(opts.tools)) {
-    tools[name] = async (args: Record<string, unknown>) => {
+    const wrapped = async (args: Record<string, unknown>) => {
       toolCalls++
-      return fn(args ?? {})
+      try { return await fn(args ?? {}) }
+      catch (e) { return `[tool error: ${e instanceof Error ? e.message : String(e)}]` }
     }
+    Object.setPrototypeOf(wrapped, null)
+    tools[name] = wrapped
   }
-
-  // Фреш-контекст: только то, что положили. process/require/fs/global недоступны.
-  const sandbox = {
-    tools,
-    log,
-    console: { log },
-    JSON, Math, Object, Array, String, Number, Boolean, Promise, Date, RegExp, Map, Set,
-  }
+  const consoleObj: Record<string, unknown> = Object.create(null)
+  consoleObj.log = log
+  const sandbox = { tools, log, console: consoleObj }
   const wrapped = `(async () => {\n${opts.code}\n})()`
 
   try {
