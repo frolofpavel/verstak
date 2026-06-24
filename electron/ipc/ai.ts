@@ -28,6 +28,9 @@ import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessio
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
+import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
+import { runLspDiagnostics } from '../ai/lsp-diagnose'
+import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { expandOfficeAttachments } from '../ai/attachment-text'
@@ -1513,6 +1516,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const autoCaptureEnabled = getSecretForDelegate?.('auto_capture_memory') !== 'false'
     let acceptedWritesThisTurn = 0
     let tsWritesThisTurn = 0  // Diagnostic Loop v2: правки .ts/.tsx → авто-tsc
+    let lastLspWrite: { path: string; content: string } | null = null  // T1.1: не-TS файл → LSP-диагностика
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       const result = toolResults[i]
@@ -1531,6 +1535,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           const content = String(call.args.content ?? call.args.patch ?? '')
           if (content && sessionChanges.length < 5) {
             sessionChanges.push({ file: p, type: call.name === 'write_file' ? 'write' : 'patch', content })
+          }
+          // T1.1: write_file не-TS файла (Python/Go/Rust) → диагностика языковым
+          // сервером. write_file несёт полное содержимое (для didOpen); apply_patch
+          // даёт лишь diff — для него LSP-диагностику пока пропускаем.
+          if (call.name === 'write_file' && content && isLspDiagnosableFile(p)) {
+            lastLspWrite = { path: p, content }
           }
         }
         acceptedWritesThisTurn++
@@ -1583,6 +1593,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             if (hint) verifyHint = hint
           }
         } catch { /* Diagnostic Loop — best-effort, не ломает цикл */ }
+      }
+      // T1.1: не-TS файлы (Python/Go/Rust) — диагностика языковым сервером (LSP).
+      // Graceful: бинаря нет / таймаут → null → откат к мягкому хинту ниже.
+      if (!verifyHint && lastLspWrite && diagnosticEnabled && !modelCheckedThisTurn) {
+        try {
+          const diags = await runLspDiagnostics({
+            path: joinPath(projectPath, lastLspWrite.path),
+            content: lastLspWrite.content,
+            root: projectPath
+          })
+          const hint = diags ? formatLspDiagnosticHint(lastLspWrite.path, diags) : null
+          if (hint) verifyHint = hint
+        } catch { /* LSP — best-effort, не ломает цикл */ }
       }
       // Фолбэк: если авто-диагностика не дала нудж (выключена / чисто / не TS) —
       // мягкое напоминание запустить проверку, как было.
