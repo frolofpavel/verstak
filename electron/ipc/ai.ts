@@ -1205,6 +1205,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // снова пересекло порог → опять сжал → зацикливание на малых окнах.
   const COMPACT_COOLDOWN_TURNS = 3
   let lastCompactTurn = -COMPACT_COOLDOWN_TURNS
+  let lastSummary = '' // T1.6: предыдущее резюме для итеративной компакции
   // Accumulate token usage across all turns of this session for the final journal entry.
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
@@ -1639,7 +1640,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if (autoCompactEnabled && model && compactCooldownOk && shouldAutoCompact(currentMessages, model)) {
       try {
         // Получаем резюме от той же модели — один non-streamed вызов
-        const summaryMessages = buildCompactSummaryPrompt(currentMessages)
+        const summaryMessages = buildCompactSummaryPrompt(currentMessages, { previousSummary: lastSummary })
         let summaryText = ''
         let summaryDone = false
         for await (const ev of provider.send(summaryMessages, [], undefined, signal)) {
@@ -1661,6 +1662,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         // частичный-но-truthy и раньше затирал историю усечённым резюме. Ревью #4.
         if (summaryDone && summaryText.trim()) {
           lastCompactTurn = turn
+          lastSummary = summaryText // T1.6: следующая компакция обновит это резюме
           const beforeLen = currentMessages.length
           const compacted = createCompactedHistory(summaryText, currentMessages)
           currentMessages.length = 0

@@ -227,29 +227,64 @@ export function shouldAutoCompact(messages: ChatMessage[], model: string): boole
   return used > effectiveLimit * COMPACT_THRESHOLD
 }
 
+const FILE_TOOLS = new Set(['read_file', 'write_file', 'apply_patch', 'edit_file', 'create_file'])
+
 /**
- * Промпт для суммаризации: просим модель собрать сжатое резюме сессии.
- * Добавляем саму историю в конце, чтобы у модели был весь контекст.
+ * Пути файлов, затронутых тулзами сессии (read/write/patch). Чтобы провенанс
+ * файлов не терялся при компакции — модель сохранит их в разделе ФАЙЛЫ (T1.6).
  */
-export function buildCompactSummaryPrompt(messages: ChatMessage[]): ChatMessage[] {
-  // Берём только текстовые сообщения (без tool internals) для суммаризации —
-  // меньше токенов, модель фокусируется на сути а не на tool payloads.
+export function extractTouchedFiles(messages: ChatMessage[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const m of messages) {
+    for (const c of m.toolCalls ?? []) {
+      if (!FILE_TOOLS.has(c.name)) continue
+      const args = (c.args ?? {}) as Record<string, unknown>
+      const p = typeof args.path === 'string' ? args.path
+        : typeof args.file_path === 'string' ? args.file_path : ''
+      if (p && !seen.has(p)) { seen.add(p); out.push(p) }
+    }
+  }
+  return out
+}
+
+/**
+ * Промпт компакции (T1.6): СТРУКТУРИРОВАННАЯ схема (Goal/Progress/Files) вместо
+ * free-form + протяжка тронутых файлов + ИТЕРАТИВНОЕ обновление прошлого резюме
+ * (previousSummary — двигаем «В работе»→«Сделано», не ре-суммаризируем с нуля).
+ * Из конкурентного исследования (OpenClaw/Cursor — главная боль агентов на хвосте
+ * длинных сессий: потеря провенанса файлов и деградация резюме).
+ */
+export function buildCompactSummaryPrompt(
+  messages: ChatMessage[],
+  opts?: { previousSummary?: string }
+): ChatMessage[] {
   const textHistory = messages
     .filter(m => m.role !== 'system' && (m.content ?? '').trim().length > 0)
     .map(m => `[${m.role}]: ${(m.content ?? '').slice(0, 2000)}`)
     .join('\n\n')
 
-  return [
-    {
-      role: 'user',
-      content:
-        'Суммаризируй этот разговор кратко и чётко. ' +
-        'Включи: ключевые решения, изменённые файлы (если упоминались), текущий статус задачи, нерешённые вопросы. ' +
-        'Максимум 600 слов. Не включай вводные фразы вроде «Вот резюме». ' +
-        'Отвечай на том же языке что и разговор.\n\n' +
-        textHistory
-    }
-  ]
+  const files = extractTouchedFiles(messages)
+  const filesBlock = files.length
+    ? `\nФайлы, затронутые в сессии (отрази релевантные в разделе ФАЙЛЫ):\n${files.map(f => `- ${f}`).join('\n')}\n`
+    : ''
+
+  const prev = opts?.previousSummary?.trim()
+  const iterative = prev
+    ? '\n\nНиже ПРЕДЫДУЩЕЕ резюме — ОБНОВИ его (двигай «В работе»→«Сделано», добавь новое, не теряй старое), НЕ пиши с нуля:\n\n' + prev + '\n'
+    : ''
+
+  const schema =
+    'Сожми сессию в СТРУКТУРИРОВАННОЕ резюме строго по схеме (заполни каждый раздел, пустой → «—»):\n\n' +
+    'ЦЕЛЬ: <что делаем, одна строка>\n' +
+    'ОГРАНИЧЕНИЯ: <ключевые правила/требования>\n' +
+    'ПРОГРЕСС:\n  Сделано: <завершённое>\n  В работе: <текущее>\n  Заблокировано: <если есть>\n' +
+    'КЛЮЧЕВЫЕ РЕШЕНИЯ: <важные выборы>\n' +
+    'СЛЕДУЮЩИЕ ШАГИ: <что дальше>\n' +
+    'ФАЙЛЫ: <релевантные файлы и их роль>\n\n' +
+    'Без вводных фраз. На языке разговора. Лаконично, но не теряй провенанс файлов и решений.'
+
+  return [{ role: 'user', content: schema + iterative + filesBlock + '\n\nИстория сессии:\n' + textHistory }]
 }
 
 /** Количество последних поворотов диалога которые сохраняем после компакшна. */
