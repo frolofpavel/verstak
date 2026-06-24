@@ -31,6 +31,7 @@ import { browserHandler } from './tool-handlers/browser'
 import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
 import { readJournalHandler } from './tool-handlers/journal'
+import { executeCodeHandler } from './tool-handlers/execute-code'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -64,6 +65,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'todo_list': todoListHandler,
   'preflight': preflightHandler,
   'read_journal': readJournalHandler,
+  'execute_code': executeCodeHandler,  // PTC (T1.4) — гейтится по настройке ptc_enabled в ai.ts
   'generate_html': generateHtmlHandler,
   'generate_docx': generateDocxHandler,
   'render_chart': renderChartHandler,

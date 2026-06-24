@@ -1278,7 +1278,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // убираем тулзы и инжектим инструкцию отчёта: модель обязана отчитаться
     // структурой «сделано/не доделано/дальше», а не молча упереться в лимит.
     const isLastTurn = turnsBudget > 1 && turn === turnsBudget - 1
-    const allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
+    let allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
+    // PTC (T1.4) пока opt-in: execute_code предлагается модели только при
+    // ptc_enabled='true' (по умолчанию выкл — фича ждёт live-проверки петли).
+    if (getSecretForDelegate?.('ptc_enabled') !== 'true') {
+      allToolDefs = allToolDefs.filter(t => t.name !== 'execute_code')
+    }
     const messagesToSend = isLastTurn
       ? [...messagesForProvider, { role: 'user' as const, content: MAX_STEPS_REPORT }]
       : messagesForProvider

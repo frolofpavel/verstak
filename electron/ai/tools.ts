@@ -150,6 +150,17 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'execute_code',
+    description: 'PTC (Programmatic Tool Calling): выполнить JS-скрипт, который программно оркестрирует READ-ONLY тулзы (циклы, фильтры, агрегация). В песочнице доступен async-объект `tools` с методами read_file/list_directory/search_project/find_files/get_project_map (те же args, что одноимённые тулзы, возвращают строку), и функция log(...) для вывода. В КОНТЕКСТ попадает ТОЛЬКО выведенное через log(...) или return — промежуточные результаты тулзов НЕ раздувают контекст. Используй для read-тяжёлых задач («прочитай N файлов и собери X», «найди по проекту и отфильтруй») — экономит токены. Писать файлы / запускать команды ВНУТРИ нельзя (только чтение). Пример: const files=(await tools.find_files({pattern:"**/*.py"})).split("\\n"); let t=[]; for(const f of files){const c=await tools.read_file({path:f}); for(const l of c.split("\\n")) if(l.includes("TODO")) t.push(f+": "+l);} log(t.join("\\n"))',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Тело async-функции на JS. Доступны: tools.{read_file,list_directory,search_project,find_files,get_project_map}(args)→Promise<string>, log(...), JSON/Math/Object/Array. Нет доступа к fs/process/require/сети.' }
+      },
+      required: ['code']
+    }
+  },
+  {
     name: 'get_project_map',
     description: 'Получить структуру проекта одной командой: дерево директорий + top-level символы (functions, classes, components, types, exports) для каждого *.ts/*.tsx/*.js/*.jsx файла + количество строк. Используй ВПЕРВЫЕ при незнакомом проекте — экономит десятки read_file/list_directory вызовов. Карта кэшируется; для обновления вызови refresh_project_map.',
     parameters: {
