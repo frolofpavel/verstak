@@ -21,6 +21,7 @@ import { DecisionsPanel } from './components/DecisionsPanel'
 import { BrainPanel } from './components/BrainPanel'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
+import { InboxApprovals } from './components/InboxApprovals'
 
 import { UpdateReadyToast } from './components/UpdateReadyToast'
 import { WhatsNewModal } from './components/WhatsNewModal'
@@ -471,6 +472,7 @@ export function App() {
       <TerminalErrorToast />
       <DiffView />
       <CommandConfirm />
+      <InboxApprovals />
       <UpdateReadyToast />
       <WhatsNewModal />
 

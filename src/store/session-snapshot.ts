@@ -97,6 +97,32 @@ export interface SessionSnapshot {
   hasUnread: boolean
 }
 
+export interface InboxApproval {
+  chatId: number
+  command: PendingCommand
+}
+
+/**
+ * T1.3 Inbox: все ожидающие подтверждения команды по ВСЕМ чатам (активный +
+ * фоновые снапшоты) одним списком. Раньше approval фонового чата был не виден,
+ * пока не переключишься в него — агент в фоне молча ждал. Resolve работает по
+ * callId+sendId (ai:resolve-command), т.е. одобрять можно не заходя в чат.
+ */
+export function selectInboxApprovals(state: {
+  activeChatId: number | null
+  pendingCommand: PendingCommand | null
+  chatSnapshots: Record<number, Pick<SessionSnapshot, 'pendingCommand'>>
+}): InboxApproval[] {
+  const out: InboxApproval[] = []
+  if (state.pendingCommand && state.activeChatId != null) {
+    out.push({ chatId: state.activeChatId, command: state.pendingCommand })
+  }
+  for (const [id, snap] of Object.entries(state.chatSnapshots)) {
+    if (snap?.pendingCommand) out.push({ chatId: Number(id), command: snap.pendingCommand })
+  }
+  return out
+}
+
 export function freshSnapshot(): SessionSnapshot {
   return {
     messages: [],

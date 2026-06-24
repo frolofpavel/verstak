@@ -129,6 +129,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
+  /** T1.3 Inbox: снять pendingCommand конкретного чата (активного или фонового
+   *  снапшота) — резолв approval из общего Inbox, не заходя в чат. */
+  clearChatPendingCommand: (chatId: number) => void
   pushActivity: (entry: ActivityEntry) => void
   updateActivity: (id: string, patch: Partial<ActivityEntry>) => void
   clearActivity: () => void
@@ -501,6 +504,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => set({ pendingWrites: [] }),
   setPendingCommand: (c) => set({ pendingCommand: c }),
+  clearChatPendingCommand: (chatId) => set(s => {
+    const patch: Partial<ProjectState> = {}
+    if (chatId === s.activeChatId && s.pendingCommand) patch.pendingCommand = null
+    const snap = s.chatSnapshots[chatId]
+    if (snap?.pendingCommand) {
+      patch.chatSnapshots = { ...s.chatSnapshots, [chatId]: { ...snap, pendingCommand: null } }
+    }
+    return patch
+  }),
   pushActivity: (entry) => set(s => ({ activity: [...s.activity, entry] })),
   updateActivity: (id, patch) => set(s => ({
     activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
