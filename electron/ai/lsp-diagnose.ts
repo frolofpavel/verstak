@@ -31,7 +31,20 @@ export async function runLspDiagnostics(opts: {
   let timer: ReturnType<typeof setTimeout> | null = null
 
   try {
-    child = spawn(cfg.command, cfg.args, { cwd: opts.root, stdio: ['pipe', 'pipe', 'ignore'] })
+    child = spawn(cfg.command, cfg.args, {
+      cwd: opts.root,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      // На Windows pyright/gopls после `npm i -g` — .cmd-обёртки; spawn без shell их
+      // не запускает (ENOENT) → вся LSP-петля молча мертва на основной платформе.
+      // (как и остальные CLI-spawn проекта: claude-cli/codex-cli/…)
+      shell: process.platform === 'win32',
+      windowsHide: true,
+    })
+    // EPIPE/ECONNRESET на пайпах прилетает АСИНХРОННО как 'error' на потоке; без
+    // слушателя Node роняет ВЕСЬ main-процесс (нет uncaughtException-хука). Глушим —
+    // функция обязана быть graceful и НИКОГДА не кидать (см. контракт в шапке).
+    child.stdin?.on('error', () => {})
+    child.stdout?.on('error', () => {})
 
     const decoder = new LspDecoder()
     const transport: LspTransport = {

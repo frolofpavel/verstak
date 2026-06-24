@@ -1521,7 +1521,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const autoCaptureEnabled = getSecretForDelegate?.('auto_capture_memory') !== 'false'
     let acceptedWritesThisTurn = 0
     let tsWritesThisTurn = 0  // Diagnostic Loop v2: правки .ts/.tsx → авто-tsc
-    let lastLspWrite: { path: string; content: string } | null = null  // T1.1: не-TS файл → LSP-диагностика
+    const lspWrites = new Map<string, string>()  // T1.1: не-TS файлы за ход (path→content) → LSP-диагностика всех
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       const result = toolResults[i]
@@ -1545,7 +1545,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // сервером. write_file несёт полное содержимое (для didOpen); apply_patch
           // даёт лишь diff — для него LSP-диагностику пока пропускаем.
           if (call.name === 'write_file' && content && isLspDiagnosableFile(p)) {
-            lastLspWrite = { path: p, content }
+            lspWrites.set(p, content)  // дедуп по пути: последняя запись файла побеждает
           }
         }
         acceptedWritesThisTurn++
@@ -1600,16 +1600,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         } catch { /* Diagnostic Loop — best-effort, не ломает цикл */ }
       }
       // T1.1: не-TS файлы (Python/Go/Rust) — диагностика языковым сервером (LSP).
-      // Graceful: бинаря нет / таймаут → null → откат к мягкому хинту ниже.
-      if (!verifyHint && lastLspWrite && diagnosticEnabled && !modelCheckedThisTurn) {
+      // ВСЕ не-TS файлы хода (не только последний), параллельно (wall-time = max, не
+      // сумма), с капом на число спавнов. Graceful: бинаря нет/таймаут → null → откат.
+      if (!verifyHint && lspWrites.size > 0 && diagnosticEnabled && !modelCheckedThisTurn) {
         try {
-          const diags = await runLspDiagnostics({
-            path: joinPath(projectPath, lastLspWrite.path),
-            content: lastLspWrite.content,
-            root: projectPath
-          })
-          const hint = diags ? formatLspDiagnosticHint(lastLspWrite.path, diags) : null
-          if (hint) verifyHint = hint
+          const entries = [...lspWrites.entries()].slice(0, 5)
+          const hints = await Promise.all(entries.map(async ([rel, content]) => {
+            const diags = await runLspDiagnostics({ path: joinPath(projectPath, rel), content, root: projectPath })
+            return diags ? formatLspDiagnosticHint(rel, diags) : null
+          }))
+          const joined = hints.filter(Boolean).join('\n\n')
+          if (joined) verifyHint = joined
         } catch { /* LSP — best-effort, не ломает цикл */ }
       }
       // Фолбэк: если авто-диагностика не дала нудж (выключена / чисто / не TS) —
