@@ -24,6 +24,13 @@ describe('extractTouchedFiles', () => {
   it('нет файловых тулзов → []', () => {
     expect(extractTouchedFiles([{ role: 'user', content: 'привет' }])).toEqual([])
   })
+  // Ревью 24.06: propose_edits — главный мульти-файловый редактор, пути в edits[].path.
+  it('извлекает пути из propose_edits (edits[].path)', () => {
+    const m: ChatMessage[] = [{ role: 'assistant', content: '', toolCalls: [
+      { id: '1', name: 'propose_edits', args: { edits: [{ path: 'src/x.ts', diff: '...' }, { path: 'src/y.ts', diff: '...' }] } },
+    ] }]
+    expect(extractTouchedFiles(m)).toEqual(['src/x.ts', 'src/y.ts'])
+  })
 })
 
 describe('buildCompactSummaryPrompt — структурная схема', () => {

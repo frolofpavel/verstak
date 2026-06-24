@@ -227,22 +227,33 @@ export function shouldAutoCompact(messages: ChatMessage[], model: string): boole
   return used > effectiveLimit * COMPACT_THRESHOLD
 }
 
-const FILE_TOOLS = new Set(['read_file', 'write_file', 'apply_patch', 'edit_file', 'create_file'])
+// Реальные файловые тулзы (ревью 24.06): edit_file/create_file — фантомы (нет в
+// TOOL_DEFS). propose_edits — основной мульти-файловый редактор, его пути лежат в
+// массиве args.edits[].path, а не args.path.
+const FILE_TOOLS = new Set(['read_file', 'write_file', 'apply_patch', 'propose_edits'])
 
 /**
- * Пути файлов, затронутых тулзами сессии (read/write/patch). Чтобы провенанс
- * файлов не терялся при компакции — модель сохранит их в разделе ФАЙЛЫ (T1.6).
+ * Пути файлов, затронутых тулзами сессии (read/write/patch/propose_edits). Чтобы
+ * провенанс файлов не терялся при компакции — модель сохранит их в разделе ФАЙЛЫ (T1.6).
  */
 export function extractTouchedFiles(messages: ChatMessage[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
+  const add = (p: unknown) => {
+    if (typeof p === 'string' && p && !seen.has(p)) { seen.add(p); out.push(p) }
+  }
   for (const m of messages) {
     for (const c of m.toolCalls ?? []) {
       if (!FILE_TOOLS.has(c.name)) continue
       const args = (c.args ?? {}) as Record<string, unknown>
-      const p = typeof args.path === 'string' ? args.path
-        : typeof args.file_path === 'string' ? args.file_path : ''
-      if (p && !seen.has(p)) { seen.add(p); out.push(p) }
+      // propose_edits — мульти-файловый: пути в массиве edits[].path.
+      if (c.name === 'propose_edits' && Array.isArray(args.edits)) {
+        for (const e of args.edits) {
+          if (e && typeof e === 'object') add((e as Record<string, unknown>).path)
+        }
+        continue
+      }
+      add(typeof args.path === 'string' ? args.path : args.file_path)
     }
   }
   return out
