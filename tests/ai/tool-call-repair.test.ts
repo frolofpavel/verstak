@@ -48,4 +48,17 @@ describe('parseTextToolCalls', () => {
   it('args отсутствуют → пустой объект, не падает', () => {
     expect(parseTextToolCalls('<function=get_status></function>')).toEqual([{ name: 'get_status', args: {} }])
   })
+
+  // Ревью 24.06: Format 5 ложно срабатывал на обычной прозе с JSON, где есть ключ
+  // name (пример тела запроса/конфига) → фантомный вызов. Теперь нужен обёрточный
+  // arg-ключ ИЛИ явный tool/tool_name.
+  it('проза с JSON-примером (ключ name, без обёртки) → НЕ вызов', () => {
+    expect(parseTextToolCalls('Отправь POST с телом {"name": "Иван", "role": "admin"}')).toEqual([])
+  })
+  it('bare JSON без обёрточного arg-ключа → НЕ вызов', () => {
+    expect(parseTextToolCalls('{"name": "read_file"}')).toEqual([])
+  })
+  it('bare JSON c обёрткой arguments → вызов (легитимный)', () => {
+    expect(parseTextToolCalls('{"name": "read_file", "arguments": {"path": "x"}}')).toEqual([{ name: 'read_file', args: { path: 'x' } }])
+  })
 })

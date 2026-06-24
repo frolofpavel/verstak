@@ -224,9 +224,16 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
         // T1.5 repair: модель отдала вызов ТЕКСТОМ (не structured tool_calls) —
         // восстанавливаем, чтобы тулза исполнилась, а не упала в чат прозой.
         // Срабатывает только для слабых/RU-моделей; сильные шлют structured.
-        if (!emittedToolCall && fullText.trim()) {
+        // ВАЛИДАЦИЯ ИМЕНИ (ревью 24.06): эмитим только вызовы, чьё имя есть в наборе
+        // tools. Иначе обычная проза с JSON (пример конфига/тела запроса с ключом
+        // name/tool) → фантомный вызов → lookupHandler-fallback на readHandler →
+        // потраченный ход. Неизвестное имя оставляем текстом (он уже отстримлен).
+        if (!emittedToolCall && fullText.trim() && tools.length > 0) {
+          const known = new Set(tools.map(t => t.name))
           for (const rc of parseTextToolCalls(fullText)) {
-            yield { type: 'tool-call', call: { id: randomUUID(), name: rc.name, args: rc.args } }
+            if (known.has(rc.name)) {
+              yield { type: 'tool-call', call: { id: randomUUID(), name: rc.name, args: rc.args } }
+            }
           }
         }
         yield { type: 'done' }

@@ -118,14 +118,20 @@ export function parseTextToolCalls(text: string): RepairedCall[] {
   }
   if (out.length) return out
 
-  // 5. голый/огороженный JSON {name|tool, parameters|arguments}
+  // 5. голый/огороженный JSON {name|tool, parameters|arguments}. СТРОГО: считаем
+  // вызовом только если есть обёрточный arg-ключ (arguments/parameters/args/input)
+  // ИЛИ имя задано явным tool-маркером (tool/tool_name). Иначе обычная проза с JSON
+  // ({"name":"Иван","role":"admin"} — пример тела/конфига) ложно распознаётся как
+  // вызов (ревью 24.06). Доп. защита — валидация имени против набора tools в openai-compat.
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/)
   const json = extractFirstJsonObject(fence ? fence[1] : s)
   if (json) {
     const obj = safeJson(json)
     if (obj) {
       const name = pickName(obj)
-      if (name) out.push({ name, args: pickArgs(obj) })
+      const hasWrapper = ['arguments', 'parameters', 'args', 'input'].some(k => k in obj)
+      const explicitToolKey = typeof obj.tool === 'string' || typeof obj.tool_name === 'string'
+      if (name && (hasWrapper || explicitToolKey)) out.push({ name, args: pickArgs(obj) })
     }
   }
   return out
