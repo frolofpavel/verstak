@@ -10,7 +10,7 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process'
-import { pathToFileURL } from 'url'
+import { pathToFileURL, fileURLToPath } from 'url'
 import { LspClient, type LspTransport } from './lsp/client'
 import { LspDecoder } from './lsp/framing'
 import { resolveLangServer, extractErrorDiagnostics, type LspDiagItem } from './lang-servers'
@@ -68,7 +68,14 @@ export async function runLspDiagnostics(opts: {
 
     client.onNotification((method, params) => {
       if (method !== 'textDocument/publishDiagnostics') return
-      if ((params as { uri?: string } | null)?.uri === uri) settle(extractErrorDiagnostics(params))
+      const got = (params as { uri?: string } | null)?.uri
+      if (process.env.LSP_DEBUG) {
+        const n = Array.isArray((params as { diagnostics?: unknown[] } | null)?.diagnostics) ? (params as { diagnostics: unknown[] }).diagnostics.length : '?'
+        console.error('[lsp] publishDiagnostics got=', got, 'expected=', uri, 'diags=', n)
+      }
+      // Строгий ===  uri ненадёжен на Windows (pyright нормализует регистр диска и
+      // percent-кодирует ':') — сравниваем по разрешённому ПУТИ (регистронезависимо).
+      if (typeof got === 'string' && sameFile(got, opts.path)) settle(extractErrorDiagnostics(params))
     })
 
     // ENOENT (бинаря нет) и ранний выход сервера → null, не ждём таймаут.
@@ -104,5 +111,19 @@ export async function runLspDiagnostics(opts: {
     // treeKill и здесь (client мог быть null — spawn упал до его создания → дерево
     // процессов не закрыто через transport.close).
     if (child) { try { treeKill(child) } catch { /* noop */ } }
+  }
+}
+
+/** Один ли это файл: сравниваем uri↔путь по разрешённому пути (на Windows
+ *  регистронезависимо и независимо от percent-кодирования диска). */
+function sameFile(uri: string, filePath: string): boolean {
+  try {
+    const a = fileURLToPath(uri)
+    if (process.platform === 'win32') {
+      return a.toLowerCase().replace(/\//g, '\\') === filePath.toLowerCase().replace(/\//g, '\\')
+    }
+    return a === filePath
+  } catch {
+    return false
   }
 }
