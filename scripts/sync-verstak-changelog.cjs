@@ -13,6 +13,15 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    version: '1.5.34',
+    build: '25.06.2026',
+    deployed: '25.06.2026',
+    title: 'Авто-диагностика Python/Go/Rust: исправлено срабатывание на Windows',
+    changes: [
+      'Авто-проверка ошибок в Python, Go и Rust (из 1.5.33) теперь действительно срабатывает на Windows: исправлено сопоставление файла с диагностикой от языкового сервера — раньше из-за разного формата пути (регистр диска, кодировка) ошибки не доходили до агента, и проверка молча простаивала. Проверено end-to-end с pyright. Нужен установленный языковой сервер (pyright / gopls / rust-analyzer).',
+    ],
+  },
+  {
     version: '1.5.33',
     build: '25.06.2026',
     deployed: '25.06.2026',
