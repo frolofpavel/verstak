@@ -17,7 +17,6 @@ function hasCmd(cmd: string): boolean {
 
 const enabled = process.env.RUN_LSP_IT === '1'
 const hasPyright = enabled && hasCmd('pyright-langserver')
-const hasRustAnalyzer = enabled && hasCmd('rust-analyzer')
 
 describe('runLspDiagnostics — LIVE (нужен языковой сервер + RUN_LSP_IT=1)', () => {
   it.skipIf(!hasPyright)('pyright находит ошибку в Python-файле (end-to-end)', async () => {
@@ -40,4 +39,10 @@ describe('runLspDiagnostics — LIVE (нужен языковой сервер +
     // null (нет publishDiagnostics в окно) или пустой массив — оба «нет ошибок».
     expect(diags === null || diags.length === 0).toBe(true)
   }, 30000)
+
+  // rust-analyzer/gopls end-to-end не тестируем здесь: на машине Pavel rust-analyzer —
+  // rustup-прокси без установленного компонента (нужен `rustup component add
+  // rust-analyzer`), gopls не установлен. Пайплайн доказан pyright'ом (тот же spawn/
+  // handshake/uri/treeKill); graceful-деградация на нерабочем сервере проверена (выход
+  // процесса → null, без краша).
 })
