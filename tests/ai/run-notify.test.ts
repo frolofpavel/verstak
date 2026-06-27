@@ -75,6 +75,11 @@ describe('run-notify: notifyRunEvent (гейтинг)', () => {
     expect(queryMock).not.toHaveBeenCalled()
   })
 
+  it('прогон без проекта (справка «?», projectName=null) → no-op (не спамим)', async () => {
+    await notifyRunEvent({ status: 'done', owner: 'main', projectName: null }, secrets({ telegram_notify_chat_id: '123', telegram_bot_token: 'tok' }))
+    expect(queryMock).not.toHaveBeenCalled()
+  })
+
   it('не кидает при ошибке коннектора (наблюдаемость не роняет прогон)', async () => {
     queryMock.mockRejectedValueOnce(new Error('network'))
     await expect(notifyRunEvent(

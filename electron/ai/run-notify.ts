@@ -54,6 +54,10 @@ export async function notifyRunEvent(
 ): Promise<void> {
   try {
     if (ev.owner && ev.owner !== 'main') return
+    // Прогоны без проекта (чат справки «?», meta) физически имеют owner='main',
+    // но projectPath=null → projectName=null. Не уведомляем — иначе спам на каждый
+    // вопрос в справке (ревью 27.06). Рабочие coding-прогоны всегда с проектом.
+    if (!ev.projectName) return
     if (!shouldNotifyStatus(ev.status)) return
     const chatId = deps.getSecret('telegram_notify_chat_id')
     if (!chatId) return // не настроено → no-op (фича выключена)
