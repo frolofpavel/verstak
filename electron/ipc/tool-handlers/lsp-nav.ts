@@ -1,11 +1,12 @@
 // Tier-2 #1 — LSP-навигация как тулзы: find_definition / find_references. Семантика
 // через язык-сервер (точнее grep'а). Read-only. Движок — electron/ai/lsp-nav.ts.
 import { readFileSync } from 'fs'
-import { join, relative } from 'path'
+import { relative } from 'path'
 import type { ToolHandler, ToolContext } from './shared'
 import { emitActivity } from './shared'
 import { runLspNavigation } from '../../ai/lsp-nav'
 import { isLspDiagnosableFile } from '../../ai/lang-servers'
+import { safeRealJoin } from '../../ai/path-policy'
 import type { ToolCall, ToolResult } from '../../ai/types'
 
 function relPath(root: string, file: string): string {
@@ -19,7 +20,14 @@ async function navigate(kind: 'definition' | 'references', call: ToolCall, ctx: 
   if (!rel || !symbol) {
     return { id: call.id, name: call.name, result: '', error: `${call.name}: нужны path и symbol` }
   }
-  const abs = join(ctx.projectPath, rel)
+  // safeRealJoin (как read_file) — anti-traversal/symlink-escape: иначе find_definition
+  // ({path:'../../../etc/passwd.py'}) прочитал бы файл вне проекта мимо path-policy.
+  let abs: string
+  try {
+    abs = await safeRealJoin(ctx.projectPath, rel)
+  } catch (e) {
+    return { id: call.id, name: call.name, result: '', error: e instanceof Error ? e.message : `путь вне проекта: ${rel}` }
+  }
   if (!isLspDiagnosableFile(abs)) {
     return { id: call.id, name: call.name, result: `LSP-навигация поддерживается для Python/Go/Rust; для ${rel} языковой сервер не настроен — используй search_project.` }
   }
