@@ -21,7 +21,12 @@ export function addProofFrame(sendId: number, png: Buffer): void {
   }
 }
 
-/** Забрать и очистить кадры прогона. */
+/** Прочитать кадры прогона БЕЗ удаления (чтобы при сбое кодирования не потерять). */
+export function peekProofFrames(sendId: number): Buffer[] {
+  return buffers.get(sendId) ?? []
+}
+
+/** Забрать и очистить кадры прогона (вызывать только после успешного кодирования). */
 export function takeProofFrames(sendId: number): Buffer[] {
   const arr = buffers.get(sendId) ?? []
   buffers.delete(sendId)

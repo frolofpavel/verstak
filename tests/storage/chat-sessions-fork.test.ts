@@ -59,4 +59,29 @@ describe('chat-sessions fork', () => {
     const branch = sessions.fork(src.id)
     expect(sessions.list('/p').some(s => s.id === branch!.id && s.parentChatId === src.id)).toBe(true)
   })
+
+  // Ревью 26.06 (HIGH): удаление родителя НЕ должно стирать форк-ветку (data loss).
+  it('удаление родителя НЕ удаляет форк-ветку — отвязывает в корень, работа цела', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db)
+    const chats = createChats(db)
+    const src = sessions.create('/p')
+    chats.appendToSession(src.id, '/p', 'user', 'a')
+    const branch = sessions.fork(src.id)
+    chats.appendToSession(branch!.id, '/p', 'assistant', 'работа в ветке')
+    sessions.remove(src.id)
+    const b = sessions.get(branch!.id)
+    expect(b).not.toBeNull() // ветка жива
+    expect(b!.parentChatId).toBeNull() // отвязана в корень
+    expect(chats.listBySession(branch!.id).map(m => m.content)).toEqual(['a', 'работа в ветке'])
+  })
+
+  it('удаление родителя каскадит скрытый review-суб-чат', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db)
+    const main = sessions.create('/p')
+    const review = sessions.create('/p', { kind: 'review', parentChatId: main.id })
+    sessions.remove(main.id)
+    expect(sessions.get(review.id)).toBeNull() // review удалён вместе с родителем
+  })
 })

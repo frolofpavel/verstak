@@ -776,13 +776,22 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   forkChat: async (sourceId) => {
     const s = get()
     if (!s.path) return null
-    const branch = await window.api.chatSessions.fork(sourceId)
-    if (!branch) return null
-    const list = await window.api.chatSessions.list(s.path)
-    set({ chatSessions: list })
-    // switchChatSession снапшотит уходящий чат и загружает скопированную историю ветки.
-    await get().switchChatSession(branch.id)
-    return branch
+    // Не форкаем СТРИМЯЩИЙ чат: in-flight ответ ещё не персистнут в БД → ветка
+    // получила бы усечённую историю без последней реплики (ревью 26.06).
+    const streaming = (sourceId === s.activeChatId && s.isStreaming) || s.chatSnapshots[sourceId]?.isStreaming
+    if (streaming) return null
+    try {
+      const branch = await window.api.chatSessions.fork(sourceId)
+      if (!branch) return null
+      const list = await window.api.chatSessions.list(s.path)
+      set({ chatSessions: list })
+      // switchChatSession снапшотит уходящий чат и грузит скопированную историю ветки.
+      await get().switchChatSession(branch.id)
+      return branch
+    } catch (e) {
+      console.error('[forkChat] fork failed:', e instanceof Error ? e.message : e)
+      return null
+    }
   },
   leaveHelpMode: () => {
     const s = get()

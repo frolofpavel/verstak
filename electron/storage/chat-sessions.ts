@@ -122,40 +122,59 @@ export function createChatSessions(db: Database): ChatSessions {
       db.prepare('UPDATE chat_sessions SET provider_id = ?, model = ? WHERE id = ?').run(providerId, model, id)
     },
     remove(id) {
-      // Cascade: review sub-chats этого main-чата + сообщения всех затронутых
-      // сессий. Делаем в одной транзакции чтобы не оставить осиротевших.
       const tx = db.transaction(() => {
-        const subIds = (db.prepare(
-          'SELECT id FROM chat_sessions WHERE parent_chat_id = ?'
-        ).all(id) as Array<{ id: number }>).map(r => r.id)
+        // Каскад: РЕКУРСИВНО всё поддерево СКРЫТЫХ суб-чатов (review/subagent/help) —
+        // иначе review на под-чате осиротевал бы (leak + мусор в поиске). Форк-ВЕТКИ
+        // (kind='main') — самостоятельные чаты пользователя, их НЕ удаляем (data loss).
+        const subIds = (db.prepare(`
+          WITH RECURSIVE sub(sid) AS (
+            SELECT id FROM chat_sessions WHERE parent_chat_id = ? AND kind != 'main'
+            UNION
+            SELECT cs.id FROM chat_sessions cs JOIN sub ON cs.parent_chat_id = sub.sid AND cs.kind != 'main'
+          )
+          SELECT sid FROM sub
+        `).all(id) as Array<{ sid: number }>).map(r => r.sid)
         const allIds = [id, ...subIds]
         const placeholders = allIds.map(() => '?').join(',')
         db.prepare(`DELETE FROM chats WHERE session_id IN (${placeholders})`).run(...allIds)
         db.prepare(`DELETE FROM chat_sessions WHERE id IN (${placeholders})`).run(...allIds)
+        // Форк-ветки, висевшие на удалённом чате, отвязываем в корень — их работа цела.
+        db.prepare("UPDATE chat_sessions SET parent_chat_id = NULL WHERE parent_chat_id = ? AND kind = 'main'").run(id)
       })
       tx()
     },
     fork(sourceId, opts = {}) {
       const source = sessions.get(sourceId)
       if (!source) return null
-      const branch = sessions.create(source.projectPath, {
-        title: opts.title ?? `${source.title} ⑂`,
-        providerId: source.providerId,
-        model: source.model,
-        kind: 'main',
-        parentChatId: sourceId,
-      })
       const upto = opts.uptoMessageId
+      const now = Date.now()
+      const title = opts.title ?? `${source.title} ⑂`
+      // Атомарно: создание ветки + копия истории в ОДНОЙ транзакции — иначе при сбое
+      // копирования осталась бы пустая осиротевшая сессия (инвариант как у remove).
+      let branchId = 0
       const tx = db.transaction(() => {
+        const info = db.prepare(
+          `INSERT INTO chat_sessions (project_path, title, provider_id, model, created_at, last_message_at, kind, parent_chat_id)
+           VALUES (?, ?, ?, ?, ?, ?, 'main', ?)`
+        ).run(source.projectPath, title, source.providerId, source.model, now, now, sourceId)
+        branchId = Number(info.lastInsertRowid)
         const rows = (upto != null
           ? db.prepare('SELECT role, content, created_at FROM chats WHERE session_id = ? AND id <= ? ORDER BY id ASC').all(sourceId, upto)
           : db.prepare('SELECT role, content, created_at FROM chats WHERE session_id = ? ORDER BY id ASC').all(sourceId)
         ) as Array<{ role: string; content: string; created_at: number }>
         const ins = db.prepare('INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-        for (const r of rows) ins.run(branch.id, source.projectPath, r.role, r.content, r.created_at)
+        for (const r of rows) ins.run(branchId, source.projectPath, r.role, r.content, r.created_at)
       })
       tx()
-      return branch
+      return {
+        id: branchId,
+        projectPath: source.projectPath,
+        title,
+        providerId: source.providerId,
+        model: source.model,
+        createdAt: now, lastMessageAt: now,
+        kind: 'main', parentChatId: sourceId,
+      }
     }
   }
   return sessions

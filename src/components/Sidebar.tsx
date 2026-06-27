@@ -235,9 +235,9 @@ function ChatNavSection() {
             onClick={() => {
               const { id } = contextMenu
               setContextMenu(null)
-              void (async () => { await forkChat(id); setActiveView('chat') })()
+              void (async () => { const b = await forkChat(id); if (b) setActiveView('chat') })().catch(() => {})
             }}
-            title="Создать ветку — копию этого чата, чтобы исследовать другой путь, не теряя оригинал"
+            title="Создать ветку — копию этого чата, чтобы исследовать другой путь, не теряя оригинал (недоступно во время ответа)"
           >
             ⑂ Ветвить
           </button>

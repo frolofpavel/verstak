@@ -12,10 +12,12 @@ import { existsSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-let ffmpegCache: string | null | undefined
+let ffmpegCache: string | null = null
 
 export function resolveFfmpeg(): string | null {
-  if (ffmpegCache !== undefined) return ffmpegCache
+  // Кэшируем ТОЛЬКО найденный путь; промах перепроверяем (ffmpeg могли поставить
+  // во время сессии — иначе null залипал бы до перезапуска, ревью 26.06).
+  if (ffmpegCache) return ffmpegCache
   ffmpegCache = doResolveFfmpeg()
   return ffmpegCache
 }
