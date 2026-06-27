@@ -6,6 +6,10 @@ import { emitActivity } from './shared'
 import { getRolePrompt } from '../../ai/agent-roles'
 import { planSpecFeedback } from '../../ai/task-spec-check'
 import { scanText } from '../../ai/secret-scanner'
+import { addWorktree, removeWorktree, worktreeDiff } from '../../ai/git-worktree'
+
+// T1.2 — кап на размер diff изолированного worktree в выдаче арбитру (символы).
+const MAX_WORKTREE_DIFF_CHARS = 6000
 
 // Таймаут на одну делегированную подзадачу. Поднят с 60с (one-shot эра) до 180с:
 // субагент теперь крутит agent-loop с tool-вызовами (read/patch/run_command),
@@ -17,7 +21,7 @@ const SUB_TASK_TIMEOUT_MS = 180_000
 // Защищает от батча из 30 задач, который один пожрёт весь бюджет: при превышении
 // оставшиеся задачи батча не стартуют. В центах. Дефолт $3 — можно переопределить
 // аргументом cost_cap_usd у delegate_parallel.
-const DEFAULT_BATCH_COST_CAP_CENTS = 300
+const DEFAULT_BATCH_COST_CAP_CENTS = 300
 
 // ============================================================================
 
@@ -883,6 +887,9 @@ export const swarmHandler: ToolHandler = {
         return { id: call.id, name: call.name, result: '', error: 'swarm: goal обязателен' }
       }
       const strategy = call.args.strategy ? String(call.args.strategy).trim() : ''
+      // T1.2: opt-in изоляция executor'ов в отдельных git-worktree, чтобы их
+      // параллельные правки не клобберили друг друга на диске. По умолчанию OFF.
+      const isolate = call.args.isolate === true
       const roster = buildSwarmRoster(typeof call.args.size === 'number' ? call.args.size : 4)
       // Дедуп id членов роя — buildSwarmRoster даёт уникальные id по построению,
       // но subCallId = `${call.id}:${m.id}` требует гарантии (см. dedupeTaskIds).
@@ -979,10 +986,18 @@ export const swarmHandler: ToolHandler = {
           throw new Error('остановлен по cost-cap')
         }
 
+        // T1.2: executor — в изолированный worktree (если isolate). researcher/critic
+        // читают/ревьюят, изоляция не нужна. Не git / ошибка add → memberRoot=main (graceful).
+        let worktree: string | null = null
+        let memberRoot = ctx.projectPath
+        if (isolate && m.role === 'executor') {
+          worktree = addWorktree(ctx.projectPath, m.id)
+          if (worktree) memberRoot = worktree
+        }
         try {
           const provider = createProvider(
             baseProviderId,
-            buildSubCreateOptions(baseProviderId, apiKey, descriptor.defaultModel, taskAc.signal, ctx)
+            buildSubCreateOptions(baseProviderId, apiKey, descriptor.defaultModel, taskAc.signal, { ...ctx, projectPath: memberRoot })
           )
           const rolePrompt = getRolePrompt(m.role) ?? 'Ты — sub-agent с доступом к инструментам.'
           // Угол/стратегия члена роя + общая стратегия-подсказка → разнообразие попыток.
@@ -990,7 +1005,7 @@ export const swarmHandler: ToolHandler = {
           const systemContent = `${rolePrompt}\n\nТы — участник РОЯ агентов, работающих над ОДНОЙ целью независимо. Твой угол: ${m.angle}.${strategyLine}\n\nДай законченный вариант решения/вывода по цели целиком (не часть). В финале — краткий итог: ПОДХОД / РЕЗУЛЬТАТ / РИСКИ.`
           const allowedTools = getRoleToolset(m.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
-            ...ctx, signal: taskAc.signal,
+            ...ctx, projectPath: memberRoot, signal: taskAc.signal,
             subProviderId: baseProviderId, subModel: descriptor.defaultModel,
             delegationDepth: depth + 1, parentCallId: subCallId
           }
@@ -1008,15 +1023,26 @@ export const swarmHandler: ToolHandler = {
           if (res.exitReason === 'error') { finalizeSub('error', res.text.trim() || undefined); throw new Error(res.error ?? 'swarm member error') }
           const trimmed = res.text.trim()
           if (!trimmed) { finalizeSub('error'); throw new Error('участник роя вернул пустой ответ') }
-          emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
-          finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
-          return { id: m.id, role: m.role, angle: m.angle, result: trimmed }
+          // T1.2: приложить git diff изолированного worktree → арбитр видит реальные
+          // изменения, а не только текст. Главный агент применит выбранный в main.
+          let result = trimmed
+          if (worktree) {
+            const diff = worktreeDiff(worktree)
+            result = diff.trim()
+              ? `${trimmed}\n\n--- ИЗМЕНЕНИЯ (git diff изолированного worktree) ---\n${diff.length > MAX_WORKTREE_DIFF_CHARS ? diff.slice(0, MAX_WORKTREE_DIFF_CHARS) + '\n…(diff обрезан)' : diff}`
+              : `${trimmed}\n\n(изолированный worktree — файловых изменений нет)`
+          }
+          emitSubagent('done', result.length > 1200 ? result.slice(0, 1200) + '…' : result)
+          finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', result)
+          return { id: m.id, role: m.role, angle: m.angle, result }
         } catch (taskErr) {
           emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
           finalizeSub('error')
           throw taskErr
         } finally {
           clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); queueSlot?.release()
+          // T1.2: cleanup worktree (diff уже снят в result). best-effort.
+          if (worktree) { try { removeWorktree(ctx.projectPath, worktree) } catch { /* best-effort */ } }
         }
       }
 
@@ -1040,7 +1066,9 @@ export const swarmHandler: ToolHandler = {
       const variantsBlock = variants
         .map((v, i) => `### Вариант ${i + 1} — ${v.role}/${v.id} (угол: ${v.angle})\n${v.result}`)
         .join('\n\n')
-      const arbiterSystem = 'Ты — АРБИТР роя агентов. Тебе дают несколько независимых вариантов решения ОДНОЙ цели. Твоя задача: оценить их, выбрать лучший ИЛИ синтезировать консенсус из сильных сторон нескольких. Верни: 1) КОНСЕНСУС — итоговое лучшее решение цели (готовое к использованию); 2) ОБОСНОВАНИЕ — на каких вариантах оно основано и почему (1-3 строки). Будь решительным: один чёткий результат, а не пересказ всех.'
+      const arbiterSystem = isolate
+        ? 'Ты — АРБИТР роя агентов. Каждый вариант содержит решение + git diff изменений в изолированном worktree. Оцени варианты, выбери ЛУЧШИЙ (или укажи какие части каких вариантов объединить). Верни: 1) ВЫБОР — какой вариант (по id) применить и какие именно файлы/правки взять из его diff; 2) ОБОСНОВАНИЕ (1-3 строки). Главный агент применит выбранные изменения в основном дереве сам — будь конкретен.'
+        : 'Ты — АРБИТР роя агентов. Тебе дают несколько независимых вариантов решения ОДНОЙ цели. Твоя задача: оценить их, выбрать лучший ИЛИ синтезировать консенсус из сильных сторон нескольких. Верни: 1) КОНСЕНСУС — итоговое лучшее решение цели (готовое к использованию); 2) ОБОСНОВАНИЕ — на каких вариантах оно основано и почему (1-3 строки). Будь решительным: один чёткий результат, а не пересказ всех.'
       const arbiterUser = `Цель: ${goal}\n\nВарианты роя (${variants.length}):\n\n${variantsBlock}\n\nВыбери/синтезируй лучший консенсусный результат.`
 
       let consensus = ''
@@ -1119,4 +1147,4 @@ export const swarmHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
   }
-}
+}
