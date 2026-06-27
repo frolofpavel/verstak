@@ -17,11 +17,28 @@ import { treeKill } from './child-kill'
 
 const DEFAULT_TIMEOUT_MS = 8_000
 
+// Семафор: LSP-навигация — единственные parallel-read тулзы, спавнящие тяжёлый внешний
+// процесс (pyright/gopls/rust-analyzer); N вызовов за ход стартуют конкурентно → пик RAM.
+// Ограничиваем число одновременных LSP-сессий (диагностика + навигация).
+const MAX_CONCURRENT_LSP = 3
+let activeLsp = 0
+const lspQueue: Array<() => void> = []
+function acquireLsp(): Promise<void> {
+  if (activeLsp < MAX_CONCURRENT_LSP) { activeLsp++; return Promise.resolve() }
+  return new Promise(resolve => lspQueue.push(resolve))
+}
+function releaseLsp(): void {
+  const next = lspQueue.shift()
+  if (next) next()        // слот переходит ждущему (activeLsp не уменьшаем)
+  else activeLsp--
+}
+
 export interface LspSessionOpts {
   path: string        // абсолютный путь к файлу
   content: string     // полное содержимое (для didOpen)
   root: string        // корень проекта (cwd сервера + rootUri)
   timeoutMs?: number
+  signal?: AbortSignal // Stop/отмена — прерывает ожидание (процесс приберётся в finally)
 }
 
 export async function withLspServer<T>(
@@ -30,6 +47,8 @@ export async function withLspServer<T>(
 ): Promise<T | null> {
   const cfg = resolveLangServer(opts.path)
   if (!cfg) return null
+  if (opts.signal?.aborted) return null
+  await acquireLsp()
 
   let child: ChildProcess | null = null
   let client: LspClient | null = null
@@ -72,6 +91,11 @@ export async function withLspServer<T>(
     const timeoutPromise = new Promise<null>(res => {
       timer = setTimeout(() => res(null), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     })
+    // Stop/отмена: прерываем ожидание; процесс приберётся в finally (treeKill).
+    const abortPromise = new Promise<null>(res => {
+      if (opts.signal?.aborted) return res(null)
+      opts.signal?.addEventListener('abort', () => res(null), { once: true })
+    })
 
     // Хендшейк отдельным промисом, чтобы зависший initialize не блокировал race.
     const session = (async (): Promise<T | null> => {
@@ -93,7 +117,7 @@ export async function withLspServer<T>(
       return run(client!, uri)
     })().catch(() => null)
 
-    return await Promise.race([session, failPromise, timeoutPromise])
+    return await Promise.race([session, failPromise, timeoutPromise, abortPromise])
   } catch {
     return null
   } finally {
@@ -101,6 +125,7 @@ export async function withLspServer<T>(
     try { client?.dispose() } catch { /* noop */ }
     // treeKill и здесь (client мог быть null — spawn упал до создания).
     if (child) { try { treeKill(child) } catch { /* noop */ } }
+    releaseLsp()
   }
 }
 

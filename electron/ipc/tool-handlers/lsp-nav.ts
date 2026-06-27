@@ -1,6 +1,6 @@
 // Tier-2 #1 — LSP-навигация как тулзы: find_definition / find_references. Семантика
 // через язык-сервер (точнее grep'а). Read-only. Движок — electron/ai/lsp-nav.ts.
-import { readFileSync } from 'fs'
+import { readFileSync, statSync } from 'fs'
 import { relative } from 'path'
 import type { ToolHandler, ToolContext } from './shared'
 import { emitActivity } from './shared'
@@ -8,6 +8,8 @@ import { runLspNavigation } from '../../ai/lsp-nav'
 import { isLspDiagnosableFile } from '../../ai/lang-servers'
 import { safeRealJoin } from '../../ai/path-policy'
 import type { ToolCall, ToolResult } from '../../ai/types'
+
+const MAX_LSP_FILE_BYTES = 2_000_000 // как MAX_READ_BYTES у read_file
 
 function relPath(root: string, file: string): string {
   const r = relative(root, file)
@@ -33,19 +35,23 @@ async function navigate(kind: 'definition' | 'references', call: ToolCall, ctx: 
   }
   let content: string
   try {
+    // Лимит размера как у read_file (didOpen 50-MB файла = пик памяти + блокировка).
+    if (statSync(abs).size > MAX_LSP_FILE_BYTES) {
+      return { id: call.id, name: call.name, result: '', error: `${rel} слишком большой для LSP-навигации (> 2 MB) — используй search_project.` }
+    }
     content = readFileSync(abs, 'utf8')
   } catch (e) {
     return { id: call.id, name: call.name, result: '', error: `не прочитать ${rel}: ${e instanceof Error ? e.message : String(e)}` }
   }
   const word = kind === 'definition' ? 'Определение' : 'Использования'
-  const locs = await runLspNavigation({ path: abs, content, root: ctx.projectPath, symbol, kind })
+  const locs = await runLspNavigation({ path: abs, content, root: ctx.projectPath, symbol, kind, signal: ctx.signal })
   if (locs === null) {
     emitActivity(ctx, call, 'error', call.name, `${symbol}: сервер недоступен`)
     return { id: call.id, name: call.name, result: `Языковой сервер недоступен/не ответил для «${symbol}». Установлен ли pyright/gopls/rust-analyzer? Фолбэк — search_project.` }
   }
   if (locs.length === 0) {
     emitActivity(ctx, call, 'ok', call.name, `${symbol}: не найдено`)
-    return { id: call.id, name: call.name, result: `${word} «${symbol}»: не найдено (символ отсутствует в ${rel} или сервер не разрешил его).` }
+    return { id: call.id, name: call.name, result: `${word} «${symbol}»: сервер не вернул локаций (символа может не быть в ${rel} как кода, либо он внешний) — попробуй search_project.` }
   }
   const lines = locs.map(l => ` ${relPath(ctx.projectPath, l.file)}:${l.line + 1}:${l.character + 1}`).join('\n')
   emitActivity(ctx, call, 'ok', call.name, `${symbol}: ${locs.length}`)

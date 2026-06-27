@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseLocations, findSymbolPosition } from '../../electron/ai/lsp-nav'
+import { parseLocations, findSymbolPosition, findSymbolPositions } from '../../electron/ai/lsp-nav'
 
 // Tier-2 #1 — LSP-навигация: чистое ядро (парсинг LSP-ответа Location/LocationLink +
 // поиск позиции символа в файле). Сетевой запрос (definition/references) — в runtime.
@@ -29,6 +29,11 @@ describe('parseLocations', () => {
     expect(r[0].line).toBe(7)
     expect(r[0].file).toContain('c.py')
   })
+  it('LocationLink: targetSelectionRange приоритетнее targetRange (имя, не блок с doc-комментом)', () => {
+    const r = parseLocations([{ targetUri: 'file:///home/u/d.go', targetRange: { start: { line: 9, character: 0 } }, targetSelectionRange: { start: { line: 10, character: 5 } } }])
+    expect(r[0].line).toBe(10) // имя на стр.10, а не блок-с-комментом на стр.9
+    expect(r[0].character).toBe(5)
+  })
   it('мусор/без range — пропускается', () => {
     expect(parseLocations([{ uri: 'file:///x' }, null, 'nope', { range: { start: { line: 1 } } }])).toEqual([])
   })
@@ -49,5 +54,20 @@ describe('findSymbolPosition', () => {
   })
   it('спецсимволы в имени экранируются (не ломают regex)', () => {
     expect(() => findSymbolPosition('a.b.c\n', 'b.c')).not.toThrow()
+  })
+})
+
+describe('findSymbolPositions (перебор кандидатов: первое вхождение может быть в комментарии)', () => {
+  it('возвращает ВСЕ вхождения сверху вниз', () => {
+    const code = '# foo здесь\nfoo()\ndef foo(): pass\n'
+    const ps = findSymbolPositions(code, 'foo')
+    expect(ps.length).toBeGreaterThanOrEqual(3) // комментарий + usage + def
+    expect(ps[0]).toEqual({ line: 0, character: 2 }) // первое — в комментарии (его сервер пропустит)
+  })
+  it('несколько вхождений в одной строке', () => {
+    expect(findSymbolPositions('x = a + a', 'a')).toEqual([{ line: 0, character: 4 }, { line: 0, character: 8 }])
+  })
+  it('словограница соблюдается (a не матчит в abc)', () => {
+    expect(findSymbolPositions('abc a', 'a')).toEqual([{ line: 0, character: 4 }])
   })
 })
