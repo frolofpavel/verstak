@@ -14,6 +14,8 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     } else if (call.name === 'browser_read_page') {
       action = `const text = await api.readPage(a.selector ? String(a.selector) : undefined);
                 return { url: api.getURL(), title: api.getTitle(), text };`
+    } else if (call.name === 'browser_click') {
+      action = `return await api.click(String(a.selector ?? ''));`
     } else {
       action = `const dataUrl = await api.screenshot();
                 return { url: api.getURL(), dataUrl };`
@@ -69,4 +71,4 @@ export const browserHandler: ToolHandler = {
     if (s) emitActivity(ctx, call, result.error ? 'error' : 'ok', s.label, s.detail)
     return result
   }
-}
+}

@@ -35,6 +35,7 @@ declare global {
     verstakBrowser?: {
       navigate: (url: string) => Promise<{ ok: true; url: string } | { ok: false; error: string }>
       readPage: (selector?: string) => Promise<string>
+      click: (selector: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
       screenshot: () => Promise<string>  // data:image/png;base64,...
       getURL: () => string | null
       getTitle: () => string | null
@@ -115,6 +116,31 @@ export function BrowserView() {
           const r = await wv.executeJavaScript(code)
           return typeof r === 'string' ? r : ''
         } catch { return '' }
+      },
+      async click(selector) {
+        const wv = webviewRef.current
+        if (!wv) return { ok: false, error: 'Browser view не активен' }
+        // Tier-2 #5: клик по элементу (CSS-селектор или текст ссылки/кнопки). Сначала
+        // querySelector; если не нашли — ищем ссылку/кнопку по видимому тексту.
+        const sel = JSON.stringify(selector)
+        const code = `(() => {
+          let el = document.querySelector(${sel});
+          if (!el) {
+            const t = ${sel}.trim().toLowerCase();
+            el = [...document.querySelectorAll('a,button,[role=button],input[type=submit]')]
+              .find(n => (n.innerText || n.value || '').trim().toLowerCase().includes(t));
+          }
+          if (!el) return { ok: false, error: 'элемент не найден: ' + ${sel} };
+          el.scrollIntoView({ block: 'center' });
+          el.click();
+          return { ok: true, url: location.href };
+        })()`
+        try {
+          const r = await wv.executeJavaScript(code) as { ok: true; url: string | null } | { ok: false; error: string }
+          return r && typeof r === 'object' ? r : { ok: false, error: 'нет ответа' }
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
       },
       async screenshot() {
         const wv = webviewRef.current

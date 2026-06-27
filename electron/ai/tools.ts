@@ -291,6 +291,17 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'browser_click',
+    description: 'Кликнуть по элементу на текущей странице во вкладке Browser (кнопка, ссылка, submit). Для интерактивной проверки: пройти UI-сценарий (войти, заполнить, нажать) с скриншотами. После клика делай browser_screenshot. Требует открытую вкладку Browser.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS-селектор (#id, .class, button[type=submit]) ИЛИ видимый текст ссылки/кнопки (например "Войти", "Отправить").' }
+      },
+      required: ['selector']
+    }
+  },
+  {
     name: 'create_plan',
     description: 'Создать структурированный план многошаговой задачи. Используй когда задача требует 3+ шагов или явного согласования с пользователем. План отобразится во вкладке Plan; пользователь сможет выполнять шаги по одному.',
     parameters: {

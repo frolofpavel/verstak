@@ -56,6 +56,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'run_command': runCommandHandler,
   'browser_navigate': browserHandler,
   'browser_read_page': browserHandler,
+  'browser_click': browserHandler,  // Tier-2 #5
   'browser_screenshot': browserHandler,
   'list_connectors': listConnectorsHandler,
   'connector_query': connectorQueryHandler,
