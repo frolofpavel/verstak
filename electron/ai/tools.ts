@@ -150,6 +150,30 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'find_definition',
+    description: 'СЕМАНТИЧЕСКИ найти, где ОПРЕДЕЛЁН символ (функция/класс/переменная) — через языковой сервер (Python/Go/Rust), а не текстом. Точнее search_project: разрешает импорты и области видимости, без ложных срабатываний на комментариях/строках/тёзках. Возвращает file:line. Нужен установленный сервер (pyright/gopls/rust-analyzer); если его нет — используй search_project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Относительный путь к файлу, где символ встречается (для контекста сервера).' },
+        symbol: { type: 'string', description: 'Имя символа — функция/класс/переменная.' }
+      },
+      required: ['path', 'symbol']
+    }
+  },
+  {
+    name: 'find_references',
+    description: 'СЕМАНТИЧЕСКИ найти ВСЕ использования символа по проекту — через языковой сервер (Python/Go/Rust). Точнее grep: только реальные ссылки на ЭТОТ символ (не тёзки/комментарии). Возвращает список file:line. Нужен установленный сервер; если нет — search_project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Относительный путь к файлу, где символ встречается.' },
+        symbol: { type: 'string', description: 'Имя символа.' }
+      },
+      required: ['path', 'symbol']
+    }
+  },
+  {
     name: 'execute_code',
     description: 'PTC (Programmatic Tool Calling): выполнить JS-скрипт, который программно оркестрирует READ-ONLY тулзы (циклы, фильтры, агрегация). В песочнице доступен async-объект `tools` с методами read_file/list_directory/search_project/find_files/get_project_map (те же args, что одноимённые тулзы, возвращают строку), и функция log(...) для вывода. В КОНТЕКСТ попадает ТОЛЬКО выведенное через log(...) или return — промежуточные результаты тулзов НЕ раздувают контекст. Используй для read-тяжёлых задач («прочитай N файлов и собери X», «найди по проекту и отфильтруй») — экономит токены. Внутри предусмотрены только read-тулзы (write/run не даются). Исполняется на уровне доверия run_command — в режиме ask потребует подтверждения кода. Пример: const files=(await tools.find_files({pattern:"**/*.py"})).split("\\n"); let t=[]; for(const f of files){const c=await tools.read_file({path:f}); for(const l of c.split("\\n")) if(l.includes("TODO")) t.push(f+": "+l);} log(t.join("\\n"))',
     parameters: {

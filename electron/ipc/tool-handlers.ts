@@ -32,6 +32,7 @@ import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler }
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
 import { readJournalHandler } from './tool-handlers/journal'
 import { executeCodeHandler } from './tool-handlers/execute-code'
+import { findDefinitionHandler, findReferencesHandler } from './tool-handlers/lsp-nav'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -66,6 +67,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'preflight': preflightHandler,
   'read_journal': readJournalHandler,
   'execute_code': executeCodeHandler,  // PTC (T1.4) — гейтится по настройке ptc_enabled в ai.ts
+  'find_definition': findDefinitionHandler,  // Tier-2 #1 — LSP-навигация (read-only)
+  'find_references': findReferencesHandler,
   'generate_html': generateHtmlHandler,
   'generate_docx': generateDocxHandler,
   'render_chart': renderChartHandler,
