@@ -5,13 +5,20 @@
  */
 
 const MAX_FRAMES = 60
+const MAX_SENDS = 8 // прогоны, не вызвавшие create_proof_video, иначе Map растёт
 const buffers = new Map<number, Buffer[]>()
 
 export function addProofFrame(sendId: number, png: Buffer): void {
   const arr = buffers.get(sendId) ?? []
   arr.push(png)
-  while (arr.length > MAX_FRAMES) arr.shift() // кап: не копим бесконечно
+  while (arr.length > MAX_FRAMES) arr.shift() // кап кадров на прогон
   buffers.set(sendId, arr)
+  // Эвикт самого старого прогона (Map хранит порядок вставки), если их слишком много.
+  while (buffers.size > MAX_SENDS) {
+    const oldest = buffers.keys().next().value
+    if (oldest === undefined || oldest === sendId) break
+    buffers.delete(oldest)
+  }
 }
 
 /** Забрать и очистить кадры прогона. */
