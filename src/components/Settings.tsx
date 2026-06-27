@@ -403,6 +403,7 @@ function PolicyTab() {
   const [matrix, setMatrix] = useState<PolicyMatrixDTO | null>(null)
   const [currentMode, setCurrentMode] = useState<AgentModeId | null>(null)
   const [dodMode, setDodMode] = useState<string>('warn')
+  const [allowlist, setAllowlist] = useState<string>('')
 
   useEffect(() => {
     void (async () => {
@@ -412,12 +413,19 @@ function PolicyTab() {
       setCurrentMode((mode as AgentModeId) || 'ask')
       const dm = await window.api.settings.getKey('dod_mode')
       setDodMode(dm || 'warn')
+      const al = await window.api.settings.getKey('bash_allowlist')
+      setAllowlist(al || '')
     })()
   }, [])
 
   const changeDod = async (v: string) => {
     setDodMode(v)
     await window.api.settings.setKey('dod_mode', v)
+  }
+
+  const changeAllowlist = async (v: string) => {
+    setAllowlist(v)
+    await window.api.settings.setKey('bash_allowlist', v)
   }
 
   if (!matrix) {
@@ -490,6 +498,20 @@ function PolicyTab() {
           <li key={i}>{d}</li>
         ))}
       </ul>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>✅ Доверенные команды (allowlist)</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        По одной на строку. Команды, начинающиеся с этих префиксов, выполняются <strong>без подтверждения</strong> в режиме «Спрашивать» (рутина: <code>git status</code>, <code>npm test</code>). Денилист всё равно срабатывает первым; команды с цепочками/подстановками (<code>&amp;&amp;</code>, <code>|</code>, <code>$(…)</code>) НЕ авто-аппрувятся.
+      </div>
+      <textarea
+        className="gg-input"
+        value={allowlist}
+        onChange={e => void changeAllowlist(e.target.value)}
+        placeholder={'git status\nnpm test\nls'}
+        spellCheck={false}
+        rows={4}
+        style={{ maxWidth: 420, fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+      />
 
       <div className="gg-settings-section-title" style={{ marginTop: 22 }}>✅ Доказательство выполнения (DoD)</div>
       <div className="gg-settings-hint" style={{ marginBottom: 10 }}>

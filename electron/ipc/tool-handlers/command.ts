@@ -3,6 +3,7 @@ import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText } from '../../ai/secret-scanner'
 import { decide, blockReason } from '../../ai/mode-policy'
+import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 
 export const runCommandHandler: ToolHandler = {
   mode: 'sequential',
@@ -30,11 +31,17 @@ export const runCommandHandler: ToolHandler = {
       })
       return { id: call.id, name: call.name, result: '', error: blockReason('run_command', ctx.agentMode) }
     }
+    // Tier-2 #4: доверенная команда (настройка bash_allowlist) авто-аппрувится в
+    // confirm-режимах — без модалки. plan (block) НЕ перекрывается (вышли выше);
+    // denylist (classifyCommand) уже отработал; цепочки/подстановки matchesAllowlist
+    // отсекает сам.
+    const allowlisted = decision !== 'auto-accept'
+      && matchesAllowlist(command, parseAllowlist(ctx.getSecretForDelegate?.('bash_allowlist') ?? null))
     let accepted: boolean
-    if (decision === 'auto-accept') {
+    if (decision === 'auto-accept' || allowlisted) {
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
-        event: { type: 'tool-activity', callId: call.id, name: 'run_command', label: 'run_command (авто)', detail: command, status: 'ok' }
+        event: { type: 'tool-activity', callId: call.id, name: 'run_command', label: allowlisted ? 'run_command (авто · allowlist)' : 'run_command (авто)', detail: command, status: 'ok' }
       })
       accepted = true
     } else {
