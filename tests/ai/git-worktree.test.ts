@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo } from '../../electron/ai/git-worktree'
+import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo, mergeWorktreeToMain } from '../../electron/ai/git-worktree'
 
 // Реальные git-субпроцессы (init/commit/worktree add/remove) под полной параллельной
 // нагрузкой suite могут превысить дефолтный таймаут 5с → щедрый запас против флака.
@@ -92,6 +92,34 @@ describe('git-worktree (T1.2)', () => {
     expect(diff).not.toBe('') // НЕ молчим про реальные правки
     expect(diff).toContain('big.txt')
     expect(diff).toContain('слишком большой')
+    removeWorktree(repo, wt)
+  })
+
+  // #5 локальный merge worktree → main (git apply, без push).
+  it('mergeWorktreeToMain применяет изменения worktree в main (модиф + новый файл)', () => {
+    const wt = addWorktree(repo, 'm')!
+    writeFileSync(join(wt, 'a.txt'), 'merged\n')      // модификация tracked
+    writeFileSync(join(wt, 'new.txt'), 'brand new\n') // новый файл
+    const r = mergeWorktreeToMain(repo, wt)
+    expect(r.ok).toBe(true)
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('merged\n')
+    expect(existsSync(join(repo, 'new.txt'))).toBe(true)
+    removeWorktree(repo, wt)
+  })
+
+  it('mergeWorktreeToMain без изменений → ok', () => {
+    const wt = addWorktree(repo, 'm2')!
+    expect(mergeWorktreeToMain(repo, wt).ok).toBe(true)
+    removeWorktree(repo, wt)
+  })
+
+  it('mergeWorktreeToMain конфликт (main разошёлся) → ok:false, main НЕ тронут (атомарно)', () => {
+    const wt = addWorktree(repo, 'm3')!
+    writeFileSync(join(repo, 'a.txt'), 'main-changed\n') // main разошёлся с HEAD
+    writeFileSync(join(wt, 'a.txt'), 'wt-changed\n')     // worktree по-другому
+    const r = mergeWorktreeToMain(repo, wt)
+    expect(r.ok).toBe(false) // патч не лёг — контекст не совпал
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('main-changed\n') // main цел
     removeWorktree(repo, wt)
   })
 

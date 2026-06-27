@@ -111,3 +111,29 @@ export function worktreeDiff(worktreePath: string): string {
   const stat = git(worktreePath, ['diff', '--cached', '--stat'])
   return stat && stat.trim() ? `[diff слишком большой для показа целиком — сводка изменений]\n${stat}` : ''
 }
+
+/**
+ * #5 локальный merge: применить изменения worktree в ОСНОВНОЕ дерево через git apply
+ * (БЕЗ push/PR — осознанный non-goal Verstak). Так главный агент «забирает» выбранный
+ * вариант роя в main. git apply атомарен: при конфликте/ошибке возвращает { ok:false }
+ * и main НЕ тронут (всё-или-ничего). Не git / пустой diff → корректный исход без правок.
+ */
+export function mergeWorktreeToMain(repoRoot: string, worktreePath: string): { ok: boolean; error?: string } {
+  if (!isGitRepo(repoRoot)) return { ok: false, error: 'не git-репозиторий' }
+  const diff = worktreeDiff(worktreePath)
+  if (!diff.trim()) return { ok: true } // нечего применять
+  if (diff.startsWith('[diff слишком большой')) return { ok: false, error: 'diff слишком большой для применения' }
+  try {
+    execFileSync('git', ['-C', repoRoot, 'apply', '--whitespace=nowarn', '-'], {
+      input: diff,
+      encoding: 'utf8',
+      stdio: ['pipe', 'ignore', 'pipe'],
+      windowsHide: true,
+      env: gitEnv(),
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
