@@ -903,6 +903,8 @@ export const swarmHandler: ToolHandler = {
       const { getRoleToolset } = await import('../../ai/role-tools')
       const { getRolePrompt } = await import('../../ai/agent-roles')
       const { subAgentQueue } = await import('../../ai/sub-queue')
+      // T1.2: для isolate — отдельный FileTools, заруленный на worktree executor'а.
+      const { createToolsForProject } = await import('../../ai/tools')
 
       const baseProviderId = (ctx.currentProviderId ?? 'gemini-api') as ProviderId
       const descriptor = PROVIDERS[baseProviderId]
@@ -990,9 +992,16 @@ export const swarmHandler: ToolHandler = {
         // читают/ревьюят, изоляция не нужна. Не git / ошибка add → memberRoot=main (graceful).
         let worktree: string | null = null
         let memberRoot = ctx.projectPath
+        let memberTools = ctx.tools
         if (isolate && m.role === 'executor') {
           worktree = addWorktree(ctx.projectPath, m.id)
-          if (worktree) memberRoot = worktree
+          if (worktree) {
+            memberRoot = worktree
+            // КЛЮЧЕВОЕ: пере-рутим FileTools на worktree — иначе write_file/apply_patch/
+            // run_command субагента шли бы в ГЛАВНОЕ дерево и изоляция была бы инертна
+            // (executor'ы клобберили бы один main-файл, а diff читался бы из пустого wt).
+            memberTools = createToolsForProject(memberRoot, taskAc.signal)
+          }
         }
         try {
           const provider = createProvider(
@@ -1005,7 +1014,7 @@ export const swarmHandler: ToolHandler = {
           const systemContent = `${rolePrompt}\n\nТы — участник РОЯ агентов, работающих над ОДНОЙ целью независимо. Твой угол: ${m.angle}.${strategyLine}\n\nДай законченный вариант решения/вывода по цели целиком (не часть). В финале — краткий итог: ПОДХОД / РЕЗУЛЬТАТ / РИСКИ.`
           const allowedTools = getRoleToolset(m.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
-            ...ctx, projectPath: memberRoot, signal: taskAc.signal,
+            ...ctx, projectPath: memberRoot, tools: memberTools, signal: taskAc.signal,
             subProviderId: baseProviderId, subModel: descriptor.defaultModel,
             delegationDepth: depth + 1, parentCallId: subCallId
           }

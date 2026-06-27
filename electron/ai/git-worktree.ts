@@ -76,7 +76,12 @@ export function addWorktree(repoRoot: string, label = 'wt'): string | null {
 export function removeWorktree(repoRoot: string, worktreePath: string): boolean {
   const out = git(repoRoot, ['worktree', 'remove', '--force', worktreePath])
   git(repoRoot, ['worktree', 'prune'])
-  try { rmSync(dirname(worktreePath), { recursive: true, force: true }) } catch { /* best-effort */ }
+  // Чистим tmp-родителя ТОЛЬКО если это наш verstak-wt- каталог под tmpdir() —
+  // защита от рекурсивного сноса чужого пути, если worktreePath не из addWorktree.
+  const parent = dirname(worktreePath)
+  if (parent.startsWith(tmpdir()) && /[\\/]verstak-wt-[^\\/]*$/.test(parent)) {
+    try { rmSync(parent, { recursive: true, force: true }) } catch { /* best-effort */ }
+  }
   return out != null
 }
 
@@ -99,5 +104,10 @@ export function listWorktrees(repoRoot: string): string[] {
 export function worktreeDiff(worktreePath: string): string {
   git(worktreePath, ['add', '-A'])
   const out = git(worktreePath, ['diff', '--cached'])
-  return out ?? ''
+  if (out != null) return out
+  // diff не получен (ENOBUFS на огромном diff / ошибка git). НЕ выдаём '' — это
+  // означало бы «изменений нет» и арбитр молча потерял бы вклад executor'а.
+  // Пробуем компактную сводку (--stat крошечный) — чтобы правки были видны.
+  const stat = git(worktreePath, ['diff', '--cached', '--stat'])
+  return stat && stat.trim() ? `[diff слишком большой для показа целиком — сводка изменений]\n${stat}` : ''
 }

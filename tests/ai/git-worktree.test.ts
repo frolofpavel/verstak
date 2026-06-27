@@ -83,4 +83,25 @@ describe('git-worktree (T1.2)', () => {
     expect(addWorktree(plain)).toBeNull()
     rmSync(plain, { recursive: true, force: true })
   })
+
+  // Ревью 27.06 (MEDIUM): >16MB diff → ENOBUFS → раньше тихо ''=«нет изменений».
+  it('worktreeDiff на огромном (>16MB) изменении не врёт «нет изменений» — даёт сводку', () => {
+    const wt = addWorktree(repo, 'big')!
+    writeFileSync(join(wt, 'big.txt'), 'x'.repeat(17 * 1024 * 1024)) // >16MB → ENOBUFS на git diff
+    const diff = worktreeDiff(wt)
+    expect(diff).not.toBe('') // НЕ молчим про реальные правки
+    expect(diff).toContain('big.txt')
+    expect(diff).toContain('слишком большой')
+    removeWorktree(repo, wt)
+  })
+
+  // Ревью 27.06 (LOW): removeWorktree не должен рекурсивно сносить чужого родителя.
+  it('removeWorktree НЕ удаляет родителя, если путь не verstak-wt- под tmpdir', () => {
+    const safe = mkdtempSync(join(tmpdir(), 'gg-safe-'))
+    writeFileSync(join(safe, 'sentinel.txt'), 'не трогать')
+    // путь, не созданный addWorktree (родитель — gg-safe-, не verstak-wt-)
+    removeWorktree(repo, join(safe, 'sub'))
+    expect(existsSync(join(safe, 'sentinel.txt'))).toBe(true) // родитель цел
+    rmSync(safe, { recursive: true, force: true })
+  })
 })
