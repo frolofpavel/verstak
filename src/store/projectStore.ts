@@ -441,6 +441,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     streamStartedAt: null,
     pendingWrites: [],
     pendingCommand: null,
+    pendingPlan: null, // #3 plan-gate: проект закрыт → снять модалку плана
     activity: [],
     preflights: [],
     subagentRuns: [],

@@ -161,7 +161,7 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setProject } = useProject()
+  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject()
 
   useEffect(() => {
     if (!authDone) return
@@ -248,11 +248,12 @@ export function App() {
         setStreaming(false)
         clearPendingWrites()
         setPendingCommand(null)
+        setPendingPlan(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand])
+  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan])
 
   // Mouse-drag resize handle on the sidebar's right edge.
   function startDrag(e: React.MouseEvent) {

@@ -1211,6 +1211,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
   } = ctx
+  // #3 plan-gate: режим прогона — МУТАБЕЛЬНЫЙ holder (не per-turn const). approve
+  // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
+  // (где ctx пересоздаётся) видит новый режим — иначе одобренный план не выполнить.
+  let runAgentMode = agentMode
   const currentMessages = [...initialMessages]
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
@@ -1504,7 +1508,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender, sendId, signal, projectPath, tools,
       recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
-      agentMode, skillRegistry, getSecretForDelegate,
+      agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       currentProviderId: providerId,
       mcpClient: mcpClientRef,
       appendAudit: appendAuditFn,

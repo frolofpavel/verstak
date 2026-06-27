@@ -220,7 +220,9 @@ export const createPlanHandler: ToolHandler = {
         })
         pending.delete(key)
         const outcome = resolvePlanGate(decision.decision, decision.feedback, title)
-        if (outcome.newMode) ctx.agentMode = outcome.newMode
+        // approve → переключаем режим ПРОГОНА (мутабельный holder), чтобы следующий
+        // turn выполнял правки. Фолбэк на прямую мутацию, если setAgentMode не задан.
+        if (outcome.newMode) { if (ctx.setAgentMode) ctx.setAgentMode(outcome.newMode); else ctx.agentMode = outcome.newMode }
         return { id: call.id, name: call.name, result: outcome.result }
       }
       // v3 Шаг B (enforcement): фидбэк по тонким ТЗ-шагам — модель уточнит, чтобы

@@ -466,6 +466,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
       }
+      // #3 plan-gate: блокирующий plan-approval показываем ГЛОБАЛЬНО (модалка), даже
+      // если прогон в фоновом чате — иначе агент висит в await навсегда (нет UI для
+      // resolve → тихий дедлок). Решение маршрутизируется по sendId в нужный прогон.
+      if (event.type === 'plan-approval') {
+        store.setPendingPlan({ callId: event.callId, title: String(event.title ?? 'План'), stepCount: Number(event.stepCount ?? 0), sendId: id })
+        return
+      }
+      // #3 plan-gate: прогон завершился/упал (gate был сдренен в main как reject) —
+      // снимаем модалку плана, чтобы не висела ghost поверх завершённого прогона.
+      if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
+        store.setPendingPlan(null)
+      }
       // Фоновый чат: другая ветка ИЛИ на экране справки (проектный стрим в snapshot).
       if (
         owner?.kind === 'chat'
@@ -508,10 +520,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         if (event.path && store.path) {
           store.markFileTouched(toProjectAbsPath(store.path, event.path), 'write')
         }
-      }
-      else if (event.type === 'plan-approval') {
-        // #3 plan-gate: агент предложил план и заблокирован до решения юзера.
-        store.setPendingPlan({ callId: event.callId, title: String(event.title ?? 'План'), stepCount: Number(event.stepCount ?? 0), sendId: id })
       }
       else if (event.type === 'pending-command') {
         store.setPendingCommand({ callId: event.callId, command: event.command, sendId: id })
@@ -1587,6 +1595,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // мог дропнуться (owner забыт выше) → модалка осталась бы (ревью 24.06).
     const cur = useProject.getState()
     if (cur.pendingCommand?.sendId === id) cur.setPendingCommand(null)
+    if (cur.pendingPlan?.sendId === id) cur.setPendingPlan(null) // #3 plan-gate: снять модалку плана при Stop
     currentSendIdRef.current = null
     flushQueueRef.current()
   }

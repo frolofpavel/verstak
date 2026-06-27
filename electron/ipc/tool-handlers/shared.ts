@@ -51,6 +51,9 @@ export interface ToolContext {
   scopedKey: (sendId: SendId, callId: string) => string
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode
+  /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).
+   *  Пишет в мутабельный holder уровня прогона — следующий turn видит новый режим. */
+  setAgentMode?: (mode: AgentMode) => void
   /** Skill registry для delegate_task (опционально — V3 фича). */
   skillRegistry?: {
     list: () => Array<{ id: string; name?: string; default_provider?: string; default_model?: string; systemPrompt: string }>
