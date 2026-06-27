@@ -16,7 +16,9 @@
  * detector or changing assembly rules — one place to edit.
  */
 
+import { relative, isAbsolute } from 'path'
 import { loadUserLayer, type UserLayer } from './user-layer'
+import { loadFileScopedRules, selectActiveRules } from './file-rules'
 import { buildContextPack } from './context-pack'
 import { composeSystemPrompt, type ComposedPrompt } from './compose-prompt'
 import type { ChatMessage } from './types'
@@ -110,6 +112,26 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
   if (userLayer.content !== undefined) {
     const delegateHint = '\n\n<!-- fan_out_decision -->\n## Когда разбивать на параллельные подзадачи (сам, без спроса)\nЕсли задача состоит из НЕСКОЛЬКИХ независимых частей («сделай X и проверь Y и собери Z», несколько файлов/модулей/каналов) — НЕ делай всё одним потоком. Разбей и выполни параллельно через delegate_parallel (несколько исполнителей разом). Для расходящихся стратегий одной цели — swarm (несколько подходов + арбитр). Для сложной декомпозиции — orchestrate. Роли: planner (разбей), executor (сделай), verifier (проверь), critic (найди проблемы), researcher (исследуй). Это твоё решение по характеру задачи — пользователь описывает результат, стратегию выбираешь ты.'
     userLayer = { path: userLayer.path, content: userLayer.content + delegateHint }
+  }
+
+  // Tier-2 #6: file-scoped правила (.verstak/rules/*.mdc) — инжектим те, что подходят
+  // под активные файлы (recentWrites) по glob, + alwaysApply всегда. Условные правила
+  // под конкретные зоны проекта, не раздувая базовый user-layer. Graceful: ошибка → skip.
+  if (projectPath && userLayer.content !== undefined) {
+    try {
+      const rules = await loadFileScopedRules(projectPath)
+      if (rules.length) {
+        const activeFiles = recentWrites.map(w =>
+          (isAbsolute(w.filePath) ? relative(projectPath, w.filePath) : w.filePath).replace(/\\/g, '/'))
+        const active = selectActiveRules(rules, activeFiles)
+        if (active.length) {
+          const block = active.map(r => r.body).join('\n\n')
+          userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n<!-- file_scoped_rules -->\n${block}` }
+        }
+      }
+    } catch (err) {
+      console.warn('[prepareSystemContext] file-rules failed:', err instanceof Error ? err.message : err)
+    }
   }
 
   // v3 Шаг D: beast-пресет автономности для режимов auto/bypass — «не сдавайся,
