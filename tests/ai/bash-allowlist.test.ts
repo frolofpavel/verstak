@@ -43,4 +43,21 @@ describe('matchesAllowlist', () => {
   it('пустой список → false', () => {
     expect(matchesAllowlist('git status', [])).toBe(false)
   })
+
+  // Ревью 26.06: arg-injection через флаги/субкоманды-эскалаторы (БЕЗ shell-метасимволов).
+  it('флаги-эскалаторы НЕ авто-аппрувятся даже на разрешённом префиксе', () => {
+    const l = ['git status', 'git', 'npm', 'node']
+    expect(matchesAllowlist('git status --pager="sh -c id"', l)).toBe(false)
+    expect(matchesAllowlist('git -c core.sshCommand=calc.exe ls-remote', l)).toBe(false)
+    expect(matchesAllowlist('npm run anything', l)).toBe(false)
+    expect(matchesAllowlist('npm exec -- x', l)).toBe(false)
+    expect(matchesAllowlist('git ls-remote ext::sh -c whoami', l)).toBe(false)
+    expect(matchesAllowlist('node -e "x"', l)).toBe(false)
+  })
+  it('безопасные команды с обычными флагами всё ещё авто-аппрувятся', () => {
+    const l = ['git status', 'npm test', 'ls']
+    expect(matchesAllowlist('git status -s', l)).toBe(true)
+    expect(matchesAllowlist('npm test -- --watch=false', l)).toBe(true)
+    expect(matchesAllowlist('ls -la', l)).toBe(true)
+  })
 })

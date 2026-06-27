@@ -501,7 +501,7 @@ function PolicyTab() {
 
       <div className="gg-settings-section-title" style={{ marginTop: 22 }}>✅ Доверенные команды (allowlist)</div>
       <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
-        По одной на строку. Команды, начинающиеся с этих префиксов, выполняются <strong>без подтверждения</strong> в режиме «Спрашивать» (рутина: <code>git status</code>, <code>npm test</code>). Денилист всё равно срабатывает первым; команды с цепочками/подстановками (<code>&amp;&amp;</code>, <code>|</code>, <code>$(…)</code>) НЕ авто-аппрувятся.
+        По одной на строку. Команды, начинающиеся с этих префиксов, выполняются <strong>без подтверждения</strong> в режиме «Спрашивать» (рутина: <code>git status</code>, <code>npm test</code>). Денилист срабатывает первым; команды с цепочками/подстановками (<code>&amp;&amp;</code>, <code>|</code>, <code>$(…)</code>) и флагами-эскалаторами (<code>git -c</code>, <code>--pager</code>, <code>npm run</code>) НЕ авто-аппрувятся. <strong>Добавляй только команды, которым доверяешь полностью</strong> — обёртки вроде git/npm могут исполнять код через флаги.
       </div>
       <textarea
         className="gg-input"

@@ -430,14 +430,16 @@ export function shouldMicrocompact(messages: ChatMessage[], model: string): bool
   return used > effectiveLimit * MICRO_THRESHOLD
 }
 
-/** Обёртка для ai.ts: при превышении MICRO_THRESHOLD прунит крупные результаты до
- *  ~55% окна. Иначе no-op (исходные messages). Токен-математика тут (estimateTotalTokens
- *  внутренний). chars ≈ tokens × 4. */
-export function microcompactIfNeeded(messages: ChatMessage[], model: string): MicrocompactResult {
-  if (!shouldMicrocompact(messages, model)) return { messages, reclaimedChars: 0, pruned: 0 }
+/** Обёртка для ai.ts: при превышении MICRO_THRESHOLD прунит крупные результаты в
+ *  `messages` до ~55% окна. Порог/цель считаются по `estimateMessages` (что РЕАЛЬНО
+ *  уходит провайдеру — sliding-window-сжатая копия; по умолчанию = messages), чтобы
+ *  не срабатывать ложно, когда отправляемый payload уже мал (ревью 26.06). chars ≈ tokens×4. */
+export function microcompactIfNeeded(messages: ChatMessage[], model: string, estimateMessages?: ChatMessage[]): MicrocompactResult {
+  const estimate = estimateMessages ?? messages
+  if (!shouldMicrocompact(estimate, model)) return { messages, reclaimedChars: 0, pruned: 0 }
   const limit = getContextLimit(model)
   const effectiveLimit = limit - Math.min(Math.floor(limit * 0.1), 16_000)
-  const used = estimateTotalTokens(messages)
+  const used = estimateTotalTokens(estimate)
   const targetReclaimChars = Math.max(0, used - Math.floor(effectiveLimit * 0.55)) * 4
   return microcompact(messages, { targetReclaimChars })
 }

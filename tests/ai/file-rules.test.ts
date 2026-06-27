@@ -23,6 +23,10 @@ describe('parseRuleFile', () => {
     expect(r.globs).toEqual([])
     expect(r.body).toBe('просто текст')
   })
+  it('globs строкой с {a,b} не дробится на запятой внутри скобок', () => {
+    const r = parseRuleFile('---\nglobs: src/{a,b}/**, **/*.py\n---\nx')
+    expect(r.globs).toEqual(['src/{a,b}/**', '**/*.py'])
+  })
 })
 
 describe('matchGlob', () => {
@@ -48,6 +52,20 @@ describe('matchGlob', () => {
   })
   it('обратные слэши нормализуются', () => {
     expect(matchGlob('**/*.py', 'src\\a.py')).toBe(true)
+  })
+  it('{a,b} альтернация (ревью 26.06)', () => {
+    expect(matchGlob('src/{components,pages}/**', 'src/components/x.tsx')).toBe(true)
+    expect(matchGlob('src/{components,pages}/**', 'src/pages/y.tsx')).toBe(true)
+    expect(matchGlob('src/{components,pages}/**', 'src/lib/z.tsx')).toBe(false)
+    expect(matchGlob('**/*.{ts,tsx}', 'a.tsx')).toBe(true)
+    expect(matchGlob('**/*.{ts,tsx}', 'a.js')).toBe(false)
+  })
+  it('ReDoS: патологичная цепочка **/ не вешает (< 100ms)', () => {
+    const evil = '**/'.repeat(25) + 'X'
+    const path = 'a/'.repeat(30) + 'b.ts'
+    const t = Date.now()
+    expect(matchGlob(evil, path)).toBe(false)
+    expect(Date.now() - t).toBeLessThan(100)
   })
 })
 

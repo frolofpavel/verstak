@@ -125,7 +125,10 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
           (isAbsolute(w.filePath) ? relative(projectPath, w.filePath) : w.filePath).replace(/\\/g, '/'))
         const active = selectActiveRules(rules, activeFiles)
         if (active.length) {
-          const block = active.map(r => r.body).join('\n\n')
+          // Cap как у user-layer (MAX_BYTES): не раздуваем промпт большими .mdc на каждом ходу.
+          const MAX_RULES_CHARS = 8000
+          let block = active.map(r => r.body).join('\n\n')
+          if (block.length > MAX_RULES_CHARS) block = block.slice(0, MAX_RULES_CHARS) + '\n…[file-scoped правила обрезаны по лимиту]'
           userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n<!-- file_scoped_rules -->\n${block}` }
         }
       }

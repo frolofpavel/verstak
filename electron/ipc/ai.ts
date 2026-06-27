@@ -1668,7 +1668,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // Microcompact (Tier-2 #2): дешёвый обратимый прунинг по размеру при ~70% окна —
     // ДО дорогого full-compact (LLM-суммаризация). Без вызова модели. Маркеры обратимы.
     if (autoCompactEnabled && model) {
-      const mc = microcompactIfNeeded(currentMessages, model)
+      // Оценка по slid-копии (что реально уходит провайдеру), прунинг — в currentMessages.
+      const mc = microcompactIfNeeded(currentMessages, model, compactToolHistory(currentMessages, turn))
       if (mc.pruned > 0) {
         currentMessages.length = 0
         currentMessages.push(...mc.messages)
