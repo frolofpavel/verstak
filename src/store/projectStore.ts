@@ -189,6 +189,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   autoTitleChatSession: (chatId: number, firstUserText: string) => Promise<void>
   /** Create a new chat session in the active project and switch to it. */
   newChatSession: (title?: string) => Promise<ChatSession | null>
+  /** Tier-2 #3 — ветвление: форк сессии (копия истории) + переключение на ветку. */
+  forkChat: (sourceId: number) => Promise<ChatSession | null>
   /** Открыть глобальный чат справки (скилл verstak-guide). */
   openHelpChat: () => Promise<void>
   /** Выйти из экрана справки в рабочий чат проекта. */
@@ -770,6 +772,17 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       subagentRuns: []
     })
     return created
+  },
+  forkChat: async (sourceId) => {
+    const s = get()
+    if (!s.path) return null
+    const branch = await window.api.chatSessions.fork(sourceId)
+    if (!branch) return null
+    const list = await window.api.chatSessions.list(s.path)
+    set({ chatSessions: list })
+    // switchChatSession снапшотит уходящий чат и загружает скопированную историю ветки.
+    await get().switchChatSession(branch.id)
+    return branch
   },
   leaveHelpMode: () => {
     const s = get()

@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('api', {
       kind?: 'main' | 'review' | 'help'
       parentChatId?: number | null
     }) => ipcRenderer.invoke('chat-sessions:create', projectPath, opts),
+    fork: (sourceId: number, opts?: { uptoMessageId?: number; title?: string }) =>
+      ipcRenderer.invoke('chat-sessions:fork', sourceId, opts),
     getOrCreateHelp: () => ipcRenderer.invoke('chat-sessions:get-or-create-help'),
     rename: (id: number, title: string) => ipcRenderer.invoke('chat-sessions:rename', id, title),
     setModel: (id: number, providerId: string | null, model: string | null) =>

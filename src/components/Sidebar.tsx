@@ -20,7 +20,7 @@ function clampChatMenuPos(x: number, y: number): { left: number; top: number } {
 
 function ChatNavSection() {
   const t = useT()
-  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject()
+  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, forkChat, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject()
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -188,7 +188,7 @@ function ChatNavSection() {
                   title={s.title}
                 >
                   <span className={`gg-chat-nav-dot ${chatSnapshots[s.id]?.isStreaming ? 'is-streaming' : chatSnapshots[s.id]?.hasUnread ? 'is-unread' : ''}`} />
-                  <span className="gg-chat-nav-title">{s.title}</span>
+                  <span className="gg-chat-nav-title">{s.parentChatId != null ? '⑂ ' : ''}{s.title}</span>
                   {s.providerId && (
                     <span className="gg-chat-nav-provider" title={`${s.providerId}${s.model ? ' · ' + s.model : ''}`}>
                       {shortProviderTag(s.providerId)}
@@ -227,6 +227,19 @@ function ChatNavSection() {
             }}
           >
             {t.sidebar.renameChat}
+          </button>
+          <button
+            type="button"
+            className="gg-chat-nav-menu-item"
+            role="menuitem"
+            onClick={() => {
+              const { id } = contextMenu
+              setContextMenu(null)
+              void (async () => { await forkChat(id); setActiveView('chat') })()
+            }}
+            title="Создать ветку — копию этого чата, чтобы исследовать другой путь, не теряя оригинал"
+          >
+            ⑂ Ветвить
           </button>
           <button
             type="button"

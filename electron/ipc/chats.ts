@@ -18,6 +18,9 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
     kind?: ChatKind
     parentChatId?: number | null
   }) => sessions.create(projectPath, opts))
+  ipcMain.handle('chat-sessions:fork', (_e, sourceId: number, opts?: { uptoMessageId?: number; title?: string }) =>
+    sessions.fork(sourceId, opts)
+  )
   ipcMain.handle('chat-sessions:rename', (_e, id: number, title: string) => sessions.rename(id, title))
   ipcMain.handle('chat-sessions:set-model', (_e, id: number, providerId: string | null, model: string | null) =>
     sessions.setProviderModel(id, providerId, model)

@@ -299,6 +299,7 @@ declare global {
           kind?: ChatKind
           parentChatId?: number | null
         }) => Promise<ChatSession>
+        fork: (sourceId: number, opts?: { uptoMessageId?: number; title?: string }) => Promise<ChatSession | null>
         rename: (id: number, title: string) => Promise<void>
         setModel: (id: number, providerId: string | null, model: string | null) => Promise<void>
         remove: (id: number) => Promise<void>
