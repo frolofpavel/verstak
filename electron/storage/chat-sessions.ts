@@ -43,6 +43,10 @@ export interface ChatSessions {
   touch: (id: number) => void
   setProviderModel: (id: number, providerId: string | null, model: string | null) => void
   remove: (id: number) => void
+  /** Tier-2 #3 — ветвление: новая main-сессия с копией сообщений источника до
+   *  uptoMessageId (включительно; без него — вся история). parentChatId = источник
+   *  → дерево веток. Исследовать альтернативный путь из точки, не теряя оригинал. */
+  fork: (sourceId: number, opts?: { uptoMessageId?: number; title?: string }) => ChatSession | null
 }
 
 interface Row {
@@ -130,6 +134,28 @@ export function createChatSessions(db: Database): ChatSessions {
         db.prepare(`DELETE FROM chat_sessions WHERE id IN (${placeholders})`).run(...allIds)
       })
       tx()
+    },
+    fork(sourceId, opts = {}) {
+      const source = sessions.get(sourceId)
+      if (!source) return null
+      const branch = sessions.create(source.projectPath, {
+        title: opts.title ?? `${source.title} ⑂`,
+        providerId: source.providerId,
+        model: source.model,
+        kind: 'main',
+        parentChatId: sourceId,
+      })
+      const upto = opts.uptoMessageId
+      const tx = db.transaction(() => {
+        const rows = (upto != null
+          ? db.prepare('SELECT role, content, created_at FROM chats WHERE session_id = ? AND id <= ? ORDER BY id ASC').all(sourceId, upto)
+          : db.prepare('SELECT role, content, created_at FROM chats WHERE session_id = ? ORDER BY id ASC').all(sourceId)
+        ) as Array<{ role: string; content: string; created_at: number }>
+        const ins = db.prepare('INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+        for (const r of rows) ins.run(branch.id, source.projectPath, r.role, r.content, r.created_at)
+      })
+      tx()
+      return branch
     }
   }
   return sessions
