@@ -9,7 +9,7 @@ import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
-import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory } from '../ai/compact-history'
+import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded } from '../ai/compact-history'
 import { estimateTokens } from '../ai/context-limits'
 import { withInitialRetry } from '../ai/with-retry'
 import { classifyProviderError } from '../ai/provider-error'
@@ -1665,6 +1665,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // отдельных tool results.
     // auto_compact = 'false' отключает фичу; по умолчанию включена.
     const autoCompactEnabled = getSecretForDelegate?.('auto_compact') !== 'false'
+    // Microcompact (Tier-2 #2): дешёвый обратимый прунинг по размеру при ~70% окна —
+    // ДО дорогого full-compact (LLM-суммаризация). Без вызова модели. Маркеры обратимы.
+    if (autoCompactEnabled && model) {
+      const mc = microcompactIfNeeded(currentMessages, model)
+      if (mc.pruned > 0) {
+        currentMessages.length = 0
+        currentMessages.push(...mc.messages)
+        recordJournal(projectPath, 'note', `[microcompact] ${mc.pruned} крупных результатов → маркеры (${mc.reclaimedChars} симв.)`, null)
+        sender.send('ai:event', { id: sendId, event: { type: 'info', text: '🧹 Контекст подчищен (microcompact)' } })
+      }
+    }
     const compactCooldownOk = turn - lastCompactTurn >= COMPACT_COOLDOWN_TURNS
     if (autoCompactEnabled && model && compactCooldownOk && shouldAutoCompact(currentMessages, model)) {
       try {

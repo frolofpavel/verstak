@@ -347,3 +347,97 @@ export function diffSize(before: ChatMessage[], after: ChatMessage[]): { savedCh
   const saved = Math.max(0, a - b)
   return { savedChars: saved, pct: a > 0 ? Math.round((saved / a) * 100) : 0 }
 }
+
+// ─── Microcompact (Tier-2 #2) ─────────────────────────────────────────────────
+// Дешёвый ОБРАТИМЫЙ прунинг между sliding-window и full-compact. В отличие от
+// sliding-window (режет по ВОЗРАСТУ) — режет по РАЗМЕРУ: маркерует самые большие
+// старые tool-результаты, пока не наберём target. Без LLM-вызова (full-compact
+// дорогой). Обратимо: маркер говорит агенту перечитать файл/перезапустить команду.
+
+function makeMicroMarker(name: string, originalLen: number): string {
+  return `[microcompacted: ${name} (${originalLen} симв.) — прунинг по размеру; перечитай файл / перезапусти команду, если результат снова нужен]`
+}
+
+export interface MicrocompactResult {
+  messages: ChatMessage[]
+  reclaimedChars: number
+  pruned: number
+}
+
+/**
+ * Замаркерить самые крупные tool-результаты (старше keepRecentTurns) по убыванию
+ * размера, пока суммарно не наберём targetReclaimChars. Возвращает НОВЫЙ массив
+ * (immutable); если резать нечего — исходный массив и pruned=0.
+ */
+export function microcompact(
+  messages: ChatMessage[],
+  opts: { targetReclaimChars: number; keepRecentTurns?: number; minResultChars?: number }
+): MicrocompactResult {
+  const keepRecent = opts.keepRecentTurns ?? 2
+  const minChars = opts.minResultChars ?? 2000
+
+  const trMsgIdx: number[] = []
+  messages.forEach((m, i) => { if (m.toolResults?.length) trMsgIdx.push(i) })
+  const protectedFrom = trMsgIdx.length - keepRecent
+
+  const candidates: Array<{ mi: number; ri: number; size: number }> = []
+  let turnNo = 0
+  for (const mi of trMsgIdx) {
+    const isProtected = turnNo >= protectedFrom
+    turnNo++
+    if (isProtected) continue
+    messages[mi].toolResults!.forEach((r, ri) => {
+      const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+      if (raw.length >= minChars && !raw.startsWith('[microcompacted:') && !raw.startsWith('[compacted:')) {
+        candidates.push({ mi, ri, size: raw.length })
+      }
+    })
+  }
+  candidates.sort((a, b) => b.size - a.size)
+
+  const toPrune = new Set<string>()
+  let reclaimed = 0
+  for (const c of candidates) {
+    if (reclaimed >= opts.targetReclaimChars) break
+    toPrune.add(`${c.mi}:${c.ri}`)
+    reclaimed += c.size
+  }
+  if (toPrune.size === 0) return { messages, reclaimedChars: 0, pruned: 0 }
+
+  const next = messages.map((m, mi) => {
+    if (!m.toolResults?.length) return m
+    let changed = false
+    const trs = m.toolResults.map((r, ri) => {
+      if (!toPrune.has(`${mi}:${ri}`)) return r
+      changed = true
+      const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+      return { ...r, result: makeMicroMarker(r.name, raw.length) }
+    })
+    return changed ? { ...m, toolResults: trs } : m
+  })
+  return { messages: next, reclaimedChars: reclaimed, pruned: toPrune.size }
+}
+
+/** Порог microcompact — ниже full-compact (COMPACT_THRESHOLD). Дешёвый прунинг
+ *  включается раньше дорогой суммаризации. */
+const MICRO_THRESHOLD = 0.7
+
+export function shouldMicrocompact(messages: ChatMessage[], model: string): boolean {
+  if (messages.length < 6) return false
+  const limit = getContextLimit(model)
+  const effectiveLimit = limit - Math.min(Math.floor(limit * 0.1), 16_000)
+  const used = estimateTotalTokens(messages)
+  return used > effectiveLimit * MICRO_THRESHOLD
+}
+
+/** Обёртка для ai.ts: при превышении MICRO_THRESHOLD прунит крупные результаты до
+ *  ~55% окна. Иначе no-op (исходные messages). Токен-математика тут (estimateTotalTokens
+ *  внутренний). chars ≈ tokens × 4. */
+export function microcompactIfNeeded(messages: ChatMessage[], model: string): MicrocompactResult {
+  if (!shouldMicrocompact(messages, model)) return { messages, reclaimedChars: 0, pruned: 0 }
+  const limit = getContextLimit(model)
+  const effectiveLimit = limit - Math.min(Math.floor(limit * 0.1), 16_000)
+  const used = estimateTotalTokens(messages)
+  const targetReclaimChars = Math.max(0, used - Math.floor(effectiveLimit * 0.55)) * 4
+  return microcompact(messages, { targetReclaimChars })
+}
