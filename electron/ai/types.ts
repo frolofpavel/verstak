@@ -80,6 +80,7 @@ export type ChatEvent =
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
   | { type: 'plan-created'; planId: number; title: string; stepCount: number }
+  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number }
   /** Preflight: агент объявил план перед сложной/деструктивной задачей.
    *  Эфемерное — карточка в чате, в БД не пишется. */
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }

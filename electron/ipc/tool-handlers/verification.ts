@@ -2,6 +2,7 @@
 import type { ToolHandler } from './shared'
 import { emitActivity } from './shared'
 import { planSpecFeedback } from '../../ai/task-spec-check'
+import { resolvePlanGate, type PlanDecision } from '../../ai/plan-gate'
 import { scanText } from '../../ai/secret-scanner'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../../ai/verification'
 
@@ -204,6 +205,24 @@ export const createPlanHandler: ToolHandler = {
       const plan = ctx.recordPlan(ctx.projectPath, title, steps)
       try { ctx.recordJournal(ctx.projectPath, 'note', `План: ${title}`, `${steps.length} шагов`) } catch { /* journal not critical */ }
       ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'plan-created', planId: plan.id, title, stepCount: steps.length } })
+      // #3 plan-gate: в режиме планирования БЛОКИРУЕМ-И-ЖДЁМ явного решения юзера
+      // (Approve/Revise/Reject), а не просто пишем план и полагаемся на ручное
+      // переключение. approve → выполнение в этом же прогоне (мутируем ctx.agentMode —
+      // decide() читает его живо на каждом tool-call).
+      if (ctx.agentMode === 'plan' && ctx.pendingPlans && ctx.getSecretForDelegate?.('plan_approval_gate') === 'true') {
+        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'plan-approval', callId: call.id, planId: plan.id, title, stepCount: steps.length } })
+        const pending = ctx.pendingPlans
+        const key = ctx.scopedKey(ctx.sendId, call.id)
+        const decision = await new Promise<{ decision: PlanDecision; feedback?: string }>(resolve => {
+          let settled = false
+          const finish = (d: { decision: PlanDecision; feedback?: string }) => { if (!settled) { settled = true; resolve(d) } }
+          pending.set(key, { sendId: ctx.sendId, resolve: finish })
+        })
+        pending.delete(key)
+        const outcome = resolvePlanGate(decision.decision, decision.feedback, title)
+        if (outcome.newMode) ctx.agentMode = outcome.newMode
+        return { id: call.id, name: call.name, result: outcome.result }
+      }
       // v3 Шаг B (enforcement): фидбэк по тонким ТЗ-шагам — модель уточнит, чтобы
       // дешёвая модель-исполнитель получила точную инструкцию, а не «улучшить X».
       const specFeedback = planSpecFeedback(steps)
@@ -250,4 +269,4 @@ export const preflightHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
-}
+}

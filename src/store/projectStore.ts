@@ -59,6 +59,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   streamStartedAt: number | null
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
+  /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
+  pendingPlan: { callId: string; title: string; stepCount: number; sendId?: number } | null
   activity: ActivityEntry[]
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
   preflights: PreflightCard[]
@@ -129,6 +131,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
+  setPendingPlan: (p: { callId: string; title: string; stepCount: number; sendId?: number } | null) => void
   /** T1.3 Inbox: снять pendingCommand конкретного чата (активного или фонового
    *  снапшота) — резолв approval из общего Inbox, не заходя в чат. */
   clearChatPendingCommand: (chatId: number) => void
@@ -260,6 +263,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   streamStartedAt: null,
   pendingWrites: [],
   pendingCommand: null,
+  pendingPlan: null,
   activity: [],
   preflights: [],
   subagentRuns: [],
@@ -506,6 +510,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => set({ pendingWrites: [] }),
   setPendingCommand: (c) => set({ pendingCommand: c }),
+  setPendingPlan: (p) => set({ pendingPlan: p }),
   clearChatPendingCommand: (chatId) => set(s => {
     const patch: Partial<ProjectState> = {}
     if (chatId === s.activeChatId && s.pendingCommand) patch.pendingCommand = null

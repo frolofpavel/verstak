@@ -404,6 +404,7 @@ function PolicyTab() {
   const [currentMode, setCurrentMode] = useState<AgentModeId | null>(null)
   const [dodMode, setDodMode] = useState<string>('warn')
   const [allowlist, setAllowlist] = useState<string>('')
+  const [planGate, setPlanGate] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -415,12 +416,19 @@ function PolicyTab() {
       setDodMode(dm || 'warn')
       const al = await window.api.settings.getKey('bash_allowlist')
       setAllowlist(al || '')
+      const pg = await window.api.settings.getKey('plan_approval_gate')
+      setPlanGate(pg === 'true')
     })()
   }, [])
 
   const changeDod = async (v: string) => {
     setDodMode(v)
     await window.api.settings.setKey('dod_mode', v)
+  }
+
+  const changePlanGate = async (v: boolean) => {
+    setPlanGate(v)
+    await window.api.settings.setKey('plan_approval_gate', v ? 'true' : 'false')
   }
 
   const changeAllowlist = async (v: string) => {
@@ -522,6 +530,15 @@ function PolicyTab() {
         <option value="block">Обязательно (Mandatory DoD)</option>
         <option value="off">Выкл</option>
       </select>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>📋 Одобрение плана перед выполнением</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        В режиме планирования агент предлагает план и <strong>блокируется до твоего решения</strong>: Одобрить (→ выполнение), Доработать (с замечаниями) или Отклонить. Высокий контроль — человек одобряет план ДО старта. По умолчанию выкл (агент просто составляет план, режим переключаешь сам).
+      </div>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={planGate} onChange={e => void changePlanGate(e.target.checked)} />
+        <span>Блокировать-и-ждать одобрения плана (Approve / Revise / Reject)</span>
+      </label>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>
         Риск по конкретным MCP-инструментам (per-server) — на вкладке <strong>MCP</strong>. Здесь он не дублируется.

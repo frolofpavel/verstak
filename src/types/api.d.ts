@@ -152,6 +152,7 @@ export type ChatEvent =
   | { type: 'turns-exhausted'; used: number; maxBudget: number; canContinue: boolean; suggestedAdd: number }
   | { type: 'tool-activity'; callId: string; name: string; label: string; detail: string; status: 'ok' | 'error' }
   | { type: 'plan-created'; planId: number; title: string; stepCount: number }
+  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
   | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
@@ -281,6 +282,7 @@ declare global {
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
+        resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
         /** Дополнить контекст активного API agent-loop (Ctrl+Enter во время стрима). */
         appendContext: (sendId: number, text: string) => Promise<

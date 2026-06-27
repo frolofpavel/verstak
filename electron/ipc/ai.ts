@@ -178,6 +178,10 @@ const pendingWrites = new Map<string, PendingWrite>()
 interface PendingCommand { sendId: number; resolve: (accept: boolean) => void }
 const pendingCommands = new Map<string, PendingCommand>()
 
+// #3 plan-gate: ожидающие одобрения планы (create_plan в plan-режиме блокирует-и-ждёт).
+interface PendingPlan { sendId: number; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }
+const pendingPlans = new Map<string, PendingPlan>()
+
 function scopedKey(sendId: number, callId: string): string {
   return `${sendId}::${callId}`
 }
@@ -196,6 +200,7 @@ export function abortSend(sendId: number): boolean {
     for (const [k, c] of activeAborts) { c.abort(); activeAborts.delete(k) }
     for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
     for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
+    for (const [k, p] of pendingPlans) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
     return true
   }
   const ctrl = activeAborts.get(sendId)
@@ -209,6 +214,9 @@ export function abortSend(sendId: number): boolean {
   }
   for (const [k, p] of pendingCommands) {
     if (p.sendId === sendId) { p.resolve(false); pendingCommands.delete(k) }
+  }
+  for (const [k, p] of pendingPlans) {
+    if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
   }
   return true
 }
@@ -332,6 +340,9 @@ export function registerAiIpc(deps: AiDeps): void {
       }
       for (const [k, p] of pendingCommands) {
         if (p.sendId === sendId) { p.resolve(false); pendingCommands.delete(k) }
+      }
+      for (const [k, p] of pendingPlans) {
+        if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
       }
       // sendIdToChatId mapping cleared via separate ai:event done handler in
       // renderer — no need to touch from main.
@@ -862,6 +873,23 @@ export function registerAiIpc(deps: AiDeps): void {
       if (k.endsWith('::' + callId)) {
         p.resolve(accept)
         pendingCommands.delete(k)
+        return
+      }
+    }
+  })
+
+  // #3 plan-gate: решение пользователя по предложенному плану (Approve/Revise/Reject).
+  ipcMain.handle('ai:resolve-plan', (_e, callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => {
+    const payload = { decision, feedback }
+    if (typeof sendId === 'number' && sendId > 0) {
+      const key = scopedKey(sendId, callId)
+      const exact = pendingPlans.get(key)
+      if (exact) { exact.resolve(payload); pendingPlans.delete(key); return }
+    }
+    for (const [k, p] of pendingPlans) {
+      if (k.endsWith('::' + callId)) {
+        p.resolve(payload)
+        pendingPlans.delete(k)
         return
       }
     }
@@ -1475,7 +1503,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
       recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
-      pendingAttachments, pendingWrites, pendingCommands, scopedKey,
+      pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode, skillRegistry, getSecretForDelegate,
       currentProviderId: providerId,
       mcpClient: mcpClientRef,

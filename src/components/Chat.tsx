@@ -509,6 +509,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           store.markFileTouched(toProjectAbsPath(store.path, event.path), 'write')
         }
       }
+      else if (event.type === 'plan-approval') {
+        // #3 plan-gate: агент предложил план и заблокирован до решения юзера.
+        store.setPendingPlan({ callId: event.callId, title: String(event.title ?? 'План'), stepCount: Number(event.stepCount ?? 0), sendId: id })
+      }
       else if (event.type === 'pending-command') {
         store.setPendingCommand({ callId: event.callId, command: event.command, sendId: id })
         store.pushActivity({

@@ -46,6 +46,8 @@ export interface ToolContext {
   /** Shared maps used by the diff-confirm flow. */
   pendingWrites: Map<string, { sendId: SendId; resolve: (accept: boolean) => void }>
   pendingCommands: Map<string, { sendId: SendId; resolve: (accept: boolean) => void }>
+  /** #3 plan-gate: ожидающие одобрения планы (create_plan в plan-режиме). */
+  pendingPlans?: Map<string, { sendId: SendId; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }>
   scopedKey: (sendId: SendId, callId: string) => string
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode

@@ -146,6 +146,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ai:resolve-write', callId, accept, sendId),
     resolveCommand: (callId: string, accept: boolean, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-command', callId, accept, sendId),
+    resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) =>
+      ipcRenderer.invoke('ai:resolve-plan', callId, decision, feedback, sendId),
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
     appendContext: (sendId: number, text: string) =>
       ipcRenderer.invoke('ai:append-context', sendId, text) as Promise<
