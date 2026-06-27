@@ -348,6 +348,9 @@ export function registerAiIpc(deps: AiDeps): void {
       for (const [k, p] of pendingPlans) {
         if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
       }
+      // #4 suspend: чистим suspendedSends здесь — cleanup идёт для ОБОИХ путей (API+CLI)
+      // и любого выхода, иначе CLI-приостановки и race suspend-после-finish копились бы.
+      suspendedSends.delete(sendId)
       // sendIdToChatId mapping cleared via separate ai:event done handler in
       // renderer — no need to touch from main.
       // Push-наблюдаемость: на завершении прогона шлём в Telegram done/failed/нужен-
@@ -1894,8 +1897,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
         }
         // #4 suspend: приостановленный прогон помечаем 'suspended' (не 'stopped').
+        // delete — в общем cleanup (для обоих путей); здесь только читаем.
         const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToStatus(exitReason)
-        suspendedSends.delete(sendId)
         agentRuns.finish(runId, finishStatus, {
           costCents: costGuard?.current() ?? 0,
           toolCount: toolCallCount,

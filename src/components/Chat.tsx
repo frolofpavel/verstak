@@ -2202,6 +2202,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <EffortPicker />
             {isStreaming ? (
               <>
+              {/* ⏸ только для API-провайдеров с проектом: только этот путь пишет чекпойнт
+                  (runApiConversation). CLI/справка не чекпойнтят → ⏸ был бы молча=⏹. */}
+              {provider.supportsTools && !helpMode && (
               <button
                 className="gg-send-btn gg-pause-btn"
                 onClick={() => void stop(true)}
@@ -2212,6 +2215,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   <rect x="14" y="5" width="4" height="14" rx="1" />
                 </svg>
               </button>
+              )}
               <button
                 className="gg-send-btn gg-stop-btn"
                 onClick={() => void stop()}
