@@ -302,6 +302,16 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'create_proof_video',
+    description: 'Собрать MP4-доказательство из скриншотов browser-прохода (все browser_screenshot текущего прогона) — видео live-проверки веб-сценария для отчёта/Proof Pack. Сначала пройди сценарий: browser_navigate → browser_click → browser_screenshot на каждом шаге, потом вызови это. Требует установленный ffmpeg.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fps: { type: 'number', description: 'Кадров в секунду (default 1 — медленный показ по шагам).' }
+      }
+    }
+  },
+  {
     name: 'create_plan',
     description: 'Создать структурированный план многошаговой задачи. Используй когда задача требует 3+ шагов или явного согласования с пользователем. План отобразится во вкладке Plan; пользователь сможет выполнять шаги по одному.',
     parameters: {

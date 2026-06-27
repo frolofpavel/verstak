@@ -33,6 +33,7 @@ import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/co
 import { readJournalHandler } from './tool-handlers/journal'
 import { executeCodeHandler } from './tool-handlers/execute-code'
 import { findDefinitionHandler, findReferencesHandler } from './tool-handlers/lsp-nav'
+import { createProofVideoHandler } from './tool-handlers/create-proof-video'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -58,6 +59,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'browser_read_page': browserHandler,
   'browser_click': browserHandler,  // Tier-2 #5
   'browser_screenshot': browserHandler,
+  'create_proof_video': createProofVideoHandler,  // Tier-2 #5
   'list_connectors': listConnectorsHandler,
   'connector_query': connectorQueryHandler,
   'create_plan': createPlanHandler,

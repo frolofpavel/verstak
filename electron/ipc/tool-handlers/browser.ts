@@ -2,6 +2,7 @@
 import type { ToolHandler, ToolContext } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 import { emitActivity, summarizeToolCall } from './shared'
+import { addProofFrame } from '../../ai/proof-frames'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -63,6 +64,8 @@ export const browserHandler: ToolHandler = {
             data: m[2],
             size: Math.floor(m[2].length * 0.75)
           })
+          // Tier-2 #5: кадр в буфер прогона для create_proof_video (MP4-доказательство).
+          try { addProofFrame(Number(ctx.sendId), Buffer.from(m[2], 'base64')) } catch { /* best-effort */ }
           result.result = { url: typeof r === 'object' ? r.url : null, attached: true }
         }
       }
