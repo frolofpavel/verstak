@@ -284,6 +284,7 @@ declare global {
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
+        suspend: (sendId: number) => Promise<boolean>
         /** Дополнить контекст активного API agent-loop (Ctrl+Enter во время стрима). */
         appendContext: (sendId: number, text: string) => Promise<
           { ok: true } | { ok: false; fallback: 'invalid' | 'unavailable' }
@@ -749,7 +750,7 @@ export interface SessionTodo {
  * тип дублируется здесь. Один ai:send = одна строка.
  */
 export type AgentRunOwner = 'main' | 'review' | 'delegate' | 'background'
-export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped'
+export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended'
 
 export interface AgentRun {
   runId: string

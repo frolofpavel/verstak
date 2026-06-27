@@ -1572,10 +1572,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     return off
   }, [])
 
-  async function stop() {
+  async function stop(asSuspend = false) {
     const id = currentSendIdRef.current
     if (id == null) return
-    await window.api.ai.stop(id)
+    // #4 suspend: та же очистка, что Stop, но прогон помечается 'suspended' с
+    // сохранённым чекпойнтом для ↻ Продолжить (резюм через resumeFromRunId).
+    if (asSuspend) await window.api.ai.suspend(id)
+    else await window.api.ai.stop(id)
     const st = useProject.getState()
     if (st.helpMode) {
       st.finalizeHelpStreamDuration()
@@ -2198,6 +2201,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             />
             <EffortPicker />
             {isStreaming ? (
+              <>
+              <button
+                className="gg-send-btn gg-pause-btn"
+                onClick={() => void stop(true)}
+                title="Приостановить — сохранить прогресс и продолжить позже (↻)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              </button>
               <button
                 className="gg-send-btn gg-stop-btn"
                 onClick={() => void stop()}
@@ -2207,6 +2221,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   <rect x="6" y="6" width="12" height="12" rx="1.5" />
                 </svg>
               </button>
+              </>
             ) : (
               <button
                 className="gg-send-btn"

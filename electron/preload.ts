@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld('api', {
     resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-plan', callId, decision, feedback, sendId),
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
+    suspend: (sendId: number) => ipcRenderer.invoke('ai:suspend', sendId),
     appendContext: (sendId: number, text: string) =>
       ipcRenderer.invoke('ai:append-context', sendId, text) as Promise<
         { ok: true } | { ok: false; fallback: 'invalid' | 'unavailable' }

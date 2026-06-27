@@ -265,13 +265,13 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
   expanded: boolean
   onToggle: () => void
   onStop: (runId: string) => void
-  onResume: (runId: string) => void
+  onResume: (runId: string, status: string) => void
 }) {
   const t = useT()
   const cost = fmtCost(run.costCents)
   const liveProgress = formatLiveProgress(run, t)
   const canStop = run.status === 'running' || run.status === 'queued'
-  const canResume = run.status === 'failed' || run.status === 'stopped'
+  const canResume = run.status === 'failed' || run.status === 'stopped' || run.status === 'suspended'
   const ownerLabel = t.agentRuns.owner[run.owner as keyof typeof t.agentRuns.owner] ?? run.owner
 
   return (
@@ -304,10 +304,10 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
               className="gg-run-action gg-run-action-resume"
               role="button"
               tabIndex={0}
-              title={t.agentRuns.resendTitle}
-              onClick={(e) => { e.stopPropagation(); onResume(run.runId) }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onResume(run.runId) } }}
-            >{t.agentRuns.resend}</span>
+              title={run.status === 'suspended' ? 'Продолжить с момента приостановки' : t.agentRuns.resendTitle}
+              onClick={(e) => { e.stopPropagation(); onResume(run.runId, run.status) }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onResume(run.runId, run.status) } }}
+            >{run.status === 'suspended' ? '↻ Продолжить' : t.agentRuns.resend}</span>
           )}
           <span className="gg-run-card-caret">{expanded ? '▾' : '▸'}</span>
         </span>
@@ -366,7 +366,7 @@ export function AgentRunsPanel() {
     void window.api.agentRuns.stop(runId).catch(() => {}).finally(() => void refresh())
   }, [refresh])
 
-  const handleResume = useCallback(async (runId: string) => {
+  const handleResume = useCallback(async (runId: string, status?: string) => {
     let res: { chatId: number | null; userMessage: string } | { error: string }
     try {
       res = await window.api.agentRuns.resume(runId)
@@ -379,7 +379,12 @@ export function AgentRunsPanel() {
     } catch { /* non-critical */ }
     setActiveView('chat')
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: userMessage }))
+      // #4 suspend: приостановленный прогон ПРОДОЛЖАЕМ с чекпойнта (resumeFromRunId),
+      // а не пере-слать сначала; failed/stopped — обычный re-send исходного запроса.
+      const detail = status === 'suspended'
+        ? { text: userMessage, resumeFromRunId: runId }
+        : userMessage
+      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail }))
     }, 0)
   }, [switchChatSession, setActiveView])
 
@@ -438,7 +443,7 @@ export function AgentRunsPanel() {
                 expanded={expanded === r.runId}
                 onToggle={() => setExpanded(prev => prev === r.runId ? null : r.runId)}
                 onStop={handleStop}
-                onResume={() => void handleResume(r.runId)}
+                onResume={(id, status) => void handleResume(id, status)}
               />
             ))}
           </div>

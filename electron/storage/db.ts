@@ -745,6 +745,37 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_undo_floors_project ON undo_floors(project_path);
       `)
     }
+  },
+  {
+    version: 29,
+    description: "agent_runs: + статус 'suspended' (#4 ⏸/↻). SQLite не меняет CHECK → пересоздание таблицы с копированием данных и индексов.",
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE agent_runs_new (
+          run_id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          owner TEXT NOT NULL DEFAULT 'main' CHECK(owner IN ('main','review','delegate','background')),
+          title TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('queued','running','waiting_review','done','failed','stopped','suspended')),
+          provider_id TEXT, model TEXT, send_id INTEGER,
+          agents_count INTEGER NOT NULL DEFAULT 0, tool_count INTEGER NOT NULL DEFAULT 0,
+          files_count INTEGER NOT NULL DEFAULT 0, cost_cents INTEGER NOT NULL DEFAULT 0,
+          error TEXT, started_at INTEGER NOT NULL, ended_at INTEGER,
+          turn_index INTEGER DEFAULT 0, last_tool_name TEXT, last_checkpoint_id INTEGER,
+          agent_mode TEXT, updated_at INTEGER
+        );
+        INSERT INTO agent_runs_new
+          SELECT run_id, project_path, chat_id, owner, title, status, provider_id, model, send_id,
+                 agents_count, tool_count, files_count, cost_cents, error, started_at, ended_at,
+                 turn_index, last_tool_name, last_checkpoint_id, agent_mode, updated_at
+          FROM agent_runs;
+        DROP TABLE agent_runs;
+        ALTER TABLE agent_runs_new RENAME TO agent_runs;
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs(project_path, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(project_path, status);
+      `)
+    }
   }
 ]
 

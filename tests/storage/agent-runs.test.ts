@@ -401,4 +401,17 @@ describe('crash-resume (migration 19)', () => {
     expect(runs.sessionStats(999)).toEqual({ runs: 0, costCents: 0, toolCount: 0, filesCount: 0, agentsCount: 0, durationMs: 0 })
     db.close()
   })
+
+  // #4 suspend: статус 'suspended' персистится (для ↻ Продолжить) + чекпойнт жив.
+  it('finish(suspended) round-trip + чекпойнт не тронут', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 's1', projectPath: '/p', chatId: 3, title: 'S', providerId: 'x', model: 'm', sendId: 9 })
+    runs.saveCheckpoint('s1', 2, JSON.stringify([{ role: 'user', content: 'q' }]))
+    runs.finish('s1', 'suspended', { costCents: 12 })
+    const row = runs.get('s1')
+    expect(row!.status).toBe('suspended')
+    expect(runs.latestCheckpoint('s1')?.messagesJson).toContain('q') // чекпойнт для resume цел
+    db.close()
+  })
 })

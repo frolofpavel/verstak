@@ -182,6 +182,10 @@ const pendingCommands = new Map<string, PendingCommand>()
 interface PendingPlan { sendId: number; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }
 const pendingPlans = new Map<string, PendingPlan>()
 
+// #4 suspend: sendId'ы, прерванные как ПРИОСТАНОВКА (не Stop) — finally помечает их
+// прогон статусом 'suspended' (чекпойнт уже сохраняется на abort) для ↻ Продолжить.
+const suspendedSends = new Set<number>()
+
 function scopedKey(sendId: number, callId: string): string {
   return `${sendId}::${callId}`
 }
@@ -774,6 +778,13 @@ export function registerAiIpc(deps: AiDeps): void {
   })
 
   ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
+
+  // #4 suspend: приостановить прогон = abort, НО прогон помечается 'suspended'
+  // (не 'stopped') и чекпойнт сохраняется (он и так держится на abort) → ↻ Продолжить.
+  ipcMain.handle('ai:suspend', (_e, sendId: number) => {
+    suspendedSends.add(sendId)
+    return abortSend(sendId)
+  })
 
   ipcMain.handle('ai:append-context', (_e, sendId: number, text: string) => {
     const trimmed = String(text ?? '').trim()
@@ -1882,7 +1893,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         if (lastAssistantText.trim()) {
           agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
         }
-        agentRuns.finish(runId, exitReasonToStatus(exitReason), {
+        // #4 suspend: приостановленный прогон помечаем 'suspended' (не 'stopped').
+        const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToStatus(exitReason)
+        suspendedSends.delete(sendId)
+        agentRuns.finish(runId, finishStatus, {
           costCents: costGuard?.current() ?? 0,
           toolCount: toolCallCount,
           filesCount: filesTouched.size,
