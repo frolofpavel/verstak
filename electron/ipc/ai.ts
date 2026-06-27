@@ -1,5 +1,7 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
+import { basename } from 'path'
+import { notifyRunEvent } from '../ai/run-notify'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
@@ -333,6 +335,21 @@ export function registerAiIpc(deps: AiDeps): void {
       }
       // sendIdToChatId mapping cleared via separate ai:event done handler in
       // renderer — no need to touch from main.
+      // Push-наблюдаемость: на завершении прогона шлём в Telegram done/failed/нужен-
+      // ревью (opt-in telegram_notify_chat_id, только main-прогон, только исходящее,
+      // не кидает). Финальный статус читаем из agent_runs (finish уже отработал).
+      try {
+        const run = deps.agentRuns?.get(runId)
+        if (run) {
+          void notifyRunEvent({
+            status: run.status, owner: run.owner,
+            projectName: projectPath ? basename(projectPath) : null,
+            costCents: run.costCents, toolCount: run.toolCount, filesCount: run.filesCount,
+            durationMs: run.endedAt && run.startedAt ? run.endedAt - run.startedAt : undefined,
+            error: run.error,
+          }, { getSecret: deps.getSecret })
+        }
+      } catch { /* наблюдаемость не должна ломать cleanup */ }
     }
 
     // Load project's user-layer (AGENTS.md / CLAUDE.md / GEMINI.md / our RULES.md)

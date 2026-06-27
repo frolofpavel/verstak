@@ -896,6 +896,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [gsheetsJson, setGsheetsJson] = useState('')
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramWhitelist, setTelegramWhitelist] = useState('')
+  const [telegramNotifyChatId, setTelegramNotifyChatId] = useState('')
   const [sshHost, setSshHost] = useState('')
   const [sshKeyPath, setSshKeyPath] = useState('')
   const [bitrixWebhook, setBitrixWebhook] = useState('')
@@ -1040,7 +1041,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       // здесь было ~50 последовательных await getKey (каждый ждёт предыдущего) —
       // главный источник лага открытия Settings после роста до 31 коннектора.
       const FLAT_KEYS = [
-        'gsheets_service_account_json', 'telegram_bot_token', 'telegram_chat_whitelist',
+        'gsheets_service_account_json', 'telegram_bot_token', 'telegram_chat_whitelist', 'telegram_notify_chat_id',
         'ssh_default_host', 'ssh_key_path', 'bitrix24_webhook_url', 'yandex_direct_token',
         'dadata_api_key', 'dadata_secret', 'yandex_metrika_token', 'avito_client_id',
         'avito_client_secret', 'yandex_webmaster_token', 'yandex_wordstat_token',
@@ -1062,6 +1063,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       setGsheetsJson(F['gsheets_service_account_json'])
       setTelegramBotToken(F['telegram_bot_token'])
       setTelegramWhitelist(F['telegram_chat_whitelist'])
+      setTelegramNotifyChatId(F['telegram_notify_chat_id'])
       setSshHost(F['ssh_default_host'])
       setSshKeyPath(F['ssh_key_path'])
       setBitrixWebhook(F['bitrix24_webhook_url'])
@@ -1246,6 +1248,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       case 'telegram':
         await window.api.settings.setKey('telegram_bot_token', telegramBotToken)
         await window.api.settings.setKey('telegram_chat_whitelist', telegramWhitelist)
+        await window.api.settings.setKey('telegram_notify_chat_id', telegramNotifyChatId)
         break
       case 'ssh':
         await window.api.settings.setKey('ssh_default_host', sshHost)
@@ -1407,6 +1410,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     await window.api.settings.setKey('gsheets_service_account_json', gsheetsJson)
     await window.api.settings.setKey('telegram_bot_token', telegramBotToken)
     await window.api.settings.setKey('telegram_chat_whitelist', telegramWhitelist)
+    await window.api.settings.setKey('telegram_notify_chat_id', telegramNotifyChatId)
     await window.api.settings.setKey('ssh_default_host', sshHost)
     await window.api.settings.setKey('ssh_key_path', sshKeyPath)
     await window.api.settings.setKey('bitrix24_webhook_url', bitrixWebhook)
@@ -1608,9 +1612,21 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
               spellCheck={false}
             />
           </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Уведомления о прогоне → chat_id</label>
+            <input
+              className="gg-input"
+              value={telegramNotifyChatId}
+              onChange={e => setTelegramNotifyChatId(e.target.value)}
+              placeholder='123456789 (твой chat_id; пусто = выкл)'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
           <div className="gg-settings-hint">
             JSON-массив chat_id куда боту разрешено отправлять. Пустая строка = всем (только dev).
             Rate limit 20 send/min на chat_id вшит в коннектор. Read истории — через SSH к Telethon скрипту.
+            <br/>Поле «Уведомления о прогоне» (opt-in): запустил агента и ушёл — бот сам пришлёт в этот chat_id, когда прогон завершился / упал / ждёт ревью. Только исходящее. Chat_id должен быть в whitelist.
           </div>
         </>
       )
