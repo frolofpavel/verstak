@@ -40,6 +40,9 @@ export function registerAgentRunsIpc(
       agentRuns.list(projectPath, opts)
   )
 
+  // #2 per-session stats: агрегат cost/инструменты/файлы/время по всем прогонам чата.
+  ipcMain.handle('agent-runs:session-stats', (_e, chatId: number) => agentRuns.sessionStats(chatId))
+
   ipcMain.handle('agent-runs:get', (_e, runId: string) => {
     const run = agentRuns.get(runId)
     // Прогона нет (удалён / неизвестный id) — отдаём пустой агрегат, чтобы

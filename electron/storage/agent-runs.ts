@@ -47,6 +47,20 @@ export interface AgentRun {
 }
 
 /**
+ * Per-session агрегат: суммы по всем прогонам одного чата. Для «открыл чат →
+ * вижу, сколько ВСЕГО потрачено $/инструментов/файлов/времени за сессию».
+ * Переживает рестарт (agent_runs персистентны), в отличие от live cost-pill.
+ */
+export interface SessionStats {
+  runs: number
+  costCents: number
+  toolCount: number
+  filesCount: number
+  agentsCount: number
+  durationMs: number
+}
+
+/**
  * Снапшот зависшего после краха прогона для баннера «сессия прервана».
  * Собирается на старте app ДО reconcileStale (см. findResumable).
  */
@@ -204,6 +218,8 @@ export interface AgentRuns {
   /** Прогоны проекта, новейшие первыми. Фильтры status/owner опциональны. */
   list: (projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }) => AgentRun[]
   get: (runId: string) => AgentRun | null
+  /** Per-session агрегат по всем прогонам чата (cost/инструменты/файлы/время). */
+  sessionStats: (chatId: number) => SessionStats
   /** События прогона в порядке добавления (id ASC). */
   getEvents: (runId: string) => AgentRunEvent[]
   /**
@@ -356,6 +372,20 @@ export function createAgentRuns(db: Database): AgentRuns {
     get(runId) {
       const row = db.prepare(`${SELECT_RUN} WHERE run_id = ?`).get(runId) as AgentRun | undefined
       return row ?? null
+    },
+    sessionStats(chatId) {
+      // Агрегат по существующим колонкам — без миграции. duration только по
+      // завершённым прогонам (ended_at IS NOT NULL), иначе текущий бы исказил.
+      const row = db.prepare(`
+        SELECT COUNT(*) as runs,
+               COALESCE(SUM(cost_cents), 0) as costCents,
+               COALESCE(SUM(tool_count), 0) as toolCount,
+               COALESCE(SUM(files_count), 0) as filesCount,
+               COALESCE(SUM(agents_count), 0) as agentsCount,
+               COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at - started_at ELSE 0 END), 0) as durationMs
+        FROM agent_runs WHERE chat_id = ?
+      `).get(chatId) as SessionStats | undefined
+      return row ?? { runs: 0, costCents: 0, toolCount: 0, filesCount: 0, agentsCount: 0, durationMs: 0 }
     },
     getEvents(runId) {
       return db.prepare(`${SELECT_EVENT} WHERE run_id = ? ORDER BY id ASC`).all(runId) as AgentRunEvent[]

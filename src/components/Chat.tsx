@@ -199,6 +199,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const id = window.setInterval(() => setTickNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [isStreaming, streamStartedAt])
+  // #2 per-session stats: персистентный агрегат cost/инструменты/файлы по всем
+  // прогонам чата (переживает рестарт). Рефетч при смене чата и по завершении прогона.
+  const [sessionStats, setSessionStats] = useState<{ runs: number; costCents: number; toolCount: number; filesCount: number; agentsCount: number; durationMs: number } | null>(null)
+  useEffect(() => {
+    if (helpMode || activeChatId == null) { setSessionStats(null); return }
+    let cancelled = false
+    void window.api.agentRuns.sessionStats(activeChatId).then(s => { if (!cancelled) setSessionStats(s) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [activeChatId, isStreaming, helpMode])
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode(activeChatId, helpMode)
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
   const activeChatTitle = isHelpChat
@@ -2280,6 +2289,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   </span>
                 )
               })()}
+              {sessionStats && sessionStats.runs > 0 && (
+                <span
+                  className="gg-usage-pill"
+                  title={`Σ за всю сессию (${sessionStats.runs} прогон(ов)${sessionStats.durationMs > 1000 ? ` · ${Math.max(1, Math.round(sessionStats.durationMs / 60000))} мин` : ''}) — переживает рестарт`}
+                >
+                  <span>Σ ${(sessionStats.costCents / 100).toFixed(2)}</span>
+                  {sessionStats.toolCount > 0 && (<><span className="gg-usage-sep">·</span><span>🔧{sessionStats.toolCount}</span></>)}
+                  {sessionStats.filesCount > 0 && (<><span className="gg-usage-sep">·</span><span>📄{sessionStats.filesCount}</span></>)}
+                </span>
+              )}
               {undoCount > 0 && (
                 <button
                   type="button"

@@ -468,6 +468,7 @@ contextBridge.exposeInMainWorld('api', {
     list: (projectPath: string, opts?: { status?: string; owner?: string; limit?: number }) =>
       ipcRenderer.invoke('agent-runs:list', projectPath, opts),
     get: (runId: string) => ipcRenderer.invoke('agent-runs:get', runId),
+    sessionStats: (chatId: number) => ipcRenderer.invoke('agent-runs:session-stats', chatId),
     stop: (runId: string) => ipcRenderer.invoke('agent-runs:stop', runId),
     resume: (runId: string) => ipcRenderer.invoke('agent-runs:resume', runId),
     // Crash-resume: зависшие после краха прогоны для баннера «сессия прервана».

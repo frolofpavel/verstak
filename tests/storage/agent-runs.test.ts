@@ -373,4 +373,32 @@ describe('crash-resume (migration 19)', () => {
     expect(list.find(r => r.runId === 'old')).toBeUndefined()
     db.close()
   })
+
+  // #2 per-session stats: агрегат по всем прогонам чата (cost-discipline).
+  it('sessionStats: суммирует cost/tools/files по всем прогонам ОДНОГО чата', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'a', projectPath: '/p', chatId: 7, title: 'A', providerId: 'x', model: 'm', sendId: 1 })
+    runs.finish('a', 'done', { costCents: 30, toolCount: 5, filesCount: 2 })
+    runs.create({ runId: 'b', projectPath: '/p', chatId: 7, title: 'B', providerId: 'x', model: 'm', sendId: 2 })
+    runs.finish('b', 'done', { costCents: 20, toolCount: 3, filesCount: 1 })
+    // прогон ДРУГОГО чата — не попадает в агрегат чата 7
+    runs.create({ runId: 'c', projectPath: '/p', chatId: 8, title: 'C', providerId: 'x', model: 'm', sendId: 3 })
+    runs.finish('c', 'done', { costCents: 999, toolCount: 99, filesCount: 99 })
+
+    const s = runs.sessionStats(7)
+    expect(s.runs).toBe(2)
+    expect(s.costCents).toBe(50)  // 30+20, без чужого чата
+    expect(s.toolCount).toBe(8)   // 5+3
+    expect(s.filesCount).toBe(3)  // 2+1
+    expect(s.durationMs).toBeGreaterThanOrEqual(0)
+    db.close()
+  })
+
+  it('sessionStats: пустой чат → нули', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    expect(runs.sessionStats(999)).toEqual({ runs: 0, costCents: 0, toolCount: 0, filesCount: 0, agentsCount: 0, durationMs: 0 })
+    db.close()
+  })
 })

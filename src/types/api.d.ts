@@ -553,6 +553,8 @@ declare global {
       agentRuns: {
         list(projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }): Promise<AgentRun[]>
         get(runId: string): Promise<AgentRunDetail>
+        /** Per-session агрегат по всем прогонам чата (cost/инструменты/файлы/время). */
+        sessionStats(chatId: number): Promise<{ runs: number; costCents: number; toolCount: number; filesCount: number; agentsCount: number; durationMs: number }>
         /** Остановить активный прогон (переиспользует ai:stop abort). true если прервали. */
         stop(runId: string): Promise<boolean>
         /** Данные для честного re-send: { chatId, userMessage } или { error }. */
