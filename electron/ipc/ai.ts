@@ -306,6 +306,12 @@ export function registerAiIpc(deps: AiDeps): void {
     if (projectPath && !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
     }
+    // #5 worktree-lifecycle: изолированный чат работает ЦЕЛИКОМ на своём worktree —
+    // tools + контекст + recordWrite/undo (effRoot ниже). Иначе undo бил бы по main
+    // (ревью: critical data-loss — правки в worktree, а undo-стек ключевался main).
+    // Security-чек выше — на исходном main-пути; worktree создан нами (tmp). НЕ реассайним
+    // projectPath (это сломало бы TS-narrowing из-за захвата в замыканиях) — отдельный const.
+    const isolatedRoot = chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null
     const messages = await expandOfficeAttachments(incomingMessages)
     // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
     // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
@@ -742,10 +748,12 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     if (useToolsPath) {
-      // #5 worktree-lifecycle: если чат изолирован — file-тулзы рутятся на его
-      // persistent worktree (правки накапливаются там, main не трогается до merge).
-      const isolatedRoot = chatId ? deps.worktreeSessions?.activePath(Number(chatId)) : null
-      const tools = createToolsForProject(isolatedRoot ?? projectPath, ctrl.signal)
+      // projectPath здесь уже = worktree для изолированного чата (реассайн выше),
+      // так что и tools, и весь контекст/undo работают на изолированном дереве.
+      // #5: изолированный чат → весь прогон на его worktree (tools + ctx.projectPath →
+      // recordWrite/undo/context). projectPath здесь narrowed string, isolatedRoot — наш.
+      const runRoot = isolatedRoot ?? projectPath
+      const tools = createToolsForProject(runRoot, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {
@@ -759,7 +767,7 @@ export function registerAiIpc(deps: AiDeps): void {
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
       if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
       void runApiConversation({
-        sender: taggedSender, sendId, provider, tools, projectPath,
+        sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
         recordWrite: deps.recordWrite, recordPlan: deps.recordPlan,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,

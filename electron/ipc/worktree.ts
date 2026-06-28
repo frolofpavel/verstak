@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { addWorktree, removeWorktree, worktreeDiff, mergeWorktreeToMain, isGitRepo } from '../ai/git-worktree'
+import { addWorktree, removeWorktree, worktreeDiff, mergeWorktreeToMain, isGitRepo, sweepStaleWorktrees } from '../ai/git-worktree'
 import type { WorktreeSessions } from '../storage/worktree-sessions'
 
 /**
@@ -12,6 +12,9 @@ export function registerWorktreeIpc(wts: WorktreeSessions): void {
     if (!projectPath || !isGitRepo(projectPath)) return { ok: false, error: 'Изоляция требует git-репозиторий проекта.' }
     const existing = wts.getActive(chatId)
     if (existing) return { ok: true, worktreePath: existing.worktreePath } // уже изолирован
+    // #5: подчистить осиротевшие worktree'ы (merged/dismissed не удалённые из-за lock,
+    // от удалённых чатов) перед созданием нового — чтобы они не копились в git/tmp.
+    try { sweepStaleWorktrees(projectPath, wts.listActive(projectPath).map(s => s.worktreePath)) } catch { /* best-effort */ }
     const path = addWorktree(projectPath, `chat-${chatId}`)
     if (!path) return { ok: false, error: 'Не удалось создать worktree (нет коммитов / ошибка git).' }
     wts.create(chatId, projectPath, path)

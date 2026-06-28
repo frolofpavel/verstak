@@ -9,9 +9,18 @@
  * Всё graceful: не-git / ошибка git → null / [] / '', НИКОГДА не кидает.
  */
 import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync, realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
+
+/** Канонический путь для сравнения: realpath (git нормализует), без хвостовых слэшей,
+ *  case-insensitive на Windows. Пути от addWorktree и `git worktree list` иначе расходятся. */
+function canonPath(p: string): string {
+  let out = p
+  try { out = realpathSync(p) } catch { /* может не существовать */ }
+  out = out.replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? out.toLowerCase() : out
+}
 
 // Унаследованные GIT_*-переменные, локализующие репозиторий. При запуске изнутри
 // git-хука (напр. pre-commit) GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE переопределяют
@@ -110,6 +119,25 @@ export function worktreeDiff(worktreePath: string): string {
   // Пробуем компактную сводку (--stat крошечный) — чтобы правки были видны.
   const stat = git(worktreePath, ['diff', '--cached', '--stat'])
   return stat && stat.trim() ? `[diff слишком большой для показа целиком — сводка изменений]\n${stat}` : ''
+}
+
+/**
+ * #5 reconcile: удалить наши (verstak-wt) worktree'ы репозитория, которых НЕТ в
+ * keepPaths (активные сессии). Чистит осиротевшие — merged/dismissed, не удалённые
+ * из-за file-lock (Windows), или от удалённых чатов. Вызывать перед новой изоляцией.
+ */
+export function sweepStaleWorktrees(repoRoot: string, keepPaths: string[]): number {
+  const keep = new Set(keepPaths.map(canonPath))
+  const root = canonPath(repoRoot)
+  let removed = 0
+  for (const wt of listWorktrees(repoRoot)) {
+    const w = canonPath(wt)
+    if (w === root) continue // основное дерево не трогаем
+    if (!/[\\/]verstak-wt-/.test(w)) continue // только свои
+    if (keep.has(w)) continue // активный — оставляем
+    if (removeWorktree(repoRoot, wt)) removed++
+  }
+  return removed
 }
 
 /**

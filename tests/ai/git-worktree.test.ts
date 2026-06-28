@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo, mergeWorktreeToMain } from '../../electron/ai/git-worktree'
+import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo, mergeWorktreeToMain, sweepStaleWorktrees } from '../../electron/ai/git-worktree'
 
 // Реальные git-субпроцессы (init/commit/worktree add/remove) под полной параллельной
 // нагрузкой suite могут превысить дефолтный таймаут 5с → щедрый запас против флака.
@@ -105,6 +105,18 @@ describe('git-worktree (T1.2)', () => {
     expect(readFileSync(join(repo, 'a.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('merged\n')
     expect(existsSync(join(repo, 'new.txt'))).toBe(true)
     removeWorktree(repo, wt)
+  })
+
+  it('sweepStaleWorktrees удаляет осиротевшие (не в keep), активный оставляет', () => {
+    const keep = addWorktree(repo, 'keep')!
+    const stale = addWorktree(repo, 'stale')!
+    expect(listWorktrees(repo).length).toBe(3) // main + 2
+    const removed = sweepStaleWorktrees(repo, [keep]) // keep — активный
+    expect(removed).toBe(1) // stale удалён
+    const after = listWorktrees(repo).map(p => p.replace(/\\/g, '/'))
+    expect(after.some(p => p.includes('/keep'))).toBe(true)  // активный жив
+    expect(after.some(p => p.includes('/stale'))).toBe(false) // осиротевший снесён
+    removeWorktree(repo, keep)
   })
 
   it('mergeWorktreeToMain без изменений → ok', () => {
