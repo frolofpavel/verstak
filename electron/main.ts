@@ -27,7 +27,8 @@ import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
-import { registerAiIpc, abortSend } from './ipc/ai'
+import { registerAiIpc, abortSend, runScheduledHeadless } from './ipc/ai'
+import { registerSchedulerIpc } from './ipc/scheduler'
 import { registerChatsIpc } from './ipc/chats'
 import { registerHandoffIpc } from './ipc/handoff'
 import { registerTerminalIpc } from './ipc/terminal'
@@ -444,7 +445,7 @@ app.whenReady().then(() => {
   }
 
   const registerDeferredIpc = () => {
-  registerAiIpc({
+  const aiDeps: Parameters<typeof registerAiIpc>[0] = {
     getSecret,
     getProviderId,
     getProviderModel,
@@ -556,6 +557,15 @@ app.whenReady().then(() => {
       const active = devTasks.list(projectPath).find(t => t.chatId === chatId && isActiveDevTask(t))
       if (active) devTasks.linkRun(active.id, runId)
     }
+  }
+  registerAiIpc(aiDeps)
+  // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
+  registerSchedulerIpc(db, {
+    getSecret,
+    getProviderId,
+    getProviderModel,
+    recordJournal: (projectPath, kind, title, detail) => journal.append(projectPath, kind, title, detail ?? null),
+    runHeadless: (opts) => runScheduledHeadless(aiDeps, opts),
   })
   registerAgentsIpc(subSessions, chats, sessionTodos)
   // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).

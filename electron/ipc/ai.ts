@@ -267,6 +267,64 @@ function fireCrossVerify(
   })()
 }
 
+/**
+ * NL-cron headless-прогон: запускает агентный цикл БЕЗ UI на read-only-тулзах
+ * (researcher-роль — read_file/search/connector_query/journal/memory, НЕ write/команды).
+ * Переиспользует проверенный sub-agent-loop (все security-гейты внутри хендлеров) +
+ * полный project-контекст (prepareSystemContext). Возвращает итог-текст для пуша.
+ *
+ * Безопасность: даже если расписанная задача попросит правку — read-only-набор
+ * физически не содержит write_file/apply_patch/run_command, агент не сможет навредить.
+ */
+export async function runScheduledHeadless(
+  deps: AiDeps,
+  opts: { projectPath: string; prompt: string; providerId: ProviderId; model: string | null; signal: AbortSignal }
+): Promise<{ ok: boolean; text: string; error?: string }> {
+  const descriptor = PROVIDERS[opts.providerId]
+  if (!descriptor || descriptor.transport !== 'API' || !descriptor.secretKey) {
+    return { ok: false, text: '', error: `Провайдер ${opts.providerId} не годится для unattended (нужен API + ключ)` }
+  }
+  const apiKey = deps.getSecret(descriptor.secretKey)
+  if (!apiKey) return { ok: false, text: '', error: `Нет API-ключа для ${opts.providerId}` }
+  const model = opts.model ?? descriptor.defaultModel
+
+  try {
+    const provider = createProvider(opts.providerId, { apiKey, model, cwd: opts.projectPath, signal: opts.signal })
+    const userMsg: ChatMessage = { role: 'user', content: opts.prompt }
+    const composed = await prepareSystemContext({
+      projectPath: opts.projectPath,
+      messages: [userMsg],
+      recentWrites: deps.recentWrites(opts.projectPath, 8),
+    })
+    const messages: ChatMessage[] = [{ role: 'system', content: composed.system }, userMsg]
+
+    // Headless sender — события дропаем (нет UI); итог берём из result.text.
+    const sender: TaggedSender = { send: () => {}, exec: async () => undefined }
+    const tools = createToolsForProject(opts.projectPath, opts.signal)
+    const ctx: ToolContext = {
+      sender, sendId: -1, signal: opts.signal, projectPath: opts.projectPath, tools,
+      recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, recordJournal: deps.recordJournal,
+      readJournal: deps.readJournal, saveMemory: deps.saveMemory, saveDecision: deps.saveDecision,
+      searchMemories: deps.searchMemories, searchConversations: deps.searchConversations, connectors: deps.connectors,
+      pendingAttachments: [], pendingWrites: new Map(), pendingCommands: new Map(), scopedKey,
+      agentMode: 'auto', skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
+      subCostGuard: createCostGuard(null), parentChatId: null,
+      delegationDepth: 0, agentCounter: new SessionAgentCounter(),
+    }
+    const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
+    const { getRoleToolset } = await import('../ai/role-tools')
+    const result = await runSubAgentLoop({
+      provider, messages, allowedToolNames: getRoleToolset('researcher'), ctx,
+      signal: opts.signal, role: 'scheduled',
+    })
+    if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error }
+    return { ok: true, text: result.text }
+  } catch (err) {
+    return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 export function registerAiIpc(deps: AiDeps): void {
   /**
    * Optional overrides for ai:send. Used by Explicit Review feature: the
