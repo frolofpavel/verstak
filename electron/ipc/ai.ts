@@ -401,7 +401,14 @@ export function registerAiIpc(deps: AiDeps): void {
     let memories: { type: string; content: string; tags: string[] }[] = []
     if (shouldInjectMemory) {
       try {
-        memories = deps.searchMemories(projectPath!, '', 5)
+        // #1 релевантный recall: инжектим память РЕЛЕВАНТНУЮ задаче (последнее user-
+        // сообщение как query), а не top-5 по времени. searchMemories санитайзит NL
+        // под FTS5 и сам падает на recency, если релевантного нет.
+        const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
+        memories = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
+        // Нет релевантных к задаче — фолбэк на недавние (как было раньше), чтобы инжект
+        // памяти не оставался пустым при старте чата без совпадений.
+        if (memories.length === 0) memories = deps.searchMemories(projectPath!, '', 5)
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
         console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)

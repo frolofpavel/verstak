@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import { openDb } from '../../electron/storage/db'
-import { saveMemory, searchMemories, listMemories, deleteMemory } from '../../electron/storage/memories'
+import { saveMemory, searchMemories, listMemories, deleteMemory, buildFtsMatch } from '../../electron/storage/memories'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -122,6 +122,19 @@ describe('memories storage', () => {
       expect(results).toHaveLength(0)
     })
 
+    // #1 релевантный recall: сырое NL-сообщение со спецсимволами FTS5 раньше ломало
+    // парсер → []. Теперь санитайзится и находит релевантное.
+    it('NL-запрос со спецсимволами FTS5 не падает + находит релевантное', () => {
+      const results = searchMemories(db, PROJECT, 'почему "TypeScript" (compiler) ломается?', 5)
+      expect(results.length).toBeGreaterThan(0)
+      expect(results.some(r => r.content.includes('TypeScript'))).toBe(true)
+    })
+
+    it('непустой запрос без совпадений → пусто (memory_search без recency-шума)', () => {
+      const results = searchMemories(db, PROJECT, 'абвгдежзсовершеннодругое', 5)
+      expect(results).toHaveLength(0)
+    })
+
     it('respects limit parameter', () => {
       const results = searchMemories(db, PROJECT, '', 2)
       expect(results).toHaveLength(2)
@@ -158,6 +171,15 @@ describe('memories storage', () => {
       const list = listMemories(db, PROJECT)
       expect(list).toHaveLength(1)
       expect(list[0].id).toBe(a.id)
+    })
+  })
+
+  // #1 релевантный recall — санитайзер NL→FTS5 (чистая функция).
+  describe('buildFtsMatch', () => {
+    it('токены ≥3 в кавычках через OR; <3 и спецсимволы дропаются; пусто→пусто', () => {
+      expect(buildFtsMatch('почини баг с FTS5')).toBe('"почини" OR "баг" OR "fts5"')
+      expect(buildFtsMatch('a "b" (c)')).toBe('') // все токены <3 → пусто
+      expect(buildFtsMatch('   ')).toBe('')
     })
   })
 })

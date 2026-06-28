@@ -64,29 +64,43 @@ export function saveMemory(
   return { id, project_path: projectPath, type, content, tags, created_at: now, accessed_at: now, decay_score: 1.0 }
 }
 
+/**
+ * NL-запрос → безопасный FTS5 MATCH: токены (буквы/цифры, ≥3 симв) в кавычках через
+ * OR. Кавычки гасят спецсимволы FTS5 (иначе сырое сообщение ломает парсер → []), OR —
+ * любой токен релевантен. Пустой/короткий → '' (вызывающий уйдёт на recency).
+ */
+export function buildFtsMatch(raw: string): string {
+  const tokens = (raw.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).slice(0, 12)
+  return tokens.length ? tokens.map(t => `"${t}"`).join(' OR ') : ''
+}
+
 export function searchMemories(
   db: Database,
   projectPath: string,
   query: string,
   limit = 5
 ): Memory[] {
-  let rows: MemoryRow[]
-  if (!query.trim()) {
-    // Нет поискового запроса — возвращаем недавно использованные воспоминания проекта
-    rows = db.prepare(
-      'SELECT * FROM memories WHERE project_path = ? ORDER BY accessed_at DESC LIMIT ?'
-    ).all(projectPath, limit) as MemoryRow[]
+  const recency = () => db.prepare(
+    'SELECT * FROM memories WHERE project_path = ? ORDER BY accessed_at DESC LIMIT ?'
+  ).all(projectPath, limit) as MemoryRow[]
+
+  let rows: MemoryRow[] = []
+  const fts = buildFtsMatch(query)
+  if (!fts) {
+    // Пустой/несодержательный запрос — недавно использованные (как было).
+    rows = recency()
   } else {
-    // FTS5 поиск по контенту и тегам, фильтрация по проекту
+    // FTS5 по контенту+тегам, ORDER BY rank = по релевантности (BM25), не по rowid.
+    // НЕ фолбэчим на recency здесь — иначе memory_search-тулза давала бы шум на no-match.
+    // Recency-фолбэк делает только инжект в начале чата (ai.ts), где это уместно.
     try {
       rows = db.prepare(
         `SELECT m.* FROM memories m
          JOIN memories_fts ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.project_path = ?
-         LIMIT ?`
-      ).all(query, projectPath, limit) as MemoryRow[]
+         ORDER BY rank LIMIT ?`
+      ).all(fts, projectPath, limit) as MemoryRow[]
     } catch {
-      // FTS5 парсер не принял query — возвращаем пустой результат
       rows = []
     }
   }
