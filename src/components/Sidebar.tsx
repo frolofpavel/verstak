@@ -393,7 +393,7 @@ function NavButtons({ items, activeView, onSelect }: {
 }
 
 const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'reminders', 'tasks-manager', 'inspector', 'agents', 'decisions'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'tasks-manager', 'inspector', 'agents', 'decisions'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -536,6 +536,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
 
   const CONTROL_NAV: NavItem[] = [
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
+    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },

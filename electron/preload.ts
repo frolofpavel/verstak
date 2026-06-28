@@ -345,6 +345,13 @@ contextBridge.exposeInMainWorld('api', {
   commands: {
     list: (projectPath: string | null) => ipcRenderer.invoke('commands:list', projectPath)
   },
+  scheduler: {
+    list: (projectPath?: string) => ipcRenderer.invoke('scheduler:list', projectPath),
+    create: (input: { projectPath: string; prompt: string; nl: string }) => ipcRenderer.invoke('scheduler:create', input),
+    toggle: (id: number, enabled: boolean) => ipcRenderer.invoke('scheduler:toggle', id, enabled),
+    remove: (id: number) => ipcRenderer.invoke('scheduler:delete', id),
+    runNow: (id: number) => ipcRenderer.invoke('scheduler:run-now', id)
+  },
   cli: {
     detect: () => ipcRenderer.invoke('cli:detect')
   },

@@ -5042,6 +5042,26 @@ html[data-theme="light"] .gg-chat-settings-popover {
 }
 .gg-skill-suggest-dismiss:hover { color: var(--text-secondary); }
 
+/* NL-cron — вкладка расписаний (флагман next-wave) */
+.gg-view-pad { padding: 20px 24px; overflow-y: auto; }
+.gg-view-title { font-size: var(--text-lg); margin: 0 0 6px; }
+.gg-scheduler-form { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin-bottom: 20px; }
+.gg-scheduler-form .gg-input { width: 100%; }
+.gg-scheduler-error { color: var(--error); font-size: var(--text-sm); }
+.gg-scheduler-list { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+.gg-scheduler-item {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-2, rgba(127, 127, 127, 0.05));
+}
+.gg-scheduler-item.is-off { opacity: 0.55; }
+.gg-scheduler-item-main { min-width: 0; flex: 1; }
+.gg-scheduler-when { font-weight: 600; font-size: var(--text-sm); }
+.gg-scheduler-prompt { color: var(--text-secondary); font-size: var(--text-sm); margin-top: 2px; word-break: break-word; }
+.gg-scheduler-last { color: var(--text-tertiary); font-size: var(--text-xs); margin-top: 4px; }
+.gg-scheduler-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.gg-btn-sm { padding: 2px 8px; font-size: var(--text-sm); }
+
 .gg-vision-banner {
   margin-bottom: 8px;
   padding: 10px 14px;

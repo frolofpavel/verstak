@@ -9,6 +9,7 @@ import { Chat } from './components/Chat'
 import { TasksView } from './components/TasksView'
 import { FilesView } from './components/FilesView'
 import { JournalView } from './components/JournalView'
+import { ScheduledTasksView } from './components/ScheduledTasksView'
 import { RemindersView } from './components/RemindersView'
 import { PlanView } from './components/PlanView'
 import { FeedbackView } from './components/FeedbackView'
@@ -399,6 +400,7 @@ export function App() {
           <Suspense fallback={<ViewFallback />}><MemoryGovernance /></Suspense>
         )}
         {activeView === 'plan' && <PlanView />}
+        {activeView === 'scheduler' && <ScheduledTasksView />}
         {activeView === 'workflow' && (
           <div className="gg-workflow-scroll">
             <Suspense fallback={<ViewFallback />}>

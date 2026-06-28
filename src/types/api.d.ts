@@ -134,6 +134,22 @@ export interface Skill {
   source: 'server' | 'user' | 'built-in'
   sourceRef: string
 }
+
+export interface ScheduledTask {
+  id: number
+  project_path: string
+  prompt: string
+  cron: string
+  human: string
+  enabled: boolean
+  provider_id: string | null
+  model: string | null
+  created_at: number
+  last_run_at: number | null
+  last_status: 'ok' | 'error' | null
+  last_result: string | null
+  last_run_minute: number | null
+}
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
 export interface UsageDelta {
   inputTokens?: number
@@ -509,6 +525,13 @@ declare global {
       }
       commands: {
         list: (projectPath: string | null) => Promise<UserCommand[]>
+      }
+      scheduler: {
+        list: (projectPath?: string) => Promise<ScheduledTask[]>
+        create: (input: { projectPath: string; prompt: string; nl: string }) => Promise<{ task?: ScheduledTask; error?: string }>
+        toggle: (id: number, enabled: boolean) => Promise<boolean>
+        remove: (id: number) => Promise<boolean>
+        runNow: (id: number) => Promise<ScheduledTask | null>
       }
       cli: {
         detect(): Promise<DetectedCli[]>
