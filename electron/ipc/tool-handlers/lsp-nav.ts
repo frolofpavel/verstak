@@ -5,7 +5,7 @@ import { relative } from 'path'
 import type { ToolHandler, ToolContext } from './shared'
 import { emitActivity } from './shared'
 import { runLspNavigation } from '../../ai/lsp-nav'
-import { isLspDiagnosableFile } from '../../ai/lang-servers'
+import { isLspNavigableFile } from '../../ai/lang-servers'
 import { safeRealJoin } from '../../ai/path-policy'
 import type { ToolCall, ToolResult } from '../../ai/types'
 
@@ -30,8 +30,8 @@ async function navigate(kind: 'definition' | 'references', call: ToolCall, ctx: 
   } catch (e) {
     return { id: call.id, name: call.name, result: '', error: e instanceof Error ? e.message : `путь вне проекта: ${rel}` }
   }
-  if (!isLspDiagnosableFile(abs)) {
-    return { id: call.id, name: call.name, result: `LSP-навигация поддерживается для Python/Go/Rust; для ${rel} языковой сервер не настроен — используй search_project.` }
+  if (!isLspNavigableFile(abs)) {
+    return { id: call.id, name: call.name, result: `LSP-навигация поддерживается для TS/JS, Python, Go, Rust; для ${rel} языковой сервер не настроен — используй search_project.` }
   }
   let content: string
   try {

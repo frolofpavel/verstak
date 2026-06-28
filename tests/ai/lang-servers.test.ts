@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   resolveLangServer,
   isLspDiagnosableFile,
+  isLspNavigableFile,
   extractErrorDiagnostics,
   formatLspDiagnosticHint,
 } from '../../electron/ai/lang-servers'
@@ -46,6 +47,16 @@ describe('isLspDiagnosableFile', () => {
     expect(isLspDiagnosableFile('a.py')).toBe(true)
     expect(isLspDiagnosableFile('a.ts')).toBe(false)
     expect(isLspDiagnosableFile('a.md')).toBe(false)
+  })
+})
+
+describe('isLspNavigableFile (включает TS/JS — гейт хендлера навигации)', () => {
+  it('TS/JS/py навигабельны, md — нет', () => {
+    expect(isLspNavigableFile('a.ts')).toBe(true)
+    expect(isLspNavigableFile('a.tsx')).toBe(true)
+    expect(isLspNavigableFile('a.js')).toBe(true)
+    expect(isLspNavigableFile('a.py')).toBe(true)
+    expect(isLspNavigableFile('a.md')).toBe(false)
   })
 })
 

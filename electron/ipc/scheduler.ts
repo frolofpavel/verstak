@@ -17,14 +17,22 @@ import {
   type ScheduledTask,
 } from '../storage/scheduled-tasks'
 import { createTelegramConnector } from '../connectors/telegram'
+import { isWithinKnownRoots } from '../ai/path-policy'
+import { scanText } from '../ai/secret-scanner'
 
 export interface SchedulerDeps {
   getSecret: (key: string) => string | null
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
+  getKnownRoots: () => string[]
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   runHeadless: (opts: { projectPath: string; prompt: string; providerId: ProviderId; model: string | null; signal: AbortSignal }) => Promise<{ ok: boolean; text: string; error?: string }>
 }
+
+// In-flight guard: id выполняющихся задач. last_run_minute пишется ПОСЛЕ прогона (может
+// длиться >1 мин), поэтому одного его недостаточно — тик/run-now могли бы запустить ту же
+// задачу повторно параллельно (ревью HIGH). Set отсекает уже бегущие.
+const running = new Set<number>()
 
 /**
  * Какие задачи запускать в данную минуту: cron совпал И не запускались уже в эту
@@ -48,8 +56,10 @@ async function pushTelegram(deps: SchedulerDeps, text: string, signal: AbortSign
 }
 
 async function runOne(db: Database, deps: SchedulerDeps, taskId: number, minuteIdx: number): Promise<void> {
+  if (running.has(taskId)) return // уже бежит — не дублируем (in-flight guard)
   const task = getScheduledTask(db, taskId)
   if (!task) return
+  running.add(taskId)
   const providerId = (task.provider_id as ProviderId | null) ?? deps.getProviderId()
   const model = task.model ?? deps.getProviderModel(providerId)
   const ac = new AbortController()
@@ -57,7 +67,10 @@ async function runOne(db: Database, deps: SchedulerDeps, taskId: number, minuteI
   try {
     const res = await deps.runHeadless({ projectPath: task.project_path, prompt: task.prompt, providerId, model, signal: ac.signal })
     const status: 'ok' | 'error' = res.ok ? 'ok' : 'error'
-    const summary = (res.ok ? res.text : (res.error ?? 'ошибка')) || '(пустой ответ)'
+    // scanText: итог может содержать секрет (из кода/данных) → редактируем перед персистом
+    // и пушем в Telegram (внешний канал) — тот же класс, что ревью утечки в session-summary.
+    const raw = (res.ok ? res.text : (res.error ?? 'ошибка')) || '(пустой ответ)'
+    const summary = scanText(raw).redacted
     recordScheduledRun(db, taskId, { status, summary, minute: minuteIdx, at: Date.now() })
     deps.recordJournal(task.project_path, 'note', `🕒 Расписание: ${task.human || task.cron}`, summary.slice(0, 1000))
     const header = res.ok
@@ -66,9 +79,10 @@ async function runOne(db: Database, deps: SchedulerDeps, taskId: number, minuteI
     await pushTelegram(deps, `${header}\n\n${summary}`.slice(0, 3500), ac.signal)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    recordScheduledRun(db, taskId, { status: 'error', summary: msg, minute: minuteIdx, at: Date.now() })
+    recordScheduledRun(db, taskId, { status: 'error', summary: scanText(msg).redacted, minute: minuteIdx, at: Date.now() })
   } finally {
     clearTimeout(timeout)
+    running.delete(taskId)
   }
 }
 
@@ -86,6 +100,7 @@ export function registerSchedulerIpc(db: Database, deps: SchedulerDeps): void {
   ipcMain.handle('scheduler:create', (_e, input: { projectPath: string; prompt: string; nl: string }) => {
     const prompt = (input.prompt ?? '').trim()
     if (!prompt) return { error: 'Пустая задача.' }
+    if (!isWithinKnownRoots(input.projectPath, deps.getKnownRoots())) return { error: 'Путь проекта не зарегистрирован.' }
     const parsed = parseSchedule(input.nl ?? '')
     if (!parsed) return { error: 'Не распознал расписание. Примеры: «каждое утро», «каждый день в 9:30», «по будням в 8», «каждые 2 часа».' }
     return { task: createScheduledTask(db, { projectPath: input.projectPath, prompt, cron: parsed.cron, human: parsed.human }) }

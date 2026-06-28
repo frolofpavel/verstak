@@ -20,7 +20,7 @@ import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
-import { suggestSkill } from '../lib/skill-suggest'
+import { buildSkillIndex, suggestFromIndex } from '../lib/skill-suggest'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment, ChatMessage, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
@@ -221,11 +221,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const allSkills = useSkillsStore(s => s.skills)
   const activeSkillId = useSkillsStore(s => s.activeSkillId)
   const [dismissedSuggestId, setDismissedSuggestId] = useState<string | null>(null)
+  // Индекс токенов скиллов — пересобирается только при смене списка скиллов (не на keystroke).
+  const skillIndex = useMemo(() => buildSkillIndex(allSkills), [allSkills])
   const suggestedSkill = useMemo(() => {
     if (input.trim().startsWith('/')) return null // слэш-команда — пользователь уже выбирает
-    const s = suggestSkill(input, allSkills, activeSkillId)
+    const s = suggestFromIndex(input, skillIndex, activeSkillId)
     return s && s.id !== dismissedSuggestId ? s : null
-  }, [input, allSkills, activeSkillId, dismissedSuggestId])
+  }, [input, skillIndex, activeSkillId, dismissedSuggestId])
   // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
   useEffect(() => { if (!input.trim()) setDismissedSuggestId(null) }, [input])
   /** Live token-count preview for whatever is in the composer right now. */

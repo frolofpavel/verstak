@@ -267,19 +267,35 @@ function fireCrossVerify(
   })()
 }
 
+// Строго ЛОКАЛЬНЫЙ read-only набор для unattended-прогона. БЕЗ connector_query/
+// list_connectors/browser_read_page — это каналы ВЫПОЛНЕНИЯ во внешние системы (SSH
+// run_remote, Telegram send, вебхуки): в agentMode='auto' они авто-принимались бы и
+// без надзора слали/выполняли по prompt-injection (ревью HIGH). БЕЗ write/run/delegate.
+// Живые connector-аудиты — follow-up (нужна op-level read/write классификация).
+const SCHEDULED_READONLY_TOOLS = [
+  'read_file', 'list_directory', 'search_project', 'find_files', 'get_project_map', 'impact_analysis',
+  'read_journal', 'conversation_search', 'memory_search', 'read_spreadsheet', 'read_document', 'convert_file',
+  'find_definition', 'find_references',
+]
+
 /**
- * NL-cron headless-прогон: запускает агентный цикл БЕЗ UI на read-only-тулзах
- * (researcher-роль — read_file/search/connector_query/journal/memory, НЕ write/команды).
+ * NL-cron headless-прогон: запускает агентный цикл БЕЗ UI на строго ЛОКАЛЬНОМ
+ * read-only-наборе (код/журнал/память/документы, БЕЗ внешних коннекторов и команд).
  * Переиспользует проверенный sub-agent-loop (все security-гейты внутри хендлеров) +
  * полный project-контекст (prepareSystemContext). Возвращает итог-текст для пуша.
  *
- * Безопасность: даже если расписанная задача попросит правку — read-only-набор
- * физически не содержит write_file/apply_patch/run_command, агент не сможет навредить.
+ * Безопасность: набор физически не содержит write_file/apply_patch/run_command/
+ * connector_query → unattended-агент не может ни писать, ни выполнять во внешних системах.
  */
 export async function runScheduledHeadless(
   deps: AiDeps,
   opts: { projectPath: string; prompt: string; providerId: ProviderId; model: string | null; signal: AbortSignal }
 ): Promise<{ ok: boolean; text: string; error?: string }> {
+  // Гейт пути как в ai:send: unattended-прогон не должен получить файловый доступ к
+  // незарегистрированной/системной папке (напр. осиротевшая задача после удаления проекта).
+  if (!isWithinKnownRoots(opts.projectPath, deps.getKnownRoots())) {
+    return { ok: false, text: '', error: 'Путь проекта не зарегистрирован — прогон отменён' }
+  }
   const descriptor = PROVIDERS[opts.providerId]
   if (!descriptor || descriptor.transport !== 'API' || !descriptor.secretKey) {
     return { ok: false, text: '', error: `Провайдер ${opts.providerId} не годится для unattended (нужен API + ключ)` }
@@ -313,9 +329,8 @@ export async function runScheduledHeadless(
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),
     }
     const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
-    const { getRoleToolset } = await import('../ai/role-tools')
     const result = await runSubAgentLoop({
-      provider, messages, allowedToolNames: getRoleToolset('researcher'), ctx,
+      provider, messages, allowedToolNames: SCHEDULED_READONLY_TOOLS, ctx,
       signal: opts.signal, role: 'scheduled',
     })
     if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error }
@@ -665,7 +680,8 @@ export function registerAiIpc(deps: AiDeps): void {
           messages,
           projectSystemPrompt: projectSystemPromptForProvider,
           skillPrompt: skillPromptForProvider,
-          memories
+          memories,
+          consolidationHint: consolidationHint ?? undefined
         })
         deps.saveRunInput({
           runId,

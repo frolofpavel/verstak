@@ -47,6 +47,8 @@ interface BuildCliPromptOpts {
   /** Топ-5 воспоминаний проекта — те же что инжектятся API-провайдерам.
    *  Передаются в prepareParts → buildContextPack. */
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  /** memory-nudge консолидации — паритет с API-путём (передаётся в buildContextPack). */
+  consolidationHint?: string
   /** Паритет с API-путём: после принятых write'ов API дописывает инлайн-хинт
    *  «запусти проверку (npm test/type)». CLI one-shot — не имеет цикла, поэтому
    *  вызывающий код выставляет флаг, когда в истории были write'ы. */
@@ -58,7 +60,7 @@ interface BuildCliPromptOpts {
  * string that should be written to the subprocess's stdin.
  */
 export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> {
-  const { providerId, projectPath, messages, recentWrites, projectSystemPrompt, skillPrompt, memories, appendVerifyHint } = opts
+  const { providerId, projectPath, messages, recentWrites, projectSystemPrompt, skillPrompt, memories, consolidationHint, appendVerifyHint } = opts
 
   const lastUser = messages.filter(m => m.role === 'user').at(-1)
   if (!lastUser) throw new Error('CLI prompt: нет user-сообщения')
@@ -72,7 +74,8 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
     messages,
     recentWrites: recentWrites ?? [],
     projectSystemPrompt,
-    memories
+    memories,
+    consolidationHint
   })
   const trimmedUser = userLayer.content.trim()
   // Skip re-injecting user_layer when the CLI is known to read this exact file

@@ -564,6 +564,7 @@ app.whenReady().then(() => {
     getSecret,
     getProviderId,
     getProviderModel,
+    getKnownRoots: knownRoots,
     recordJournal: (projectPath, kind, title, detail) => journal.append(projectPath, kind, title, detail ?? null),
     runHeadless: (opts) => runScheduledHeadless(aiDeps, opts),
   })

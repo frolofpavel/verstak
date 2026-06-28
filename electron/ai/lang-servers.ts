@@ -64,6 +64,11 @@ export function isLspDiagnosableFile(path: string): boolean {
   return resolveLangServer(path) !== null
 }
 
+/** Можно ли НАВИГировать по файлу (goToDefinition/findReferences) — включает TS/JS. */
+export function isLspNavigableFile(path: string): boolean {
+  return resolveLangServer(path, { navigation: true }) !== null
+}
+
 /**
  * ERROR-диагностики (severity 1) из params уведомления textDocument/publishDiagnostics.
  * Warnings/info/hint отбрасываем — в петле fix-until-green они только шумят.
