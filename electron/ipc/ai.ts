@@ -1892,6 +1892,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     } catch (err) {
       console.error('[ai.ts] writeSessionJournal failed in finally:', err)
     }
+    // #3 персист авто-резюме сессии: если прогон компактился (lastSummary непуст),
+    // сохраняем сжатый итог в память с тегом session-summary. Всплывёт в релевантном
+    // recall следующего чата (#1) — кросс-сессионный recall БЕЗ embeddings. Раньше
+    // lastSummary жил только in-run и терялся после закрытия чата.
+    if (lastSummary.trim() && projectPath) {
+      try {
+        saveMemory(projectPath, 'fact', `Итог прошлой сессии: ${lastSummary.trim().slice(0, 2000)}`, ['session-summary'])
+      } catch (err) {
+        console.warn('[ai.ts] session-summary persist failed:', err instanceof Error ? err.message : err)
+      }
+    }
     // Multi-agent Manager (Фаза 2): завершаем прогон — статус из exitReason,
     // счётчики из того что уже накоплено в прогоне (tool/files/agents),
     // стоимость из costGuard. Best-effort: ошибка storage не ломает loop.
