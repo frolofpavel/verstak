@@ -794,6 +794,30 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_worktree_sessions_project ON worktree_sessions(project_path, state);
       `)
     }
+  },
+  {
+    version: 31,
+    description: 'NL-cron: таблица scheduled_tasks (unattended-прогоны по расписанию, исходящий пуш).',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          cron TEXT NOT NULL,
+          human TEXT NOT NULL DEFAULT '',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          provider_id TEXT,
+          model TEXT,
+          created_at INTEGER NOT NULL,
+          last_run_at INTEGER,
+          last_status TEXT CHECK(last_status IN ('ok','error') OR last_status IS NULL),
+          last_result TEXT,
+          last_run_minute INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled);
+      `)
+    }
   }
 ]
 
