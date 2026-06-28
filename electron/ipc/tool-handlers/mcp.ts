@@ -1,7 +1,7 @@
 // MCP-хендлер: роутинг вызовов внешних MCP-инструментов. Вынесено при распиле.
 import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
-import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../../ai/mcp-policy'
+import { classifyMcpToolScope, mcpDecision, mcpBlockReason, parseMcpScopeOverrides } from '../../ai/mcp-policy'
 import { scanText } from '../../ai/secret-scanner'
 
 export const mcpToolHandler: ToolHandler = {
@@ -20,7 +20,10 @@ export const mcpToolHandler: ToolHandler = {
     // серверах. Гейтим их так же, как connector_query: scope тулза классифицируем
     // по name + description (read → авто, write/command/network/unknown → команда),
     // затем mcpDecision(scope, mode) даёт block/confirm/auto-accept.
-    const scope = classifyMcpToolScope(matchedTool.name, matchedTool.description)
+    // #2 приоритет гейтинга: override (Settings, per-tool) > annotations (MCP-хинты
+    // readOnlyHint/destructiveHint) > keyword-угадайка. Убирает зависимость от угадайки.
+    const overrides = parseMcpScopeOverrides(ctx.getSecretForDelegate?.('mcp_scope_overrides'))
+    const scope = classifyMcpToolScope(matchedTool.name, matchedTool.description, matchedTool.annotations, overrides[matchedTool.name])
     const decision = mcpDecision(scope, ctx.agentMode)
     // Короткая сводка аргументов для модалки подтверждения (без раскрытия больших значений)
     const argKeys = Object.keys(call.args ?? {})
@@ -56,4 +59,4 @@ export const mcpToolHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: scanText(msg).redacted }
     }
   }
-}
+}

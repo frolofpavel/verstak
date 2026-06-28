@@ -29,7 +29,15 @@ const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; risk: McpRisk; keywords: rea
  * Классифицирует один инструмент по name + description.
  * Эвристика по lowercased тексту, выигрывает самое опасное совпадение.
  */
-export function classifyTool(tool: { name: string; description?: string }): ToolClassification {
+export function classifyTool(tool: { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }): ToolClassification {
+  // #2: стандартные MCP-аннотации приоритетнее keyword-угадайки (как в electron-гейте
+  // mcp-policy.ts — держим UI-классификацию и runtime-гейт согласованными).
+  const a = tool.annotations
+  if (a) {
+    if (a.readOnlyHint === true) return { scope: 'read', risk: 'low' }
+    if (a.destructiveHint === true) return { scope: 'command', risk: 'high' }
+    if (a.readOnlyHint === false) return { scope: 'write', risk: 'medium' }
+  }
   const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase()
   for (const rule of SCOPE_RULES) {
     if (rule.keywords.some(kw => haystack.includes(kw))) {

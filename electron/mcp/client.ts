@@ -12,6 +12,8 @@ export interface McpTool {
   name: string
   description: string
   inputSchema: Record<string, unknown>
+  /** Стандартные MCP tool annotations — для надёжного гейтинга вместо угадайки по имени. */
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
 }
 
 export interface McpServerConfig {
@@ -160,11 +162,13 @@ export class McpClient extends EventEmitter {
       this._notify(conn, 'notifications/initialized')
 
       // 3. tools/list
-      const result = await this._request(conn, 'tools/list', {}, INIT_TIMEOUT_MS) as { tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }
+      const result = await this._request(conn, 'tools/list', {}, INIT_TIMEOUT_MS) as { tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }> }
       const tools: McpTool[] = (result?.tools ?? []).map(t => ({
         name: t.name,
         description: t.description ?? '',
-        inputSchema: t.inputSchema ?? {}
+        inputSchema: t.inputSchema ?? {},
+        // Стандартные MCP-хинты (если сервер их прислал) — надёжнее keyword-угадайки.
+        ...(t.annotations ? { annotations: { readOnlyHint: t.annotations.readOnlyHint, destructiveHint: t.annotations.destructiveHint } } : {})
       }))
       conn.tools = tools
 

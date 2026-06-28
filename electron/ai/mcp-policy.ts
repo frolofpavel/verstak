@@ -15,6 +15,12 @@ import type { ToolDecision } from './mode-policy'
 
 export type McpScope = 'read' | 'write' | 'command' | 'network' | 'unknown'
 
+/** Стандартные MCP tool annotations (из tools/list spec) — надёжнее угадайки по имени. */
+export interface McpToolAnnotations {
+  readOnlyHint?: boolean
+  destructiveHint?: boolean
+}
+
 // Keyword tables ordered most-dangerous → least. Longest/most-dangerous match wins:
 // проходим группы сверху вниз и возвращаем на первом совпадении.
 const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; keywords: readonly string[] }> = [
@@ -24,11 +30,26 @@ const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; keywords: readonly string[] 
   { scope: 'read', keywords: ['describe', 'search', 'query', 'view', 'show', 'list', 'find', 'read', 'get'] }
 ]
 
+const VALID_SCOPES: ReadonlySet<string> = new Set(['read', 'write', 'command', 'network'])
+
 /**
- * Классифицирует один MCP-инструмент по name + description.
- * Эвристика по lowercased тексту, выигрывает самое опасное совпадение.
+ * Классифицирует scope MCP-инструмента. Приоритет:
+ *  1) override — явное решение пользователя (Settings, per-tool) — высший.
+ *  2) annotations — стандартные MCP-хинты readOnlyHint/destructiveHint (надёжно).
+ *  3) keyword-эвристика по name+description (фолбэк, выигрывает самое опасное).
  */
-export function classifyMcpToolScope(name: string, description?: string): McpScope {
+export function classifyMcpToolScope(
+  name: string,
+  description?: string,
+  annotations?: McpToolAnnotations,
+  override?: string
+): McpScope {
+  if (override && VALID_SCOPES.has(override)) return override as McpScope
+  if (annotations) {
+    if (annotations.readOnlyHint === true) return 'read'        // только чтение → авто
+    if (annotations.destructiveHint === true) return 'command'  // деструктивный → строжайший гейт
+    if (annotations.readOnlyHint === false) return 'write'      // не read-only, но не деструктивный
+  }
   const haystack = `${name} ${description ?? ''}`.toLowerCase()
   for (const rule of SCOPE_RULES) {
     if (rule.keywords.some(kw => haystack.includes(kw))) {
@@ -36,6 +57,23 @@ export function classifyMcpToolScope(name: string, description?: string): McpSco
     }
   }
   return 'unknown'
+}
+
+/**
+ * Парсит настройку mcp_scope_overrides — JSON { "toolName": "read|write|command|network" }.
+ * Битый/не-объект → {} (без оверрайдов). Невалидные значения отфильтрованы classifyMcpToolScope.
+ */
+export function parseMcpScopeOverrides(raw: string | null | undefined): Record<string, string> {
+  if (!raw || !raw.trim()) return {}
+  try {
+    const obj = JSON.parse(raw)
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const out: Record<string, string> = {}
+      for (const [k, v] of Object.entries(obj)) if (typeof v === 'string') out[k] = v
+      return out
+    }
+  } catch { /* битый JSON → без оверрайдов */ }
+  return {}
 }
 
 /**

@@ -560,6 +560,8 @@ function McpTab() {
   const [manifests, setManifests] = useState<Record<string, McpManifest>>({})
   const [previewBusy, setPreviewBusy] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<Record<string, string>>({})
+  // #2: per-tool override scope гейтинга (JSON {toolName: read|write|command|network}).
+  const [scopeOverrides, setScopeOverrides] = useState('')
 
   useEffect(() => {
     void loadAll()
@@ -583,7 +585,14 @@ function McpTab() {
       }
       setConnectedIds(ids)
       setToolCounts(counts)
+      const ov = await window.api.settings.getKey('mcp_scope_overrides')
+      setScopeOverrides(ov || '')
     } catch { /* ignore */ }
+  }
+
+  const saveScopeOverrides = async (v: string) => {
+    setScopeOverrides(v)
+    await window.api.settings.setKey('mcp_scope_overrides', v)
   }
 
   async function handleConnect(id: string) {
@@ -691,6 +700,21 @@ function McpTab() {
         Подключай внешние MCP-серверы чтобы расширить возможности агента: поиск в интернете,
         базы данных, GitHub, браузер и многое другое. Инструменты сервера автоматически
         добавляются в арсенал AI.
+      </div>
+
+      <div className="gg-settings-row">
+        <label className="gg-settings-label">Override scope тулза (JSON, опц.)</label>
+        <input
+          className="gg-input"
+          value={scopeOverrides}
+          onChange={e => void saveScopeOverrides(e.target.value)}
+          placeholder={'{"some_tool":"read","danger_tool":"command"}'}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+          spellCheck={false}
+        />
+      </div>
+      <div className="gg-settings-hint" style={{ marginBottom: 16, fontSize: 'var(--text-xs)' }}>
+        Явный scope гейтинга для конкретного MCP-тулза (read = авто; write/command/network = подтверждение). Приоритет: это поле → стандартные MCP-хинты (readOnlyHint/destructiveHint) → угадайка по имени.
       </div>
 
       {error && (

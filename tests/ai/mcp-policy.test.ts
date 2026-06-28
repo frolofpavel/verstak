@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyMcpToolScope, mcpDecision } from '../../electron/ai/mcp-policy'
+import { classifyMcpToolScope, mcpDecision, parseMcpScopeOverrides } from '../../electron/ai/mcp-policy'
 
 // mcp-policy — runtime-гейт вызовов внешних MCP-инструментов под agent-mode.
 // Имена MCP-тулзов динамические, поэтому scope классифицируется эвристикой,
@@ -37,6 +37,31 @@ describe('classifyMcpToolScope()', () => {
   it('most-dangerous match wins (command over read)', () => {
     // "get" (read) присутствует, но "exec" (command) опаснее и идёт первым правилом
     expect(classifyMcpToolScope('get_and_exec', 'get data then exec it')).toBe('command')
+  })
+
+  // #2: annotations (MCP-хинты) приоритетнее keyword-угадайки.
+  it('annotations имеют приоритет над keyword', () => {
+    expect(classifyMcpToolScope('create_report', 'create a report', { readOnlyHint: true })).toBe('read')
+    expect(classifyMcpToolScope('get_thing', 'get', { destructiveHint: true })).toBe('command')
+    expect(classifyMcpToolScope('do_thing', '', { readOnlyHint: false })).toBe('write')
+  })
+
+  it('override имеет приоритет над annotations и keyword; невалидный игнорируется', () => {
+    expect(classifyMcpToolScope('run_shell', 'exec', { readOnlyHint: true }, 'command')).toBe('command')
+    expect(classifyMcpToolScope('delete_all', 'delete', undefined, 'read')).toBe('read')
+    expect(classifyMcpToolScope('fetch_url', 'fetch', undefined, 'bogus')).toBe('network') // override невалиден → keyword
+  })
+})
+
+describe('parseMcpScopeOverrides()', () => {
+  it('валидный JSON-объект → map строковых значений', () => {
+    expect(parseMcpScopeOverrides('{"tool_a":"read","tool_b":"command"}')).toEqual({ tool_a: 'read', tool_b: 'command' })
+  })
+  it('битый JSON / не-объект / пусто / null → {}', () => {
+    expect(parseMcpScopeOverrides('not json')).toEqual({})
+    expect(parseMcpScopeOverrides('[1,2]')).toEqual({})
+    expect(parseMcpScopeOverrides('')).toEqual({})
+    expect(parseMcpScopeOverrides(null)).toEqual({})
   })
 })
 
