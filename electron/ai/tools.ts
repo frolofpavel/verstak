@@ -151,7 +151,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'find_definition',
-    description: 'СЕМАНТИЧЕСКИ найти, где ОПРЕДЕЛЁН символ (функция/класс/переменная) — через языковой сервер (Python/Go/Rust), а не текстом. Точнее search_project: разрешает импорты и области видимости, без ложных срабатываний на комментариях/строках/тёзках. Возвращает file:line. Нужен установленный сервер (pyright/gopls/rust-analyzer); если его нет — используй search_project.',
+    description: 'СЕМАНТИЧЕСКИ найти, где ОПРЕДЕЛЁН символ (функция/класс/переменная) — через языковой сервер (TS/JS, Python, Go, Rust), а не текстом. Точнее search_project: разрешает импорты и области видимости, без ложных срабатываний на комментариях/строках/тёзках. Возвращает file:line. Нужен установленный сервер (typescript-language-server/pyright/gopls/rust-analyzer); если его нет — используй search_project.',
     parameters: {
       type: 'object',
       properties: {
@@ -163,7 +163,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'find_references',
-    description: 'СЕМАНТИЧЕСКИ найти ВСЕ использования символа по проекту — через языковой сервер (Python/Go/Rust). Точнее grep: только реальные ссылки на ЭТОТ символ (не тёзки/комментарии). Возвращает список file:line. Нужен установленный сервер; если нет — search_project.',
+    description: 'СЕМАНТИЧЕСКИ найти ВСЕ использования символа по проекту — через языковой сервер (TS/JS, Python, Go, Rust). Точнее grep: только реальные ссылки на ЭТОТ символ (не тёзки/комментарии). Возвращает список file:line. Нужен установленный сервер; если нет — search_project.',
     parameters: {
       type: 'object',
       properties: {

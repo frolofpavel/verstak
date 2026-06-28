@@ -24,22 +24,42 @@ export interface LspDiagItem {
   source?: string
 }
 
-// .ts/.tsx НАМЕРЕННО отсутствуют — они покрыты tsc-петлёй (diagnostic-loop.ts),
-// дублировать языковым сервером не нужно.
+// .ts/.tsx НАМЕРЕННО отсутствуют в реестре ДИАГНОСТИК — они покрыты tsc-петлёй
+// (diagnostic-loop.ts), дублировать языковым сервером не нужно.
 const REGISTRY: Array<{ ext: RegExp; cfg: LangServerConfig }> = [
   { ext: /\.pyi?$/i, cfg: { command: 'pyright-langserver', args: ['--stdio'], languageId: 'python' } },
   { ext: /\.go$/i, cfg: { command: 'gopls', args: [], languageId: 'go' } },
   { ext: /\.rs$/i, cfg: { command: 'rust-analyzer', args: [], languageId: 'rust' } },
 ]
 
-/** Конфиг языкового сервера для файла или null (нет сервера / это TS). */
-export function resolveLangServer(path: string): LangServerConfig | null {
+// typescript-language-server подключаем ТОЛЬКО для НАВИГАЦИИ (goToDefinition/
+// findReferences по TS/JS). Для диагностик TS владеет tsc-петля — поэтому этот сервер
+// НЕ в REGISTRY и резолвится лишь при navigation=true (иначе дублировал бы tsc).
+const TS_NAV_EXT = /\.[mc]?[jt]sx?$/i
+
+/** LSP languageId для TS/JS по расширению (важно для корректного парсинга JSX). */
+function tsLanguageId(path: string): string {
+  if (/\.tsx$/i.test(path)) return 'typescriptreact'
+  if (/\.jsx$/i.test(path)) return 'javascriptreact'
+  if (/\.[mc]?js$/i.test(path)) return 'javascript'
+  return 'typescript'
+}
+
+/**
+ * Конфиг языкового сервера для файла или null.
+ * @param opts.navigation — true для навигации (включает typescript-language-server
+ *   на TS/JS). По умолчанию (диагностики) TS/JS → null (их ведёт tsc-петля).
+ */
+export function resolveLangServer(path: string, opts?: { navigation?: boolean }): LangServerConfig | null {
   const p = (path ?? '').trim()
   for (const r of REGISTRY) if (r.ext.test(p)) return r.cfg
+  if (opts?.navigation && TS_NAV_EXT.test(p)) {
+    return { command: 'typescript-language-server', args: ['--stdio'], languageId: tsLanguageId(p) }
+  }
   return null
 }
 
-/** Можно ли диагностировать файл через LSP (есть сервер в реестре). */
+/** Можно ли диагностировать файл через LSP (есть сервер в реестре диагностик). */
 export function isLspDiagnosableFile(path: string): boolean {
   return resolveLangServer(path) !== null
 }

@@ -18,6 +18,7 @@ function hasCmd(cmd: string): boolean {
 
 const enabled = process.env.RUN_LSP_IT === '1'
 const hasPyright = enabled && hasCmd('pyright-langserver')
+const hasTsLs = enabled && hasCmd('typescript-language-server')
 
 describe('runLspDiagnostics — LIVE (нужен языковой сервер + RUN_LSP_IT=1)', () => {
   it.skipIf(!hasPyright)('pyright находит ошибку в Python-файле (end-to-end)', async () => {
@@ -70,5 +71,31 @@ describe('runLspNavigation — LIVE (Tier-2 #1, нужен pyright + RUN_LSP_IT=
     const locs = await runLspNavigation({ path: file, content: code, root: dir, symbol: 'helper', kind: 'references', timeoutMs: 25000 })
     expect(locs).not.toBeNull()
     expect(locs!.length).toBeGreaterThanOrEqual(2) // usage (стр.1) + определение (стр.3)
+  }, 30000)
+})
+
+// next-wave: семантическая LSP-нав TS/JS через typescript-language-server. Тот же
+// проверенный pyright'ом путь (spawn/handshake/uri/treeKill), но navigation=true
+// резолвит ts-сервер. Live доказывает, что ts-сервер не отличается в handshake.
+describe('runLspNavigation TS/JS — LIVE (нужен typescript-language-server + RUN_LSP_IT=1)', () => {
+  // helper вызван на строке 1 (usage), определён на строке 3 (0-based).
+  const ts = 'function caller() {\n  return helper()\n}\nfunction helper() {\n  return 42\n}\n'
+  it.skipIf(!hasTsLs)('find_definition: использование TS-символа резолвится в определение', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lsp-ts-'))
+    const file = join(dir, 'm.ts')
+    writeFileSync(file, ts)
+    const locs = await runLspNavigation({ path: file, content: ts, root: dir, symbol: 'helper', kind: 'definition', timeoutMs: 25000 })
+    expect(locs).not.toBeNull()
+    expect(locs!.length).toBeGreaterThan(0)
+    expect(locs!.some(l => l.line === 3)).toBe(true) // function helper на 0-based строке 3
+  }, 30000)
+
+  it.skipIf(!hasTsLs)('find_references: использование + определение TS-символа', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lsp-ts-'))
+    const file = join(dir, 'm.ts')
+    writeFileSync(file, ts)
+    const locs = await runLspNavigation({ path: file, content: ts, root: dir, symbol: 'helper', kind: 'references', timeoutMs: 25000 })
+    expect(locs).not.toBeNull()
+    expect(locs!.length).toBeGreaterThanOrEqual(2)
   }, 30000)
 })

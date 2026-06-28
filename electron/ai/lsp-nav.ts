@@ -103,7 +103,8 @@ export async function runLspNavigation(opts: {
 }): Promise<LspLocation[] | null> {
   const positions = findSymbolPositions(opts.content, opts.symbol)
   if (positions.length === 0) return []
-  return withLspServer(opts, async (client, uri) => {
+  // navigation:true → резолвит typescript-language-server на TS/JS (диагностики — нет).
+  return withLspServer({ ...opts, navigation: true }, async (client, uri) => {
     await waitForReadiness(client, opts.path)
     const method = opts.kind === 'definition' ? 'textDocument/definition' : 'textDocument/references'
     for (const pos of positions) {

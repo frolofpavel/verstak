@@ -20,12 +20,24 @@ describe('resolveLangServer', () => {
     expect(resolveLangServer('main.go')?.languageId).toBe('go')
     expect(resolveLangServer('lib.rs')?.languageId).toBe('rust')
   })
-  it('TS/TSX → null (покрыто tsc-петлёй, не дублируем)', () => {
+  it('TS/TSX → null для ДИАГНОСТИК (покрыто tsc-петлёй, не дублируем)', () => {
     expect(resolveLangServer('a.ts')).toBeNull()
     expect(resolveLangServer('a.tsx')).toBeNull()
   })
-  it('неизвестное расширение → null', () => {
+  it('TS/JS → typescript-language-server ТОЛЬКО при navigation=true', () => {
+    expect(resolveLangServer('a.ts', { navigation: true })?.command).toBe('typescript-language-server')
+    // languageId по расширению (важно для JSX-парсинга)
+    expect(resolveLangServer('a.ts', { navigation: true })?.languageId).toBe('typescript')
+    expect(resolveLangServer('a.tsx', { navigation: true })?.languageId).toBe('typescriptreact')
+    expect(resolveLangServer('a.jsx', { navigation: true })?.languageId).toBe('javascriptreact')
+    expect(resolveLangServer('a.mjs', { navigation: true })?.languageId).toBe('javascript')
+  })
+  it('navigation НЕ перебивает реестр диагностик (py остаётся pyright)', () => {
+    expect(resolveLangServer('a.py', { navigation: true })?.command).toBe('pyright-langserver')
+  })
+  it('неизвестное расширение → null (даже при navigation)', () => {
     expect(resolveLangServer('readme.md')).toBeNull()
+    expect(resolveLangServer('readme.md', { navigation: true })).toBeNull()
   })
 })
 

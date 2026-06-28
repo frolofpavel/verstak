@@ -39,13 +39,14 @@ export interface LspSessionOpts {
   root: string        // корень проекта (cwd сервера + rootUri)
   timeoutMs?: number
   signal?: AbortSignal // Stop/отмена — прерывает ожидание (процесс приберётся в finally)
+  navigation?: boolean // true → резолвить TS/JS-сервер (для goToDefinition/findReferences)
 }
 
 export async function withLspServer<T>(
   opts: LspSessionOpts,
   run: (client: LspClient, uri: string) => Promise<T | null>,
 ): Promise<T | null> {
-  const cfg = resolveLangServer(opts.path)
+  const cfg = resolveLangServer(opts.path, { navigation: opts.navigation })
   if (!cfg) return null
   if (opts.signal?.aborted) return null
   await acquireLsp()
