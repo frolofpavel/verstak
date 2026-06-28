@@ -5008,6 +5008,40 @@ html[data-theme="light"] .gg-chat-settings-popover {
   color: var(--error);
 }
 
+/* Авто-предложение скилла — ненавязчивый чип над композером (next-wave #2) */
+.gg-skill-suggest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+.gg-skill-suggest-text { flex: 1; color: var(--text-secondary); }
+.gg-skill-suggest-accept {
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.gg-skill-suggest-accept:hover { filter: brightness(1.08); }
+.gg-skill-suggest-dismiss {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.gg-skill-suggest-dismiss:hover { color: var(--text-secondary); }
+
 .gg-vision-banner {
   margin-bottom: 8px;
   padding: 10px 14px;

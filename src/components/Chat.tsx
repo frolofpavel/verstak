@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
@@ -20,6 +20,7 @@ import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
+import { suggestSkill } from '../lib/skill-suggest'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment, ChatMessage, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
@@ -216,6 +217,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     : (chatSessions.find(s => s.id === activeChatId)?.title ?? null)
   const provider = useProvider()
   const [input, setInput] = useState('')
+  // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
+  const allSkills = useSkillsStore(s => s.skills)
+  const activeSkillId = useSkillsStore(s => s.activeSkillId)
+  const [dismissedSuggestId, setDismissedSuggestId] = useState<string | null>(null)
+  const suggestedSkill = useMemo(() => {
+    if (input.trim().startsWith('/')) return null // слэш-команда — пользователь уже выбирает
+    const s = suggestSkill(input, allSkills, activeSkillId)
+    return s && s.id !== dismissedSuggestId ? s : null
+  }, [input, allSkills, activeSkillId, dismissedSuggestId])
+  // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
+  useEffect(() => { if (!input.trim()) setDismissedSuggestId(null) }, [input])
   /** Live token-count preview for whatever is in the composer right now. */
   const [previewTokens, setPreviewTokens] = useState<{ tokens: number; exact: boolean } | null>(null)
   /** If the agent loop exhausted its budget on the last send, the user can click "+N turns" to extend. */
@@ -2094,6 +2106,24 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 onClick={() => setExhausted(null)}
               >Закрыть</button>
             </div>
+          </div>
+        )}
+        {suggestedSkill && (
+          <div className="gg-skill-suggest">
+            <span className="gg-skill-suggest-text">
+              💡 Похоже, подойдёт скилл <strong>{suggestedSkill.icon ? suggestedSkill.icon + ' ' : ''}{suggestedSkill.name ?? suggestedSkill.id}</strong>
+            </span>
+            <button
+              type="button"
+              className="gg-skill-suggest-accept"
+              onClick={() => { useSkillsStore.getState().setActiveSkill(suggestedSkill.id); setDismissedSuggestId(null) }}
+            >Активировать</button>
+            <button
+              type="button"
+              className="gg-skill-suggest-dismiss"
+              onClick={() => setDismissedSuggestId(suggestedSkill.id)}
+              title="Скрыть предложение"
+            >×</button>
           </div>
         )}
         <div className="gg-composer-inner">
