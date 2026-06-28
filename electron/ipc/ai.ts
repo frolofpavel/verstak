@@ -267,25 +267,24 @@ function fireCrossVerify(
   })()
 }
 
-// Строго ЛОКАЛЬНЫЙ read-only набор для unattended-прогона. БЕЗ connector_query/
-// list_connectors/browser_read_page — это каналы ВЫПОЛНЕНИЯ во внешние системы (SSH
-// run_remote, Telegram send, вебхуки): в agentMode='auto' они авто-принимались бы и
-// без надзора слали/выполняли по prompt-injection (ревью HIGH). БЕЗ write/run/delegate.
-// Живые connector-аудиты — follow-up (нужна op-level read/write классификация).
+// Read-only набор для unattended-прогона. Локальные read-тулзы + connector_query/
+// list_connectors — НО connector_query гейтится op-level политикой (ctx.readOnlyConnectors):
+// проходят только читающие op'ы (Ozon/WB/Метрика-данные), пишущие/выполняющие (ssh
+// run_remote, telegram send, вебхуки) блокируются. БЕЗ write_file/apply_patch/run_command/
+// browser/delegate. Так live-аудиты внешних данных безопасны без надзора.
 const SCHEDULED_READONLY_TOOLS = [
   'read_file', 'list_directory', 'search_project', 'find_files', 'get_project_map', 'impact_analysis',
   'read_journal', 'conversation_search', 'memory_search', 'read_spreadsheet', 'read_document', 'convert_file',
-  'find_definition', 'find_references',
+  'find_definition', 'find_references', 'list_connectors', 'connector_query',
 ]
 
 /**
- * NL-cron headless-прогон: запускает агентный цикл БЕЗ UI на строго ЛОКАЛЬНОМ
- * read-only-наборе (код/журнал/память/документы, БЕЗ внешних коннекторов и команд).
- * Переиспользует проверенный sub-agent-loop (все security-гейты внутри хендлеров) +
- * полный project-контекст (prepareSystemContext). Возвращает итог-текст для пуша.
+ * NL-cron headless-прогон: запускает агентный цикл БЕЗ UI на read-only-наборе (локальные
+ * read-тулзы + ЧИТАЮЩИЙ connector_query). Переиспользует проверенный sub-agent-loop (все
+ * security-гейты внутри хендлеров) + полный project-контекст (prepareSystemContext).
  *
- * Безопасность: набор физически не содержит write_file/apply_patch/run_command/
- * connector_query → unattended-агент не может ни писать, ни выполнять во внешних системах.
+ * Безопасность: набор без write/run/delegate; connector_query гейтится op-level политикой
+ * (readOnlyConnectors=true) → unattended-агент читает внешние данные, но не пишет/выполняет.
  */
 export async function runScheduledHeadless(
   deps: AiDeps,
@@ -323,7 +322,7 @@ export async function runScheduledHeadless(
       readJournal: deps.readJournal, saveMemory: deps.saveMemory, saveDecision: deps.saveDecision,
       searchMemories: deps.searchMemories, searchConversations: deps.searchConversations, connectors: deps.connectors,
       pendingAttachments: [], pendingWrites: new Map(), pendingCommands: new Map(), scopedKey,
-      agentMode: 'auto', skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      agentMode: 'auto', readOnlyConnectors: true, skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
       currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
       subCostGuard: createCostGuard(null), parentChatId: null,
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),

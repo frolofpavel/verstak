@@ -5,6 +5,7 @@ import { scanText, isForbiddenPath } from '../../ai/secret-scanner'
 import { safeRealJoin } from '../../ai/path-policy'
 import { relative, resolve, isAbsolute } from 'path'
 import { decide, blockReason } from '../../ai/mode-policy'
+import { isReadOnlyConnectorOp } from '../../ai/connector-readonly'
 import { summarizeToolCall } from './shared'
 
 export const listConnectorsHandler: ToolHandler = {
@@ -25,6 +26,15 @@ export const connectorQueryHandler: ToolHandler = {
       const cid = String(call.args.id ?? '')
       if (!cid) {
         return { id: call.id, name: call.name, result: '', error: 'connector_query: id обязателен' }
+      }
+      // NL-cron: unattended-прогон читает внешние данные, но НЕ пишет/выполняет. Гейтим
+      // op по kind через op-level политику (fail-safe). ssh run_remote / telegram send /
+      // вебхуки → запрет без надзора. Read-op'ы (Ozon/WB/Метрика-данные) проходят.
+      if (ctx.readOnlyConnectors) {
+        const kind = ctx.connectors.list().find(c => c.id === cid)?.kind ?? ''
+        if (!isReadOnlyConnectorOp(kind, call.args as Record<string, unknown>)) {
+          return { id: call.id, name: call.name, result: '', error: `Расписанный (unattended) прогон: коннектор "${cid}" (${kind || 'неизвестный'}) с этой операцией запрещён — без надзора разрешено только чтение данных, не отправка/выполнение.` }
+        }
       }
       // Mode policy: коннекторы трогают внешние системы (SSH, HTTP POST, Telegram,
       // публикация), поэтому гейтятся как команда — plan блокирует, ask подтверждает,
@@ -117,4 +127,4 @@ export const connectorQueryHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: safeMsg }
     }
   }
-}
+}

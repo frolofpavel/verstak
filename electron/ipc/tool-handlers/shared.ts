@@ -51,6 +51,10 @@ export interface ToolContext {
   scopedKey: (sendId: SendId, callId: string) => string
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode
+  /** NL-cron: unattended-прогон → connector_query разрешён ТОЛЬКО для read-only op'ов
+   *  (op-level политика). Пишущие/выполняющие коннекторы (ssh/telegram send/вебхуки)
+   *  блокируются без надзора. См. connector-readonly.ts. */
+  readOnlyConnectors?: boolean
   /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).
    *  Пишет в мутабельный holder уровня прогона — следующий turn видит новый режим. */
   setAgentMode?: (mode: AgentMode) => void
