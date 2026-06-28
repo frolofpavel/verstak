@@ -45,6 +45,8 @@ import { createChatSessions } from './storage/chat-sessions'
 import { createSubSessions } from './storage/sub-sessions'
 import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
+import { createWorktreeSessions } from './storage/worktree-sessions'
+import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
 import { registerGitIpc } from './ipc/git'
@@ -318,6 +320,8 @@ app.whenReady().then(() => {
   // Multi-agent Manager (Фаза 2) — фундамент «задач» поверх run_id. ai.ts пишет
   // прогоны (create на старте / finish на завершении), панель Задач читает их.
   const agentRuns = createAgentRuns(db)
+  // #5 worktree-lifecycle: персистентная изоляция чата в git-worktree.
+  const worktreeSessions = createWorktreeSessions(db)
   // Реконсайл зависших прогонов: строки running/queued без ended_at — это
   // прогоны, прерванные крахом/выходом приложения (без живого процесса).
   // Помечаем их failed один раз на старте, чтобы они не висели «в работе».
@@ -531,6 +535,8 @@ app.whenReady().then(() => {
     // пока НЕ используется: запись прогонов (create/finish/recordRunEvent) включит
     // Фаза 2. Здесь только делаем фундамент доступным для следующих фаз.
     agentRuns,
+    // #5 worktree-lifecycle: ре-рут file-тулзов на worktree изолированного чата.
+    worktreeSessions,
     // Verification Artifact (Фаза 3) — attest_verification пишет строку истории
     // после writeVerificationArtifact (best-effort). Только insert нужен в ctx.
     verifications: {
@@ -551,6 +557,7 @@ app.whenReady().then(() => {
   // (Crash-resume): findResumable отбирает прогоны, помеченные failed ИМЕННО на
   // этом старте.
   registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend, agentRunsReconciledAt)
+  registerWorktreeIpc(worktreeSessions)
   // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
   registerVerificationsIpc(verifications)
   // Proof Pack — доказательство выполнения прогона (proof.json + proof.html).

@@ -95,6 +95,8 @@ interface AiDeps {
   /** Фасад Multi-agent Manager (Фаза 1) — agent_runs. Прокинут заранее; запись
    *  прогонов (create/finish/recordRunEvent) подключит Фаза 2 — здесь НЕ используется. */
   agentRuns?: AgentRuns
+  /** #5 worktree-lifecycle: ре-рут file-тулзов на persistent worktree изолированного чата. */
+  worktreeSessions?: import('../storage/worktree-sessions').WorktreeSessions
   /** Фасад истории Verification Artifact (Фаза 3) — attest_verification пишет
    *  строку после writeVerificationArtifact. Прокидывается в ToolContext. */
   verifications?: ToolContext['verifications']
@@ -740,7 +742,10 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     if (useToolsPath) {
-      const tools = createToolsForProject(projectPath, ctrl.signal)
+      // #5 worktree-lifecycle: если чат изолирован — file-тулзы рутятся на его
+      // persistent worktree (правки накапливаются там, main не трогается до merge).
+      const isolatedRoot = chatId ? deps.worktreeSessions?.activePath(Number(chatId)) : null
+      const tools = createToolsForProject(isolatedRoot ?? projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {

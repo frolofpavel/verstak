@@ -776,6 +776,24 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(project_path, status);
       `)
     }
+  },
+  {
+    version: 30,
+    description: '#5 worktree-lifecycle: таблица worktree_sessions (персистентная изоляция чата в git-worktree, локальный merge/discard).',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS worktree_sessions (
+          chat_id INTEGER NOT NULL,
+          project_path TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','merged','dismissed')),
+          created_at INTEGER NOT NULL,
+          ended_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_worktree_sessions_chat ON worktree_sessions(chat_id, state);
+        CREATE INDEX IF NOT EXISTS idx_worktree_sessions_project ON worktree_sessions(project_path, state);
+      `)
+    }
   }
 ]
 

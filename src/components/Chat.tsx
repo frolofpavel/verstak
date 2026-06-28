@@ -12,6 +12,7 @@ import { TimelineBar } from './TimelineBar'
 import { ReviewPanel } from './ReviewPills'
 import { DevTaskBadge } from './DevTaskBadge'
 import { ResumeBanner } from './ResumeBanner'
+import { WorktreeBar } from './WorktreeBar'
 import { PipelineWizard } from './PipelineWizard'
 import { PipelineBanner } from './PipelineBanner'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
@@ -2061,6 +2062,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       )}
 
       <div className="gg-composer">
+        <WorktreeBar />
         {attachments.length > 0 && (
           <div className="gg-attach-row">
             {attachments.map((a, i) => (

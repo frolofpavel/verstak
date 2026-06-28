@@ -478,6 +478,13 @@ contextBridge.exposeInMainWorld('api', {
     listResumable: (projectPath: string) => ipcRenderer.invoke('ai:list-resumable', projectPath),
     dismissResumable: (runId: string) => ipcRenderer.invoke('ai:dismiss-resumable', runId)
   },
+  // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
+  worktree: {
+    isolate: (chatId: number, projectPath: string) => ipcRenderer.invoke('worktree:isolate', chatId, projectPath),
+    status: (chatId: number) => ipcRenderer.invoke('worktree:status', chatId),
+    merge: (chatId: number) => ipcRenderer.invoke('worktree:merge', chatId),
+    discard: (chatId: number) => ipcRenderer.invoke('worktree:discard', chatId),
+  },
   // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
   verifications: {
     list: (projectPath: string, limit?: number) =>

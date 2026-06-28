@@ -2243,6 +2243,20 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-thinking-body p { margin: 6px 0; }
 
 /* Continue-budget bar shown above the composer when agent hits turn limit */
+/* #5 worktree-lifecycle: панель изоляции чата */
+.gg-worktree-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 6px 10px; margin-bottom: 6px;
+  font-size: var(--text-xs);
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-subtle, rgba(127,127,127,0.06));
+}
+.gg-worktree-bar.is-active { border-color: var(--accent, #4a9); }
+.gg-worktree-bar .gg-btn { padding: 3px 10px; font-size: var(--text-xs); }
+.gg-worktree-isolate { opacity: 0.75; }
+.gg-worktree-label { font-weight: 600; margin-right: auto; }
+.gg-worktree-err { color: var(--danger, #c55); }
+
 .gg-budget-bar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px;

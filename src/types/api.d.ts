@@ -567,6 +567,13 @@ declare global {
         /** Crash-resume: отклонить баннер для прогона (не показывать в этом сеансе app). */
         dismissResumable(runId: string): Promise<boolean>
       }
+      // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
+      worktree: {
+        isolate(chatId: number, projectPath: string): Promise<{ ok: true; worktreePath: string } | { ok: false; error: string }>
+        status(chatId: number): Promise<{ active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }>
+        merge(chatId: number): Promise<{ ok: boolean; error?: string }>
+        discard(chatId: number): Promise<{ ok: boolean; error?: string }>
+      }
       // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
       verifications: {
         list(projectPath: string, limit?: number): Promise<VerificationRow[]>
