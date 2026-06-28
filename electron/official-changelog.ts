@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.41',
+    name: 'Verstak 1.5.41',
+    publishedAt: '2026-06-29T12:00:00Z',
+    body: '### Расписание умнее: задачи по расписанию читают внешние данные (Ozon/WB/Метрика/CRM)\n- Расписанные задачи теперь могут читать данные из подключённых сервисов — Ozon, Wildberries, Яндекс.Метрика, CRM, Google Sheets и других — и присылать сводку. Например: «каждое утро собери новые заказы Ozon и продажи WB за вчера». Безопасно по построению: фоновая задача только ЧИТАЕТ, любые отправки и изменения (сообщения в Telegram, команды по SSH, запись в таблицы, вебхуки) в режиме без надзора заблокированы — это разрешено только в обычном чате под вашим контролем.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.41'
+  },
+  {
     version: '1.5.40',
     name: 'Verstak 1.5.40',
     publishedAt: '2026-06-29T12:00:00Z',
