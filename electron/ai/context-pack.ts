@@ -51,6 +51,9 @@ export interface ContextPackInput {
   /** Топ-5 воспоминаний проекта из долговременной памяти — инжектятся как
    *  информационный блок. Пустой массив или undefined = секция не добавляется. */
   memories?: MemoryEntry[]
+  /** memory-nudge консолидации (next-wave #3) — готовый system-хинт или undefined.
+   *  Инжектится отдельной секцией, чтобы не вытесняться лимитом топ-5 памяти. */
+  consolidationHint?: string
   /** Core memory (Hermes-style) — всегда в system prompt, обновляется агентом через tools.
    *  Инжектируется ДО архивной памяти, т.к. всегда релевантна. */
   coreMemory?: CoreMemoryBlocks
@@ -216,13 +219,16 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
     memorySection = `\n\n## Память агента (из прошлых сессий)\n\n${lines.join('\n')}`
   }
 
-  if (parts.length === 0 && !mapBlock && !depBlock && !coreMemorySection && !memorySection) return ''
+  // memory-nudge консолидации — отдельной секцией (не вытесняется лимитом памяти).
+  const consolidationSection = input.consolidationHint ? `\n\n${input.consolidationHint}` : ''
+
+  if (parts.length === 0 && !mapBlock && !depBlock && !coreMemorySection && !memorySection && !consolidationSection) return ''
 
   const meta = parts.length > 0 ? parts.join('\n') : '(no git, no recent writes)'
   const mapSection = mapBlock ? `\n\nproject_map (compact):\n${mapBlock}` : ''
   const depSection = depBlock ? `\n\n${depBlock}` : ''
   return `<context_pack generated="auto" project="${escapeAttr(projectPath)}">
-${meta}${mapSection}${depSection}${coreMemorySection}${memorySection}
+${meta}${mapSection}${depSection}${coreMemorySection}${memorySection}${consolidationSection}
 </context_pack>`
 }
 

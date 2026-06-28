@@ -39,6 +39,8 @@ export interface PrepareSystemInput {
   /** Топ-5 воспоминаний проекта — передаются в context-pack для инжекции
    *  в system prompt. Опционально: если не передано, секция не появляется. */
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  /** memory-nudge консолидации — готовый system-хинт, пробрасывается в context-pack. */
+  consolidationHint?: string
   /** Core memory (Hermes-style) — MEMORY.md + USER.md, всегда в system prompt.
    *  Загружается при каждом turn'е в отличие от архивной памяти. */
   coreMemory?: CoreMemoryBlocks
@@ -155,6 +157,7 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
         latestUserMessage: lastUser?.content ?? '',
         isFirstTurn,
         memories,
+        consolidationHint: input.consolidationHint,
         coreMemory,
         brainContext: input.brainContext
       })

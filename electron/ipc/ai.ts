@@ -64,6 +64,8 @@ interface AiDeps {
   saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
   /** Поиск по долговременной памяти проекта. */
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
+  /** memory-nudge консолидации: system-хинт если воспоминания накопились, иначе null. */
+  memoryConsolidationHint?: (projectPath: string) => string | null
   /** Полнотекстовый поиск по истории разговоров проекта. */
   searchConversations: (projectPath: string, query: string, limit: number) => Array<{ session_id: number; role: string; content: string; created_at: number }>
   /** Connector registry (list / query external services like 1C). */
@@ -400,6 +402,7 @@ export function registerAiIpc(deps: AiDeps): void {
       memorizedChats.add(memoryCacheKey)
     }
     let memories: { type: string; content: string; tags: string[] }[] = []
+    let consolidationHint: string | null = null
     if (shouldInjectMemory) {
       try {
         // #1 релевантный recall: инжектим память РЕЛЕВАНТНУЮ задаче (последнее user-
@@ -413,6 +416,9 @@ export function registerAiIpc(deps: AiDeps): void {
         if (memories.length === 0) {
           memories = deps.searchMemories(projectPath!, '', 5).filter(m => !m.tags.includes('session-summary'))
         }
+        // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
+        // накопились/задублировались — мягко предлагаем модели консолидировать.
+        consolidationHint = deps.memoryConsolidationHint?.(projectPath!) ?? null
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
         console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)
@@ -463,6 +469,7 @@ export function registerAiIpc(deps: AiDeps): void {
         recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
         projectSystemPrompt,
         memories,
+        consolidationHint: consolidationHint ?? undefined,
         coreMemory,
         agentMode,
         brainContext: brain?.content ?? null,

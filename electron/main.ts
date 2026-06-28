@@ -81,7 +81,8 @@ import { registerSkillsIpc } from './ipc/skills'
 import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
 import { registerMemoryIpc } from './ipc/memory'
-import { saveMemory, searchMemories, applyMemoryDecay } from './storage/memories'
+import { saveMemory, searchMemories, listMemories, applyMemoryDecay } from './storage/memories'
+import { findConsolidationNudge, buildConsolidationHint } from './ai/memory-consolidate'
 import { searchConversations } from './storage/chats'
 import { registerCommandsIpc } from './ipc/commands'
 import { registerMcpIpc } from './ipc/mcp'
@@ -479,6 +480,12 @@ app.whenReady().then(() => {
     saveDecision: (projectPath, rec) => brainStore.saveDecisionRecord(projectPath, rec),
     searchMemories: (projectPath, query, limit) => {
       return searchMemories(db, projectPath, query, limit)
+    },
+    memoryConsolidationHint: (projectPath) => {
+      try {
+        const nudge = findConsolidationNudge(listMemories(db, projectPath))
+        return nudge ? buildConsolidationHint(nudge) : null
+      } catch { return null }
     },
     searchConversations: (projectPath, query, limit) => {
       return searchConversations(db, projectPath, query, limit)
