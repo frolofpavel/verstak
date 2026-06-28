@@ -5,6 +5,7 @@
 
 import type { Database } from 'better-sqlite3'
 import { saveMemory } from '../storage/memories'
+import { scanText } from './secret-scanner'
 
 interface RawMessage {
   role: string
@@ -58,6 +59,8 @@ export function summarizeAndSaveSession(
     parts.push(`Темы: ${topics}`)
   }
 
-  const summary = parts.join('. ')
+  // scanText: parts включают сырые user-сообщения (Темы) — юзер мог вставить токен/ключ.
+  // Иначе он осел бы в памяти и всплыл в recall → system prompt внешнего провайдера.
+  const summary = scanText(parts.join('. ')).redacted
   saveMemory(db, projectPath, 'fact', summary, ['session', `session-${sessionId}`])
 }

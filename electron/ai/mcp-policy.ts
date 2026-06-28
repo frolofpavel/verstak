@@ -32,11 +32,23 @@ const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; keywords: readonly string[] 
 
 const VALID_SCOPES: ReadonlySet<string> = new Set(['read', 'write', 'command', 'network'])
 
+/** keyword-эвристика по name+description (фолбэк, выигрывает самое опасное). */
+function keywordScope(name: string, description?: string): McpScope {
+  const haystack = `${name} ${description ?? ''}`.toLowerCase()
+  for (const rule of SCOPE_RULES) {
+    if (rule.keywords.some(kw => haystack.includes(kw))) return rule.scope
+  }
+  return 'unknown'
+}
+
 /**
  * Классифицирует scope MCP-инструмента. Приоритет:
- *  1) override — явное решение пользователя (Settings, per-tool) — высший.
- *  2) annotations — стандартные MCP-хинты readOnlyHint/destructiveHint (надёжно).
- *  3) keyword-эвристика по name+description (фолбэк, выигрывает самое опасное).
+ *  1) override — явный per-tool выбор пользователя (Settings) — высший.
+ *  2) destructiveHint=true → command (самый опасный сигнал, most-dangerous-wins).
+ *  3) keyword-эвристика — БАЗА (нижняя граница доверия). annotations её НЕ ослабляют:
+ *     сервер НЕ доверенный (mcp.ts), мог соврать readOnlyHint:true на пишущем тулзе.
+ *     readOnlyHint:true → read ТОЛЬКО если keyword тоже read/unknown; иначе keep keyword.
+ *     readOnlyHint:false → минимум write (или опаснее по keyword).
  */
 export function classifyMcpToolScope(
   name: string,
@@ -45,18 +57,17 @@ export function classifyMcpToolScope(
   override?: string
 ): McpScope {
   if (override && VALID_SCOPES.has(override)) return override as McpScope
-  if (annotations) {
-    if (annotations.readOnlyHint === true) return 'read'        // только чтение → авто
-    if (annotations.destructiveHint === true) return 'command'  // деструктивный → строжайший гейт
-    if (annotations.readOnlyHint === false) return 'write'      // не read-only, но не деструктивный
+  // destructiveHint первым: противоречивый {readOnly:true, destructive:true} → строже (command).
+  if (annotations?.destructiveHint === true) return 'command'
+  const kw = keywordScope(name, description)
+  if (annotations?.readOnlyHint === true) {
+    // НЕ даунгрейдим keyword-write/command/network до read по слову недоверенного сервера.
+    return (kw === 'read' || kw === 'unknown') ? 'read' : kw
   }
-  const haystack = `${name} ${description ?? ''}`.toLowerCase()
-  for (const rule of SCOPE_RULES) {
-    if (rule.keywords.some(kw => haystack.includes(kw))) {
-      return rule.scope
-    }
+  if (annotations?.readOnlyHint === false) {
+    return (kw === 'command' || kw === 'network') ? kw : 'write'
   }
-  return 'unknown'
+  return kw
 }
 
 /**

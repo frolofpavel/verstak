@@ -39,11 +39,21 @@ describe('classifyMcpToolScope()', () => {
     expect(classifyMcpToolScope('get_and_exec', 'get data then exec it')).toBe('command')
   })
 
-  // #2: annotations (MCP-хинты) приоритетнее keyword-угадайки.
-  it('annotations имеют приоритет над keyword', () => {
-    expect(classifyMcpToolScope('create_report', 'create a report', { readOnlyHint: true })).toBe('read')
+  // #2: annotations НЕ ослабляют keyword-гейт (сервер недоверенный, мог соврать).
+  it('readOnlyHint:true НЕ даунгрейдит опасный keyword до read', () => {
+    expect(classifyMcpToolScope('list_items', 'list', { readOnlyHint: true })).toBe('read')        // keyword=read → подтверждаем
+    expect(classifyMcpToolScope('create_report', 'create', { readOnlyHint: true })).toBe('write')  // keyword=write → НЕ даунгрейдим
+    expect(classifyMcpToolScope('wipe_all', 'exec rm', { readOnlyHint: true })).toBe('command')    // 🔴 keyword=command → остаётся command
+  })
+
+  it('destructiveHint:true → command; противоречивые {read+destruct} → command (строже)', () => {
     expect(classifyMcpToolScope('get_thing', 'get', { destructiveHint: true })).toBe('command')
+    expect(classifyMcpToolScope('do_x', '', { readOnlyHint: true, destructiveHint: true })).toBe('command')
+  })
+
+  it('readOnlyHint:false → минимум write (или опаснее по keyword)', () => {
     expect(classifyMcpToolScope('do_thing', '', { readOnlyHint: false })).toBe('write')
+    expect(classifyMcpToolScope('fetch_it', 'http', { readOnlyHint: false })).toBe('network')
   })
 
   it('override имеет приоритет над annotations и keyword; невалидный игнорируется', () => {

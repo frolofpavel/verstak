@@ -29,22 +29,23 @@ const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; risk: McpRisk; keywords: rea
  * Классифицирует один инструмент по name + description.
  * Эвристика по lowercased тексту, выигрывает самое опасное совпадение.
  */
-export function classifyTool(tool: { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }): ToolClassification {
-  // #2: стандартные MCP-аннотации приоритетнее keyword-угадайки (как в electron-гейте
-  // mcp-policy.ts — держим UI-классификацию и runtime-гейт согласованными).
-  const a = tool.annotations
-  if (a) {
-    if (a.readOnlyHint === true) return { scope: 'read', risk: 'low' }
-    if (a.destructiveHint === true) return { scope: 'command', risk: 'high' }
-    if (a.readOnlyHint === false) return { scope: 'write', risk: 'medium' }
-  }
+function keywordClassify(tool: { name: string; description?: string }): ToolClassification {
   const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase()
   for (const rule of SCOPE_RULES) {
-    if (rule.keywords.some(kw => haystack.includes(kw))) {
-      return { scope: rule.scope, risk: rule.risk }
-    }
+    if (rule.keywords.some(kw => haystack.includes(kw))) return { scope: rule.scope, risk: rule.risk }
   }
   return { scope: 'unknown', risk: 'medium' }
+}
+
+export function classifyTool(tool: { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }): ToolClassification {
+  // Согласовано с electron-гейтом mcp-policy.ts: destructiveHint → command первым;
+  // readOnlyHint:true НЕ даунгрейдит keyword-write/command (сервер недоверенный).
+  const a = tool.annotations
+  if (a?.destructiveHint === true) return { scope: 'command', risk: 'high' }
+  const kw = keywordClassify(tool)
+  if (a?.readOnlyHint === true) return (kw.scope === 'read' || kw.scope === 'unknown') ? { scope: 'read', risk: 'low' } : kw
+  if (a?.readOnlyHint === false) return (kw.scope === 'command' || kw.scope === 'network') ? kw : { scope: 'write', risk: 'medium' }
+  return kw
 }
 
 /**

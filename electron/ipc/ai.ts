@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent } from '../ai/run-notify'
+import { scanText } from '../ai/secret-scanner'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
@@ -406,9 +407,12 @@ export function registerAiIpc(deps: AiDeps): void {
         // под FTS5 и сам падает на recency, если релевантного нет.
         const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
         memories = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
-        // Нет релевантных к задаче — фолбэк на недавние (как было раньше), чтобы инжект
-        // памяти не оставался пустым при старте чата без совпадений.
-        if (memories.length === 0) memories = deps.searchMemories(projectPath!, '', 5)
+        // Нет релевантных к задаче — фолбэк на недавние. Исключаем session-summary,
+        // чтобы накопленные резюме сессий не вытесняли зафиксированные факты/решения
+        // из топ-5 (ревью). Релевантный recall выше их всё равно поднимет по задаче.
+        if (memories.length === 0) {
+          memories = deps.searchMemories(projectPath!, '', 5).filter(m => !m.tags.includes('session-summary'))
+        }
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
         console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)
@@ -1898,7 +1902,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // lastSummary жил только in-run и терялся после закрытия чата.
     if (lastSummary.trim() && projectPath) {
       try {
-        saveMemory(projectPath, 'fact', `Итог прошлой сессии: ${lastSummary.trim().slice(0, 2000)}`, ['session-summary'])
+        // scanText ОБЯЗАТЕЛЕН: lastSummary включает сырые user-сообщения (compact-history),
+        // юзер мог вставить токен/ключ → иначе он осел бы в памяти и всплыл в recall →
+        // в system prompt внешнего провайдера (ревью: HIGH утечка секрета).
+        const safe = scanText(lastSummary.trim()).redacted.slice(0, 2000)
+        saveMemory(projectPath, 'fact', `Итог прошлой сессии: ${safe}`, ['session-summary'])
       } catch (err) {
         console.warn('[ai.ts] session-summary persist failed:', err instanceof Error ? err.message : err)
       }
