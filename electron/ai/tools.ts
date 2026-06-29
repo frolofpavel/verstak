@@ -125,6 +125,19 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'run_until_green',
+    description: 'Запустить ПРОВЕРОЧНУЮ команду (test/lint/build/typecheck/скрипт) в цикле fix-until-green: прогнал → если упала (exit≠0), почини причину в коде и вызови снова с attempt+1 → до зелёного или лимита попыток. Работает с ЛЮБЫМ стеком (не только tsc). Возвращает stdout/stderr/exitCode + директиву (зелёная / чини и повтори / лимит исчерпан). На лимите ЧЕСТНО сообщи, что не починил — не говори «готово». Те же гейты, что у run_command (денилист + подтверждение по режиму).',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Проверочная команда (напр. "npm run lint", "pytest", "go build ./...").' },
+        attempt: { type: 'number', description: 'Номер текущей попытки (начни с 1; при повторе после фикса передай предыдущий+1).' },
+        max_attempts: { type: 'number', description: 'Лимит попыток (по умолчанию 5, максимум 8).' }
+      },
+      required: ['command']
+    }
+  },
+  {
     name: 'search_project',
     description: 'Полнотекстовый поиск по проекту (ripgrep). Возвращает совпадения в формате file:line:text. Игнорирует node_modules / .git / out / dist. Используй для нахождения определений функций, использований переменных, текстовых фрагментов.',
     parameters: {

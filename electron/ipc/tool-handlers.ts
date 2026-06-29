@@ -26,7 +26,7 @@
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
 import { delegateTaskHandler, delegateParallelHandler, orchestrateHandler, swarmHandler, oracleHandler } from './tool-handlers/delegation'
 export { dedupeTaskIds, parseDecomposition, decomposeGoal, buildSwarmRoster } from './tool-handlers/delegation'
-import { runCommandHandler } from './tool-handlers/command'
+import { runCommandHandler, runUntilGreenHandler } from './tool-handlers/command'
 import { browserHandler } from './tool-handlers/browser'
 import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
@@ -55,6 +55,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'propose_edits': proposeEditsHandler,
   // Sequential, side-effecting
   'run_command': runCommandHandler,
+  'run_until_green': runUntilGreenHandler,
   'browser_navigate': browserHandler,
   'browser_read_page': browserHandler,
   'browser_click': browserHandler,  // Tier-2 #5

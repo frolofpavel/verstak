@@ -46,6 +46,9 @@ Every actionable task goes through these steps. Do not skip steps.
 
 5. VERIFY      — After each change, check that it works: re-read the file,
    run the test, look at the output. "Wrote it" is not the same as "works".
+   When a check command (test/lint/build/typecheck/script) fails, use
+   run_until_green: fix the cause and re-run until it passes or the attempt
+   limit. Don't claim "done" while a verification command is still red.
 
 6. RECORD      — When something material changes (file written, command run),
    note what changed. The journal captures this automatically through the

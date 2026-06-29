@@ -81,3 +81,32 @@ export const runCommandHandler: ToolHandler = {
     }
   }
 }
+
+/**
+ * Auto-debug (ось 3 E): рамка результата проверочной команды для цикла fix-until-green.
+ * Чистая: exitCode + номер попытки → директива + флаги. На лимите ЧЕСТНО стопит петлю
+ * (агент не должен говорить «готово», пока команда реально не зелёная — на любом стеке).
+ */
+export function formatAutoDebugResult(exitCode: number, attempt: number, maxAttempts: number): { passed: boolean; exhausted: boolean; directive: string } {
+  if (exitCode === 0) return { passed: true, exhausted: false, directive: `✓ Команда зелёная (exit 0, попытка ${attempt}/${maxAttempts}). Проверка пройдена.` }
+  if (attempt >= maxAttempts) return { passed: false, exhausted: true, directive: `✗ Команда всё ещё падает (exit ${exitCode}) после ${attempt} попыток — лимит исчерпан. ЧЕСТНО сообщи пользователю, какая команда не проходит и почему; НЕ говори «готово».` }
+  return { passed: false, exhausted: false, directive: `✗ Команда упала (exit ${exitCode}), попытка ${attempt}/${maxAttempts}. Разбери ошибку выше, ПОЧИНИ причину в коде и вызови run_until_green снова с той же командой и attempt: ${attempt + 1}.` }
+}
+
+// run_until_green (ось 3 E): прогон ПРОИЗВОЛЬНОЙ команды в цикле fix-until-green. Тонкая
+// обёртка над run_command — реюз денилиста/mode-policy-гейта/executor/secret-scan. Агент
+// чинит между попытками (его ходы), хендлер несёт рамку с честным лимитом.
+export const runUntilGreenHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    const command = String(call.args.command ?? '').trim()
+    if (!command) return { id: call.id, name: call.name, result: '', error: 'run_until_green: command обязателен' }
+    const attempt = Math.max(1, Math.floor(Number(call.args.attempt) || 1))
+    const maxAttempts = Math.min(8, Math.max(1, Math.floor(Number(call.args.max_attempts) || 5)))
+    const res = await runCommandHandler.handle({ ...call, args: { command } }, ctx)
+    if (res.error) return { ...res, name: call.name } // заблокировано денилистом/режимом/отклонено
+    const exitCode = (res.result as { exitCode?: number })?.exitCode ?? 0
+    const framed = formatAutoDebugResult(exitCode, attempt, maxAttempts)
+    return { id: call.id, name: call.name, result: { ...(res.result as object), ...framed } }
+  }
+}
