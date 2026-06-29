@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
@@ -21,7 +21,9 @@ import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestFromIndex } from '../lib/skill-suggest'
+import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
+import type { AgentMode } from './ModePicker'
 import type { Attachment, ChatMessage, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
@@ -216,6 +218,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     ? t.help.emptyTitle
     : (chatSessions.find(s => s.id === activeChatId)?.title ?? null)
   const provider = useProvider()
+  // ось 3 A: смена режима свопит модель по привязке mode_models_<provider> (plan →
+  // reasoning-модель, act/auto → дешёвый кодер). Идёт через onChange ModePicker —
+  // ловит И клики, И клавиши 1-5. Нет привязки для режима → модель не трогаем.
+  const applyMode = useCallback(async (m: AgentMode) => {
+    await setAgentMode(m)
+    if (isHelpChat) return
+    try {
+      const raw = await window.api.settings.getKey(modeModelsKey(provider.id))
+      const target = resolveModeModel(parseModeModels(raw), m)
+      if (target && target !== provider.model && (provider.models.length === 0 || provider.models.includes(target))) {
+        await provider.setModel(target)
+      }
+    } catch { /* своп не критичен — режим уже применён */ }
+  }, [setAgentMode, isHelpChat, provider])
   const [input, setInput] = useState('')
   // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
   const allSkills = useSkillsStore(s => s.skills)
@@ -2405,7 +2421,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                         <span className="gg-chat-settings-label">Режим</span>
                         <ModePicker
                           mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                          onChange={setAgentMode}
+                          onChange={applyMode}
                           locked={isHelpChat}
                         />
                       </div>
@@ -2460,7 +2476,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               {!isHelpChat && <ComposerToolsMenu onInject={injectTemplate} />}
               <ModePicker
                 mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                onChange={setAgentMode}
+                onChange={applyMode}
                 locked={isHelpChat}
               />
               {!isHelpChat && <IntensityToggle />}

@@ -24,6 +24,8 @@ import {
 } from './ConnectorIcons'
 import { useT } from '../i18n'
 import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
+import { modeModelsKey, parseModeModels, serializeModeModels } from '../lib/mode-model'
+import type { AgentMode } from './ModePicker'
 
 interface ProviderConfig {
   id: ProviderId
@@ -543,6 +545,55 @@ function PolicyTab() {
       <div className="gg-policy-note" style={{ marginTop: 18 }}>
         Риск по конкретным MCP-инструментам (per-server) — на вкладке <strong>MCP</strong>. Здесь он не дублируется.
       </div>
+    </div>
+  )
+}
+
+// ось 3 A: привязка модели к режиму агента (авто-своп при 1-5). Self-contained.
+const MODE_BIND_ROWS: { mode: AgentMode; label: string }[] = [
+  { mode: 'plan', label: '📋 Планирование' },
+  { mode: 'accept-edits', label: '✏ Правки' },
+  { mode: 'auto', label: '⚡ Авто' },
+]
+
+function ModeModelBinding({ providers }: { providers: ProviderConfig[] }) {
+  const [providerId, setProviderId] = useState<string>(providers[0]?.id ?? '')
+  const [map, setMap] = useState<Record<string, string>>({})
+  const provider = providers.find(p => p.id === providerId)
+
+  useEffect(() => {
+    void (async () => setMap(parseModeModels(await window.api.settings.getKey(modeModelsKey(providerId)))))()
+  }, [providerId])
+
+  const update = async (mode: string, model: string) => {
+    const next = { ...map }
+    if (model) next[mode] = model; else delete next[mode]
+    setMap(next)
+    await window.api.settings.setKey(modeModelsKey(providerId), serializeModeModels(next))
+  }
+
+  return (
+    <div className="gg-settings-section" style={{ marginTop: 24 }}>
+      <div className="gg-settings-section-title">🎚 Модель по режиму (авто-своп при 1-5)</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 12 }}>
+        Привяжи модель к режиму: при переключении (клавиши 1-5 или пикер) модель сменится сама —
+        например план на сильной reasoning-модели, авто-кодинг на дешёвой. «не менять» = режим не трогает модель.
+      </div>
+      <div className="gg-settings-row">
+        <label className="gg-settings-label">Провайдер</label>
+        <select className="gg-input" value={providerId} onChange={e => setProviderId(e.target.value)}>
+          {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      {MODE_BIND_ROWS.map(r => (
+        <div className="gg-settings-row" key={r.mode}>
+          <label className="gg-settings-label">{r.label}</label>
+          <select className="gg-input" value={map[r.mode] ?? ''} onChange={e => void update(r.mode, e.target.value)}>
+            <option value="">— не менять —</option>
+            {(provider?.models ?? []).map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      ))}
     </div>
   )
 }
@@ -2216,6 +2267,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         )}
 
         {tab === 'models' && (
+        <>
         <ModelsPage
           providers={PROVIDERS}
           enabledModels={enabledModels}
@@ -2228,6 +2280,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           customOpenaiBaseUrl={customOpenaiBaseUrl}
           onGoToProviders={() => setTab('providers')}
         />
+        <ModeModelBinding providers={PROVIDERS} />
+        </>
         )}
 
         {tab === 'connectors' && (
