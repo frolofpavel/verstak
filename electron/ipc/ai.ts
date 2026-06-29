@@ -1425,7 +1425,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // только если есть НЕзавершённые пункты; компакция и так несёт якорь отдельно.
     if (turn > 0 && turn % FOCUS_REINJECT_EVERY === 0 && sessionTodos && projectPath) {
       const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
-      if (focus) currentMessages.push({ role: 'system', content: focus })
+      if (focus) {
+        // Дедуп: убираем прошлый Focus-Chain блок, чтобы не копить дубли в истории (ревью).
+        for (let i = currentMessages.length - 1; i >= 0; i--) {
+          const c = currentMessages[i]
+          if (c.role === 'system' && typeof c.content === 'string' && c.content.startsWith('[Focus Chain')) {
+            currentMessages.splice(i, 1)
+          }
+        }
+        currentMessages.push({ role: 'system', content: focus })
+      }
     }
     const toolCalls: ToolCall[] = []
     let assistantText = ''

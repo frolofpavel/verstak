@@ -229,9 +229,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       const target = resolveModeModel(parseModeModels(raw), m)
       if (target && target !== provider.model && (provider.models.length === 0 || provider.models.includes(target))) {
         await provider.setModel(target)
+        // Персист per-chat (как ModelPicker/switchVisionModel): иначе глобальный
+        // model_<provider> откатится при возврате в чат (switchChatSession пишет его
+        // из session.model) и протечёт в новые чаты (ревью HIGH).
+        if (activeChatId != null) {
+          try {
+            await window.api.chatSessions.setModel(activeChatId, provider.id, target)
+            await useProject.getState().refreshChatSessions()
+          } catch { /* не блокируем UX */ }
+        }
       }
     } catch { /* своп не критичен — режим уже применён */ }
-  }, [setAgentMode, isHelpChat, provider])
+  }, [setAgentMode, isHelpChat, provider, activeChatId])
   const [input, setInput] = useState('')
   // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
   const allSkills = useSkillsStore(s => s.skills)

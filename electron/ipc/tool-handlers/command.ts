@@ -90,23 +90,31 @@ export const runCommandHandler: ToolHandler = {
 export function formatAutoDebugResult(exitCode: number, attempt: number, maxAttempts: number): { passed: boolean; exhausted: boolean; directive: string } {
   if (exitCode === 0) return { passed: true, exhausted: false, directive: `✓ Команда зелёная (exit 0, попытка ${attempt}/${maxAttempts}). Проверка пройдена.` }
   if (attempt >= maxAttempts) return { passed: false, exhausted: true, directive: `✗ Команда всё ещё падает (exit ${exitCode}) после ${attempt} попыток — лимит исчерпан. ЧЕСТНО сообщи пользователю, какая команда не проходит и почему; НЕ говори «готово».` }
-  return { passed: false, exhausted: false, directive: `✗ Команда упала (exit ${exitCode}), попытка ${attempt}/${maxAttempts}. Разбери ошибку выше, ПОЧИНИ причину в коде и вызови run_until_green снова с той же командой и attempt: ${attempt + 1}.` }
+  return { passed: false, exhausted: false, directive: `✗ Команда упала (exit ${exitCode}), попытка ${attempt}/${maxAttempts}. Разбери ошибку выше, ПОЧИНИ причину в коде и вызови run_until_green с той же командой снова.` }
 }
+
+// Серверный счётчик попыток run_until_green per (sendId + command). Лимит НЕ доверяем
+// агенту (он мог бы вечно слать attempt:1 в обход честного стопа — ревью). Ключ чистится
+// на passed/exhausted/блокировке.
+const runUntilGreenAttempts = new Map<string, number>()
 
 // run_until_green (ось 3 E): прогон ПРОИЗВОЛЬНОЙ команды в цикле fix-until-green. Тонкая
 // обёртка над run_command — реюз денилиста/mode-policy-гейта/executor/secret-scan. Агент
-// чинит между попытками (его ходы), хендлер несёт рамку с честным лимитом.
+// чинит между попытками (его ходы), хендлер несёт рамку с ЧЕСТНЫМ серверным лимитом.
 export const runUntilGreenHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     const command = String(call.args.command ?? '').trim()
     if (!command) return { id: call.id, name: call.name, result: '', error: 'run_until_green: command обязателен' }
-    const attempt = Math.max(1, Math.floor(Number(call.args.attempt) || 1))
     const maxAttempts = Math.min(8, Math.max(1, Math.floor(Number(call.args.max_attempts) || 5)))
+    const key = `${ctx.sendId}::${command}`
+    const attempt = (runUntilGreenAttempts.get(key) ?? 0) + 1  // серверный счётчик, не args
+    runUntilGreenAttempts.set(key, attempt)
     const res = await runCommandHandler.handle({ ...call, args: { command } }, ctx)
-    if (res.error) return { ...res, name: call.name } // заблокировано денилистом/режимом/отклонено
+    if (res.error) { runUntilGreenAttempts.delete(key); return { ...res, name: call.name } } // заблокировано/отклонено
     const exitCode = (res.result as { exitCode?: number })?.exitCode ?? 0
     const framed = formatAutoDebugResult(exitCode, attempt, maxAttempts)
+    if (framed.passed || framed.exhausted) runUntilGreenAttempts.delete(key) // сброс на финале петли
     return { id: call.id, name: call.name, result: { ...(res.result as object), ...framed } }
   }
 }
