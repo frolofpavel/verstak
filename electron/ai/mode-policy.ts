@@ -52,7 +52,10 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
   // trust = run_command: confirm в ask, block в plan. Без эскалации привилегий.
   const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
 
-  if (!isEdit && !isCommand) return 'auto-accept'  // reads always pass
+  // reads + операции с СОБСТВЕННОЙ памятью агента (memory_save/memory_invalidate/
+  // core_memory_*) всегда проходят: plan-режим гейтит изменения ПРОЕКТА (файлы/команды),
+  // а не курирование агентом своей памяти (дёшево, обратимо, не трогает рабочее дерево).
+  if (!isEdit && !isCommand) return 'auto-accept'
 
   let decision: ToolDecision
   switch (mode) {

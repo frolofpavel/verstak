@@ -53,8 +53,10 @@ export function saveMemory(
   ).run(id, projectPath, type, content, JSON.stringify(tags), now, now)
 
   if (result.changes === 0) {
-    // Дубль — last-write-wins: обновить type, tags, accessed_at и сбросить decay, затем вернуть актуальную запись
-    db.prepare(`UPDATE memories SET type = ?, tags = ?, accessed_at = ?, decay_score = 1.0 WHERE project_path = ? AND content = ?`)
+    // Дубль — last-write-wins: обновить type, tags, accessed_at, сбросить decay. Ось 4 #3:
+    // ВОСКРЕШАЕМ запись — снимаем invalidated_at/superseded_by, иначе повторное явное
+    // сохранение того же факта молча оставалось бы невидимым в recall (ревью HIGH).
+    db.prepare(`UPDATE memories SET type = ?, tags = ?, accessed_at = ?, decay_score = 1.0, invalidated_at = NULL, superseded_by = NULL WHERE project_path = ? AND content = ?`)
       .run(type, JSON.stringify(tags), now, projectPath, content)
     const updated = db.prepare(`SELECT * FROM memories WHERE project_path = ? AND content = ?`)
       .get(projectPath, content) as MemoryRow

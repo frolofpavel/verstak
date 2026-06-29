@@ -201,5 +201,16 @@ describe('memories storage', () => {
       expect(invalidateMemory(db2, m.id)).toBe(false)
       db2.close()
     })
+    it('ре-сохранение того же факта ВОСКРЕШАЕТ invalidated (ревью HIGH — не тихая потеря)', () => {
+      const db2 = openDb(join(dir, 'inv3.db'))
+      saveMemory(db2, PROJECT, 'fact', 'проект на vite', ['build'])
+      const found = searchMemories(db2, PROJECT, 'vite', 5).find(x => x.content === 'проект на vite')!
+      invalidateMemory(db2, found.id)
+      expect(searchMemories(db2, PROJECT, 'vite', 5).find(x => x.content === 'проект на vite')).toBeUndefined()
+      // снова явно сохраняем тот же факт → должен вернуться в recall
+      saveMemory(db2, PROJECT, 'fact', 'проект на vite', ['build'])
+      expect(searchMemories(db2, PROJECT, 'vite', 5).find(x => x.content === 'проект на vite')).toBeDefined()
+      db2.close()
+    })
   })
 })
