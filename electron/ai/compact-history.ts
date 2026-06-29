@@ -337,6 +337,25 @@ export function createCompactedHistory(summary: string, messages: ChatMessage[],
  * Держит фокус длинной одиночной сессии — переживает компакцию и реинъектится по cadence.
  * null если нет незавершённых пунктов (нечего держать).
  */
+/**
+ * H (ось 3): контекст после new_task. СОХРАНЯЕТ базовый system-промпт (протокол/память/
+ * правила живут только в нём) + исходную задачу юзера, затем дистиллят агента + Focus Chain.
+ * Без сохранения base-system агент уходит off-policy на весь остаток прогона (ревью HIGH).
+ */
+export function buildNewTaskContext(
+  baseSystem: ChatMessage | null,
+  originalUser: ChatMessage | null,
+  distillate: string,
+  focusBlock?: string | null
+): ChatMessage[] {
+  const out: ChatMessage[] = []
+  if (baseSystem) out.push(baseSystem)
+  if (originalUser) out.push(originalUser)
+  out.push({ role: 'system', content: '[Новая задача — предыдущий контекст очищен по запросу агента (new_task). Дистиллят прогресса:]\n\n' + distillate })
+  if (focusBlock) out.push({ role: 'system', content: focusBlock })
+  return out
+}
+
 export function formatFocusChain(todos: ReadonlyArray<{ title: string; status: string }>): string | null {
   const active = todos.filter(t => t.status !== 'done')
   if (active.length === 0) return null

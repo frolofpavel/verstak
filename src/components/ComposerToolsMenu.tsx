@@ -23,6 +23,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   const messages = useProject(s => s.messages)
   const activeChatId = useProject(s => s.activeChatId)
   const checkpointId = useProject(s => s.checkpointId)
+  const checkpointMessageId = useProject(s => s.checkpointMessageId)
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)
   const startReview = useProject(s => s.startReview)
@@ -101,7 +102,9 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   async function createCheckpoint() {
     if (!path) return
     const id = await window.api.undo.checkpoint(path)
-    setCheckpoint(id)
+    // F (ось 3): захватываем границу диалога — для режима «Откатить задачу».
+    const msgId = activeChatId != null ? await window.api.chats.maxMessageId(activeChatId) : null
+    setCheckpoint(id, msgId)
     pushActivity({
       id: `checkpoint-${Date.now()}`,
       kind: 'write',
@@ -113,28 +116,47 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     setOpen(false)
   }
 
-  async function revertSession() {
-    if (!path || checkpointId === null) return
-    const ok = window.confirm(
-      'Откатить ВСЕ файловые правки, сделанные после чекпоинта?\n\n' +
-      'Это вернёт файлы к состоянию на момент чекпоинта. Действие не отменить.',
-    )
-    if (!ok) return
+  // Откат файлов (per-file undo до чекпоинта). Возвращает успех.
+  async function revertFilesOnly(): Promise<boolean> {
+    if (!path || checkpointId === null) return false
     const result = await window.api.undo.revertToCheckpoint(path, checkpointId)
     if (result.ok) {
       const tree = await window.api.files.tree(path)
       useProject.setState({ tree })
-      setCheckpoint(null)
       pushActivity({
-        id: `revert-session-${Date.now()}`,
-        kind: 'write',
-        label: `↶ Откатил сессию: ${result.count} файлов`,
+        id: `revert-files-${Date.now()}`, kind: 'write', label: `↶ Откатил файлы: ${result.count}`,
         detail: result.restored.slice(0, 4).join(', ') + (result.restored.length > 4 ? ` …+${result.restored.length - 4}` : ''),
-        status: 'ok',
-        timestamp: Date.now(),
+        status: 'ok', timestamp: Date.now(),
       })
+      return true
     }
+    return false
+  }
+
+  // Откат задачи: truncate диалога к чекпоинту (файлы не трогаем).
+  async function revertTaskOnly() {
+    if (activeChatId == null || checkpointMessageId == null) return
+    const deleted = await window.api.chats.truncateAfter(activeChatId, checkpointMessageId)
+    const msgs = await window.api.chats.list(activeChatId)
+    useProject.setState({ messages: msgs.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })) })
+    pushActivity({
+      id: `revert-task-${Date.now()}`, kind: 'write', label: `↶ Откатил задачу: −${deleted} сообщений`,
+      detail: 'диалог обрезан к чекпоинту (файлы не тронуты)', status: 'ok', timestamp: Date.now(),
+    })
+  }
+
+  async function revertFiles() {
+    if (!window.confirm('Откатить ВСЕ файловые правки после чекпоинта? Файлы вернутся к состоянию на момент чекпоинта.')) return
+    if (await revertFilesOnly()) setCheckpoint(null)
     setOpen(false)
+  }
+  async function revertTask() {
+    if (!window.confirm('Откатить ДИАЛОГ к чекпоинту (файлы НЕ трогаем)? Сообщения после чекпоинта удалятся.')) return
+    await revertTaskOnly(); setCheckpoint(null); setOpen(false)
+  }
+  async function revertBoth() {
+    if (!window.confirm('Откатить и ФАЙЛЫ, и ДИАЛОГ к чекпоинту? Действие не отменить.')) return
+    await revertFilesOnly(); await revertTaskOnly(); setCheckpoint(null); setOpen(false)
   }
 
   async function runReview(providerId: string) {
@@ -394,10 +416,20 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                       <span className="gg-tools-row-meta">Откатить правки позже</span>
                     </button>
                   ) : (
-                    <button type="button" className="gg-tools-row is-warn" onClick={() => void revertSession()}>
-                      <span className="gg-tools-row-label">Откатить сессию</span>
-                      <span className="gg-tools-row-meta">После #{checkpointId === 0 ? 'start' : checkpointId}</span>
-                    </button>
+                    <>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertFiles()}>
+                        <span className="gg-tools-row-label">Откатить файлы</span>
+                        <span className="gg-tools-row-meta">После #{checkpointId === 0 ? 'start' : checkpointId}</span>
+                      </button>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertTask()} disabled={checkpointMessageId == null}>
+                        <span className="gg-tools-row-label">Откатить задачу (диалог)</span>
+                        <span className="gg-tools-row-meta">{checkpointMessageId == null ? 'граница не захвачена' : 'обрезать диалог к чекпоинту'}</span>
+                      </button>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertBoth()}>
+                        <span className="gg-tools-row-label">Файлы + задачу</span>
+                        <span className="gg-tools-row-meta">откатить всё</span>
+                      </button>
+                    </>
                   )}
                 </div>
               )}

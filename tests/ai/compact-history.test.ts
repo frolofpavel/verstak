@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { compactToolHistory, diffSize, smartCompressResult, shouldAutoCompact, formatFocusChain, createCompactedHistory } from '../../electron/ai/compact-history'
+import { compactToolHistory, diffSize, smartCompressResult, shouldAutoCompact, formatFocusChain, createCompactedHistory, buildNewTaskContext } from '../../electron/ai/compact-history'
 import type { ChatMessage } from '../../electron/ai/types'
 
 function bigResult(name: string, size: number): ChatMessage {
@@ -186,5 +186,22 @@ describe('createCompactedHistory — Focus Chain переживает компа
     const out = createCompactedHistory('резюме', [{ role: 'user', content: 'x' }])
     expect(out[0].content).toContain('резюме')
     expect(out[0].content).not.toContain('Focus Chain')
+  })
+})
+
+describe('buildNewTaskContext (ось 3 H — new_task сохраняет протокол+задачу)', () => {
+  const baseSys: ChatMessage = { role: 'system', content: 'VERSTAK SYSTEM PROTOCOL...' }
+  const userTask: ChatMessage = { role: 'user', content: 'почини баг X' }
+  it('сохраняет base-system + исходную задачу + дистиллят (и focus)', () => {
+    const out = buildNewTaskContext(baseSys, userTask, 'сделано A, осталось B', '[Focus Chain]')
+    expect(out[0]).toBe(baseSys)               // протокол не потерян (ревью HIGH)
+    expect(out[1]).toBe(userTask)              // исходная задача не потеряна (ревью MEDIUM)
+    expect(out.some(m => m.content.includes('сделано A, осталось B'))).toBe(true)
+    expect(out.some(m => m.content.includes('Focus Chain'))).toBe(true)
+  })
+  it('null base/user — не падает, только дистиллят', () => {
+    const out = buildNewTaskContext(null, null, 'дистиллят')
+    expect(out).toHaveLength(1)
+    expect(out[0].content).toContain('дистиллят')
   })
 })

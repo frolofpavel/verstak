@@ -12,7 +12,7 @@ import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
-import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain } from '../ai/compact-history'
+import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from '../ai/compact-history'
 import { estimateTokens } from '../ai/context-limits'
 import { withInitialRetry } from '../ai/with-retry'
 import { classifyProviderError } from '../ai/provider-error'
@@ -1338,6 +1338,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // (как компакция, но по запросу агента и с его резюме). Холдер уровня прогона.
   let pendingNewTask: string | null = null
   const currentMessages = [...initialMessages]
+  // H-фиксы (ревью): при new_task сохраняем БАЗОВЫЙ system-промпт (протокол/память/правила
+  // живут ТОЛЬКО как currentMessages[0]) и ИСХОДНУЮ задачу юзера — иначе агент теряет
+  // протокол и цель на весь остаток прогона. Захватываем до любого wipe.
+  const baseSystemMsg = currentMessages.find(m => m.role === 'system') ?? null
+  const originalUserMsg = currentMessages.find(m => m.role === 'user') ?? null
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
     pendingSupplements.push(text)
@@ -1427,12 +1432,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // (как компакция). Безопасно: dangling toolCalls предыдущего turn'а уходят ВМЕСТЕ с их
     // toolResults. Focus Chain (todo) сохраняем — анти-дрейф переживает и new_task.
     if (pendingNewTask) {
+      const focus = (sessionTodos && projectPath) ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+      const rebuilt = buildNewTaskContext(baseSystemMsg, originalUserMsg, pendingNewTask, focus)
       currentMessages.length = 0
-      currentMessages.push({ role: 'system', content: '[Новая задача — предыдущий контекст очищен по запросу агента (new_task). Дистиллят:]\n\n' + pendingNewTask })
-      if (sessionTodos && projectPath) {
-        const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
-        if (focus) currentMessages.push({ role: 'system', content: focus })
-      }
+      currentMessages.push(...rebuilt)
       sender.send('ai:event', { id: sendId, event: { type: 'info', message: '🧹 Контекст очищен по new_task — продолжаю с дистиллята' } })
       pendingNewTask = null
     }
