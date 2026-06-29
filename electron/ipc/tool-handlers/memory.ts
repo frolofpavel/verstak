@@ -23,6 +23,30 @@ export const memorySaveHandler: ToolHandler = {
   }
 }
 
+/** memory_invalidate (ось 4 #2) — пометить устаревший/опровергнутый факт суперсеженным
+ *  (soft, не удаляя). Агент сам реконсилирует: memory_search → если новый факт
+ *  противоречит/обновляет старый, invalidate(old, superseded_by=new). История сохраняется. */
+export const memoryInvalidateHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const id = String(call.args.id ?? '').trim()
+      if (!id) return { id: call.id, name: call.name, result: '', error: 'memory_invalidate: id обязателен' }
+      if (!ctx.invalidateMemory) return { id: call.id, name: call.name, result: '', error: 'memory_invalidate недоступен' }
+      const supersededBy = call.args.superseded_by ? String(call.args.superseded_by) : null
+      const ok = ctx.invalidateMemory(id, supersededBy)
+      emitActivity(ctx, call, ok ? 'ok' : 'error', 'memory_invalidate', `${id}${supersededBy ? ` → ${supersededBy}` : ''}`)
+      return ok
+        ? { id: call.id, name: call.name, result: `Воспоминание ${id} помечено устаревшим${supersededBy ? ` (заменено ${supersededBy})` : ''}. Из recall выпало, история сохранена.` }
+        : { id: call.id, name: call.name, result: '', error: `Воспоминание ${id} не найдено или уже устаревшее.` }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
 /** save_decision — пишет структурированное Decision Record в Decision Memory
  *  (project-brain decision_record). Питает AI-штаб (/board) и будущий UI решений. */
 export const saveDecisionHandler: ToolHandler = {

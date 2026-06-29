@@ -39,7 +39,7 @@ export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
 export { convertFileHandler } from './tool-handlers/files'
 import { attestVerificationHandler, createPlanHandler, preflightHandler } from './tool-handlers/verification'
-import { memorySaveHandler, saveDecisionHandler, memorySearchHandler, coreMemoryAppendHandler, coreMemoryReplaceHandler, coreMemoryRemoveHandler } from './tool-handlers/memory'
+import { memorySaveHandler, memoryInvalidateHandler, saveDecisionHandler, memorySearchHandler, coreMemoryAppendHandler, coreMemoryReplaceHandler, coreMemoryRemoveHandler } from './tool-handlers/memory'
 import { screenCaptureHandler, screenInfoHandler } from './tool-handlers/screen'
 import { mcpToolHandler } from './tool-handlers/mcp'
 import { todoCreateHandler, todoUpdateHandler, todoListHandler } from './tool-handlers/todos'
@@ -86,6 +86,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Agent Swarms (Фаза 4, Идея 10) — рой агентов с консенсусом-арбитром
   'swarm': swarmHandler,
   'memory_save': memorySaveHandler,
+  'memory_invalidate': memoryInvalidateHandler,
   'save_decision': saveDecisionHandler,
   'memory_search': memorySearchHandler,
   // Core Memory (Hermes-style) — sequential, file-backed, no user confirmation

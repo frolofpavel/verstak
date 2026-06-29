@@ -82,7 +82,7 @@ import { registerSkillsIpc } from './ipc/skills'
 import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
 import { registerMemoryIpc } from './ipc/memory'
-import { saveMemory, searchMemories, listMemories, applyMemoryDecay } from './storage/memories'
+import { saveMemory, searchMemories, listMemories, applyMemoryDecay, invalidateMemory } from './storage/memories'
 import { findConsolidationNudge, buildConsolidationHint } from './ai/memory-consolidate'
 import { searchConversations } from './storage/chats'
 import { registerCommandsIpc } from './ipc/commands'
@@ -478,6 +478,7 @@ app.whenReady().then(() => {
     saveMemory: (projectPath, type, content, tags) => {
       return saveMemory(db, projectPath, type as import('./storage/memories').MemoryType, content, tags)
     },
+    invalidateMemory: (id, supersededBy) => invalidateMemory(db, id, supersededBy),
     saveDecision: (projectPath, rec) => brainStore.saveDecisionRecord(projectPath, rec),
     searchMemories: (projectPath, query, limit) => {
       return searchMemories(db, projectPath, query, limit)

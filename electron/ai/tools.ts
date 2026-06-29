@@ -589,7 +589,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'memory_save',
-    description: 'Сохраняет факт, решение или паттерн в долговременную память агента для этого проекта. Используй в конце сессии или когда обнаружен важный инсайт.',
+    description: 'Сохраняет факт, решение или паттерн в долговременную память агента для этого проекта. Используй в конце сессии или когда обнаружен важный инсайт. РЕКОНСИЛЯЦИЯ: если новый факт ОБНОВЛЯЕТ или ПРОТИВОРЕЧИТ уже сохранённому (напр. «перешли на vite» против старого «используем webpack») — сначала найди старый через memory_search, сохрани новый, затем пометь старый устаревшим через memory_invalidate(old_id, superseded_by=new_id). Так память не копит противоречия, а история сохраняется.',
     parameters: {
       type: 'object',
       properties: {
@@ -598,6 +598,18 @@ export const TOOL_DEFS: ToolDefinition[] = [
         tags: { type: 'array', items: { type: 'string' }, description: 'Теги для поиска (3-5 слов)' }
       },
       required: ['type', 'content', 'tags']
+    }
+  },
+  {
+    name: 'memory_invalidate',
+    description: 'Пометить устаревший/опровергнутый факт в долговременной памяти суперсеженным (soft, БЕЗ удаления). Из recall выпадает, но история «было X → стало Y» сохраняется. Используй при реконсиляции: новый факт заменил/опроверг старый (id берётся из memory_search). superseded_by — id нового факта, заменившего этот.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'id устаревшего воспоминания (из memory_search).' },
+        superseded_by: { type: 'string', description: 'Опц. — id нового воспоминания, заменившего это.' }
+      },
+      required: ['id']
     }
   },
   {

@@ -62,6 +62,9 @@ interface AiDeps {
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   /** Сохранить запись в долговременную память проекта. */
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string }
+  /** Ось 4 #2: пометить воспоминание устаревшим (soft-invalidate) — для реконсиляции
+   *  противоречащих фактов агентом. supersededBy — id заменившего воспоминания. */
+  invalidateMemory: (id: string, supersededBy?: string | null) => boolean
   /** Сохранить структурированное Decision Record в Decision Memory (project-brain). */
   saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
   /** Поиск по долговременной памяти проекта. */
@@ -864,7 +867,7 @@ export function registerAiIpc(deps: AiDeps): void {
         initialMessages: messagesWithSystem, signal: ctrl.signal,
         recordWrite: deps.recordWrite, recordPlan: deps.recordPlan,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
-        saveMemory: deps.saveMemory, saveDecision: deps.saveDecision,
+        saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
         connectors: deps.connectors, agentMode, turnsBudget,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
@@ -1296,6 +1299,7 @@ export interface AgentRunContext {
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   saveMemory: AiDeps['saveMemory']
+  invalidateMemory: AiDeps['invalidateMemory']
   saveDecision: AiDeps['saveDecision']
   searchMemories: AiDeps['searchMemories']
   searchConversations: AiDeps['searchConversations']
@@ -1326,7 +1330,7 @@ export interface AgentRunContext {
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision,
+    recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
@@ -1666,6 +1670,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
       recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+      invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.

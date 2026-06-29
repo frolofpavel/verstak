@@ -34,6 +34,8 @@ export interface ToolContext {
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   /** Сохранить запись в долговременную память проекта. */
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string }
+  /** Ось 4 #2: пометить воспоминание устаревшим (soft-invalidate) для реконсиляции. */
+  invalidateMemory?: (id: string, supersededBy?: string | null) => boolean
   /** Сохранить структурированное Decision Record в Decision Memory (project-brain). */
   saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
   /** Поиск по долговременной памяти проекта. */
