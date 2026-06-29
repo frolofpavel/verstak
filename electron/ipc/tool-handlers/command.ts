@@ -23,7 +23,7 @@ export const runCommandHandler: ToolHandler = {
     }
     // Mode policy: plan blocks, ask confirms, auto/bypass auto-accept,
     // accept-edits still confirms commands (only edits auto-pass).
-    const decision = decide('run_command', ctx.agentMode)
+    const decision = decide('run_command', ctx.agentMode, ctx.autoApprove)
     if (decision === 'block') {
       ctx.sender.send('ai:event', {
         id: ctx.sendId,

@@ -16,7 +16,7 @@ function csvToMarkdown(lines: string[]): string {
     '| ' + sep.join(' | ') + ' |',
     ...body.map(r => '| ' + r.join(' | ') + ' |')
   ].join('\n')
-}
+}
 
 function stripHtml(html: string): string {
   return html
@@ -26,7 +26,7 @@ function stripHtml(html: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 10000)
-}
+}
 
 export const convertFileHandler: ToolHandler = {
   mode: 'parallel-read',
@@ -95,7 +95,7 @@ export const convertFileHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
-}
+}
 
 export const editSpreadsheetHandler: ToolHandler = {
   mode: 'confirm-write',
@@ -116,7 +116,7 @@ export const editSpreadsheetHandler: ToolHandler = {
       }
 
       // Mode policy — как write_file: ask/accept-edits/auto/bypass/plan
-      const decision = decide('edit_spreadsheet', ctx.agentMode)
+      const decision = decide('edit_spreadsheet', ctx.agentMode, ctx.autoApprove)
       if (decision === 'block') {
         const reason = blockReason('edit_spreadsheet', ctx.agentMode)
         return { id: call.id, name: call.name, result: '', error: reason }
@@ -149,4 +149,4 @@ export const editSpreadsheetHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
-}
+}

@@ -1644,6 +1644,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
+      // ось 3 I: per-tool auto-approve — читаем тумблеры живо (как agentMode).
+      autoApprove: {
+        edits: getSecretForDelegate?.('auto_approve_edits') === 'true',
+        commands: getSecretForDelegate?.('auto_approve_commands') === 'true',
+      },
       currentProviderId: providerId,
       mcpClient: mcpClientRef,
       appendAudit: appendAuditFn,

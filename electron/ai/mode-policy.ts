@@ -23,6 +23,17 @@ export type ToolDecision =
   | 'block'        // refuse with a message back to the model
 
 /**
+ * Per-tool auto-approve (ось 3 I) — пользовательские категорийные тумблеры поверх mode.
+ * Повышают confirm→auto-accept для ДОВЕРЕННОЙ категории (без перехода в полный auto/
+ * bypass). НЕ перекрывают block — plan-режим остаётся строгим. Гранулярный контроль:
+ * «доверяю правкам, но команды подтверждаю» и наоборот.
+ */
+export interface AutoApprove {
+  edits?: boolean     // write_file / apply_patch / propose_edits / edit_spreadsheet
+  commands?: boolean  // run_command / connector_query / execute_code
+}
+
+/**
  * Returns what to do with a tool call under the given mode. Used by
  * tool-handlers to short-circuit the diff/command modals.
  *
@@ -35,7 +46,7 @@ export type ToolDecision =
  * Telegram, Битрикс24, публикация) дают side-effects на внешних системах, поэтому
  * в plan-режиме («только чтение») они должны блокироваться, а в ask — подтверждаться.
  */
-export function decide(toolName: string, mode: AgentMode): ToolDecision {
+export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
   // execute_code (PTC) исполняет произвольный JS — vm НЕ граница безопасности, поэтому
   // trust = run_command: confirm в ask, block в plan. Без эскалации привилегий.
@@ -43,13 +54,21 @@ export function decide(toolName: string, mode: AgentMode): ToolDecision {
 
   if (!isEdit && !isCommand) return 'auto-accept'  // reads always pass
 
+  let decision: ToolDecision
   switch (mode) {
-    case 'ask':          return 'confirm'
-    case 'accept-edits': return isEdit ? 'auto-accept' : 'confirm'
-    case 'plan':         return 'block'
-    case 'auto':         return 'auto-accept'
-    case 'bypass':       return 'auto-accept'
+    case 'ask':          decision = 'confirm'; break
+    case 'accept-edits': decision = isEdit ? 'auto-accept' : 'confirm'; break
+    case 'plan':         decision = 'block'; break
+    case 'auto':         decision = 'auto-accept'; break
+    case 'bypass':       decision = 'auto-accept'; break
   }
+  // Per-tool auto-approve: только повышаем confirm→auto-accept для доверенной категории.
+  // block (plan) и без того auto-accept НЕ трогаем.
+  if (decision === 'confirm' && autoApprove) {
+    if (isEdit && autoApprove.edits) return 'auto-accept'
+    if (isCommand && autoApprove.commands) return 'auto-accept'
+  }
+  return decision
 }
 
 /** Human-readable rejection message for the model when a tool is blocked by mode. */

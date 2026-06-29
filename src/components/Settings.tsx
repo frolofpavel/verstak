@@ -407,6 +407,8 @@ function PolicyTab() {
   const [dodMode, setDodMode] = useState<string>('warn')
   const [allowlist, setAllowlist] = useState<string>('')
   const [planGate, setPlanGate] = useState(false)
+  const [autoEdits, setAutoEdits] = useState(false)
+  const [autoCommands, setAutoCommands] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -420,8 +422,13 @@ function PolicyTab() {
       setAllowlist(al || '')
       const pg = await window.api.settings.getKey('plan_approval_gate')
       setPlanGate(pg === 'true')
+      setAutoEdits((await window.api.settings.getKey('auto_approve_edits')) === 'true')
+      setAutoCommands((await window.api.settings.getKey('auto_approve_commands')) === 'true')
     })()
   }, [])
+
+  const changeAutoEdits = async (v: boolean) => { setAutoEdits(v); await window.api.settings.setKey('auto_approve_edits', v ? 'true' : 'false') }
+  const changeAutoCommands = async (v: boolean) => { setAutoCommands(v); await window.api.settings.setKey('auto_approve_commands', v ? 'true' : 'false') }
 
   const changeDod = async (v: string) => {
     setDodMode(v)
@@ -540,6 +547,19 @@ function PolicyTab() {
       <label className="gg-theme-square">
         <input type="checkbox" checked={planGate} onChange={e => void changePlanGate(e.target.checked)} />
         <span>Блокировать-и-ждать одобрения плана (Approve / Revise / Reject)</span>
+      </label>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>⚙ Авто-одобрение по категориям</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Гранулярный контроль поверх режима: доверяй отдельной категории, не переходя в полный «Авто/Без подтверждений». Подтверждение пропускается только для включённой категории; <strong>режим планирования всё равно блокирует</strong>.
+      </div>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={autoEdits} onChange={e => void changeAutoEdits(e.target.checked)} />
+        <span>Авто-принимать правки файлов (write/apply_patch) — без модалки diff</span>
+      </label>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={autoCommands} onChange={e => void changeAutoCommands(e.target.checked)} />
+        <span>Авто-принимать команды (run_command / коннекторы / execute_code) — осторожно</span>
       </label>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>

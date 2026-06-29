@@ -66,3 +66,23 @@ describe('mode-policy blockReason()', () => {
     expect(blockReason('write_file', 'plan')).toContain('планирования')
   })
 })
+
+describe('mode-policy decide() — per-tool auto-approve (ось 3 I)', () => {
+  it('autoApprove.commands повышает confirm→auto-accept в ask (не трогая plan-block)', () => {
+    expect(decide('run_command', 'ask', { commands: true })).toBe('auto-accept')
+    expect(decide('connector_query', 'ask', { commands: true })).toBe('auto-accept')
+    // plan строгий — auto-approve НЕ перекрывает block
+    expect(decide('run_command', 'plan', { commands: true })).toBe('block')
+  })
+  it('autoApprove.edits повышает правки в ask; команды без своего тумблера остаются confirm', () => {
+    expect(decide('write_file', 'ask', { edits: true })).toBe('auto-accept')
+    expect(decide('run_command', 'ask', { edits: true })).toBe('confirm') // другой тумблер
+  })
+  it('без тумблеров поведение прежнее; чтение всегда auto', () => {
+    expect(decide('run_command', 'ask')).toBe('confirm')
+    expect(decide('read_file', 'ask', { commands: true })).toBe('auto-accept')
+  })
+  it('accept-edits + autoApprove.commands → команды тоже авто', () => {
+    expect(decide('run_command', 'accept-edits', { commands: true })).toBe('auto-accept')
+  })
+})

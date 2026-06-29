@@ -30,7 +30,7 @@ export const readHandler: ToolHandler = {
 // ============================================================================
 
 async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string): Promise<ToolResult> {
-  const decision = decide(call.name, ctx.agentMode)
+  const decision = decide(call.name, ctx.agentMode, ctx.autoApprove)
   if (decision === 'block') {
     return { id: call.id, name: call.name, result: '', error: blockReason(call.name, ctx.agentMode) }
   }
@@ -179,4 +179,4 @@ export const proposeEditsHandler: ToolHandler = {
       ...(ok === 0 ? { error: 'All edits rejected or failed' } : {})
     }
   }
-}
+}

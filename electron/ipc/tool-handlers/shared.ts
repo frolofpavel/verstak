@@ -55,6 +55,9 @@ export interface ToolContext {
    *  (op-level политика). Пишущие/выполняющие коннекторы (ssh/telegram send/вебхуки)
    *  блокируются без надзора. См. connector-readonly.ts. */
   readOnlyConnectors?: boolean
+  /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
+   *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
+  autoApprove?: import('../../ai/mode-policy').AutoApprove
   /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).
    *  Пишет в мутабельный holder уровня прогона — следующий turn видит новый режим. */
   setAgentMode?: (mode: AgentMode) => void

@@ -42,7 +42,7 @@ export const connectorQueryHandler: ToolHandler = {
       const entity = call.args.entity ? ` · ${call.args.entity}` : ''
       const path = call.args.path ? ` · ${call.args.path}` : ''
       const summary = `Коннектор ${cid}${entity}${path}`
-      const decision = decide('connector_query', ctx.agentMode)
+      const decision = decide('connector_query', ctx.agentMode, ctx.autoApprove)
       if (decision === 'block') {
         const reason = blockReason('connector_query', ctx.agentMode)
         ctx.sender.send('ai:event', {
