@@ -818,6 +818,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled);
       `)
     }
+  },
+  {
+    version: 32,
+    description: 'Ось 4 #3: soft-invalidate памяти — invalidated_at/superseded_by (история «было X → стало Y», не физическое удаление при суперсессии).',
+    run: (db: DB) => {
+      // ADD COLUMN не идемпотентен (нет IF NOT EXISTS) — гейтим по table_info, чтобы
+      // повторный прогон миграций (тесты / ручной rerun) не падал «duplicate column».
+      const cols = db.prepare('PRAGMA table_info(memories)').all() as Array<{ name: string }>
+      const has = (n: string) => cols.some(c => c.name === n)
+      if (!has('invalidated_at')) db.exec('ALTER TABLE memories ADD COLUMN invalidated_at INTEGER')
+      if (!has('superseded_by')) db.exec('ALTER TABLE memories ADD COLUMN superseded_by TEXT')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memories_invalidated ON memories(project_path, invalidated_at)')
+    }
   }
 ]
 

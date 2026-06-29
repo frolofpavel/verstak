@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import { openDb } from '../../electron/storage/db'
-import { saveMemory, searchMemories, listMemories, deleteMemory, buildFtsMatch } from '../../electron/storage/memories'
+import { saveMemory, searchMemories, listMemories, deleteMemory, buildFtsMatch, invalidateMemory } from '../../electron/storage/memories'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -180,6 +180,26 @@ describe('memories storage', () => {
       expect(buildFtsMatch('почини баг с FTS5')).toBe('"почини" OR "баг" OR "fts5"')
       expect(buildFtsMatch('a "b" (c)')).toBe('') // все токены <3 → пусто
       expect(buildFtsMatch('   ')).toBe('')
+    })
+  })
+  describe('invalidateMemory (ось 4 #3 soft-invalidate)', () => {
+    it('суперсеженное воспоминание выпадает из recall+list, но физически остаётся', () => {
+      const db2 = openDb(join(dir, 'inv.db'))
+      const m = saveMemory(db2, PROJECT, 'fact', 'проект использует webpack', ['build'])
+      const m2 = saveMemory(db2, PROJECT, 'fact', 'проект перешёл на vite', ['build'])
+      expect(invalidateMemory(db2, m.id, m2.id)).toBe(true)
+      expect(searchMemories(db2, PROJECT, 'webpack', 5).find(x => x.id === m.id)).toBeUndefined()
+      expect(listMemories(db2, PROJECT).find(x => x.id === m.id)).toBeUndefined()
+      const raw = db2.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(m.id) as { superseded_by: string }
+      expect(raw.superseded_by).toBe(m2.id) // история сохранена
+      db2.close()
+    })
+    it('повторная инвалидация → false (уже инвалидирован)', () => {
+      const db2 = openDb(join(dir, 'inv2.db'))
+      const m = saveMemory(db2, PROJECT, 'fact', 'x', [])
+      expect(invalidateMemory(db2, m.id)).toBe(true)
+      expect(invalidateMemory(db2, m.id)).toBe(false)
+      db2.close()
     })
   })
 })

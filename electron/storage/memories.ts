@@ -80,8 +80,9 @@ export function searchMemories(
   query: string,
   limit = 5
 ): Memory[] {
+  // Ось 4 #3: invalidated (суперсеженные) воспоминания НЕ участвуют в recall.
   const recency = () => db.prepare(
-    'SELECT * FROM memories WHERE project_path = ? ORDER BY accessed_at DESC LIMIT ?'
+    'SELECT * FROM memories WHERE project_path = ? AND invalidated_at IS NULL ORDER BY accessed_at DESC LIMIT ?'
   ).all(projectPath, limit) as MemoryRow[]
 
   let rows: MemoryRow[] = []
@@ -97,7 +98,7 @@ export function searchMemories(
       rows = db.prepare(
         `SELECT m.* FROM memories m
          JOIN memories_fts ON m.rowid = memories_fts.rowid
-         WHERE memories_fts MATCH ? AND m.project_path = ?
+         WHERE memories_fts MATCH ? AND m.project_path = ? AND m.invalidated_at IS NULL
          ORDER BY rank LIMIT ?`
       ).all(fts, projectPath, limit) as MemoryRow[]
     } catch {
@@ -121,9 +122,22 @@ export function searchMemories(
 
 export function listMemories(db: Database, projectPath: string): Memory[] {
   const rows = db.prepare(
-    'SELECT * FROM memories WHERE project_path = ? ORDER BY accessed_at DESC'
+    'SELECT * FROM memories WHERE project_path = ? AND invalidated_at IS NULL ORDER BY accessed_at DESC'
   ).all(projectPath) as MemoryRow[]
   return rows.map(rowToMemory)
+}
+
+/**
+ * Ось 4 #3: soft-invalidate — пометить воспоминание устаревшим (суперсеженным), НЕ
+ * удаляя физически. Из recall выпадает, но история «было X → стало Y» сохраняется
+ * (audit-trail: агент может объяснить, почему решение изменилось). supersededBy — id
+ * нового воспоминания, заменившего это. Decay физически приберёт со временем сам.
+ */
+export function invalidateMemory(db: Database, id: string, supersededBy?: string | null): boolean {
+  const info = db.prepare(
+    'UPDATE memories SET invalidated_at = ?, superseded_by = ? WHERE id = ? AND invalidated_at IS NULL'
+  ).run(Date.now(), supersededBy ?? null, id)
+  return info.changes > 0
 }
 
 export function deleteMemory(db: Database, id: string): boolean {
