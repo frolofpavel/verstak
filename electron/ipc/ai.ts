@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent } from '../ai/run-notify'
 import { scanText } from '../ai/secret-scanner'
+import { clearRunUntilGreenForSend } from './tool-handlers/command'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
@@ -216,6 +217,7 @@ export function abortSend(sendId: number): boolean {
   if (!ctrl) return false
   ctrl.abort()
   activeAborts.delete(sendId)
+  clearRunUntilGreenForSend(sendId) // ось 3 E: счётчик run_until_green этого прогона
   // Reject ONLY this session's pending confirmations — other concurrent
   // ai:send streams (background sessions) keep theirs intact.
   for (const [k, p] of pendingWrites) {
@@ -434,6 +436,8 @@ export function registerAiIpc(deps: AiDeps): void {
       // #4 suspend: чистим suspendedSends здесь — cleanup идёт для ОБОИХ путей (API+CLI)
       // и любого выхода, иначе CLI-приостановки и race suspend-после-finish копились бы.
       suspendedSends.delete(sendId)
+      // ось 3 E: чистим серверный счётчик run_until_green этого прогона (иначе Map течёт).
+      clearRunUntilGreenForSend(sendId)
       // sendIdToChatId mapping cleared via separate ai:event done handler in
       // renderer — no need to touch from main.
       // Push-наблюдаемость: на завершении прогона шлём в Telegram done/failed/нужен-
@@ -1436,6 +1440,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       const rebuilt = buildNewTaskContext(baseSystemMsg, originalUserMsg, pendingNewTask, focus)
       currentMessages.length = 0
       currentMessages.push(...rebuilt)
+      // Стейл итеративное резюме относится к ВЫБРОШЕННОМУ контексту — иначе следующая
+      // авто-компакция втянет его обратно через previousSummary (ревью кросс-фич). Сброс.
+      lastSummary = ''
       sender.send('ai:event', { id: sendId, event: { type: 'info', message: '🧹 Контекст очищен по new_task — продолжаю с дистиллята' } })
       pendingNewTask = null
     }

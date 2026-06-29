@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatAutoDebugResult, runUntilGreenHandler } from '../../electron/ipc/tool-handlers/command'
+import { formatAutoDebugResult, runUntilGreenHandler, clearRunUntilGreenForSend } from '../../electron/ipc/tool-handlers/command'
 import type { ToolContext } from '../../electron/ipc/tool-handlers/shared'
 
 // run_until_green (ось 3 E) — цикл fix-until-green для ПРОИЗВОЛЬНОЙ команды.
@@ -51,5 +51,24 @@ describe('runUntilGreenHandler — серверный счётчик (агент
       if (i < 5) expect(last.exhausted).toBe(false)
     }
     expect(last.exhausted).toBe(true) // серверный счётчик дошёл до лимита, агент не обошёл
+  })
+})
+
+describe('clearRunUntilGreenForSend — очистка счётчика по sendId (ревью leak)', () => {
+  const mkCtx = (sendId: number) => ({
+    sendId, agentMode: 'auto', getSecretForDelegate: () => null,
+    sender: { send: () => {} }, recordRunEvent: () => {},
+    tools: { classifyCommand: () => ({ allowed: true }), runCommand: async () => ({ stdout: '', stderr: 'x', exitCode: 1 }) },
+  } as unknown as ToolContext)
+
+  it('после clear счётчик стартует заново (не продолжает с прошлого прогона)', async () => {
+    const ctx = mkCtx(999)
+    const call = { id: 'c', name: 'run_until_green', args: { command: 'npm test' } }
+    await runUntilGreenHandler.handle(call, ctx) // attempt 1
+    const r2 = await runUntilGreenHandler.handle(call, ctx) // attempt 2
+    expect((r2.result as { directive: string }).directive).toMatch(/2\/5/)
+    clearRunUntilGreenForSend(999)
+    const r3 = await runUntilGreenHandler.handle(call, ctx) // снова attempt 1 (счётчик очищен)
+    expect((r3.result as { directive: string }).directive).toMatch(/1\/5/)
   })
 })

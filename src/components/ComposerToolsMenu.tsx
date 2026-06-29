@@ -24,6 +24,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   const activeChatId = useProject(s => s.activeChatId)
   const checkpointId = useProject(s => s.checkpointId)
   const checkpointMessageId = useProject(s => s.checkpointMessageId)
+  const isStreaming = useProject(s => s.isStreaming)
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)
   const startReview = useProject(s => s.startReview)
@@ -145,16 +146,21 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     })
   }
 
+  // Откат во время стрима небезопасен (гонка с дописыванием сообщений/файлов, снятие
+  // undo-floor) — гейтим (ревью кросс-фич: HIGH порча истории чата мид-стрим).
   async function revertFiles() {
+    if (isStreaming) return
     if (!window.confirm('Откатить ВСЕ файловые правки после чекпоинта? Файлы вернутся к состоянию на момент чекпоинта.')) return
     if (await revertFilesOnly()) setCheckpoint(null)
     setOpen(false)
   }
   async function revertTask() {
+    if (isStreaming) return
     if (!window.confirm('Откатить ДИАЛОГ к чекпоинту (файлы НЕ трогаем)? Сообщения после чекпоинта удалятся.')) return
     await revertTaskOnly(); setCheckpoint(null); setOpen(false)
   }
   async function revertBoth() {
+    if (isStreaming) return
     if (!window.confirm('Откатить и ФАЙЛЫ, и ДИАЛОГ к чекпоинту? Действие не отменить.')) return
     await revertFilesOnly(); await revertTaskOnly(); setCheckpoint(null); setOpen(false)
   }
@@ -417,17 +423,17 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                     </button>
                   ) : (
                     <>
-                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertFiles()}>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertFiles()} disabled={isStreaming}>
                         <span className="gg-tools-row-label">Откатить файлы</span>
-                        <span className="gg-tools-row-meta">После #{checkpointId === 0 ? 'start' : checkpointId}</span>
+                        <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения ответа' : `После #${checkpointId === 0 ? 'start' : checkpointId}`}</span>
                       </button>
-                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertTask()} disabled={checkpointMessageId == null}>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertTask()} disabled={isStreaming || checkpointMessageId == null}>
                         <span className="gg-tools-row-label">Откатить задачу (диалог)</span>
-                        <span className="gg-tools-row-meta">{checkpointMessageId == null ? 'граница не захвачена' : 'обрезать диалог к чекпоинту'}</span>
+                        <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения' : checkpointMessageId == null ? 'граница не захвачена' : 'обрезать диалог к чекпоинту'}</span>
                       </button>
-                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertBoth()}>
+                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertBoth()} disabled={isStreaming}>
                         <span className="gg-tools-row-label">Файлы + задачу</span>
-                        <span className="gg-tools-row-meta">откатить всё</span>
+                        <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения' : 'откатить всё'}</span>
                       </button>
                     </>
                   )}

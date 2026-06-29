@@ -98,6 +98,14 @@ export function formatAutoDebugResult(exitCode: number, attempt: number, maxAtte
 // на passed/exhausted/блокировке.
 const runUntilGreenAttempts = new Map<string, number>()
 
+/** Очистить счётчики попыток прогона (на завершении/abort) — иначе Map течёт per sendId. */
+export function clearRunUntilGreenForSend(sendId: number): void {
+  const prefix = `${sendId}::`
+  for (const key of runUntilGreenAttempts.keys()) {
+    if (key.startsWith(prefix)) runUntilGreenAttempts.delete(key)
+  }
+}
+
 // run_until_green (ось 3 E): прогон ПРОИЗВОЛЬНОЙ команды в цикле fix-until-green. Тонкая
 // обёртка над run_command — реюз денилиста/mode-policy-гейта/executor/secret-scan. Агент
 // чинит между попытками (его ходы), хендлер несёт рамку с ЧЕСТНЫМ серверным лимитом.
