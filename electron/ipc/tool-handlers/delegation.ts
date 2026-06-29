@@ -301,6 +301,35 @@ export const delegateTaskHandler: ToolHandler = {
 }
 
 // ============================================================================
+// oracle (ось 3, кластер B) — reasoning-советник как first-class tool. Тонкая
+// обёртка над delegate_task role=critic: read-only, лимиты глубины/числа агентов,
+// суб-сессия, cost-guard — всё переиспользуется. Агент зовёт его проактивно для
+// плана / ревью своего кода / дебага (инструкция в system-layer).
+// ============================================================================
+
+/** Рефрейм oracle-вызова в delegate_task role=critic. null если нет question (чистое, тестируемо). */
+export function buildOracleDelegateArgs(args: Record<string, unknown>): Record<string, unknown> | null {
+  const question = String(args.question ?? '').trim()
+  if (!question) return null
+  const context = args.context ? `\n\nКОНТЕКСТ:\n${String(args.context)}` : ''
+  const files = Array.isArray(args.files) && args.files.length
+    ? `\n\nОтносящиеся файлы (прочитай их): ${(args.files as unknown[]).map(String).join(', ')}` : ''
+  const prompt = `Ты — senior-советник (oracle). Дай экспертную оценку/план/ревью по запросу. Будь критичен и конкретен, опирайся на РЕАЛЬНЫЙ код (читай файлы). Не правь и не запускай команды — ТОЛЬКО анализ и рекомендации.\n\nЗАПРОС: ${question}${context}${files}`
+  // role=critic → read-only набор (researcher/critic/planner read-only по role-tools).
+  return { role: 'critic', prompt, provider_id: args.provider_id, model: args.model, group: 'oracle' }
+}
+
+export const oracleHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    const dargs = buildOracleDelegateArgs(call.args as Record<string, unknown>)
+    if (!dargs) return { id: call.id, name: call.name, result: '', error: 'oracle: question обязателен' }
+    const res = await delegateTaskHandler.handle({ ...call, args: dargs }, ctx)
+    return { ...res, name: call.name }
+  }
+}
+
+// ============================================================================
 // delegate_parallel — мультиагент V2: параллельное выполнение N задач
 // ============================================================================
 

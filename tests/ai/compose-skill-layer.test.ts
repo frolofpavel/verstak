@@ -24,6 +24,13 @@ describe('composeSystemPrompt — skill layering (не замена)', () => {
     expect(system).toContain(SKILL)
   })
 
+  it('guardrails (ось 3): план при >3 файлов + no-new-deps + сериализация правок одного файла', () => {
+    const { system } = composeSystemPrompt({ path: null, content: '' })
+    expect(system).toContain('more than 3 files')         // PLAN-порог по числу файлов
+    expect(system).toContain('NEW dependency')            // no-new-deps в immutable-протоколе
+    expect(system).toContain('shared contract/interface') // сериализация правок одного файла
+  })
+
   it('порядок слоёв: system-layer → user-layer → context-pack → skill-layer', () => {
     const { system } = composeSystemPrompt(
       { path: 'CLAUDE.md', content: 'правило проекта' },
