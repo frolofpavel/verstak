@@ -12,7 +12,7 @@ import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
-import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded } from '../ai/compact-history'
+import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain } from '../ai/compact-history'
 import { estimateTokens } from '../ai/context-limits'
 import { withInitialRetry } from '../ai/with-retry'
 import { classifyProviderError } from '../ai/provider-error'
@@ -1246,6 +1246,7 @@ export type { UsageDelta } from '../ai/types'
  */
 const DEFAULT_AGENT_TURNS = 8
 const MAX_BUDGET_TURNS = 40  // hard ceiling even with continues — prevents infinite-budget abuse
+const FOCUS_REINJECT_EVERY = 8  // ось 3 C: каждые N ходов реинъект незакрытого todo-листа (анти-дрейф)
 
 /**
  * Аудит M4: отбирает инструменты, которые увидит модель, по tools_allow скилла.
@@ -1418,6 +1419,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       exitReason = 'aborted'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
+    }
+    // Focus Chain (ось 3 C): по cadence реинъектим незакрытый todo-лист как system-
+    // напоминание — длинная сессия дрейфует, чеклист уезжает из внимания (§5.4). Лёгко:
+    // только если есть НЕзавершённые пункты; компакция и так несёт якорь отдельно.
+    if (turn > 0 && turn % FOCUS_REINJECT_EVERY === 0 && sessionTodos && projectPath) {
+      const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
+      if (focus) currentMessages.push({ role: 'system', content: focus })
     }
     const toolCalls: ToolCall[] = []
     let assistantText = ''
@@ -1872,7 +1880,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           lastCompactTurn = turn
           lastSummary = summaryText // T1.6: следующая компакция обновит это резюме
           const beforeLen = currentMessages.length
-          const compacted = createCompactedHistory(summaryText, currentMessages)
+          // Focus Chain (ось 3 C): незакрытый todo-лист переживает сжатие — якорем в
+          // первое сообщение, чтобы агент не потерял исходные пункты задачи.
+          const focusAtCompact = (sessionTodos && projectPath)
+            ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+          const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact)
           currentMessages.length = 0
           currentMessages.push(...compacted)
           // Уведомляем пользователя через info-событие (UI покажет тост)

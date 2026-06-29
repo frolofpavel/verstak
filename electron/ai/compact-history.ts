@@ -305,7 +305,7 @@ const KEEP_RECENT_FOR_COMPACT = 3
  * Создаёт сжатую историю: системное сообщение с резюме + последние N пар user/assistant.
  * Возвращаемый массив готов для подстановки в currentMessages.
  */
-export function createCompactedHistory(summary: string, messages: ChatMessage[]): ChatMessage[] {
+export function createCompactedHistory(summary: string, messages: ChatMessage[], focusBlock?: string | null): ChatMessage[] {
   // Берём последние KEEP_RECENT_FOR_COMPACT пары (user + assistant)
   // Считаем с конца: ищем user-сообщения (они маркируют начало turn'а)
   const recentTurns: ChatMessage[] = []
@@ -323,10 +323,27 @@ export function createCompactedHistory(summary: string, messages: ChatMessage[])
       role: 'system',
       content:
         '[Авто-компакшн: предыдущая часть сессии сжата в резюме]\n\n' +
-        summary
+        summary +
+        // Focus Chain (ось 3 C): незакрытый todo-лист — ЯКОРЬ в первом сообщении, чтобы
+        // он пережил сжатие и агент не потерял исходные пункты задачи (анти-дрейф §5.4).
+        (focusBlock ? '\n\n' + focusBlock : '')
     },
     ...recentTurns
   ]
+}
+
+/**
+ * Focus Chain (ось 3 C): активные (НЕ done) пункты todo-листа сессии как чеклист-якорь.
+ * Держит фокус длинной одиночной сессии — переживает компакцию и реинъектится по cadence.
+ * null если нет незавершённых пунктов (нечего держать).
+ */
+export function formatFocusChain(todos: ReadonlyArray<{ title: string; status: string }>): string | null {
+  const active = todos.filter(t => t.status !== 'done')
+  if (active.length === 0) return null
+  const mark = (s: string) => s === 'in_progress' ? '⏳' : s === 'blocked' ? '⛔' : '☐'
+  const lines = active.slice(0, 12).map(t => `${mark(t.status)} ${t.title}`)
+  const more = active.length > 12 ? `\n…ещё ${active.length - 12}` : ''
+  return '[Focus Chain — незакрытые пункты задачи (держи в фокусе, не дрейфуй):\n' + lines.join('\n') + more + ']'
 }
 
 /** Статистика сжатия — для журнала / отладки. */

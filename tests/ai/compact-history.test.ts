@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { compactToolHistory, diffSize, smartCompressResult, shouldAutoCompact } from '../../electron/ai/compact-history'
+import { compactToolHistory, diffSize, smartCompressResult, shouldAutoCompact, formatFocusChain, createCompactedHistory } from '../../electron/ai/compact-history'
 import type { ChatMessage } from '../../electron/ai/types'
 
 function bigResult(name: string, size: number): ChatMessage {
@@ -154,5 +154,37 @@ describe('shouldAutoCompact — резерв output-бюджета (ревью #
     const small = 'x'.repeat(4_000) // ~1000 токенов
     const msgs: ChatMessage[] = Array.from({ length: 10 }, () => ({ role: 'user' as const, content: small }))
     expect(shouldAutoCompact(msgs, 'gpt-4o')).toBe(false)
+  })
+})
+
+describe('formatFocusChain (ось 3 C — анти-дрейф)', () => {
+  it('активные пункты → чеклист с маркерами; нет незакрытых → null', () => {
+    const block = formatFocusChain([
+      { title: 'починить парсер', status: 'in_progress' },
+      { title: 'добавить тест', status: 'pending' },
+      { title: 'уже сделано', status: 'done' },
+    ])
+    expect(block).toContain('починить парсер')
+    expect(block).toContain('добавить тест')
+    expect(block).not.toContain('уже сделано') // done не показываем
+    expect(block).toContain('⏳') // in_progress
+    expect(formatFocusChain([{ title: 'x', status: 'done' }])).toBeNull()
+    expect(formatFocusChain([])).toBeNull()
+  })
+})
+
+describe('createCompactedHistory — Focus Chain переживает компакцию', () => {
+  it('focusBlock уходит в ПЕРВОЕ (system) сообщение сжатой истории', () => {
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'задача' }, { role: 'assistant', content: 'ок' }]
+    const focus = '[Focus Chain — незакрытые пункты задачи:\n☐ пункт A]'
+    const out = createCompactedHistory('резюме сессии', msgs, focus)
+    expect(out[0].role).toBe('system')
+    expect(out[0].content).toContain('резюме сессии')
+    expect(out[0].content).toContain('пункт A') // якорь пережил сжатие
+  })
+  it('без focusBlock — поведение прежнее (только резюме)', () => {
+    const out = createCompactedHistory('резюме', [{ role: 'user', content: 'x' }])
+    expect(out[0].content).toContain('резюме')
+    expect(out[0].content).not.toContain('Focus Chain')
   })
 })
