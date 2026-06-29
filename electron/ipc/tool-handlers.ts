@@ -24,7 +24,7 @@
  */
 
 // Типы и общие хелперы вынесены в ./tool-handlers/shared (распил монолита tool-handlers.ts).
-import { delegateTaskHandler, delegateParallelHandler, orchestrateHandler, swarmHandler, oracleHandler } from './tool-handlers/delegation'
+import { delegateTaskHandler, delegateParallelHandler, orchestrateHandler, swarmHandler, oracleHandler, newTaskHandler } from './tool-handlers/delegation'
 export { dedupeTaskIds, parseDecomposition, decomposeGoal, buildSwarmRoster } from './tool-handlers/delegation'
 import { runCommandHandler, runUntilGreenHandler } from './tool-handlers/command'
 import { browserHandler } from './tool-handlers/browser'
@@ -80,6 +80,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'attest_verification': attestVerificationHandler,
   'delegate_task': delegateTaskHandler,
   'oracle': oracleHandler,
+  'new_task': newTaskHandler,
   'delegate_parallel': delegateParallelHandler,
   'orchestrate': orchestrateHandler,
   // Agent Swarms (Фаза 4, Идея 10) — рой агентов с консенсусом-арбитром

@@ -1334,6 +1334,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
   // (где ctx пересоздаётся) видит новый режим — иначе одобренный план не выполнить.
   let runAgentMode = agentMode
+  // H (ось 3): new_task — агент пакует дистиллят, контекст очищается до него на след. turn
+  // (как компакция, но по запросу агента и с его резюме). Холдер уровня прогона.
+  let pendingNewTask: string | null = null
   const currentMessages = [...initialMessages]
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
@@ -1419,6 +1422,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       exitReason = 'aborted'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
+    }
+    // H (ось 3): new_task — агент запросил чистый контекст. Очищаем историю до дистиллята
+    // (как компакция). Безопасно: dangling toolCalls предыдущего turn'а уходят ВМЕСТЕ с их
+    // toolResults. Focus Chain (todo) сохраняем — анти-дрейф переживает и new_task.
+    if (pendingNewTask) {
+      currentMessages.length = 0
+      currentMessages.push({ role: 'system', content: '[Новая задача — предыдущий контекст очищен по запросу агента (new_task). Дистиллят:]\n\n' + pendingNewTask })
+      if (sessionTodos && projectPath) {
+        const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
+        if (focus) currentMessages.push({ role: 'system', content: focus })
+      }
+      sender.send('ai:event', { id: sendId, event: { type: 'info', message: '🧹 Контекст очищен по new_task — продолжаю с дистиллята' } })
+      pendingNewTask = null
     }
     // Focus Chain (ось 3 C): по cadence реинъектим незакрытый todo-лист как system-
     // напоминание — длинная сессия дрейфует, чеклист уезжает из внимания (§5.4). Лёгко:
@@ -1644,6 +1660,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
+      // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.
+      requestNewTask: (summary: string) => { pendingNewTask = summary },
       // ось 3 I: per-tool auto-approve — читаем тумблеры живо (как agentMode).
       autoApprove: {
         edits: getSecretForDelegate?.('auto_approve_edits') === 'true',

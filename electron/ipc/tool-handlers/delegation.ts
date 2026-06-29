@@ -329,6 +329,19 @@ export const oracleHandler: ToolHandler = {
   }
 }
 
+// new_task (ось 3 H) — агент пакует дистиллят и просит чистый контекст. Сигналит прогону
+// через ctx.requestNewTask; сама очистка currentMessages — в безопасной точке turn-цикла.
+export const newTaskHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    const summary = String(call.args.summary ?? '').trim()
+    if (!summary) return { id: call.id, name: call.name, result: '', error: 'new_task: summary (дистиллят) обязателен' }
+    if (!ctx.requestNewTask) return { id: call.id, name: call.name, result: '', error: 'new_task недоступен в этом контексте' }
+    ctx.requestNewTask(summary)
+    return { id: call.id, name: call.name, result: 'Контекст будет очищен до твоего дистиллята перед следующим шагом. Продолжай с чистого окна — у тебя только дистиллят и активный todo-лист.' }
+  }
+}
+
 // ============================================================================
 // delegate_parallel — мультиагент V2: параллельное выполнение N задач
 // ============================================================================
