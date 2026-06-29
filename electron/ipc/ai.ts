@@ -4,6 +4,7 @@ import { basename } from 'path'
 import { notifyRunEvent } from '../ai/run-notify'
 import { scanText } from '../ai/secret-scanner'
 import { clearRunUntilGreenForSend } from './tool-handlers/command'
+import { fuseRanks } from '../ai/memory-fusion'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
@@ -481,17 +482,14 @@ export function registerAiIpc(deps: AiDeps): void {
     let consolidationHint: string | null = null
     if (shouldInjectMemory) {
       try {
-        // #1 релевантный recall: инжектим память РЕЛЕВАНТНУЮ задаче (последнее user-
-        // сообщение как query), а не top-5 по времени. searchMemories санитайзит NL
-        // под FTS5 и сам падает на recency, если релевантного нет.
+        // #1 релевантный recall + ось 4 #1 RRF-fusion: блендим два канала вместо бинарного
+        // «релевантные ИЛИ недавние». Канал релевантности (FTS5/BM25 по последнему user-
+        // сообщению) ⊕ канал недавности (без session-summary, чтобы не вытесняли факты).
+        // Факт и релевантный, и недавний — всплывает выше. Чисто на позициях, без векторов.
         const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
-        memories = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
-        // Нет релевантных к задаче — фолбэк на недавние. Исключаем session-summary,
-        // чтобы накопленные резюме сессий не вытесняли зафиксированные факты/решения
-        // из топ-5 (ревью). Релевантный recall выше их всё равно поднимет по задаче.
-        if (memories.length === 0) {
-          memories = deps.searchMemories(projectPath!, '', 5).filter(m => !m.tags.includes('session-summary'))
-        }
+        const relevance = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
+        const recency = deps.searchMemories(projectPath!, '', 5).filter(m => !m.tags.includes('session-summary'))
+        memories = fuseRanks([relevance, recency]).slice(0, 5)
         // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
         // накопились/задублировались — мягко предлагаем модели консолидировать.
         consolidationHint = deps.memoryConsolidationHint?.(projectPath!) ?? null
