@@ -183,7 +183,9 @@ contextBridge.exposeInMainWorld('api', {
   chats: {
     list: (sessionId: number) => ipcRenderer.invoke('chats:list', sessionId),
     append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) =>
-      ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content)
+      ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content),
+    maxMessageId: (sessionId: number) => ipcRenderer.invoke('chats:max-message-id', sessionId) as Promise<number>,
+    truncateAfter: (sessionId: number, afterMessageId: number) => ipcRenderer.invoke('chats:truncate-after', sessionId, afterMessageId) as Promise<number>
   },
   handoff: {
     generate: (sessionId: number, parentId?: string | null) =>

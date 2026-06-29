@@ -35,7 +35,7 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     activity: [{ id: `act-${tag}`, kind: 'read', label: 'r', status: 'ok', timestamp: 1 }],
     sessionUsage: { inputTokens: 11, outputTokens: 22, cachedInputTokens: 3 },
     runningPlanStep: { planId: 1, stepId: 2, title: `plan-${tag}` },
-    checkpointId: 500,
+    checkpointId: 500, checkpointMessageId: 501,
     preflights: [{ callId: `pf-${tag}`, summary: `s-${tag}`, affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
     subagentRuns: [{ callId: `sr-${tag}`, label: `l-${tag}`, task: 't', status: 'running' }],
     hasUnread: false,

@@ -23,6 +23,11 @@ export interface Chats {
   list: (projectPath: string) => ChatMessage[]
   /** Append a message to a specific session. */
   appendToSession: (sessionId: number, projectPath: string, role: Role, content: string) => void
+  /** Макс. id сообщения сессии (граница для «Откатить задачу»). 0 если сессия пуста. */
+  maxMessageId: (sessionId: number) => number
+  /** Удалить сообщения сессии с id > afterMessageId (truncate диалога к чекпоинту).
+   *  FTS чистится триггером chats_fts_ad. Возвращает число удалённых. */
+  truncateAfter: (sessionId: number, afterMessageId: number) => number
 }
 
 export function createChats(db: Database): Chats {
@@ -57,6 +62,13 @@ export function createChats(db: Database): Chats {
         'INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(sessionId, projectPath, role, content, now)
       touchSession.run(now, sessionId)
+    },
+    maxMessageId(sessionId) {
+      const row = db.prepare('SELECT COALESCE(MAX(id), 0) as maxId FROM chats WHERE session_id = ?').get(sessionId) as { maxId: number }
+      return row.maxId
+    },
+    truncateAfter(sessionId, afterMessageId) {
+      return db.prepare('DELETE FROM chats WHERE session_id = ? AND id > ?').run(sessionId, afterMessageId).changes
     }
   }
 }

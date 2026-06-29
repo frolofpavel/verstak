@@ -92,4 +92,42 @@ describe('chats', () => {
     chats.appendToSession(s.id, '/p', 'user', 'давай')
     expect(chats.listBySession(s.id)).toHaveLength(2)
   })
+
+  // F (ось 3): «Откатить задачу» — граница + truncate.
+  it('maxMessageId — макс. id сессии; 0 для пустой', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db); const chats = createChats(db)
+    const s = sessions.create('/p')
+    expect(chats.maxMessageId(s.id)).toBe(0)
+    chats.appendToSession(s.id, '/p', 'user', 'a')
+    chats.appendToSession(s.id, '/p', 'assistant', 'b')
+    const list = chats.listBySession(s.id)
+    expect(chats.maxMessageId(s.id)).toBe(list[list.length - 1].id)
+  })
+
+  it('truncateAfter — удаляет сообщения после границы, граница и до неё остаются', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db); const chats = createChats(db)
+    const s = sessions.create('/p')
+    chats.appendToSession(s.id, '/p', 'user', 'q1')
+    chats.appendToSession(s.id, '/p', 'assistant', 'a1')
+    const boundary = chats.maxMessageId(s.id) // чекпоинт здесь
+    chats.appendToSession(s.id, '/p', 'user', 'q2')
+    chats.appendToSession(s.id, '/p', 'assistant', 'a2')
+    expect(chats.listBySession(s.id)).toHaveLength(4)
+    const deleted = chats.truncateAfter(s.id, boundary)
+    expect(deleted).toBe(2)
+    expect(chats.listBySession(s.id).map(m => m.content)).toEqual(['q1', 'a1'])
+  })
+
+  it('truncateAfter изолирован по сессии', () => {
+    db = openDb(join(dir, 't.db'))
+    const sessions = createChatSessions(db); const chats = createChats(db)
+    const a = sessions.create('/p'); const b = sessions.create('/p')
+    chats.appendToSession(a.id, '/p', 'user', 'a1')
+    chats.appendToSession(b.id, '/p', 'user', 'b1')
+    chats.truncateAfter(a.id, 0) // снести всё в A
+    expect(chats.listBySession(a.id)).toHaveLength(0)
+    expect(chats.listBySession(b.id)).toHaveLength(1) // B не тронут
+  })
 })

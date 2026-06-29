@@ -74,6 +74,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
    *  checkpoint pops every entry whose id > this until back at this mark.
    *  Null when no checkpoint set. */
   checkpointId: number | null
+  checkpointMessageId: number | null
   /** Dev Task Flow (Фаза 2): id активной dev_task текущего чата (или null).
    *  Привязывается при openDevTask, питает бейдж и вкладку «Задача». */
   activeDevTaskId: number | null
@@ -148,7 +149,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   clearTouchedFiles: () => void
   /** Snap a checkpoint at the current undo head. Subsequent writes can be
    *  rolled back to this mark in one click. */
-  setCheckpoint: (id: number | null) => void
+  setCheckpoint: (id: number | null, msgId?: number | null) => void
   /** Dev Task Flow (Фаза 2): сделать задачу активной (id + снимок) и открыть
    *  вкладку «Задача». */
   openDevTask: (task: DevTask) => void
@@ -268,7 +269,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   preflights: [],
   subagentRuns: [],
   touchedFiles: {},
-  checkpointId: null,
+  checkpointId: null, checkpointMessageId: null,
   activeDevTaskId: null,
   devTask: null,
   activeView: 'chat',
@@ -381,7 +382,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       runningPlanStep: target.runningPlanStep,
       // checkpointId/preflights/subagentRuns теперь per-chat в bundle —
       // восстанавливаем сохранённое для активного чата нового проекта (finding 2/3).
-      checkpointId: target.checkpointId,
+      checkpointId: target.checkpointId, checkpointMessageId: target.checkpointMessageId,
       preflights: target.preflights,
       subagentRuns: target.subagentRuns,
       activeView: 'chat',
@@ -455,7 +456,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     reviews: {},
     openedReviewId: null,
     touchedFiles: {},
-    checkpointId: null,
+    checkpointId: null, checkpointMessageId: null,
     artifacts: [],
     resumableRuns: [],
     activePipeline: null,
@@ -541,7 +542,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { touchedFiles: { ...s.touchedFiles, [path]: kind } }
   }),
   clearTouchedFiles: () => set({ touchedFiles: {} }),
-  setCheckpoint: (id) => set({ checkpointId: id }),
+  setCheckpoint: (id, msgId) => set({ checkpointId: id, checkpointMessageId: msgId ?? null }),
   openDevTask: (task) => set({ activeDevTaskId: task.id, devTask: task, activeView: 'task' }),
   refreshDevTask: async () => {
     const id = get().activeDevTaskId
@@ -625,7 +626,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         chatSnapshots: nextSnapshots,
         openedReviewId: null,
         touchedFiles: {},
-        checkpointId: null,
+        checkpointId: null, checkpointMessageId: null,
         artifacts: [],
         previewArtifactId: null,
         preflights: [],
@@ -771,7 +772,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       isStreaming: false,
       streamStartedAt: null,
       touchedFiles: {},
-      checkpointId: null,
+      checkpointId: null, checkpointMessageId: null,
       artifacts: [],
       // Эфемерные карточки активности уходящего чата — не тащим в новый (finding 3).
       preflights: [],

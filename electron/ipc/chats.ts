@@ -47,4 +47,7 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
   ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => {
     chats.appendToSession(sessionId, projectPath, role, content)
   })
+  // F (ось 3): «Откатить задачу» — граница (макс. id) на момент чекпоинта + truncate к ней.
+  ipcMain.handle('chats:max-message-id', (_e, sessionId: number) => chats.maxMessageId(sessionId))
+  ipcMain.handle('chats:truncate-after', (_e, sessionId: number, afterMessageId: number) => chats.truncateAfter(sessionId, afterMessageId))
 }

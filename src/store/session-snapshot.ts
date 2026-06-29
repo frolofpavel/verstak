@@ -90,6 +90,8 @@ export interface SessionSnapshot {
    *  при переключении чатов. Теперь носим в bundle → сохраняется per-chat, при
    *  этом чужой checkpoint не утекает (каждый чат восстанавливает свой). */
   checkpointId: number | null
+  /** F (ось 3): граница «Откатить задачу» — макс. id сообщения на момент чекпоинта. */
+  checkpointMessageId: number | null
   /** Эфемерные карточки активности чата — путешествуют с ним (per-chat). */
   preflights: PreflightCard[]
   subagentRuns: SubagentRunCard[]
@@ -134,6 +136,7 @@ export function freshSnapshot(): SessionSnapshot {
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
     runningPlanStep: null,
     checkpointId: null,
+    checkpointMessageId: null,
     preflights: [],
     subagentRuns: [],
     hasUnread: false
@@ -160,6 +163,7 @@ export function captureBundle(s: ChatStateBundle): SessionSnapshot {
     sessionUsage: s.sessionUsage,
     runningPlanStep: s.runningPlanStep,
     checkpointId: s.checkpointId,
+    checkpointMessageId: s.checkpointMessageId,
     preflights: s.preflights,
     subagentRuns: s.subagentRuns,
     hasUnread: false
@@ -179,6 +183,7 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
     sessionUsage: snap.sessionUsage,
     runningPlanStep: snap.runningPlanStep,
     checkpointId: snap.checkpointId,
+    checkpointMessageId: snap.checkpointMessageId,
     preflights: snap.preflights,
     subagentRuns: snap.subagentRuns
   }

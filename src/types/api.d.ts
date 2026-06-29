@@ -327,6 +327,8 @@ declare global {
       chats: {
         list: (sessionId: number) => Promise<StoredChatMessage[]>
         append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => Promise<void>
+        maxMessageId: (sessionId: number) => Promise<number>
+        truncateAfter: (sessionId: number, afterMessageId: number) => Promise<number>
       }
       handoff: {
         generate: (sessionId: number, parentId?: string | null) => Promise<string>
