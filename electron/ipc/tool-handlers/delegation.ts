@@ -4,6 +4,7 @@ import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
 import type { ProviderId, CreateOptions } from '../../ai/registry'
 import { emitActivity } from './shared'
 import { getRolePrompt } from '../../ai/agent-roles'
+import { findUserAgent } from '../../ai/user-agents'
 import { planSpecFeedback } from '../../ai/task-spec-check'
 import { scanText } from '../../ai/secret-scanner'
 import { addWorktree, removeWorktree, worktreeDiff } from '../../ai/git-worktree'
@@ -97,6 +98,13 @@ export const delegateTaskHandler: ToolHandler = {
       const providerOverride = call.args.provider_id ? String(call.args.provider_id) : null
       const modelOverride = call.args.model ? String(call.args.model) : null
       const role = call.args.role ? String(call.args.role) : null
+      // Субагент-как-файл: пользовательский субагент из .verstak/agents/<name>.md —
+      // свой system prompt + tools-whitelist + провайдер/модель. Перебивает скилл/роль.
+      const agentName = call.args.agent ? String(call.args.agent) : null
+      const userAgent = agentName ? findUserAgent(ctx.projectPath, agentName) : null
+      if (agentName && !userAgent) {
+        return { id: call.id, name: call.name, result: '', error: `delegate_task: субагент "${agentName}" не найден в .verstak/agents/` }
+      }
       const prompt = String(call.args.prompt ?? '').trim()
       if (!prompt) {
         return { id: call.id, name: call.name, result: '', error: 'delegate_task: prompt обязателен' }
@@ -119,14 +127,16 @@ export const delegateTaskHandler: ToolHandler = {
       const skill = skillId ? skills.find(s => s.id === skillId) ?? null : null
 
       const subProvider = providerOverride
+        ?? userAgent?.provider
         ?? skill?.default_provider
         ?? null  // null → ai:send возьмёт текущий default из settings
-      const subModel = modelOverride ?? skill?.default_model ?? null
-      // Промпт субагента: роль (если задана) + скилл/generic. Роль определяет
-      // и поведение, и набор tools (getRoleToolset). С tool-enabled loop'ом
-      // важно явно сказать субу, что у него ЕСТЬ инструменты.
+      const subModel = modelOverride ?? userAgent?.model ?? skill?.default_model ?? null
+      // Промпт субагента: пользовательский субагент (файл) > роль > скилл > generic.
+      // Роль определяет и поведение, и набор tools (getRoleToolset). С tool-enabled
+      // loop'ом важно явно сказать субу, что у него ЕСТЬ инструменты.
       const rolePrompt = role ? getRolePrompt(role) : null
-      const systemPrompt = rolePrompt
+      const systemPrompt = userAgent?.systemPrompt
+        ?? rolePrompt
         ?? skill?.systemPrompt
         ?? 'Ты — sub-agent с доступом к инструментам (чтение файлов, поиск по проекту). Выполни узкую задачу, при необходимости используй tools, ответь по существу.'
 
@@ -144,7 +154,7 @@ export const delegateTaskHandler: ToolHandler = {
 
       // subagent-run visibility (fan-out V1) — additive card в чате. label/skill/
       // provider/task + status running → done/error + tool-счётчик (Фаза 1).
-      const subLabel = skill?.name ?? skillId ?? role ?? 'sub-agent'
+      const subLabel = userAgent?.name ?? skill?.name ?? skillId ?? role ?? 'sub-agent'
       let toolCount = 0
       const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
         ctx.sender.send('ai:event', {
@@ -244,9 +254,16 @@ export const delegateTaskHandler: ToolHandler = {
           fallbackProvider as ProviderId,
           buildSubCreateOptions(fallbackProvider as ProviderId, apiKey, resolvedModel, taskAc.signal, ctx)
         )
-        // Whitelist tools по роли + глубине суба (Фаза 4): на разрешённой глубине
-        // суб-исполнитель получает delegate_* и может строить поддерево.
-        const allowedTools = getRoleToolset(role, { depth: depth + 1 })
+        // Whitelist tools: пользовательский субагент задаёт свой набор явно (файл),
+        // иначе — по роли + глубине (Фаза 4). Субагент-файл с tools=[] → read-only
+        // набор роли (безопасный дефолт). Объявленные tools всё равно гейтятся
+        // mode-policy в хендлерах — декларация не повышает привилегии сверх режима.
+        // SUBAGENT_FORBIDDEN_TOOLS (orchestrate/swarm) отсеиваем и из файлового набора
+        // тоже — иначе субагент-файл обошёл бы инвариант «суб не оркеструет» (ревью MEDIUM).
+        const { SUBAGENT_FORBIDDEN_TOOLS } = await import('../../ai/role-tools')
+        const allowedTools = (userAgent && userAgent.tools.length)
+          ? userAgent.tools.filter(t => !SUBAGENT_FORBIDDEN_TOOLS.has(t))
+          : getRoleToolset(role, { depth: depth + 1 })
         const subCtx: ToolContext = {
           ...ctx,
           subProviderId: fallbackProvider as ProviderId,

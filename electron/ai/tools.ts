@@ -429,6 +429,10 @@ export const TOOL_DEFS: ToolDefinition[] = [
           type: 'string',
           description: 'ID скилла для sub-agent (например "code-review", "git-summary"). Если skill_id неизвестен — используется generic prompt.'
         },
+        agent: {
+          type: 'string',
+          description: 'Опционально — имя пользовательского субагента из .verstak/agents/<name>.md (свой system prompt + tools-whitelist + провайдер/модель). Перебивает skill_id/role. Используй, когда у пользователя объявлен специализированный субагент под задачу.'
+        },
         provider_id: {
           type: 'string',
           description: 'Опционально — провайдер для sub-agent (gemini-api / claude / openai / grok). Если не указан — берётся из default_provider скилла, иначе используется провайдер текущего чата.'

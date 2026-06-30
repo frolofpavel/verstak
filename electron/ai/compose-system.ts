@@ -25,6 +25,7 @@ import type { ChatMessage } from './types'
 import type { CoreMemoryBlocks } from './core-memory'
 import { buildModePreset } from './model-presets'
 import { resolveOutputStylePrompt } from './output-styles'
+import { loadUserAgents } from './user-agents'
 import type { AgentMode } from './mode-policy'
 
 export interface PrepareSystemInput {
@@ -142,6 +143,21 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
     } catch (err) {
       console.warn('[prepareSystemContext] file-rules failed:', err instanceof Error ? err.message : err)
     }
+  }
+
+  // Субагенты-как-файлы: если у пользователя объявлены .verstak/agents/*.md —
+  // перечисляем их, чтобы агент знал, кому можно делегировать (delegate_task agent=).
+  // Иначе фича была бы недостижима (агент не знает имён). Graceful: ошибка → skip.
+  // НЕ гейтим по projectPath: loadUserAgents(null) читает user-scope ~/.verstak/agents,
+  // и findUserAgent резолвит их и без проекта — иначе автодискаверибилити глохла бы (ревью MEDIUM).
+  if (userLayer.content !== undefined) {
+    try {
+      const agents = loadUserAgents(projectPath)
+      if (agents.length) {
+        const list = agents.map(a => `- ${a.name}${a.description ? ` — ${a.description}` : ''}`).join('\n')
+        userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n<!-- user_subagents -->\n## Доступные субагенты (delegate_task agent="имя")\nПод узкую подзадачу можно делегировать пользовательскому субагенту со своим набором инструментов:\n${list}` }
+      }
+    } catch { /* субагенты — best-effort */ }
   }
 
   // Output style — формат/персона ответа поверх базового протокола. Инжектим как
