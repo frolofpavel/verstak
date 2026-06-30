@@ -50,4 +50,17 @@ describe('review-diff — buildDiffCommand', () => {
     expect(buildDiffCommand({ commit: '../../../etc/passwd' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
     expect(buildDiffCommand({ base: 'a..b' })).toEqual({ error: expect.stringContaining('Небезопасный base') })
   })
+
+  // Ре-ревью HIGH: regex был слишком строг — ломал ходовые относительные ref.
+  it('относительные ref HEAD~3 / HEAD^ / branch@{1} проходят (регрессия закрыта)', () => {
+    expect(buildDiffCommand({ base: 'HEAD~3' })).toEqual({ command: 'git --no-pager diff HEAD~3...HEAD' })
+    expect(buildDiffCommand({ commit: 'HEAD^' })).toEqual({ command: 'git --no-pager show HEAD^' })
+    expect(buildDiffCommand({ base: 'branch@{1}' })).toEqual({ command: 'git --no-pager diff branch@{1}...HEAD' })
+  })
+
+  it('но инъекция и .. всё ещё блокируются после расширения класса', () => {
+    expect(buildDiffCommand({ commit: 'main; rm -rf /' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
+    expect(buildDiffCommand({ base: '--output=/x' })).toEqual({ error: expect.stringContaining('Небезопасный base') })
+    expect(buildDiffCommand({ commit: 'HEAD@{..}' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
+  })
 })

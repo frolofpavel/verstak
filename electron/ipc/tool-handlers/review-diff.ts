@@ -10,7 +10,9 @@ import { delegateTaskHandler } from './delegation'
 // (?!-) — ref НЕ может начинаться с дефиса: иначе ведущий '-' делает ref git-ОПЦИЕЙ
 // (commit='--output=/path' → произвольная запись файла; ревью: argument-injection,
 // воспроизведено вживую). Запрет '..' — против обхода диапазона/родителя в ref.
-const GIT_REF_RE = /^(?!-)(?!.*\.\.)[\w./+-]+$/
+// Класс включает ~^@{} для ходовых относительных ref (HEAD~3, HEAD^, branch@{1}) —
+// shell-метасимволы (;|&$ backtick пробел) в класс НЕ входят, инъекция закрыта.
+const GIT_REF_RE = /^(?!-)(?!.*\.\.)[\w./+~^@{}-]+$/
 const MAX_DIFF_CHARS = 14000
 
 export interface DiffArgs {

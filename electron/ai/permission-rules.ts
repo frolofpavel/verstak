@@ -57,29 +57,70 @@ export function expandToolName(name: string): string[] {
 }
 
 // Разбить команду на исполняемые сегменты для матчинга префикс-правил. Иначе deny
-// тривиально обходится цепочкой/обёрткой: `npm test && git push` не начинается с
-// "git push", `sudo rm x` не с "rm" (ревью HIGH). Зеркалит хардинг bash-allowlist:
-// для deny (где провал = запрещённая команда исполнилась) фильтр обязателен.
-const SEGMENT_SPLIT = /\s*(?:&&|\|\||[;|\n])\s*/
+// тривиально обходится цепочкой/обёрткой/подстановкой: `npm test && git push`,
+// `sudo rm x`, `echo $(rm x)`, `(rm x)`, `find . -exec rm {} +` (ревью HIGH×2).
+// ВАЖНО (честно, как bash-allowlist): regex не парсит shell идеально — это хардинг,
+// поднимающий планку (закрывает распространённые обфускации), НЕ песочница. Остаются
+// экзотические векторы (\rm, /bin/rm, индирекция через переменную) — для настоящей
+// изоляции нужна OS-песочница (осознанный non-goal). Для deny (провал = запрещённое
+// исполнилось) бьём по всем известным обёрткам и извлекаем вложенные команды.
+const SEGMENT_SPLIT = /\s*(?:&&|\|\||[;|&\n])\s*/   // + одиночный & (фоновый запуск)
 const ENV_ASSIGN_RE = /^(?:[A-Za-z_]\w*=\S*\s+)+/
-const ENV_CMD_RE = /^env\s+(?:[A-Za-z_]\w*=\S*\s+)*/i
-const WRAPPER_RE = /^(?:(?:sudo|doas|nice|time|xargs|command|builtin|exec)\s+)+/i
+const GROUP_OPEN_RE = /^[({]\s*/                     // ведущая группа ( или {
+const WRAPPER_WORDS = /^(?:sudo|doas|nice|command|builtin|exec|nohup|stdbuf|watch|timeout|time|xargs|env)\b/i
 const SHELL_C_RE = /^(?:bash|sh|zsh|dash|pwsh|powershell)\s+-c\s+['"]?/i
+// Извлечь содержимое подстановок/групп: $(...), `...`, <(...), >(...), (...), {...}.
+// innermost-first ([^()]* не матчит вложенные скобки) — внешние распутываются итерацией.
+const NESTED_RE = /[$<>]?\(([^()]*)\)|`([^`]*)`|\{([^{}]*)\}/
 
-/** Сегменты команды со снятыми обёртками (sudo/env/bash -c) и env-присвоениями. */
+/** Вынести вложенные команды (подстановки/группы) как отдельные блоки + остаток. */
+function extractNested(command: string): string[] {
+  const parts: string[] = []
+  let work = command
+  for (let i = 0; i < 50; i++) {
+    const m = work.match(NESTED_RE)
+    if (!m || m.index === undefined) break
+    const inner = m[1] ?? m[2] ?? m[3] ?? ''
+    if (inner.trim()) parts.push(inner)
+    work = work.slice(0, m.index) + ' ' + work.slice(m.index + m[0].length)
+  }
+  parts.push(work)
+  return parts
+}
+
+/** Снять обёртки (sudo/env/timeout/bash -c/группы) и env-присвоения с одного сегмента. */
+function stripWrappers(seg: string): string {
+  let s = seg.trim()
+  let prev: string
+  do {
+    prev = s
+    s = s.replace(GROUP_OPEN_RE, '')
+    s = s.replace(ENV_ASSIGN_RE, '')
+    const w = s.match(WRAPPER_WORDS)
+    if (w) {
+      s = s.slice(w[0].length).trim()
+      // снять флаги/числа-аргументы обёртки: timeout 5 / stdbuf -oL / nice -n 10 / watch -n2
+      s = s.replace(/^(?:-\S+\s+|\d+\S*\s+)+/, '')
+    }
+    s = s.replace(SHELL_C_RE, '')
+    s = s.replace(/^['"]/, '')
+  } while (s !== prev)
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+/** Сегменты команды со снятыми обёртками + извлечёнными вложенными командами. */
 export function splitCommandSegments(command: string): string[] {
-  return command.split(SEGMENT_SPLIT).map(seg => {
-    let s = seg.trim()
-    let prev: string
-    do {
-      prev = s
-      s = s.replace(ENV_ASSIGN_RE, '')
-      s = s.replace(ENV_CMD_RE, '')
-      s = s.replace(WRAPPER_RE, '')
-      s = s.replace(SHELL_C_RE, '')
-    } while (s !== prev)
-    return s.replace(/^['"]/, '').replace(/\s+/g, ' ').trim()
-  }).filter(Boolean)
+  const out: string[] = []
+  for (const block of extractNested(command)) {
+    for (const raw of block.split(SEGMENT_SPLIT)) {
+      const seg = stripWrappers(raw)
+      if (seg) out.push(seg)
+      // find ... -exec[dir] CMD ... \; / + — выделить под-команду после -exec
+      const exec = raw.match(/-exec(?:dir)?\s+(.+?)(?:\s+(?:\\?;|\+)\s*)?$/i)
+      if (exec) { const sub = stripWrappers(exec[1]); if (sub) out.push(sub) }
+    }
+  }
+  return out.filter(Boolean)
 }
 
 /**

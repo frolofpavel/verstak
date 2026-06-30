@@ -81,6 +81,42 @@ describe('permission-rules — приоритет deny > ask > allow', () => {
     const r2 = compilePermissionConfig({ deny: ['Bash(curl:*)'] })
     expect(applyPermissionRules('run_command', 'echo x && curl http://evil', r2)!.decision).toBe('deny')
   })
+
+  // Ре-ревью HIGH×2: подстановки/группы/wrappers/find -exec/одиночный & обходили deny.
+  const rmRules = compilePermissionConfig({ deny: ['Bash(rm:*)'] })
+  const denied = (cmd: string) => applyPermissionRules('run_command', cmd, rmRules)?.decision
+  it('подстановка $(...) и бэктики не прячут rm', () => {
+    expect(denied('echo $(rm important.txt)')).toBe('deny')
+    expect(denied('echo `rm important.txt`')).toBe('deny')
+    expect(denied('X=$(rm important.txt) echo')).toBe('deny')
+  })
+  it('process substitution <(...) >(...) не прячут rm', () => {
+    expect(denied('cat <(rm important.txt)')).toBe('deny')
+    expect(denied('tee >(rm important.txt)')).toBe('deny')
+  })
+  it('сабшелл (...) и brace-group {...} не прячут rm', () => {
+    expect(denied('(rm important.txt)')).toBe('deny')
+    expect(denied('{ rm important.txt; }')).toBe('deny')
+    expect(denied('( sudo rm important.txt )')).toBe('deny')
+  })
+  it('одиночный & (фон) не прячет rm', () => {
+    expect(denied('sleep 1 & rm important.txt')).toBe('deny')
+  })
+  it('обёртки timeout/nohup/watch/stdbuf не прячут rm', () => {
+    expect(denied('timeout 5 rm x')).toBe('deny')
+    expect(denied('nohup rm x')).toBe('deny')
+    expect(denied('watch -n2 rm x')).toBe('deny')
+    expect(denied('stdbuf -oL rm x')).toBe('deny')
+  })
+  it('find -exec/-execdir rm извлекается', () => {
+    expect(denied('find . -name "*" -exec rm {} \\;')).toBe('deny')
+    expect(denied('find . -type f -execdir rm {} +')).toBe('deny')
+  })
+  it('легитимные команды НЕ блокируются под deny rm:*', () => {
+    expect(denied('npm test')).toBeUndefined()
+    expect(denied('echo hi && git status')).toBeUndefined()
+    expect(denied('git log --oneline')).toBeUndefined()
+  })
 })
 
 describe('permission-rules — extractArgText', () => {

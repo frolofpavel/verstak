@@ -43,6 +43,9 @@ const DENY_RULES: DenyRule[] = [
   { pattern: /\bsudo\s+rm\b/i,                                           reason: 'Запрещено: sudo rm' },
   { pattern: /\bgit\s+push\s+.*--force\b/i,                              reason: 'Запрещено: git push --force (фиксить вручную при необходимости)' },
   { pattern: /\bgit\s+(reset\s+--hard\s+HEAD~|clean\s+-fdx|filter-(repo|branch))/i, reason: 'Запрещено: разрушающие git операции' },
+  // find -exec/-execdir rm -rf {} — массовое удаление: цель внутри find ({}), поэтому
+  // правила rm-rf выше (требуют путь /|~|..) её НЕ ловят (ревью: обход денилиста).
+  { pattern: /\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-[a-z]*r[a-z]*f|\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-rf/i, reason: 'Запрещено: массовое удаление через find -exec rm -rf' },
   { pattern: /\.ssh|\.ss\*|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\bid_[a-z0-9]*\*|\.aws[\/\\]|\.kube[\/\\]|\.docker[\/\\]|\.azure[\/\\]|\.config[\/\\]gcloud|kubeconfig|\.npmrc|\.netrc|\.gnupg|authorized_keys|known_hosts/i, reason: 'Запрещено: чтение/копирование ключей и токенов' },
   // PowerShell EncodedCommand bypass: payload is base64, denylist can't inspect contents.
   // Аудит M13: штатный бинарь PowerShell 7 на Win11 называется pwsh — без него обход.
@@ -148,12 +151,23 @@ const INJECTION_ALLOW_PATTERNS: RegExp[] = [
   /^(date|whoami|hostname|node\s+--version|npm\s+--version|python\s+--version)\b/i,
 ]
 
+// find разрешён для листинга, но GNU find деструктивен: -delete/-exec/-fprintf пишут/
+// удаляют/исполняют. Блокируем эти примитивы (ре-ревью HIGH: find . -delete обходил).
+const DESTRUCTIVE_FIND_RE = /(?:^|\s)-(?:delete|exec|execdir|ok|okdir|fprintf?|fls|fprint0)\b/i
+// Абсолютный / восходящий / drive-letter путь в аргументах — read-диагностика в
+// пределах проекта в них не нуждается, а cat /etc/passwd / cat ../../.env = эксфильтрация
+// секретов вне проекта (ре-ревью HIGH). Срабатывает на токене после пробела/начала.
+const OUT_OF_PROJECT_PATH_RE = /(?:^|\s)(?:[/~]|\.\.[/\\]|[A-Za-z]:[/\\])/
+
 /** Безопасна ли команда для инъекции !`cmd` (read-only allowlist + общий денилист)? */
 export function isInjectionCommandAllowed(command: string): boolean {
   const trimmed = normalize(command)
   if (!trimmed) return false
   // Цепочки/подстановки/обёртки — НЕ для инъекции (могут спрятать опасное за read-команду).
   if (/[;&|`<>\n]|\$\(|\bsudo\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(trimmed)) return false
+  // Деструктивный find и пути вне проекта — закрыты до allowlist-матча.
+  if (/^find\b/i.test(trimmed) && DESTRUCTIVE_FIND_RE.test(trimmed)) return false
+  if (OUT_OF_PROJECT_PATH_RE.test(trimmed)) return false
   if (!classifyCommand(trimmed).allowed) return false
   return INJECTION_ALLOW_PATTERNS.some(p => p.test(trimmed))
 }
