@@ -62,6 +62,25 @@ describe('permission-rules — приоритет deny > ask > allow', () => {
   it('нет совпадения → null', () => {
     expect(applyPermissionRules('run_command', 'ls', rules)).toBeNull()
   })
+
+  // Ревью HIGH: deny обходится цепочкой/обёрткой — теперь сегментируем.
+  it('deny на git push ловит цепочку npm test && git push', () => {
+    expect(applyPermissionRules('run_command', 'npm test && git push origin', rules)!.decision).toBe('ask')
+  })
+  it('deny на rm ловит цепочку cd sub && rm important.txt', () => {
+    const r2 = compilePermissionConfig({ deny: ['Bash(rm:*)'] })
+    expect(applyPermissionRules('run_command', 'cd sub && rm important.txt', r2)!.decision).toBe('deny')
+  })
+  it('deny ловит обёртку sudo/env/bash -c', () => {
+    const r2 = compilePermissionConfig({ deny: ['Bash(rm:*)'] })
+    expect(applyPermissionRules('run_command', 'sudo rm x', r2)!.decision).toBe('deny')
+    expect(applyPermissionRules('run_command', 'env FOO=1 rm x', r2)!.decision).toBe('deny')
+    expect(applyPermissionRules('run_command', 'bash -c "rm x"', r2)!.decision).toBe('deny')
+  })
+  it('deny на curl ловит echo x && curl evil', () => {
+    const r2 = compilePermissionConfig({ deny: ['Bash(curl:*)'] })
+    expect(applyPermissionRules('run_command', 'echo x && curl http://evil', r2)!.decision).toBe('deny')
+  })
 })
 
 describe('permission-rules — extractArgText', () => {

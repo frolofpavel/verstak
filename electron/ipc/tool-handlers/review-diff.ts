@@ -7,7 +7,10 @@ import { delegateTaskHandler } from './delegation'
 
 // Безопасные символы git-ref: буквы/цифры/_/-/./+/слэш. Блокируем shell-инъекцию
 // (base="main; rm -rf /") ещё до денилиста — строгий allowlist символов ref.
-const GIT_REF_RE = /^[\w./+-]+$/
+// (?!-) — ref НЕ может начинаться с дефиса: иначе ведущий '-' делает ref git-ОПЦИЕЙ
+// (commit='--output=/path' → произвольная запись файла; ревью: argument-injection,
+// воспроизведено вживую). Запрет '..' — против обхода диапазона/родителя в ref.
+const GIT_REF_RE = /^(?!-)(?!.*\.\.)[\w./+-]+$/
 const MAX_DIFF_CHARS = 14000
 
 export interface DiffArgs {

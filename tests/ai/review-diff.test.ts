@@ -34,7 +34,20 @@ describe('review-diff — buildDiffCommand', () => {
     expect(buildDiffCommand({ commit: 'abc`id`' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
   })
 
-  it('валидные ref-символы (точки/слэши/дефисы) проходят', () => {
+  it('валидные ref-символы (точки/слэши/дефисы не-первым) проходят', () => {
     expect(buildDiffCommand({ base: 'feature/x-1.2' })).toEqual({ command: 'git --no-pager diff feature/x-1.2...HEAD' })
+    expect(buildDiffCommand({ base: 'v1.2-rc' })).toEqual({ command: 'git --no-pager diff v1.2-rc...HEAD' })
+  })
+
+  it('ведущий дефис → ошибка (git-опция-инъекция: commit=--output=/path → запись файла)', () => {
+    expect(buildDiffCommand({ commit: '--output=/tmp/x' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
+    expect(buildDiffCommand({ commit: '-O.git/x' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
+    expect(buildDiffCommand({ base: '-R' })).toEqual({ error: expect.stringContaining('Небезопасный base') })
+    expect(buildDiffCommand({ base: '--ext-diff' })).toEqual({ error: expect.stringContaining('Небезопасный base') })
+  })
+
+  it("'..' в ref → ошибка (обход диапазона/родителя)", () => {
+    expect(buildDiffCommand({ commit: '../../../etc/passwd' })).toEqual({ error: expect.stringContaining('Небезопасный commit') })
+    expect(buildDiffCommand({ base: 'a..b' })).toEqual({ error: expect.stringContaining('Небезопасный base') })
   })
 })

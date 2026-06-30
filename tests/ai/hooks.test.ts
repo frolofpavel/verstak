@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import {
-  compileHooksConfig, matchHook, interpretHookResult, runHooks, hooksEnabled,
+  compileHooksConfig, matchHook, interpretHookResult, runHooks, hooksEnabled, hooksProjectEnabled, loadHooks,
   type CompiledHooks, type HookEntry
 } from '../../electron/ai/hooks'
 
@@ -29,6 +32,36 @@ describe('hooks — конфиг', () => {
     expect(hooksEnabled(undefined)).toBe(false)
     expect(hooksEnabled(() => null)).toBe(false)
     expect(hooksEnabled((k) => k === 'hooks_enabled' ? 'true' : null)).toBe(true)
+  })
+
+  it('hooksProjectEnabled: отдельный гейт, дефолт выключен', () => {
+    expect(hooksProjectEnabled(undefined)).toBe(false)
+    expect(hooksProjectEnabled((k) => k === 'hooks_enabled' ? 'true' : null)).toBe(false)
+    expect(hooksProjectEnabled((k) => k === 'hooks_project_enabled' ? 'true' : null)).toBe(true)
+  })
+})
+
+describe('hooks — loadHooks: project-scope только при projectEnabled (security)', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'gg-hooks-'))
+    mkdirSync(join(dir, '.verstak'), { recursive: true })
+    writeFileSync(join(dir, '.verstak', 'hooks.json'), JSON.stringify({
+      PreToolUse: [{ matcher: 'run_command', command: 'echo PROJECT_HOOK' }]
+    }))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('БЕЗ projectEnabled → project-хуки НЕ грузятся (чужой репо не исполняется)', () => {
+    const h = loadHooks(dir)
+    expect(h.PreToolUse.filter(e => e.scope === 'project')).toHaveLength(0)
+  })
+
+  it('С projectEnabled=true → project-хуки грузятся', () => {
+    const h = loadHooks(dir, { projectEnabled: true })
+    const proj = h.PreToolUse.filter(e => e.scope === 'project')
+    expect(proj).toHaveLength(1)
+    expect(proj[0].command).toBe('echo PROJECT_HOOK')
   })
 })
 

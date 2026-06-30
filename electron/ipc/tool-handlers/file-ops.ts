@@ -30,10 +30,15 @@ export const readHandler: ToolHandler = {
 // File ops: write_file, apply_patch, propose_edits
 // ============================================================================
 
-async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string): Promise<ToolResult> {
-  const { decision, reason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string, permissionName?: string): Promise<ToolResult> {
+  // permissionName — ИСХОДНОЕ имя тула для permission-правил. propose_edits фанит
+  // правки в синтетические write_file-subCall'ы; без этого deny/ask на Edit/
+  // propose_edits молча игнорировались бы (ревью: правило обходится). Исполнение
+  // всё равно идёт как write_file, но решение резолвится по исходному имени.
+  const decisionName = permissionName ?? call.name
+  const { decision, reason } = resolveDecision(decisionName, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
   if (decision === 'block') {
-    return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }
+    return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(decisionName, ctx.agentMode) }
   }
   let accepted: boolean
   if (decision === 'auto-accept') {
@@ -163,7 +168,7 @@ export const proposeEditsHandler: ToolHandler = {
         args: { path: edit.path, content: edit.content },
         ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {})
       }
-      const r = await diffConfirmWrite(subCall, ctx, edit.path, before, edit.content)
+      const r = await diffConfirmWrite(subCall, ctx, edit.path, before, edit.content, 'propose_edits')
       subResults.push(r)
     }
     const ok = subResults.filter(r => !r.error).length

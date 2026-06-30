@@ -83,6 +83,14 @@ export function hooksEnabled(getSecret: ((key: string) => string | null) | undef
   return getSecret?.('hooks_enabled') === 'true'
 }
 
+/** Доверять project-scope хукам ({project}/.verstak/hooks.json)? Отдельный гейт,
+ *  ВЫКЛЮЧЕН по умолчанию даже при hooks_enabled — чтобы хуки чужого склонированного
+ *  репо не исполнялись молча (ревью: supply-chain). По умолчанию бегут только
+ *  user-хуки (~/.verstak), которые писал сам пользователь. */
+export function hooksProjectEnabled(getSecret: ((key: string) => string | null) | undefined): boolean {
+  return getSecret?.('hooks_project_enabled') === 'true'
+}
+
 function parseEntries(raw: unknown, scope: 'user' | 'project'): HookEntry[] {
   if (!Array.isArray(raw)) return []
   const out: HookEntry[] = []
@@ -115,10 +123,13 @@ function readJsonFile(path: string): unknown {
   try { return JSON.parse(readFileSync(path, 'utf8')) } catch { return null }
 }
 
-/** Загрузить хуки: user (~/.verstak) + project. Оба набора исполняются (project добавляется). */
-export function loadHooks(projectPath: string | null): CompiledHooks {
+/**
+ * Загрузить хуки: user (~/.verstak) всегда + project ТОЛЬКО при opts.projectEnabled.
+ * По умолчанию project-хуки НЕ грузятся (security: чужой репо). См. hooksProjectEnabled.
+ */
+export function loadHooks(projectPath: string | null, opts: { projectEnabled?: boolean } = {}): CompiledHooks {
   const merged = compileHooksConfig(readJsonFile(join(homedir(), '.verstak', 'hooks.json')), 'user')
-  if (projectPath) {
+  if (projectPath && opts.projectEnabled) {
     const proj = compileHooksConfig(readJsonFile(join(projectPath, '.verstak', 'hooks.json')), 'project')
     for (const ev of HOOK_EVENTS) merged[ev].push(...proj[ev])
   }
@@ -150,7 +161,8 @@ export function interpretHookResult(
   // exit code 2 = блок (только PreToolUse имеет смысл блокировать)
   if (event === 'PreToolUse' && res.exitCode === 2) {
     outcome.block = true
-    outcome.reason = (res.stderr || res.stdout || '').trim() || 'Заблокировано PreToolUse-хуком (exit 2).'
+    // reason идёт модели/в UI — редактируем секреты (вдруг хук вывел токен в stderr).
+    outcome.reason = scanText((res.stderr || res.stdout || '').trim()).redacted || 'Заблокировано PreToolUse-хуком (exit 2).'
   }
   // stdout JSON — структурированный ответ
   const trimmed = res.stdout.trim()
@@ -159,7 +171,7 @@ export function interpretHookResult(
       const obj = JSON.parse(trimmed) as Record<string, unknown>
       if (event === 'PreToolUse' && obj.block === true) {
         outcome.block = true
-        if (typeof obj.reason === 'string' && obj.reason) outcome.reason = obj.reason
+        if (typeof obj.reason === 'string' && obj.reason) outcome.reason = scanText(obj.reason).redacted
       }
       if (typeof obj.additionalContext === 'string' && obj.additionalContext.trim()) {
         outcome.additionalContext = obj.additionalContext.trim()
@@ -208,7 +220,9 @@ function runHook(entry: HookEntry, payload: HookPayload): Promise<{ exitCode: nu
     child.stderr?.on('data', (d) => { stderr += String(d) })
     child.on('error', (err) => { stderr += err.message; finish(null) })
     child.on('close', (code) => finish(code))
-    // payload на stdin
+    // payload на stdin. EPIPE/ECONNRESET приходит АСИНХРОННО событием 'error' (хук
+    // не читает stdin / быстро завершился) — ловим и его, иначе uncaught в main.
+    child.stdin?.on('error', () => { /* stdin закрыт раньше записи — не фатально */ })
     try {
       child.stdin?.write(JSON.stringify(payload))
       child.stdin?.end()

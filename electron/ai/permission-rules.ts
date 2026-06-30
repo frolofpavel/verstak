@@ -56,6 +56,32 @@ export function expandToolName(name: string): string[] {
   return TOOL_ALIASES[low] ?? [name.trim()]
 }
 
+// Разбить команду на исполняемые сегменты для матчинга префикс-правил. Иначе deny
+// тривиально обходится цепочкой/обёрткой: `npm test && git push` не начинается с
+// "git push", `sudo rm x` не с "rm" (ревью HIGH). Зеркалит хардинг bash-allowlist:
+// для deny (где провал = запрещённая команда исполнилась) фильтр обязателен.
+const SEGMENT_SPLIT = /\s*(?:&&|\|\||[;|\n])\s*/
+const ENV_ASSIGN_RE = /^(?:[A-Za-z_]\w*=\S*\s+)+/
+const ENV_CMD_RE = /^env\s+(?:[A-Za-z_]\w*=\S*\s+)*/i
+const WRAPPER_RE = /^(?:(?:sudo|doas|nice|time|xargs|command|builtin|exec)\s+)+/i
+const SHELL_C_RE = /^(?:bash|sh|zsh|dash|pwsh|powershell)\s+-c\s+['"]?/i
+
+/** Сегменты команды со снятыми обёртками (sudo/env/bash -c) и env-присвоениями. */
+export function splitCommandSegments(command: string): string[] {
+  return command.split(SEGMENT_SPLIT).map(seg => {
+    let s = seg.trim()
+    let prev: string
+    do {
+      prev = s
+      s = s.replace(ENV_ASSIGN_RE, '')
+      s = s.replace(ENV_CMD_RE, '')
+      s = s.replace(WRAPPER_RE, '')
+      s = s.replace(SHELL_C_RE, '')
+    } while (s !== prev)
+    return s.replace(/^['"]/, '').replace(/\s+/g, ' ').trim()
+  }).filter(Boolean)
+}
+
 /**
  * Скомпилировать паттерн аргумента в матчер.
  * - `npm:*`     → префикс по первому токену (команда начинается с "npm")
@@ -68,10 +94,11 @@ export function compileArgMatcher(pattern: string | null): ((argText: string) =>
   if (pattern === null) return null
   const p = pattern.trim()
   if (p === '' || p === '*' || p === '**') return null
-  // `prefix:*` — префиксный матч (Claude Code Bash(npm:*) семантика)
+  // `prefix:*` — префиксный матч (Claude Code Bash(npm:*) семантика). Матчим КАЖДЫЙ
+  // сегмент команды — иначе deny обходится цепочкой/обёрткой (ревью HIGH).
   if (p.endsWith(':*')) {
-    const prefix = p.slice(0, -2).trim()
-    return (argText: string) => argText.trim().startsWith(prefix)
+    const prefix = p.slice(0, -2).trim().replace(/\s+/g, ' ')
+    return (argText: string) => splitCommandSegments(argText).some(seg => seg.startsWith(prefix))
   }
   // Иначе — glob: * → [^/]* (в пределах сегмента), ** → .* , экранируем спецсимволы
   const re = globToRegExp(p)
@@ -182,6 +209,7 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
     case 'read_file':
     case 'write_file':
     case 'apply_patch':
+    case 'propose_edits':
     case 'edit_spreadsheet':
     case 'read_spreadsheet':
     case 'read_document':

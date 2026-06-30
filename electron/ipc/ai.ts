@@ -22,7 +22,7 @@ import { createCostGuard } from '../ai/cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
 import { loadPermissionRules } from '../ai/permission-rules'
-import { hooksEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
+import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 import { captureToolObservation } from '../ai/memory-hooks'
@@ -555,7 +555,10 @@ export function registerAiIpc(deps: AiDeps): void {
         brainContext: brain?.content ?? null,
         skillPrompt: overrides?.systemPrompt,
         // Output style (формат/персона ответа) — глобальная настройка, инжектится
-        // в user_layer секцией. 'default'/пусто → ничего не добавляется.
+        // в user_layer секцией. 'default'/пусто → ничего не добавляется. ЛИМИТ: только
+        // API-путь; CLI-провайдеры (claude-cli/codex-cli/grok-cli/gemini-cli) строят свой
+        // промпт в buildCliPrompt без outputStyle — стиль на них не применяется (известный
+        // CLI-parity лимит, как бинарные вложения; см. CLAUDE.md §5.2).
         outputStyle: deps.getSecret('output_style')
       })
       // Наслоение интенсивности (<intensity>) поверх собранного промпта — стерёт
@@ -1331,6 +1334,10 @@ export interface AgentRunContext {
   runId?: string
   verifications?: AiDeps['verifications']
   toolsAllow?: string[] | null
+  /** F1-фикс: помечает рекурсивный smart-fallback-фрейм. SessionStart/UserPromptSubmit-
+   *  хуки НЕ перефаерятся в нём (симметрично Stop-хуку под !handedOff) — иначе на одну
+   *  отправку при N фолбэках старт-хуки исполнились бы N+1 раз. */
+  isFallbackFrame?: boolean
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -1341,6 +1348,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+    isFallbackFrame,
   } = ctx
   // #3 plan-gate: режим прогона — МУТАБЕЛЬНЫЙ holder (не per-turn const). approve
   // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
@@ -1436,10 +1444,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const agentCounter = new SessionAgentCounter()
   // F1: пользовательский lifecycle-hooks движок (opt-in, default OFF — security:
   // хуки исполняют произвольный shell из конфига проекта). Грузим один раз на прогон.
-  const hooks: CompiledHooks | null = hooksEnabled(getSecretForDelegate) ? loadHooks(projectPath) : null
+  const hooks: CompiledHooks | null = hooksEnabled(getSecretForDelegate)
+    ? loadHooks(projectPath, { projectEnabled: hooksProjectEnabled(getSecretForDelegate) })
+    : null
   // SessionStart + UserPromptSubmit — фаер до петли; additionalContext инжектится в
-  // первый turn через pendingSupplements (drainSupplements() в начале turn 0).
-  if (hooks) {
+  // первый turn через pendingSupplements (drainSupplements() в начале turn 0). НЕ в
+  // fallback-фрейме: иначе на одну отправку при N фолбэках старт-хуки сработали бы N+1 раз.
+  if (hooks && !isFallbackFrame) {
     try {
       const ss = await runHooks('SessionStart', hooks, { event: 'SessionStart', cwd: projectPath })
       if (ss.additionalContext) pendingSupplements.push(ss.additionalContext)
@@ -2070,7 +2081,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // 6.2: fallback продолжает с НАКОПЛЕННОЙ истории (currentMessages с
           // проделанными tool-результатами), а не с initialMessages — иначе
           // downstream-провайдер переделывает работу и повторно пишет файлы.
-          return runApiConversation({ ...ctx, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
+          return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
         }
       }
     }

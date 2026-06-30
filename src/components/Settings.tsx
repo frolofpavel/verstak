@@ -410,7 +410,9 @@ function PolicyTab() {
   const [autoEdits, setAutoEdits] = useState(false)
   const [autoCommands, setAutoCommands] = useState(false)
   const [hooksOn, setHooksOn] = useState(false)
+  const [hooksProjectOn, setHooksProjectOn] = useState(false)
   const [outputStyle, setOutputStyle] = useState('default')
+  const [outputStyleList, setOutputStyleList] = useState<Array<{ id: string; name: string; scope: string }>>([])
 
   useEffect(() => {
     void (async () => {
@@ -427,13 +429,16 @@ function PolicyTab() {
       setAutoEdits((await window.api.settings.getKey('auto_approve_edits')) === 'true')
       setAutoCommands((await window.api.settings.getKey('auto_approve_commands')) === 'true')
       setHooksOn((await window.api.settings.getKey('hooks_enabled')) === 'true')
+      setHooksProjectOn((await window.api.settings.getKey('hooks_project_enabled')) === 'true')
       setOutputStyle((await window.api.settings.getKey('output_style')) || 'default')
+      try { setOutputStyleList(await window.api.settings.outputStyles(null)) } catch { /* список стилей — best-effort */ }
     })()
   }, [])
 
   const changeAutoEdits = async (v: boolean) => { setAutoEdits(v); await window.api.settings.setKey('auto_approve_edits', v ? 'true' : 'false') }
   const changeAutoCommands = async (v: boolean) => { setAutoCommands(v); await window.api.settings.setKey('auto_approve_commands', v ? 'true' : 'false') }
   const changeHooks = async (v: boolean) => { setHooksOn(v); await window.api.settings.setKey('hooks_enabled', v ? 'true' : 'false') }
+  const changeHooksProject = async (v: boolean) => { setHooksProjectOn(v); await window.api.settings.setKey('hooks_project_enabled', v ? 'true' : 'false') }
   const changeOutputStyle = async (v: string) => { setOutputStyle(v); await window.api.settings.setKey('output_style', v) }
 
   const changeDod = async (v: string) => {
@@ -573,11 +578,13 @@ function PolicyTab() {
         Как агент <strong>форматирует и подаёт</strong> ответ — отдельно от режима правок. «Обычный» — без надстройки. Свои стили: <code>.md</code> в <code>~/.verstak/output-styles/</code> (frontmatter name/description, тело — инструкция), указывай id <code>user:имя</code>.
       </div>
       <select className="gg-input" value={outputStyle} onChange={e => void changeOutputStyle(e.target.value)} style={{ maxWidth: 320 }}>
-        <option value="default">Обычный (по умолчанию)</option>
-        <option value="concise">Кратко</option>
-        <option value="explanatory">С пояснениями</option>
-        <option value="formal">Деловой</option>
-        <option value="bullet">Только списки</option>
+        {outputStyleList.map(s => (
+          <option key={s.id} value={s.id}>{s.name}{s.scope !== 'built-in' ? ` (${s.scope})` : ''}</option>
+        ))}
+        {/* Fallback: сохранённый id отсутствует в списке (стиль удалён) — не теряем его молча. */}
+        {outputStyle && !outputStyleList.some(s => s.id === outputStyle) && (
+          <option value={outputStyle}>{outputStyle} (не найден)</option>
+        )}
       </select>
 
       <div className="gg-settings-section-title" style={{ marginTop: 22 }}>📐 Правила доступа (permissions)</div>
@@ -600,7 +607,11 @@ function PolicyTab() {
       </div>
       <label className="gg-theme-square">
         <input type="checkbox" checked={hooksOn} onChange={e => void changeHooks(e.target.checked)} />
-        <span>Включить пользовательские хуки (исполнение скриптов на события — доверенные проекты)</span>
+        <span>Включить хуки из <code>~/.verstak/hooks.json</code> (твои глобальные скрипты)</span>
+      </label>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={hooksProjectOn} disabled={!hooksOn} onChange={e => void changeHooksProject(e.target.checked)} />
+        <span>⚠ Доверять хукам ИЗ ПРОЕКТА (<code>{'{project}'}/.verstak/hooks.json</code>) — исполняет код из репозитория, включай только для своих проектов</span>
       </label>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>

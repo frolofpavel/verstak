@@ -2,6 +2,7 @@
 import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { classifyMcpToolScope, mcpDecision, mcpBlockReason, parseMcpScopeOverrides } from '../../ai/mcp-policy'
+import { applyPermissionRules } from '../../ai/permission-rules'
 import { scanText } from '../../ai/secret-scanner'
 
 export const mcpToolHandler: ToolHandler = {
@@ -24,7 +25,17 @@ export const mcpToolHandler: ToolHandler = {
     // readOnlyHint/destructiveHint) > keyword-угадайка. Убирает зависимость от угадайки.
     const overrides = parseMcpScopeOverrides(ctx.getSecretForDelegate?.('mcp_scope_overrides'))
     const scope = classifyMcpToolScope(matchedTool.name, matchedTool.description, matchedTool.annotations, overrides[matchedTool.name])
-    const decision = mcpDecision(scope, ctx.agentMode)
+    let decision = mcpDecision(scope, ctx.agentMode)
+    // Декларативные permission-правила применяются и к MCP-тулзам (ревью: deny на имя
+    // MCP-тула игнорировался). deny бьёт даже bypass; правила не ослабляют scope-block.
+    // Имя MCP-тула без скобок матчится правилом с argMatcher===null.
+    const permRule = applyPermissionRules(call.name, JSON.stringify(call.args ?? {}), ctx.permissionRules)
+    if (permRule?.decision === 'deny') {
+      decision = 'block'
+    } else if (decision !== 'block') {
+      if (permRule?.decision === 'ask') decision = 'confirm'
+      else if (permRule?.decision === 'allow') decision = 'auto-accept'
+    }
     // Короткая сводка аргументов для модалки подтверждения (без раскрытия больших значений)
     const argKeys = Object.keys(call.args ?? {})
     const argsSummary = argKeys.length ? argKeys.join(', ') : ''

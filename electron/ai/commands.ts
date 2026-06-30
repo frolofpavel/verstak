@@ -127,11 +127,10 @@ const BASH_INJECT_RE = /!`([^`]+)`/g
 export async function expandCommandBody(body: string, argString: string, opts: ExpandOptions = {}): Promise<string> {
   const args = splitArgs(argString)
   let out = body
-  // $ARGUMENTS — вся строка
-  out = out.replaceAll('$ARGUMENTS', argString.trim())
-  // $1..$9 — позиционные (одна цифра; $10 не поддерживаем в V1)
-  out = out.replace(/\$([1-9])/g, (_m, d: string) => args[Number(d) - 1] ?? '')
-  // !`cmd` — инъекция живого вывода shell
+  // !`cmd` — инъекция живого вывода shell. ВАЖНО: резолвим по ИСХОДНОМУ body ДО
+  // подстановки $ARGUMENTS/$1 — иначе `!`cmd`` пришедший в аргументе пользователя
+  // встроился бы в тело и исполнился в обход confirm-гейта (ревью HIGH: RCE через
+  // аргумент). Так аргумент с backtick'ами остаётся литералом.
   if (opts.runCommand) {
     const matches = [...out.matchAll(BASH_INJECT_RE)]
     for (const m of matches) {
@@ -145,6 +144,9 @@ export async function expandCommandBody(body: string, argString: string, opts: E
       out = out.replace(m[0], replacement)
     }
   }
+  // $ARGUMENTS / $1..$9 — подстановка аргументов ПОСЛЕ резолва !`cmd`.
+  out = out.replaceAll('$ARGUMENTS', argString.trim())
+  out = out.replace(/\$([1-9])/g, (_m, d: string) => args[Number(d) - 1] ?? '')
   return out
 }
 

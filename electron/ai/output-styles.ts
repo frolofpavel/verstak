@@ -119,12 +119,19 @@ function loadStylesFromDir(dir: string, scope: 'user' | 'project'): OutputStyle[
  * короткому имени (часть id после двоеточия).
  */
 export function loadOutputStyles(projectPath: string | null): OutputStyle[] {
+  // Ключуем по ПОЛНОМУ id (built-in 'concise', user 'user:concise', project
+  // 'project:concise') — не коллизируем built-in с одноимённым user-файлом, иначе
+  // список (где user перетирал built-in) расходился бы с resolveOutputStylePrompt
+  // (который для built-in id берёт built-in). Project перебивает user по короткому
+  // имени (project:x удаляет user:x).
   const byKey = new Map<string, OutputStyle>()
   for (const s of BUILT_IN_STYLES) byKey.set(s.id, s)
-  for (const s of loadStylesFromDir(USER_STYLES_DIR, 'user')) byKey.set(s.id.split(':')[1], s)
+  for (const s of loadStylesFromDir(USER_STYLES_DIR, 'user')) byKey.set(s.id, s)
   if (projectPath) {
     for (const s of loadStylesFromDir(join(projectPath, '.verstak', 'output-styles'), 'project')) {
-      byKey.set(s.id.split(':')[1], s)
+      const short = s.id.split(':')[1]
+      byKey.delete(`user:${short}`)  // project перебивает одноимённый user-стиль
+      byKey.set(s.id, s)
     }
   }
   return [...byKey.values()]

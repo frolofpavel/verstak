@@ -130,3 +130,30 @@ export function isVerifierCommand(command: string): boolean {
   if (!classifyCommand(trimmed).allowed) return false
   return VERIFIER_ALLOW_PATTERNS.some(p => p.test(trimmed))
 }
+
+/**
+ * Allowlist read-only команд для инъекции !`cmd` в slash-командах (F4/F5 ревью HIGH).
+ * Этот путь (commands:expand) НЕ проходит mode-policy/confirm-модалку — только денилист,
+ * который default-allow и пропускает exfiltration/reverse-shell. Поэтому для инъекции
+ * в ПРОМПТ разрешаем лишь заведомо безопасные диагностические команды (git read-ops,
+ * листинг, чтение в пределах проекта). Всё прочее !`cmd` остаётся текстовым маркером.
+ * Защита от вредоносного {project}/.verstak/commands/*.md недоверенного репо.
+ */
+const INJECTION_ALLOW_PATTERNS: RegExp[] = [
+  /^git\s+(diff|status|log|show|branch|rev-parse|describe|remote|tag|shortlog|blame|ls-files|config\s+--get)\b/i,
+  /^(ls|dir|pwd|cd)\b/i,
+  /^(cat|type|head|tail|wc|nl)\b/i,
+  /^(echo|printf)\b/i,
+  /^(grep|rg|findstr|find)\b/i,
+  /^(date|whoami|hostname|node\s+--version|npm\s+--version|python\s+--version)\b/i,
+]
+
+/** Безопасна ли команда для инъекции !`cmd` (read-only allowlist + общий денилист)? */
+export function isInjectionCommandAllowed(command: string): boolean {
+  const trimmed = normalize(command)
+  if (!trimmed) return false
+  // Цепочки/подстановки/обёртки — НЕ для инъекции (могут спрятать опасное за read-команду).
+  if (/[;&|`<>\n]|\$\(|\bsudo\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(trimmed)) return false
+  if (!classifyCommand(trimmed).allowed) return false
+  return INJECTION_ALLOW_PATTERNS.some(p => p.test(trimmed))
+}

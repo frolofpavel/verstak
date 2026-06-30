@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('api', {
   settings: {
     getKey: (key: string) => ipcRenderer.invoke('settings:get-key', key),
     setKey: (key: string, value: string) => ipcRenderer.invoke('settings:set-key', key, value),
+    outputStyles: (projectPath: string | null) => ipcRenderer.invoke('output-styles:list', projectPath),
     onUiScaleChanged: (cb: (percent: number) => void) => {
       const handler = (_e: unknown, percent: number) => cb(percent)
       ipcRenderer.on('ui-scale:changed', handler)

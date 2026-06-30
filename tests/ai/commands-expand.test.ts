@@ -58,4 +58,22 @@ describe('commands — expandCommandBody', () => {
     const out = await expandCommandBody('$FOCUS и $1', 'pos', {})
     expect(out).toBe('$FOCUS и pos')
   })
+
+  // Ревью HIGH: аргумент с !`cmd` НЕ должен исполняться (резолв по исходному body).
+  it('!`cmd` из аргумента ($ARGUMENTS) НЕ исполняется — остаётся литералом', async () => {
+    const spy: string[] = []
+    const out = await expandCommandBody('Запрос: $ARGUMENTS', '!`whoami`', {
+      runCommand: async (cmd) => { spy.push(cmd); return 'ATTACKER' }
+    })
+    expect(spy).not.toContain('whoami')          // команда из аргумента НЕ выполнена
+    expect(out).toContain('!`whoami`')           // осталась литералом
+    expect(out).not.toContain('ATTACKER')
+  })
+
+  it('!`cmd` из ИСХОДНОГО body выполняется (легитимный путь сохранён)', async () => {
+    const out = await expandCommandBody('Диф $1:\n!`git diff`', 'main', {
+      runCommand: async (cmd) => cmd === 'git diff' ? 'DIFF' : ''
+    })
+    expect(out).toBe('Диф main:\nDIFF')
+  })
 })

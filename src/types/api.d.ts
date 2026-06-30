@@ -269,6 +269,7 @@ declare global {
       settings: {
         getKey: (key: string) => Promise<string | null>
         setKey: (key: string, value: string) => Promise<void>
+        outputStyles: (projectPath: string | null) => Promise<Array<{ id: string; name: string; description: string; scope: string }>>
         onUiScaleChanged?: (cb: (percent: number) => void) => () => void
       }
       providers: {

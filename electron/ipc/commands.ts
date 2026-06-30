@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { loadCommands, expandCommandBody } from '../ai/commands'
 import { createToolsForProject } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
+import { isInjectionCommandAllowed } from '../ai/command-policy'
 
 export function registerCommandsIpc(getKnownRoots: () => string[]): void {
   ipcMain.handle('commands:list', (_e, projectPath: string | null) => {
@@ -22,8 +23,12 @@ export function registerCommandsIpc(getKnownRoots: () => string[]): void {
       const controller = new AbortController()
       const tools = createToolsForProject(projectPath, controller.signal)
       runCommand = async (shellCmd: string): Promise<string> => {
-        const verdict = tools.classifyCommand(shellCmd)
-        if (!verdict.allowed) throw new Error(`денилист: ${verdict.reason ?? 'запрещено'}`)
+        // Этот путь минует mode-policy/confirm-модалку — поэтому инъекция !`cmd`
+        // ограничена read-only allowlist'ом (ревью HIGH: денилист пропускал
+        // exfiltration/reverse-shell из недоверенного {project}/.verstak/commands).
+        if (!isInjectionCommandAllowed(shellCmd)) {
+          throw new Error('разрешены только read-only команды (git diff/status, ls, cat и т.п.)')
+        }
         const r = await tools.runCommand(shellCmd)
         return r.stdout || r.stderr || ''
       }

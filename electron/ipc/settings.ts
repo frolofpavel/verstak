@@ -81,6 +81,13 @@ export function registerSettingsIpc(settings: Settings): void {
       }
     }
   })
+  // F3: список output-стилей (built-in + user:/project:) для динамического селектора —
+  // иначе кастомные user:/project: стили недостижимы из UI (ревью HIGH).
+  ipcMain.handle('output-styles:list', async (_e, projectPath: string | null) => {
+    const { loadOutputStyles } = await import('../ai/output-styles')
+    return loadOutputStyles(projectPath).map(s => ({ id: s.id, name: s.name, description: s.description, scope: s.scope }))
+  })
+
   ipcMain.handle('cli:detect', () => detectInstalledClis())
   ipcMain.handle('local-models:scan', () => scanLocalModelServers())
 
