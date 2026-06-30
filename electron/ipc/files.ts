@@ -102,6 +102,30 @@ export function registerFilesIpc(deps: FilesIpcDeps): void {
     }
   })
 
+  /**
+   * F6: @-mentions — прочитать набор упомянутых файлов и собрать контекст-блок для
+   * инъекции в сообщение агента. Безопасно: projectPath против known-roots,
+   * safeRealJoin (anti-symlink-escape), isForbiddenPath (секреты), scanText (redact).
+   * Кап 10 файлов × 12000 симв. Непрочитанные молча пропускаются.
+   */
+  ipcMain.handle('files:resolveMentions', async (_e, projectPath: string, paths: string[]): Promise<string> => {
+    if (!projectPath || !isWithinKnownRoots(projectPath, deps.getKnownRoots())) return ''
+    const blocks: string[] = []
+    for (const rel of (Array.isArray(paths) ? paths : []).slice(0, 10)) {
+      try {
+        if (isForbiddenPath(rel)) continue
+        const abs = await safeRealJoin(projectPath, rel)
+        const st = await stat(abs)
+        if (!st.isFile() || st.size > MAX_READ_BYTES) continue
+        const raw = await readFile(abs, 'utf8')
+        let safe = scanText(raw).redacted
+        if (safe.length > 12000) safe = safe.slice(0, 12000) + '\n…[обрезано по лимиту]'
+        blocks.push('### @' + rel + '\n```\n' + safe + '\n```')
+      } catch { /* файл не прочитан — пропускаем */ }
+    }
+    return blocks.length ? '<mentioned_files>\n' + blocks.join('\n\n') + '\n</mentioned_files>' : ''
+  })
+
   ipcMain.handle('files:read', async (_e, path: string) => {
     const root = deps.getProjectRoot()
     if (!root) throw new Error('Проект не открыт')

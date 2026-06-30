@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('api', {
   files: {
     tree: (root: string) => ipcRenderer.invoke('files:tree', root),
     read: (path: string) => ipcRenderer.invoke('files:read', path),
+    resolveMentions: (projectPath: string, paths: string[]) => ipcRenderer.invoke('files:resolveMentions', projectPath, paths),
     revealInExplorer: (path: string) => ipcRenderer.invoke('files:reveal', path),
     docxToHtml: (path: string) => ipcRenderer.invoke('files:docx-to-html', path)
   },
@@ -345,7 +346,8 @@ contextBridge.exposeInMainWorld('api', {
     stop: () => ipcRenderer.invoke('autonomous:stop')
   },
   commands: {
-    list: (projectPath: string | null) => ipcRenderer.invoke('commands:list', projectPath)
+    list: (projectPath: string | null) => ipcRenderer.invoke('commands:list', projectPath),
+    expand: (name: string, argString: string, projectPath: string | null) => ipcRenderer.invoke('commands:expand', name, argString, projectPath)
   },
   scheduler: {
     list: (projectPath?: string) => ipcRenderer.invoke('scheduler:list', projectPath),

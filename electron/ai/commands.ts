@@ -103,6 +103,51 @@ function loadFromDir(dir: string, scope: 'user' | 'project'): UserCommand[] {
   return out
 }
 
+/** Разбить строку аргументов на позиционные (простой whitespace-сплит; кавычки — V1 не трогаем). */
+export function splitArgs(argString: string): string[] {
+  const s = argString.trim()
+  return s ? s.split(/\s+/) : []
+}
+
+export interface ExpandOptions {
+  /** Исполнитель shell для инъекции !`cmd`. Инъектируется (тест/IPC). Без него !`cmd`
+   *  оставляется как маркер (не выполняем произвольный shell без явного раннера). */
+  runCommand?: (cmd: string) => Promise<string>
+}
+
+const BASH_INJECT_RE = /!`([^`]+)`/g
+
+/**
+ * Раскрыть тело команды: позиционные аргументы + инъекция вывода shell.
+ *  - $ARGUMENTS → вся строка аргументов
+ *  - $1..$9     → позиционные аргументы
+ *  - !`cmd`     → заменяется на stdout команды (через opts.runCommand с гейтом денилиста)
+ * $VARIABLE (заглавные) НЕ трогаем — их по-прежнему промптит UI перед инжектом.
+ */
+export async function expandCommandBody(body: string, argString: string, opts: ExpandOptions = {}): Promise<string> {
+  const args = splitArgs(argString)
+  let out = body
+  // $ARGUMENTS — вся строка
+  out = out.replaceAll('$ARGUMENTS', argString.trim())
+  // $1..$9 — позиционные (одна цифра; $10 не поддерживаем в V1)
+  out = out.replace(/\$([1-9])/g, (_m, d: string) => args[Number(d) - 1] ?? '')
+  // !`cmd` — инъекция живого вывода shell
+  if (opts.runCommand) {
+    const matches = [...out.matchAll(BASH_INJECT_RE)]
+    for (const m of matches) {
+      const cmd = m[1].trim()
+      let replacement: string
+      try {
+        replacement = (await opts.runCommand(cmd)).trim()
+      } catch (err) {
+        replacement = `[команда не выполнена: ${err instanceof Error ? err.message : String(err)}]`
+      }
+      out = out.replace(m[0], replacement)
+    }
+  }
+  return out
+}
+
 /**
  * Загрузить все команды.
  * Project-команды перебивают user-команды с тем же именем.

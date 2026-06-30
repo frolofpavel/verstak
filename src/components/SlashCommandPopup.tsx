@@ -133,19 +133,27 @@ export function SlashCommandPopup({ text, onClear, onInject, systemCommands = []
       cmd.action()
       onClear()
     } else {
-      // user-command: запросить переменные через window.prompt, затем инжектировать
+      // user-command: сначала backend-раскрытие ($1/$ARGUMENTS + инъекция !`bash`),
+      // затем промпт остаточных $VARIABLE, затем инжект. argString = текст после триггера.
       const userCmd = cmd.command
-      let body = userCmd.body
-      for (const varName of userCmd.variables) {
-        // eslint-disable-next-line no-alert
-        const val = window.prompt(`Введи значение для $${varName}:`) ?? ''
-        body = body.replaceAll(`$${varName}`, val)
-      }
-      if (onInject) {
-        onInject(body)
-      } else {
-        onClear()
-      }
+      const sp = text.indexOf(' ')
+      const argString = sp >= 0 ? text.slice(sp + 1).trim() : ''
+      void window.api.commands.expand(userCmd.name, argString, projectPath)
+        .then(expanded => {
+          let body = expanded || userCmd.body
+          for (const varName of userCmd.variables) {
+            // $VARIABLE мог уже быть подставлен из $ARGUMENTS — промптим только оставшиеся
+            if (!body.includes(`$${varName}`)) continue
+            // eslint-disable-next-line no-alert
+            const val = window.prompt(`Введи значение для $${varName}:`) ?? ''
+            body = body.replaceAll(`$${varName}`, val)
+          }
+          if (onInject) onInject(body); else onClear()
+        })
+        .catch(err => {
+          console.error('[SlashCommandPopup] expand failed:', err)
+          if (onInject) onInject(userCmd.body); else onClear()
+        })
     }
   }
 

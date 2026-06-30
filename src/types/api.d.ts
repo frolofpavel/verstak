@@ -251,6 +251,8 @@ declare global {
       files: {
         tree: (root: string) => Promise<FileNode[]>
         read: (path: string) => Promise<string>
+        /** F6: прочитать @-упомянутые файлы → контекст-блок (path-policy + redaction). */
+        resolveMentions: (projectPath: string, paths: string[]) => Promise<string>
         /** Открыть папку в системном проводнике через electron.shell.openPath. */
         revealInExplorer: (path: string) => Promise<{ ok: boolean; error: string | null }>
         /** Конвертация DOCX → HTML body через mammoth.js (для embedded preview). */
@@ -527,6 +529,7 @@ declare global {
       }
       commands: {
         list: (projectPath: string | null) => Promise<UserCommand[]>
+        expand: (name: string, argString: string, projectPath: string | null) => Promise<string>
       }
       scheduler: {
         list: (projectPath?: string) => Promise<ScheduledTask[]>

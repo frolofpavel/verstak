@@ -18,7 +18,9 @@ import { PipelineBanner } from './PipelineBanner'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
+import { MentionPopup } from './MentionPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
+import { extractMentions } from '../lib/mentions'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestFromIndex } from '../lib/skill-suggest'
 import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
@@ -1442,6 +1444,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         console.warn('[chat] skill loaders failed:', err)
       }
     }
+    // F6: @-mentions — пользователь явно подмешал файлы (@path). Читаем их (бэкенд:
+    // path-policy + redaction) и префиксим к контексту агента. БД хранит оригинал.
+    try {
+      const mentions = extractMentions(text)
+      if (mentions.length && path) {
+        const block = await window.api.files.resolveMentions(path, mentions)
+        if (block) enrichedText = `${block}\n\n---\n\n${enrichedText}`
+      }
+    } catch (err) {
+      console.warn('[chat] @-mentions resolve failed:', err)
+    }
     const isFirstUserMessage = !store.messages.some(m => m.role === 'user')
     armAutoScrollForOutgoing()
     addMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
@@ -2154,6 +2167,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           </div>
         )}
         <div className="gg-composer-inner">
+          {!isHelpChat && (
+            <MentionPopup
+              text={input}
+              projectPath={activePath}
+              onReplace={next => setInput(next)}
+            />
+          )}
           <SlashCommandPopup
             text={input}
             onClear={() => setInput('')}

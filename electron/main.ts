@@ -656,7 +656,7 @@ app.whenReady().then(() => {
   registerTerminalIpc(knownRoots)
   registerSkillsIpc(skillRegistry, { getSecret })
   registerMemoryIpc(db)
-  registerCommandsIpc()
+  registerCommandsIpc(knownRoots)
   registerMcpIpc(settings)
   registerAuditIpc(db)
   registerDebugIpc(db, chats)

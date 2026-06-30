@@ -34,6 +34,7 @@ import { readJournalHandler } from './tool-handlers/journal'
 import { executeCodeHandler } from './tool-handlers/execute-code'
 import { findDefinitionHandler, findReferencesHandler } from './tool-handlers/lsp-nav'
 import { createProofVideoHandler } from './tool-handlers/create-proof-video'
+import { reviewDiffHandler } from './tool-handlers/review-diff'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -80,6 +81,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'attest_verification': attestVerificationHandler,
   'delegate_task': delegateTaskHandler,
   'oracle': oracleHandler,
+  'review_diff': reviewDiffHandler,  // F5: git-diff-scoped review через критика
   'new_task': newTaskHandler,
   'delegate_parallel': delegateParallelHandler,
   'orchestrate': orchestrateHandler,

@@ -395,6 +395,20 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'review_diff',
+    description: 'Отревьюить git-diff отдельным критиком, скоупленный по диапазону: рабочее дерево (uncommitted, по умолчанию), против base-ветки (base, считает merge-base сам через three-dot) или конкретный коммит (commit). В отличие от обычного run_command(git diff) — сам строит правильную diff-команду и отдаёт критику структурированный разбор (баги/безопасность/регрессии с файл:строка и серьёзностью). Зови перед коммитом/PR или чтобы проверить ветку. Read-only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        base: { type: 'string', description: 'Опц. — ветка/ref для ревью против неё (git diff base...HEAD). Напр. "main".' },
+        commit: { type: 'string', description: 'Опц. — конкретный коммит для ревью (git show). Имеет приоритет над base.' },
+        uncommitted: { type: 'boolean', description: 'Опц. — ревью рабочего дерева vs HEAD (по умолчанию, если base/commit не заданы).' },
+        provider_id: { type: 'string', description: 'Опц. — провайдер модели-критика (claude / openai / gemini-api).' },
+        model: { type: 'string', description: 'Опц. — модель критика в рамках provider_id.' }
+      }
+    }
+  },
+  {
     name: 'new_task',
     description: 'Завершить текущий подход и продолжить с ЧИСТОГО контекста. Передай дистиллят: что уже сделано, что осталось, ключевые решения и файлы. Контекст диалога очистится до этого дистиллята (активный todo-лист сохранится) — экономит токены и убирает дрейф на ОЧЕНЬ длинной задаче. Используй, когда история раздулась, а задача далеко не закончена. НЕ для завершённой задачи — тогда просто отчитайся.',
     parameters: {
