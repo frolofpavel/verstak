@@ -4,7 +4,8 @@
 // (vm-песочница без process/require/fs, таймаут) — в electron/ai/ptc.ts.
 import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
-import { decide, blockReason } from '../../ai/mode-policy'
+import { blockReason } from '../../ai/mode-policy'
+import { resolveDecision } from '../../ai/permission-rules'
 import { runPtcCode, PTC_READONLY_TOOLS } from '../../ai/ptc'
 
 export const executeCodeHandler: ToolHandler = {
@@ -17,9 +18,9 @@ export const executeCodeHandler: ToolHandler = {
     // Гейтинг как КОМАНДА (vm не граница безопасности → trust = run_command): plan
     // блокирует, ask показывает код и ждёт подтверждения, auto/bypass — авто. Без
     // эскалации привилегий относительно уже имеющегося run_command.
-    const decision = decide('execute_code', ctx.agentMode, ctx.autoApprove)
+    const { decision, reason: denyReason } = resolveDecision('execute_code', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
     if (decision === 'block') {
-      const reason = blockReason('execute_code', ctx.agentMode)
+      const reason = denyReason ?? blockReason('execute_code', ctx.agentMode)
       ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'tool-blocked', callId: call.id, name: 'execute_code', command: code, reason } })
       return { id: call.id, name: call.name, result: '', error: reason }
     }

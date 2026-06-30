@@ -21,6 +21,8 @@ import { classifyProviderError } from '../ai/provider-error'
 import { createCostGuard } from '../ai/cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
+import { loadPermissionRules } from '../ai/permission-rules'
+import { hooksEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 import { captureToolObservation } from '../ai/memory-hooks'
@@ -329,6 +331,7 @@ export async function runScheduledHeadless(
       searchMemories: deps.searchMemories, searchConversations: deps.searchConversations, connectors: deps.connectors,
       pendingAttachments: [], pendingWrites: new Map(), pendingCommands: new Map(), scopedKey,
       agentMode: 'auto', readOnlyConnectors: true, skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      permissionRules: loadPermissionRules(opts.projectPath),
       currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
       subCostGuard: createCostGuard(null), parentChatId: null,
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),
@@ -550,7 +553,10 @@ export function registerAiIpc(deps: AiDeps): void {
         coreMemory,
         agentMode,
         brainContext: brain?.content ?? null,
-        skillPrompt: overrides?.systemPrompt
+        skillPrompt: overrides?.systemPrompt,
+        // Output style (формат/персона ответа) — глобальная настройка, инжектится
+        // в user_layer секцией. 'default'/пусто → ничего не добавляется.
+        outputStyle: deps.getSecret('output_style')
       })
       // Наслоение интенсивности (<intensity>) поверх собранного промпта — стерёт
       // поведение под Простой/Турбо. Простой-подсказка нейтральна к сегодняшнему
@@ -1340,6 +1346,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
   // (где ctx пересоздаётся) видит новый режим — иначе одобренный план не выполнить.
   let runAgentMode = agentMode
+  // F2: декларативные permission-правила allow/deny/ask по паттернам (~/.verstak +
+  // project). Грузим один раз на прогон (deny бьёт даже bypass; правила не ослабляют
+  // plan). Пусто, если файлов нет — no-op, обратная совместимость.
+  const permissionRules = loadPermissionRules(projectPath)
   // H (ось 3): new_task — агент пакует дистиллят, контекст очищается до него на след. turn
   // (как компакция, но по запросу агента и с его резюме). Холдер уровня прогона.
   let pendingNewTask: string | null = null
@@ -1424,6 +1434,20 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // (ai:send). Прокидывается во ВСЕ вложенные субы через ctx.agentCounter →
   // общий потолок MAX_TOTAL_AGENTS_PER_SESSION на всё дерево, а не на ветку.
   const agentCounter = new SessionAgentCounter()
+  // F1: пользовательский lifecycle-hooks движок (opt-in, default OFF — security:
+  // хуки исполняют произвольный shell из конфига проекта). Грузим один раз на прогон.
+  const hooks: CompiledHooks | null = hooksEnabled(getSecretForDelegate) ? loadHooks(projectPath) : null
+  // SessionStart + UserPromptSubmit — фаер до петли; additionalContext инжектится в
+  // первый turn через pendingSupplements (drainSupplements() в начале turn 0).
+  if (hooks) {
+    try {
+      const ss = await runHooks('SessionStart', hooks, { event: 'SessionStart', cwd: projectPath })
+      if (ss.additionalContext) pendingSupplements.push(ss.additionalContext)
+      const up = typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : ''
+      const ups = await runHooks('UserPromptSubmit', hooks, { event: 'UserPromptSubmit', cwd: projectPath, prompt: up })
+      if (ups.additionalContext) pendingSupplements.push(ups.additionalContext)
+    } catch { /* хуки best-effort — ошибка не ломает прогон */ }
+  }
 
   try {
 
@@ -1680,6 +1704,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         edits: getSecretForDelegate?.('auto_approve_edits') === 'true',
         commands: getSecretForDelegate?.('auto_approve_commands') === 'true',
       },
+      // F2: декларативные permission-правила (загружены 1 раз на прогон выше).
+      permissionRules,
       currentProviderId: providerId,
       mcpClient: mcpClientRef,
       appendAudit: appendAuditFn,
@@ -1711,10 +1737,31 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // после writeVerificationArtifact (best-effort, для latest в Review DoD).
       verifications
     }
+    // F1: PreToolUse-хуки — детерминированный гейт ПЕРЕД исполнением тула (вне LLM).
+    // exit 2 / {block:true} → вызов блокируется, модель видит причину как tool error.
+    // Пре-пасс (последовательно, чтобы ранний блок виделся до запуска), потом dispatch.
+    const preBlocked = new Map<number, string>()
+    if (hooks) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        const call = toolCalls[i]
+        try {
+          const pre = await runHooks('PreToolUse', hooks, { event: 'PreToolUse', cwd: projectPath, tool_name: call.name, tool_input: call.args })
+          if (pre.additionalContext) pendingSupplements.push(pre.additionalContext)
+          if (pre.block) preBlocked.set(i, pre.reason ?? `Вызов "${call.name}" заблокирован PreToolUse-хуком.`)
+        } catch { /* хук best-effort */ }
+      }
+    }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
+      // F1: заблокированный PreToolUse-хуком вызов не исполняем — отдаём error модели.
+      if (preBlocked.has(i)) {
+        const reason = preBlocked.get(i)!
+        toolResults[i] = { id: call.id, name: call.name, result: '', error: reason }
+        sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: call.id, name: call.name, command: '', reason } })
+        continue
+      }
       const handler = lookupHandler(call.name, ctx)
       if (handler.mode === 'parallel-read') {
         readPromises.push({ idx: i, promise: handler.handle(call, ctx) })
@@ -1735,6 +1782,20 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // Then wait for user to resolve every pending write
     for (const { idx, promise } of writePromises) {
       toolResults[idx] = await promise
+    }
+    // F1: PostToolUse-хуки — после исполнения тулзов. Не блокируют (поздно); их
+    // additionalContext уходит в следующий ход через pendingSupplements. Пропускаем
+    // pre-заблокированные (тул не исполнялся).
+    if (hooks) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        if (preBlocked.has(i)) continue
+        const call = toolCalls[i]
+        const result = toolResults[i]
+        try {
+          const post = await runHooks('PostToolUse', hooks, { event: 'PostToolUse', cwd: projectPath, tool_name: call.name, tool_input: call.args, tool_output: result?.result })
+          if (post.additionalContext) pendingSupplements.push(post.additionalContext)
+        } catch { /* хук best-effort */ }
+      }
     }
     // Tally tool usage for the end-of-session journal summary
     // auto_capture_memory: по умолчанию включено; выключается настройкой 'false'
@@ -2021,6 +2082,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
     unregisterConversationSupplements(sendId)
+    // F1: Stop-хук — завершение прогона (для side-effects: коммит/нотификация/синк).
+    // Best-effort, не ждём additionalContext (прогон закончен). Не на handed-off
+    // фолбэке (его завершит рекурсивный фрейм), чтобы Stop не сработал дважды.
+    if (hooks && !handedOff) {
+      try { await runHooks('Stop', hooks, { event: 'Stop', cwd: projectPath }) } catch { /* best-effort */ }
+    }
     // #15: при handed-off fallback journal/finish делает рекурсивный фрейм (ему
     // переданы recordJournal + agentRuns/runId) — внешний пропускает, иначе
     // дублировал бы журнал и финализировал run статусом упавшей попытки.

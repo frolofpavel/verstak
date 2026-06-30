@@ -24,6 +24,7 @@ import { composeSystemPrompt, type ComposedPrompt } from './compose-prompt'
 import type { ChatMessage } from './types'
 import type { CoreMemoryBlocks } from './core-memory'
 import { buildModePreset } from './model-presets'
+import { resolveOutputStylePrompt } from './output-styles'
 import type { AgentMode } from './mode-policy'
 
 export interface PrepareSystemInput {
@@ -53,6 +54,10 @@ export interface PrepareSystemInput {
   agentMode?: AgentMode
   /** Project Brain (Итер.4): прогретый ContextPack проекта (грузит вызывающий). */
   brainContext?: string | null
+  /** Output style (формат/персона ответа) — id стиля из output-styles.ts. Когда
+   *  задан и не 'default', соответствующий текст инжектится в user_layer секцией.
+   *  Ортогонален режиму агента: меняет КАК агент форматирует ответ, не политику правок. */
+  outputStyle?: string | null
 }
 
 export interface PreparedParts {
@@ -136,6 +141,15 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
       }
     } catch (err) {
       console.warn('[prepareSystemContext] file-rules failed:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  // Output style — формат/персона ответа поверх базового протокола. Инжектим как
+  // отдельную секцию user_layer (не отменяет system-layer, только формат изложения).
+  if (input.outputStyle && userLayer.content !== undefined) {
+    const stylePrompt = resolveOutputStylePrompt(input.outputStyle, projectPath)
+    if (stylePrompt) {
+      userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n<!-- output_style -->\n${stylePrompt}` }
     }
   }
 

@@ -5,7 +5,8 @@ import { emitActivity, summarizeToolCall } from './shared'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import { decide, blockReason } from '../../ai/mode-policy'
+import { blockReason } from '../../ai/mode-policy'
+import { resolveDecision } from '../../ai/permission-rules'
 import { applySearchReplaceBlocks } from '../../ai/tools'
 import { markFileDirty } from '../../ai/project-map'
 
@@ -30,9 +31,9 @@ export const readHandler: ToolHandler = {
 // ============================================================================
 
 async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string): Promise<ToolResult> {
-  const decision = decide(call.name, ctx.agentMode, ctx.autoApprove)
+  const { decision, reason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
   if (decision === 'block') {
-    return { id: call.id, name: call.name, result: '', error: blockReason(call.name, ctx.agentMode) }
+    return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }
   }
   let accepted: boolean
   if (decision === 'auto-accept') {

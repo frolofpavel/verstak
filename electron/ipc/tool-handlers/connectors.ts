@@ -4,7 +4,8 @@ import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText, isForbiddenPath } from '../../ai/secret-scanner'
 import { safeRealJoin } from '../../ai/path-policy'
 import { relative, resolve, isAbsolute } from 'path'
-import { decide, blockReason } from '../../ai/mode-policy'
+import { blockReason } from '../../ai/mode-policy'
+import { resolveDecision } from '../../ai/permission-rules'
 import { isReadOnlyConnectorOp } from '../../ai/connector-readonly'
 import { summarizeToolCall } from './shared'
 
@@ -42,9 +43,9 @@ export const connectorQueryHandler: ToolHandler = {
       const entity = call.args.entity ? ` · ${call.args.entity}` : ''
       const path = call.args.path ? ` · ${call.args.path}` : ''
       const summary = `Коннектор ${cid}${entity}${path}`
-      const decision = decide('connector_query', ctx.agentMode, ctx.autoApprove)
+      const { decision, reason: denyReason } = resolveDecision('connector_query', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
       if (decision === 'block') {
-        const reason = blockReason('connector_query', ctx.agentMode)
+        const reason = denyReason ?? blockReason('connector_query', ctx.agentMode)
         ctx.sender.send('ai:event', {
           id: ctx.sendId,
           event: { type: 'tool-blocked', callId: call.id, name: 'connector_query', command: summary, reason }

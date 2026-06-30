@@ -60,6 +60,10 @@ export interface ToolContext {
   /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
    *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
   autoApprove?: import('../../ai/mode-policy').AutoApprove
+  /** Декларативные permission-правила allow/deny/ask по паттернам (поверх режима).
+   *  Грузятся из ~/.verstak/permissions.json + project. Хендлеры решают через
+   *  resolveDecision(). deny бьёт даже bypass; правила не ослабляют plan. См. permission-rules. */
+  permissionRules?: import('../../ai/permission-rules').CompiledPermissionRules
   /** H (ось 3): new_task — агент пакует дистиллят, контекст очистится до него на след. turn. */
   requestNewTask?: (summary: string) => void
   /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).

@@ -2,7 +2,8 @@
 import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText } from '../../ai/secret-scanner'
-import { decide, blockReason } from '../../ai/mode-policy'
+import { blockReason } from '../../ai/mode-policy'
+import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 
 export const runCommandHandler: ToolHandler = {
@@ -23,13 +24,14 @@ export const runCommandHandler: ToolHandler = {
     }
     // Mode policy: plan blocks, ask confirms, auto/bypass auto-accept,
     // accept-edits still confirms commands (only edits auto-pass).
-    const decision = decide('run_command', ctx.agentMode, ctx.autoApprove)
+    const { decision, reason: denyReason } = resolveDecision('run_command', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
     if (decision === 'block') {
+      const reason = denyReason ?? blockReason('run_command', ctx.agentMode)
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
-        event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason: blockReason('run_command', ctx.agentMode) }
+        event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason }
       })
-      return { id: call.id, name: call.name, result: '', error: blockReason('run_command', ctx.agentMode) }
+      return { id: call.id, name: call.name, result: '', error: reason }
     }
     // Tier-2 #4: доверенная команда (настройка bash_allowlist) авто-аппрувится в
     // confirm-режимах — без модалки. plan (block) НЕ перекрывается (вышли выше);

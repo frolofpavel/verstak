@@ -3,7 +3,8 @@ import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText, isForbiddenPath } from '../../ai/secret-scanner'
 import { safeRealJoin } from '../../ai/path-policy'
-import { decide, blockReason } from '../../ai/mode-policy'
+import { blockReason } from '../../ai/mode-policy'
+import { resolveDecision } from '../../ai/permission-rules'
 
 function csvToMarkdown(lines: string[]): string {
   if (lines.length === 0) return '(пустой CSV)'
@@ -116,9 +117,9 @@ export const editSpreadsheetHandler: ToolHandler = {
       }
 
       // Mode policy — как write_file: ask/accept-edits/auto/bypass/plan
-      const decision = decide('edit_spreadsheet', ctx.agentMode, ctx.autoApprove)
+      const { decision, reason: denyReason } = resolveDecision('edit_spreadsheet', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
       if (decision === 'block') {
-        const reason = blockReason('edit_spreadsheet', ctx.agentMode)
+        const reason = denyReason ?? blockReason('edit_spreadsheet', ctx.agentMode)
         return { id: call.id, name: call.name, result: '', error: reason }
       }
       const summary = `Правка таблицы ${path}${sheet ? ` · лист ${sheet}` : ''}: ${edits.map(e => `${e.cell}=${e.value}`).join(', ').slice(0, 300)}`

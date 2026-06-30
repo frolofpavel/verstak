@@ -409,6 +409,8 @@ function PolicyTab() {
   const [planGate, setPlanGate] = useState(false)
   const [autoEdits, setAutoEdits] = useState(false)
   const [autoCommands, setAutoCommands] = useState(false)
+  const [hooksOn, setHooksOn] = useState(false)
+  const [outputStyle, setOutputStyle] = useState('default')
 
   useEffect(() => {
     void (async () => {
@@ -424,11 +426,15 @@ function PolicyTab() {
       setPlanGate(pg === 'true')
       setAutoEdits((await window.api.settings.getKey('auto_approve_edits')) === 'true')
       setAutoCommands((await window.api.settings.getKey('auto_approve_commands')) === 'true')
+      setHooksOn((await window.api.settings.getKey('hooks_enabled')) === 'true')
+      setOutputStyle((await window.api.settings.getKey('output_style')) || 'default')
     })()
   }, [])
 
   const changeAutoEdits = async (v: boolean) => { setAutoEdits(v); await window.api.settings.setKey('auto_approve_edits', v ? 'true' : 'false') }
   const changeAutoCommands = async (v: boolean) => { setAutoCommands(v); await window.api.settings.setKey('auto_approve_commands', v ? 'true' : 'false') }
+  const changeHooks = async (v: boolean) => { setHooksOn(v); await window.api.settings.setKey('hooks_enabled', v ? 'true' : 'false') }
+  const changeOutputStyle = async (v: string) => { setOutputStyle(v); await window.api.settings.setKey('output_style', v) }
 
   const changeDod = async (v: string) => {
     setDodMode(v)
@@ -560,6 +566,41 @@ function PolicyTab() {
       <label className="gg-theme-square">
         <input type="checkbox" checked={autoCommands} onChange={e => void changeAutoCommands(e.target.checked)} />
         <span>Авто-принимать команды (run_command / коннекторы / execute_code) — осторожно</span>
+      </label>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>🎭 Стиль ответа агента</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Как агент <strong>форматирует и подаёт</strong> ответ — отдельно от режима правок. «Обычный» — без надстройки. Свои стили: <code>.md</code> в <code>~/.verstak/output-styles/</code> (frontmatter name/description, тело — инструкция), указывай id <code>user:имя</code>.
+      </div>
+      <select className="gg-input" value={outputStyle} onChange={e => void changeOutputStyle(e.target.value)} style={{ maxWidth: 320 }}>
+        <option value="default">Обычный (по умолчанию)</option>
+        <option value="concise">Кратко</option>
+        <option value="explanatory">С пояснениями</option>
+        <option value="formal">Деловой</option>
+        <option value="bullet">Только списки</option>
+      </select>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>📐 Правила доступа (permissions)</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Декларативные правила <strong>allow / deny / ask</strong> по паттернам поверх режима — тонкая автономность без переключения всего режима. Файл <code>.verstak/permissions.json</code> (в проекте) или <code>~/.verstak/permissions.json</code> (глобально). Применяются <strong>всегда</strong>, как только файл есть. Приоритет: <strong>deny &gt; ask &gt; allow</strong>; <code>deny</code> блокирует даже в «Без подтверждений», правила <strong>не ослабляют</strong> режим планирования.
+        <pre style={{ background: 'var(--bg-elev)', padding: 8, borderRadius: 6, fontSize: 11, marginTop: 8, overflowX: 'auto' }}>{`{
+  "allow": ["Bash(npm:*)", "Read(src/**)"],
+  "ask":   ["Bash(git push:*)"],
+  "deny":  ["Bash(rm:*)", "Read(*.env)"]
+}`}</pre>
+      </div>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>🪝 Хуки жизненного цикла (hooks)</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Свои скрипты на события агента (<code>PreToolUse</code> / <code>PostToolUse</code> / <code>SessionStart</code> / <code>Stop</code> / <code>UserPromptSubmit</code>) — детерминированный контроль <strong>вне модели</strong>: блокировать вызов (<code>PreToolUse</code> exit 2), линтить после правки, инжектить контекст. Конфиг <code>.verstak/hooks.json</code> (проект) или <code>~/.verstak/hooks.json</code> (глобально). <strong>⚠ Хуки исполняют произвольные shell-команды из конфига проекта</strong> — включай только если доверяешь проекту. По умолчанию выключено.
+        <pre style={{ background: 'var(--bg-elev)', padding: 8, borderRadius: 6, fontSize: 11, marginTop: 8, overflowX: 'auto' }}>{`{
+  "PreToolUse": [{ "matcher": "run_command", "command": "node guard.js" }],
+  "PostToolUse": [{ "matcher": "write_file", "command": "npm run lint" }]
+}`}</pre>
+      </div>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={hooksOn} onChange={e => void changeHooks(e.target.checked)} />
+        <span>Включить пользовательские хуки (исполнение скриптов на события — доверенные проекты)</span>
       </label>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>
