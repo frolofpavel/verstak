@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '1.5.49',
+    name: 'Verstak 1.5.49',
+    publishedAt: '2026-07-02T12:00:00Z',
+    body: '### Веб-доступ под контролем: белый/чёрный список доменов\n- Ограничение доменов для веб-доступа агента: теперь можно точно задать, какие сайты агенту разрешено читать. Файл .verstak/web-policy.json (в проекте) или ~/.verstak/web-policy.json (глобально): «allow» — белый список (например только docs.python.org и github.com), «deny» — чёрный список (сильнее белого). Нет файла — разрешены все публичные адреса, как раньше. Шаблон python.org покрывает домен и его поддомены, *.mozilla.org — только поддомены. Проверка срабатывает на каждом переходе по редиректу, так что увести агента на чужой домен через цепочку перенаправлений нельзя. Продолжение линии «контроль в конфиге»: поверх общего тумблера веб-доступа — тонкая граница по доменам.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v1.5.49'
+  },
+  {
     version: '1.5.48',
     name: 'Verstak 1.5.48',
     publishedAt: '2026-07-02T12:00:00Z',

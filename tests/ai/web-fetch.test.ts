@@ -177,6 +177,30 @@ describe('web-fetch — fetchUrl (инъекция fetch/lookup)', () => {
     })).rejects.toThrow(/редирект/i)
   })
 
+  it('domainCheck блокирует хост до сети (web-policy)', async () => {
+    let called = false
+    const fakeFetch = async () => { called = true; return new Response('ok') }
+    const deny = (host: string) => (host === 'evil.example' ? 'домен запрещён политикой' : null)
+    await expect(fetchUrl('https://evil.example/x', { fetchImpl: fakeFetch, lookupImpl: okLookup, domainCheck: deny }))
+      .rejects.toThrow(/политик/i)
+    expect(called).toBe(false)
+  })
+
+  it('domainCheck блокирует РЕДИРЕКТ на запрещённый домен (per-hop)', async () => {
+    let hop = 0
+    const fakeFetch = async (input: string | URL) => {
+      hop++
+      if (String(input).includes('allowed.example')) {
+        return new Response(null, { status: 302, headers: { location: 'https://evil.example/x' } })
+      }
+      return new Response('secret', { status: 200 })
+    }
+    const deny = (host: string) => (host === 'evil.example' ? 'домен запрещён политикой' : null)
+    await expect(fetchUrl('https://allowed.example/start', { fetchImpl: fakeFetch as typeof fetch, lookupImpl: okLookup, domainCheck: deny }))
+      .rejects.toThrow()
+    expect(hop).toBe(1) // редирект-хоп на evil не выполнен
+  })
+
   it('non-http схема в теле fetchUrl отвергается до сети', async () => {
     let called = false
     const fakeFetch = async () => { called = true; return new Response('x') }

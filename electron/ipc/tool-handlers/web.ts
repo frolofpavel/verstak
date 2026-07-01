@@ -7,6 +7,7 @@ import { emitActivity } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 import { fetchUrl } from '../../ai/web-fetch'
 import { webSearch } from '../../ai/web-search'
+import { loadWebPolicy, isHostAllowed } from '../../ai/web-policy'
 import { scanText, redactUrlSecrets } from '../../ai/secret-scanner'
 
 // Ревью MEDIUM: finalUrl (конечный хоп после редиректов) может нести секрет в query
@@ -40,8 +41,15 @@ export const webFetchHandler: ToolHandler = {
     if (!url) {
       return { id: call.id, name: call.name, result: '', error: 'web_fetch: нужен параметр url' }
     }
+    // Per-domain web-политика: ограничивает, какие домены агенту можно фетчить
+    // (~/.verstak/web-policy.json + project). Проверяется на каждом хопе редиректа.
+    const policy = loadWebPolicy(ctx.projectPath)
+    const domainCheck = (host: string): string | null => {
+      const r = isHostAllowed(host, policy)
+      return r.allowed ? null : (r.reason ?? 'домен запрещён web-политикой')
+    }
     try {
-      const res = await fetchUrl(url, { signal: ctx.signal, maxBytes: 2_000_000, timeoutMs: 15_000 })
+      const res = await fetchUrl(url, { signal: ctx.signal, maxBytes: 2_000_000, timeoutMs: 15_000, domainCheck })
       let text = res.text
       let clipped = res.truncated
       if (text.length > MAX_OUTPUT_CHARS) {

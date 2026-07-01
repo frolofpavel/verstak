@@ -260,6 +260,9 @@ export interface FetchUrlOpts {
   /** Не конвертировать HTML→текст: вернуть тело как есть (для парсинга разметки,
    *  напр. web_search над html.duckduckgo.com). SSRF/лимиты работают так же. */
   raw?: boolean
+  /** Per-domain политика: проверяется на КАЖДОМ хопе (вкл. редиректы). Возвращает
+   *  причину блокировки или null (разрешено). Напр. allow/deny доменов из web-policy. */
+  domainCheck?: (host: string) => string | null
   /** Инъекция для тестов. По умолчанию глобальный fetch. */
   fetchImpl?: typeof fetch
   /** Инъекция для тестов. По умолчанию node:dns lookup(all). */
@@ -338,6 +341,11 @@ export async function fetchUrl(rawUrl: string, opts: FetchUrlOpts = {}): Promise
   }
   try {
     for (;;) {
+      // Per-domain политика (web-policy) — до DNS/сети, на каждом хопе редиректа.
+      if (opts.domainCheck) {
+        const reason = opts.domainCheck(current.hostname.replace(/^\[/, '').replace(/\]$/, ''))
+        if (reason) throw new Error(reason)
+      }
       await guardDns(current.hostname, doLookup)
       const resp = await doFetch(current.toString(), {
         redirect: 'manual',

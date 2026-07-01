@@ -625,6 +625,13 @@ function PolicyTab() {
         <input type="checkbox" checked={webAccess} onChange={e => void changeWebAccess(e.target.checked)} />
         <span>Разрешить веб-доступ агенту (<code>web_search</code> + <code>web_fetch</code>)</span>
       </label>
+      <div className="gg-settings-hint" style={{ marginTop: 10 }}>
+        Можно ограничить, <strong>какие домены</strong> агенту разрешено читать — файл <code>.verstak/web-policy.json</code> (в проекте) или <code>~/.verstak/web-policy.json</code> (глобально). Нет файла → разрешены все публичные адреса. <code>deny</code> сильнее <code>allow</code>; непустой <code>allow</code> = режим белого списка. Паттерн <code>python.org</code> матчит домен и субдомены, <code>*.mozilla.org</code> — только субдомены. Проверяется на каждом хопе редиректа.
+        <pre style={{ background: 'var(--bg-elev)', padding: 8, borderRadius: 6, fontSize: 11, marginTop: 8, overflowX: 'auto' }}>{`{
+  "allow": ["python.org", "*.mozilla.org", "github.com"],
+  "deny":  ["*.internal"]
+}`}</pre>
+      </div>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>
         Риск по конкретным MCP-инструментам (per-server) — на вкладке <strong>MCP</strong>. Здесь он не дублируется.
