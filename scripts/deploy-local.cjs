@@ -75,9 +75,13 @@ if (fs.existsSync(UNPACKED)) {
   console.log('[deploy-local] Удалён stale app.asar.unpacked')
 }
 
+// ВАЖНО: locales ОБЯЗАТЕЛЬНО зеркалим (раньше был /XD locales для скорости). При
+// апгрейде Electron старые locales/*.pak оставались в install-папке и мисматчились
+// с новым бинарём → «locale resources are not loaded» → нативный краш рендерера
+// (0xC0000005), окно не открывалось. /MIR без исключения locales держит их в синке.
 const robocopy = spawnSync(
   'robocopy',
-  [SRC, DEST, '/MIR', '/XD', 'locales', '/NFL', '/NDL', '/NJH', '/NJS'],
+  [SRC, DEST, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS'],
   { stdio: 'inherit', shell: true }
 )
 const code = robocopy.status ?? 1

@@ -5,7 +5,7 @@ set LC_ALL=en_US.UTF-8
 set TERM=xterm-256color
 set COLORTERM=truecolor
 title Verstak
-cd /d C:\Users\Pavel\verstak
+cd /d "C:\Users\Pavel\Progetc\Проекты\verstak"
 echo Starting Verstak...
 echo.
 echo Keep this window open while using the app.

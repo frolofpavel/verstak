@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getLocalSttStatus, transcribeLocalWav, warmLocalStt } from '../voice/local-stt'
+import { getLocalSttStatus, transcribeLocalWav } from '../voice/local-stt'
 
 export type VoiceTranscribeResult =
   | { ok: true; text: string }
@@ -12,8 +12,12 @@ export interface VoiceStatusResult {
 }
 
 export function registerVoiceIpc(): void {
-  warmLocalStt()
-
+  // НЕ прогреваем на старте: модель Whisper ~150 МБ (onnxruntime) — грузить её при
+  // КАЖДОМ запуске приложения, даже когда голосовой ввод не используется, било по
+  // старту и в УПАКОВАННОЙ сборке валило рендерер (краш совпадал с домогрузкой модели).
+  // Ленивая загрузка: модель поднимается в transcribeLocalWav при ПЕРВОМ голосовом
+  // вводе. voice:status до этого показывает ready=false (кнопка работает, первый ввод
+  // включает загрузку). warmLocalStt оставлен экспортом — можно звать по клику на микрофон.
   ipcMain.handle('voice:status', (): VoiceStatusResult => {
     const local = getLocalSttStatus()
     return {

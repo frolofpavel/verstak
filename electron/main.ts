@@ -140,6 +140,22 @@ function createWindow(settings: Settings): BrowserWindow {
   trackMainWindowState(win, settings, windowState)
   bindWindowChromeEvents(win)
 
+  // Диагностика/наблюдаемость рендерера: причина падения, его консоль, сбой preload,
+  // ошибка загрузки. Логируется в main-процесс (видно в ELECTRON_ENABLE_LOGGING).
+  // Полезно и в проде: молчаливый краш рендерера в упаковке иначе не отследить.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[render-process-gone]', JSON.stringify(details))
+  })
+  win.webContents.on('preload-error', (_e, preloadPath, err) => {
+    console.error('[preload-error]', preloadPath, err && err.message ? err.message : String(err))
+  })
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[did-fail-load]', code, desc, url)
+  })
+  win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    console.log('[renderer]', level, `${message} (${sourceId}:${line})`)
+  })
+
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -207,6 +223,13 @@ if (process.platform === 'win32') {
 }
 
 installGlobalQuitHandlers()
+
+// Единое имя userData для dev И упакованной сборки. Без этого dev использовал
+// %APPDATA%/verstak (по package.json name), а упакованная — %APPDATA%/Verstak (по
+// productName) → упакованное приложение не видело данные пользователя (проекты/чаты/
+// память/whisper-модель осели в dev-папке) и создавало пустую. setName ДО whenReady и
+// первого getPath('userData'). Держать до любого обращения к путям приложения.
+app.setName('verstak')
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
