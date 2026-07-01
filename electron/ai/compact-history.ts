@@ -29,6 +29,7 @@
 
 import type { ChatMessage } from './types'
 import { estimateTokens, getContextLimit, COMPACT_THRESHOLD } from './context-limits'
+import { CACHE_BREAKPOINT } from './compose-prompt'
 
 /** Сколько последних turn'ов оставляем целиком. */
 const KEEP_RECENT_TURNS = 3
@@ -305,7 +306,7 @@ const KEEP_RECENT_FOR_COMPACT = 3
  * Создаёт сжатую историю: системное сообщение с резюме + последние N пар user/assistant.
  * Возвращаемый массив готов для подстановки в currentMessages.
  */
-export function createCompactedHistory(summary: string, messages: ChatMessage[], focusBlock?: string | null): ChatMessage[] {
+export function createCompactedHistory(summary: string, messages: ChatMessage[], focusBlock?: string | null, baseSystem?: string | null): ChatMessage[] {
   // Берём последние KEEP_RECENT_FOR_COMPACT пары (user + assistant)
   // Считаем с конца: ищем user-сообщения (они маркируют начало turn'а)
   const recentTurns: ChatMessage[] = []
@@ -318,18 +319,32 @@ export function createCompactedHistory(summary: string, messages: ChatMessage[],
     }
   }
 
-  return [
-    {
+  const summaryMsg: ChatMessage = {
+    role: 'system',
+    content:
+      '[Авто-компакшн: предыдущая часть сессии сжата в резюме]\n\n' +
+      summary +
+      // Focus Chain (ось 3 C): незакрытый todo-лист — ЯКОРЬ, чтобы он пережил сжатие и
+      // агент не потерял исходные пункты задачи (анти-дрейф §5.4).
+      (focusBlock ? '\n\n' + focusBlock : '')
+  }
+
+  // Ревью: сохраняем БАЗОВЫЙ system-префикс (протокол/правила/skill), иначе после
+  // компакции агент терял immutable-протокол → off-policy (как чинил new_task-фикс), а
+  // prompt-каша с маркером терялась. Для claude — стабильный префикс + маркер (кэш
+  // продолжает попадать, старый volatile-pack отброшен, его заменяет summary). Для
+  // не-claude (маркера нет — снят) — базовый префикс как есть, маркер НЕ добавляем.
+  const systemMsgs: ChatMessage[] = []
+  if (baseSystem && baseSystem.trim()) {
+    const bpIdx = baseSystem.indexOf(CACHE_BREAKPOINT)
+    systemMsgs.push({
       role: 'system',
-      content:
-        '[Авто-компакшн: предыдущая часть сессии сжата в резюме]\n\n' +
-        summary +
-        // Focus Chain (ось 3 C): незакрытый todo-лист — ЯКОРЬ в первом сообщении, чтобы
-        // он пережил сжатие и агент не потерял исходные пункты задачи (анти-дрейф §5.4).
-        (focusBlock ? '\n\n' + focusBlock : '')
-    },
-    ...recentTurns
-  ]
+      content: bpIdx >= 0 ? baseSystem.slice(0, bpIdx) + CACHE_BREAKPOINT : baseSystem
+    })
+  }
+  systemMsgs.push(summaryMsg)
+
+  return [...systemMsgs, ...recentTurns]
 }
 
 /**

@@ -93,12 +93,21 @@ export function appendCoreMemory(
   while (lines.join('\n').length > max && lines.length > 1) {
     evacuated.push(lines.shift()!)
   }
-  const tail = lines.join('\n')
-  saveCoreMemoryBlock(projectPath, block, tail)
+  let tail = lines.join('\n')
+  // Вырожденный случай (ревью MEDIUM): единственная строка всё ещё длиннее max — НЕ
+  // режем молча, а вытесняем хвост строки в архив тоже (иначе кусок нового факта терялся).
+  if (tail.length > max) {
+    evacuated.push(tail.slice(max))
+    tail = tail.slice(0, max)
+  }
   const evacuatedText = evacuated.join('\n').trim()
+  // АРХИВ-ПЕРВЫМ (ревью HIGH): сохраняем эвакуированное ДО обрезки core-файла. Если
+  // onEvacuate кинул (напр. SQLITE_BUSY) — бросаем ДО saveCoreMemoryBlock, core-файл
+  // остаётся ЦЕЛ (голова не потеряна). Раньше обрезали первым → падение saveMemory =
+  // безвозвратная потеря вытесненного. Порядок критичен: не менять местами.
   if (evacuatedText && onEvacuate) onEvacuate(evacuatedText)
-  // tail.slice — страховка на случай единственной строки длиннее max (патология).
-  return { success: true, content: tail.slice(0, max), overflow: true, evacuated: evacuatedText || undefined }
+  saveCoreMemoryBlock(projectPath, block, tail)
+  return { success: true, content: tail, overflow: true, evacuated: evacuatedText || undefined }
 }
 
 /**

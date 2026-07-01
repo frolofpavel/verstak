@@ -124,8 +124,11 @@ export const coreMemoryAppendHandler: ToolHandler = {
         return { id: call.id, name: call.name, result: '', error: 'core_memory_append: content обязателен' }
       }
       // При переполнении эвакуируем старейшее в архивную память (не теряем факты).
+      // БЕЗ swallow-catch: если saveMemory кинул (SQLITE_BUSY/shutdown), ошибка всплывает
+      // ДО обрезки core-файла (архив-первым в appendCoreMemory) → факт остаётся в core,
+      // внешний catch вернёт агенту ошибку. Глотание здесь = молчаливая потеря (ревью HIGH).
       const res = appendCoreMemory(ctx.projectPath, block, content, (evacuated) => {
-        try { ctx.saveMemory(ctx.projectPath, 'fact', `Вытеснено из core-memory (${block}): ${evacuated}`, ['core-evicted', block]) } catch { /* архив best-effort */ }
+        ctx.saveMemory(ctx.projectPath, 'fact', `Вытеснено из core-memory (${block}): ${evacuated}`, ['core-evicted', block])
       })
       const overflowNote = res.overflow ? ' (старейшее вытеснено в архивную память)' : ''
       emitActivity(ctx, call, 'ok', 'core_memory_append', `${block} · +${content.length} символов${overflowNote}`)

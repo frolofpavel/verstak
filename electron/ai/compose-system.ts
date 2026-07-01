@@ -125,7 +125,11 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
   // Tier-2 #6: file-scoped правила (.verstak/rules/*.mdc) — инжектим те, что подходят
   // под активные файлы (recentWrites) по glob, + alwaysApply всегда. Условные правила
   // под конкретные зоны проекта, не раздувая базовый user-layer. Graceful: ошибка → skip.
-  if (projectPath && userLayer.content !== undefined) {
+  // ВАЖНО (prompt caching, ревью): блок ИЗМЕНЧИВ (зависит от recentWrites) → идёт в
+  // context-pack (volatile хвост ПОСЛЕ маркера кэша), НЕ в user_layer (стабильный
+  // префикс). Иначе кэш-мисс каждый ход, когда агент пишет файлы под разные globs.
+  let fileRulesBlock = ''
+  if (projectPath) {
     try {
       const rules = await loadFileScopedRules(projectPath)
       if (rules.length) {
@@ -137,7 +141,7 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
           const MAX_RULES_CHARS = 8000
           let block = active.map(r => r.body).join('\n\n')
           if (block.length > MAX_RULES_CHARS) block = block.slice(0, MAX_RULES_CHARS) + '\n…[file-scoped правила обрезаны по лимиту]'
-          userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n<!-- file_scoped_rules -->\n${block}` }
+          fileRulesBlock = `<!-- file_scoped_rules -->\n${block}`
         }
       }
     } catch (err) {
@@ -195,6 +199,11 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
       // Visible failure — previously this was silent and made debugging hard.
       console.warn('[prepareSystemContext] buildContextPack failed:', err instanceof Error ? err.message : err)
     }
+  }
+
+  // file-scoped правила — в ХВОСТ context-pack (volatile), после кэш-маркера.
+  if (fileRulesBlock) {
+    contextPack = contextPack ? `${contextPack}\n\n${fileRulesBlock}` : fileRulesBlock
   }
 
   return { userLayer, contextPack }

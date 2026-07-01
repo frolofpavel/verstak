@@ -14,6 +14,7 @@
 import { ipcMain } from 'electron'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import { prepareSystemContext } from '../ai/compose-system'
+import { systemForProvider } from '../ai/compose-prompt'
 import type { ChatMessage } from '../ai/types'
 
 export interface AutonomousDeps {
@@ -124,7 +125,9 @@ async function runCycle(deps: AutonomousDeps): Promise<void> {
       recentWrites: deps.recentWrites(projectPath, 8)
     })
     const messagesWithSystem: ChatMessage[] = [
-      { role: 'system', content: composed.system },
+      // systemForProvider: снять кэш-маркер для не-claude (паритет с ai.ts:323/573),
+      // иначе '<<VERSTAK_CACHE_BP>>' протекал бы литералом в system prompt (ревью LOW).
+      { role: 'system', content: systemForProvider(composed.system, providerId) },
       ...messages
     ]
 

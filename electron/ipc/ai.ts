@@ -2006,7 +2006,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // первое сообщение, чтобы агент не потерял исходные пункты задачи.
           const focusAtCompact = (sessionTodos && projectPath)
             ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
-          const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact)
+          const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
           currentMessages.length = 0
           currentMessages.push(...compacted)
           // Уведомляем пользователя через info-событие (UI покажет тост)

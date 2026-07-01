@@ -46,4 +46,29 @@ describe('core-memory — appendCoreMemory overflow (эвакуация, не п
     // новейшее НЕ должно оказаться в эвакуированном
     expect(evac.join('\n')).not.toContain('ПОСЛЕДНЯЯ_ЗАПИСЬ')
   })
+
+  // Ревью HIGH: архив-первым — падение onEvacuate НЕ должно рушить core-файл.
+  it('падение onEvacuate → core-файл НЕ обрезан, ошибка всплывает (нет потери)', () => {
+    for (let i = 0; i < 80; i++) appendCoreMemory(dir, 'memory', `factline_${i} ${'q'.repeat(25)}`)
+    const before = loadCoreMemory(dir).memory
+    // onEvacuate имитирует SQLITE_BUSY
+    expect(() => appendCoreMemory(dir, 'memory', 'NEW ' + 'r'.repeat(400), () => {
+      throw new Error('SQLITE_BUSY')
+    })).toThrow('SQLITE_BUSY')
+    // core-файл остался ЦЕЛ — голова не потеряна (обрезка не случилась)
+    const after = loadCoreMemory(dir).memory
+    expect(after).toBe(before)
+  })
+
+  // Ревью MEDIUM: единственная строка длиннее max — хвост эвакуируется, не режется молча.
+  it('единственная сверхдлинная строка → хвост уходит в архив, не теряется', () => {
+    const evac: string[] = []
+    const big = 'ОГРОМНЫЙ_ФАКТ ' + 'k'.repeat(2500)  // > MAX_MEMORY (2000)
+    const r = appendCoreMemory(dir, 'memory', big, (e) => evac.push(e))
+    expect(r.overflow).toBe(true)
+    expect(r.content.length).toBeLessThanOrEqual(2000)
+    // отрезанный хвост НЕ потерян — ушёл в архив
+    expect(evac.length).toBeGreaterThan(0)
+    expect(evac.join('').length).toBeGreaterThan(400)
+  })
 })
