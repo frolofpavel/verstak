@@ -123,8 +123,11 @@ export const coreMemoryAppendHandler: ToolHandler = {
       if (!content) {
         return { id: call.id, name: call.name, result: '', error: 'core_memory_append: content обязателен' }
       }
-      const res = appendCoreMemory(ctx.projectPath, block, content)
-      const overflowNote = res.overflow ? ' (контент обрезан по лимиту)' : ''
+      // При переполнении эвакуируем старейшее в архивную память (не теряем факты).
+      const res = appendCoreMemory(ctx.projectPath, block, content, (evacuated) => {
+        try { ctx.saveMemory(ctx.projectPath, 'fact', `Вытеснено из core-memory (${block}): ${evacuated}`, ['core-evicted', block]) } catch { /* архив best-effort */ }
+      })
+      const overflowNote = res.overflow ? ' (старейшее вытеснено в архивную память)' : ''
       emitActivity(ctx, call, 'ok', 'core_memory_append', `${block} · +${content.length} символов${overflowNote}`)
       return { id: call.id, name: call.name, result: `Добавлено в ${block}${overflowNote}.\n\nТекущее содержимое:\n${res.content}` }
     } catch (err) {

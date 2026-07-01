@@ -31,23 +31,22 @@ describe('composeSystemPrompt — skill layering (не замена)', () => {
     expect(system).toContain('shared contract/interface') // сериализация правок одного файла
   })
 
-  it('порядок слоёв: system-layer → user-layer → context-pack → skill-layer', () => {
+  it('порядок слоёв (prompt caching): system-layer → user-layer → skill-layer → context-pack', () => {
     const { system } = composeSystemPrompt(
       { path: 'CLAUDE.md', content: 'правило проекта' },
       '<context_pack generated="auto">пакет</context_pack>',
       SKILL
     )
-    // Ищем по реальным открывающим тегам наслоённых блоков. indexOf('context_pack')
-    // нельзя — этот текст встречается ВНУТРИ immutable system-layer (он
-    // документирует слои), поэтому опираемся на конкретные открывающие маркеры.
+    // Порядок изменён под prompt caching: изменчивый context-pack ушёл В КОНЕЦ (после
+    // стабильного skill), между ними — маркер кэша. Стабильное первым → кэшируется.
     const iSystem = system.indexOf('<verstak_system_layer')
     const iUser = system.indexOf('<user_layer source=')
-    const iPack = system.indexOf('<context_pack generated=')
     const iSkill = system.indexOf('<skill_layer>')
+    const iPack = system.indexOf('<context_pack generated=')
     expect(iSystem).toBeGreaterThanOrEqual(0)
     expect(iSystem).toBeLessThan(iUser)
-    expect(iUser).toBeLessThan(iPack)
-    expect(iPack).toBeLessThan(iSkill)
+    expect(iUser).toBeLessThan(iSkill)
+    expect(iSkill).toBeLessThan(iPack)  // pack теперь ПОСЛЕ skill
   })
 
   it('пустой skillPrompt (whitespace) не добавляет секцию', () => {

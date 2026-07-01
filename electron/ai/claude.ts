@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { CACHE_BREAKPOINT } from './compose-prompt'
 
 interface ClaudeOptions {
   apiKey: string
@@ -76,6 +77,19 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
 
     async *send(messages: ChatMessage[], tools: ToolDefinition[], _results?: ToolResult[], signal?: AbortSignal): AsyncIterable<ChatEvent> {
       const systemMessages = messages.filter(m => m.role === 'system').map(m => m.content).filter(Boolean).join('\n\n')
+      // Prompt caching: режем по маркеру на СТАБИЛЬНЫЙ префикс (кэшируем) и ИЗМЕНЧИВЫЙ
+      // хвост (context-pack, не кэшируем — меняется каждый ход). cache_control на
+      // стабильном блоке → Anthropic кэширует tools+stable-system (60-90% на input
+      // со 2-го хода). Нет маркера (нет проекта/reviewer) → весь system стабилен.
+      const bpIdx = systemMessages.indexOf(CACHE_BREAKPOINT)
+      const stableSys = bpIdx >= 0 ? systemMessages.slice(0, bpIdx) : systemMessages
+      const volatileSys = bpIdx >= 0 ? systemMessages.slice(bpIdx + CACHE_BREAKPOINT.length) : ''
+      const systemParam: Anthropic.Messages.TextBlockParam[] | undefined = stableSys.trim()
+        ? [
+            { type: 'text', text: stableSys, cache_control: { type: 'ephemeral' } },
+            ...(volatileSys.trim() ? [{ type: 'text' as const, text: volatileSys }] : []),
+          ]
+        : undefined
       const conversation = messages
         .filter(m => m.role !== 'system')
         .map(m => ({
@@ -87,11 +101,15 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
           return typeof c === 'string' ? c.length > 0 : c.length > 0
         })
 
+      // cache_control на ПОСЛЕДНЕМ туле → Anthropic кэширует весь блок tools (~11-14K
+      // токенов, статичны между ходами). Отдельный breakpoint от system: если system
+      // сменится (skill/mode), tools-кэш всё равно попадёт.
       const apiTools = tools.length > 0
-        ? tools.map(t => ({
+        ? tools.map((t, i) => ({
             name: t.name,
             description: t.description,
-            input_schema: t.parameters as Anthropic.Messages.Tool.InputSchema
+            input_schema: t.parameters as Anthropic.Messages.Tool.InputSchema,
+            ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {})
           }))
         : undefined
 
@@ -115,7 +133,7 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
         const stream = await client.messages.stream({
           model,
           max_tokens: maxTokens,
-          system: systemMessages || undefined,
+          system: systemParam,
           messages: conversation as Anthropic.Messages.MessageParam[],
           ...(apiTools ? { tools: apiTools } : {}),
           ...thinkingParam
@@ -124,10 +142,12 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
         let inputTokens = 0
         let outputTokens = 0
         let cachedInputTokens = 0
+        let cacheCreationInputTokens = 0
         for await (const event of stream) {
           if (event.type === 'message_start' && event.message?.usage) {
             inputTokens = event.message.usage.input_tokens ?? 0
             cachedInputTokens = (event.message.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0
+            cacheCreationInputTokens = (event.message.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0
           } else if (event.type === 'message_delta' && event.usage) {
             outputTokens = event.usage.output_tokens ?? 0
           } else if (event.type === 'content_block_start') {
@@ -166,7 +186,7 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
           }
         }
         if (inputTokens || outputTokens) {
-          yield { type: 'usage', usage: { inputTokens, outputTokens, cachedInputTokens, model } }
+          yield { type: 'usage', usage: { inputTokens, outputTokens, cachedInputTokens, cacheCreationInputTokens, model } }
         }
         yield { type: 'done' }
       } catch (err) {

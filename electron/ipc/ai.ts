@@ -10,6 +10,7 @@ import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
+import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { loadCoreMemory } from '../ai/core-memory'
@@ -319,7 +320,7 @@ export async function runScheduledHeadless(
       messages: [userMsg],
       recentWrites: deps.recentWrites(opts.projectPath, 8),
     })
-    const messages: ChatMessage[] = [{ role: 'system', content: composed.system }, userMsg]
+    const messages: ChatMessage[] = [{ role: 'system', content: systemForProvider(composed.system, opts.providerId) }, userMsg]
 
     // Headless sender — события дропаем (нет UI); итог берём из result.text.
     const sender: TaggedSender = { send: () => {}, exec: async () => undefined }
@@ -565,7 +566,11 @@ export function registerAiIpc(deps: AiDeps): void {
       // поведение под Простой/Турбо. Простой-подсказка нейтральна к сегодняшнему
       // поведению (один прямой путь), Турбо — поощряет всю машинерию.
       composedSystem = composed.system + '\n\n' + intCfg.systemHint
-      messagesWithSystem = [{ role: 'system', content: composedSystem }, ...messages]
+      // Prompt caching: 'claude' получает маркер (сам режет и кэширует стабильный
+      // префикс), остальные провайдеры — снятый маркер (авто-кэш по стабильному
+      // префиксу OpenAI/DeepSeek/Gemini implicit). Порядок stable→volatile уже задан
+      // в composeSystemPrompt — этого достаточно для implicit-кэша прочих.
+      messagesWithSystem = [{ role: 'system', content: systemForProvider(composedSystem, providerId) }, ...messages]
     } else if (overrides?.systemPrompt) {
       // Не-API (CLI) транспорт со скилл-override. CLI-провайдеры строят свой
       // системный промпт внутри buildCliPrompt и игнорируют system-сообщение в
@@ -658,7 +663,7 @@ export function registerAiIpc(deps: AiDeps): void {
           timestamp: Date.now(),
           providerId,
           model: model ?? null,
-          systemPrompt: composedSystem,
+          systemPrompt: stripCacheBreakpoint(composedSystem),
           userMessage: lastUser?.content ?? ''
         })
       } catch { /* snapshot not critical */ }
@@ -974,7 +979,7 @@ export function registerAiIpc(deps: AiDeps): void {
         })
         // Full context size: system + every prior turn + the draft text.
         const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [
-          { role: 'user', parts: [{ text: composed.system }] }
+          { role: 'user', parts: [{ text: stripCacheBreakpoint(composed.system) }] }
         ]
         for (const m of history) {
           if (m.role === 'system') continue  // already in composed.system

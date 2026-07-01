@@ -1,6 +1,31 @@
 import { SYSTEM_LAYER_PROMPT, SYSTEM_LAYER_VERSION } from './system-layer'
 import type { UserLayer } from './user-layer'
 
+/**
+ * Маркер границы кэша между СТАБИЛЬНЫМ префиксом (system-layer + user-layer +
+ * skill + preflight — не меняется между ходами сессии) и ИЗМЕНЧИВЫМ хвостом
+ * (context-pack: git-status, недавние правки, память — меняется каждый ход).
+ *
+ * Prompt caching префиксный: изменчивый байт в середине инвалидирует весь кэш
+ * после него. Поэтому мы кладём стабильное ПЕРВЫМ, ставим маркер, изменчивое —
+ * ПОСЛЕ. claude.ts режет по маркеру и вешает cache_control на стабильный блок
+ * (Anthropic explicit caching). Остальные провайдеры получают строку со снятым
+ * маркером (systemForProvider) — стабильный префикс идёт первым → авто-кэш
+ * OpenAI/DeepSeek/Gemini implicit попадает сам. См. token-audit 01.07.
+ */
+export const CACHE_BREAKPOINT = '<<VERSTAK_CACHE_BP>>'
+
+/** Снять маркер кэша (для провайдеров без explicit caching + для debug-снапшота). */
+export function stripCacheBreakpoint(system: string): string {
+  return system.split(CACHE_BREAKPOINT).join('')
+}
+
+/** Система для конкретного провайдера: Anthropic ('claude') получает маркер
+ *  (сам режет и кэширует), все прочие — снятый (авто-кэш по стабильному префиксу). */
+export function systemForProvider(system: string, providerId: string): string {
+  return providerId === 'claude' ? system : stripCacheBreakpoint(system)
+}
+
 export interface ComposedPrompt {
   /** Final string to put in the API's `system` field (or system message). */
   system: string
@@ -44,7 +69,14 @@ export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skil
   // Мягкий nudge: перед сложной/многофайловой/деструктивной задачей объявить
   // план через preflight. НЕ для тривиальных одиночных правок — иначе раздражает.
   const preflightHint = '\n\n<preflight_hint>\nПеред сложной, многофайловой или деструктивной задачей сначала вызови preflight (план: затронутые зоны, уровень риска, что проверить после, что вне scope / запреты), затем выполняй. Для тривиальной одиночной правки preflight не нужен.\n</preflight_hint>'
-  const system = `${SYSTEM_LAYER_PROMPT}${userBlock}${packBlock}${skillBlock}${preflightHint}`
+  // Порядок для prompt caching: СТАБИЛЬНОЕ (system-layer + user + skill + preflight)
+  // → маркер → ИЗМЕНЧИВОЕ (context-pack). Раньше packBlock стоял в СЕРЕДИНЕ (перед
+  // skill) — это ломало бы кэш (изменчивое инвалидирует всё после). context-pack —
+  // это данные проекта, порядок после skill-специализации семантически безвреден.
+  const stablePrefix = `${SYSTEM_LAYER_PROMPT}${userBlock}${skillBlock}${preflightHint}`
+  const system = packBlock
+    ? `${stablePrefix}${CACHE_BREAKPOINT}${packBlock}`
+    : stablePrefix
 
   return {
     system,

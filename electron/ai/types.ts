@@ -65,6 +65,9 @@ export interface UsageDelta {
   outputTokens?: number
   /** Tokens already cached on the provider side (Anthropic / OpenAI) */
   cachedInputTokens?: number
+  /** Tokens записанные В кэш на этом ходу (Anthropic cache write, ~1.25× цены input).
+   *  Нужен для честной оценки стоимости 1-го хода в cost-controller. */
+  cacheCreationInputTokens?: number
   /** Model that produced the usage, helps cost lookup */
   model?: string
 }

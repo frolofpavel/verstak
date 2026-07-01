@@ -64,20 +64,41 @@ export function replaceCoreMemory(
 
 /**
  * Добавить текст в конец блока.
- * overflow: true если итог превысил лимит (контент всё равно сохраняется, но обрезается).
+ *
+ * При переполнении (>max) НЕ теряем факты обрезкой: эвакуируем СТАРЕЙШИЕ строки
+ * (голову) в архив через onEvacuate (Hermes-style memory pressure — вытолкнуть
+ * старое из core в archival, оставив новое), а не режем хвост с только что
+ * добавленным фактом. Раньше `joined.slice(0,max)` держал начало и молча ронял
+ * НОВЫЙ текст — реальная потеря данных (token-audit 01.07).
+ *
+ * @param onEvacuate — колбэк сохранения вытесненного в долговременную память (archival).
  */
 export function appendCoreMemory(
   projectPath: string,
   block: 'memory' | 'user',
-  text: string
-): { success: boolean; content: string; overflow: boolean } {
+  text: string,
+  onEvacuate?: (evacuated: string) => void
+): { success: boolean; content: string; overflow: boolean; evacuated?: string } {
   const blocks = loadCoreMemory(projectPath)
   const current = block === 'memory' ? blocks.memory : blocks.user
   const max = block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS
   const joined = current.length > 0 ? current + '\n' + text : text
-  const overflow = joined.length > max
-  saveCoreMemoryBlock(projectPath, block, joined)
-  return { success: true, content: joined.slice(0, max), overflow }
+  if (joined.length <= max) {
+    saveCoreMemoryBlock(projectPath, block, joined)
+    return { success: true, content: joined, overflow: false }
+  }
+  // Переполнение: режем по строкам, отрезаем старейшие (голову) пока хвост не влезет.
+  const lines = joined.split('\n')
+  const evacuated: string[] = []
+  while (lines.join('\n').length > max && lines.length > 1) {
+    evacuated.push(lines.shift()!)
+  }
+  const tail = lines.join('\n')
+  saveCoreMemoryBlock(projectPath, block, tail)
+  const evacuatedText = evacuated.join('\n').trim()
+  if (evacuatedText && onEvacuate) onEvacuate(evacuatedText)
+  // tail.slice — страховка на случай единственной строки длиннее max (патология).
+  return { success: true, content: tail.slice(0, max), overflow: true, evacuated: evacuatedText || undefined }
 }
 
 /**
