@@ -88,6 +88,17 @@ export function registerSettingsIpc(settings: Settings): void {
     return loadOutputStyles(projectPath).map(s => ({ id: s.id, name: s.name, description: s.description, scope: s.scope }))
   })
 
+  // Persistent per-command approvals: «запомнить это одобрение» → prefix-правило в
+  // ~/.verstak/permissions.json (allow). Будущие сессии авто-разрешают. Возвращает
+  // добавленное правило (или null, если нечего/уже было).
+  ipcMain.handle('permissions:remember', async (_e, toolName: string, argText: string): Promise<string | null> => {
+    const { derivePrefixRule, rememberApproval } = await import('../ai/permission-rules')
+    const rule = derivePrefixRule(toolName, argText)
+    if (!rule) return null
+    rememberApproval(rule)  // идемпотентно; правило возвращаем для UI-фидбека
+    return rule
+  })
+
   ipcMain.handle('cli:detect', () => detectInstalledClis())
   ipcMain.handle('local-models:scan', () => scanLocalModelServers())
 

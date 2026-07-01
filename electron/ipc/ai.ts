@@ -1536,6 +1536,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if (getSecretForDelegate?.('ptc_enabled') !== 'true') {
       allToolDefs = allToolDefs.filter(t => t.name !== 'execute_code')
     }
+    // Веб-доступ агента (web_fetch) — opt-in по web_access='true' (по умолчанию
+    // выкл: контроль-first + SSRF-периметр открывается только по явному согласию).
+    if (getSecretForDelegate?.('web_access') !== 'true') {
+      allToolDefs = allToolDefs.filter(t => t.name !== 'web_fetch' && t.name !== 'web_search')
+    }
     const messagesToSend = isLastTurn
       ? [...messagesForProvider, { role: 'user' as const, content: MAX_STEPS_REPORT }]
       : messagesForProvider

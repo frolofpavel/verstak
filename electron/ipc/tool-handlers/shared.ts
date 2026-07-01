@@ -240,6 +240,13 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
   if (name === 'browser_navigate') {
     return { label: 'browser_navigate', detail: String(args.url ?? '') }
   }
+  if (name === 'web_fetch') {
+    const len = typeof result === 'string' ? result.length : 0
+    return { label: 'web_fetch', detail: `${String(args.url ?? '')} · ${len} символов` }
+  }
+  if (name === 'web_search') {
+    return { label: 'web_search', detail: String(args.query ?? '') }
+  }
   if (name === 'browser_read_page') {
     return { label: 'browser_read_page', detail: args.selector ? String(args.selector) : '(вся страница)' }
   }

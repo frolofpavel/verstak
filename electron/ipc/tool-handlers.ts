@@ -42,6 +42,7 @@ export { convertFileHandler } from './tool-handlers/files'
 import { attestVerificationHandler, createPlanHandler, preflightHandler } from './tool-handlers/verification'
 import { memorySaveHandler, memoryInvalidateHandler, saveDecisionHandler, memorySearchHandler, coreMemoryAppendHandler, coreMemoryReplaceHandler, coreMemoryRemoveHandler } from './tool-handlers/memory'
 import { screenCaptureHandler, screenInfoHandler } from './tool-handlers/screen'
+import { webFetchHandler, webSearchHandler } from './tool-handlers/web'
 import { mcpToolHandler } from './tool-handlers/mcp'
 import { todoCreateHandler, todoUpdateHandler, todoListHandler } from './tool-handlers/todos'
 import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler } from './tool-handlers/shared'
@@ -106,6 +107,9 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Screen capture — parallel-read, Electron desktopCapturer
   'screen_capture': screenCaptureHandler,
   'screen_info': screenInfoHandler,
+  // Web access — sequential, HTTP + SSRF-guard; гейтится по web_access в ai.ts
+  'web_fetch': webFetchHandler,
+  'web_search': webSearchHandler,
   // Office «beyond code» — чтение parallel-read (через readHandler), правка confirm-write
   'read_spreadsheet': readHandler,
   'read_document': readHandler,

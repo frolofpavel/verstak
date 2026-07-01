@@ -6894,6 +6894,18 @@ html[data-theme="light"] .gg-chat-settings-popover {
 .gg-cmd-prompt { color: var(--accent); flex-shrink: 0; font-weight: 600; }
 .gg-cmd-text { color: var(--text-primary); white-space: pre-wrap; }
 
+/* «Больше не спрашивать» — persistent per-command approval чекбокс в CommandConfirm */
+.gg-remember-approval {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.gg-remember-approval input { cursor: pointer; margin: 0; }
+.gg-remember-approval:hover { color: var(--text-primary); }
+
 /* Activity log entries (rendered inline in chat) */
 .gg-activity-row {
   display: inline-flex; align-items: center; gap: 8px;

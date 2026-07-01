@@ -411,6 +411,7 @@ function PolicyTab() {
   const [autoCommands, setAutoCommands] = useState(false)
   const [hooksOn, setHooksOn] = useState(false)
   const [hooksProjectOn, setHooksProjectOn] = useState(false)
+  const [webAccess, setWebAccess] = useState(false)
   const [outputStyle, setOutputStyle] = useState('default')
   const [outputStyleList, setOutputStyleList] = useState<Array<{ id: string; name: string; scope: string }>>([])
 
@@ -430,6 +431,7 @@ function PolicyTab() {
       setAutoCommands((await window.api.settings.getKey('auto_approve_commands')) === 'true')
       setHooksOn((await window.api.settings.getKey('hooks_enabled')) === 'true')
       setHooksProjectOn((await window.api.settings.getKey('hooks_project_enabled')) === 'true')
+      setWebAccess((await window.api.settings.getKey('web_access')) === 'true')
       setOutputStyle((await window.api.settings.getKey('output_style')) || 'default')
       try { setOutputStyleList(await window.api.settings.outputStyles(null)) } catch { /* список стилей — best-effort */ }
     })()
@@ -439,6 +441,7 @@ function PolicyTab() {
   const changeAutoCommands = async (v: boolean) => { setAutoCommands(v); await window.api.settings.setKey('auto_approve_commands', v ? 'true' : 'false') }
   const changeHooks = async (v: boolean) => { setHooksOn(v); await window.api.settings.setKey('hooks_enabled', v ? 'true' : 'false') }
   const changeHooksProject = async (v: boolean) => { setHooksProjectOn(v); await window.api.settings.setKey('hooks_project_enabled', v ? 'true' : 'false') }
+  const changeWebAccess = async (v: boolean) => { setWebAccess(v); await window.api.settings.setKey('web_access', v ? 'true' : 'false') }
   const changeOutputStyle = async (v: string) => { setOutputStyle(v); await window.api.settings.setKey('output_style', v) }
 
   const changeDod = async (v: string) => {
@@ -612,6 +615,15 @@ function PolicyTab() {
       <label className="gg-theme-square">
         <input type="checkbox" checked={hooksProjectOn} disabled={!hooksOn} onChange={e => void changeHooksProject(e.target.checked)} />
         <span>⚠ Доверять хукам ИЗ ПРОЕКТА (<code>{'{project}'}/.verstak/hooks.json</code>) — исполняет код из репозитория, включай только для своих проектов</span>
+      </label>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>🌐 Веб-доступ агенту</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Разрешить агенту искать в вебе (<code>web_search</code>) и читать страницы по URL (<code>web_fetch</code>) — документация, changelog, версии библиотек, статьи. Прямой HTTP-запрос, без вкладки Browser. <strong>Только публичные адреса</strong>: приватные/локальные хосты и cloud-metadata заблокированы (SSRF-периметр), редиректы ре-валидируются, ответ обрезается и чистится от секретов. По умолчанию <strong>выключено</strong> — включай осознанно.
+      </div>
+      <label className="gg-theme-square">
+        <input type="checkbox" checked={webAccess} onChange={e => void changeWebAccess(e.target.checked)} />
+        <span>Разрешить веб-доступ агенту (<code>web_search</code> + <code>web_fetch</code>)</span>
       </label>
 
       <div className="gg-policy-note" style={{ marginTop: 18 }}>

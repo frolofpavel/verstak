@@ -62,6 +62,19 @@ function buildContent(message: ChatMessage): string | AnyBlock[] {
   return blocks
 }
 
+/** Пометить последний блок сообщения cache_control:ephemeral (history-prefix кэш).
+ *  Строку конвертируем в text-блок (к строке cache_control не прицепить). Пустое — как есть. */
+export function withHistoryCacheControl(content: string | AnyBlock[]): string | AnyBlock[] {
+  if (typeof content === 'string') {
+    if (!content) return content
+    return [{ type: 'text', text: content, cache_control: { type: 'ephemeral' } }]
+  }
+  if (content.length === 0) return content
+  const clone = content.slice()
+  clone[clone.length - 1] = { ...clone[clone.length - 1], cache_control: { type: 'ephemeral' } }
+  return clone
+}
+
 // Модели Claude поддерживающие extended thinking (budget_tokens)
 const THINKING_MODELS = new Set(['claude-sonnet-4-6', 'claude-opus-4-5', 'claude-opus-4'])
 
@@ -100,6 +113,15 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
           const c = m.content
           return typeof c === 'string' ? c.length > 0 : c.length > 0
         })
+
+      // history-prefix caching: ephemeral-маркер на ПОСЛЕДНЕМ сообщении диалога →
+      // Anthropic кэширует растущий префикс истории (всё до текущего хвоста). Каждый
+      // ход маркер «катится» вперёд: прошлый префикс = cache hit. 3-й breakpoint
+      // (system + tools + history ≤ 4 макс). Крупнейший остаток токенов после 1.5.47.
+      if (conversation.length > 0) {
+        const last = conversation[conversation.length - 1]
+        last.content = withHistoryCacheControl(last.content)
+      }
 
       // cache_control на ПОСЛЕДНЕМ туле → Anthropic кэширует весь блок tools (~11-14K
       // токенов, статичны между ходами). Отдельный breakpoint от system: если system
