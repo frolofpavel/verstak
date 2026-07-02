@@ -340,6 +340,10 @@ declare global {
           | { ok: true; path: string; markdown: string }
           | { ok: false; error: string }
         >
+        exportTranscript: (sessionId: number) => Promise<
+          | { ok: true; path: string; markdown: string }
+          | { ok: false; error: string }
+        >
       }
       tasks: {
         list: (projectPath: string) => Promise<Task[]>

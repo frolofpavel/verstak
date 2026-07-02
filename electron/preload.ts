@@ -194,7 +194,9 @@ contextBridge.exposeInMainWorld('api', {
     generate: (sessionId: number, parentId?: string | null) =>
       ipcRenderer.invoke('handoff:generate', sessionId, parentId) as Promise<string>,
     saveToDownloads: (sessionId: number, parentId?: string | null) =>
-      ipcRenderer.invoke('handoff:save-to-downloads', sessionId, parentId)
+      ipcRenderer.invoke('handoff:save-to-downloads', sessionId, parentId),
+    exportTranscript: (sessionId: number) =>
+      ipcRenderer.invoke('transcript:export-to-downloads', sessionId)
   },
   tasks: {
     list: (projectPath: string) => ipcRenderer.invoke('tasks:list', projectPath),

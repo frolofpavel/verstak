@@ -4,7 +4,8 @@ import { join } from 'path'
 import type { Chats } from '../storage/chats'
 import type { ChatSessions } from '../storage/chat-sessions'
 import { generateHandoff } from '../ai/handoff'
-import { buildHandoffFileName } from '../ai/handoff-file'
+import { buildHandoffFileName, sanitizeHandoffFilePart } from '../ai/handoff-file'
+import { buildTranscriptMarkdown } from '../ai/transcript'
 import type { ChatMessage } from '../ai/types'
 
 export type HandoffSaveResult =
@@ -47,6 +48,26 @@ export function registerHandoffIpc(chats: Chats, sessions: ChatSessions): void {
         ok: false,
         error: err instanceof Error ? err.message : String(err)
       }
+    }
+  })
+
+  // Полный дословный транскрипт сессии в Markdown (в отличие от сжатого handoff) —
+  // для code-review / багрепорта / архива. scanText внутри buildTranscriptMarkdown.
+  ipcMain.handle('transcript:export-to-downloads', (_e, sessionId: number): HandoffSaveResult => {
+    try {
+      const session = sessions.get(sessionId)
+      const stored = chats.listBySession(sessionId)
+      const markdown = buildTranscriptMarkdown(
+        stored.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })),
+        { title: session?.title, provider: session?.providerId ?? undefined, exportedAt: Date.now() }
+      )
+      const slug = sanitizeHandoffFilePart(session?.title)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const filePath = join(app.getPath('downloads'), `verstak-транскрипт-${sessionId}-${slug}-${stamp}.md`)
+      writeFileSync(filePath, markdown, 'utf8')
+      return { ok: true, path: filePath, markdown }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 }
