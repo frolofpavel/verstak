@@ -1,16 +1,15 @@
 import { readFile, stat, writeFile, mkdir } from 'fs/promises'
 import { join, dirname } from 'path'
+import { homedir } from 'os'
 
 /**
- * Discovers and loads the user-defined "user layer" of agent instructions
- * for the current project. This is anything the project owner wants the AI
- * to know — coding conventions, domain rules, common patterns, taboos.
- *
- * Search order (first match wins):
- *   1. AGENTS.md          (Cursor / Codex convention)
- *   2. CLAUDE.md          (Anthropic convention)
- *   3. GEMINI.md          (Google convention)
- *   4. .verstak/RULES.md (our own)
+ * Discovers and loads the user-defined "user layer" of agent instructions.
+ * Двухуровневая иерархия (вдохновлено OpenCode instruction hierarchy):
+ *   1. ГЛОБАЛЬНЫЙ слой — ~/.verstak/RULES.md (правила на ВСЕ проекты пользователя).
+ *   2. ПРОЕКТНЫЙ слой — первый из кандидатов в корне проекта (first match wins):
+ *        AGENTS.md → CLAUDE.md → GEMINI.md → .verstak/RULES.md
+ * Глобальный идёт первым (с маркером источника), затем проектный. Оба капятся,
+ * склейка обрезается до общего лимита.
  *
  * The user layer EXTENDS the system layer; it cannot override the protocol.
  * The combined prompt is built by `composeSystemPrompt`.
@@ -26,21 +25,47 @@ export interface UserLayer {
   content: string
 }
 
-export async function loadUserLayer(projectRoot: string | null): Promise<UserLayer> {
-  if (!projectRoot) return { path: null, content: '' }
-  for (const rel of CANDIDATES) {
-    const abs = join(projectRoot, rel)
-    try {
-      const st = await stat(abs)
-      if (!st.isFile()) continue
-      if (st.size > MAX_BYTES) continue  // ignore oversized files
-      const content = await readFile(abs, 'utf8')
-      return { path: rel, content }
-    } catch {
-      continue
+/** Прочитать файл, если он есть и не превышает cap. Иначе null. */
+async function readCappedFile(abs: string): Promise<string | null> {
+  try {
+    const st = await stat(abs)
+    if (!st.isFile() || st.size > MAX_BYTES) return null
+    return await readFile(abs, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * @param projectRoot корень проекта (или null — тогда только глобальный слой)
+ * @param globalRulesPath путь к глобальным правилам; по умолчанию ~/.verstak/RULES.md.
+ *        Инъектируется для герметичности тестов.
+ */
+export async function loadUserLayer(
+  projectRoot: string | null,
+  globalRulesPath: string | null = join(homedir(), '.verstak', 'RULES.md')
+): Promise<UserLayer> {
+  const globalContent = globalRulesPath ? await readCappedFile(globalRulesPath) : null
+
+  let projPath: string | null = null
+  let projContent = ''
+  if (projectRoot) {
+    for (const rel of CANDIDATES) {
+      const c = await readCappedFile(join(projectRoot, rel))
+      if (c !== null) { projPath = rel; projContent = c; break }
     }
   }
-  return { path: null, content: '' }
+
+  if (!globalContent && projPath === null) return { path: null, content: '' }
+  // Только проектный слой → отдаём как есть (обратная совместимость).
+  if (!globalContent) return { path: projPath, content: projContent }
+  // Только глобальный / оба → склейка с маркером, глобальный первым.
+  const paths = ['~/.verstak/RULES.md']
+  const parts = [`# Глобальные правила (~/.verstak/RULES.md)\n\n${globalContent}`]
+  if (projPath !== null) { paths.push(projPath); parts.push(projContent) }
+  let content = parts.join('\n\n---\n\n')
+  if (content.length > MAX_BYTES) content = content.slice(0, MAX_BYTES)
+  return { path: paths.join(' + '), content }
 }
 
 const DEFAULT_RULES = `# Verstak Rules
