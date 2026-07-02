@@ -14,6 +14,7 @@
  *          на 127.0.0.1/10.x/169.254 — почти наверняка атака, легитимной причины нет.
  */
 import { isIPv4, isIPv6 } from 'net'
+import { lookup as dnsLookup } from 'node:dns/promises'
 
 function ipv4ToInt(ip: string): number | null {
   const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
@@ -84,4 +85,35 @@ export function isBlockedHost(hostname: string, opts: { allowLocalAndPrivate?: b
   if (isIPv4(host)) return isBlockedIpv4(host, opts.allowLocalAndPrivate)
   if (isIPv6(host)) return isBlockedIpv6(host, opts.allowLocalAndPrivate)
   return false
+}
+
+/** Проверить резолвленный из DNS числовой IP (v4/v6) в том же режиме. */
+export function isBlockedResolvedIp(ip: string, allowLocalAndPrivate?: boolean): boolean {
+  if (isIPv4(ip)) return isBlockedIpv4(ip, allowLocalAndPrivate)
+  if (isIPv6(ip)) return isBlockedIpv6(ip, allowLocalAndPrivate)
+  return false
+}
+
+/**
+ * Async SSRF-проверка хоста: литеральная (isBlockedHost) + DNS-резолв доменного ИМЕНИ
+ * с проверкой КАЖДОГО адреса (anti-rebinding — паритет с guardDns в ai/web-fetch.ts).
+ * Ревью MEDIUM: раньше коннекторный гейт резолв не делал → имя с A-записью в 169.254/10.x
+ * проходило. Возвращает причину блокировки или null. lookupImpl инъектируется для тестов.
+ */
+export async function assertHostAllowed(
+  hostname: string,
+  opts: { allowLocalAndPrivate?: boolean; lookupImpl?: (h: string) => Promise<Array<{ address: string }>> } = {}
+): Promise<string | null> {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (isBlockedHost(host, opts)) return `${hostname} — служебный/внутренний адрес`
+  if (!host || isIPv4(host) || isIPv6(host)) return null // литерал уже проверен
+  const doLookup = opts.lookupImpl ?? ((h: string) => dnsLookup(h, { all: true }))
+  let addrs: Array<{ address: string }>
+  try { addrs = await doLookup(host) } catch { return `${hostname} — DNS не разрешился` }
+  for (const a of addrs) {
+    if (isBlockedResolvedIp(a.address, opts.allowLocalAndPrivate)) {
+      return `${hostname} резолвится в ${a.address} — внутренний адрес (заблокировано)`
+    }
+  }
+  return null
 }

@@ -16,6 +16,8 @@
  * confirmation gate is the real safety net.
  */
 
+import { isForbiddenPath } from './secret-scanner'
+
 export interface CommandClassification {
   /** Pass to user-confirmation UI. */
   allowed: boolean
@@ -168,6 +170,13 @@ export function isInjectionCommandAllowed(command: string): boolean {
   // Деструктивный find и пути вне проекта — закрыты до allowlist-матча.
   if (/^find\b/i.test(trimmed) && DESTRUCTIVE_FIND_RE.test(trimmed)) return false
   if (OUT_OF_PROJECT_PATH_RE.test(trimmed)) return false
+  // Аргумент-путь к секрету в пределах проекта (ре-ревью HIGH: `cat .env` / `cat creds.json`
+  // обходили OUT_OF_PROJECT_PATH_RE как относительный путь без /~/..). Гейт isForbiddenPath
+  // как у write_file — .env/.ssh/*.key/id_ed25519 нельзя читать даже read-командой в инъекции.
+  for (const tok of trimmed.split(/\s+/).slice(1)) {
+    if (tok.startsWith('-')) continue
+    if (isForbiddenPath(tok.replace(/^["']|["']$/g, ''))) return false
+  }
   if (!classifyCommand(trimmed).allowed) return false
   return INJECTION_ALLOW_PATTERNS.some(p => p.test(trimmed))
 }

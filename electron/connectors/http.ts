@@ -29,7 +29,7 @@
 
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
 import { readBodyWithLimit } from './types'
-import { isBlockedHost } from './ip-guard'
+import { isBlockedHost, assertHostAllowed } from './ip-guard'
 import { redactUrlSecrets } from '../ai/secret-scanner'
 
 const MAX_ENDPOINTS = 4
@@ -192,12 +192,24 @@ export function createHttpConnector(): Connector {
       // как «custom internal services»); редиректы (hop 1+) блокируют ВСЁ внутреннее
       // (внешний API, редиректящий на 127.0.0.1/169.254 — атака). Ревью 23.06 #8.
       const MAX_REDIRECTS = 5
+      const baseHost = new URL(url).host
       let currentUrl = url
       try {
         for (let hop = 0; ; hop++) {
           const hopHost = new URL(currentUrl).hostname
-          if (isBlockedHost(hopHost, { allowLocalAndPrivate: hop === 0 })) {
-            return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес${hop > 0 ? ' (через редирект)' : ''}.`, url: redactUrlSecrets(currentUrl), method }
+          // hop 0 (сконфигурированная база) — синхронная литеральная проверка, как раньше:
+          // internal services разрешены намеренно, DNS-rebinding базы вне scope (без лишней
+          // латентности на каждый запрос). Редирект-хопы (hop>0) — литеральная + DNS-резолв
+          // (anti-rebinding: имя с A-записью во внутренний адрес блокируется, ревью MEDIUM).
+          if (hop === 0) {
+            if (isBlockedHost(hopHost, { allowLocalAndPrivate: true })) {
+              return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес.`, url: redactUrlSecrets(currentUrl), method }
+            }
+          } else {
+            const blockReason = await assertHostAllowed(hopHost, { allowLocalAndPrivate: false })
+            if (blockReason) {
+              return { error: 'ssrf-blocked', message: `Запрещено: ${blockReason} (через редирект).`, url: redactUrlSecrets(currentUrl), method }
+            }
           }
           const res = await fetch(currentUrl, { method, headers, body, signal: ctx.signal, redirect: 'manual' })
           const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
@@ -205,7 +217,16 @@ export function createHttpConnector(): Connector {
             if (hop >= MAX_REDIRECTS) {
               return { error: 'fetch-failed', message: 'Слишком много редиректов.', url: redactUrlSecrets(currentUrl), method }
             }
-            currentUrl = new URL(loc, currentUrl).toString()
+            const next = new URL(loc, currentUrl)
+            // Cross-origin редирект: срезаем креденшл-заголовки (ревью HIGH — иначе токен
+            // cfg.auth уходит на attacker.com через open-redirect/вредоносный upstream).
+            // Семантика fetch/undici; ручной redirect:'manual' сам это НЕ делает.
+            if (next.host !== baseHost) {
+              for (const k of Object.keys(headers)) {
+                if (/^(authorization|cookie|proxy-authorization)$/i.test(k)) delete headers[k]
+              }
+            }
+            currentUrl = next.toString()
             continue
           }
           const bodyText = await readBodyWithLimit(res)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isBlockedHost } from '../../electron/connectors/ip-guard'
+import { isBlockedHost, assertHostAllowed } from '../../electron/connectors/ip-guard'
 
 // Security (ревью 23.06 #8): SSRF-guard коннекторов.
 describe('isBlockedHost — SSRF-guard', () => {
@@ -51,5 +51,35 @@ describe('isBlockedHost — SSRF-guard', () => {
   it('IPv6 scope-id не сбивает детект (security-review)', () => {
     expect(isBlockedHost('fe80::1%eth0')).toBe(true)       // link-local со scope
     expect(isBlockedHost('[fe80::1%25eth0]')).toBe(true)   // url-encoded scope в скобках
+  })
+})
+
+// Ре-ревью MEDIUM: DNS-резолв доменного имени (anti-rebinding) для редирект-хопов.
+describe('assertHostAllowed — DNS-резолв доменного имени', () => {
+  it('имя, резолвящееся в metadata/private, блокируется на редирект-хопе', async () => {
+    const toMeta = async () => [{ address: '169.254.169.254' }]
+    const toPriv = async () => [{ address: '10.0.0.5' }]
+    expect(await assertHostAllowed('evil.example', { lookupImpl: toMeta })).toBeTruthy()
+    expect(await assertHostAllowed('rebind.example', { lookupImpl: toPriv })).toBeTruthy()
+  })
+  it('metadata блокируется даже на БАЗЕ (allowLocalAndPrivate), private — нет', async () => {
+    const toMeta = async () => [{ address: '169.254.169.254' }]
+    const toPriv = async () => [{ address: '10.0.0.5' }]
+    expect(await assertHostAllowed('x.example', { allowLocalAndPrivate: true, lookupImpl: toMeta })).toBeTruthy()
+    expect(await assertHostAllowed('internal.example', { allowLocalAndPrivate: true, lookupImpl: toPriv })).toBeNull()
+  })
+  it('публичный резолв проходит', async () => {
+    const toPub = async () => [{ address: '93.184.216.34' }]
+    expect(await assertHostAllowed('example.com', { lookupImpl: toPub })).toBeNull()
+  })
+  it('IP-литерал не резолвится (проверяется напрямую)', async () => {
+    let called = false
+    const spy = async () => { called = true; return [{ address: '1.2.3.4' }] }
+    expect(await assertHostAllowed('169.254.169.254', { lookupImpl: spy })).toBeTruthy()
+    expect(called).toBe(false)
+  })
+  it('DNS-фейл → блок (fail-safe)', async () => {
+    const fail = async () => { throw new Error('ENOTFOUND') }
+    expect(await assertHostAllowed('nx.example', { lookupImpl: fail })).toBeTruthy()
   })
 })

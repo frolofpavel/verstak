@@ -1,13 +1,16 @@
 // Memory-хендлеры: memory_save/search + core_memory_*. Вынесено при распиле.
 import type { ToolHandler } from './shared'
 import { emitActivity } from './shared'
+import { scanText } from '../../ai/secret-scanner'
 
 export const memorySaveHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
       const type = String(call.args.type ?? '')
-      const content = String(call.args.content ?? '').trim()
+      // Редакция секретов ДО записи (ревью HIGH): агентский content оседает в памяти и
+      // всплывает в system prompt другого чата/провайдера. Симметрично session-summary/auto-capture.
+      const content = scanText(String(call.args.content ?? '').trim()).redacted
       const tags = Array.isArray(call.args.tags) ? call.args.tags.map(String) : []
       if (!content) {
         return { id: call.id, name: call.name, result: '', error: 'memory_save: content обязателен' }

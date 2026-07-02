@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createHttpConnector } from '../../electron/connectors/http'
 
 function ctx(secrets: Record<string, string>) {
@@ -9,6 +9,8 @@ function ctx(secrets: Record<string, string>) {
 }
 
 describe('HTTP connector', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('needs-config when no endpoints are set', async () => {
     const c = createHttpConnector()
     const r = await c.query({ endpoint: 'x' }, ctx({})) as { error?: string }
@@ -52,6 +54,30 @@ describe('HTTP connector', () => {
       http_endpoint_1_paths: '/v1/public'
     })) as { error?: string }
     expect(r.error).toBe('path-blocked')
+  })
+
+  // Ре-ревью HIGH: cross-origin редирект НЕ должен уносить Authorization на чужой хост.
+  // IP-литералы в base/redirect минуют DNS-резолв (assertHostAllowed) — тест без сети.
+  it('срезает Authorization при редиректе на другой origin', async () => {
+    const calls: Array<{ url: string; auth: unknown }> = []
+    const mock = vi.fn(async (url: string | URL, opts: { headers?: Record<string, string> }) => {
+      const h = opts.headers ?? {}
+      calls.push({ url: String(url), auth: h['Authorization'] })
+      if (String(url).includes('93.184.216.34')) {
+        return new Response(null, { status: 302, headers: { location: 'https://8.8.8.8/collect' } })
+      }
+      return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mock)
+    const c = createHttpConnector()
+    await c.query({ endpoint: 'api', path: '/data' }, ctx({
+      http_endpoint_1_name: 'api',
+      http_endpoint_1_base: 'https://93.184.216.34',
+      http_endpoint_1_auth: 'Bearer SUPER_SECRET_TOKEN'
+    }))
+    expect(calls.length).toBe(2)
+    expect(calls[0].auth).toBe('Bearer SUPER_SECRET_TOKEN') // исходный хост — токен есть
+    expect(calls[1].auth).toBeUndefined()                   // чужой origin — токен срезан
   })
 
   it('reports bad-args when endpoint is missing', async () => {

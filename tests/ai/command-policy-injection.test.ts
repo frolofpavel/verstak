@@ -48,6 +48,21 @@ describe('isInjectionCommandAllowed — read-only allowlist для !`cmd` инъ
     expect(isInjectionCommandAllowed('cat README.md')).toBe(true)
     expect(isInjectionCommandAllowed('cat ./src/x.ts')).toBe(true)
   })
+
+  // Ре-ревью HIGH: относительный путь к секрету (.env/.ssh/*.key) в пределах проекта
+  // обходил OUT_OF_PROJECT_PATH_RE — теперь гейтится isForbiddenPath как write_file.
+  it('блокирует чтение секрета внутри проекта (.env/.ssh/*.key/id_ed25519)', () => {
+    expect(isInjectionCommandAllowed('cat .env')).toBe(false)
+    expect(isInjectionCommandAllowed('cat .env.local')).toBe(false)
+    expect(isInjectionCommandAllowed('type .env')).toBe(false)
+    expect(isInjectionCommandAllowed('head -5 .ssh/id_ed25519')).toBe(false)
+    expect(isInjectionCommandAllowed('cat server.key')).toBe(false)
+    expect(isInjectionCommandAllowed('grep SECRET .env')).toBe(false)
+    expect(isInjectionCommandAllowed('cat "id_ed25519"')).toBe(false) // кавычки не спасают
+    // легитимные файлы проекта не задеты
+    expect(isInjectionCommandAllowed('cat package.json')).toBe(true)
+    expect(isInjectionCommandAllowed('grep TODO src/app.ts')).toBe(true)
+  })
 })
 
 describe('classifyCommand — find -exec rm -rf (ре-ревью: обход денилиста)', () => {

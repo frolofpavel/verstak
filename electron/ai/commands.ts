@@ -18,6 +18,7 @@
 import { readdirSync, readFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { scanText } from './secret-scanner'
 
 export interface UserCommand {
   /** Уникальный id вида 'user:review-diff' или 'project:review-diff'. */
@@ -137,7 +138,9 @@ export async function expandCommandBody(body: string, argString: string, opts: E
       const cmd = m[1].trim()
       let replacement: string
       try {
-        replacement = (await opts.runCommand(cmd)).trim()
+        // Редакция секретов в инжектируемом выводе (ре-ревью HIGH, defense-in-depth поверх
+        // блока путей-к-секретам в isInjectionCommandAllowed) — как для stdout коннекторов/хуков.
+        replacement = scanText((await opts.runCommand(cmd)).trim()).redacted
       } catch (err) {
         replacement = `[команда не выполнена: ${err instanceof Error ? err.message : String(err)}]`
       }
