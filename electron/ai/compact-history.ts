@@ -43,14 +43,6 @@ function makeOldMarker(name: string, originalLen: number, turnIdx: number): stri
   return `[compacted: ${name} (${originalLen} симв., turn ${turnIdx + 1}) — обрезано sliding window, перечитай если нужно]`
 }
 
-/** Грубо отрезаем середину если жирный, но в окне keep — оставляем хвост. */
-function tailTruncate(text: string, cap: number): string {
-  if (text.length <= cap) return text
-  const headLen = Math.floor(cap * 0.3)
-  const tailLen = cap - headLen - 60
-  return `${text.slice(0, headLen)}\n[…вырезано ${text.length - cap + 60} симв., см. оригинал в исходном файле…]\n${text.slice(text.length - tailLen)}`
-}
-
 // ─── Smart compression helpers ────────────────────────────────────────────────
 
 function truncateWithContext(text: string, max: number): string {

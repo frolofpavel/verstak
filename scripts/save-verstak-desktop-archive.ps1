@@ -60,7 +60,7 @@ $copyPaths = @(
   'electron\updater.ts','electron\update-staging.ts','electron\update-install.ts','electron\updater-cache.ts',
   'electron\update-remote.ts','electron\system-node.ts','electron\update-payload-extract.ts',
   'scripts\apply-silent-update.cjs','scripts\sync-verstak-changelog.cjs','scripts\deploy-local.cjs',
-  'src\components\UpdatesSettings.tsx','src\components\UpdateReadyToast.tsx','src\components\UpdateAvailableModal.tsx',
+  'src\components\UpdatesSettings.tsx','src\components\UpdateReadyToast.tsx',
   'src\lib\staging-step-label.ts','src\lib\updater-error.ts',
   'tests\update-staging.test.ts','tests\apply-silent-update.test.ts','tests\update-install.test.ts'
 )

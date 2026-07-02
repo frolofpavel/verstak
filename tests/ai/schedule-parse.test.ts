@@ -55,4 +55,15 @@ describe('cronMatches', () => {
     expect(cronMatches('0 9 * *', at({ hour: 9 }))).toBe(false)
     expect(cronMatches('', at({}))).toBe(false)
   })
+  // Ревью LOW: стандартный cron — dow 7≡0 (вс), */N от минимума поля.
+  it('dow=7 матчит воскресенье (7 ≡ 0)', () => {
+    expect(cronMatches('0 9 * * 7', at({ hour: 9, dow: 0 }))).toBe(true)
+    expect(cronMatches('0 9 * * 7', at({ hour: 9, dow: 1 }))).toBe(false)
+    expect(cronMatches('0 9 * * 0', at({ hour: 9, dow: 0 }))).toBe(true) // 0 тоже вс
+  })
+  it('*/2 на day-of-month считается от 1 (нечётные дни 1,3,5), не 2,4,6', () => {
+    expect(cronMatches('0 9 */2 * *', at({ hour: 9, dom: 1 }))).toBe(true)
+    expect(cronMatches('0 9 */2 * *', at({ hour: 9, dom: 3 }))).toBe(true)
+    expect(cronMatches('0 9 */2 * *', at({ hour: 9, dom: 2 }))).toBe(false)
+  })
 })

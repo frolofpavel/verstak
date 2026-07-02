@@ -165,10 +165,15 @@ export function applyMemoryDecay(db: Database): { decayed: number; deleted: numb
     WHERE accessed_at < ? AND decay_score > 0.05
   `).run(now - DAY_MS).changes
 
-  // Удаляем совсем протухшие (>30 дней без обращения И score < 0.1)
+  // Удаляем совсем протухшие (>30 дней без обращения И score < 0.1). Ревью IMPROVEMENT:
+  // архитектурные/устойчивые типы (decision/bug/preference) НЕ удаляем физически — их
+  // score занижается (выпадают из recall), но запись сохраняется (иначе редкое, но важное
+  // решение молча теряется без audit-trail, как проходной шум). Эпизодические fact/pattern
+  // подлежат физуборке.
   const deleted = db.prepare(`
     DELETE FROM memories
     WHERE accessed_at < ? AND decay_score < 0.1
+      AND type NOT IN ('decision', 'bug', 'preference')
   `).run(now - 30 * DAY_MS).changes
 
   return { decayed, deleted }

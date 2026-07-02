@@ -1,12 +1,8 @@
 // Delegation: delegate_task / delegate_parallel / orchestrate / swarm + хелперы. Вынесено при распиле.
 import type { ToolHandler, ToolContext } from './shared'
-import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
 import type { ProviderId, CreateOptions } from '../../ai/registry'
-import { emitActivity } from './shared'
 import { getRolePrompt } from '../../ai/agent-roles'
 import { findUserAgent } from '../../ai/user-agents'
-import { planSpecFeedback } from '../../ai/task-spec-check'
-import { scanText } from '../../ai/secret-scanner'
 import { addWorktree, removeWorktree, worktreeDiff } from '../../ai/git-worktree'
 
 // T1.2 — кап на размер diff изолированного worktree в выдаче арбитру (символы).

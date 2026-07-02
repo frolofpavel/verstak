@@ -897,8 +897,7 @@ export function applySearchReplaceBlocks(input: string, diff: string, anchorHash
       }
     }
     // Primary: exact match
-    let first = result.indexOf(search)
-    let actualSearch = search
+    const first = result.indexOf(search)
     if (first === -1) {
       // Fallback: normalize line endings (\r\n → \n) and trim trailing whitespace
       // on each line of both SEARCH and file content, then apply to the
@@ -927,13 +926,12 @@ export function applySearchReplaceBlocks(input: string, diff: string, anchorHash
       const sample = search.split('\n')[0].slice(0, 80)
       throw new Error(`apply_patch: SEARCH блок #${applied + 1} не найден в файле (даже после нормализации whitespace). Первая строка искомого: "${sample}". Прочитай файл заново и составь патч по актуальному содержимому.`)
     }
-    if (actualSearch === search) {
-      const nextEx = result.indexOf(search, first + 1)
-      if (nextEx !== -1) {
-        throw new Error(`apply_patch: SEARCH блок #${applied + 1} встречается в файле несколько раз (позиции ${first} и ${nextEx}). Добавь контекста до/после чтобы фрагмент стал уникальным.`)
-      }
+    // exact-match ветка: убеждаемся, что фрагмент уникален (иначе неоднозначная замена).
+    const nextEx = result.indexOf(search, first + 1)
+    if (nextEx !== -1) {
+      throw new Error(`apply_patch: SEARCH блок #${applied + 1} встречается в файле несколько раз (позиции ${first} и ${nextEx}). Добавь контекста до/после чтобы фрагмент стал уникальным.`)
     }
-    result = result.slice(0, first) + replace + result.slice(first + actualSearch.length)
+    result = result.slice(0, first) + replace + result.slice(first + search.length)
     applied++
   }
   if (applied === 0) {

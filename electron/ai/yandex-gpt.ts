@@ -28,12 +28,6 @@ export const YANDEX_GPT_MODELS = [
   'yandexgpt-32k/latest'
 ]
 
-export const YANDEX_GPT_MODEL_LABELS: Record<string, string> = {
-  'yandexgpt/latest':      'YandexGPT Pro',
-  'yandexgpt-lite/latest': 'YandexGPT Lite',
-  'yandexgpt-32k/latest':  'YandexGPT Pro 32K'
-}
-
 const DEFAULT_MODEL = 'yandexgpt/latest'
 
 export interface YandexGptOptions {

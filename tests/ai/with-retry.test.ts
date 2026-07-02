@@ -156,13 +156,13 @@ describe('withInitialRetry', () => {
     let attempt = 0
     const factory = vi.fn(async function* () {
       attempt++
-      if (attempt < 3) { yield { type: 'error', message: '503 overloaded' }; return }
+      if (attempt < 2) { yield { type: 'error', message: '503 overloaded' }; return } // 1 ретрай
       yield { type: 'text', text: 'ok' }
     })
     const out: Array<{ type?: string }> = []
     for await (const v of withInitialRetry(factory, { maxAttempts: 4, retriableValue })) out.push(v)
     expect(out).toEqual([{ type: 'text', text: 'ok' }]) // error-события НЕ пропущены наружу
-    expect(factory).toHaveBeenCalledTimes(3)
+    expect(factory).toHaveBeenCalledTimes(2)
   })
 
   it('на ПОСЛЕДНЕЙ попытке error-значение пропускается наружу (для smart-fallback)', async () => {

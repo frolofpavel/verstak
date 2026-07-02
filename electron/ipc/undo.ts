@@ -66,13 +66,16 @@ export async function revertToCheckpoint(
       })
     }
   }
-  // Чекпоинт израсходован — снимаем защиту ИМЕННО этого чекпоинта (review fix #4).
-  // floorId = checkpointId: при мульти-чате защиты других чекпоинтов остаются (F3).
-  stack.clearProtection(projectPath, checkpointId)
-  // Re-push the failed ones so the user can see / retry
+  // Re-push проваленных записей ДО снятия floor-защиты (ре-ревью LOW): иначе при >50
+  // проваленных ревертах floor снимался первым → prune внутри push резал новые записи,
+  // и часть failed[] теряла beforeContent (нечего было бы ретраить). Порядок: сначала
+  // вернуть в стек, потом снять защиту.
   for (const f of failed) {
     stack.push(projectPath, f.filePath, f.before, f.after)
   }
+  // Чекпоинт израсходован — снимаем защиту ИМЕННО этого чекпоинта (review fix #4).
+  // floorId = checkpointId: при мульти-чате защиты других чекпоинтов остаются (F3).
+  stack.clearProtection(projectPath, checkpointId)
   if (failed.length > 0) {
     return { ok: false, restored, count: restored.length, failed: failed.map(f => ({ id: f.id, filePath: f.filePath, reason: f.reason })) }
   }

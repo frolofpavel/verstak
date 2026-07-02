@@ -92,12 +92,13 @@ export function parseSchedule(nl: string): ParsedSchedule | null {
 }
 
 // Разобрать одно cron-поле и проверить, попадает ли значение. Поддержка: звёздочка,
-// шаг (звёздочка-слэш-N), диапазон a-b, списки через запятую.
-function fieldMatches(field: string, value: number): boolean {
+// шаг (звёздочка-слэш-N), диапазон a-b, списки через запятую. Ревью LOW: `*/N` считаем
+// от МИНИМУМА поля (min) — иначе на 1-based dom/month `*/2` матчил 2,4,6 вместо 1,3,5.
+function fieldMatches(field: string, value: number, min = 0): boolean {
   for (const part of field.split(',')) {
     if (part === '*') return true
     const step = /^\*\/(\d+)$/.exec(part)
-    if (step) { if (value % Number(step[1]) === 0) return true; continue }
+    if (step) { const n = Number(step[1]); if (n > 0 && (value - min) % n === 0) return true; continue }
     const range = /^(\d+)-(\d+)$/.exec(part)
     if (range) { if (value >= Number(range[1]) && value <= Number(range[2])) return true; continue }
     if (Number(part) === value) return true
@@ -112,11 +113,14 @@ function fieldMatches(field: string, value: number): boolean {
 export function cronMatches(cron: string, now: TimeParts): boolean {
   const f = (cron ?? '').trim().split(/\s+/)
   if (f.length !== 5) return false
+  // dom/month 1-based (min=1); minute/hour/dow 0-based. dow: 7 ≡ 0 (вс) как в стандартном
+  // cron — матчим и по значению, и по 7 при воскресенье (ревью LOW).
+  const dowOk = fieldMatches(f[4], now.dow, 0) || (now.dow === 0 && fieldMatches(f[4], 7, 0))
   return (
-    fieldMatches(f[0], now.minute) &&
-    fieldMatches(f[1], now.hour) &&
-    fieldMatches(f[2], now.dom) &&
-    fieldMatches(f[3], now.month) &&
-    fieldMatches(f[4], now.dow)
+    fieldMatches(f[0], now.minute, 0) &&
+    fieldMatches(f[1], now.hour, 0) &&
+    fieldMatches(f[2], now.dom, 1) &&
+    fieldMatches(f[3], now.month, 1) &&
+    dowOk
   )
 }

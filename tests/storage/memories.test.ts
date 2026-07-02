@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import { openDb } from '../../electron/storage/db'
-import { saveMemory, searchMemories, listMemories, deleteMemory, buildFtsMatch, invalidateMemory } from '../../electron/storage/memories'
+import { saveMemory, searchMemories, listMemories, deleteMemory, buildFtsMatch, invalidateMemory, applyMemoryDecay } from '../../electron/storage/memories'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -211,6 +211,21 @@ describe('memories storage', () => {
       saveMemory(db2, PROJECT, 'fact', 'проект на vite', ['build'])
       expect(searchMemories(db2, PROJECT, 'vite', 5).find(x => x.content === 'проект на vite')).toBeDefined()
       db2.close()
+    })
+  })
+
+  // Ревью IMPROVEMENT: physical DELETE не трогает архитектурные типы (decision/bug/preference).
+  describe('applyMemoryDecay — устойчивые типы не удаляются физически', () => {
+    it('протухший decision выживает, протухший fact удаляется', () => {
+      const dec = saveMemory(db, PROJECT, 'decision', 'Перешли на vite', [])
+      const fact = saveMemory(db, PROJECT, 'fact', 'временный факт', [])
+      // Симулируем «протухание»: старый accessed_at + score ниже порога удаления.
+      const old = Date.now() - 40 * 86_400_000
+      db.prepare('UPDATE memories SET accessed_at = ?, decay_score = 0.05 WHERE id IN (?, ?)').run(old, dec.id, fact.id)
+      applyMemoryDecay(db)
+      const ids = listMemories(db, PROJECT).map(m => m.id)
+      expect(ids).toContain(dec.id)      // decision сохранён (только score занижен)
+      expect(ids).not.toContain(fact.id) // fact физически удалён
     })
   })
 })
