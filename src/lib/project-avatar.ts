@@ -70,8 +70,7 @@ export function projectAvatarLetterStyleVariant1(color: string, size?: number): 
   return withSize({
     '--avatar-tint': color,
     background: `color-mix(in srgb, ${color} 20%, var(--bg-overlay))`,
-    color: 'var(--text-secondary)',
-    borderColor: `color-mix(in srgb, ${color} 30%, var(--border-default))`
+    color: 'var(--text-secondary)'
   } as CSSProperties & { '--avatar-tint'?: string }, size)
 }
 

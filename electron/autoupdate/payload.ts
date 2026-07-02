@@ -61,6 +61,27 @@ export function readAppAsarVersion(payloadRoot: string): string | null {
   }
 }
 
+function verifyAppAsarMain(appAsar: string): { ok: boolean; main?: string; error?: string } {
+  try {
+    const pkg = readAsarFile(appAsar, 'package.json')
+    if (!pkg) return { ok: false, error: 'Damaged payload: package.json is missing inside app.asar' }
+    const parsed = JSON.parse(pkg.toString('utf8')) as { main?: unknown }
+    const main = typeof parsed.main === 'string' && parsed.main.trim()
+      ? parsed.main.trim()
+      : 'index.js'
+    const mainFile = readAsarFile(appAsar, main)
+    if (!mainFile || mainFile.length <= 0) {
+      return { ok: false, main, error: `Damaged payload: app entrypoint is missing inside app.asar (${main})` }
+    }
+    return { ok: true, main }
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Damaged payload: app.asar entrypoint check failed (${err instanceof Error ? err.message : String(err)})`,
+    }
+  }
+}
+
 export function verifyPayloadRoot(payloadRoot: string, expectedVersion?: string): PayloadVerification {
   const exe = join(payloadRoot, 'Verstak.exe')
   const appAsar = join(payloadRoot, 'resources', 'app.asar')
@@ -90,8 +111,14 @@ export function verifyPayloadRoot(payloadRoot: string, expectedVersion?: string)
     logAutoUpdate('payload.verify.fail', { payloadRoot, error, version, expectedVersion, exeSize, appAsarSize })
     return { ok: false, version, appAsarSize, exeSize, error }
   }
+  const mainCheck = verifyAppAsarMain(appAsar)
+  if (!mainCheck.ok) {
+    const error = mainCheck.error ?? 'Damaged payload: app entrypoint is missing inside app.asar'
+    logAutoUpdate('payload.verify.fail', { payloadRoot, error, version, main: mainCheck.main, exeSize, appAsarSize })
+    return { ok: false, version, appAsarSize, exeSize, error }
+  }
 
-  logAutoUpdate('payload.verify.ok', { payloadRoot, version, exeSize, appAsarSize })
+  logAutoUpdate('payload.verify.ok', { payloadRoot, version, main: mainCheck.main, exeSize, appAsarSize })
   return { ok: true, version, appAsarSize, exeSize }
 }
 

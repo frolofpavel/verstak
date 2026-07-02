@@ -379,8 +379,8 @@ function NavButtons({ items, activeView, onSelect }: {
   )
 }
 
-const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'reminders', 'tasks-manager', 'inspector', 'agents'])
+const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'workflow'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'reminders', 'skills', 'tasks-manager', 'inspector', 'agents'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -503,13 +503,13 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   const WORK_NAV: NavItem[] = [
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
-    { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon },
   ]
 
   const CONTROL_NAV: NavItem[] = [
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
+    { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },

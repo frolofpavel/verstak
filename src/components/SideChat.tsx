@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useProject } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
 import type { ProviderDescriptorDTO } from '../types/api'
@@ -9,7 +9,10 @@ import { readAgentMode } from '../hooks/useAgentMode'
 interface SideChatProps {
   /** Set after the first user message creates a chat session in the sidebar. */
   sideChatId: number | null
+  width: number
+  onResizeStart: (e: ReactMouseEvent<HTMLDivElement>) => void
   onSessionCreated: (id: number) => void
+  onSessionSelected: (id: number | null) => void
   onClose: () => void
 }
 
@@ -27,11 +30,12 @@ function SideChatPanelIcon() {
  * Работает параллельно основному чату в том же окне: свой стрим
  * сообщений + свой composer.
  */
-export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProps) {
+export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, onSessionSelected, onClose }: SideChatProps) {
   const t = useT()
   const provider = useProvider()
   const patchChatSession = useProject(s => s.patchChatSession)
   const refreshChatSessions = useProject(s => s.refreshChatSessions)
+  const chatSessions = useProject(s => s.chatSessions)
   const snapshot = useProject(s => sideChatId != null ? s.chatSnapshots[sideChatId] : undefined)
   const path = useProject(s => s.path)
   const [draftMessages, setDraftMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
@@ -112,12 +116,30 @@ export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProp
   const sideLabel = sideProvider?.shortLabel ?? sideProvider?.name ?? (sideProviderId ?? '—')
   const sideModelLabel = sideModel ?? sideProvider?.defaultModel ?? 'auto'
 
-  async function persistSideModel(nextProviderId: string | null, nextModel: string | null) {
-    if (sideChatId == null) return
+  async function ensureSideChatSession(opts: { providerId?: string | null; model?: string | null } = {}): Promise<number | null> {
+    if (sideChatId != null) return sideChatId
+    if (!path) return null
     try {
-      await window.api.chatSessions.setModel(sideChatId, nextProviderId, nextModel)
-      patchChatSession(sideChatId, { providerId: nextProviderId, model: nextModel })
-    } catch { /* не блокируем UX */ }
+      const created = await window.api.chatSessions.create(path, {
+        title: 'Параллельный чат',
+        providerId: opts.providerId ?? sideProviderId,
+        model: opts.model ?? sideModel,
+      })
+      onSessionCreated(created.id)
+      await refreshChatSessions()
+      return created.id
+    } catch {
+      return null
+    }
+  }
+
+  async function persistSideModel(nextProviderId: string | null, nextModel: string | null) {
+    const chatId = await ensureSideChatSession({ providerId: nextProviderId, model: nextModel })
+    if (chatId == null) return
+    try {
+      await window.api.chatSessions.setModel(chatId, nextProviderId, nextModel)
+      patchChatSession(chatId, { providerId: nextProviderId, model: nextModel })
+    } catch { /* keep the picker responsive if persistence fails */ }
   }
 
   async function selectProvider(p: ProviderDescriptorDTO) {
@@ -130,6 +152,20 @@ export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProp
   async function selectModel(model: string) {
     setSideModel(model)
     await persistSideModel(sideProviderId, model)
+  }
+
+  function selectSideChat(value: string) {
+    if (value === 'new') {
+      onSessionSelected(null)
+      setDraftMessages([])
+      setInput('')
+      setSideProviderId(provider.id)
+      setSideModel(provider.model ?? null)
+      return
+    }
+    const nextId = Number(value)
+    if (!Number.isFinite(nextId)) return
+    onSessionSelected(nextId)
   }
 
   useEffect(() => {
@@ -158,23 +194,6 @@ export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProp
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
   }
   useEffect(autoGrow, [input])
-
-  async function ensureSideChatSession(): Promise<number | null> {
-    if (sideChatId != null) return sideChatId
-    if (!path) return null
-    try {
-      const created = await window.api.chatSessions.create(path, {
-        title: 'Параллельный чат',
-        providerId: sideProviderId,
-        model: sideModel,
-      })
-      onSessionCreated(created.id)
-      await refreshChatSessions()
-      return created.id
-    } catch {
-      return null
-    }
-  }
 
   async function send() {
     const text = input.trim()
@@ -224,12 +243,33 @@ export function SideChat({ sideChatId, onSessionCreated, onClose }: SideChatProp
   const streamingLabel = sideProvider?.shortLabel ?? sideProvider?.name ?? provider.label
 
   return (
-    <div className="gg-sidechat">
+    <div className="gg-sidechat" style={{ width }}>
+      <div
+        className="gg-sidechat-resizer"
+        onMouseDown={onResizeStart}
+        role="separator"
+        aria-orientation="vertical"
+        title="Изменить ширину параллельного чата"
+      />
       <div className="gg-sidechat-header">
         <div className="gg-sidechat-title">
           <span className="gg-sidechat-title-icon"><SideChatPanelIcon /></span>
           <span>{t.chat.sideChatTitle}</span>
         </div>
+        <select
+          className="gg-sidechat-session-select"
+          value={sideChatId ?? 'new'}
+          onChange={e => selectSideChat(e.target.value)}
+          disabled={isStreaming}
+          title="Выбрать чат для правой панели"
+        >
+          <option value="new">Новый параллельный</option>
+          {chatSessions.map(session => (
+            <option key={session.id} value={session.id}>
+              {session.title?.trim() || `Чат ${session.id}`}
+            </option>
+          ))}
+        </select>
         <div className="gg-sidechat-mp" ref={pickerRef}>
           <button
             type="button"

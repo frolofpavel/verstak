@@ -55,7 +55,7 @@ const REGISTRY_TEST_OPS: Record<string, Record<string, unknown>> = {
   onec: { metadata: true },
   telegram: { op: 'get_me' },
   ssh: { op: 'run_remote', command: 'echo verstak-ping', timeout_ms: 8_000 },
-  bitrix24: { op: 'call', method: 'user.current' },
+  bitrix24: { op: 'call', method: 'profile' },
   yandex_direct: { op: 'list_campaigns' },
   yandex_disk: { op: 'list_files', path: '/' },
   github: { op: 'list_repos', per_page: 1 },
@@ -149,6 +149,25 @@ async function testSkillsServer(
   }
 }
 
+async function testBitrix24(registry: ConnectorRegistry, ctx: ConnectorContext): Promise<ConnectorTestResult> {
+  const profile = parseConnectorResult(await registry.query('bitrix24', { op: 'call', method: 'profile' }, ctx))
+  if (!profile.ok) return profile
+
+  const crmFields = await registry.query('bitrix24', { op: 'call', method: 'crm.deal.fields' }, ctx)
+  const crm = parseConnectorResult(crmFields)
+  if (crm.ok) return { ok: true, message: 'Webhook работает, CRM-доступ есть' }
+
+  const raw = crmFields && typeof crmFields === 'object' ? crmFields as Record<string, unknown> : {}
+  const details = typeof raw.message === 'string' ? raw.message : crm.message
+  if (/insufficient_scope/i.test(details)) {
+    return {
+      ok: false,
+      message: 'Webhook живой, но без прав CRM. В Битрикс24 пересоздайте входящий вебхук и включите CRM.'
+    }
+  }
+  return { ok: false, message: `Webhook живой, но CRM недоступна: ${crm.message}` }
+}
+
 async function runRegistryTest(
   registryId: string,
   registry: ConnectorRegistry,
@@ -161,6 +180,10 @@ async function runRegistryTest(
     }
     const raw = await registry.query(registryId, { endpoint, method: 'GET', path: '/' }, ctx)
     return parseConnectorResult(raw)
+  }
+
+  if (registryId === 'bitrix24') {
+    return testBitrix24(registry, ctx)
   }
 
   const args = REGISTRY_TEST_OPS[registryId]

@@ -46,7 +46,7 @@ export function createBitrix24Connector(): Connector {
 
     async query(args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
       const op = String(args.op ?? '')
-      const webhook = ctx.getSecret('bitrix24_webhook_url')
+      const webhook = (ctx.getSecret('bitrix24_webhook_url') ?? '').trim()
       if (!webhook) {
         return {
           error: 'no-webhook',

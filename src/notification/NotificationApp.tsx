@@ -38,7 +38,18 @@ export function NotificationApp() {
         createdAt: Date.now(),
         theme: payload.theme === 'light' ? 'light' : 'nord'
       }
-      setToasts(prev => [item, ...prev].slice(0, MAX_VISIBLE))
+      setToasts(prev => {
+        const sameReminder = typeof item.reminderId === 'number'
+          ? prev.find(t => t.reminderId === item.reminderId && (t.kind ?? 'reminder') === (item.kind ?? 'reminder'))
+          : null
+        if (sameReminder) {
+          return [
+            { ...sameReminder, ...item, id: sameReminder.id },
+            ...prev.filter(t => t.id !== sameReminder.id)
+          ].slice(0, MAX_VISIBLE)
+        }
+        return [item, ...prev].slice(0, MAX_VISIBLE)
+      })
 
       if (!item.persistent) {
         const timer = setTimeout(() => {
@@ -72,19 +83,33 @@ export function NotificationApp() {
     })
   }
 
+  function dismissReminderToasts(reminderId: number) {
+    setToasts(prev => {
+      const removedIds = prev.filter(t => t.reminderId === reminderId).map(t => t.id)
+      for (const toastId of removedIds) {
+        const timer = timersRef.current.get(toastId)
+        if (timer) clearTimeout(timer)
+        timersRef.current.delete(toastId)
+      }
+      const next = prev.filter(t => t.reminderId !== reminderId)
+      if (next.length === 0) window.toastApi.hideWindow()
+      return next
+    })
+  }
+
   function dismissReminder(id: number, reminderId: number) {
     window.toastApi.reminderDismiss(reminderId)
-    dismiss(id)
+    dismissReminderToasts(reminderId)
   }
 
   function snoozeReminder(id: number, reminderId: number) {
     window.toastApi.reminderSnooze(reminderId)
-    dismiss(id)
+    dismissReminderToasts(reminderId)
   }
 
   function openReminder(id: number, reminderId: number) {
     window.toastApi.reminderOpen(reminderId)
-    dismiss(id)
+    dismissReminderToasts(reminderId)
   }
 
   function openMain(id: number, toast: ToastItem) {

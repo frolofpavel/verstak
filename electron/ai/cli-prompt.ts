@@ -24,6 +24,15 @@ import type { ChatMessage } from './types'
 
 export type CliProviderId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
 
+const SKILL_COMPLIANCE_CONTRACT = `<skill_compliance_contract>
+If a <skill_layer> is present, it is mandatory execution guidance, not optional advice.
+- Before acting, identify which parts/checklists of the skill apply to the user's request.
+- Execute every applicable required step from the skill. Do not silently skip steps because they are inconvenient or time-consuming.
+- If a skill step is impossible because data/tool/access is missing, stop and report the blocker instead of pretending it was optional.
+- Before the final answer, self-check the completed work against the applicable skill steps. If something was missed, complete it or clearly report the blocker.
+- Never answer that you "decided to skip", "ignored", or "did not follow" an applicable skill.
+</skill_compliance_contract>`
+
 /**
  * True if the CLI provider reads this user_layer file by itself on startup.
  * grok-cli — no documented convention file, always inject.
@@ -138,7 +147,7 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
   //      ПОВЕРХ system/user/context, как в API-пути (compose-prompt.ts
   //      <skill_layer>): это выбор пользователя, а не наш базовый регламент.
   const trimmedSkill = (skillPrompt ?? '').trim()
-  if (trimmedSkill) sections.push(`<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
+  if (trimmedSkill) sections.push(`${SKILL_COMPLIANCE_CONTRACT}\n\n<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
 
   // 3. Conversation history — единый сериализатор (history-serializer.ts).
   //    NEVER include system messages here (they're already above).

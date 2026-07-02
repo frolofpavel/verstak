@@ -78,6 +78,7 @@ describe('switchChatSession — snapshot уходящего чата', () => {
       activity: active.activity,
       sessionUsage: active.sessionUsage,
       runningPlanStep: active.runningPlanStep,
+      sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },
     }, false)
 
     await useProject.getState().switchChatSession(2)
@@ -109,6 +110,7 @@ describe('switchChatSession — restore входящего чата', () => {
       activeChatId: 1,
       messages: [],
       chatSnapshots: { 2: saved },
+      sendOwners: { 22: { kind: 'chat', chatId: 2, projectPath: 'C:/proj' } },
     }, false)
 
     await useProject.getState().switchChatSession(2)

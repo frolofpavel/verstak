@@ -238,11 +238,32 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       let textBuffer = ''   // полный сырой text-стрим Grok'а; чистим в самом конце
       const queue: ChatEvent[] = []
       let done = false
+      let finalQueued = false
       let resolve: (() => void) | null = null
       const wake = () => { if (resolve) { const r = resolve; resolve = null; r() } }
 
+      function queueFinalFromBuffer(): boolean {
+        if (finalQueued) return true
+        const { answer, reasoning } = cleanGrokOutput(textBuffer)
+        if (reasoning) queue.push({ type: 'thought', text: reasoning })
+        if (answer) {
+          queue.push({ type: 'text', text: answer })
+        } else if (!reasoning && textBuffer.trim()) {
+          queue.push({ type: 'text', text: textBuffer.trim() })
+        } else {
+          return false
+        }
+        finalQueued = true
+        textBuffer = ''
+        queue.push({ type: 'done' })
+        done = true
+        wake()
+        return true
+      }
+
       function processLine(line: string) {
         const trimmed = line.trim()
+        if (finalQueued) return
         if (!trimmed.startsWith('{')) return
         let ev: CliEvent
         try { ev = JSON.parse(trimmed) } catch { return }
@@ -260,7 +281,12 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         // незаметна — он быстрый.
         else if (ev.type === 'text' || ev.type === 'assistant_message_delta' || ev.type === 'message_delta') {
           const text = ev.data ?? ev.text ?? ev.content ?? ev.message?.content
-          if (text) textBuffer += text
+          if (text) {
+            textBuffer += text
+            if (/<answer>[\s\S]*?<\/answer>/i.test(textBuffer)) {
+              queueFinalFromBuffer()
+            }
+          }
         }
         // Completion event — здесь разбираем буфер и эмитим
         else if (ev.type === 'turn_complete' || ev.type === 'done' || ev.type === 'message_complete' || ev.type === 'final') {

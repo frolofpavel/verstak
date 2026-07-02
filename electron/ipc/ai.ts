@@ -108,11 +108,21 @@ function unregisterConversationSupplements(sendId: number): void {
 
 /** Инъекция догруженного контекста (supplement) в активный прогон по sendId.
  *  false — если для sendId нет активного слушателя. Используется ai:append-context. */
-export function pushConversationSupplement(sendId: number, text: string): boolean {
+export function pushConversationSupplement(sendId: number, text: string): 'deferred' | false {
   const push = conversationSupplements.get(sendId)
   if (!push) return false
   push(text)
-  return true
+  return 'deferred'
+}
+
+function formatConversationSupplement(text: string): string {
+  return [
+    '[Дополнение к текущей задаче]',
+    'Это не новая задача и не элемент очереди. Обязательно учти это дополнение в текущем прогоне перед следующим действием, следующим вызовом инструментов или финальным ответом.',
+    'Если уже был составлен план, скорректируй его. Не завершай старый вариант работы так, будто этого дополнения нет.',
+    '',
+    text.trim(),
+  ].join('\n')
 }
 
 // Track which chats have already received memory injection in this process
@@ -720,8 +730,9 @@ export function registerAiIpc(deps: AiDeps): void {
   ipcMain.handle('ai:append-context', (_e, sendId: number, text: string) => {
     const trimmed = String(text ?? '').trim()
     if (!trimmed || sendId <= 0) return { ok: false as const, fallback: 'invalid' as const }
-    if (!pushConversationSupplement(sendId, trimmed)) return { ok: false as const, fallback: 'unavailable' as const }
-    return { ok: true as const }
+    const mode = pushConversationSupplement(sendId, trimmed)
+    if (!mode) return { ok: false as const, fallback: 'unavailable' as const }
+    return { ok: true as const, mode }
   })
 
   ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
@@ -903,7 +914,7 @@ async function runPlainConversation(
       const text = pendingSupplements.shift()!
       currentMessages.push({
         role: 'user',
-        content: `[Дополнение к текущей задаче]\n${text}`
+        content: formatConversationSupplement(text)
       })
       added = true
       if (agentRuns && runId) {
@@ -1192,7 +1203,7 @@ export async function runApiConversation(
       const text = pendingSupplements.shift()!
       currentMessages.push({
         role: 'user',
-        content: `[Дополнение к текущей задаче]\n${text}`
+        content: formatConversationSupplement(text)
       })
       added = true
       if (agentRuns && runId) {

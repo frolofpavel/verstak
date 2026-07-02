@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { I18nContext, getTranslations, type Lang } from './i18n'
 import { ProjectRail } from './components/ProjectRail'
 
@@ -72,12 +72,25 @@ const SIDEBAR_MAX = 480
 const SIDEBAR_DEFAULT = 260
 const SIDEBAR_WIDTH_KEY = 'gg.sidebarWidth'
 const SIDEBAR_OPEN_KEY = 'gg-sidebar-open'
+const SIDECHAT_MIN = 360
+const SIDECHAT_MAX = 760
+const SIDECHAT_DEFAULT = 460
+const SIDECHAT_WIDTH_KEY = 'gg.sideChatWidth'
 
 function readSidebarOpen(): boolean {
   try {
     return localStorage.getItem(SIDEBAR_OPEN_KEY) === '1'
   } catch {
     return false
+  }
+}
+
+function readSideChatWidth(): number {
+  try {
+    const stored = parseInt(localStorage.getItem(SIDECHAT_WIDTH_KEY) || '0', 10)
+    return stored >= SIDECHAT_MIN && stored <= SIDECHAT_MAX ? stored : SIDECHAT_DEFAULT
+  } catch {
+    return SIDECHAT_DEFAULT
   }
 }
 
@@ -90,6 +103,9 @@ export function App() {
   const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat'>('none')
   // Side-chat session id — created on first sent message, not on panel open.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
+  const [sideChatWidth, setSideChatWidth] = useState<number>(readSideChatWidth)
+  const sideChatByProjectRef = useRef<Record<string, number | null>>({})
+  const sideChatResizeRef = useRef<{ startX: number; startW: number; lastW: number } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [lang, setLang] = useState<Lang>('ru')
 
@@ -158,6 +174,7 @@ export function App() {
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
   const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setProject } = useProject()
+  const chatSessions = useProject(s => s.chatSessions)
 
   useEffect(() => {
     if (!authDone) return
@@ -202,17 +219,60 @@ export function App() {
   // Panels require an open project (the terminal/file tree are project-scoped).
   const effectiveRightPanel = path ? rightPanel : 'none'
 
-  // Project switch invalidates the side-chat session (chat sessions are
-  // project-scoped). Drop the id and close the panel if it was open.
+  function rememberSideChatId(id: number | null) {
+    if (path) sideChatByProjectRef.current[path] = id
+    setSideChatId(id)
+  }
+
+  // Chat sessions are project-scoped; remember the selected right-dock chat per project.
   useEffect(() => {
-    setSideChatId(null)
-    setRightPanel(p => (p === 'sidechat' ? 'none' : p))
-  }, [path])
+    if (!path) {
+      setSideChatId(null)
+      setRightPanel(p => (p === 'sidechat' ? 'none' : p))
+      return
+    }
+    const saved = sideChatByProjectRef.current[path] ?? null
+    setSideChatId(saved && chatSessions.some(c => c.id === saved) ? saved : null)
+  }, [path, chatSessions])
 
   function openSideChat() {
     if (!path) return
+    const saved = sideChatByProjectRef.current[path] ?? null
+    if (saved && useProject.getState().chatSessions.some(c => c.id === saved)) {
+      setSideChatId(saved)
+    }
     setRightPanel('sidechat')
   }
+
+  function startSideChatResize(e: ReactMouseEvent<HTMLDivElement>) {
+    e.preventDefault()
+    sideChatResizeRef.current = { startX: e.clientX, startW: sideChatWidth, lastW: sideChatWidth }
+    document.body.classList.add('gg-resizing-sidechat')
+  }
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const drag = sideChatResizeRef.current
+      if (!drag) return
+      const next = Math.max(SIDECHAT_MIN, Math.min(SIDECHAT_MAX, drag.startW + (drag.startX - e.clientX)))
+      drag.lastW = next
+      setSideChatWidth(next)
+    }
+    function onUp() {
+      const drag = sideChatResizeRef.current
+      if (!drag) return
+      sideChatResizeRef.current = null
+      document.body.classList.remove('gg-resizing-sidechat')
+      try { localStorage.setItem(SIDECHAT_WIDTH_KEY, String(drag.lastW)) } catch { /* ignore */ }
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.classList.remove('gg-resizing-sidechat')
+    }
+  }, [])
 
   // Ctrl/Cmd+B toggles the project sidebar; Esc cancels active stream (safety
   // net — if the UI ever feels stuck during a long agentic loop, Esc kills it).
@@ -372,7 +432,10 @@ export function App() {
             {effectiveRightPanel === 'sidechat' && (
               <SideChat
                 sideChatId={sideChatId}
-                onSessionCreated={setSideChatId}
+                width={sideChatWidth}
+                onResizeStart={startSideChatResize}
+                onSessionCreated={rememberSideChatId}
+                onSessionSelected={rememberSideChatId}
                 onClose={() => setRightPanel('none')}
               />
             )}

@@ -1,6 +1,15 @@
 import { SYSTEM_LAYER_PROMPT, SYSTEM_LAYER_VERSION } from './system-layer'
 import type { UserLayer } from './user-layer'
 
+const SKILL_COMPLIANCE_CONTRACT = `<skill_compliance_contract>
+If a <skill_layer> is present, it is mandatory execution guidance, not optional advice.
+- Before acting, identify which parts/checklists of the skill apply to the user's request.
+- Execute every applicable required step from the skill. Do not silently skip steps because they are inconvenient or time-consuming.
+- If a skill step is impossible because data/tool/access is missing, stop and report the blocker instead of pretending it was optional.
+- Before the final answer, self-check the completed work against the applicable skill steps. If something was missed, complete it or clearly report the blocker.
+- Never answer that you "decided to skip", "ignored", or "did not follow" an applicable skill.
+</skill_compliance_contract>`
+
 export interface ComposedPrompt {
   /** Final string to put in the API's `system` field (or system message). */
   system: string
@@ -25,7 +34,7 @@ export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skil
   // протокола (system-layer + user-layer + context-pack), не заменяя его:
   // скилл уточняет роль и стиль, но 7-шаговый цикл выполнения остаётся.
   const skillBlock = trimmedSkill
-    ? `\n\n<skill_layer>\n${trimmedSkill}\n</skill_layer>`
+    ? `\n\n${SKILL_COMPLIANCE_CONTRACT}\n\n<skill_layer>\n${trimmedSkill}\n</skill_layer>`
     : ''
   // Мягкий nudge: перед сложной/многофайловой/деструктивной задачей объявить
   // план через preflight. НЕ для тривиальных одиночных правок — иначе раздражает.

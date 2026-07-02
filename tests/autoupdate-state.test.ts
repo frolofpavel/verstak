@@ -16,6 +16,8 @@ async function writeVersionedAsar(filePath: string, version: string): Promise<vo
   mkdirSync(src, { recursive: true })
   try {
     writeFileSync(join(src, 'package.json'), JSON.stringify({ version, main: 'out/main/main.mjs' }))
+    mkdirSync(join(src, 'out', 'main'), { recursive: true })
+    writeFileSync(join(src, 'out', 'main', 'main.mjs'), 'export {}\n')
     writeFileSync(join(src, 'padding.bin'), Buffer.alloc(10_000_000, 0x61))
     await asar.createPackage(src, filePath)
   } finally {

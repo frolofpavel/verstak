@@ -114,7 +114,12 @@ function verifyPayloadRoot(payloadRoot, expectedVersion) {
   if (expectedVersion && parsed.version !== expectedVersion) {
     throw new Error(`Payload версии ${parsed.version}, ожидалась ${expectedVersion}`)
   }
-  return { version: parsed.version, exeSize, appAsarSize }
+  const main = typeof parsed.main === 'string' && parsed.main.trim() ? parsed.main.trim() : 'index.js'
+  const mainFile = readAsarFile(appAsar, main)
+  if (!mainFile || mainFile.length <= 0) {
+    throw new Error(`Damaged payload: app entrypoint is missing inside app.asar (${main})`)
+  }
+  return { version: parsed.version, exeSize, appAsarSize, main }
 }
 
 function extractCommand(opts) {

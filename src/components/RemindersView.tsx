@@ -25,6 +25,10 @@ function statusLabel(reminder: Reminder): string {
   return 'Закрыто'
 }
 
+function emitRemindersChanged(projectPath: string): void {
+  window.dispatchEvent(new CustomEvent('gg-reminders-changed', { detail: { projectPath } }))
+}
+
 export function RemindersView() {
   const { path, chatSessions } = useProject()
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -104,6 +108,7 @@ export function RemindersView() {
       setDue(toLocalInputValue(Date.now() + 60 * 60 * 1000))
       setNotice('Напоминание создано')
       await refresh()
+      emitRemindersChanged(path!)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -112,16 +117,22 @@ export function RemindersView() {
   async function snooze(id: number) {
     await window.api.reminders.snooze(id, 10)
     await refresh()
+    if (!path) return
+    emitRemindersChanged(path)
   }
 
   async function dismiss(id: number) {
     await window.api.reminders.dismiss(id)
     await refresh()
+    if (!path) return
+    emitRemindersChanged(path)
   }
 
   async function remove(id: number) {
     await window.api.reminders.remove(id)
     await refresh()
+    if (!path) return
+    emitRemindersChanged(path)
   }
 
   function renderReminder(reminder: Reminder) {
