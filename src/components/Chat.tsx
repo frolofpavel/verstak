@@ -494,8 +494,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         return
       }
       // Route background-project events to the snapshot store so they don't
-      // mutate the currently-visible session.
-      if (projectPath && projectPath !== store.path) {
+      // mutate the currently-visible session. НО: события чат-owner'а (даже при смене
+      // проекта) НЕ сюда — иначе они (а) прилипали к чужому чату и (б) НЕ персистились
+      // в БД (applyEventToSession не пишет chats.append) → тихая потеря ответа при reload
+      // (ревью HIGH). Chat-owner всегда идёт в applyEventToChat ниже (персист по sessionId).
+      if (projectPath && projectPath !== store.path && owner?.kind !== 'chat') {
         store.applyEventToSession(projectPath, event as unknown as { type: string; [k: string]: unknown })
         // sendOwners leak fix: stream завершается → удаляем owner, иначе
         // мапа растёт при каждом переключении проекта во время активного
@@ -520,17 +523,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
         store.setPendingPlan(null)
       }
-      // Фоновый чат: другая ветка ИЛИ на экране справки (проектный стрим в snapshot).
+      // Фоновый чат: другая ветка, экран справки ИЛИ другой проект (стрим начатый до
+      // смены проекта). Персистим в БД по sessionId (applyEventToChat), атрибутируем
+      // уведомление реальному проекту чата (projectPath), а не текущему store.path.
       if (
         owner?.kind === 'chat'
         && !owner.isHelp
-        && (store.helpMode || owner.chatId !== store.activeChatId)
+        && (store.helpMode || owner.chatId !== store.activeChatId || (projectPath && projectPath !== store.path))
       ) {
         store.applyEventToChat(owner.chatId, event as unknown as { type: string; [k: string]: unknown })
+        const chatProject = projectPath || store.path
         if (event.type === 'done') {
-          notifyAgentFinished(owner, store.path)
+          notifyAgentFinished(owner, chatProject)
         } else if (event.type === 'error') {
-          notifyAgentFinished(owner, store.path, true)
+          notifyAgentFinished(owner, chatProject, true)
         }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return

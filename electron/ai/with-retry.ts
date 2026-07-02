@@ -115,7 +115,7 @@ export function computeRetryDelay(attempt: number, err: unknown): number {
   return nextDelay(attempt)
 }
 
-export interface RetryOptions {
+export interface RetryOptions<T = unknown> {
   /** Имя для логов. */
   label?: string
   /** Лимит попыток (default 4). */
@@ -124,6 +124,13 @@ export interface RetryOptions {
   onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => void
   /** AbortSignal — если abort сработал, прерываем без retry. */
   signal?: AbortSignal
+  /**
+   * Ревью HIGH: провайдеры не throw'ят транзиентную ошибку соединения, а yield'ят
+   * первым событием `{type:'error'}` (внутри async-генератора). Без этого хука backoff
+   * был мёртв. Предикат возвращает error-подобное значение, если ПЕРВОЕ выданное значение
+   * = транзиентная ошибка (тогда backoff+повтор factory), иначе null.
+   */
+  retriableValue?: (value: T) => unknown
 }
 
 /**
@@ -133,7 +140,7 @@ export interface RetryOptions {
  */
 export async function* withInitialRetry<T>(
   factory: () => AsyncIterable<T>,
-  opts: RetryOptions = {}
+  opts: RetryOptions<T> = {}
 ): AsyncIterable<T> {
   const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -141,12 +148,27 @@ export async function* withInitialRetry<T>(
     let firstYielded = false
     try {
       const iter = factory()[Symbol.asyncIterator]()
+      let retryFromValue = false
       while (true) {
         const next = await iter.next()
         if (next.done) return
+        // Первое событие — транзиентная ошибка, выданная как значение (не throw)?
+        // → backoff + повтор factory (как для throw). На последней попытке НЕ ретраим —
+        // пропускаем событие наружу, чтобы рантайм показал ошибку / ушёл в smart-fallback.
+        if (!firstYielded && opts.retriableValue) {
+          const errLike = opts.retriableValue(next.value)
+          if (errLike != null && isRetriableError(errLike) && attempt < maxAttempts - 1) {
+            const delayMs = computeRetryDelay(attempt, errLike)
+            opts.onRetry?.({ attempt, delayMs, error: errLike })
+            await sleep(delayMs, opts.signal)
+            retryFromValue = true
+            break
+          }
+        }
         firstYielded = true
         yield next.value
       }
+      if (retryFromValue) continue // следующая попытка (re-invoke factory)
     } catch (err) {
       if (firstYielded) {
         // Stream уже стартовал — retry бы дублировал. Пробрасываем.

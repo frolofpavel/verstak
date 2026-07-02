@@ -495,7 +495,10 @@ export function registerAiIpc(deps: AiDeps): void {
         // Факт и релевантный, и недавний — всплывает выше. Чисто на позициях, без векторов.
         const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
         const relevance = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
-        const recency = deps.searchMemories(projectPath!, '', 5).filter(m => !m.tags.includes('session-summary'))
+        // Ревью HIGH: фильтр session-summary ПОСЛЕ LIMIT обнулял recency-канал — session-summary
+        // (свежайший accessed_at, пишутся в конце каждой сессии) занимали топ-5 и все выпадали
+        // фильтром, реальные факты не попадали. Берём с запасом (20) ДО фильтра, потом slice(5).
+        const recency = deps.searchMemories(projectPath!, '', 20).filter(m => !m.tags.includes('session-summary')).slice(0, 5)
         memories = fuseRanks([relevance, recency]).slice(0, 5)
         // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
         // накопились/задублировались — мягко предлагаем модели консолидировать.
@@ -1068,6 +1071,13 @@ interface FallbackOpts {
 /** Максимальное количество fallback-попыток (original + 2 alternates). */
 const MAX_FALLBACK_ATTEMPTS = 2
 
+/** Ревью HIGH: провайдер yield'ит транзиентную ошибку как событие {type:'error'} вместо
+ *  throw → backoff/retry в withInitialRetry был мёртв. Предикат превращает первое такое
+ *  событие в Error, чтобы withInitialRetry сделал backoff+повтор (для ВСЕХ провайдеров). */
+function retriableErrorEvent(ev: { type?: string; message?: unknown }): Error | null {
+  return ev && ev.type === 'error' ? new Error(String(ev.message ?? '')) : null
+}
+
 /**
  * Plain streaming conversation — no tools, no multi-turn. Used for providers
  * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
@@ -1465,6 +1475,26 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     } catch { /* хуки best-effort — ошибка не ломает прогон */ }
   }
 
+  // Ревью HIGH: провайдеры yield'ят {type:'error'} вместо throw → catch со smart-fallback
+  // ниже недостижим для ошибок стрима. Выносим fallback в замыкание, чтобы вызвать его И
+  // из catch (throw), И из ветки event.type==='error' (yield). Возвращает Promise fallback-
+  // фрейма или null (нет следующего провайдера / ошибка не транзиентная).
+  const attemptProviderFallback = (err: unknown): Promise<void> | null => {
+    if (!(fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS)) return null
+    fallbackOpts.triedProviders.add(providerId)
+    if (!shouldFallback(err)) return null
+    const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
+    const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
+    if (!nextProvider || !nextId) return null
+    console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
+    sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` } })
+    fallbackOpts.triedProviders.add(nextId)
+    const fallbackTools = createToolsForProject(projectPath, signal)
+    const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
+    handedOff = true
+    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
+  }
+
   try {
 
   turnLoop: for (let turn = 0; turn < turnsBudget; turn++) {
@@ -1550,6 +1580,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       {
         label: `turn-${turnNum}`,
         signal,
+        retriableValue: retriableErrorEvent,
         onRetry: ({ attempt, delayMs, error }) => {
           const msg = error instanceof Error ? error.message : String(error)
           console.warn(`[agent] turn ${turnNum} retry ${attempt + 1} in ${delayMs}ms: ${msg.slice(0, 200)}`)
@@ -1616,6 +1647,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           return
         }
       } else if (event.type === 'error') {
+        // Транзиентная ошибка на старте прогона (провайдер yield'нул error вместо throw,
+        // ничего ещё не выдано) → пробуем следующего провайдера (ревью HIGH: smart-fallback
+        // был мёртв для API-пути). Если сделали прогресс — не фолбэчим (не переделываем работу).
+        if (turn === 0 && !assistantText && toolCalls.length === 0) {
+          const fb = attemptProviderFallback(new Error(String((event as { message?: unknown }).message ?? 'provider error')))
+          if (fb) return fb
+        }
         exitReason = 'error'
         sender.send('ai:event', { id: sendId, event })
         return
@@ -1670,15 +1708,18 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Теперь скармливаем её модели и даём ОДИН шанс сменить подход (continue),
       // и только при повторном зацикливании — hard-stop. Bounded MAX_LOOP_NUDGES.
       // (Ревью 23.06)
+      // Ревью MEDIUM: результат синтезируем для ВСЕХ toolCalls turn'а, не только loopHits —
+      // иначе при смешанном turn'е (часть вызовов зациклилась, часть нет) не-loop tool_use
+      // остаётся без парного tool_result → на следующем provider.send Claude/OpenAI вернут 400
+      // (каждый tool_use требует tool_result). Loop-вызовам — supervisor-нота, остальным — skip.
+      const loopIds = new Set(loopHits.map(c => c.id))
       currentMessages.push({
         role: 'user',
         content: '',
-        toolResults: loopHits.map(c => ({
-          id: c.id,
-          name: c.name,
-          result: '',
-          error: 'Supervisor: вы зациклились — этот же вызов повторён несколько раз. Смените подход или сообщите пользователю что нужна помощь.'
-        }))
+        toolResults: toolCalls.map(c => loopIds.has(c.id)
+          ? { id: c.id, name: c.name, result: '', error: 'Supervisor: вы зациклились — этот же вызов повторён несколько раз. Смените подход или сообщите пользователю что нужна помощь.' }
+          : { id: c.id, name: c.name, result: 'Пропущено: turn прерван детектором зацикливания (повторялся другой вызов). Повтори при необходимости.' }
+        )
       })
       if (loopNudges < MAX_LOOP_NUDGES) {
         loopNudges++
@@ -2064,37 +2105,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
-    // Smart fallback для API-агентного пути: если withInitialRetry исчерпал
-    // попытки и ошибка всё ещё retriable — переключаемся на следующего провайдера.
-    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
-      fallbackOpts.triedProviders.add(providerId)
-      if (shouldFallback(err)) {
-        const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
-        if (nextProvider && nextId) {
-          console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-          sender.send('ai:event', {
-            id: sendId,
-            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
-          })
-          fallbackOpts.triedProviders.add(nextId)
-          // Передаём tools из замыкания — они привязаны к projectPath и signal, не к провайдеру.
-          const fallbackTools = createToolsForProject(projectPath, signal)
-          // #7: модель fallback-провайдера, а не упавшего — иначе cost-guard/журнал
-          // считаются по тарифу чужой модели (cost cap не срабатывает).
-          const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
-          // #15: передаём agentRuns/runId в fallback-фрейм — ОН финализирует run
-          // своим (реальным) статусом; внешний finally пропускает финализацию по
-          // handedOff. verifications/toolsAllow — capability-фильтр (M4) и индексация
-          // attest обязаны действовать и при фолбэке.
-          handedOff = true
-          // 6.2: fallback продолжает с НАКОПЛЕННОЙ истории (currentMessages с
-          // проделанными tool-результатами), а не с initialMessages — иначе
-          // downstream-провайдер переделывает работу и повторно пишет файлы.
-          return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
-        }
-      }
-    }
+    // Smart fallback для API-агентного пути: если withInitialRetry исчерпал попытки
+    // (throw наружу) и ошибка всё ещё retriable — переключаемся на следующего провайдера.
+    // Та же логика доступна из ветки event.type==='error' (см. attemptProviderFallback).
+    const fb = attemptProviderFallback(err)
+    if (fb) return fb
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,

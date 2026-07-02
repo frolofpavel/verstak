@@ -146,6 +146,44 @@ describe('withInitialRetry', () => {
     expect(retries).toHaveLength(1)
     expect(retries[0].attempt).toBe(0)
   })
+
+  // Ревью HIGH: провайдер yield'ит транзиентную ошибку как значение {type:'error'},
+  // а не throw → backoff был мёртв. retriableValue распознаёт это первое значение.
+  const retriableValue = (v: { type?: string; message?: unknown }) =>
+    v && v.type === 'error' ? new Error(String(v.message ?? '')) : null
+
+  it('retry когда транзиентная ошибка ВЫДАНА значением (yield), не throw', async () => {
+    let attempt = 0
+    const factory = vi.fn(async function* () {
+      attempt++
+      if (attempt < 3) { yield { type: 'error', message: '503 overloaded' }; return }
+      yield { type: 'text', text: 'ok' }
+    })
+    const out: Array<{ type?: string }> = []
+    for await (const v of withInitialRetry(factory, { maxAttempts: 4, retriableValue })) out.push(v)
+    expect(out).toEqual([{ type: 'text', text: 'ok' }]) // error-события НЕ пропущены наружу
+    expect(factory).toHaveBeenCalledTimes(3)
+  })
+
+  it('на ПОСЛЕДНЕЙ попытке error-значение пропускается наружу (для smart-fallback)', async () => {
+    const factory = vi.fn(async function* () {
+      yield { type: 'error', message: '429 rate limit' }
+    })
+    const out: Array<{ type?: string }> = []
+    for await (const v of withInitialRetry(factory, { maxAttempts: 2, retriableValue })) out.push(v)
+    expect(out).toEqual([{ type: 'error', message: '429 rate limit' }]) // выдано наружу
+    expect(factory).toHaveBeenCalledTimes(2)
+  })
+
+  it('non-retriable error-значение (4xx) сразу наружу, без ретраев', async () => {
+    const factory = vi.fn(async function* () {
+      yield { type: 'error', message: '401 unauthorized' }
+    })
+    const out: Array<{ type?: string }> = []
+    for await (const v of withInitialRetry(factory, { maxAttempts: 4, retriableValue })) out.push(v)
+    expect(out).toHaveLength(1)
+    expect(factory).toHaveBeenCalledTimes(1)
+  })
 })
 
 // Retry-After (конкурентный разбор OpenCode): провайдер в заголовке говорит,
