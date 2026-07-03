@@ -23,6 +23,7 @@ import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { extractMentions } from '../lib/mentions'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestFromIndex } from '../lib/skill-suggest'
+import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
 import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
@@ -255,8 +256,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const s = suggestFromIndex(input, skillIndex, activeSkillId)
     return s && s.id !== dismissedSuggestId ? s : null
   }, [input, skillIndex, activeSkillId, dismissedSuggestId])
+  // Этап 4: детерминированное предложение coding-recipe по интенту задачи. Только
+  // явный интент (не фоллбэк small-edit), только если такой recipe-скилл есть и не
+  // активен. Чисто предложение через chip — без auto-run.
+  const [dismissedRecipeId, setDismissedRecipeId] = useState<string | null>(null)
+  const suggestedRecipe = useMemo(() => {
+    if (input.trim().startsWith('/')) return null
+    if (!hasExplicitRecipeIntent(input)) return null
+    const id = suggestRecipe(input)
+    if (id === activeSkillId || id === dismissedRecipeId) return null
+    const skill = allSkills.find(s => s.id === id && s.recipe)
+    return skill ?? null
+  }, [input, activeSkillId, dismissedRecipeId, allSkills])
   // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
-  useEffect(() => { if (!input.trim()) setDismissedSuggestId(null) }, [input])
+  useEffect(() => { if (!input.trim()) { setDismissedSuggestId(null); setDismissedRecipeId(null) } }, [input])
   /** Live token-count preview for whatever is in the composer right now. */
   const [previewTokens, setPreviewTokens] = useState<{ tokens: number; exact: boolean } | null>(null)
   /** If the agent loop exhausted its budget on the last send, the user can click "+N turns" to extend. */
@@ -2186,7 +2199,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
           </div>
         )}
-        {suggestedSkill && (
+        {suggestedRecipe && (
+          <div className="gg-skill-suggest">
+            <span className="gg-skill-suggest-text">
+              🚦 Похоже, задача под рецепт <strong>{suggestedRecipe.icon ? suggestedRecipe.icon + ' ' : ''}{suggestedRecipe.name ?? suggestedRecipe.id}</strong> (жёсткий workflow)
+            </span>
+            <button
+              type="button"
+              className="gg-skill-suggest-accept"
+              onClick={() => { useSkillsStore.getState().setActiveSkill(suggestedRecipe.id); setDismissedRecipeId(null) }}
+            >Включить</button>
+            <button
+              type="button"
+              className="gg-skill-suggest-dismiss"
+              onClick={() => setDismissedRecipeId(suggestedRecipe.id)}
+              title="Скрыть предложение"
+            >×</button>
+          </div>
+        )}
+        {suggestedSkill && !suggestedRecipe && (
           <div className="gg-skill-suggest">
             <span className="gg-skill-suggest-text">
               💡 Похоже, подойдёт скилл <strong>{suggestedSkill.icon ? suggestedSkill.icon + ' ' : ''}{suggestedSkill.name ?? suggestedSkill.id}</strong>
