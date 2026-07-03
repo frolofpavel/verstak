@@ -966,7 +966,11 @@ async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools) {
               }
             }
             if (tc.id) pendingToolCalls[idx].id = tc.id
-            if (tc.function?.name) pendingToolCalls[idx].name += tc.function.name
+            // Имя приходит целиком в одном delta у большинства провайдеров; часть
+            // (DeepSeek/Qwen/др.) шлёт его в КАЖДОМ delta повторно → += давал
+            // «read_fileread_file» и все tool-calls отвергались как неизвестные.
+            // Присваиваем (как GUI-парсер openai-compat.ts), а не аккумулируем.
+            if (tc.function?.name) pendingToolCalls[idx].name = tc.function.name
             if (tc.function?.arguments) pendingToolCalls[idx].argsRaw += tc.function.arguments
           }
         }
