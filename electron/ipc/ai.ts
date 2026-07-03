@@ -12,7 +12,11 @@ import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
 import type { RecipeSpec } from '../ai/skills/types'
-import { isMutatingToolName, snapshotVerifyBaseline, type VerifyRun } from '../ai/review-gate'
+import {
+  isMutatingToolName, snapshotVerifyBaseline, isReviewGatePassResult,
+  decideReviewGate, buildReviewGateRequiredNudge, REVIEW_GATE_STOP_MESSAGE,
+  MAX_REVIEW_GATE_NUDGES, type VerifyRun,
+} from '../ai/review-gate'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
@@ -1593,8 +1597,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // снимает его ДО первой правки. In-memory, per-run.
   const recipeVerifyCommands = (ctx.recipe?.verify?.commands ?? [])
     .map(c => String(c ?? '').trim()).filter(Boolean)
+  const recipeRequiresReview = ctx.recipe?.reviewer?.required === true
   let recipeBaseline: VerifyRun[] | null = null
   let recipeBaselineTaken = false
+  // ── Этап 6 P2: обязательный review gate при recipe.reviewer.required ──
+  let reviewGatePassed = false
+  let reviewGateNudges = 0
 
   // Лениво снять baseline перед первым мутирующим вызовом. Одноразово на прогон,
   // даже если снимок частичный/пустой (fail-closed — не ретраим на каждый write).
@@ -1613,6 +1621,26 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         })
       } catch { /* best-effort */ }
     }
+  }
+
+  // P2: enforcement перед финальным ответом (только recipe.reviewer.required).
+  // 'retry' — corrective nudge и ещё turn; 'stop' — fail-closed остановка;
+  // 'allow' — финал разрешён (нет требования / гейт пройден).
+  const enforceReviewGateBeforeFinal = (): 'allow' | 'retry' | 'stop' => {
+    const decision = decideReviewGate({
+      required: recipeRequiresReview, passed: reviewGatePassed,
+      nudges: reviewGateNudges, maxNudges: MAX_REVIEW_GATE_NUDGES,
+    })
+    if (decision === 'retry') {
+      reviewGateNudges++
+      currentMessages.push({ role: 'user', content: buildReviewGateRequiredNudge(recipeVerifyCommands) })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'tool-blocked', callId: `review-gate-${reviewGateNudges}`, name: 'review_before_commit',
+          reason: 'Рецепт требует review_before_commit перед завершением — вызови гейт.' },
+      })
+    }
+    return decision
   }
 
   try {
@@ -1762,6 +1790,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
           const esc = maybeEscalateNoTools()
           if (esc) return esc
+          // P2 (Этап 6): обязательный review gate перед финалом (recipe.reviewer.required).
+          const gate = enforceReviewGateBeforeFinal()
+          if (gate === 'retry') { assistantText = ''; continue turnLoop }
+          if (gate === 'stop') {
+            exitReason = 'error'
+            sender.send('ai:event', { id: sendId, event: { type: 'error', message: REVIEW_GATE_STOP_MESSAGE } })
+            sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+            return
+          }
           exitReason = 'completed'
           sender.send('ai:event', { id: sendId, event })
           // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done,
@@ -1826,6 +1863,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
       const esc = maybeEscalateNoTools()
       if (esc) return esc
+      // P2 (Этап 6): обязательный review gate перед финалом (recipe.reviewer.required).
+      const gate = enforceReviewGateBeforeFinal()
+      if (gate === 'retry') { assistantText = ''; continue }
+      if (gate === 'stop') {
+        exitReason = 'error'
+        sender.send('ai:event', { id: sendId, event: { type: 'error', message: REVIEW_GATE_STOP_MESSAGE } })
+        sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+        return
+      }
       exitReason = 'completed'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
@@ -2048,6 +2094,18 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           const post = await runHooks('PostToolUse', hooks, { event: 'PostToolUse', cwd: projectPath, tool_name: call.name, tool_input: call.args, tool_output: result?.result })
           if (post.additionalContext) pendingSupplements.push(post.additionalContext)
         } catch { /* хук best-effort */ }
+      }
+    }
+    // P2 (Этап 6): зафиксировать успешный проход обязательного review gate по
+    // результату его tool-вызова (маркер REVIEW_GATE_PASS_MARKER). Только при
+    // recipe.reviewer.required — иначе no-op для обычных прогонов/скиллов.
+    if (recipeRequiresReview && !reviewGatePassed) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        if (toolCalls[i].name === 'review_before_commit'
+            && isReviewGatePassResult(toolResults[i]?.result, !!toolResults[i]?.error)) {
+          reviewGatePassed = true
+          break
+        }
       }
     }
     // Tally tool usage for the end-of-session journal summary

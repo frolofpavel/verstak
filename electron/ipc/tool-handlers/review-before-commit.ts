@@ -20,6 +20,7 @@ import {
   buildFixerPrompt,
   formatVerifyReport,
   MAX_AUTOFIX_CYCLES,
+  REVIEW_GATE_PASS_MARKER,
   type VerifyRun,
 } from '../../ai/review-gate'
 
@@ -115,7 +116,7 @@ export const reviewBeforeCommitHandler: ToolHandler = {
         return {
           id: call.id,
           name: call.name,
-          result: `✅ REVIEW GATE: ПРОЙДЕНО (confidence ${verdict.confidence}).\n${verdict.summary || 'Изменения безопасно коммитить.'}\n\nВерификация:\n${verifyReport}`,
+          result: `✅ ${REVIEW_GATE_PASS_MARKER} (confidence ${verdict.confidence}).\n${verdict.summary || 'Изменения безопасно коммитить.'}\n\nВерификация:\n${verifyReport}`,
         }
       }
 

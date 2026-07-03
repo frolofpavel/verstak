@@ -259,3 +259,42 @@ export async function snapshotVerifyBaseline(
   return runs
 }
 
+/** Маркер успешного прохождения гейта в тексте результата review_before_commit.
+ *  Runtime (P2) сверяет по нему, что гейт реально пройден (не текстовая имитация). */
+export const REVIEW_GATE_PASS_MARKER = 'REVIEW GATE: ПРОЙДЕНО'
+
+/** Прошёл ли review_before_commit по результату его tool-вызова. */
+export function isReviewGatePassResult(result: unknown, hadError?: boolean): boolean {
+  if (hadError) return false
+  return typeof result === 'string' && result.includes(REVIEW_GATE_PASS_MARKER)
+}
+
+/** Максимум corrective-nudge'ей на обязательный gate (bounded, п.3 ТЗ). */
+export const MAX_REVIEW_GATE_NUDGES = 1
+
+/**
+ * Решение enforcement обязательного review gate (P2, Этап 6). Срабатывает ТОЛЬКО
+ * для active recipe с reviewer.required. 'allow' — финал разрешён; 'retry' — один
+ * corrective nudge (в бюджете); 'stop' — fail-closed остановка.
+ */
+export function decideReviewGate(state: {
+  required: boolean
+  passed: boolean
+  nudges: number
+  maxNudges: number
+}): 'allow' | 'retry' | 'stop' {
+  if (!state.required || state.passed) return 'allow'
+  if (state.nudges < state.maxNudges) return 'retry'
+  return 'stop'
+}
+
+/** Corrective-нота модели: рецепт требует вызвать gate перед финальным ответом. */
+export function buildReviewGateRequiredNudge(verifyCommands: string[]): string {
+  const cmds = verifyCommands.length ? verifyCommands.map(c => `"${c}"`).join(', ') : '(из recipe.verify)'
+  return `Этот рецепт требует вызова review_before_commit ПЕРЕД финальным ответом. Вызови инструмент сейчас: передай task_brief (что менял) и verify_commands (${cmds}); baseline подставится автоматически. Не давай финальный ответ, пока гейт не вернёт «${REVIEW_GATE_PASS_MARKER}».`
+}
+
+/** Сообщение пользователю при fail-closed остановке (гейт так и не пройден). */
+export const REVIEW_GATE_STOP_MESSAGE =
+  'Остановлено: рецепт требует обязательного review_before_commit (reviewer.required), но гейт не пройден после запроса. Изменения НЕ прошли обязательное ревью — заверши задачу через гейт вручную.'
+

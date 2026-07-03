@@ -10,6 +10,12 @@ import {
   MAX_AUTOFIX_CYCLES,
   isMutatingToolName,
   snapshotVerifyBaseline,
+  isReviewGatePassResult,
+  decideReviewGate,
+  buildReviewGateRequiredNudge,
+  REVIEW_GATE_PASS_MARKER,
+  REVIEW_GATE_STOP_MESSAGE,
+  MAX_REVIEW_GATE_NUDGES,
 } from '../../electron/ai/review-gate'
 
 describe('isAllowedVerifyCommand', () => {
@@ -233,5 +239,62 @@ describe('snapshotVerifyBaseline — P1', () => {
     // новая ошибка поверх baseline → блок
     const g = evaluateVerify([{ command: 'npm run type', output: preExisting + '\nsrc/b.ts(3,1): error TS1005: ; expected', exitCode: 1 }], baseline)
     expect(g.pass).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Этап 6 P2: mandatory review gate enforcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isReviewGatePassResult', () => {
+  it('распознаёт успешный результат гейта по маркеру', () => {
+    const ok = `✅ ${REVIEW_GATE_PASS_MARKER} (confidence 0.9).\nок`
+    expect(isReviewGatePassResult(ok)).toBe(true)
+  })
+  it('провал гейта (❌) не считается pass', () => {
+    expect(isReviewGatePassResult('❌ REVIEW GATE: НЕ ПРОЙДЕНО.\nПричина: X')).toBe(false)
+  })
+  it('результат с ошибкой tool-вызова не pass даже с маркером', () => {
+    expect(isReviewGatePassResult(`✅ ${REVIEW_GATE_PASS_MARKER}`, true)).toBe(false)
+  })
+  it('не-строка не pass', () => {
+    expect(isReviewGatePassResult(undefined)).toBe(false)
+    expect(isReviewGatePassResult({ pass: true })).toBe(false)
+  })
+})
+
+describe('decideReviewGate — enforcement', () => {
+  const max = MAX_REVIEW_GATE_NUDGES
+  it('recipe без reviewer.required → финал разрешён', () => {
+    expect(decideReviewGate({ required: false, passed: false, nudges: 0, maxNudges: max })).toBe('allow')
+  })
+  it('обычный skill (required=false) не задет даже без гейта', () => {
+    expect(decideReviewGate({ required: false, passed: false, nudges: 5, maxNudges: max })).toBe('allow')
+  })
+  it('reviewer.required и гейт не пройден, есть бюджет nudge → retry', () => {
+    expect(decideReviewGate({ required: true, passed: false, nudges: 0, maxNudges: max })).toBe('retry')
+  })
+  it('после успешного гейта → финал разрешён', () => {
+    expect(decideReviewGate({ required: true, passed: true, nudges: 0, maxNudges: max })).toBe('allow')
+  })
+  it('гейт не пройден и nudge исчерпан → fail-closed stop', () => {
+    expect(decideReviewGate({ required: true, passed: false, nudges: max, maxNudges: max })).toBe('stop')
+  })
+  it('MAX_REVIEW_GATE_NUDGES bounded = 1', () => {
+    expect(MAX_REVIEW_GATE_NUDGES).toBe(1)
+  })
+})
+
+describe('сообщения enforcement', () => {
+  it('nudge перечисляет verify-команды и требует вызвать гейт', () => {
+    const n = buildReviewGateRequiredNudge(['npm run type', 'npm test'])
+    expect(n).toContain('review_before_commit')
+    expect(n).toContain('npm run type')
+    expect(n).toContain('npm test')
+    expect(n).toContain(REVIEW_GATE_PASS_MARKER)
+  })
+  it('stop-сообщение объясняет причину', () => {
+    expect(REVIEW_GATE_STOP_MESSAGE).toContain('reviewer.required')
+    expect(REVIEW_GATE_STOP_MESSAGE.length).toBeGreaterThan(20)
   })
 })
