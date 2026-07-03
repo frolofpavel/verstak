@@ -31,6 +31,7 @@ import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
 import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
+import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from '../ai/tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
@@ -1382,6 +1383,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // протокол и цель на весь остаток прогона. Захватываем до любого wipe.
   const baseSystemMsg = currentMessages.find(m => m.role === 'system') ?? null
   const originalUserMsg = currentMessages.find(m => m.role === 'user') ?? null
+  // Hardening (китайские/reasoning-модели): для 'json'-режима (deepseek-reasoner,
+  // Ollama и т.п. — native function calling не работает) один раз инжектим
+  // инструкцию отдавать вызов инструмента текстом <tool_call>{…}</tool_call> —
+  // его уже ловит parseTextToolCalls. Только при наличии тулзов и не в fallback-
+  // фрейме (иначе дубль). Для 'native' — no-op, поведение не меняется.
+  if (!isFallbackFrame && projectPath && resolveToolMode(providerId, model) === 'json') {
+    const sysIdx = currentMessages.findIndex(m => m.role === 'system')
+    currentMessages.splice(sysIdx >= 0 ? sysIdx + 1 : 0, 0, { role: 'system', content: JSON_TOOL_INSTRUCTION })
+  }
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
     pendingSupplements.push(text)
@@ -1401,12 +1411,33 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
     return added
   }
+  // Hardening: bounded corrective-nudge для «слабых» провайдеров, когда модель
+  // ответила прозой и не вызвала ни одного инструмента (см. continueAfterPlainReply).
+  let plainReplyNudges = 0
+  const MAX_PLAIN_NUDGES = 1
+  const coaxableProvider = isCoaxableProvider(providerId)
   const continueAfterPlainReply = (text: string): boolean => {
     if (text.trim()) {
       currentMessages.push({ role: 'assistant', content: text })
       lastAssistantText = text
     }
-    return drainSupplements()
+    if (drainSupplements()) return true
+    // Corrective retry (китайские/слабые OpenAI-compat): модель ответила прозой и
+    // НИ РАЗУ не вызвала инструмент при агентной задаче → один раз просим её либо
+    // явно завершить, либо вызвать тул. Гейт: coaxable-провайдер + тулзы доступны +
+    // за прогон не было ни одного вызова + бюджет nudge не исчерпан. Frontier/RU не
+    // трогаем — они надёжны, nudge дал бы ложные срабатывания на обычном Q&A.
+    if (coaxableProvider && projectPath && toolCallCount === 0 && plainReplyNudges < MAX_PLAIN_NUDGES && text.trim()) {
+      plainReplyNudges++
+      currentMessages.push({ role: 'user', content: IGNORED_TOOLS_NUDGE })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'tool-blocked', callId: `plain-nudge-${plainReplyNudges}`, name: 'no-tool-call',
+          reason: 'Модель ответила текстом без вызова инструмента — прошу выбрать инструмент или явно завершить.' }
+      })
+      return true
+    }
+    return false
   }
   // Loop detection: per-signature occurrence counter across the whole agent
   // loop. We block when a single tool+args combination has been called 3 times
