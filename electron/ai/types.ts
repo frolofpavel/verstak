@@ -102,6 +102,10 @@ export type ChatEvent =
    *  Эфемерный бейдж для UI (overall + N/M); БД-персист — Фаза 3. */
   | { type: 'verification-attested'; callId: string; overall: 'passed' | 'failed' | 'partial' | 'not_run'; checksTotal: number; checksPassed: number; changedFilesCount: number }
   | { type: 'usage'; usage: UsageDelta }
+  /** Context window auto-compact is running or has just finished. */
+  | { type: 'context-compact'; phase: 'start'; reason: 'context-window' }
+  | { type: 'context-compact'; phase: 'done'; beforeChars: number; afterChars: number; droppedTurns: number; keptTurns: number; reason: 'context-window' }
+  | { type: 'context-compact'; phase: 'cancel'; reason: 'context-window' }
   /** Информационное сообщение для UI (тост). Не блокирует сессию. */
   | { type: 'info'; text: string }
   /** Результат авто-кросс-верификации: другой провайдер просмотрел изменённые файлы. */

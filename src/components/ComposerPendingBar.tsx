@@ -7,6 +7,8 @@ interface ComposerPendingBarProps {
   expanded: boolean
   onToggle: () => void
   onRemoveQueueItem?: (id: string) => void
+  onMoveQueueItemToContext?: (id: string) => void
+  onEditQueueItem?: (id: string) => void
 }
 
 function formatItemTime(at: number): string {
@@ -19,6 +21,8 @@ export function ComposerPendingBar({
   expanded,
   onToggle,
   onRemoveQueueItem,
+  onMoveQueueItemToContext,
+  onEditQueueItem,
 }: ComposerPendingBarProps) {
   const t = useT()
   const queueCount = queueItems.length
@@ -84,6 +88,30 @@ export function ComposerPendingBar({
                         {t.chat.pendingBarQueueOrder.replace('{n}', String(index + 1))}
                       </span>
                       <time className="gg-composer-pending-item-time">{formatItemTime(item.at)}</time>
+                      {(onMoveQueueItemToContext || onEditQueueItem || onRemoveQueueItem) && (
+                        <span className="gg-composer-pending-item-actions">
+                          {onMoveQueueItemToContext && (
+                            <button
+                              type="button"
+                              className="gg-composer-pending-item-action"
+                              onClick={() => onMoveQueueItemToContext(item.id)}
+                              title="Добавить как допконтекст"
+                            >
+                              Контекст
+                            </button>
+                          )}
+                          {onEditQueueItem && (
+                            <button
+                              type="button"
+                              className="gg-composer-pending-item-action"
+                              onClick={() => onEditQueueItem(item.id)}
+                              title="Редактировать сообщение"
+                            >
+                              Править
+                            </button>
+                          )}
+                        </span>
+                      )}
                       {onRemoveQueueItem && (
                         <button
                           type="button"

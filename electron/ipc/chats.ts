@@ -4,6 +4,7 @@ import type { Chats } from '../storage/chats'
 import type { ChatSessions, ChatKind } from '../storage/chat-sessions'
 import { forgetMemorizedChat } from './ai'
 import { summarizeAndSaveSession } from '../ai/session-summary'
+import { logRuntime, logRuntimeError } from '../runtime-log'
 
 export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Database): void {
   // Sessions
@@ -17,7 +18,18 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
     model?: string | null
     kind?: ChatKind
     parentChatId?: number | null
-  }) => sessions.create(projectPath, opts))
+  }) => {
+    const session = sessions.create(projectPath, opts)
+    logRuntime('chat_session.create', {
+      sessionId: session.id,
+      projectPath,
+      kind: opts?.kind ?? 'chat',
+      parentChatId: opts?.parentChatId ?? null,
+      providerId: opts?.providerId ?? null,
+      model: opts?.model ?? null
+    })
+    return session
+  })
   ipcMain.handle('chat-sessions:fork', (_e, sourceId: number, opts?: { uptoMessageId?: number; title?: string }) =>
     sessions.fork(sourceId, opts)
   )
@@ -33,10 +45,12 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
       try {
         summarizeAndSaveSession(db, id, session.projectPath, messages)
       } catch (err) {
+        logRuntimeError('chat_session.summary_before_remove.fail', err, { sessionId: id, projectPath: session.projectPath })
         console.error('[chats] summarizeAndSaveSession failed, proceeding with deletion:', err instanceof Error ? err.message : err)
       }
     }
     sessions.remove(id)
+    logRuntime('chat_session.remove', { sessionId: id, hadSession: !!session })
     // Clear memory-injection cache so if a new session reuses this id as key,
     // it still receives a fresh memory injection.
     forgetMemorizedChat(String(id))
@@ -45,7 +59,33 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
   // Messages
   ipcMain.handle('chats:list', (_e, sessionId: number) => chats.listBySession(sessionId))
   ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => {
-    chats.appendToSession(sessionId, projectPath, role, content)
+    const message = chats.appendToSession(sessionId, projectPath, role, content)
+    logRuntime('chat_message.append', {
+      sessionId,
+      messageId: message.id,
+      projectPath,
+      role,
+      contentLength: content.length
+    })
+    return message
+  })
+  ipcMain.handle('chats:update-message', (_e, messageId: number, content: string) => {
+    const updated = chats.updateMessage(messageId, content)
+    logRuntime('chat_message.update', {
+      messageId,
+      updated,
+      contentLength: content.length
+    })
+    return updated
+  })
+  ipcMain.handle('chats:update-thinking', (_e, messageId: number, thinking: string) => {
+    const updated = chats.updateThinking(messageId, thinking)
+    logRuntime('chat_message.update_thinking', {
+      messageId,
+      updated,
+      thinkingLength: thinking.length
+    })
+    return updated
   })
   // F (ось 3): «Откатить задачу» — граница (макс. id) на момент чекпоинта + truncate к ней.
   ipcMain.handle('chats:max-message-id', (_e, sessionId: number) => chats.maxMessageId(sessionId))

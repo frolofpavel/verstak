@@ -193,7 +193,7 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
-  it('reconcileStale помечает зависшие running/queued (ended_at null) как failed', () => {
+  it('reconcileStale помечает зависшие running/queued (ended_at null) как interrupted', () => {
     const db = openDb(join(dir, 'test.db'))
     const runs = createAgentRuns(db)
     // r1 — зависший running (краш/выход без живого процесса), ended_at null.
@@ -204,7 +204,7 @@ describe('agent-runs (migration 16)', () => {
     const reconciled = runs.reconcileStale()
     expect(reconciled).toBe(1)                       // только r1
     const r1 = runs.get('r1')!
-    expect(r1.status).toBe('failed')                 // running → failed
+    expect(r1.status).toBe('interrupted')            // running → interrupted
     expect(r1.endedAt).not.toBeNull()                // проставлен ended_at
     const r2 = runs.get('r2')!
     expect(r2.status).toBe('done')                   // done не тронут
@@ -218,7 +218,7 @@ describe('agent-runs (migration 16)', () => {
     runs.create({ runId: 'b', projectPath: '/p2', title: 'B' })   // зависший
     const reconciled = runs.reconcileStale('/p1')
     expect(reconciled).toBe(1)                       // только из /p1
-    expect(runs.get('a')!.status).toBe('failed')
+    expect(runs.get('a')!.status).toBe('interrupted')
     expect(runs.get('b')!.status).toBe('running')    // /p2 не тронут
     db.close()
   })

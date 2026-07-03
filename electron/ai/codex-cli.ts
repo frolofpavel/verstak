@@ -118,7 +118,8 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
           messages,
           projectSystemPrompt: opts.projectSystemPrompt,
           skillPrompt: opts.skillPrompt,
-          memories: opts.memories
+          memories: opts.memories,
+          agentMode: opts.agentMode
         })
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }

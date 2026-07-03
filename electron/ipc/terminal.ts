@@ -98,7 +98,13 @@ export function registerTerminalIpc(getKnownRoots: () => string[] = () => []): v
           "[Console]::InputEncoding=[System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $OutputEncoding=[System.Text.UTF8Encoding]::new(); chcp 65001 > $null"
         ]
       : []
-    const p = pty.spawn(shell, args, { cwd: safeCwd, cols: 100, rows: 30, env })
+    const p = pty.spawn(shell, args, {
+      cwd: safeCwd,
+      cols: 100,
+      rows: 30,
+      env,
+      ...(process.platform === 'win32' ? { useConpty: false } : {}),
+    })
     const id = p.pid
     sessions.set(id, p)
     errBuffers.set(id, '')

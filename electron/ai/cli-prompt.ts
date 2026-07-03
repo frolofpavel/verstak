@@ -17,11 +17,21 @@
 
 import { SYSTEM_LAYER_PROMPT } from './system-layer'
 import { prepareParts } from './compose-system'
-import { serializeHistory, describeAttachments } from './history-serializer'
+import { serializeHistory, describeAttachments, type SerializeHistoryOpts } from './history-serializer'
 import { detectVerifyScriptsForHint } from './session-journal'
+import type { AgentMode } from './mode-policy'
 import type { ChatMessage } from './types'
 
 export type CliProviderId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
+
+const SKILL_COMPLIANCE_CONTRACT = `<skill_compliance_contract>
+If a <skill_layer> is present, it is mandatory execution guidance, not optional advice.
+- Before acting, identify which parts/checklists of the skill apply to the user's request.
+- Execute every applicable required step from the skill. Do not silently skip steps because they are inconvenient or time-consuming.
+- If a skill step is impossible because data/tool/access is missing, stop and report the blocker instead of pretending it was optional.
+- Before the final answer, self-check the completed work against the applicable skill steps. If something was missed, complete it or clearly report the blocker.
+- Never answer that you "decided to skip", "ignored", or "did not follow" an applicable skill.
+</skill_compliance_contract>`
 
 /**
  * True if the CLI provider reads this user_layer file by itself on startup.
@@ -53,6 +63,42 @@ interface BuildCliPromptOpts {
    *  «запусти проверку (npm test/type)». CLI one-shot — не имеет цикла, поэтому
    *  вызывающий код выставляет флаг, когда в истории были write'ы. */
   appendVerifyHint?: boolean
+  /** Current chat mode. Used only for prompt-size policy: destructive/auto modes
+   *  keep a wider history, plain ask/plan can use a low-latency window. */
+  agentMode?: AgentMode
+}
+
+const DEFAULT_HISTORY_OPTS: SerializeHistoryOpts = {}
+const LOW_LATENCY_HISTORY_OPTS: SerializeHistoryOpts = {
+  charBudget: 12_000,
+  minTurns: 8,
+  perMsgBodyCap: 1200,
+  perToolResultCap: 700,
+  perToolCallArgsCap: 180
+}
+
+function isLikelySimpleConversationTurn(text: string): boolean {
+  const normalized = text.trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized.length > 220) return false
+
+  const complexSignals = [
+    'fix', 'debug', 'implement', 'build', 'create', 'refactor', 'rewrite',
+    'test', 'deploy', 'release', 'push', 'commit', 'merge', 'migrate',
+    'исправ', 'почин', 'сдела', 'добав', 'удал', 'собер', 'запуш',
+    'задепло', 'пересоб', 'перепиш', 'реализ', 'проверь код', 'заливай'
+  ]
+
+  return !complexSignals.some(signal => normalized.includes(signal))
+}
+
+function historyOptsForPrompt(opts: BuildCliPromptOpts, lastUserText: string): SerializeHistoryOpts {
+  if (opts.agentMode === 'auto' || opts.agentMode === 'bypass' || opts.agentMode === 'accept-edits') {
+    return DEFAULT_HISTORY_OPTS
+  }
+  return isLikelySimpleConversationTurn(lastUserText)
+    ? LOW_LATENCY_HISTORY_OPTS
+    : DEFAULT_HISTORY_OPTS
 }
 
 /**
@@ -104,7 +150,7 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
   //      ПОВЕРХ system/user/context, как в API-пути (compose-prompt.ts
   //      <skill_layer>): это выбор пользователя, а не наш базовый регламент.
   const trimmedSkill = (skillPrompt ?? '').trim()
-  if (trimmedSkill) sections.push(`<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
+  if (trimmedSkill) sections.push(`${SKILL_COMPLIANCE_CONTRACT}\n\n<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
 
   // 3. Conversation history — единый сериализатор (history-serializer.ts).
   //    NEVER include system messages here (they're already above).
@@ -124,7 +170,8 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
   const turns = messages.filter(m => m.role !== 'system')
   // Drop the very last user message — we'll send it separately as the prompt
   const candidates = turns.slice(0, -1)
-  const { transcript, includedCount, droppedCount } = serializeHistory(candidates)
+  const historyOpts = historyOptsForPrompt(opts, lastUser.content)
+  const { transcript, includedCount, droppedCount } = serializeHistory(candidates, historyOpts)
   if (includedCount > 0) {
     const droppedNote = droppedCount > 0
       ? ` dropped="${droppedCount}" reason="budget"`

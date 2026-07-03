@@ -3,7 +3,7 @@ import { createGeminiCliProvider, GEMINI_CLI_MODELS } from './gemini-cli'
 import { createClaudeProvider, CLAUDE_MODELS } from './claude'
 import { createClaudeCliProvider, CLAUDE_CLI_MODELS } from './claude-cli'
 import { createGrokProvider, GROK_MODELS } from './grok'
-import { createGrokCliProvider, GROK_CLI_MODELS } from './grok-cli'
+import { createGrokCliProvider, DEFAULT_GROK_CLI_MODEL, GROK_CLI_MODELS } from './grok-cli'
 import { createOpenAiProvider, OPENAI_MODELS } from './openai'
 import { createCodexCliProvider, CODEX_CLI_MODELS } from './codex-cli'
 import { createExtraProvider, EXTRA_PROVIDERS, type ExtraProviderSpec } from './extra-providers'
@@ -136,7 +136,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
     transport: 'CLI',
     secretKey: null,
     models: GROK_CLI_MODELS,
-    defaultModel: 'auto',
+    defaultModel: DEFAULT_GROK_CLI_MODEL,
     supportsTools: false,
     shortLabel: 'Grok Build'
   },
@@ -242,7 +242,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createGeminiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'gemini-cli':
-      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
+      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
     case 'claude': {
       if (!opts.apiKey) throw new Error('Anthropic API key not set')
       return createClaudeProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
@@ -255,14 +255,15 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
         projectSystemPrompt: opts.projectSystemPrompt,
         skillPrompt: opts.skillPrompt,
         oauthToken: opts.claudeOauthToken,
-        memories: opts.memories
+        memories: opts.memories,
+        agentMode: opts.agentMode
       })
     case 'grok': {
       if (!opts.apiKey) throw new Error('xAI (Grok) API key not set')
       return createGrokProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'grok-cli':
-      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories })
+      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
     case 'openai': {
       if (!opts.apiKey) throw new Error('OpenAI API key not set')
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })

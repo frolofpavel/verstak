@@ -3,6 +3,7 @@ import { pathToFileURL } from 'url'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { mkdirSync } from 'fs'
+import { logRuntime, logRuntimeError, registerRuntimeLogIpc, runtimeLogsDir } from './runtime-log'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
 // AppImage не может создать sandbox namespace. Electron падает с:
@@ -215,6 +216,20 @@ function installCSP(): void {
 }
 
 installAppIdentity()
+logRuntime('app.bootstrap', {
+  version: app.getVersion(),
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  arch: process.arch,
+  logsDir: runtimeLogsDir()
+})
+
+process.on('uncaughtException', err => {
+  logRuntimeError('process.uncaught_exception', err)
+})
+process.on('unhandledRejection', reason => {
+  logRuntimeError('process.unhandled_rejection', reason)
+})
 
 // Tell Windows this is its own application so the taskbar uses our icon
 // (and not the generic Electron / Node icon).
@@ -248,6 +263,7 @@ protocol.registerSchemesAsPrivileged([
 // против той же БД (WAL пускает второй процесс) и помечает ЖИВЫЕ прогоны первой
 // копии как failed. Вторая копия — фокусируем существующее окно и выходим.
 app.on('second-instance', () => {
+  logRuntime('app.second_instance')
   const win = BrowserWindow.getAllWindows()[0]
   if (!win) return
   if (win.isMinimized()) win.restore()
@@ -256,10 +272,12 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  logRuntime('app.ready', { userData: app.getPath('userData') })
   if (!gotSingleInstanceLock) return // вторая копия — ранний выход до операций с БД
   Menu.setApplicationMenu(null)
   registerWindowIpc()
   registerNotificationWindowIpc()
+  registerRuntimeLogIpc()
 
   protocol.handle('gg-project-icon', (request) => {
     const prefix = 'gg-project-icon://local/'
@@ -278,7 +296,9 @@ app.whenReady().then(() => {
   let db
   try {
     db = openDb(join(dir, 'verstak.db'))
+    logRuntime('db.open.ok', { path: join(dir, 'verstak.db') })
   } catch (err) {
+    logRuntimeError('db.open.fail', err, { path: join(dir, 'verstak.db') })
     // DB locked, disk full, schema migration failed — show GUI error
     // instead of crashing silently with stderr only.
     const msg = err instanceof Error ? err.message : String(err)
@@ -308,8 +328,10 @@ app.whenReady().then(() => {
       const decayResult = applyMemoryDecay(db)
       if (decayResult.decayed > 0 || decayResult.deleted > 0) {
         console.log(`[memory] decay: ${decayResult.decayed} updated, ${decayResult.deleted} deleted`)
+        logRuntime('memory.decay', decayResult)
       }
     } catch (err) {
+      logRuntimeError('memory.decay.fail', err)
       console.warn('[memory] decay failed:', err instanceof Error ? err.message : err)
     }
   })
@@ -360,8 +382,12 @@ app.whenReady().then(() => {
   const agentRunsReconciledAt = Date.now()
   try {
     const staleCount = agentRuns.reconcileStale()
-    if (staleCount > 0) console.log(`[agent-runs] reconciled ${staleCount} stale run(s) → failed`)
+    if (staleCount > 0) {
+      console.log(`[agent-runs] reconciled ${staleCount} stale run(s) → interrupted`)
+      logRuntime('agent_runs.reconcile_stale', { staleCount })
+    }
   } catch (err) {
+    logRuntimeError('agent_runs.reconcile_stale.fail', err)
     console.warn('[agent-runs] reconcileStale failed:', err instanceof Error ? err.message : err)
   }
   // Verification Artifact (Фаза 3) — история DoD поверх файла-артефакта.
@@ -395,11 +421,13 @@ app.whenReady().then(() => {
   }
   scheduleJournalRollover()
   app.once('before-quit', () => {
+    logRuntime('app.before_quit')
     if (journalRolloverTimer) clearTimeout(journalRolloverTimer)
     try {
       journal.flushDailyRollovers()
       journal.flushSessionSummaries('close')
     } catch (err) {
+      logRuntimeError('journal.flush_on_quit.fail', err)
       console.warn('[journal] session flush failed:', err instanceof Error ? err.message : err)
     }
   })

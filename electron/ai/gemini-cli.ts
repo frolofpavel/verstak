@@ -5,6 +5,7 @@ import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
+import type { AgentMode } from './mode-policy'
 
 /**
  * Аудит M7: gemini-cli шлёт assistant-сообщение accumulated (каждое событие —
@@ -28,6 +29,7 @@ interface GeminiCliOptions {
   /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
   skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  agentMode?: AgentMode
 }
 
 // CLI distinguishes between alias names it actually knows and what we expose
@@ -98,7 +100,8 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
           messages,
           projectSystemPrompt: opts.projectSystemPrompt,
           skillPrompt: opts.skillPrompt,
-          memories: opts.memories
+          memories: opts.memories,
+          agentMode: opts.agentMode
         })
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }

@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // so module load + the actions under test don't blow up on `window.api`.
 // Keep it minimal — only the methods the tested actions actually call.
 const appendSpy = vi.fn(async () => {})
-const windowStub = { api: { chats: { append: appendSpy } } }
+const agentRunsListSpy = vi.fn(async (_path?: string, _opts?: { status?: string }) => [] as Array<{ runId: string }>)
+const windowStub = { api: { chats: { append: appendSpy }, agentRuns: { list: agentRunsListSpy } } }
 // Стабим ДО импорта стора (безопасность загрузки модуля). Переставляем в
 // beforeEach: глобальный afterEach (tests/setup.ts) снимает все стабы после
 // каждого теста, иначе window исчезает со второго теста файла.
@@ -41,6 +42,52 @@ beforeEach(() => {
   vi.stubGlobal('window', windowStub)
   resetStore()
   appendSpy.mockClear()
+  agentRunsListSpy.mockClear()
+  agentRunsListSpy.mockResolvedValue([] as Array<{ runId: string }>)
+})
+
+describe('reconcileStreamingState', () => {
+  it('снимает ложный streaming, если в БД ещё running, но живого sendOwner уже нет', async () => {
+    agentRunsListSpy.mockImplementation(async (_path?: string, opts?: { status?: string }) => (
+      opts?.status === 'running' ? [{ runId: 'stale' }] : []
+    ))
+    useProject.setState({
+      path: 'C:/proj',
+      activeChatId: 1,
+      isStreaming: true,
+      streamStartedAt: 1000,
+      messages: [
+        { role: 'user', content: 'вопрос' },
+        { role: 'assistant', content: '' }
+      ] as ChatMessage[],
+      chatSnapshots: {
+        2: {
+          messages: [{ role: 'assistant', content: '' }] as ChatMessage[],
+          isStreaming: true,
+          streamStartedAt: 1000,
+          pendingWrites: [],
+          pendingCommand: null,
+          activity: [],
+          sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+          runningPlanStep: null,
+          hasUnread: false,
+          checkpointId: null,
+          checkpointMessageId: null,
+          preflights: [],
+          subagentRuns: []
+        }
+      },
+      sendOwners: {}
+    }, false)
+
+    await useProject.getState().reconcileStreamingState('C:/proj')
+
+    const st = useProject.getState()
+    expect(st.isStreaming).toBe(false)
+    expect(st.streamStartedAt).toBeNull()
+    expect(st.chatSnapshots[2].isStreaming).toBe(false)
+    expect(st.chatSnapshots[2].streamStartedAt).toBeNull()
+  })
 })
 
 describe('SendRegistry — registerSendOwner / lookupSendOwner / forgetSendOwner', () => {
@@ -126,6 +173,18 @@ describe('Routing — события фонового чата идут в chatS
     expect(useProject.getState().chatSnapshots[2].isStreaming).toBe(false)
     // Завершённый ассистентский ответ сохраняется в БД (переживёт reload).
     expect(appendSpy).toHaveBeenCalledWith(2, 'C:/proj', 'assistant', 'готовый ответ')
+  })
+
+  it('done event фонового чата сохраняет ответ с projectPath владельца, а не текущего проекта', () => {
+    useProject.setState({ path: 'C:/other-project' }, false)
+    useProject.getState().applyEventToChat(7, {
+      type: 'text',
+      text: 'ответ из другого проекта',
+      projectPath: 'C:/real-project'
+    })
+    useProject.getState().applyEventToChat(7, { type: 'done', projectPath: 'C:/real-project' })
+
+    expect(appendSpy).toHaveBeenCalledWith(7, 'C:/real-project', 'assistant', 'ответ из другого проекта')
   })
 
   it('error event дописывает текст ошибки в последнее сообщение фонового чата', () => {
@@ -282,7 +341,10 @@ describe('newChatSession — снапшот уходящего стримяще�
         { role: 'user', content: 'вопрос' },
         { role: 'assistant', content: 'частичный ответ' }
       ] as ChatMessage[],
-      chatSnapshots: {}
+      chatSnapshots: {},
+      sendOwners: {
+        7: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' }
+      }
     }, false)
 
     await useProject.getState().newChatSession()

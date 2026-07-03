@@ -8,6 +8,7 @@ import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult }
 import { buildCliPrompt } from './cli-prompt'
 import { describeAttachments } from './history-serializer'
 import { treeKill } from './child-kill'
+import type { AgentMode } from './mode-policy'
 
 /**
  * Grok-4 / Grok Build (xAI) в режиме `streaming-json` стримит ВСЁ как обычный
@@ -110,15 +111,19 @@ interface GrokCliOptions {
   /** Промпт активного скилла — наслаивается секцией <skill_layer> в buildCliPrompt. */
   skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  agentMode?: AgentMode
 }
 
 export const GROK_CLI_MODELS = [
-  'auto',
+  'grok-composer-2.5-fast',
+  'grok-build',
   'grok-4',
   'grok-4-fast',
   'grok-code-fast-1',
   'grok-3'
 ]
+
+export const DEFAULT_GROK_CLI_MODEL = 'grok-composer-2.5-fast'
 
 function findBinary(): string {
   const home = process.env.USERPROFILE || process.env.HOME || ''
@@ -142,13 +147,44 @@ interface CliEvent {
   data?: string
   text?: string
   content?: string
-  message?: { content?: string }
+  message?: string | { content?: string }
   /** For tool_call events */
   name?: string
   args?: Record<string, unknown>
   arguments?: Record<string, unknown>
   /** Error payload */
   error?: string
+}
+
+function eventText(ev: CliEvent): string | undefined {
+  if (typeof ev.message === 'string') return ev.message
+  return ev.error ?? ev.data ?? ev.text ?? ev.content ?? ev.message?.content
+}
+
+function normalizeGrokCliError(raw: string): string {
+  let text = raw.trim()
+  try {
+    const parsed = JSON.parse(text) as { message?: string }
+    if (typeof parsed.message === 'string') text = parsed.message
+  } catch {
+    /* raw is already plain text */
+  }
+
+  const subscriptionDenied =
+    /403\s+Forbidden/i.test(text) ||
+    /permission-denied/i.test(text) ||
+    /requires a Grok subscription/i.test(text)
+
+  if (subscriptionDenied) {
+    const model = text.match(/model ['"`]([^'"`]+)['"`]/i)?.[1]
+    return [
+      `Grok CLI не может выполнить запрос${model ? ` через модель ${model}` : ''}: аккаунту нужна активная Grok/SuperGrok подписка для CLI.`,
+      'grok.exe найден и логин есть, но сервер xAI возвращает 403 Forbidden.',
+      'Проверь подписку в grok.com или переключи чат на Grok API с ключом из xAI Console.'
+    ].join('\n')
+  }
+
+  return `Grok CLI error: ${text}`
 }
 
 export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
@@ -190,7 +226,8 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
             messages,
             projectSystemPrompt: opts.projectSystemPrompt,
             skillPrompt: opts.skillPrompt,
-            memories: opts.memories
+            memories: opts.memories,
+            agentMode: opts.agentMode
           })
         } catch (err) {
           yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
@@ -199,7 +236,8 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       }
 
       const args = ['--output-format', 'streaming-json', '--no-alt-screen']
-      if (opts.model && opts.model !== 'auto') args.push('-m', opts.model)
+      const selectedModel = opts.model && opts.model !== 'auto' ? opts.model : DEFAULT_GROK_CLI_MODEL
+      args.push('-m', selectedModel)
       // Back to -p argv (this is what worked before parity changes). stdin
       // through cmd.exe wrapper on Windows turned out to be even more unstable.
       // Soft cap to 8KB so we never trip CreateProcess limits or grok's own
@@ -235,18 +273,39 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       let textBuffer = ''   // полный сырой text-стрим Grok'а; чистим в самом конце
       const queue: ChatEvent[] = []
       let done = false
+      let finalQueued = false
       let resolve: (() => void) | null = null
       const wake = () => { if (resolve) { const r = resolve; resolve = null; r() } }
 
+      function queueFinalFromBuffer(): boolean {
+        if (finalQueued) return true
+        const { answer, reasoning } = cleanGrokOutput(textBuffer)
+        if (reasoning) queue.push({ type: 'thought', text: reasoning })
+        if (answer) {
+          queue.push({ type: 'text', text: answer })
+        } else if (!reasoning && textBuffer.trim()) {
+          queue.push({ type: 'text', text: textBuffer.trim() })
+        } else {
+          return false
+        }
+        finalQueued = true
+        textBuffer = ''
+        queue.push({ type: 'done' })
+        done = true
+        wake()
+        return true
+      }
+
       function processLine(line: string) {
         const trimmed = line.trim()
+        if (finalQueued) return
         if (!trimmed.startsWith('{')) return
         let ev: CliEvent
         try { ev = JSON.parse(trimmed) } catch { return }
 
         // type='thought' (если CLI вдруг эмитит явно) сразу в thought-канал.
         if (ev.type === 'thought') {
-          const text = ev.data ?? ev.text ?? ev.content ?? ev.message?.content
+          const text = eventText(ev)
           if (text) { queue.push({ type: 'thought', text }); wake() }
         }
         // Любой text-event — буферизуем, НЕ стримим. Grok всегда мешает
@@ -256,8 +315,13 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         // чистый ответ. Для типичных Grok-ответов (1-3 параграфа) задержка
         // незаметна — он быстрый.
         else if (ev.type === 'text' || ev.type === 'assistant_message_delta' || ev.type === 'message_delta') {
-          const text = ev.data ?? ev.text ?? ev.content ?? ev.message?.content
-          if (text) textBuffer += text
+          const text = eventText(ev)
+          if (text) {
+            textBuffer += text
+            if (/<answer>[\s\S]*?<\/answer>/i.test(textBuffer)) {
+              queueFinalFromBuffer()
+            }
+          }
         }
         // Completion event — здесь разбираем буфер и эмитим
         else if (ev.type === 'turn_complete' || ev.type === 'done' || ev.type === 'message_complete' || ev.type === 'final') {
@@ -272,7 +336,11 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         }
         // Error event
         else if (ev.type === 'error' || ev.type === 'fatal') {
-          queue.push({ type: 'error', message: ev.error ?? ev.data ?? 'Grok CLI error' })
+          const detail = eventText(ev)
+          queue.push({
+            type: 'error',
+            message: detail ? normalizeGrokCliError(detail) : normalizeGrokCliError(JSON.stringify(ev).slice(0, 1000))
+          })
           wake()
         }
       }

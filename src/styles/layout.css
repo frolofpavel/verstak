@@ -27,9 +27,6 @@
   --gg-sidebar-target-w: 260px;
   --gg-rail-w: 76px;
 }
-html {
-  transition: --gg-rail-w var(--shell-dur) var(--shell-ease);
-}
 .gg-app {
   --gg-sidebar-panel-w: var(--gg-sidebar-target-w);
   --gg-sidebar-resize-w: 4px;
@@ -39,7 +36,6 @@ html {
   background: var(--bg-base);
   overflow: hidden;
   transition:
-    grid-template-columns var(--shell-dur) var(--shell-ease),
     --gg-sidebar-panel-w var(--shell-dur) var(--shell-ease),
     --gg-sidebar-resize-w var(--shell-dur) var(--shell-ease);
 }
@@ -206,13 +202,18 @@ html {
   flex: 0 0 auto;
   max-width: 0;
   opacity: 0;
-  transition: opacity var(--shell-dur) var(--shell-ease);
+  transform: translateX(-6px);
+  transition:
+    opacity calc(var(--shell-dur) * 0.8) var(--shell-ease),
+    transform calc(var(--shell-dur) * 0.9) var(--shell-ease);
 }
 .gg-rail.is-expanded .gg-rail-brand-name {
   max-width: 140px;
   opacity: 1;
+  transform: translateX(0);
   transition:
     opacity var(--shell-dur) var(--shell-ease) 50ms,
+    transform var(--shell-dur) var(--shell-ease) 30ms,
     max-width var(--shell-dur) var(--shell-ease);
 }
 .gg-rail-expand-panel {
@@ -238,11 +239,17 @@ html {
   flex-direction: column;
   gap: 10px;
   opacity: 0;
-  transition: opacity calc(var(--shell-dur) * 0.9) var(--shell-ease);
+  transform: translateX(-8px);
+  transition:
+    opacity calc(var(--shell-dur) * 0.75) var(--shell-ease),
+    transform calc(var(--shell-dur) * 0.9) var(--shell-ease);
 }
 .gg-rail.is-expanded .gg-rail-expand-inner {
   opacity: 1;
-  transition: opacity calc(var(--shell-dur) * 0.9) var(--shell-ease) 40ms;
+  transform: translateX(0);
+  transition:
+    opacity calc(var(--shell-dur) * 0.9) var(--shell-ease) 40ms,
+    transform var(--shell-dur) var(--shell-ease) 30ms;
 }
 .gg-rail-toolbar {
   --rail-tool-size: 34px;
@@ -758,15 +765,19 @@ html {
   overflow: hidden;
   white-space: nowrap;
   max-width: 0;
+  transform: translateX(-6px);
   transition:
-    opacity calc(var(--shell-dur) * 1.1) var(--shell-ease),
+    opacity calc(var(--shell-dur) * 0.85) var(--shell-ease),
+    transform calc(var(--shell-dur) * 0.9) var(--shell-ease),
     max-width var(--shell-dur) var(--shell-ease) calc(var(--shell-dur) * 0.5);
 }
 .gg-rail-chip.is-expanded .gg-rail-chip-text {
   opacity: 1;
   max-width: 180px;
+  transform: translateX(0);
   transition:
     opacity calc(var(--shell-dur) * 1.05) var(--shell-ease),
+    transform var(--shell-dur) var(--shell-ease) 30ms,
     max-width var(--shell-dur) var(--shell-ease);
 }
 .gg-rail-label {
@@ -784,6 +795,7 @@ html {
   position: absolute;
   right: -1px;
   bottom: -1px;
+  z-index: 3;
   width: 11px;
   height: 11px;
   border-radius: 50%;
@@ -798,6 +810,11 @@ html {
   background: var(--success);
   box-shadow: 0 0 8px color-mix(in srgb, var(--success) 50%, transparent);
   animation: gg-pulse 1.2s ease-in-out infinite;
+}
+.gg-rail-status.is-interrupted {
+  background: var(--error);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--error) 60%, transparent);
+  animation: gg-pulse 0.9s ease-in-out infinite;
 }
 .gg-rail-settings {
   position: absolute;
@@ -2624,6 +2641,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  contain: layout style;
 }
 
 /* Active-project badge — visible header so user always knows which project AI sees */
@@ -2655,11 +2673,165 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 .gg-chat-area {
   flex: 1; min-height: 0; min-width: 0;
   display: flex; flex-direction: row;
+  contain: layout style;
 }
 .gg-chat {
   position: relative;
   display: flex; flex-direction: column;
   flex: 1; min-width: 0; min-height: 0;
+  contain: layout style;
+}
+.gg-chat-reminder-pins {
+  position: absolute;
+  top: 48px;
+  left: 18px;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  max-width: min(320px, calc(100% - 36px));
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--accent-muted));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: none;
+}
+.gg-chat-reminder-pins.is-collapsed {
+  min-width: 190px;
+}
+.gg-chat-reminder-pins-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 8px;
+  cursor: grab;
+  background: color-mix(in srgb, var(--bg-panel) 76%, var(--accent-muted));
+}
+.gg-chat-reminder-pins-head:active {
+  cursor: grabbing;
+}
+.gg-chat-reminder-pins-toggle {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--accent-muted));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.gg-chat-reminder-pins-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.gg-chat-reminder-pins-grip {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: -0.1em;
+  opacity: 0.8;
+}
+.gg-chat-reminder-pins-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.gg-chat-reminder-pins-count {
+  min-width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.gg-chat-reminder-pins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+}
+.gg-chat-reminder-pin {
+  display: flex;
+  align-items: stretch;
+  min-width: 220px;
+  max-width: 320px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  border-radius: calc(var(--radius-md) - 2px);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent-muted));
+  overflow: hidden;
+}
+.gg-chat-reminder-pin-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.gg-chat-reminder-pin-body:hover {
+  background: color-mix(in srgb, var(--accent-muted) 28%, transparent);
+}
+.gg-chat-reminder-pin-kicker {
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.gg-chat-reminder-pin-title {
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-chat-reminder-pin-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text-tertiary);
+}
+.gg-chat-reminder-pin-more {
+  align-self: flex-start;
+  pointer-events: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.gg-chat-reminder-pin-more:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 /*
  * Scroll container takes the FULL panel width so the scrollbar lives at the
@@ -2828,6 +3000,27 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   margin-left: auto;
   font-family: var(--font-mono);
 }
+.gg-composer-pending-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gg-composer-pending-item-action {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  line-height: 1;
+  padding: 4px 7px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.gg-composer-pending-item-action:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
 .gg-composer-pending-item-remove {
   border: none;
   background: transparent;
@@ -2862,6 +3055,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   flex: 1; overflow-y: auto;
   width: 100%;
   min-height: 0;
+  contain: layout paint style;
 }
 .gg-chat-scroll-down {
   position: absolute;
@@ -2897,6 +3091,7 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   max-width: 980px;
   margin: 0 auto;
   padding: 24px 28px 12px;
+  contain: layout style;
 }
 .gg-help-chat-banner {
   display: flex;
@@ -2978,7 +3173,20 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
  *  User: сжатая «команда» с фоном-tint и левой stripe в цвет accent.
  *  Author-label: мини-dot + mono-caps, аналог breadcrumb'а в Cursor.
  * ──────────────────────────────────────────────────────────────────────── */
-.gg-msg { display: flex; flex-direction: column; gap: 4px; animation: gg-fade-in 180ms ease-out; }
+.gg-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: gg-fade-in 180ms ease-out;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+body.gg-rail-toggling .gg-msg {
+  animation: none;
+}
+body.gg-rail-toggling .gg-msg-actions {
+  transition: none;
+}
 .gg-msg-user { align-items: flex-end; }
 .gg-msg-assistant { align-items: stretch; }
 
@@ -4194,7 +4402,7 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   margin-left: auto;
   justify-content: flex-end;
 }
-.gg-composer-meta-cluster--end > :not(.gg-chat-settings-wrap) {
+.gg-composer-meta-cluster--end > :not(.gg-chat-settings-wrap):not(.gg-chat-turbo-btn) {
   display: none !important;
 }
 .gg-chat-settings-wrap {
@@ -4210,8 +4418,8 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   height: 28px;
   min-height: 28px;
   max-width: 180px;
-  padding: 0 11px;
-  border: 1px solid var(--border-subtle);
+  padding: 0 10px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-base);
   color: var(--text-secondary);
@@ -4227,6 +4435,38 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   background: var(--bg-hover);
   border-color: var(--border-default);
   color: var(--text-primary);
+}
+.gg-chat-turbo-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease;
+}
+.gg-chat-turbo-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.gg-chat-turbo-btn.is-turbo {
+  color: #fb923c;
+  border-color: color-mix(in srgb, #fb923c 45%, var(--border));
+  background: color-mix(in srgb, #fb923c 10%, var(--bg-base));
+}
+.gg-chat-turbo-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .gg-chat-settings-popover {
   position: absolute;
@@ -4942,9 +5182,9 @@ html[data-theme="light"] .gg-chat-settings-popover {
 .gg-composer-actions {
   position: absolute;
   right: 8px;
-  top: 50%;
-  bottom: auto;
-  transform: translateY(-50%);
+  top: auto;
+  bottom: 8px;
+  transform: none;
   display: flex; align-items: center; gap: 4px;
 }
 .gg-attach-btn {
@@ -5061,6 +5301,45 @@ html[data-theme="light"] .gg-chat-settings-popover {
 .gg-scheduler-last { color: var(--text-tertiary); font-size: var(--text-xs); margin-top: 4px; }
 .gg-scheduler-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .gg-btn-sm { padding: 2px 8px; font-size: var(--text-sm); }
+
+.gg-context-compact-toast {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  max-width: min(680px, 100%);
+  margin: 0 auto 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default));
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-align: center;
+}
+
+.gg-context-compact-spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+}
+
+.gg-context-compact-toast.is-loading .gg-context-compact-spinner {
+  animation: gg-voice-spin 0.75s linear infinite;
+}
+
+.gg-context-compact-toast.is-done .gg-context-compact-spinner {
+  width: 7px;
+  height: 7px;
+  border: none;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent);
+}
 
 .gg-vision-banner {
   margin-bottom: 8px;
@@ -7086,12 +7365,40 @@ html[data-theme="light"] .gg-chat-settings-popover {
 /* Right-docked parallel chat — mirrors the .gg-terminal-wrap 460px column,
    with its own scrollable message stream + composer pinned at the bottom. */
 .gg-sidechat {
+  position: relative;
   background: color-mix(in srgb, var(--bg-base) 90%, var(--bg-elevated));
   border-left: 1px solid color-mix(in srgb, var(--border-subtle) 45%, transparent);
   box-shadow: inset 2px 0 10px -4px rgba(0, 0, 0, 0.1);
   width: 460px; flex-shrink: 0;
   display: flex; flex-direction: column;
   min-height: 0;
+}
+.gg-sidechat-resizer {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 12;
+}
+.gg-sidechat-resizer::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.gg-sidechat-resizer:hover::after,
+body.gg-resizing-sidechat .gg-sidechat-resizer::after {
+  background: var(--accent);
+}
+body.gg-resizing-sidechat {
+  cursor: ew-resize;
+  user-select: none;
 }
 .gg-sidechat-header {
   padding: 8px 14px;
@@ -7118,6 +7425,30 @@ html[data-theme="light"] .gg-chat-settings-popover {
 }
 /* Independent model picker in the side chat header — own provider/model,
    does not touch the main chat's selection. */
+.gg-sidechat-session-select {
+  min-width: 120px;
+  max-width: 180px;
+  height: 24px;
+  padding: 2px 26px 2px 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  outline: none;
+  cursor: pointer;
+}
+.gg-sidechat-session-select:hover,
+.gg-sidechat-session-select:focus {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong, var(--border-subtle));
+}
+.gg-sidechat-session-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 .gg-sidechat-mp {
   position: relative;
   margin-left: auto;
@@ -10578,6 +10909,7 @@ textarea.gg-input {
 .gg-agent-status-dot.is-running { background: var(--accent); animation: gg-pulse 1.4s ease-in-out infinite; }
 .gg-agent-status-dot.is-done { background: var(--success, #3fb950); }
 .gg-agent-status-dot.is-error { background: var(--error); }
+.gg-agent-status-dot.is-interrupted { background: var(--warning, #facc15); }
 .gg-agent-status-dot.is-cancelled { background: var(--text-tertiary); }
 
 @keyframes gg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -10987,6 +11319,7 @@ textarea.gg-input {
 }
 .gg-run-card.is-running { border-color: var(--accent); }
 .gg-run-card.is-failed { border-color: var(--error); }
+.gg-run-card.is-interrupted { border-color: var(--warning, #facc15); }
 .gg-run-card.is-waiting_review { border-color: var(--warning, #facc15); }
 .gg-run-card.is-stopped { opacity: 0.75; }
 .gg-run-card.is-expanded { box-shadow: 0 0 0 1px var(--border-subtle); }

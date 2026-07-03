@@ -5,6 +5,7 @@ import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
+import type { AgentMode } from './mode-policy'
 
 interface ClaudeCliOptions {
   binary?: string
@@ -21,6 +22,7 @@ interface ClaudeCliOptions {
    *  ограничение Claude Code v2.1+. */
   oauthToken?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  agentMode?: AgentMode
 }
 
 export const CLAUDE_CLI_MODELS = [
@@ -108,7 +110,8 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           messages,
           projectSystemPrompt: opts.projectSystemPrompt,
           skillPrompt: opts.skillPrompt,
-          memories: opts.memories
+          memories: opts.memories,
+          agentMode: opts.agentMode
         })
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }

@@ -134,7 +134,7 @@ export function ReviewPanel() {
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
     const sendId = await window.api.ai.send(allMessages, path)
-    registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+    registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
     toggleReviewPanel(null)
   }
 
@@ -166,7 +166,7 @@ export function ReviewPanel() {
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
     const sendId = await window.api.ai.send(allMessages, path)
-    registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+    registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
     toggleReviewPanel(null)
   }
 

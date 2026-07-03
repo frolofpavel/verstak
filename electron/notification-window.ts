@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 const TOAST_W = 420
-/** Высота окна под до 3 тостов (~132px каждый + отступы). */
-const TOAST_H = 440
+/** Высота окна под до 3 persistent-тостов с кнопками без обрезки. */
+const TOAST_H = 560
 /** Как Windows toast: вплотную к правому нижнему углу рабочей области. */
 const MARGIN = 8
 /** Отступ от нижнего края рабочей области — выше панели задач Windows. */

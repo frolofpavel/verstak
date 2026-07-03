@@ -138,6 +138,39 @@ describe('buildCliPrompt', () => {
     })
     expect(out).toContain('verify_hint')
   })
+
+  it('uses a low-latency history window for short conversational CLI turns', async () => {
+    const msgs: ChatMessage[] = []
+    for (let i = 0; i < 60; i++) {
+      msgs.push({ role: 'user', content: `old question ${i} ${'U'.repeat(900)}` })
+      msgs.push({ role: 'assistant', content: `old answer ${i} ${'A'.repeat(900)}` })
+    }
+    msgs.push({ role: 'user', content: 'why so slow?' })
+
+    const out = await buildCliPrompt({ providerId: 'grok-cli', projectPath: dir, messages: msgs, agentMode: 'ask' })
+    const match = out.match(/<conversation_history turns="(\d+)" dropped="(\d+)"/)
+
+    expect(match).not.toBeNull()
+    expect(Number(match?.[1])).toBeLessThan(20)
+    expect(Number(match?.[2])).toBeGreaterThan(90)
+    expect(out.length).toBeLessThan(30_000)
+  })
+
+  it('keeps the wider history window in auto mode', async () => {
+    const msgs: ChatMessage[] = []
+    for (let i = 0; i < 60; i++) {
+      msgs.push({ role: 'user', content: `old question ${i} ${'U'.repeat(900)}` })
+      msgs.push({ role: 'assistant', content: `old answer ${i} ${'A'.repeat(900)}` })
+    }
+    msgs.push({ role: 'user', content: 'why so slow?' })
+
+    const out = await buildCliPrompt({ providerId: 'grok-cli', projectPath: dir, messages: msgs, agentMode: 'auto' })
+    const match = out.match(/<conversation_history turns="(\d+)" dropped="(\d+)"/)
+
+    expect(match).not.toBeNull()
+    expect(Number(match?.[1])).toBeGreaterThan(30)
+    expect(Number(match?.[2])).toBeLessThan(90)
+  })
 })
 
 describe('fitCliPayloadToArgvCap', () => {

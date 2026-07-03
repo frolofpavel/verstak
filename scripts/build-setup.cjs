@@ -42,6 +42,45 @@ function die(msg) {
 
 const PAYLOAD_SKIP = new Set(['app-payload', 'locales'])
 
+function readAsarFile(archivePath, filePath) {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const fd = fs.openSync(archivePath, 'r')
+  try {
+    const sizeBuf = Buffer.alloc(8)
+    if (fs.readSync(fd, sizeBuf, 0, 8, 0) !== 8) return null
+    const headerSize = sizeBuf.readUInt32LE(4)
+    const headerBuf = Buffer.alloc(headerSize)
+    if (fs.readSync(fd, headerBuf, 0, headerSize, 8) !== headerSize) return null
+    const headerStringLength = headerBuf.readInt32LE(4)
+    const headerString = headerBuf.slice(8, 8 + headerStringLength).toString('utf8')
+    let node = JSON.parse(headerString)
+    for (const part of normalized.split('/')) {
+      node = node.files && node.files[part]
+      if (!node) return null
+    }
+    if (node.unpacked || typeof node.offset !== 'string' || typeof node.size !== 'number') return null
+    const file = Buffer.alloc(node.size)
+    if (node.size === 0) return file
+    const fileOffset = 8 + headerSize + Number.parseInt(node.offset, 10)
+    if (fs.readSync(fd, file, 0, node.size, fileOffset) !== node.size) return null
+    return file
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+function verifyPackedAppAsar(appAsar) {
+  const pkg = readAsarFile(appAsar, 'package.json')
+  if (!pkg) die('payload app.asar is missing package.json')
+  const parsed = JSON.parse(pkg.toString('utf8'))
+  const main = typeof parsed.main === 'string' && parsed.main.trim() ? parsed.main.trim() : 'index.js'
+  const mainFile = readAsarFile(appAsar, main)
+  if (!mainFile || mainFile.length <= 0) {
+    die(`payload app.asar is missing app entrypoint: ${main}`)
+  }
+  return { version: parsed.version, main }
+}
+
 function computePayloadManifest(dir) {
   let fileCount = 0
   let payloadBytes = 0
@@ -161,6 +200,8 @@ if (!fs.existsSync(path.join(UNPACKED, 'Verstak.exe'))) {
 console.log('[build-setup] prepare app-payload-staging')
 fs.rmSync(STAGING, { recursive: true, force: true })
 copyDirFiltered(UNPACKED, STAGING)
+const appAsarCheck = verifyPackedAppAsar(path.join(STAGING, 'resources', 'app.asar'))
+console.log(`[build-setup] verified app.asar: ${appAsarCheck.version} (${appAsarCheck.main})`)
 const manifest = computePayloadManifest(STAGING)
 fs.writeFileSync(
   path.join(STAGING, 'payload-manifest.json'),

@@ -50,6 +50,7 @@ import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { expandOfficeAttachments } from '../ai/attachment-text'
+import { logRuntime, logRuntimeError } from '../runtime-log'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -143,11 +144,21 @@ function unregisterConversationSupplements(sendId: number): void {
 
 /** Инъекция догруженного контекста (supplement) в активный прогон по sendId.
  *  false — если для sendId нет активного слушателя. Используется ai:append-context. */
-export function pushConversationSupplement(sendId: number, text: string): boolean {
+export function pushConversationSupplement(sendId: number, text: string): 'deferred' | false {
   const push = conversationSupplements.get(sendId)
   if (!push) return false
   push(text)
-  return true
+  return 'deferred'
+}
+
+function formatConversationSupplement(text: string): string {
+  return [
+    '[Дополнение к текущей задаче]',
+    'Это не новая задача и не элемент очереди. Обязательно учти это дополнение в текущем прогоне перед следующим действием, следующим вызовом инструментов или финальным ответом.',
+    'Если уже был составлен план, скорректируй его. Не завершай старый вариант работы так, будто этого дополнения нет.',
+    '',
+    text.trim(),
+  ].join('\n')
 }
 
 // Track which chats have already received memory injection in this process
@@ -221,15 +232,20 @@ function scopedKey(sendId: number, callId: string): string {
  *  все подтверждения (Shift+Esc). Иначе — точечно по sendId.
  */
 export function abortSend(sendId: number): boolean {
+  logRuntime('ai.abort.request', { sendId, activeCount: activeAborts.size })
   if (sendId <= 0) {
     for (const [k, c] of activeAborts) { c.abort(); activeAborts.delete(k) }
     for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
     for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
     for (const [k, p] of pendingPlans) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+    logRuntime('ai.abort.all')
     return true
   }
   const ctrl = activeAborts.get(sendId)
-  if (!ctrl) return false
+  if (!ctrl) {
+    logRuntime('ai.abort.miss', { sendId }, 'warn')
+    return false
+  }
   ctrl.abort()
   activeAborts.delete(sendId)
   clearRunUntilGreenForSend(sendId) // ось 3 E: счётчик run_until_green этого прогона
@@ -244,6 +260,7 @@ export function abortSend(sendId: number): boolean {
   for (const [k, p] of pendingPlans) {
     if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
   }
+  logRuntime('ai.abort.ok', { sendId })
   return true
 }
 
@@ -517,6 +534,7 @@ export function registerAiIpc(deps: AiDeps): void {
         consolidationHint = deps.memoryConsolidationHint?.(projectPath!) ?? null
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
+        logRuntimeError('ai.memories.search.fail', err, { sendId, runId, projectPath })
         console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)
       }
     }
@@ -628,6 +646,19 @@ export function registerAiIpc(deps: AiDeps): void {
     }
 
     let model = (overrides?.model ?? deps.getProviderModel(providerId)) ?? descriptor.defaultModel
+    logRuntime('ai.send.start', {
+      sendId,
+      runId,
+      projectPath,
+      chatId: chatId ?? null,
+      providerId,
+      model,
+      transport: descriptor.transport,
+      agentMode,
+      messageCount: messages.length,
+      inputChars: messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0),
+      overrideKeys: overrides ? Object.keys(overrides) : []
+    })
 
     // Smart routing: если пользователь не задал модель явно и effort=standard,
     // выбираем дешёвую/мощную модель по сложности запроса.
@@ -642,7 +673,16 @@ export function registerAiIpc(deps: AiDeps): void {
       const complexity = estimateComplexity(messages, [])
       const suggested = recommendModel(providerId, complexity)
       if (suggested && suggested !== model) {
+        const previousModel = model
         model = suggested
+        logRuntime('ai.smart_routing.pick', {
+          sendId,
+          runId,
+          providerId,
+          previousModel,
+          model,
+          complexity: complexityLabel(complexity)
+        })
         taggedSender.send('ai:event', {
           id: sendId,
           event: {
@@ -786,7 +826,9 @@ export function registerAiIpc(deps: AiDeps): void {
         effortLevel: resolvedEffort,
         agentMode
       })
+      logRuntime('ai.provider.created', { sendId, runId, providerId, model, transport: descriptor.transport })
     } catch (err) {
+      logRuntimeError('ai.provider.create.fail', err, { sendId, runId, providerId, model })
       taggedSender.send('ai:event', {
         id: 0,
         event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
@@ -828,8 +870,18 @@ export function registerAiIpc(deps: AiDeps): void {
       })
       // Timeline: исходный запрос пользователя первым событием — чтобы лента
       // читалась как нарратив (запрос → действия → итог), а не только механика.
+      logRuntime('agent_runs.create', {
+        runId,
+        sendId,
+        projectPath,
+        chatId: chatId ? Number(chatId) : null,
+        owner: runOwner,
+        providerId,
+        model
+      })
       if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
     } catch (err) {
+      logRuntimeError('agent_runs.create.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
       console.warn('[agent-runs] create failed:', err instanceof Error ? err.message : err)
     }
 
@@ -840,6 +892,7 @@ export function registerAiIpc(deps: AiDeps): void {
       try {
         deps.linkDevTaskRun?.(projectPath, chatId ? Number(chatId) : null, runId)
       } catch (err) {
+        logRuntimeError('dev_task.link_run.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
         console.warn('[dev-task] linkDevTaskRun failed:', err instanceof Error ? err.message : err)
       }
     }
@@ -896,6 +949,15 @@ export function registerAiIpc(deps: AiDeps): void {
       // Инспектор группирует по runId; этот маркер также даёт точку отсчёта run'а
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
       if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
+      logRuntime('ai.runner.start', {
+        sendId,
+        runId,
+        path: 'api-tools',
+        providerId,
+        model,
+        turnsBudget,
+        toolCount: TOOL_DEFS.length
+      })
       void runApiConversation({
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
@@ -915,6 +977,14 @@ export function registerAiIpc(deps: AiDeps): void {
         recipe: overrides?.recipe,
       }).finally(cleanup)
     } else {
+      logRuntime('ai.runner.start', {
+        sendId,
+        runId,
+        path: 'plain',
+        providerId,
+        model,
+        transport: descriptor.transport
+      })
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
         deps.agentRuns,
@@ -936,8 +1006,9 @@ export function registerAiIpc(deps: AiDeps): void {
   ipcMain.handle('ai:append-context', (_e, sendId: number, text: string) => {
     const trimmed = String(text ?? '').trim()
     if (!trimmed || sendId <= 0) return { ok: false as const, fallback: 'invalid' as const }
-    if (!pushConversationSupplement(sendId, trimmed)) return { ok: false as const, fallback: 'unavailable' as const }
-    return { ok: true as const }
+    const mode = pushConversationSupplement(sendId, trimmed)
+    if (!mode) return { ok: false as const, fallback: 'unavailable' as const }
+    return { ok: true as const, mode }
   })
 
   ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
@@ -1122,6 +1193,16 @@ async function runPlainConversation(
   agentRuns?: AgentRuns,
   runId?: string
 ): Promise<void> {
+  const startedAt = Date.now()
+  logRuntime('ai.runner.loop_start', {
+    sendId,
+    runId: runId ?? null,
+    path: 'plain',
+    projectPath,
+    providerId: providerId ?? null,
+    model: model ?? null,
+    messageCount: messages.length
+  })
   const currentMessages = [...messages]
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
@@ -1133,7 +1214,7 @@ async function runPlainConversation(
       const text = pendingSupplements.shift()!
       currentMessages.push({
         role: 'user',
-        content: `[Дополнение к текущей задаче]\n${text}`
+        content: formatConversationSupplement(text)
       })
       added = true
       if (agentRuns && runId) {
@@ -1179,6 +1260,15 @@ async function runPlainConversation(
             )
             if (check.exceeded) {
               exitReason = 'error'
+              logRuntime('ai.cost_cap.exceeded', {
+                sendId,
+                runId: runId ?? null,
+                path: 'plain',
+                providerId,
+                model: model ?? null,
+                message: check.message ?? 'cost cap exceeded',
+                usage: sessionUsage
+              }, 'warn')
               sender.send('ai:event', { id: sendId, event: { type: 'error', message: check.message ?? 'cost cap exceeded' } })
               sender.send('ai:event', { id: sendId, event: { type: 'done' } })
               return
@@ -1214,6 +1304,14 @@ async function runPlainConversation(
       }
     }
   } catch (err) {
+    logRuntimeError('ai.runner.error', err, {
+      sendId,
+      runId: runId ?? null,
+      path: 'plain',
+      projectPath,
+      providerId: providerId ?? null,
+      model: model ?? null
+    })
     // Smart fallback: если ошибка retriable и есть ещё кандидаты — пробуем.
     if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
       fallbackOpts.triedProviders.add(providerId)
@@ -1231,6 +1329,15 @@ async function runPlainConversation(
           const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
           // #15: fallback-фрейм владеет финализацией (agentRuns/runId переданы).
           handedOff = true
+          logRuntime('ai.fallback.handoff', {
+            sendId,
+            runId: runId ?? null,
+            path: 'plain',
+            fromProviderId: providerId,
+            toProviderId: nextId,
+            fromModel: model ?? null,
+            toModel: nextModel ?? null
+          }, 'warn')
           return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, nextModel, fallbackOpts, agentRuns, runId)
         }
       }
@@ -1243,6 +1350,20 @@ async function runPlainConversation(
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
     unregisterConversationSupplements(sendId)
+    logRuntime('ai.runner.finish', {
+      sendId,
+      runId: runId ?? null,
+      path: 'plain',
+      projectPath,
+      providerId: providerId ?? null,
+      model: model ?? null,
+      exitReason,
+      handedOff,
+      durationMs: Date.now() - startedAt,
+      assistantChars: lastAssistantText.length,
+      usage: sessionUsage,
+      costCents: costGuard?.current() ?? 0
+    }, exitReason === 'completed' || exitReason === 'aborted' || handedOff ? 'info' : 'warn')
     // Same guarantee as runApiConversation: every exit path writes a journal
     // entry. Skipped when there's no projectPath (background sessions in the
     // future may not have one). #15: при fallback журнал/finish делает рекурсивный фрейм.
@@ -1392,6 +1513,18 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
     isFallbackFrame,
   } = ctx
+  const startedAt = Date.now()
+  logRuntime('ai.runner.loop_start', {
+    sendId,
+    runId: runId ?? null,
+    path: 'api-tools',
+    projectPath,
+    providerId: providerId ?? null,
+    model: model ?? null,
+    turnsBudget,
+    toolCount: TOOL_DEFS.length,
+    messageCount: initialMessages.length
+  })
   // #3 plan-gate: режим прогона — МУТАБЕЛЬНЫЙ holder (не per-turn const). approve
   // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
   // (где ctx пересоздаётся) видит новый режим — иначе одобренный план не выполнить.
@@ -1429,7 +1562,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       const text = pendingSupplements.shift()!
       currentMessages.push({
         role: 'user',
-        content: `[Дополнение к текущей задаче]\n${text}`
+        content: formatConversationSupplement(text)
       })
       added = true
       if (agentRuns && runId) {
@@ -1773,6 +1906,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           )
           if (check.exceeded) {
             exitReason = 'error'
+            logRuntime('ai.cost_cap.exceeded', {
+              sendId,
+              runId: runId ?? null,
+              path: 'api-tools',
+              providerId,
+              model: model ?? null,
+              message: check.message ?? 'cost cap exceeded',
+              usage: sessionUsage
+            }, 'warn')
             sender.send('ai:event', { id: sendId, event: { type: 'error', message: check.message ?? 'cost cap exceeded' } })
             sender.send('ai:event', { id: sendId, event: { type: 'done' } })
             return
@@ -2272,6 +2414,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const compactCooldownOk = turn - lastCompactTurn >= COMPACT_COOLDOWN_TURNS
     if (autoCompactEnabled && model && compactCooldownOk && shouldAutoCompact(currentMessages, model)) {
       try {
+        sender.send('ai:event', {
+          id: sendId,
+          event: { type: 'context-compact', phase: 'start', reason: 'context-window' }
+        })
+        logRuntime('ai.context_compact.start', {
+          sendId,
+          runId: runId ?? null,
+          projectPath,
+          providerId: providerId ?? null,
+          model: model ?? null,
+          messageCount: currentMessages.length,
+          chars: currentMessages.reduce((sum, m) => sum + (m.content ?? '').length, 0)
+        })
         // Получаем резюме от той же модели — один non-streamed вызов
         const summaryMessages = buildCompactSummaryPrompt(currentMessages, { previousSummary: lastSummary })
         let summaryText = ''
@@ -2301,13 +2456,34 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // первое сообщение, чтобы агент не потерял исходные пункты задачи.
           const focusAtCompact = (sessionTodos && projectPath)
             ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+          const beforeChars = currentMessages.reduce((sum, m) => sum + (m.content ?? '').length, 0)
           const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
+          const afterChars = compacted.reduce((sum, m) => sum + (m.content ?? '').length, 0)
           currentMessages.length = 0
           currentMessages.push(...compacted)
-          // Уведомляем пользователя через info-событие (UI покажет тост)
           sender.send('ai:event', {
             id: sendId,
-            event: { type: 'info', text: '🔄 Контекст сжат — сессия продолжена' }
+            event: {
+              type: 'context-compact',
+              phase: 'done',
+              beforeChars,
+              afterChars,
+              droppedTurns: Math.max(0, beforeLen - compacted.length),
+              keptTurns: compacted.length,
+              reason: 'context-window'
+            }
+          })
+          logRuntime('ai.context_compact.done', {
+            sendId,
+            runId: runId ?? null,
+            projectPath,
+            providerId: providerId ?? null,
+            model: model ?? null,
+            beforeChars,
+            afterChars,
+            beforeTurns: beforeLen,
+            keptTurns: compacted.length,
+            summaryChars: summaryText.length
           })
           // Записываем в журнал
           const summaryTokens = estimateTokens(summaryText)
@@ -2319,10 +2495,32 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           )
           console.log(`[agent] auto-compact: ${beforeLen} msgs → ${compacted.length} msgs (summary ${summaryTokens} tokens)`)
         } else {
+          sender.send('ai:event', {
+            id: sendId,
+            event: { type: 'context-compact', phase: 'cancel', reason: 'context-window' }
+          })
+          logRuntime('ai.context_compact.empty', {
+            sendId,
+            runId: runId ?? null,
+            projectPath,
+            providerId: providerId ?? null,
+            model: model ?? null
+          }, 'warn')
           console.warn('[agent] auto-compact: summary was empty, continuing without compaction')
         }
       } catch (err) {
         // Грейсфул деградация: компакшн упал — продолжаем без него
+        sender.send('ai:event', {
+          id: sendId,
+          event: { type: 'context-compact', phase: 'cancel', reason: 'context-window' }
+        })
+        logRuntimeError('ai.context_compact.fail', err, {
+          sendId,
+          runId: runId ?? null,
+          projectPath,
+          providerId: providerId ?? null,
+          model: model ?? null
+        })
         console.warn('[agent] auto-compact failed, continuing without compaction:', err instanceof Error ? err.message : err)
       }
     }
@@ -2354,6 +2552,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
+    logRuntimeError('ai.runner.error', err, {
+      sendId,
+      runId: runId ?? null,
+      path: 'api-tools',
+      projectPath,
+      providerId: providerId ?? null,
+      model: model ?? null,
+      turnCount: turnsBudget
+    })
     // Smart fallback для API-агентного пути: если withInitialRetry исчерпал попытки
     // (throw наружу) и ошибка всё ещё retriable — переключаемся на следующего провайдера.
     // Та же логика доступна из ветки event.type==='error' (см. attemptProviderFallback).
@@ -2376,6 +2583,23 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // #15: при handed-off fallback journal/finish делает рекурсивный фрейм (ему
     // переданы recordJournal + agentRuns/runId) — внешний пропускает, иначе
     // дублировал бы журнал и финализировал run статусом упавшей попытки.
+    logRuntime('ai.runner.finish', {
+      sendId,
+      runId: runId ?? null,
+      path: 'api-tools',
+      projectPath,
+      providerId: providerId ?? null,
+      model: model ?? null,
+      exitReason,
+      handedOff,
+      durationMs: Date.now() - startedAt,
+      assistantChars: lastAssistantText.length,
+      usage: sessionUsage,
+      costCents: costGuard?.current() ?? 0,
+      toolCallCount,
+      filesCount: filesTouched.size,
+      commandsCount: commandsRun.length
+    }, exitReason === 'completed' || exitReason === 'aborted' || handedOff ? 'info' : 'warn')
     if (!handedOff) {
     // GUARANTEED journal write on every exit path — completion, abort, error,
     // max-turns, loop-detected, crashed (uncaught). Per Gemini audit Idea B:

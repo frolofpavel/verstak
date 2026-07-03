@@ -530,7 +530,6 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   const WORK_NAV: NavItem[] = [
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
-    { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon },
   ]
 
@@ -538,6 +537,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
     { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
+    { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },

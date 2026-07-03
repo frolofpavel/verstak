@@ -29,6 +29,22 @@ interface Props {
   onClose: () => void
 }
 
+function artifactFromPath(path: string): ArtifactRef {
+  const filename = path.split(/[\\/]/).pop() || path
+  const lower = filename.toLowerCase()
+  const kind: ArtifactRef['kind'] = lower.endsWith('.docx')
+    ? 'docx'
+    : lower.endsWith('.verification.html')
+      ? 'verification'
+      : 'html'
+  return {
+    kind,
+    filename,
+    path,
+    sizeBytes: 0,
+  }
+}
+
 export function ArtifactPreview({ artifact, onClose }: Props) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -136,7 +152,7 @@ export function ArtifactPreviewContainer() {
   const setPreviewArtifact = useProject(s => s.setPreviewArtifact)
 
   const artifact = previewArtifactId != null
-    ? artifacts.find(a => a.path === previewArtifactId) ?? null
+    ? artifacts.find(a => a.path === previewArtifactId) ?? artifactFromPath(previewArtifactId)
     : null
 
   return <ArtifactPreview artifact={artifact} onClose={() => setPreviewArtifact(null)} />

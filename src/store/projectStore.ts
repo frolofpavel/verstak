@@ -48,7 +48,7 @@ export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'work
  * - 'review': sub-chat ревьюера. parentChatId — какой main-чат он ревьюит.
  */
 export type SendOwner =
-  | { kind: 'chat'; chatId: number; isHelp?: boolean }
+  | { kind: 'chat'; chatId: number; isHelp?: boolean; projectPath?: string | null }
   | { kind: 'review'; reviewChatId: number; parentChatId: number }
 
 export interface ProjectState extends PipelineSlice, ReviewSlice {
@@ -181,7 +181,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** Push a user message + empty assistant placeholder into a background CHAT
    *  snapshot. Used by SideChat's composer — streamed assistant text then lands
    *  via applyEventToChat (text events append to the last assistant message). */
-  pushUserToChatSnapshot: (chatId: number, content: string, meta?: Partial<ChatMessage>) => void
+  pushUserToChatSnapshot: (chatId: number, content: string, meta?: Partial<ChatMessage>, assistantDbId?: number) => void
   /** Switch to a different chat session within the active project. */
   switchChatSession: (id: number) => Promise<void>
   /** Refresh the chat sessions list (after create/rename/delete). */
@@ -222,6 +222,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   setEffortLevel: (level: 'quick' | 'standard' | 'deep') => void
   /** Crash-resume: подгрузить зависшие прогоны проекта для баннера. Fire-and-forget. */
   loadResumableRuns: (path: string) => Promise<void>
+  reconcileStreamingState: (path: string) => Promise<void>
   /** Crash-resume: отклонить баннер для прогона (убрать из resumableRuns + main). */
   dismissResumableRun: (runId: string) => void
   /** Несохранённые черновики композера (текст + вложения) до выхода из приложения. */
@@ -254,7 +255,24 @@ function hasInflightChatSend(
   )
 }
 
+function hasInflightProjectSend(
+  sendOwners: ProjectState['sendOwners'],
+  projectPath: string
+): boolean {
+  return Object.values(sendOwners).some(
+    o => o.kind === 'chat' && !o.isHelp && o.projectPath === projectPath
+  )
+}
 
+function keepStreamingOnlyWhenInflight(snap: SessionSnapshot, inflight: boolean): SessionSnapshot {
+  if (inflight && snap.isStreaming) return snap
+  if (!snap.isStreaming && snap.streamStartedAt == null) return snap
+  return {
+    ...snap,
+    isStreaming: false,
+    streamStartedAt: null
+  }
+}
 
 export const useProject = create<ProjectState>((set, get, store) => ({
   path: null,
@@ -325,13 +343,22 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // 1) Snapshot current session before switching (so background streams keep their state)
     let nextSessions = s.sessions
     if (s.path && s.path !== path) {
-      nextSessions = { ...s.sessions, [s.path]: captureBundle(s) }
+      nextSessions = {
+        ...s.sessions,
+        [s.path]: keepStreamingOnlyWhenInflight(
+          captureBundle(s),
+          hasInflightProjectSend(s.sendOwners, s.path)
+        )
+      }
     }
     const existing = nextSessions[path]
     let target: SessionSnapshot
     if (existing) {
       // Returning to a backgrounded session — keep its state, clear unread badge
-      target = { ...existing, hasUnread: false }
+      target = {
+        ...keepStreamingOnlyWhenInflight(existing, hasInflightProjectSend(s.sendOwners, path)),
+        hasUnread: false
+      }
       // Remove from sessions map since it becomes the active one
       const { [path]: _drop, ...rest } = nextSessions
       void _drop
@@ -418,7 +445,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         if (myToken !== setProjectToken) return
         const cur = get()
         if (cur.path !== path || cur.activeChatId !== hydrateChatId) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -428,6 +455,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // Crash-resume: подгружаем зависшие после краха прогоны этого проекта для
     // баннера «сессия прервана». Fire-and-forget.
     void get().loadResumableRuns(path)
+    void get().reconcileStreamingState(path)
     void get().loadActivePipeline(path)
   },
   closeProject: () => set({
@@ -591,14 +619,27 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const s = get()
     if (!s.path) return
     get().leaveHelpMode()
-    const nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, id, s)
+    let nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, id, s)
+    if (s.activeChatId != null && s.activeChatId !== id && nextSnapshots[s.activeChatId]) {
+      nextSnapshots = {
+        ...nextSnapshots,
+        [s.activeChatId]: keepStreamingOnlyWhenInflight(
+          nextSnapshots[s.activeChatId],
+          hasInflightChatSend(s.sendOwners, s.activeChatId, false)
+        )
+      }
+    }
     const restored = nextSnapshots[id]
     const session = s.chatSessions.find(c => c.id === id)
 
     if (restored) {
       delete nextSnapshots[id]
+      const restoredSafe = keepStreamingOnlyWhenInflight(
+        restored,
+        hasInflightChatSend(s.sendOwners, id, false)
+      )
       set({
-        ...restoreBundle(restored),
+        ...restoreBundle(restoredSafe),
         activeChatId: id,
         chatSnapshots: nextSnapshots,
         openedReviewId: null,
@@ -636,7 +677,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         const history = await window.api.chats.list(id)
         if (myToken !== switchChatSessionToken) return
         if (get().activeChatId !== id) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -684,10 +725,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
     }
     // Персист завершённого assistant-сообщения в БД (переживёт reload).
-    if ((event.type === 'done' || event.type === 'error') && s.path) {
+    // persistedByChat: активный чат уже персистит сам (Chat.tsx) — не дублируем.
+    if ((t === 'done' || t === 'error') && !event.persistedByChat) {
       const lastMsg = next.messages[next.messages.length - 1]
-      if (lastMsg?.role === 'assistant' && lastMsg.content) {
-        void window.api.chats.append(chatId, s.path, 'assistant', lastMsg.content).catch(() => {})
+      const persistProjectPath = typeof event.projectPath === 'string' ? event.projectPath : s.path
+      if (lastMsg?.role === 'assistant' && lastMsg.content && persistProjectPath) {
+        void window.api.chats.append(chatId, persistProjectPath, 'assistant', lastMsg.content).catch(() => {})
       }
     }
     return { chatSnapshots: { ...s.chatSnapshots, [chatId]: next } }
@@ -696,14 +739,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
     return { chatSnapshots: { ...s.chatSnapshots, [chatId]: { ...existing, messages } } }
   }),
-  pushUserToChatSnapshot: (chatId, content, meta) => set(s => {
+  pushUserToChatSnapshot: (chatId, content, meta, assistantDbId) => set(s => {
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
     return {
       chatSnapshots: {
         ...s.chatSnapshots,
         [chatId]: {
           ...existing,
-          messages: [...existing.messages, { ...meta, role: 'user', content }, { role: 'assistant', content: '' }],
+          messages: [...existing.messages, { ...meta, role: 'user', content }, { role: 'assistant', content: '', ...(assistantDbId ? { dbId: assistantDbId } : {}) }],
           isStreaming: true,
           streamStartedAt: Date.now(),
           hasUnread: false
@@ -759,7 +802,16 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // Снапшотим уходящий активный чат — как switchChatSession. Иначе при создании
     // нового чата во время стрима частичный ответ старого чата теряется, а его
     // фоновые события (включая финальный done) уходят в пустой freshSnapshot (#8).
-    const nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, created.id, s)
+    let nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, created.id, s)
+    if (s.activeChatId != null && nextSnapshots[s.activeChatId]) {
+      nextSnapshots = {
+        ...nextSnapshots,
+        [s.activeChatId]: keepStreamingOnlyWhenInflight(
+          nextSnapshots[s.activeChatId],
+          hasInflightChatSend(s.sendOwners, s.activeChatId, false)
+        )
+      }
+    }
     set({
       chatSessions: list,
       activeChatId: created.id,
@@ -871,8 +923,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   applyEventToHelp: (event) => set(s => {
     const next = applySnapshotEvent({ ...s.help, hasUnread: s.helpMode ? false : true }, event)
     const t = event.type
-    if (t === 'done' || t === 'error') {
+    if ((t === 'done' || t === 'error') && !event.persistedByChat) {
       // Персист завершённого assistant-сообщения справки в БД.
+      // persistedByChat: активный чат уже персистит сам (Chat.tsx) — не дублируем.
       const lastMsg = next.messages[next.messages.length - 1]
       const chatId = s.helpChatId
       if (lastMsg?.role === 'assistant' && lastMsg.content && chatId != null) {
@@ -918,7 +971,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const history = await window.api.chats.list(helpSession.id)
       helpState = {
         ...helpState,
-        messages: history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt }))
+        messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
       }
     }
     set({
@@ -953,6 +1006,41 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       set({ resumableRuns: runs })
     } catch (err) {
       console.warn('[crash-resume] loadResumableRuns failed:', err)
+    }
+  },
+  reconcileStreamingState: async (path) => {
+    try {
+      const [running, queued] = await Promise.all([
+        window.api.agentRuns.list(path, { status: 'running', owner: 'main', limit: 1 }),
+        window.api.agentRuns.list(path, { status: 'queued', owner: 'main', limit: 1 }),
+      ])
+      set(s => {
+        const hasLiveOwner = hasInflightProjectSend(s.sendOwners, path)
+        if ((running.length > 0 || queued.length > 0) && hasLiveOwner) return {}
+        const patch: Partial<ProjectState> = {}
+        if (s.path === path && s.isStreaming && !hasLiveOwner) {
+          patch.isStreaming = false
+          patch.streamStartedAt = null
+        }
+        const existing = s.sessions[path]
+        if (existing?.isStreaming && !hasLiveOwner) {
+          patch.sessions = {
+            ...s.sessions,
+            [path]: { ...existing, isStreaming: false, streamStartedAt: null }
+          }
+        }
+        let nextChatSnapshots: ProjectState['chatSnapshots'] | null = null
+        for (const [chatIdRaw, snap] of Object.entries(s.chatSnapshots)) {
+          const chatId = Number(chatIdRaw)
+          if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false)) continue
+          nextChatSnapshots = nextChatSnapshots ?? { ...s.chatSnapshots }
+          nextChatSnapshots[chatId] = { ...snap, isStreaming: false, streamStartedAt: null }
+        }
+        if (nextChatSnapshots) patch.chatSnapshots = nextChatSnapshots
+        return patch
+      })
+    } catch (err) {
+      console.warn('[projectStore] reconcileStreamingState failed:', err)
     }
   },
   dismissResumableRun: (runId) => {

@@ -166,7 +166,16 @@ html.gg-atelier body {
 }
 
 .gg-app-atelier .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar {
-  box-shadow: none;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent),
+    var(--shadow-sm);
+}
+
+.gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar {
+  position: relative;
+  z-index: 1;
+  border-color: var(--accent);
 }
 
 .gg-app-atelier .gg-rail-status.is-unread {

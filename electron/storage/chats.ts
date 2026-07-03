@@ -6,6 +6,7 @@ export interface ChatMessage {
   id: number
   role: Role
   content: string
+  thinking: string
   createdAt: number
 }
 
@@ -22,7 +23,11 @@ export interface Chats {
   /** Legacy: list all messages of a project (across sessions) — left for back-compat callers. */
   list: (projectPath: string) => ChatMessage[]
   /** Append a message to a specific session. */
-  appendToSession: (sessionId: number, projectPath: string, role: Role, content: string) => void
+  appendToSession: (sessionId: number, projectPath: string, role: Role, content: string) => ChatMessage
+  /** Update an existing message body. Used for streaming assistant persistence. */
+  updateMessage: (messageId: number, content: string) => boolean
+  /** Update an existing message thinking stream. Used for crash-resume context. */
+  updateThinking: (messageId: number, thinking: string) => boolean
   /** Макс. id сообщения сессии (граница для «Откатить задачу»). 0 если сессия пуста. */
   maxMessageId: (sessionId: number) => number
   /** Удалить сообщения сессии с id > afterMessageId (truncate диалога к чекпоинту).
@@ -35,12 +40,12 @@ export function createChats(db: Database): Chats {
   return {
     listBySession(sessionId) {
       return db.prepare(
-        'SELECT id, role, content, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id ASC'
+        'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id ASC'
       ).all(sessionId) as ChatMessage[]
     },
     list(projectPath) {
       return db.prepare(
-        'SELECT id, role, content, created_at as createdAt FROM chats WHERE project_path = ? ORDER BY id ASC'
+        'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE project_path = ? ORDER BY id ASC'
       ).all(projectPath) as ChatMessage[]
     },
     appendToSession(sessionId, projectPath, role, content) {
@@ -51,17 +56,38 @@ export function createChats(db: Database): Chats {
       // двойного персиста, а намеренный повтор пользователя терять нельзя.
       if (role === 'assistant') {
         const last = db.prepare(
-          'SELECT role, content FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT 1'
-        ).get(sessionId) as { role: string; content: string } | undefined
+          'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT 1'
+        ).get(sessionId) as ChatMessage | undefined
         if (last && last.role === 'assistant' && last.content === content) {
-          return
+          return last
         }
       }
       const now = Date.now()
-      db.prepare(
+      const info = db.prepare(
         'INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(sessionId, projectPath, role, content, now)
       touchSession.run(now, sessionId)
+      return {
+        id: Number(info.lastInsertRowid),
+        role,
+        content,
+        thinking: '',
+        createdAt: now
+      }
+    },
+    updateMessage(messageId, content) {
+      const now = Date.now()
+      const info = db.prepare('UPDATE chats SET content = ? WHERE id = ?').run(content, messageId)
+      const row = db.prepare('SELECT session_id as sessionId FROM chats WHERE id = ?').get(messageId) as { sessionId: number } | undefined
+      if (row?.sessionId) touchSession.run(now, row.sessionId)
+      return info.changes > 0
+    },
+    updateThinking(messageId, thinking) {
+      const now = Date.now()
+      const info = db.prepare('UPDATE chats SET thinking = ? WHERE id = ?').run(thinking, messageId)
+      const row = db.prepare('SELECT session_id as sessionId FROM chats WHERE id = ?').get(messageId) as { sessionId: number } | undefined
+      if (row?.sessionId) touchSession.run(now, row.sessionId)
+      return info.changes > 0
     },
     maxMessageId(sessionId) {
       const row = db.prepare('SELECT COALESCE(MAX(id), 0) as maxId FROM chats WHERE session_id = ?').get(sessionId) as { maxId: number }

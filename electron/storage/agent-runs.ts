@@ -18,7 +18,7 @@ import type { Database } from 'better-sqlite3'
  */
 
 export type AgentRunOwner = 'main' | 'review' | 'delegate' | 'background'
-export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended'
+export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended' | 'interrupted'
 
 export interface AgentRun {
   runId: string
@@ -395,7 +395,7 @@ export function createAgentRuns(db: Database): AgentRuns {
       const vals: unknown[] = [Date.now()]
       if (projectPath !== undefined) { where.push('project_path = ?'); vals.push(projectPath) }
       const info = db.prepare(
-        `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE ${where.join(' AND ')}`
+        `UPDATE agent_runs SET status = 'interrupted', ended_at = ? WHERE ${where.join(' AND ')}`
       ).run(...vals)
       return info.changes
     },
@@ -405,7 +405,7 @@ export function createAgentRuns(db: Database): AgentRuns {
       // ended_at < reconciledAt и не предлагаются. owner='main' — review/
       // background не возобновляем как «прерванную задачу пользователя».
       const rows = db.prepare(
-        `${SELECT_RUN} WHERE project_path = ? AND status = 'failed'
+        `${SELECT_RUN} WHERE project_path = ? AND status IN ('interrupted', 'failed')
            AND ended_at IS NOT NULL AND ended_at >= ? AND owner = 'main'
          ORDER BY started_at DESC, rowid DESC`
       ).all(projectPath, reconciledAt) as AgentRun[]

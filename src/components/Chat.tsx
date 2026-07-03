@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
@@ -27,7 +27,7 @@ import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
 import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
-import type { Attachment, ChatMessage, Suggestion } from '../types/api'
+import type { Attachment, ChatEvent, ChatMessage, Reminder, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
@@ -64,6 +64,17 @@ import {
   isLegacyDoc,
 } from '../lib/chat-attachments'
 
+interface ComposerPendingState {
+  queuedMessages: QueuedComposerMessage[]
+  pendingSupplements: PendingSupplement[]
+  pendingBarExpanded: boolean
+}
+
+const EMPTY_COMPOSER_PENDING_STATE: ComposerPendingState = {
+  queuedMessages: [],
+  pendingSupplements: [],
+  pendingBarExpanded: false,
+}
 
 function normalizeProjectPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -76,11 +87,72 @@ function projectNameForPath(projectPath: string | null | undefined): string | un
   return meta?.name ?? projectPath.split(/[/\\]/).pop() ?? undefined
 }
 
-function registerChatSendOwner(sendId: number, chatId: number, isHelp: boolean): void {
+interface ReminderPinsPrefs {
+  collapsed: boolean
+  x: number
+  y: number
+}
+
+const DEFAULT_REMINDER_PINS_PREFS: ReminderPinsPrefs = {
+  collapsed: false,
+  x: 10,
+  y: 76,
+}
+
+function reminderPinsPrefsKey(projectPath: string): string {
+  return `gg.chatReminderPins.panel.v2.${normalizeProjectPath(projectPath)}`
+}
+
+function readReminderPinsPrefs(projectPath: string): ReminderPinsPrefs {
+  try {
+    const raw = localStorage.getItem(reminderPinsPrefsKey(projectPath))
+    const parsed = raw ? JSON.parse(raw) : null
+    if (!parsed || typeof parsed !== 'object') return DEFAULT_REMINDER_PINS_PREFS
+    return {
+      collapsed: Boolean(parsed.collapsed),
+      x: Number.isFinite(Number(parsed.x)) ? Number(parsed.x) : DEFAULT_REMINDER_PINS_PREFS.x,
+      y: Number.isFinite(Number(parsed.y)) ? Number(parsed.y) : DEFAULT_REMINDER_PINS_PREFS.y,
+    }
+  } catch {
+    return DEFAULT_REMINDER_PINS_PREFS
+  }
+}
+
+function writeReminderPinsPrefs(projectPath: string, prefs: ReminderPinsPrefs): void {
+  try {
+    localStorage.setItem(reminderPinsPrefsKey(projectPath), JSON.stringify(prefs))
+  } catch {
+    /* ignore */
+  }
+}
+
+function clampReminderPinsPrefs(prefs: ReminderPinsPrefs, host: HTMLElement | null): ReminderPinsPrefs {
+  if (!host) return prefs
+  const rect = host.getBoundingClientRect()
+  const maxX = Math.max(8, rect.width - 260)
+  const maxY = Math.max(44, rect.height - 150)
+  return {
+    ...prefs,
+    x: Math.min(Math.max(8, prefs.x), maxX),
+    y: Math.min(Math.max(44, prefs.y), maxY),
+  }
+}
+
+function formatReminderPinTime(ts: number): string {
+  return new Date(ts).toLocaleString([], {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function registerChatSendOwner(sendId: number, chatId: number, isHelp: boolean, projectPath?: string | null): void {
   useProject.getState().registerSendOwner(sendId, {
     kind: 'chat',
     chatId,
-    ...(isHelp ? { isHelp: true } : {})
+    ...(isHelp ? { isHelp: true } : {}),
+    ...(projectPath ? { projectPath } : {})
   })
 }
 
@@ -192,6 +264,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     appendHelpLastAssistantThinking,
     setComposerDraft,
     clearComposerDraft,
+    setActiveView,
   } = useProject()
   const isHelpChat = helpMode
   const messages = helpMode ? help.messages : projectMessages
@@ -270,14 +343,28 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   }, [input, activeSkillId, dismissedRecipeId, allSkills])
   // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
   useEffect(() => { if (!input.trim()) { setDismissedSuggestId(null); setDismissedRecipeId(null) } }, [input])
+  const [chatReminderPins, setChatReminderPins] = useState<Reminder[]>([])
+  const [reminderPinsPrefs, setReminderPinsPrefs] = useState<ReminderPinsPrefs>(DEFAULT_REMINDER_PINS_PREFS)
+  const visibleReminderPins = isHelpChat || reminderPinsPrefs.collapsed ? [] : chatReminderPins
   /** Live token-count preview for whatever is in the composer right now. */
   const [previewTokens, setPreviewTokens] = useState<{ tokens: number; exact: boolean } | null>(null)
   /** If the agent loop exhausted its budget on the last send, the user can click "+N turns" to extend. */
   const [exhausted, setExhausted] = useState<{ used: number; suggestedAdd: number; maxBudget: number } | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const chatRootRef = useRef<HTMLDivElement | null>(null)
+  const reminderPinsPrefsRef = useRef(reminderPinsPrefs)
+  const reminderPanelDragRef = useRef<{
+    pointerId: number
+    projectPath: string
+    startClientX: number
+    startClientY: number
+    startX: number
+    startY: number
+  } | null>(null)
   const composerDraftKeyRef = useRef<string | null>(null)
   const composerInputRef = useRef(input)
   const composerAttachmentsRef = useRef(attachments)
+  reminderPinsPrefsRef.current = reminderPinsPrefs
   composerInputRef.current = input
   composerAttachmentsRef.current = attachments
 
@@ -322,6 +409,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const [warning, setWarning] = useState<string | null>(null)
   const [queueNotice, setQueueNotice] = useState<string | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
+  const [contextCompactNotice, setContextCompactNotice] = useState<{ text: string; loading: boolean } | null>(null)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
@@ -336,17 +424,201 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const screenshotCounter = useRef(0)
   const warningTimer = useRef<number | null>(null)
   const queueNoticeTimer = useRef<number | null>(null)
+  const contextCompactTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
+  const persistedAssistantBySendIdRef = useRef(new Map<number, {
+    messageId: number
+    content: string
+    thinking: string
+    timer: number | null
+    thinkingTimer: number | null
+  }>())
+  const pendingScopeKey = isHelpChat
+    ? `help:${helpChatId ?? 'global'}`
+    : activePath && activeChatId != null
+      ? `project:${normalizeProjectPath(activePath)}:${activeChatId}`
+      : 'none'
+  const pendingScopeKeyRef = useRef(pendingScopeKey)
+  const pendingStateByScopeRef = useRef(new Map<string, ComposerPendingState>())
   const queuedMessagesRef = useRef<QueuedComposerMessage[]>([])
   const [queuedMessages, setQueuedMessages] = useState<QueuedComposerMessage[]>([])
-  const [pendingSupplements, setPendingSupplements] = useState<PendingSupplement[]>([])
-  const [pendingBarExpanded, setPendingBarExpanded] = useState(false)
+  const pendingSupplementsRef = useRef<PendingSupplement[]>([])
+  const [pendingSupplements, setPendingSupplementsRaw] = useState<PendingSupplement[]>([])
+  const pendingBarExpandedRef = useRef(false)
+  const [pendingBarExpanded, setPendingBarExpandedRaw] = useState(false)
   const flushQueueRef = useRef<() => void>(() => {})
   // Resume задачи (Фаза 4): взводится при gg-resume-send, эффект ниже шлёт send().
   const resumeAutoSendRef = useRef(false)
   // Crash-resume Фаза 2: runId прерванного прогона для re-send с полным контекстом
   // (взводится из gg-resume-send с объектом-detail; консьюмится в send()).
   const resumeFromRunIdRef = useRef<string | null>(null)
+
+  function persistPendingScope(key = pendingScopeKeyRef.current): void {
+    pendingStateByScopeRef.current.set(key, {
+      queuedMessages: queuedMessagesRef.current,
+      pendingSupplements: pendingSupplementsRef.current,
+      pendingBarExpanded: pendingBarExpandedRef.current,
+    })
+  }
+
+  useEffect(() => {
+    if (!activePath || isHelpChat) {
+      setChatReminderPins([])
+      setReminderPinsPrefs(DEFAULT_REMINDER_PINS_PREFS)
+      return
+    }
+
+    let cancelled = false
+    const projectPath = activePath
+    setChatReminderPins([])
+    setReminderPinsPrefs(clampReminderPinsPrefs(readReminderPinsPrefs(projectPath), chatRootRef.current))
+
+    async function refreshReminders() {
+      try {
+        const list = await window.api.reminders.list(projectPath, 50)
+        if (cancelled) return
+        setChatReminderPins(
+          list
+            .filter(r => r.status === 'pending')
+            .sort((a, b) => a.dueAt - b.dueAt)
+        )
+      } catch {
+        if (!cancelled) setChatReminderPins([])
+      }
+    }
+
+    function onChanged(event: Event) {
+      const detail = (event as CustomEvent<{ projectPath?: string }>).detail
+      if (!detail?.projectPath || normalizeProjectPath(detail.projectPath) === normalizeProjectPath(projectPath)) {
+        void refreshReminders()
+      }
+    }
+    const onFocus = () => { void refreshReminders() }
+
+    void refreshReminders()
+    const timer = window.setInterval(() => { void refreshReminders() }, 60_000)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('gg-reminders-changed', onChanged as EventListener)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('gg-reminders-changed', onChanged as EventListener)
+    }
+  }, [activePath, isHelpChat])
+
+  function persistReminderPinsPrefs(next: ReminderPinsPrefs, projectPath = activePath): void {
+    const clamped = clampReminderPinsPrefs(next, chatRootRef.current)
+    setReminderPinsPrefs(clamped)
+    if (projectPath) writeReminderPinsPrefs(projectPath, clamped)
+  }
+
+  function setReminderPinsCollapsed(collapsed: boolean): void {
+    persistReminderPinsPrefs({ ...reminderPinsPrefsRef.current, collapsed })
+  }
+
+  function onReminderPinsDragStart(e: ReactPointerEvent<HTMLDivElement>): void {
+    if (!activePath || e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.closest('button')) return
+    reminderPanelDragRef.current = {
+      pointerId: e.pointerId,
+      projectPath: activePath,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startX: reminderPinsPrefsRef.current.x,
+      startY: reminderPinsPrefsRef.current.y,
+    }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+
+  function onReminderPinsDragMove(e: ReactPointerEvent<HTMLDivElement>): void {
+    const drag = reminderPanelDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    const next = clampReminderPinsPrefs({
+      ...reminderPinsPrefsRef.current,
+      x: drag.startX + e.clientX - drag.startClientX,
+      y: drag.startY + e.clientY - drag.startClientY,
+    }, chatRootRef.current)
+    setReminderPinsPrefs(next)
+  }
+
+  function onReminderPinsDragEnd(e: ReactPointerEvent<HTMLDivElement>): void {
+    const drag = reminderPanelDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+    writeReminderPinsPrefs(drag.projectPath, reminderPinsPrefsRef.current)
+    reminderPanelDragRef.current = null
+  }
+
+  function applyPendingState(state: ComposerPendingState): void {
+    queuedMessagesRef.current = state.queuedMessages
+    pendingSupplementsRef.current = state.pendingSupplements
+    pendingBarExpandedRef.current = state.pendingBarExpanded
+    setQueuedMessages(state.queuedMessages)
+    setPendingSupplementsRaw(state.pendingSupplements)
+    setPendingBarExpandedRaw(state.pendingBarExpanded)
+  }
+
+  function pendingScopeKeyFor(owner: SendOwner | null): string | null {
+    if (owner?.kind !== 'chat') return null
+    if (owner.isHelp) return `help:${helpChatId ?? 'global'}`
+    if (!owner.projectPath || owner.chatId == null) return null
+    return `project:${normalizeProjectPath(owner.projectPath)}:${owner.chatId}`
+  }
+
+  function clearPendingSupplementsForScope(key: string | null): void {
+    if (!key) return
+    const current = pendingStateByScopeRef.current.get(key) ?? EMPTY_COMPOSER_PENDING_STATE
+    const next: ComposerPendingState = {
+      ...current,
+      pendingSupplements: [],
+      pendingBarExpanded: current.queuedMessages.length > 0 ? current.pendingBarExpanded : false,
+    }
+    pendingStateByScopeRef.current.set(key, next)
+    if (key === pendingScopeKeyRef.current) applyPendingState(next)
+  }
+
+  function getPendingStateForScope(key: string): ComposerPendingState {
+    if (key === pendingScopeKeyRef.current) {
+      return {
+        queuedMessages: queuedMessagesRef.current,
+        pendingSupplements: pendingSupplementsRef.current,
+        pendingBarExpanded: pendingBarExpandedRef.current,
+      }
+    }
+    return pendingStateByScopeRef.current.get(key) ?? EMPTY_COMPOSER_PENDING_STATE
+  }
+
+  function setPendingStateForScope(key: string, state: ComposerPendingState): void {
+    pendingStateByScopeRef.current.set(key, state)
+    if (key === pendingScopeKeyRef.current) applyPendingState(state)
+  }
+
+  function setPendingSupplements(next: SetStateAction<PendingSupplement[]>): void {
+    const value = typeof next === 'function'
+      ? (next as (prev: PendingSupplement[]) => PendingSupplement[])(pendingSupplementsRef.current)
+      : next
+    pendingSupplementsRef.current = value
+    setPendingSupplementsRaw(value)
+    persistPendingScope()
+  }
+
+  function setPendingBarExpanded(next: SetStateAction<boolean>): void {
+    const value = typeof next === 'function'
+      ? (next as (prev: boolean) => boolean)(pendingBarExpandedRef.current)
+      : next
+    pendingBarExpandedRef.current = value
+    setPendingBarExpandedRaw(value)
+    persistPendingScope()
+  }
+
+  useEffect(() => {
+    if (pendingScopeKeyRef.current === pendingScopeKey) return
+    persistPendingScope()
+    pendingScopeKeyRef.current = pendingScopeKey
+    applyPendingState(pendingStateByScopeRef.current.get(pendingScopeKey) ?? EMPTY_COMPOSER_PENDING_STATE)
+  }, [pendingScopeKey])
   // Pipeline (спек D5): авто-send шага. Держит желаемый режим — авто-send
   // срабатывает только когда agentMode реально применился (без race).
   const pipelineSendModeRef = useRef<'plan' | 'accept-edits' | null>(null)
@@ -375,7 +647,63 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   function flashQueueNotice(msg: string) {
     setQueueNotice(msg)
     if (queueNoticeTimer.current) window.clearTimeout(queueNoticeTimer.current)
-    queueNoticeTimer.current = window.setTimeout(() => setQueueNotice(null), 2500)
+    queueNoticeTimer.current = window.setTimeout(() => setQueueNotice(null), 5000)
+  }
+
+  function flushPersistedAssistant(sendId: number, kind: 'content' | 'thinking' | 'both' = 'both') {
+    const tracked = persistedAssistantBySendIdRef.current.get(sendId)
+    if (!tracked) return
+    if ((kind === 'content' || kind === 'both') && tracked.content) {
+      void window.api.chats.updateMessage(tracked.messageId, tracked.content).catch(() => {})
+    }
+    if ((kind === 'thinking' || kind === 'both') && tracked.thinking) {
+      void window.api.chats.updateThinking(tracked.messageId, tracked.thinking).catch(() => {})
+    }
+  }
+
+  function schedulePersistedAssistantFlush(sendId: number, kind: 'content' | 'thinking') {
+    const tracked = persistedAssistantBySendIdRef.current.get(sendId)
+    if (!tracked) return
+    if (kind === 'content') {
+      if (tracked.timer) window.clearTimeout(tracked.timer)
+      tracked.timer = window.setTimeout(() => flushPersistedAssistant(sendId, 'content'), 350)
+    } else {
+      if (tracked.thinkingTimer) window.clearTimeout(tracked.thinkingTimer)
+      tracked.thinkingTimer = window.setTimeout(() => flushPersistedAssistant(sendId, 'thinking'), 350)
+    }
+  }
+
+  function registerPersistedAssistant(sendId: number, messageId: number) {
+    persistedAssistantBySendIdRef.current.set(sendId, {
+      messageId,
+      content: '',
+      thinking: '',
+      timer: null,
+      thinkingTimer: null,
+    })
+  }
+
+  function trackPersistedAssistantEvent(sendId: number, event: { type: string; text?: string }) {
+    const tracked = persistedAssistantBySendIdRef.current.get(sendId)
+    if (!tracked) return
+    if (event.type === 'text' && typeof event.text === 'string') {
+      tracked.content += event.text
+      schedulePersistedAssistantFlush(sendId, 'content')
+    } else if (event.type === 'thought' && typeof event.text === 'string') {
+      tracked.thinking += event.text
+      schedulePersistedAssistantFlush(sendId, 'thinking')
+    } else if (event.type === 'done' || event.type === 'error') {
+      finishPersistedAssistant(sendId)
+    }
+  }
+
+  function finishPersistedAssistant(sendId: number) {
+    const tracked = persistedAssistantBySendIdRef.current.get(sendId)
+    if (!tracked) return
+    if (tracked.timer) window.clearTimeout(tracked.timer)
+    if (tracked.thinkingTimer) window.clearTimeout(tracked.thinkingTimer)
+    flushPersistedAssistant(sendId, 'both')
+    persistedAssistantBySendIdRef.current.delete(sendId)
   }
 
   async function saveHandoffToDownloads() {
@@ -483,6 +811,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
   useEffect(() => {
     const off = window.api.ai.onEvent(({ id, event, projectPath }) => {
+      trackPersistedAssistantEvent(id, event as { type: string; text?: string })
       const store = useProject.getState()
       // Routing через единый sendOwners реестр (был двойной мап:
       // sendIdToChatId + sendIdToReviewChatId — давало race-баги).
@@ -495,11 +824,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         store.applyEventToHelp(event as { type: string; [k: string]: unknown })
         if (event.type === 'done' || event.type === 'error') {
           notifyAgentFinished(owner, null, event.type === 'error')
+          clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
           store.forgetSendOwner(id)
           if (store.helpMode) {
             setHelpStreaming(false)
-            flushQueueRef.current()
+            if (currentSendIdRef.current === id) currentSendIdRef.current = null
           }
+          void flushQueuedForOwner(owner)
         }
         return
       }
@@ -535,7 +866,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         } else if (event.type === 'error') {
           notifyAgentFinished(owner, projectPath, true)
         }
-        if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
+        if (event.type === 'done' || event.type === 'error') {
+          clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
+          store.forgetSendOwner(id)
+          void flushQueuedForOwner(owner)
+        }
         return
       }
       // #3 plan-gate: блокирующий plan-approval показываем ГЛОБАЛЬНО (модалка), даже
@@ -565,7 +900,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         } else if (event.type === 'error') {
           notifyAgentFinished(owner, chatProject, true)
         }
-        if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
+        if (event.type === 'done' || event.type === 'error') {
+          clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
+          store.forgetSendOwner(id)
+          void flushQueuedForOwner(owner)
+        }
         return
       }
       // Owner забыт (stop() или send уже завершён) → это трейлинг/устаревшее
@@ -813,9 +1152,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         setStreaming(false)
         setPendingSupplements([])
         setPendingBarExpanded(false)
+        if (currentSendIdRef.current === id) currentSendIdRef.current = null
         store.forgetSendOwner(id)
         notifyAgentFinished(owner, store.path)
-        flushQueueRef.current()
+        void flushQueuedForOwner(owner)
       }
       else if (event.type === 'error') {
         // If a plan step was running, mark it failed
@@ -842,9 +1182,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         setStreaming(false)
         setPendingSupplements([])
         setPendingBarExpanded(false)
+        if (currentSendIdRef.current === id) currentSendIdRef.current = null
         store.forgetSendOwner(id)
         notifyAgentFinished(owner, store.path, true)
-        flushQueueRef.current()
+        void flushQueuedForOwner(owner)
       }
     })
     return off
@@ -1024,10 +1365,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     return () => window.removeEventListener('gg-inject-prompt', onInject)
   }, [])
 
-  // Resume задачи (Multi-agent Manager, Фаза 4): AgentRunsPanel диспатчит
-  // CustomEvent('gg-resume-send') с текстом исходного запроса. В отличие от
-  // gg-inject-prompt (только заполняет ввод), здесь — ЧЕСТНЫЙ re-send: ставим
-  // текст в ввод и взводим флаг, эффект ниже автоматически вызывает send().
+  // Crash-resume dispatches an internal prompt directly to the model. It must not
+  // create a visible user bubble or reuse the normal composer auto-send path.
   useEffect(() => {
     function onResume(e: Event) {
       // detail: либо строка (legacy — AgentRunsPanel/PipelineBanner), либо объект
@@ -1162,10 +1501,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   // флаг — шлём ровно как при ручной отправке (через send()). Флаг гасим сразу,
   // чтобы обычный ввод пользователя не уезжал в авто-send.
   useEffect(() => {
-    if (resumeAutoSendRef.current && input.trim() && !isStreaming) {
-      resumeAutoSendRef.current = false
-      void send()
-    } else if (
+    if (
       pipelineSendModeRef.current && input.trim() && !isStreaming
       && agentMode === pipelineSendModeRef.current
     ) {
@@ -1180,6 +1516,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   useEffect(() => () => {
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
     if (queueNoticeTimer.current) window.clearTimeout(queueNoticeTimer.current)
+    if (contextCompactTimer.current) window.clearTimeout(contextCompactTimer.current)
+    for (const [sendId] of persistedAssistantBySendIdRef.current) {
+      finishPersistedAssistant(sendId)
+    }
   }, [])
 
   // Live token preview: debounce text changes (400ms) and ask the main process
@@ -1274,18 +1614,26 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setExhausted(null)
     armAutoScrollForOutgoing()
     if (store.helpMode) {
-      addHelpMessage({ role: 'assistant', content: '' })
+      const assistantRow = store.helpChatId != null
+        ? await window.api.chats.append(store.helpChatId, HELP_PROJECT_PATH, 'assistant', '')
+        : null
+      addHelpMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
       setHelpStreaming(true)
       const msgs = [...store.help.messages].slice(0, -1)
       const sendId = await window.api.ai.sendWithBudget(msgs, null, newBudget, store.helpChatId != null ? String(store.helpChatId) : undefined)
-      if (store.helpChatId != null) registerChatSendOwner(sendId, store.helpChatId, true)
+      if (store.helpChatId != null) registerChatSendOwner(sendId, store.helpChatId, true, null)
+      if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
       return
     }
-    addMessage({ role: 'assistant', content: '' })
+    const assistantRow = store.path && activeChatId != null
+      ? await window.api.chats.append(activeChatId, store.path, 'assistant', '')
+      : null
+    addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
     setStreaming(true)
     const msgs = [...useProject.getState().messages].slice(0, -1)
     const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
-    if (activeChatId != null) registerChatSendOwner(sendId, activeChatId, false)
+    if (activeChatId != null) registerChatSendOwner(sendId, activeChatId, false, store.path)
+    if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
   }
 
   async function ensureProjectForChat(): Promise<{ path: string; activeChatId: number } | null> {
@@ -1309,6 +1657,158 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   function setQueuedMessagesState(items: QueuedComposerMessage[]) {
     queuedMessagesRef.current = items
     setQueuedMessages(items)
+    persistPendingScope()
+  }
+
+  async function startQueuedBackgroundChatMessage(owner: SendOwner, text: string): Promise<boolean> {
+    if (owner.kind !== 'chat' || owner.isHelp || !owner.projectPath || owner.chatId == null) return false
+
+    const projectPath = owner.projectPath
+    const chatId = owner.chatId
+    let store = useProject.getState()
+    const sameProject = !!store.path && normalizeProjectPath(store.path) === normalizeProjectPath(projectPath)
+    const isActiveTarget = sameProject && !store.helpMode && store.activeChatId === chatId
+    if (isActiveTarget) {
+      await send({ text, fromQueue: true })
+      return true
+    }
+
+    let priorMessages: ChatMessage[] | undefined = sameProject
+      ? store.chatSnapshots[chatId]?.messages
+      : undefined
+
+    if (!priorMessages) {
+      const history = await window.api.chats.list(chatId)
+      priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
+      if (sameProject) {
+        useProject.getState().seedChatSnapshot(chatId, priorMessages)
+      }
+    }
+
+    const history = compactMessagesForSend(priorMessages)
+    const userMsg: ChatMessage = { role: 'user', content: text }
+    const isFirstUserMessage = !priorMessages.some(m => m.role === 'user' && m.content.trim())
+
+    await window.api.chats.append(chatId, projectPath, 'user', text)
+    const assistantRow = await window.api.chats.append(chatId, projectPath, 'assistant', '')
+
+    store = useProject.getState()
+    const stillSameProject = !!store.path && normalizeProjectPath(store.path) === normalizeProjectPath(projectPath)
+    const stillActiveTarget = stillSameProject && !store.helpMode && store.activeChatId === chatId
+    if (stillActiveTarget) {
+      store.clearActivity()
+      setExhausted(null)
+      setCrossVerify(null)
+      armAutoScrollForOutgoing()
+      store.addMessage(userMsg)
+      store.addMessage({ role: 'assistant', content: '', dbId: assistantRow.id })
+      store.setStreaming(true)
+    } else if (stillSameProject) {
+      store.pushUserToChatSnapshot(chatId, text, undefined, assistantRow.id)
+    }
+
+    if (isFirstUserMessage) {
+      void useProject.getState().autoTitleChatSession(chatId, text)
+    }
+
+    let targetSession = sameProject
+      ? useProject.getState().chatSessions.find(c => c.id === chatId) ?? null
+      : null
+    if (!targetSession) {
+      try {
+        targetSession = (await window.api.chatSessions.list(projectPath)).find(c => c.id === chatId) ?? null
+      } catch {
+        targetSession = null
+      }
+    }
+
+    const effort = useProject.getState().effortLevel
+    let sendId = 0
+    try {
+      sendId = await window.api.ai.sendWithOverrides(
+        [...history, userMsg],
+        projectPath,
+        {
+          ...(targetSession?.providerId ? { providerId: targetSession.providerId } : {}),
+          ...(targetSession?.model ? { model: targetSession.model } : {}),
+          ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+          agentMode: await readAgentMode(chatId, false)
+        },
+        String(chatId)
+      )
+    } catch (err) {
+      console.error('[chat] failed to start queued background message:', err)
+    }
+
+    if (sendId > 0) {
+      useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId, projectPath })
+      registerPersistedAssistant(sendId, assistantRow.id)
+      const activeAfterSend = (() => {
+        const current = useProject.getState()
+        return !!current.path
+          && normalizeProjectPath(current.path) === normalizeProjectPath(projectPath)
+          && !current.helpMode
+          && current.activeChatId === chatId
+      })()
+      if (activeAfterSend) {
+        currentSendIdRef.current = sendId
+      }
+      return true
+    }
+
+    const errorText = '\n\n[Ошибка: провайдер недоступен]'
+    await window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+    store = useProject.getState()
+    const activeAfterFailure = !!store.path
+      && normalizeProjectPath(store.path) === normalizeProjectPath(projectPath)
+      && !store.helpMode
+      && store.activeChatId === chatId
+    if (activeAfterFailure) {
+      store.updateLastAssistant(errorText)
+      store.setStreaming(false)
+      currentSendIdRef.current = null
+    } else if (!!store.path && normalizeProjectPath(store.path) === normalizeProjectPath(projectPath)) {
+      store.applyEventToChat(chatId, {
+        type: 'error',
+        message: 'Провайдер недоступен',
+        persistedByChat: true
+      })
+    }
+    return true
+  }
+
+  async function flushQueuedForOwner(owner: SendOwner | null): Promise<void> {
+    const key = pendingScopeKeyFor(owner)
+    if (!key) return
+
+    if (key === pendingScopeKeyRef.current) {
+      await flushMessageQueue()
+      return
+    }
+
+    const state = getPendingStateForScope(key)
+    if (state.queuedMessages.length === 0) return
+    const [next, ...rest] = state.queuedMessages
+    setPendingStateForScope(key, {
+      ...state,
+      queuedMessages: rest,
+      pendingBarExpanded: rest.length > 0 ? state.pendingBarExpanded : false,
+    })
+
+    let started = false
+    try {
+      started = await startQueuedBackgroundChatMessage(owner!, next.text)
+    } catch (err) {
+      console.error('[chat] failed to flush queued message:', err)
+    }
+    if (!started) {
+      const latest = getPendingStateForScope(key)
+      setPendingStateForScope(key, {
+        ...latest,
+        queuedMessages: [next, ...latest.queuedMessages],
+        pendingBarExpanded: true,
+      })
+    }
   }
 
   async function flushMessageQueue() {
@@ -1321,6 +1821,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   }
 
   flushQueueRef.current = () => { void flushMessageQueue() }
+
+  useEffect(() => {
+    if (isStreaming || queuedMessages.length === 0) return
+    const timer = window.setTimeout(() => flushQueueRef.current(), 0)
+    return () => window.clearTimeout(timer)
+  }, [isStreaming, queuedMessages.length, pendingScopeKey])
 
   function queueFollowUp(text: string) {
     const item: QueuedComposerMessage = { id: nextComposerItemId(), text, at: Date.now() }
@@ -1335,30 +1841,33 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setQueuedMessagesState(queuedMessagesRef.current.filter(m => m.id !== id))
   }
 
-  async function appendToCurrentContext() {
-    const text = input.trim()
-    if (!text || !isStreaming) return
+  async function appendTextToCurrentContext(text: string): Promise<boolean> {
+    const clean = text.trim()
+    if (!clean || !isStreaming) return false
     const sendId = currentSendIdRef.current
     const ctx = await ensureProjectForChat()
-    const formatted = formatSupplementForAgent(text)
+    const formatted = formatSupplementForAgent(clean)
     insertMessageBeforeLast({ role: 'user', content: formatted })
-    setInput('')
     armAutoScrollForOutgoing()
 
     let status: PendingSupplementStatus = 'deferred'
     if (sendId != null) {
-      const res = await window.api.ai.appendContext(sendId, text)
+      const res = await window.api.ai.appendContext(sendId, clean)
       if (res.ok) {
-        status = 'accepted'
-        flashQueueNotice(t.chat.streamingAppendAccepted)
-      } else if (provider.id.endsWith('-cli')) {
+        status = res.mode
+        if (res.mode === 'deferred') {
+          flashQueueNotice(t.chat.streamingAppendCliNote)
+        } else {
+          flashQueueNotice(t.chat.streamingAppendAccepted)
+        }
+      } else if (isCliProvider(provider.id)) {
         flashQueueNotice(t.chat.streamingAppendCliNote)
       }
     }
 
     setPendingSupplements(prev => [...prev, {
       id: nextComposerItemId(),
-      text,
+      text: clean,
       at: Date.now(),
       status,
     }])
@@ -1367,10 +1876,44 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     if (ctx?.path && ctx.activeChatId) {
       await window.api.chats.append(ctx.activeChatId, ctx.path, 'user', formatted)
     }
+    return true
   }
 
-  async function send(opts?: { text?: string; fromQueue?: boolean }) {
+  async function appendToCurrentContext() {
+    const text = input.trim()
+    if (await appendTextToCurrentContext(text)) {
+      setInput('')
+    }
+  }
+
+  async function moveQueuedMessageToContext(id: string) {
+    const index = queuedMessagesRef.current.findIndex(m => m.id === id)
+    const item = index >= 0 ? queuedMessagesRef.current[index] : null
+    if (!item) return
+    setQueuedMessagesState(queuedMessagesRef.current.filter(m => m.id !== id))
+    const moved = await appendTextToCurrentContext(item.text)
+    if (!moved) {
+      const restored = [...queuedMessagesRef.current]
+      restored.splice(Math.max(0, Math.min(index, restored.length)), 0, item)
+      setQueuedMessagesState(restored)
+    }
+  }
+
+  function editQueuedMessage(id: string) {
+    const item = queuedMessagesRef.current.find(m => m.id === id)
+    if (!item) return
+    setQueuedMessagesState(queuedMessagesRef.current.filter(m => m.id !== id))
+    setInput(item.text)
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      autoGrow()
+    })
+  }
+
+  async function send(opts?: { text?: string; modelText?: string; displayText?: string; internalResume?: boolean; fromQueue?: boolean }) {
     const text = (opts?.text ?? input).trim()
+    const modelText = (opts?.modelText ?? text).trim()
+    const displayText = (opts?.displayText ?? text).trim()
     if (!text && attachments.length === 0) return
     if (!opts?.fromQueue && isStreaming) return
     const store = useProject.getState()
@@ -1397,7 +1940,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           const loaded = await window.api.skills.runLoaders(activeSkillForLoad.id, {
             trigger: !store.help.messages.some(m => m.role === 'user') ? 'chat_open' : 'slash_arg',
             projectPath: null,
-            arg: text.split(/\s+/)[0]
+          arg: modelText.split(/\s+/)[0]
           })
           if (loaded.context) enrichedText = `${loaded.context}\n\n---\n\n${text}`
         } catch (err) {
@@ -1407,7 +1950,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       armAutoScrollForOutgoing()
       addHelpMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
       await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'user', summary)
-      addHelpMessage({ role: 'assistant', content: '' })
+      const assistantRow = await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'assistant', '')
+      addHelpMessage({ role: 'assistant', content: '', dbId: assistantRow.id })
       setHelpStreaming(true)
       const allMessages = [...useProject.getState().help.messages].slice(0, -1)
       const activeSkill = useSkillsStore.getState().activeSkillId
@@ -1434,7 +1978,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       }
       sendId = await window.api.ai.sendWithOverrides(allMessages, null, helpOverrides, String(helpChatId))
       currentSendIdRef.current = sendId
-      registerChatSendOwner(sendId, helpChatId, true)
+      if (sendId <= 0) {
+        const errorText = '\n\n[Ошибка: провайдер недоступен]'
+        updateHelpLastAssistant(errorText)
+        void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+        setHelpStreaming(false)
+        currentSendIdRef.current = null
+        return
+      }
+      registerChatSendOwner(sendId, helpChatId, true, null)
+      if (sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
       return
     }
 
@@ -1448,7 +2001,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     store.clearActivity()
     setExhausted(null)  // new send wipes any pending continue state
     setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify
-    if (!opts?.text) {
+    if (!opts?.text || opts?.modelText) {
       resetComposerAfterSend()
     }
     const summary = userAttachments.length > 0
@@ -1458,7 +2011,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // запускаем их и подмешиваем результат в content user-message ПЕРЕД
     // отправкой. Это делает скиллы реально мощными — скилл может подгрузить
     // нужные данные (карточку, отчёт, контекст) автоматически.
-    let enrichedText = text
+    let enrichedText = modelText
     const activeSkillForLoad = useSkillsStore.getState().activeSkillId
       ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
       : null
@@ -1472,7 +2025,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           arg: text.split(/\s+/)[0]  // первое слово как arg (для /dossier alfa-development)
         })
         if (loaded.context) {
-          enrichedText = `${loaded.context}\n\n---\n\n${text}`
+          enrichedText = `${loaded.context}\n\n---\n\n${modelText}`
         }
       } catch (err) {
         console.warn('[chat] skill loaders failed:', err)
@@ -1491,9 +2044,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     }
     const isFirstUserMessage = !store.messages.some(m => m.role === 'user')
     armAutoScrollForOutgoing()
-    addMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
+    if (!opts?.internalResume) {
+      addMessage({ role: 'user', content: opts?.modelText ? displayText : enrichedText, attachments: userAttachments })
+    }
     const activeChatId = ctx.activeChatId
-    if (path && activeChatId) {
+    if (path && activeChatId && !opts?.internalResume) {
       // В БД сохраняем оригинальный text пользователя (без loader-контекста),
       // чтобы при reload UI не показывал жирный системный блок.
       await window.api.chats.append(activeChatId, path, 'user', summary)
@@ -1501,9 +2056,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         void store.autoTitleChatSession(activeChatId, text || summary)
       }
     }
-    addMessage({ role: 'assistant', content: '' })
+    const assistantRow = path && activeChatId
+      ? await window.api.chats.append(activeChatId, path, 'assistant', '')
+      : null
+    addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
+    if (opts?.internalResume) {
+      while (allMessages.length > 0 && allMessages[allMessages.length - 1].role === 'assistant') {
+        allMessages.pop()
+      }
+      allMessages.push({ role: 'user', content: enrichedText })
+    } else if (opts?.modelText) {
+      const lastUserIndex = allMessages.map(m => m.role).lastIndexOf('user')
+      if (lastUserIndex >= 0) {
+        allMessages[lastUserIndex] = { ...allMessages[lastUserIndex], content: enrichedText }
+      }
+    }
     const sendAgentMode = await readAgentMode(activeChatId, false)
     // Skill override: если активен скилл — system prompt берётся из его тела.
     // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
@@ -1559,6 +2128,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       })
     }
     currentSendIdRef.current = sendId
+    if (sendId <= 0) {
+      const errorText = '\n\n[Ошибка: провайдер недоступен]'
+      updateLastAssistant(errorText)
+      if (assistantRow) void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+      setStreaming(false)
+      currentSendIdRef.current = null
+      return
+    }
     if (pipelineAutoSendStepRef.current === 'execute') {
       pipelineExecuteSendIdRef.current = sendId
     }
@@ -1566,7 +2143,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // another chat mid-stream, the event handler will route events into
     // chatSnapshots[activeChatId] rather than corrupting the new active chat.
     if (activeChatId != null) {
-      registerChatSendOwner(sendId, activeChatId, false)
+      registerChatSendOwner(sendId, activeChatId, false, path)
+      if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
     }
   }
 
@@ -1600,7 +2178,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
           if (!priorMessages) {
             const history = await window.api.chats.list(payload.chatId)
-            priorMessages = history.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt }))
+            priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
             useProject.getState().seedChatSnapshot(payload.chatId, priorMessages)
           }
 
@@ -1609,6 +2187,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           const userMsg: ChatMessage = { role: 'user', content: text, source: 'reminder' }
 
           await window.api.chats.append(payload.chatId, payload.projectPath, 'user', text)
+          const assistantRow = await window.api.chats.append(payload.chatId, payload.projectPath, 'assistant', '')
+          await window.api.reminders.markChatDelivered(payload.reminderId).catch(err => {
+            console.warn('[reminders] failed to ack chat delivery:', err)
+          })
+          window.dispatchEvent(new CustomEvent('gg-reminders-changed', { detail: { projectPath: payload.projectPath } }))
 
           store = useProject.getState()
           if (isActiveTarget) {
@@ -1617,10 +2200,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             setCrossVerify(null)
             armAutoScrollForOutgoing()
             store.addMessage(userMsg)
-            store.addMessage({ role: 'assistant', content: '' })
+            store.addMessage({ role: 'assistant', content: '', dbId: assistantRow.id })
             store.setStreaming(true)
           } else {
-            store.pushUserToChatSnapshot(payload.chatId, text, { source: 'reminder' })
+            store.pushUserToChatSnapshot(payload.chatId, text, { source: 'reminder' }, assistantRow.id)
           }
 
           if (isFirstUserMessage) {
@@ -1639,7 +2222,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           )
 
           if (sendId > 0) {
-            useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: payload.chatId })
+            useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: payload.chatId, projectPath: payload.projectPath })
+            registerPersistedAssistant(sendId, assistantRow.id)
             if (isActiveTarget) {
               currentSendIdRef.current = sendId
             }
@@ -1681,6 +2265,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // sendOwners cleanup: stop() = главное место где renderer знает, что
     // больше событий по этому sendId не придёт. Без этого owner повисал бы
     // в мапе, потому что done event на abort иногда теряется.
+    finishPersistedAssistant(id)
     useProject.getState().forgetSendOwner(id)
     // Снять висящую модалку CommandConfirm этого прогона: Stop во время ожидания
     // подтверждения команды → main зарезолвил pendingCommand в false, но command-result
@@ -1714,6 +2299,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
   return (
     <div
+      ref={chatRootRef}
       className={`gg-chat ${dragOver ? 'is-drag-over' : ''}`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -1791,11 +2377,62 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         </div>
       ) : null}
 
+      {!isHelpChat && chatReminderPins.length > 0 && (
+        <div
+          className={`gg-chat-reminder-pins ${reminderPinsPrefs.collapsed ? 'is-collapsed' : ''}`}
+          aria-label="Напоминания проекта"
+          style={{ left: reminderPinsPrefs.x, top: reminderPinsPrefs.y }}
+        >
+          <div
+            className="gg-chat-reminder-pins-head"
+            onPointerDown={onReminderPinsDragStart}
+            onPointerMove={onReminderPinsDragMove}
+            onPointerUp={onReminderPinsDragEnd}
+            onPointerCancel={onReminderPinsDragEnd}
+          >
+            <button
+              type="button"
+              className="gg-chat-reminder-pins-toggle"
+              onClick={() => setReminderPinsCollapsed(!reminderPinsPrefs.collapsed)}
+              title={reminderPinsPrefs.collapsed ? 'Развернуть напоминания' : 'Свернуть напоминания'}
+            >
+              {reminderPinsPrefs.collapsed ? '+' : '-'}
+            </button>
+            <span className="gg-chat-reminder-pins-grip" aria-hidden>::</span>
+            <button
+              type="button"
+              className="gg-chat-reminder-pins-title"
+              onClick={() => setActiveView('reminders')}
+              title="Открыть напоминания"
+            >
+              <span>Напоминания</span>
+              <span className="gg-chat-reminder-pins-count">{chatReminderPins.length}</span>
+            </button>
+          </div>
+          {!reminderPinsPrefs.collapsed && (
+            <div className="gg-chat-reminder-pins-list">
+              {visibleReminderPins.map(reminder => (
+                <div key={reminder.id} className="gg-chat-reminder-pin">
+                  <button
+                    type="button"
+                    className="gg-chat-reminder-pin-body"
+                    onClick={() => setActiveView('reminders')}
+                    title="Открыть напоминания"
+                  >
+                    <span className="gg-chat-reminder-pin-kicker">Напоминание</span>
+                    <span className="gg-chat-reminder-pin-title">{reminder.title}</span>
+                    <span className="gg-chat-reminder-pin-time">{formatReminderPinTime(reminder.dueAt)}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="gg-chat-stream-area">
         <div className="gg-chat-stream" ref={streamRef}>
         <div className="gg-chat-stream-inner">
-        {/* Crash-resume: баннер «сессия прервана» (если есть зависшие прогоны). */}
-        <ResumeBanner />
         {isHelpChat && (
           <div className="gg-help-chat-banner" role="note">
             <span className="gg-help-chat-banner-icon" aria-hidden>❓</span>
@@ -2113,6 +2750,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </Fragment>
           )
         })}
+        {/* Crash-resume: keep it next to the latest interrupted answer, not above the scrolled history. */}
+        <ResumeBanner />
         </div>
         </div>
         {showScrollDown && (
@@ -2141,13 +2780,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
           </div>
         )}
-        {isStreaming && (queuedMessages.length > 0 || pendingSupplements.length > 0) && (
+        {(queuedMessages.length > 0 || (isStreaming && pendingSupplements.length > 0)) && (
           <ComposerPendingBar
             queueItems={queuedMessages}
             supplements={pendingSupplements}
             expanded={pendingBarExpanded}
             onToggle={() => setPendingBarExpanded(v => !v)}
             onRemoveQueueItem={removeQueuedMessage}
+            onMoveQueueItemToContext={id => void moveQueuedMessageToContext(id)}
+            onEditQueueItem={editQueuedMessage}
           />
         )}
       </div>
@@ -2183,6 +2824,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           />
         )}
         {warning && <div className="gg-composer-warning">{warning}</div>}
+        {contextCompactNotice && (
+          <div className={`gg-context-compact-toast ${contextCompactNotice.loading ? 'is-loading' : 'is-done'}`} role="status" aria-live="polite">
+            <span className="gg-context-compact-spinner" aria-hidden />
+            <span>{contextCompactNotice.text}</span>
+          </div>
+        )}
         {exhausted && !isStreaming && (
           <div className="gg-budget-bar">
             <span>⏸ Бюджет {exhausted.used} ходов исчерпан — задача не завершена.</span>
@@ -2403,11 +3050,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 <div className="gg-composer-streaming-hint">
                   <span>
                     <kbd className="gg-kbd">Ctrl+Enter</kbd>
-                    {' вЂ” '}
+                    {' - '}
                     {t.chat.streamingAppendHint}
-                    {' В· '}
+                    {' / '}
                     <kbd className="gg-kbd">Enter</kbd>
-                    {' вЂ” '}
+                    {' - '}
                     {t.chat.streamingQueueHint}
                   </span>
                 </div>
@@ -2418,11 +3065,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <div className="gg-composer-streaming-hint">
               <span>
                 <kbd className="gg-kbd">Ctrl+Enter</kbd>
-                {' — '}
+                {' - '}
                 {t.chat.streamingAppendHint}
-                {' · '}
+                {' / '}
                 <kbd className="gg-kbd">Enter</kbd>
-                {' — '}
+                {' - '}
                 {t.chat.streamingQueueHint}
               </span>
             </div>
@@ -2550,7 +3197,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                           </button>
                         </div>
                       )}
-                      {provider.id.endsWith('-cli') && (
+                      {isCliProvider(provider.id) && (
                         <div className="gg-chat-settings-item">
                           <span className="gg-chat-settings-label">CLI</span>
                           <CliComposerBadge hint={t.chat.cliStrip} />
@@ -2560,6 +3207,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                className={`gg-chat-turbo-btn ${agentMode === 'auto' || agentMode === 'bypass' ? 'is-turbo' : 'is-simple'}`}
+                onClick={() => setAgentMode(agentMode === 'auto' || agentMode === 'bypass' ? 'ask' : 'auto')}
+                disabled={isHelpChat}
+                title={
+                  isHelpChat
+                    ? 'В справке режим зафиксирован'
+                    : agentMode === 'auto' || agentMode === 'bypass'
+                      ? 'Турбо-режим включён. Нажмите, чтобы вернуться в простой режим.'
+                      : 'Включить турбо-режим: агент будет выполнять действия быстрее и принимать правки автоматически.'
+                }
+                aria-label={agentMode === 'auto' || agentMode === 'bypass' ? 'Выключить турбо-режим' : 'Включить турбо-режим'}
+                aria-pressed={agentMode === 'auto' || agentMode === 'bypass'}
+              >
+                <span aria-hidden>🔥</span>
+              </button>
               {!isHelpChat && !activePipeline && (
                 <button
                   type="button"
@@ -2584,7 +3248,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   Verstak (per-file undo / checkpoint / подтверждение write / mode-
                   policy) НЕ действуют, вложения уходят текстовым хинтом. Бейдж
                   закрывает дыру «выглядит одинаково, ведёт себя по-разному». */}
-              {provider.id.endsWith('-cli') && (
+              {isCliProvider(provider.id) && (
                 <CliComposerBadge hint={t.chat.cliStrip} />
               )}
             </div>

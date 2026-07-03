@@ -7,6 +7,7 @@ import type { Settings } from './storage/settings'
 
 const MAX_TIMEOUT = 2_147_483_647
 const SNOOZE_MS = 10 * 60 * 1000
+const CHAT_DELIVERY_RETRY_MS = 10_000
 
 function readTheme(settings: Settings): 'nord' | 'light' {
   return settings.getSecret('theme') === 'light' ? 'light' : 'nord'
@@ -39,10 +40,25 @@ export function createReminderService(opts: {
   getMainWindow: () => BrowserWindow | null
 }) {
   let timer: ReturnType<typeof setTimeout> | null = null
+  const chatDeliveryRetries = new Map<number, ReturnType<typeof setTimeout>>()
 
   const clear = () => {
     if (timer) clearTimeout(timer)
     timer = null
+  }
+
+  const clearChatRetry = (id: number) => {
+    const retry = chatDeliveryRetries.get(id)
+    if (retry) clearTimeout(retry)
+    chatDeliveryRetries.delete(id)
+  }
+
+  const scheduleChatRetry = (id: number) => {
+    clearChatRetry(id)
+    chatDeliveryRetries.set(id, setTimeout(() => {
+      chatDeliveryRetries.delete(id)
+      void processDue()
+    }, CHAT_DELIVERY_RETRY_MS))
   }
 
   const schedule = () => {
@@ -68,6 +84,7 @@ export function createReminderService(opts: {
   }
 
   const deliverChat = (reminder: Reminder) => {
+    if (chatDeliveryRetries.has(reminder.id)) return
     if (!reminder.chatId) {
       showReminder(reminder)
       return
@@ -88,17 +105,7 @@ export function createReminderService(opts: {
       chatId: reminder.chatId,
       text: reminderUserText(reminder)
     })
-    showAppToast({
-      title: 'Команда отправлена в чат',
-      body: `По напоминанию: ${reminder.title}`,
-      projectName: projectName(reminder.projectPath),
-      projectPath: reminder.projectPath,
-      reminderId: reminder.id,
-      chatId: reminder.chatId,
-      kind: 'chat-reminder-sent',
-      theme: readTheme(opts.settings)
-    })
-    opts.reminders.markDelivered(reminder.id)
+    scheduleChatRetry(reminder.id)
   }
 
   const processDue = async () => {
@@ -119,6 +126,7 @@ export function createReminderService(opts: {
     },
     stop() {
       clear()
+      for (const id of chatDeliveryRetries.keys()) clearChatRetry(id)
     },
     reschedule() {
       schedule()
@@ -132,9 +140,30 @@ export function createReminderService(opts: {
       return next
     },
     dismiss(id: number) {
+      clearChatRetry(id)
       const next = opts.reminders.dismiss(id)
       schedule()
       return next
+    },
+    markChatDelivered(id: number) {
+      clearChatRetry(id)
+      const reminder = opts.reminders.get(id)
+      if (!reminder || reminder.status !== 'pending') return reminder
+      const delivered = opts.reminders.markDelivered(id)
+      if (reminder.target === 'chat' && reminder.chatId) {
+        showAppToast({
+          title: 'Команда отправлена в чат',
+          body: `По напоминанию: ${reminder.title}`,
+          projectName: projectName(reminder.projectPath),
+          projectPath: reminder.projectPath,
+          reminderId: reminder.id,
+          chatId: reminder.chatId,
+          kind: 'chat-reminder-sent',
+          theme: readTheme(opts.settings)
+        })
+      }
+      schedule()
+      return delivered
     },
     open(id: number) {
       const reminder = opts.reminders.get(id)

@@ -26,6 +26,7 @@ export function registerRemindersIpc(reminders: Reminders, service: ReminderServ
     service.reschedule()
     return reminder
   })
+  ipcMain.handle('reminders:mark-chat-delivered', (_e, id: number) => service.markChatDelivered(id))
   ipcMain.handle('reminders:remove', (_e, id: number) => {
     reminders.remove(id)
     service.reschedule()
