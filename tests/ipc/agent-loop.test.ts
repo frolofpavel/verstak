@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ChatProvider, ChatEvent, ChatMessage } from '../../electron/ai/types'
@@ -42,6 +42,7 @@ type Overrides = {
   sender?: ReturnType<typeof makeSender>
   signal?: AbortSignal
   recordJournal?: ReturnType<typeof vi.fn>
+  agentMode?: string
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -57,7 +58,7 @@ function args(dir: string, o: Overrides): unknown[] {
     recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: o.recordJournal ?? vi.fn(), readJournal: vi.fn(() => []),
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
     searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
-    connectors: { list: () => [], query: async () => ({}) }, agentMode: 'bypass', turnsBudget: 5,
+    connectors: { list: () => [], query: async () => ({}) }, agentMode: o.agentMode ?? 'bypass', turnsBudget: 5,
     skillRegistry: undefined, getSecretForDelegate: () => null, costGuard: o.costGuard,
     providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
     mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
@@ -330,5 +331,182 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     // Раньше (void-стаб) recordJournal не вызывался ни разу. Теперь — 'session'-запись.
     const sessionCalls = recordJournal.mock.calls.filter((c: unknown[]) => c[1] === 'session')
     expect(sessionCalls.length).toBeGreaterThan(0)
+  }, 20000)
+})
+
+/**
+ * Этап 2 — agentic fallback routing по FallbackReason. Проверяем реальным loop'ом:
+ * маршрутизацию по причинам сбоя tool-calling, эскалацию native→JSON, corrective
+ * retry на битый JSON, auth→смена провайдера, и что policy не обходится в
+ * escalation-фрейме. Все ветки bounded.
+ */
+const JSON_MARK = '<!-- tool_mode:json -->'
+
+describe('agent-loop Этап 2 — fallback routing', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-loop2-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  // Сценарий: DeepSeek native (deepseek-chat) остаётся native — НИКАКОЙ JSON-инъекции,
+  // native tool-call исполняется как раньше. Стабильный путь не деградирует.
+  it('deepseek-chat (native) — без JSON-инъекции, native tool-call работает', async () => {
+    const runs = mockRuns()
+    const received: string[] = []
+    const p: ChatProvider = {
+      id: 'deepseek', name: 'deepseek', models: ['deepseek-chat'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(messages))
+        if (received.length === 1) {
+          yield { type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'foo.txt' } } }
+          yield { type: 'done' }
+        } else {
+          yield { type: 'text', text: 'готово' }
+          yield { type: 'done' }
+        }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'deepseek', model: 'deepseek-chat', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+    expect(received[0]).not.toContain(JSON_MARK)     // native — без инъекции
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  }, 15000)
+
+  // Сценарий: reasoning-модель (deepseek-reasoner) → resolveToolMode='json' → JSON-
+  // инструкция вызова инжектится в первый же запрос (Этап 1, теперь через forceToolMode-путь).
+  it('deepseek-reasoner — JSON-инструкция инжектится в первый запрос', async () => {
+    const runs = mockRuns()
+    const received: string[] = []
+    const p: ChatProvider = {
+      id: 'deepseek', name: 'deepseek', models: ['deepseek-reasoner'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(messages))
+        yield { type: 'text', text: 'готово' }
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'deepseek', model: 'deepseek-reasoner', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+    expect(received[0]).toContain(JSON_MARK)
+  }, 15000)
+
+  // Приоритет 1+2: coaxable-модель (deepseek-chat, native) дважды отвечает прозой,
+  // не вызвав tool → nudge (ход 1) → всё равно проза (ход 2) → эскалация в JSON-режим
+  // (тот же провайдер, forceToolMode='json'). Проверяем: JSON-инъекция появилась в
+  // запросе ПОСЛЕ эскалации + info-событие про JSON-режим.
+  it('coaxable модель игнорит tools → nudge → эскалация в JSON-режим', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const received: string[] = []
+    const p: ChatProvider = {
+      id: 'deepseek', name: 'deepseek', models: ['deepseek-chat'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(messages))
+        yield { type: 'text', text: 'я подумаю и сделаю' }  // всегда проза, tool не зовём
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'deepseek', model: 'deepseek-chat', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender }) as Parameters<typeof runApiConversation>))
+    // Первый запрос — без JSON-инъекции (native), после эскалации — с ней.
+    expect(received[0]).not.toContain(JSON_MARK)
+    expect(received.some(m => m.includes(JSON_MARK))).toBe(true)
+    // info-событие об эскалации в JSON-режим отправлено.
+    const infoTexts = sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; text?: string } })?.event)
+      .filter((e): e is { type: string; text: string } => e?.type === 'info')
+      .map(e => e.text)
+    expect(infoTexts.some(t => t.includes('JSON-режим'))).toBe(true)
+  }, 15000)
+
+  // Приоритет 3: native tool-call пришёл с битым JSON (argsError='malformed_json') →
+  // один corrective retry «повтори валидным JSON», НЕ диспатчим с пустыми args.
+  it('malformed native args → typed reason → corrective retry', async () => {
+    const runs = mockRuns()
+    const received: string[] = []
+    const p: ChatProvider = {
+      id: 'deepseek', name: 'deepseek', models: ['deepseek-chat'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(messages))
+        if (received.length === 1) {
+          // битый вызов — argsError выставлен провайдером (openai-compat)
+          yield { type: 'tool-call', call: { id: 'c1', name: 'read_file', args: {}, argsError: 'malformed_json' } }
+          yield { type: 'done' }
+        } else {
+          yield { type: 'text', text: 'ок, исправился' }
+          yield { type: 'done' }
+        }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'deepseek', model: 'deepseek-chat', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+    // Второй запрос содержит corrective-инструкцию про валидный JSON.
+    expect(received.length).toBeGreaterThanOrEqual(2)
+    expect(received[1]).toContain('невалидный JSON')
+  }, 15000)
+
+  // Приоритет 5: auth-ошибка (401) В СЕРЕДИНЕ прогона (не turn 0) → сразу смена
+  // провайдера. Раньше yield-error вне turn 0 не фолбэчил — прогон падал.
+  it('auth-ошибка (401) в середине прогона → смена провайдера', async () => {
+    const runs = mockRuns()
+    let captured: ChatMessage[] | null = null
+    let aTurn = 0
+    const failing: ChatProvider = {
+      id: 'claude', name: 'claude', models: ['claude'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        aTurn++
+        if (aTurn === 1) {
+          yield { type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'foo.txt' } } }
+          yield { type: 'done' }
+        } else {
+          yield { type: 'error', message: '401 Unauthorized: invalid api key' }
+        }
+      },
+    }
+    const fallback: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        captured = messages
+        yield { type: 'text', text: 'ответ от fallback' }
+        yield { type: 'done' }
+      },
+    }
+    // getNextFallback берёт следующего из FALLBACK_CHAINS['claude'] = [gemini-api, …],
+    // поэтому fallback-провайдер и configuredProviders должны быть из этой цепочки.
+    const fallbackOpts = {
+      getNextProvider: () => fallback,
+      getProviderModel: () => 'gemini-3-flash',
+      configuredProviders: new Set(['claude', 'gemini-api']),
+      triedProviders: new Set(['claude']),
+    }
+    await runApiConversation(...(args(dir, {
+      provider: failing, providerId: 'claude', model: 'claude-opus-4-5',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', fallbackOpts,
+    }) as Parameters<typeof runApiConversation>))
+    expect(captured).not.toBeNull()   // fallback-провайдер получил управление
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  }, 15000)
+
+  // Safety: policy НЕ обходится в escalation-фрейме. В plan-режиме write_file
+  // блокируется decide() — даже после эскалации в JSON-режим. Файл не создаётся.
+  it('policy не обходится в escalation-фрейме: write_file в plan-режиме заблокирован', async () => {
+    const runs = mockRuns()
+    let n = 0
+    const p: ChatProvider = {
+      id: 'deepseek', name: 'deepseek', models: ['deepseek-chat'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        n++
+        if (n <= 2) {
+          // два прозаичных хода → nudge → эскалация в JSON-фрейм
+          yield { type: 'text', text: 'думаю' }
+          yield { type: 'done' }
+        } else if (n === 3) {
+          // в JSON-фрейме пробуем записать файл — plan-режим обязан заблокировать
+          yield { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'blocked.txt', content: 'x' } } }
+          yield { type: 'done' }
+        } else {
+          yield { type: 'text', text: 'ладно' }
+          yield { type: 'done' }
+        }
+      },
+    }
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'deepseek', model: 'deepseek-chat', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', agentMode: 'plan' }) as Parameters<typeof runApiConversation>))
+    // Записи не произошло — policy заблокировала даже в escalation-фрейме.
+    expect(existsSync(join(dir, 'blocked.txt'))).toBe(false)
   }, 20000)
 })

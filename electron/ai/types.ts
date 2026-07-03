@@ -37,6 +37,13 @@ export interface ToolCall {
    * round-trip it.
    */
   thoughtSignature?: string
+  /**
+   * Native tool-call пришёл, но `arguments` не распарсились в JSON (модель отдала
+   * битый/оборванный JSON). Раньше это молча превращалось в `args: {}` → тулза
+   * исполнялась с пустыми аргументами. Теперь агентный цикл видит typed-причину и
+   * делает bounded corrective retry «повтори вызов валидным JSON» (Этап 2).
+   */
+  argsError?: 'malformed_json'
 }
 
 export interface ToolResult {

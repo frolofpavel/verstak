@@ -37,8 +37,13 @@ export function isCoaxableProvider(providerId?: string): boolean {
  * Как модель обращается с инструментами. Консервативно: по умолчанию 'native'
  * (поведение не меняется для существующих провайдеров). 'json' только для
  * reasoning-моделей без function calling и локального Ollama.
+ *
+ * `force` — override из агентного цикла (Этап 2): когда native tool-calling
+ * доказанно не сработал (модель проигнорировала tools), цикл перезапускает
+ * прогон с `forceToolMode='json'`, и этот аргумент побеждает эвристику.
  */
-export function resolveToolMode(providerId?: string, model?: string): ToolMode {
+export function resolveToolMode(providerId?: string, model?: string, force?: ToolMode): ToolMode {
+  if (force) return force
   const m = (model ?? '').toLowerCase()
   // DeepSeek reasoner / R1 и прочие reasoning-алиасы не поддерживают native
   // function calling через OpenAI-compat — сервер игнорирует `tools`.

@@ -30,7 +30,7 @@ import { captureToolObservation } from '../ai/memory-hooks'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
-import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
+import { shouldFallback, getNextFallback, classifyFallbackReason } from '../ai/smart-fallback'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from '../ai/tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
@@ -1354,6 +1354,10 @@ export interface AgentRunContext {
    *  хуки НЕ перефаерятся в нём (симметрично Stop-хуку под !handedOff) — иначе на одну
    *  отправку при N фолбэках старт-хуки исполнились бы N+1 раз. */
   isFallbackFrame?: boolean
+  /** Этап 2: принудительный tool-mode для этого фрейма. Ставится в 'json', когда
+   *  native tool-calling доказанно не сработал (модель проигнорировала tools) —
+   *  тот же провайдер/модель перезапускается с JSON-инструкцией вызова. */
+  forceToolMode?: 'native' | 'json'
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -1388,7 +1392,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // инструкцию отдавать вызов инструмента текстом <tool_call>{…}</tool_call> —
   // его уже ловит parseTextToolCalls. Только при наличии тулзов и не в fallback-
   // фрейме (иначе дубль). Для 'native' — no-op, поведение не меняется.
-  if (!isFallbackFrame && projectPath && resolveToolMode(providerId, model) === 'json') {
+  if (projectPath && resolveToolMode(providerId, model, ctx.forceToolMode) === 'json'
+      && (!isFallbackFrame || ctx.forceToolMode === 'json')) {
     const sysIdx = currentMessages.findIndex(m => m.role === 'system')
     currentMessages.splice(sysIdx >= 0 ? sysIdx + 1 : 0, 0, { role: 'system', content: JSON_TOOL_INSTRUCTION })
   }
@@ -1416,6 +1421,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let plainReplyNudges = 0
   const MAX_PLAIN_NUDGES = 1
   const coaxableProvider = isCoaxableProvider(providerId)
+  // Этап 2 (agentic fallback routing), все bounded:
+  let forcedJsonThisRun = false            // эскалация native→JSON-режим на той же модели (1 раз)
+  let malformedRetries = 0                 // corrective retry на битый JSON аргументов
+  const MAX_MALFORMED_RETRIES = 1
+  let contextRetries = 0                   // форс-компакция + retry при context_overflow
+  const MAX_CONTEXT_RETRIES = 1
   const continueAfterPlainReply = (text: string): boolean => {
     if (text.trim()) {
       currentMessages.push({ role: 'assistant', content: text })
@@ -1510,10 +1521,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // ниже недостижим для ошибок стрима. Выносим fallback в замыкание, чтобы вызвать его И
   // из catch (throw), И из ветки event.type==='error' (yield). Возвращает Promise fallback-
   // фрейма или null (нет следующего провайдера / ошибка не транзиентная).
-  const attemptProviderFallback = (err: unknown): Promise<void> | null => {
+  // `force` (Этап 2): пропустить shouldFallback-гейт, когда причина смены — доказанный
+  // поведенческий сбой tool-calling (модель игнорит tools / повторно битый JSON), а не
+  // сетевой транзиент. Такие ошибки не матчат сетевые паттерны, но смена модели оправдана.
+  const attemptProviderFallback = (err: unknown, force = false): Promise<void> | null => {
     if (!(fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS)) return null
     fallbackOpts.triedProviders.add(providerId)
-    if (!shouldFallback(err)) return null
+    if (!force && !shouldFallback(err)) return null
     const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
     const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
     if (!nextProvider || !nextId) return null
@@ -1524,6 +1538,36 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
     handedOff = true
     return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
+  }
+
+  // Этап 2: эскалация native→JSON tool mode на ТОЙ ЖЕ модели (bounded, 1 раз за прогон).
+  // Тот же провайдер/модель перезапускается с forceToolMode='json' → инъекция JSON-
+  // инструкции вызова + parseTextToolCalls ловит текстовые вызовы. Не трогает triedProviders
+  // (провайдер не меняется). Историю (currentMessages) передаём накопленную — работа не теряется.
+  const escalateToJsonMode = (): Promise<void> | null => {
+    if (forcedJsonThisRun || !projectPath) return null
+    forcedJsonThisRun = true
+    handedOff = true
+    sender.send('ai:event', { id: sendId, event: { type: 'info', text: '↻ Модель игнорирует инструменты — включаю JSON-режим вызовов' } })
+    const jsonTools = createToolsForProject(projectPath, signal)
+    return runApiConversation({ ...ctx, isFallbackFrame: true, forceToolMode: 'json', tools: jsonTools, initialMessages: currentMessages })
+  }
+
+  // Этап 2, приоритет 1+2: модель так и не вызвала инструмент (после corrective nudge).
+  // Лестница: native → (nudge уже был) → JSON tool mode → fallback model. Гейт: coaxable-
+  // провайдер, ни одного вызова за прогон, nudge уже потрачен. Для native-моделей и frontier
+  // не срабатывает (не coaxable) — стабильный путь не деградирует.
+  const maybeEscalateNoTools = (): Promise<void> | null => {
+    if (!coaxableProvider || !projectPath || toolCallCount !== 0) return null
+    if (plainReplyNudges < MAX_PLAIN_NUDGES) return null
+    const mode = resolveToolMode(providerId, model, ctx.forceToolMode)
+    if (mode !== 'json') {
+      const esc = escalateToJsonMode()
+      if (esc) return esc
+    }
+    // Уже в JSON-режиме (или эскалация исчерпана) и всё равно без вызовов →
+    // tool_calling_unsupported → сменить модель (force: минуя сетевой shouldFallback-гейт).
+    return attemptProviderFallback(new Error('model ignored tools (tool_calling_unsupported)'), true)
   }
 
   try {
@@ -1670,6 +1714,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             assistantText = ''
             continue turnLoop
           }
+          // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
+          const esc = maybeEscalateNoTools()
+          if (esc) return esc
           exitReason = 'completed'
           sender.send('ai:event', { id: sendId, event })
           // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done,
@@ -1678,11 +1725,47 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           return
         }
       } else if (event.type === 'error') {
-        // Транзиентная ошибка на старте прогона (провайдер yield'нул error вместо throw,
-        // ничего ещё не выдано) → пробуем следующего провайдера (ревью HIGH: smart-fallback
-        // был мёртв для API-пути). Если сделали прогресс — не фолбэчим (не переделываем работу).
-        if (turn === 0 && !assistantText && toolCalls.length === 0) {
-          const fb = attemptProviderFallback(new Error(String((event as { message?: unknown }).message ?? 'provider error')))
+        const provErr = new Error(String((event as { message?: unknown }).message ?? 'provider error'))
+        const reason = classifyFallbackReason(provErr)
+        // Этап 2, приоритет 4: context_overflow → форс-компакция существующим summary-
+        // компактором + один retry той же моделью. Не помогло → понятная ошибка, НЕ
+        // бесконечный retry (bounded MAX_CONTEXT_RETRIES).
+        if (reason === 'context_overflow' && contextRetries < MAX_CONTEXT_RETRIES && model) {
+          contextRetries++
+          try {
+            const summaryMessages = buildCompactSummaryPrompt(currentMessages, { previousSummary: lastSummary })
+            let summaryText = ''
+            let summaryDone = false
+            for await (const ev of provider.send(summaryMessages, [], undefined, signal)) {
+              if (ev.type === 'text') summaryText += ev.text
+              else if (ev.type === 'done') { summaryDone = true; break }
+              else if (ev.type === 'error') break
+            }
+            if (summaryDone && summaryText.trim()) {
+              lastSummary = summaryText
+              const focusAtCompact = (sessionTodos && projectPath)
+                ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+              const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
+              currentMessages.length = 0
+              currentMessages.push(...compacted)
+              sender.send('ai:event', { id: sendId, event: { type: 'info', text: '🔄 Контекст переполнен — сжат, повторяю' } })
+              assistantText = ''
+              continue turnLoop
+            }
+          } catch { /* компакция не удалась → понятная ошибка ниже */ }
+          exitReason = 'error'
+          sender.send('ai:event', { id: sendId, event: { type: 'error', message: classifyProviderError(provErr).userMessage } })
+          return
+        }
+        // Этап 2, приоритет 5: auth-ошибка (ключ/провайдер мёртв — как бан Claude) →
+        // сразу другой провайдер, В ЛЮБОЙ ход (fallback продолжает с накопленной историей).
+        if (reason === 'provider_auth_error') {
+          const fb = attemptProviderFallback(provErr)
+          if (fb) return fb
+        } else if (turn === 0 && !assistantText && toolCalls.length === 0) {
+          // Транзиент на старте прогона (rate/network/5xx) → следующий провайдер (как было).
+          // Если сделали прогресс — не фолбэчим (не переделываем работу).
+          const fb = attemptProviderFallback(provErr)
           if (fb) return fb
         }
         exitReason = 'error'
@@ -1695,11 +1778,35 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         assistantText = ''
         continue
       }
+      // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
+      const esc = maybeEscalateNoTools()
+      if (esc) return esc
       exitReason = 'completed'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
       if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
       return
+    }
+
+    // Этап 2, приоритет 3: native tool-call пришёл с битым JSON в arguments (typed
+    // argsError из openai-compat) → один corrective retry «повтори валидным JSON»,
+    // НЕ диспатчим с пустыми args. Повторно битый → fallback model (force). Нет
+    // фолбэка → падаем в обычную диспетчеризацию (тулза вернёт ошибку → self-correction).
+    {
+      const malformed = toolCalls.filter(c => c.argsError)
+      if (malformed.length > 0) {
+        if (malformedRetries < MAX_MALFORMED_RETRIES) {
+          malformedRetries++
+          const names = [...new Set(malformed.map(c => c.name))].join(', ')
+          if (assistantText.trim()) currentMessages.push({ role: 'assistant', content: assistantText })
+          currentMessages.push({ role: 'user', content: `Вызов инструмента (${names}) содержал невалидный JSON в поле arguments. Повтори вызов одним валидным JSON-объектом arguments, без пояснений и текста вокруг.` })
+          sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: `malformed-${turn}`, name: names, reason: 'Битый JSON в аргументах вызова — прошу повторить валидным JSON' } })
+          assistantText = ''
+          continue turnLoop
+        }
+        const fb = attemptProviderFallback(new Error('malformed tool call arguments'), true)
+        if (fb) return fb
+      }
     }
 
     // Defence-in-depth dedupe: даже если провайдер эмитит один и тот же

@@ -200,8 +200,12 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
             for (const k of Object.keys(inProgress)) {
               const t = inProgress[Number(k)]
               let args: Record<string, unknown> = {}
-              try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {} }
-              yield { type: 'tool-call', call: { id: t.id, name: t.name, args } }
+              // Этап 2: битый JSON в arguments — раньше молча {} и тулза исполнялась
+              // с пустыми аргументами. Теперь помечаем argsError, чтобы цикл сделал
+              // corrective retry. Только при НЕПУСТОМ payload (пустой = легитимный no-arg).
+              let argsErr: 'malformed_json' | undefined
+              try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {}; if (t.args.trim()) argsErr = 'malformed_json' }
+              yield { type: 'tool-call', call: { id: t.id, name: t.name, args, ...(argsErr ? { argsError: argsErr } : {}) } }
               emittedToolCall = true
             }
             // Clear so next turn starts fresh if reused
@@ -217,8 +221,9 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
           const t = inProgress[Number(k)]
           if (!t.name) continue
           let args: Record<string, unknown> = {}
-          try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {} }
-          yield { type: 'tool-call', call: { id: t.id, name: t.name, args } }
+          let argsErr: 'malformed_json' | undefined
+          try { args = t.args ? JSON.parse(t.args) : {} } catch { args = {}; if (t.args.trim()) argsErr = 'malformed_json' }
+          yield { type: 'tool-call', call: { id: t.id, name: t.name, args, ...(argsErr ? { argsError: argsErr } : {}) } }
           emittedToolCall = true
         }
         // T1.5 repair: модель отдала вызов ТЕКСТОМ (не structured tool_calls) —
