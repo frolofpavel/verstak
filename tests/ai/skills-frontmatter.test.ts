@@ -124,4 +124,46 @@ body`
     expect(parseSkillDoc('')).toEqual({ frontmatter: {}, body: '' })
     expect(parseSkillDoc(undefined as unknown as string)).toEqual({ frontmatter: {}, body: '' })
   })
+
+  // Этап 4: recipe-блок — вложенный объект с массивами и 2-уровневым verify.commands.
+  // Проверяем, что минимальный YAML-парсер тянет нужную глубину.
+  it('парсит recipe-блок (вложенный объект + verify.commands)', () => {
+    const raw = `---
+id: typescript-error
+recipe:
+  id: typescript-error
+  kind: coding
+  trigger:
+    - typescript error
+    - npm run type failed
+  read_set:
+    - package.json
+    - "**/*.ts"
+  steps:
+    - inspect_error
+    - apply_patch
+    - run_verify
+  verify:
+    commands:
+      - npm run type
+  reviewer:
+    required: false
+  stop:
+    - typecheck_green
+---
+body`
+    const doc = parseSkillDoc(raw)
+    const recipe = doc.frontmatter.recipe as {
+      id: string; kind: string; trigger: string[]; read_set: string[]
+      steps: string[]; verify: { commands: string[] }; reviewer: { required: boolean }; stop: string[]
+    }
+    expect(recipe.id).toBe('typescript-error')
+    expect(recipe.kind).toBe('coding')
+    expect(recipe.trigger).toEqual(['typescript error', 'npm run type failed'])
+    expect(recipe.read_set).toEqual(['package.json', '**/*.ts'])
+    expect(recipe.steps).toEqual(['inspect_error', 'apply_patch', 'run_verify'])
+    expect(recipe.verify.commands).toEqual(['npm run type'])
+    expect(recipe.reviewer.required).toBe(false)
+    expect(recipe.stop).toEqual(['typecheck_green'])
+  })
 })

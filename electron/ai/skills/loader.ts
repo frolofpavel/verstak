@@ -15,6 +15,7 @@ import { readdir, readFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { parseSkillDoc } from './frontmatter'
+import { parseRecipe } from './recipe'
 import { BUILT_IN_SKILLS } from './built-in'
 import type { Skill, SkillFrontmatter } from './types'
 import type { ProviderId } from '../registry'
@@ -212,6 +213,9 @@ function parseSkillFile(
     tools_allow: fm.tools_allow,
     suggested_prompts: fm.suggested_prompts,
     context_loaders: fm.context_loaders,
+    // Этап 4: recipe-блок опционален и fail-soft — невалидный → undefined,
+    // скилл остаётся обычным скиллом (парсинг в recipe.ts).
+    recipe: parseRecipe((doc.frontmatter as { recipe?: unknown }).recipe),
     systemPrompt: doc.body,
     source,
     sourceRef

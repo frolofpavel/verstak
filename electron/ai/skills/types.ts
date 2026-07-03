@@ -15,6 +15,54 @@
 import type { ProviderId } from '../registry'
 import type { AgentMode } from '../mode-policy'
 
+/**
+ * Recipe (Этап 4) — жёсткий пошаговый протокол под тип coding-задачи поверх
+ * обычного скилла. Цель — не «подсказать», а ОГРАНИЧИТЬ свободу дешёвой модели:
+ * читать только read_set, делать маленький patch, проверять результат, не чинить
+ * чужой red, не завершать без verify. Рецепт опционален: скилл без блока `recipe:`
+ * работает как раньше. Невалидный recipe → fail-soft (parseRecipe вернёт undefined,
+ * скилл остаётся обычным скиллом). См. `recipe.ts`.
+ */
+export type RecipeStep =
+  | 'inspect_error'
+  | 'locate_files'
+  | 'read_context'
+  | 'propose_patch'
+  | 'apply_patch'
+  | 'run_verify'
+  | 'run_tests'
+  | 'review'
+  | 'summarize'
+
+/** Forward-compat (Блок G Этапа 4): model-compensation. В Этапе 4 НЕ используется —
+ *  только парсится и хранится, чтобы позже `ModelProfile` встал без ломки схемы. */
+export interface RecipeCompensation {
+  toolMode?: 'native' | 'json'
+  editStrategy?: 'patch' | 'search-replace' | 'whole-file'
+  promptStyle?: 'strict-json' | 'terse' | 'stepwise'
+  knownIssues?: string[]
+}
+
+export interface RecipeSpec {
+  id: string
+  /** Категория рецепта (пока — coding). */
+  kind: string
+  /** Ключевые фразы для recipe-router (Блок D). */
+  trigger: string[]
+  /** Минимальный контекст: какие файлы/globs читать. */
+  read_set: string[]
+  /** Пошаговый протокол — ограничивает свободу модели. */
+  steps: RecipeStep[]
+  /** Команды верификации (напр. npm run type / npm test). */
+  verify?: { commands: string[] }
+  /** Нужен ли независимый reviewer (Блок E — review_before_commit). */
+  reviewer?: { required: boolean }
+  /** Критерии завершения задачи. */
+  stop: string[]
+  /** Forward-compat, не используется в Этапе 4. */
+  compensation?: RecipeCompensation
+}
+
 /** Frontmatter полей скилла. Все поля кроме id опциональны. */
 export interface SkillFrontmatter {
   id: string
@@ -52,6 +100,12 @@ export interface SkillFrontmatter {
     /** Произвольные параметры для конкретного loader'а. */
     args?: Record<string, unknown>
   }>
+  /**
+   * Recipe-блок (Этап 4). Опционален. Если задан и валиден — скилл работает как
+   * рецепт (жёсткий протокол). Невалидный → parseRecipe вернёт undefined и скилл
+   * остаётся обычным скиллом (fail-soft).
+   */
+  recipe?: RecipeSpec
 }
 
 /** Полная сборка: frontmatter + тело system prompt. */
