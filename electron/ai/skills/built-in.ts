@@ -673,7 +673,186 @@ suggested_prompts:
 
 Не отвечай сам в обход коллегии — ценность Fusion в том, что несколько независимых попыток надёжнее одной.`
 
+/**
+ * Coding recipes (Этап 4, Блок B) — inline Skill-объекты с типизированным `recipe`.
+ * Не MD-строки: recipe хранит структуру (steps/verify/reviewer), TS проверяет шаги
+ * против RecipeStep. Тело systemPrompt — короткая персона + правила протокола;
+ * пошаговый протокол в system prompt рендерит renderRecipeProtocol (Блок C).
+ *
+ * Цель рецептов — загнать дешёвую модель в жёсткий workflow вместо свободного
+ * агентного режима: читать только read_set → маленький patch → verify → (review) → stop.
+ */
+const RECIPE_SKILLS: Skill[] = [
+  {
+    id: 'small-edit',
+    name: 'Small Edit',
+    description: 'Мелкая локальная правка — точечно, без расползания scope',
+    icon: '✏️',
+    slash: 'small-edit',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты выполняешь МЕЛКУЮ локальную правку. Дисциплина важнее скорости.
+
+Правила:
+- Меняй только то, что просили. Никакого рефакторинга «заодно».
+- Сначала найди и прочитай целевой файл, потом правь.
+- Правка минимальная: не переформатируй файл, сохраняй стиль вокруг.
+- После правки прогони проверку типов и объясни diff в 1-2 строках.
+- Не трогай несвязанные файлы.`,
+    recipe: {
+      id: 'small-edit',
+      kind: 'coding',
+      trigger: ['small edit', 'tweak', 'правка', 'измени', 'поменяй', 'подправь'],
+      read_set: [],
+      steps: ['locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'summarize'],
+      verify: { commands: ['npm run type'] },
+      reviewer: { required: false },
+      stop: ['change_applied', 'type_green', 'no_unrelated_changes'],
+    },
+  },
+  {
+    id: 'typescript-error',
+    name: 'TypeScript Error',
+    description: 'Починка ошибок tsc / npm run type минимальным изменением',
+    icon: '🟦',
+    slash: 'typescript-error',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты чинишь ошибки TypeScript. Работай от текста ошибки, а не от догадок.
+
+Правила:
+- Начни с точного текста ошибки: код (TSxxxx), файл, строка.
+- Прочитай файл с ошибкой и связанные типы прежде чем править.
+- Чини причину, а не симптом. Не глуши ошибку через any/@ts-ignore без явной причины.
+- Правка минимальная и локальная.
+- Обязательно прогони npm run type и убедись, что новых ошибок нет.
+- Не «улучшай» несвязанный код.`,
+    recipe: {
+      id: 'typescript-error',
+      kind: 'coding',
+      trigger: ['tsc', 'typescript', 'npm run type', 'type error', 'ts error', 'ошибка типов'],
+      read_set: ['tsconfig*.json', '**/*.ts', '**/*.tsx'],
+      steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'summarize'],
+      verify: { commands: ['npm run type'] },
+      reviewer: { required: false },
+      stop: ['typecheck_green', 'diff_explained', 'no_unrelated_changes'],
+    },
+  },
+  {
+    id: 'bugfix',
+    name: 'Bugfix',
+    description: 'Поиск причины бага и починка с тестом и ревью',
+    icon: '🐞',
+    slash: 'bugfix',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты чинишь баг. Сначала причина, потом фикс — не наоборот.
+
+Правила:
+- Воспроизведи и локализуй: найди файл и строку, где реально ломается.
+- Пойми КОРНЕВУЮ причину, а не только где проявилось.
+- Если возможно — сперва тест, воспроизводящий баг, потом фикс, который его гасит.
+- Правка минимальная. Не чини заодно чужой код.
+- Прогони тесты и проверку типов. Затем пройди review-before-commit gate.`,
+    recipe: {
+      id: 'bugfix',
+      kind: 'coding',
+      trigger: ['bug', 'broken', 'не работает', 'ошибка', 'crash', 'regression', 'баг', 'падает'],
+      read_set: ['**/*.ts', '**/*.tsx', 'tests/**'],
+      steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_tests', 'run_verify', 'review', 'summarize'],
+      verify: { commands: ['npm run type', 'npm run test:fast'] },
+      reviewer: { required: true },
+      stop: ['root_cause_found', 'tests_green', 'type_green', 'reviewer_pass'],
+    },
+  },
+  {
+    id: 'test-fix',
+    name: 'Test Fix',
+    description: 'Починка падающих тестов без подгонки под зелёный',
+    icon: '🧪',
+    slash: 'test-fix',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты чинишь падающие тесты. Цель — честно зелёные тесты, а не подогнанные.
+
+Правила:
+- Прочитай вывод упавшего теста: какой assert, что ожидалось vs получено.
+- Реши, где баг: в коде или в тесте. Не «подкручивай» тест под текущее поведение,
+  если поведение неверное — чини код.
+- Правка минимальная и по существу падения.
+- Прогони тесты и убедись, что они проходят по правильной причине.
+- Не удаляй и не skip'ай тесты, чтобы «стало зелено».`,
+    recipe: {
+      id: 'test-fix',
+      kind: 'coding',
+      trigger: ['test failed', 'vitest', 'jest', 'npm test', 'failing test', 'red test', 'тест падает', 'тесты красные'],
+      read_set: ['tests/**', '**/*.test.ts', 'vitest.config*', 'package.json'],
+      steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_tests', 'summarize'],
+      verify: { commands: ['npm run test:fast'] },
+      reviewer: { required: false },
+      stop: ['tests_green', 'no_unrelated_changes', 'diff_explained'],
+    },
+  },
+  {
+    id: 'refactor-safe',
+    name: 'Refactor (safe)',
+    description: 'Рефакторинг без изменения поведения — под verify и ревью',
+    icon: '🧹',
+    slash: 'refactor-safe',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты рефакторишь код БЕЗ изменения поведения. Поведение до и после — идентично.
+
+Правила:
+- Определи границы рефакторинга и НЕ выходи за них.
+- Никаких «заодно фиксов багов» — рефактор чистый, поведение не меняется.
+- Двигайся мелкими шагами, проверяя типы и тесты после каждого.
+- Существующие тесты должны оставаться зелёными без правок логики тестов.
+- Пройди review-before-commit gate: ревьюер подтверждает, что поведение не изменилось.`,
+    recipe: {
+      id: 'refactor-safe',
+      kind: 'coding',
+      trigger: ['refactor', 'cleanup', 'rename', 'extract', 'tidy', 'упростить', 'рефактор', 'переименуй'],
+      read_set: ['**/*.ts', '**/*.tsx'],
+      steps: ['locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'run_tests', 'review', 'summarize'],
+      verify: { commands: ['npm run type', 'npm run test:fast'] },
+      reviewer: { required: true },
+      stop: ['behavior_unchanged', 'type_green', 'tests_green', 'reviewer_pass'],
+    },
+  },
+  {
+    id: 'review-before-commit',
+    name: 'Review before commit',
+    description: 'Гейт перед коммитом: verify + независимый ревьюер diff',
+    icon: '🚦',
+    slash: 'review-before-commit',
+    source: 'built-in',
+    sourceRef: 'electron/ai/skills/built-in.ts',
+    systemPrompt: `Ты — гейт качества перед коммитом. Твоя задача — не написать код, а ПРОВЕРИТЬ.
+
+Правила:
+- Собери diff изменений и краткое описание задачи.
+- Прогони обязательную верификацию (типы + быстрые тесты).
+- Вызови review_before_commit — независимый ревьюер со свежим контекстом смотрит
+  только diff + task brief + вывод verify и выносит строгий JSON-вердикт.
+- Вердикт fail-closed: невалидный/пустой JSON, confidence < 0.7, ревьюер не осмотрел
+  diff, или обязательная verify не запускалась — это FAIL.
+- При FAIL — не коммить: объясни причину и что нужно поправить.`,
+    recipe: {
+      id: 'review-before-commit',
+      kind: 'coding',
+      trigger: ['review', 'commit', 'проверь перед коммитом', 'before commit', 'ready to commit', 'ревью', 'закоммить'],
+      read_set: [],
+      steps: ['run_verify', 'run_tests', 'review', 'summarize'],
+      verify: { commands: ['npm run type', 'npm run test:fast'] },
+      reviewer: { required: true },
+      stop: ['verify_green', 'reviewer_pass', 'diff_explained'],
+    },
+  },
+]
+
 export const BUILT_IN_SKILLS: Skill[] = [
+  ...RECIPE_SKILLS,
   parseBuiltIn(AI_BOARD_MD, 'ai-board'),
   parseBuiltIn(AI_FUSION_MD, 'fusion'),
   parseBuiltIn(VERSTAK_GUIDE_MD, 'verstak-guide'),
