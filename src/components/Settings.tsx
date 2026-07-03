@@ -102,8 +102,8 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Grok Build',
     transport: 'CLI',
     description: 'Твоя x.com/SuperGrok подписка через grok CLI.',
-    models: ['auto', 'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'grok-3'],
-    defaultModel: 'auto',
+    models: ['grok-composer-2.5-fast', 'grok-build', 'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'grok-3'],
+    defaultModel: 'grok-composer-2.5-fast',
     secretKey: null,
     keyHint: '',
     supportsTools: false

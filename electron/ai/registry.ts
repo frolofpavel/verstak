@@ -3,7 +3,7 @@ import { createGeminiCliProvider, GEMINI_CLI_MODELS } from './gemini-cli'
 import { createClaudeProvider, CLAUDE_MODELS } from './claude'
 import { createClaudeCliProvider, CLAUDE_CLI_MODELS } from './claude-cli'
 import { createGrokProvider, GROK_MODELS } from './grok'
-import { createGrokCliProvider, GROK_CLI_MODELS } from './grok-cli'
+import { createGrokCliProvider, DEFAULT_GROK_CLI_MODEL, GROK_CLI_MODELS } from './grok-cli'
 import { createOpenAiProvider, OPENAI_MODELS } from './openai'
 import { createCodexCliProvider, CODEX_CLI_MODELS } from './codex-cli'
 import { createExtraProvider, EXTRA_PROVIDERS, type ExtraProviderSpec } from './extra-providers'
@@ -136,7 +136,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
     transport: 'CLI',
     secretKey: null,
     models: GROK_CLI_MODELS,
-    defaultModel: 'auto',
+    defaultModel: DEFAULT_GROK_CLI_MODEL,
     supportsTools: false,
     shortLabel: 'Grok Build'
   },
