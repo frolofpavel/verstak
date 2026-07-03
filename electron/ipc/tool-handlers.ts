@@ -35,6 +35,7 @@ import { executeCodeHandler } from './tool-handlers/execute-code'
 import { findDefinitionHandler, findReferencesHandler } from './tool-handlers/lsp-nav'
 import { createProofVideoHandler } from './tool-handlers/create-proof-video'
 import { reviewDiffHandler } from './tool-handlers/review-diff'
+import { reviewBeforeCommitHandler } from './tool-handlers/review-before-commit'
 import { checkDiagnosticsHandler, conversationSearchHandler, impactAnalysisHandler } from './tool-handlers/diagnostics'
 export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
@@ -83,6 +84,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'delegate_task': delegateTaskHandler,
   'oracle': oracleHandler,
   'review_diff': reviewDiffHandler,  // F5: git-diff-scoped review через критика
+  'review_before_commit': reviewBeforeCommitHandler,  // Этап 4 E: гейт verify+ревью+autofix перед коммитом
   'new_task': newTaskHandler,
   'delegate_parallel': delegateParallelHandler,
   'orchestrate': orchestrateHandler,

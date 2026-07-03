@@ -431,6 +431,26 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'review_before_commit',
+    description: 'Гейт качества ПЕРЕД коммитом (recipe-шаг). Прогоняет обязательную верификацию (baseline-aware: pre-existing red не блокирует, новые ошибки — блокируют), затем отдаёт diff + task brief + вывод verify независимому ревьюеру со СВЕЖИМ контекстом и требует строго JSON-вердикт. FAIL при: невалидном/пустом JSON, confidence < 0.7, если ревьюер не осмотрел diff, или если обязательная verify не запускалась. При FAIL — до 2 циклов авто-починки отдельным фиксером (свежий контекст), затем повторная verify+ревью. После 2 неудач — остановка с причиной. Зови как финальный шаг перед коммитом.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_brief: { type: 'string', description: 'Краткое ТЗ: что должно было измениться. Ревьюер сверяет diff с этим.' },
+        verify_commands: { type: 'array', items: { type: 'string' }, description: 'Обязательные verify-команды (из recipe.verify), напр. ["npm run type","npm run test:fast"]. Гейт исполняет их сам; пустой список = FAIL.' },
+        baseline: {
+          type: 'array',
+          description: 'Опц. — снимок verify ДО правок для baseline-aware сравнения: [{command, output}]. Без него любая ошибка в verify блокирует.',
+          items: { type: 'object', properties: { command: { type: 'string' }, output: { type: 'string' } }, required: ['command', 'output'] }
+        },
+        base: { type: 'string', description: 'Опц. — ревью против ветки/ref (git diff base...HEAD). По умолчанию — рабочее дерево vs HEAD.' },
+        provider_id: { type: 'string', description: 'Опц. — провайдер модели-ревьюера/фиксера.' },
+        model: { type: 'string', description: 'Опц. — модель в рамках provider_id.' }
+      },
+      required: ['verify_commands']
+    }
+  },
+  {
     name: 'new_task',
     description: 'Завершить текущий подход и продолжить с ЧИСТОГО контекста. Передай дистиллят: что уже сделано, что осталось, ключевые решения и файлы. Контекст диалога очистится до этого дистиллята (активный todo-лист сохранится) — экономит токены и убирает дрейф на ОЧЕНЬ длинной задаче. Используй, когда история раздулась, а задача далеко не закончена. НЕ для завершённой задачи — тогда просто отчитайся.',
     parameters: {
