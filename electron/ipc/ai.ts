@@ -10,6 +10,8 @@ import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
+import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
+import type { RecipeSpec } from '../ai/skills/types'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
@@ -383,6 +385,10 @@ export function registerAiIpc(deps: AiDeps): void {
      *  история сообщений), а не с turn 0. Невалидный/отсутствующий чекпойнт —
      *  мягкий фоллбэк на обычный старт по incomingMessages. */
     resumeFromRunId?: string
+    /** Этап 4: recipe активного скилла. Когда задан — его workflow-протокол
+     *  наслаивается на skill-промпт (renderRecipeProtocol). Renderer форвардит
+     *  структуру, рендер живёт в main. Нет recipe → обычный skill как раньше. */
+    recipe?: RecipeSpec
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -517,6 +523,11 @@ export function registerAiIpc(deps: AiDeps): void {
     // для reviewer override.
     let composedSystem: string | null = null
     let brain: { content: string; packType: string; tokenEstimate?: number | null } | null = null
+    // Этап 4 (Блок C): наслаиваем recipe-протокол на skill-промпт ОДИН раз здесь и
+    // используем ниже во всех точках инъекции (API path, CLI fallback, CLI provider).
+    // Нет recipe → возвращает overrides.systemPrompt как есть (обычный skill не меняется).
+    // Reviewer override не задаёт recipe → изоляция ревьюера не нарушается.
+    const skillLayerPrompt = applyRecipeToSkillPrompt(overrides?.systemPrompt, overrides?.recipe)
     // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
     // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
     // независимый разбор. Давать ему system-layer + user-layer = заставить
@@ -558,7 +569,7 @@ export function registerAiIpc(deps: AiDeps): void {
         coreMemory,
         agentMode,
         brainContext: brain?.content ?? null,
-        skillPrompt: overrides?.systemPrompt,
+        skillPrompt: skillLayerPrompt ?? undefined,
         // Output style (формат/персона ответа) — глобальная настройка, инжектится
         // в user_layer секцией. 'default'/пусто → ничего не добавляется. ЛИМИТ: только
         // API-путь; CLI-провайдеры (claude-cli/codex-cli/grok-cli/gemini-cli) строят свой
@@ -582,7 +593,7 @@ export function registerAiIpc(deps: AiDeps): void {
       // для CLI через skillPromptForProvider → createProvider → buildCliPrompt
       // секцией <skill_layer> (см. ниже). Это system-сообщение — безвредный
       // fallback для гипотетических не-CLI не-API провайдеров (CLI его отфильтрует).
-      messagesWithSystem = [{ role: 'system', content: overrides.systemPrompt }, ...messages]
+      messagesWithSystem = [{ role: 'system', content: skillLayerPrompt ?? overrides.systemPrompt }, ...messages]
     }
 
     const taggedSender = tagSender(e.sender, projectPath)
@@ -683,7 +694,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // Skill-промпт для CLI-провайдеров: наслаивается секцией <skill_layer> внутри
     // buildCliPrompt (как в API-пути). Не пробрасываем при reviewer override —
     // ревьюер работает в изоляции. Уже содержит anti-stall nudge (Chat.tsx).
-    const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (overrides?.systemPrompt ?? null)
+    const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (skillLayerPrompt ?? null)
 
     // Debug Packet для CLI-провайдеров. API-путь снапшотит composedSystem выше;
     // CLI строит свой stdin-payload внутри buildCliPrompt и раньше ничего не

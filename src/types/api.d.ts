@@ -118,6 +118,25 @@ export interface UserProfile {
 
 /** Skill — переиспользуемый агентский пресет (system prompt + tools + provider).
  *  См. electron/ai/skills/types.ts для серверной структуры. */
+/** Recipe (Этап 4) — зеркало electron/ai/skills/types RecipeSpec для renderer.
+ *  Renderer только форвардит структуру в main; рендер протокола живёт в main. */
+export interface RecipeSpec {
+  id: string
+  kind: string
+  trigger: string[]
+  read_set: string[]
+  steps: string[]
+  verify?: { commands: string[] }
+  reviewer?: { required: boolean }
+  stop: string[]
+  compensation?: {
+    toolMode?: 'native' | 'json'
+    editStrategy?: 'patch' | 'search-replace' | 'whole-file'
+    promptStyle?: 'strict-json' | 'terse' | 'stepwise'
+    knownIssues?: string[]
+  }
+}
+
 export interface Skill {
   id: string
   name?: string
@@ -133,6 +152,8 @@ export interface Skill {
   systemPrompt: string
   source: 'server' | 'user' | 'built-in'
   sourceRef: string
+  /** Этап 4: опциональный recipe-блок (жёсткий workflow-протокол). */
+  recipe?: RecipeSpec
 }
 
 export interface ScheduledTask {
@@ -297,7 +318,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string },
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>

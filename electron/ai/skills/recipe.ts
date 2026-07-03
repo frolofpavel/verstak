@@ -93,3 +93,93 @@ export function parseRecipe(raw: unknown): RecipeSpec | undefined {
     ...(compensation ? { compensation } : {}),
   }
 }
+
+// --- Блок C: рендер протокола recipe и наслоение на skill-промпт ---
+
+/** Человекочитаемое описание каждого шага для инструкции модели. */
+const STEP_TEXT: Record<RecipeStep, string> = {
+  inspect_error: 'Изучи точный текст ошибки/симптома (код, файл, строка) — не гадай о причине.',
+  locate_files: 'Найди конкретные файлы и места, которых касается задача.',
+  read_context: 'Прочитай найденные файлы и связанный контекст ПЕРЕД правкой.',
+  propose_patch: 'Сформулируй минимальный патч; не расширяй scope.',
+  apply_patch: 'Примени патч точечно, сохраняя стиль вокруг.',
+  run_verify: 'Прогони верификацию и добейся зелёного результата.',
+  run_tests: 'Прогони релевантные тесты и убедись, что они проходят по правильной причине.',
+  review: 'Пройди независимое ревью изменений (review_before_commit) перед завершением.',
+  summarize: 'Кратко объясни, что и почему изменил (diff в 1-2 строки).',
+}
+
+/**
+ * Рендерит recipe в жёсткий workflow-протокол для system prompt. Чистая функция —
+ * никакого fs/провайдеров. `profile` (forward-compat, Блок G) — per-model
+ * compensation: если задан, его поля имеют приоритет над recipe.compensation.
+ */
+export function renderRecipeProtocol(recipe: RecipeSpec, profile?: RecipeCompensation): string {
+  const L: string[] = []
+  L.push(`<!-- recipe_protocol: ${recipe.id} -->`)
+  L.push(`## Рабочий протокол задачи (recipe: ${recipe.id})`)
+  L.push('Работай по этому жёсткому пошаговому протоколу, а не в свободном агентном режиме. Соблюдай порядок шагов и границы охвата — это важнее скорости.')
+
+  if (recipe.read_set.length > 0) {
+    L.push('\n### Контекст (read_set) — читай только релевантное из:')
+    for (const g of recipe.read_set) L.push(`- ${g}`)
+    L.push('Не выходи за пределы read_set без явной необходимости.')
+  } else {
+    L.push('\n### Контекст: читай только файлы, прямо относящиеся к задаче. Не расширяй охват.')
+  }
+
+  L.push('\n### Шаги (строго по порядку):')
+  recipe.steps.forEach((s, i) => L.push(`${i + 1}. ${STEP_TEXT[s]}`))
+
+  if (recipe.verify && recipe.verify.commands.length > 0) {
+    L.push('\n### Верификация (обязательна):')
+    for (const c of recipe.verify.commands) L.push(`- \`${c}\``)
+    L.push('Задача не выполнена, пока верификация не зелёная. Учитывается baseline: ошибки, существовавшие ДО правки, не блокируют — блокируют только новые.')
+  }
+
+  if (recipe.reviewer?.required) {
+    L.push('\n### Ревью перед завершением (обязательно):')
+    L.push('Вызови инструмент review_before_commit — независимый ревьюер со свежим контекстом проверит diff + описание задачи + вывод verify. Вердикт fail-closed: невалидный/пустой JSON, confidence < 0.7, ревьюер не осмотрел diff или обязательная verify не запускалась = FAIL. Не завершай задачу без прохождения гейта.')
+  }
+
+  if (recipe.stop.length > 0) {
+    L.push('\n### Готово, когда выполнено ВСЁ:')
+    for (const x of recipe.stop) L.push(`- ${x}`)
+  }
+
+  // Forward-compat: model-compensation. profile перекрывает recipe.compensation.
+  const comp = mergeCompensation(recipe.compensation, profile)
+  if (comp) {
+    if (comp.editStrategy) L.push(`\n### Стратегия правок: предпочитай ${comp.editStrategy}.`)
+    if (comp.knownIssues && comp.knownIssues.length > 0) {
+      L.push('\n### Известные слабые места модели (учитывай):')
+      for (const k of comp.knownIssues) L.push(`- ${k}`)
+    }
+  }
+
+  L.push('\nГраницы: минимальный патч, никаких несвязанных правок, не глуши ошибки заглушками (any/@ts-ignore/skip тестов) без явной причины.')
+  return L.join('\n')
+}
+
+function mergeCompensation(base?: RecipeCompensation, over?: RecipeCompensation): RecipeCompensation | undefined {
+  if (!base && !over) return undefined
+  const merged: RecipeCompensation = { ...(base ?? {}), ...(over ?? {}) }
+  const knownIssues = [...(base?.knownIssues ?? []), ...(over?.knownIssues ?? [])]
+  if (knownIssues.length > 0) merged.knownIssues = knownIssues
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+/**
+ * Наслаивает recipe-протокол на skill-промпт (main-side glue для инъекции).
+ * Нет recipe → возвращает исходный промпт как есть (обычный skill работает как раньше).
+ */
+export function applyRecipeToSkillPrompt(
+  skillPrompt: string | null | undefined,
+  recipe: RecipeSpec | undefined,
+  profile?: RecipeCompensation,
+): string | null | undefined {
+  if (!recipe) return skillPrompt
+  const protocol = renderRecipeProtocol(recipe, profile)
+  if (!skillPrompt) return protocol
+  return `${skillPrompt}\n\n${protocol}`
+}

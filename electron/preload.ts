@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { RecipeSpec } from './ai/skills/types'
 
 contextBridge.exposeInMainWorld('api', {
   projects: {
@@ -142,7 +143,7 @@ contextBridge.exposeInMainWorld('api', {
     sendWithOverrides: (
       messages: unknown[],
       projectPath: string | null,
-      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass' },
+      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec },
       chatId?: string
     ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>

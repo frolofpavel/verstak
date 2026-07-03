@@ -1413,6 +1413,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           ...(overrideProvider ? { providerId: overrideProvider } : {}),
           ...(overrideModel ? { model: overrideModel } : {}),
           ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
+          ...(activeSkill.recipe ? { recipe: activeSkill.recipe } : {}),
           effortLevel: store.effortLevel,
         })
       } else if (store.effortLevel !== 'standard') {
@@ -1523,6 +1524,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         ...(overrideModel ? { model: overrideModel } : {}),
         // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
         ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
+        // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
+        ...(activeSkill.recipe ? { recipe: activeSkill.recipe } : {}),
         effortLevel: useProject.getState().effortLevel,
         agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {})
