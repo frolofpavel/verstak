@@ -3,7 +3,7 @@
 > Единый живой план работ. Открой — и сразу видно: что в проде, что осталось, что в бэклоге.
 > **Обновляется в конце каждой рабочей сессии.** Не держи это в голове — держи здесь.
 
-**Обновлено:** 2026-07-02 · **В проде:** `1.5.50` 🚀 · **Полный аудит приложения (8 осей) — дефекты закрыты (1.5.50)** · **Тесты:** ~1928 зелёных · **Ветка:** main · **Хвост:** чужие зоны (Gateway→Codex, дизайн, скиллы→Павел); inbound TG-пульт — за go Павла
+**Обновлено:** 2026-07-03 · **В проде:** `1.5.50` 🚀 · **tool-mode hardening под OpenAI-compat/китайские модели (в main, не зарелизено, ddd5161)** · **Тесты:** ~1946 зелёных · **Ветка:** main · **Хвост:** чужие зоны (Gateway→Codex, дизайн, скиллы→Павел); inbound TG-пульт — за go Павла
 
 > **1.5.50** 🚀 — **полный аудит приложения по 8 осям (память/баги/безопасность/целостность/мусор/правильность/читаемость/vs-OpenCode) + фиксы.** Многоагентный аудит (Workflow, 39 агентов, адверсариальная верификация) → **32 находки, 28 подтверждено**; закрыты все дефекты (7 HIGH + 2 MEDIUM + LOW) тремя пачками по TDD. **Безопасность:** утечка секретов в память без scanText (авто-захват + memory_save); инъекция `!\`cat .env\`` в slash-команде мимо isForbiddenPath; http-коннектор слал Authorization на хост редиректа; SSRF без DNS-резолва на редирект-хопах коннекторов. **Надёжность (баги):** smart-fallback между провайдерами НЕ срабатывал (провайдеры yield'ят error вместо throw → catch недостижим) + backoff-retry тоже мёртв — вынесен `attemptProviderFallback` + `retriableValue` в withInitialRetry; recall фильтровал session-summary ПОСЛЕ LIMIT → факты выпадали; стрим фонового чата терялся/прилипал при смене проекта; loop-detection оставлял висячие tool_call → 400. **Мусор:** 2 мёртвых компонента (342 стр), мёртвые импорты/экспорты/функции/переменные. **Корректность:** cron dow=7/`*/N`, откат-чекпоинт floor-ordering, decay не удаляет decision/bug/preference. **Ось 8 (vs OpenCode):** глобальный слой правил `~/.verstak/RULES.md`. Коммиты f620cff (security), 3831d23 (bugs), b766664 (cleanup), c2c9262 (user-layer). Деливерабл аудита: `wm1ns4h3o.output`. **Отложено (enhancement, не дефекты):** 4 OpenCode-фичи M/L (edit+rerun сообщения, ручной `/compact`, экспорт транскрипта в MD, undo+redo) + рефактор монолита runApiConversation (~840 стр, §5) + drainSupplements DRY + разрозненные unused-locals + unused-экспорты autoupdate (зона Ильи).
 
@@ -102,6 +102,27 @@
 | 3 | **Решение по архитектуре скиллов** | ✅ Вариант (2) pre-commit хук СДЕЛАН (23.06: `.githooks/pre-commit` → `scripts/precommit.cjs`, type жёстко + тесты с ABI-awareness, gate-lib под TDD, активируется через `npm install`). Остаются на выбор Павла: (1) аудит 50+ скиллов; (3) тонкий `/verstak`-скилл | Павел |
 
 ---
+
+## ✅ Сделано (03.07 — tool-mode hardening под OpenAI-compat/китайские модели, в main, не зарелизено)
+
+Точечный production-hardening существующего agent loop под нестабильный tool-calling дешёвых/китайских моделей (commit `ddd5161`). Без новых больших модулей и без рефакторинга — расширены существующие `smart-fallback.ts` и `runApiConversation`, добавлен один малый слой знаний `tool-mode.ts`.
+
+**Что сделано:**
+- `tool-mode.ts` (новый) — слой model/tool compatibility: `resolveToolMode` (`native`/`json`), `isCoaxableProvider`, `JSON_TOOL_INSTRUCTION`, `IGNORED_TOOLS_NUDGE`. Консервативно: неизвестное → `native`, старые провайдеры не затронуты.
+- JSON tool mode для моделей, плохо держащих native tools (`deepseek-reasoner`/R1, локальный Ollama): один раз инжектится инструкция отдавать вызов текстом `<tool_call>{…}</tool_call>` — его ловит уже существующий `parseTextToolCalls`.
+- Corrective nudge, когда модель ответила прозой и не вызвала ни одного инструмента: `continueAfterPlainReply` для coaxable-провайдеров при `toolCallCount===0` один раз просит выбрать тул или явно завершить (bounded), вместо тихого «готово».
+- Расширены fallback-классы: `FallbackReason` + чистые `classifyFallbackReason`/`fallbackPlan`; `shouldFallback` теперь триггерит и на auth-ошибке (битый ключ → другой провайдер).
+- china→china fallback chains перед дорогими frontier (deepseek↔qwen↔moonshot, потом gemini/claude/openai).
+- Тесты: `tool-mode.test.ts` (новый) + расширен `smart-fallback.test.ts`.
+
+**Почему важно для DeepSeek/Qwen/Kimi/GLM:** симптом «DeepSeek не работает в режиме управления компьютером» = слабая/reasoning-модель игнорировала native `tools`, отвечала прозой → цикл завершался «готово», не сделав ничего. Теперь такие модели либо получают JSON-режим, либо один corrective-retry, либо уходят на соседнюю дешёвую модель — не молчаливый провал.
+
+**Сценарии теперь покрыты:** DeepSeek native OK (без изменений) · Qwen malformed JSON repaired (было) · model ignored tools → corrective retry (новое) · native unsupported → JSON mode (новое) · rate limit → fallback model (усилено china-цепочками) · dangerous command всё так же блокируется policy (fallback-фрейм переиспользует тот же dispatch).
+
+**Ограничения (осознанно оставлены):**
+- `fallbackPlan` пока не полностью встроен в `attemptProviderFallback` (проброшен только расширенный `shouldFallback`).
+- Malformed **native** arguments лечатся реактивно через `tool_result`, без отдельного corrective retry в `openai-compat.ts`.
+- Следующий этап — agentic fallback routing по `FallbackReason`.
 
 ## ✅ Сделано (23.06 ч.2 — reliability-батч, зарелизено в 1.5.29)
 
