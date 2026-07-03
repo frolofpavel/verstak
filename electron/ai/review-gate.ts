@@ -215,3 +215,47 @@ export function formatVerifyReport(runs: VerifyRun[], gate: VerifyGate): string 
     : '\nБлокирующих ошибок нет.'
   return lines.join('\n') + blocking
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Этап 6: recipe enforcement — авто-baseline (P1) + mandatory review gate (P2).
+// Чистая логика; оркестрация — в ipc/ai.ts (agent loop) и review-before-commit.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Мутирующие file-тулзы. Перед первым таким вызовом active recipe с `verify`
+ *  снимает baseline (P1). Минимальный безопасный набор — patch/write тулзы
+ *  coding-рецептов, как в ТЗ (не пытаемся покрыть всё идеально). */
+export const MUTATING_TOOL_NAMES = new Set<string>([
+  'write_file', 'apply_patch', 'edit_file', 'create_file', 'apply_diff',
+])
+export function isMutatingToolName(name: string): boolean {
+  return MUTATING_TOOL_NAMES.has(name)
+}
+
+/**
+ * Снимает baseline verify ДО первой правки (P1, Этап 6). In-memory, per-run.
+ * fail-closed: не-allowlisted / заблокированные политикой / упавшие с throw
+ * команды НЕ попадают в baseline — их отсутствие заставляет `evaluateVerify`
+ * трактовать ошибки как блокирующие (нет false-pass на «пропавшем» baseline).
+ * Политики не обходятся: та же пара isAllowedVerifyCommand + classifyCommand,
+ * что и в самом гейте.
+ */
+export async function snapshotVerifyBaseline(
+  commands: string[],
+  deps: {
+    classifyCommand: (cmd: string) => { allowed: boolean; reason?: string }
+    runCommand: (cmd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  },
+): Promise<VerifyRun[]> {
+  const runs: VerifyRun[] = []
+  for (const raw of commands ?? []) {
+    const cmd = String(raw ?? '').trim()
+    if (!cmd || !isAllowedVerifyCommand(cmd)) continue
+    if (!deps.classifyCommand(cmd).allowed) continue
+    try {
+      const r = await deps.runCommand(cmd)
+      runs.push({ command: cmd, output: `${r.stdout || ''}\n${r.stderr || ''}`.trim(), exitCode: r.exitCode })
+    } catch { /* fail-closed: нет baseline для этой команды */ }
+  }
+  return runs
+}
+

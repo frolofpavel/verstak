@@ -67,12 +67,16 @@ export const reviewBeforeCommitHandler: ToolHandler = {
     const verifyCommands = Array.isArray(args.verify_commands)
       ? (args.verify_commands as unknown[]).map(String).map(s => s.trim()).filter(Boolean)
       : []
-    const baseline: VerifyRun[] | undefined = Array.isArray(args.baseline)
+    // Baseline: явный аргумент модели ИЛИ авто-снапшот из run context (Этап 6 P1).
+    // Модель может забыть передать baseline → берём снятый runtime'ом перед первой
+    // правкой. Без baseline любая ошибка verify блокирует (fail-closed, без false-pass).
+    const explicitBaseline: VerifyRun[] | undefined = Array.isArray(args.baseline) && args.baseline.length
       ? (args.baseline as unknown[]).map(b => {
           const o = b && typeof b === 'object' ? (b as Record<string, unknown>) : {}
           return { command: String(o.command ?? ''), output: String(o.output ?? '') }
         }).filter(b => b.command)
       : undefined
+    const baseline: VerifyRun[] | undefined = explicitBaseline ?? ctx.getRecipeBaseline?.()
 
     const fail = (reason: string) => ({
       id: call.id,

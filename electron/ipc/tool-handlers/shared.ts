@@ -2,6 +2,7 @@
 // Вынесено из electron/ipc/tool-handlers.ts при распиле монолита — поведение не меняется.
 import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
 import type { FileTools } from '../../ai/tools'
+import type { VerifyRun } from '../../ai/review-gate'
 import type { AgentMode } from '../../ai/mode-policy'
 import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
@@ -118,6 +119,10 @@ export interface ToolContext {
   }
   /** ID агентного прогона этого ai:send (Multi-agent Manager, Фаза 4). */
   runId?: string
+  /** Этап 6 P1: авто-снятый baseline verify active recipe (до первой правки).
+   *  review_before_commit берёт его, если модель не передала baseline аргументом.
+   *  undefined → baseline не снимался (нет recipe/verify) → гейт строгий. */
+  getRecipeBaseline?: () => VerifyRun[] | undefined
   /** Записать событие в Timeline прогона (Фаза 4). ОПЦИОНАЛЬНОЕ, best-effort:
    *  ai.ts подкладывает реализацию с try/catch поверх agentRuns.appendEvent.
    *  Дёргается РЯДОМ с существующими ai:event-эмиттерами (emitActivity/

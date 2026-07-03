@@ -12,6 +12,7 @@ import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
 import type { RecipeSpec } from '../ai/skills/types'
+import { isMutatingToolName, snapshotVerifyBaseline, type VerifyRun } from '../ai/review-gate'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
@@ -907,6 +908,7 @@ export function registerAiIpc(deps: AiDeps): void {
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
         toolsAllow: overrides?.toolsAllow ?? null,
+        recipe: overrides?.recipe,
       }).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
@@ -1369,6 +1371,11 @@ export interface AgentRunContext {
    *  native tool-calling доказанно не сработал (модель проигнорировала tools) —
    *  тот же провайдер/модель перезапускается с JSON-инструкцией вызова. */
   forceToolMode?: 'native' | 'json'
+  /** Этап 6: active recipe этого прогона (тот же, что наслаивается на skill-промпт).
+   *  Включает enforcement: авто-снапшот baseline при recipe.verify (P1) и
+   *  обязательный review gate при recipe.reviewer.required (P2). Нет recipe →
+   *  обычный agent run без enforcement. */
+  recipe?: RecipeSpec
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -1579,6 +1586,33 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // Уже в JSON-режиме (или эскалация исчерпана) и всё равно без вызовов →
     // tool_calling_unsupported → сменить модель (force: минуя сетевой shouldFallback-гейт).
     return attemptProviderFallback(new Error('model ignored tools (tool_calling_unsupported)'), true)
+  }
+
+  // ── Этап 6 P1: авто-снапшот baseline verify для active recipe с `verify` ──
+  // Модель не обязана передавать baseline руками в review_before_commit — runtime
+  // снимает его ДО первой правки. In-memory, per-run.
+  const recipeVerifyCommands = (ctx.recipe?.verify?.commands ?? [])
+    .map(c => String(c ?? '').trim()).filter(Boolean)
+  let recipeBaseline: VerifyRun[] | null = null
+  let recipeBaselineTaken = false
+
+  // Лениво снять baseline перед первым мутирующим вызовом. Одноразово на прогон,
+  // даже если снимок частичный/пустой (fail-closed — не ретраим на каждый write).
+  const snapshotRecipeBaselineIfNeeded = async (): Promise<void> => {
+    if (recipeBaselineTaken || !projectPath || recipeVerifyCommands.length === 0) return
+    recipeBaselineTaken = true
+    recipeBaseline = await snapshotVerifyBaseline(recipeVerifyCommands, {
+      classifyCommand: tools.classifyCommand,
+      runCommand: tools.runCommand,
+    })
+    if (agentRuns && runId) {
+      try {
+        agentRuns.appendEvent(runId, 'verify', {
+          label: 'recipe baseline',
+          detail: recipeBaseline.length ? recipeBaseline.map(r => `${r.command}: exit ${r.exitCode}`).join('; ') : 'не снят (нет allowlisted verify)',
+        })
+      } catch { /* best-effort */ }
+    }
   }
 
   try {
@@ -1900,6 +1934,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const toolResults: ToolResult[] = new Array(toolCalls.length)
     toolCallCount += toolCalls.length  // Manager (Фаза 2): tool_count прогона
 
+    // P1 (Этап 6): снять baseline verify ДО первого мутирующего вызова active recipe.
+    if (!recipeBaselineTaken && recipeVerifyCommands.length > 0 && toolCalls.some(c => isMutatingToolName(c.name))) {
+      await snapshotRecipeBaselineIfNeeded()
+    }
+
     // Dispatch via tool-handlers registry. Each handler knows its own scheduling
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
@@ -1941,6 +1980,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         if (!agentRuns || !runId) return
         try { agentRuns.appendEvent(runId, kind, p) } catch { /* best-effort */ }
       },
+      // Этап 6 P1: авто-baseline recipe для review_before_commit (если модель
+      // не передала baseline аргументом). undefined → снимка нет → строгий гейт.
+      getRecipeBaseline: () => recipeBaseline ?? undefined,
       // attest_verification (Verification Фаза 2): снимок реально записанных за
       // прогон файлов — для сверки claimed vs actual в DoD-артефакте.
       runFilesTouched: () => Array.from(filesTouched),

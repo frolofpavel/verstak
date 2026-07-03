@@ -8,6 +8,8 @@ import {
   formatVerifyReport,
   REVIEW_CONFIDENCE_THRESHOLD,
   MAX_AUTOFIX_CYCLES,
+  isMutatingToolName,
+  snapshotVerifyBaseline,
 } from '../../electron/ai/review-gate'
 
 describe('isAllowedVerifyCommand', () => {
@@ -144,5 +146,92 @@ describe('константы гейта', () => {
   it('порог и лимит autofix соответствуют решению Павла', () => {
     expect(REVIEW_CONFIDENCE_THRESHOLD).toBe(0.7)
     expect(MAX_AUTOFIX_CYCLES).toBe(2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Этап 6 P1: авто-снапшот baseline
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isMutatingToolName', () => {
+  it('распознаёт file-edit/patch тулзы', () => {
+    expect(isMutatingToolName('write_file')).toBe(true)
+    expect(isMutatingToolName('apply_patch')).toBe(true)
+    expect(isMutatingToolName('edit_file')).toBe(true)
+  })
+  it('не считает read/verify тулзы мутирующими', () => {
+    expect(isMutatingToolName('read_file')).toBe(false)
+    expect(isMutatingToolName('run_command')).toBe(false)
+    expect(isMutatingToolName('review_before_commit')).toBe(false)
+    expect(isMutatingToolName('get_project_map')).toBe(false)
+  })
+})
+
+describe('snapshotVerifyBaseline — P1', () => {
+  const okClassify = () => ({ allowed: true as const })
+
+  it('снимает baseline по allowlisted verify-командам (output+exit)', async () => {
+    const calls: string[] = []
+    const runs = await snapshotVerifyBaseline(['npm run type'], {
+      classifyCommand: okClassify,
+      runCommand: async (cmd) => { calls.push(cmd); return { stdout: '✅ нет ошибок', stderr: '', exitCode: 0 } },
+    })
+    expect(calls).toEqual(['npm run type'])
+    expect(runs).toEqual([{ command: 'npm run type', output: '✅ нет ошибок', exitCode: 0 }])
+  })
+
+  it('пропускает не-allowlisted команды (fail-closed, не в baseline)', async () => {
+    let ran = false
+    const runs = await snapshotVerifyBaseline(['rm -rf /', 'git push'], {
+      classifyCommand: okClassify,
+      runCommand: async () => { ran = true; return { stdout: '', stderr: '', exitCode: 0 } },
+    })
+    expect(ran).toBe(false)
+    expect(runs).toEqual([])
+  })
+
+  it('пропускает команды, заблокированные политикой (не обходим command-policy)', async () => {
+    const runs = await snapshotVerifyBaseline(['npm run type'], {
+      classifyCommand: () => ({ allowed: false, reason: 'денилист' }),
+      runCommand: async () => { throw new Error('не должно запуститься') },
+    })
+    expect(runs).toEqual([])
+  })
+
+  it('throw в runCommand → нет baseline для команды (без false-pass)', async () => {
+    const runs = await snapshotVerifyBaseline(['npm run type'], {
+      classifyCommand: okClassify,
+      runCommand: async () => { throw new Error('spawn failed') },
+    })
+    expect(runs).toEqual([])
+  })
+
+  it('baseline unavailable + красный после правки → evaluateVerify блокирует (нет false-pass)', async () => {
+    // baseline не снялся (пустой) → gate идёт строгим путём: exit≠0/сигнатуры блокируют.
+    const baseline = await snapshotVerifyBaseline(['npm run type'], {
+      classifyCommand: () => ({ allowed: false }),
+      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    })
+    expect(baseline).toEqual([])
+    const gate = evaluateVerify(
+      [{ command: 'npm run type', output: 'src/a.ts(1,2): error TS2322: bad', exitCode: 1 }],
+      baseline,
+    )
+    expect(gate.pass).toBe(false)
+    expect(gate.blocking.length).toBeGreaterThan(0)
+  })
+
+  it('снятый baseline reused: pre-existing red не блокирует, новая — блокирует', async () => {
+    const preExisting = 'src/a.ts(10,5): error TS2322: type mismatch'
+    const baseline = await snapshotVerifyBaseline(['npm run type'], {
+      classifyCommand: okClassify,
+      runCommand: async () => ({ stdout: preExisting, stderr: '', exitCode: 1 }),
+    })
+    expect(baseline).toHaveLength(1)
+    // тот же red после правки → не блок
+    expect(evaluateVerify([{ command: 'npm run type', output: preExisting, exitCode: 1 }], baseline).pass).toBe(true)
+    // новая ошибка поверх baseline → блок
+    const g = evaluateVerify([{ command: 'npm run type', output: preExisting + '\nsrc/b.ts(3,1): error TS1005: ; expected', exitCode: 1 }], baseline)
+    expect(g.pass).toBe(false)
   })
 })
