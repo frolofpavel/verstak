@@ -29,6 +29,7 @@ const DEFAULT_BATCH_COST_CAP_CENTS = 300
  *   - yandex-gpt    → yandexFolderId (yandex_folder_id)
  *   - gigachat      → gigachatClientSecret (gigachat_client_secret)
  *   - custom-openai → customBaseUrl/customModels (custom_openai_baseurl/_models)
+ *   - verstak-gateway → customBaseUrl (verstak_gateway_baseurl kill-switch)
  *   - claude-cli    → claudeOauthToken (claude_code_oauth_token, для headless+Max)
  * Секреты добираются через ctx.getSecretForDelegate (тот же reader, что и в
  * главном ai.ts:405-427). Без этого суб на 4+ провайдерах падает «Folder ID
@@ -43,9 +44,13 @@ function buildSubCreateOptions(
 ): CreateOptions {
   const getSecret = ctx.getSecretForDelegate
   let customModels: string[] | undefined
+  let customBaseUrl: string | undefined
   if (providerId === 'custom-openai') {
     const modelsRaw = getSecret?.('custom_openai_models')
     if (modelsRaw) customModels = modelsRaw.split(',').map(s => s.trim()).filter(Boolean)
+    customBaseUrl = getSecret?.('custom_openai_baseurl') ?? undefined
+  } else if (providerId === 'verstak-gateway') {
+    customBaseUrl = getSecret?.('verstak_gateway_baseurl') ?? undefined
   }
   return {
     apiKey,
@@ -53,7 +58,7 @@ function buildSubCreateOptions(
     cwd: ctx.projectPath,
     signal,
     claudeOauthToken: providerId === 'claude-cli' ? (getSecret?.('claude_code_oauth_token') ?? null) : undefined,
-    customBaseUrl: providerId === 'custom-openai' ? (getSecret?.('custom_openai_baseurl') ?? undefined) : undefined,
+    customBaseUrl,
     customModels,
     yandexFolderId: providerId === 'yandex-gpt' ? (getSecret?.('yandex_folder_id') ?? undefined) : undefined,
     gigachatClientSecret: providerId === 'gigachat' ? (getSecret?.('gigachat_client_secret') ?? undefined) : undefined,
