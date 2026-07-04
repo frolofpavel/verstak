@@ -68,6 +68,7 @@ const PRICES: Record<string, { input: number; output: number }> = {
   'deepseek-chat':               { input: 0.14, output: 0.28 },
   'deepseek-reasoner':           { input: 0.14, output: 0.28 },
   // Moonshot Kimi (platform.kimi.ai pricing, $ / 1M)
+  'kimi-k2.7-code':              { input: 0.95, output: 4.00 },
   'kimi-k2.6':                   { input: 0.95, output: 4.00 },
   'kimi-k2.5':                   { input: 0.60, output: 3.00 },
   // Qwen / DashScope intl (alibabacloud.com/help/en/model-studio/model-pricing, $ / 1M)

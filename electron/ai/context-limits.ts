@@ -6,6 +6,8 @@
  * Это безопасно: лучше сжать чуть раньше, чем словить ошибку провайдера.
  */
 
+import { getRegisteredContextLimit } from './model-registry'
+
 export const CONTEXT_LIMITS: Record<string, number> = {
   // Gemini
   'gemini-3-pro': 1_000_000,
@@ -35,6 +37,7 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'deepseek-chat': 1_000_000,
   'deepseek-reasoner': 1_000_000,
   // Moonshot Kimi (platform.kimi.ai/docs/models.md)
+  'kimi-k2.7-code': 256_000,
   'kimi-k2.6': 256_000,
   'kimi-k2.5': 256_000,
   'moonshot-v1-128k': 128_000,
@@ -66,7 +69,7 @@ export function estimateTokens(text: string): number {
 
 /** Возвращает лимит контекста для модели (с консервативным дефолтом). */
 export function getContextLimit(model: string): number {
-  return CONTEXT_LIMITS[model] ?? 128_000
+  return CONTEXT_LIMITS[model] ?? getRegisteredContextLimit(model) ?? 128_000
 }
 
 /** Порог авто-компакшна — 95% контекстного окна. */
