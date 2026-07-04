@@ -4,6 +4,7 @@ import { useT } from '../i18n'
 import type { Translations } from '../i18n'
 import type { AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO } from '../types/api'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
+import { summarizeAgentRunPipeline } from '../lib/agent-run-pipeline'
 import { EmptyState } from './EmptyState'
 
 function fmtDuration(start: number, end: number | null): string {
@@ -152,6 +153,7 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   const uniqueFiles = Array.from(new Set(files))
   const verifyEvents = events.filter(e => e.kind === 'verify')
   const tree: TreeNode[] = buildAgentTree(subs)
+  const pipelineStages = summarizeAgentRunPipeline(events)
 
   return (
     <div className="gg-run-detail">
@@ -194,6 +196,20 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
         </button>
         {proofMsg && <span className="gg-run-proof-msg">{proofMsg}</span>}
         {captureMsg && <span className="gg-run-proof-msg">{captureMsg}</span>}
+      </div>
+      <div className="gg-run-pipeline" aria-label="Agency pipeline">
+        {pipelineStages.map((stage, index) => (
+          <div key={stage.id} className="gg-run-pipeline-stage-wrap">
+            <span
+              className={`gg-run-pipeline-stage is-${stage.state}`}
+              title={stage.detail ?? stage.label}
+            >
+              <span className="gg-run-pipeline-dot" aria-hidden />
+              <span className="gg-run-pipeline-label">{stage.label}</span>
+            </span>
+            {index < pipelineStages.length - 1 && <span className="gg-run-pipeline-arrow" aria-hidden>→</span>}
+          </div>
+        ))}
       </div>
       {/* (1) Timeline событий */}
       <div className="gg-run-section">
