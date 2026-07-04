@@ -550,7 +550,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
     return patch
   }),
-  pushActivity: (entry) => set(s => ({ activity: [...s.activity, entry] })),
+  // Дедуп по id: один и тот же tool-call (callId+name) может прийти дважды
+  // (повторная доставка события / реплей) — иначе React ловит дубль-key на
+  // одинаковых id в стриме активности. Существующий → обновляем на месте.
+  pushActivity: (entry) => set(s => (
+    s.activity.some(a => a.id === entry.id)
+      ? { activity: s.activity.map(a => a.id === entry.id ? { ...a, ...entry } : a) }
+      : { activity: [...s.activity, entry] }
+  )),
   updateActivity: (id, patch) => set(s => ({
     activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
