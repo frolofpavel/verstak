@@ -38,6 +38,12 @@ const { values, positionals } = parseArgs({
     mode:     { type: 'string', default: 'auto' },
     stdin:    { type: 'boolean', default: false },
     json:     { type: 'boolean', default: false },
+    recipe:   { type: 'string' },
+    task:     { type: 'string' },
+    workspace:{ type: 'string' },
+    'max-turns': { type: 'string' },
+    'trace-json': { type: 'boolean', default: false },
+    'dry-run': { type: 'boolean', default: false },
     help:     { type: 'boolean', short: 'h', default: false },
     version:  { type: 'boolean', short: 'v', default: false },
   },
@@ -64,6 +70,7 @@ Verstak CLI — AI-агент в терминале без GUI
   verstak doctor          Проверить настроенные провайдеры (--json для machine-readable)
   verstak status          То же, что doctor
   verstak models          Список провайдеров и env-переменных
+  verstak recipe run      Запустить coding recipe в headless режиме
 
 Опции:
   -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
@@ -76,6 +83,12 @@ Verstak CLI — AI-агент в терминале без GUI
                    auto — все инструменты без подтверждения
                    ask  — подтверждение перед write/run
                    plan — только чтение, без записи
+  --recipe         Recipe id для "recipe run": bugfix, test-fix, typescript-error...
+  --task           Текст задачи для "recipe run" (или positional после run)
+  --workspace      Alias для --project
+  --max-turns      Лимит ходов agent loop (по умолч: 20)
+  --trace-json     Добавить machine-readable trace в JSON output
+  --dry-run        Для recipe run: показать protocol/trace без вызова провайдера
   --stdin          Читать промпт из stdin
   --json           Вывод в JSON-формате
   -v, --version    Показать версию
@@ -159,7 +172,7 @@ function resolveApiKey(provider, explicit) {
 // Путь к проекту
 // ---------------------------------------------------------------------------
 
-const projectPath = resolve(process.cwd(), values.project ?? '.')
+const projectPath = resolve(process.cwd(), values.workspace ?? values.project ?? '.')
 
 // ---------------------------------------------------------------------------
 // Bounded local commands (F14, claw-code parity): doctor / status / models —
@@ -192,6 +205,7 @@ function providerSource(provider) {
 }
 
 const COMMAND = positionals[0]
+const SUBCOMMAND = positionals[1]
 if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
   const pkgVersion = (() => {
     try { return JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8')).version }
@@ -221,6 +235,122 @@ if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
   process.exit(0)
 }
 
+const isRecipeRun = COMMAND === 'recipe' && SUBCOMMAND === 'run'
+
+// ---------------------------------------------------------------------------
+// Headless coding recipes
+// ---------------------------------------------------------------------------
+
+const STEP_TEXT = {
+  inspect_error: 'Изучи точный текст ошибки/симптома (код, файл, строка) — не гадай о причине.',
+  locate_files: 'Найди конкретные файлы и места, которых касается задача.',
+  read_context: 'Прочитай найденные файлы и связанный контекст ПЕРЕД правкой.',
+  propose_patch: 'Сформулируй минимальный патч; не расширяй scope.',
+  apply_patch: 'Примени патч точечно, сохраняя стиль вокруг.',
+  run_verify: 'Прогони верификацию и добейся зелёного результата.',
+  run_tests: 'Прогони релевантные тесты и убедись, что они проходят по правильной причине.',
+  review: 'Пройди независимое ревью изменений (review_before_commit) перед завершением.',
+  summarize: 'Кратко объясни, что и почему изменил (diff в 1-2 строки).',
+}
+
+const BUILT_IN_RECIPES = [
+  {
+    id: 'small-edit',
+    kind: 'coding',
+    read_set: [],
+    steps: ['locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'summarize'],
+    verify: { commands: ['npm run type'] },
+    reviewer: { required: false },
+    stop: ['change_applied', 'type_green', 'no_unrelated_changes'],
+  },
+  {
+    id: 'typescript-error',
+    kind: 'coding',
+    read_set: ['tsconfig*.json', '**/*.ts', '**/*.tsx'],
+    steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'summarize'],
+    verify: { commands: ['npm run type'] },
+    reviewer: { required: false },
+    stop: ['typecheck_green', 'diff_explained', 'no_unrelated_changes'],
+  },
+  {
+    id: 'bugfix',
+    kind: 'coding',
+    read_set: ['**/*.ts', '**/*.tsx', 'tests/**'],
+    steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_tests', 'run_verify', 'review', 'summarize'],
+    verify: { commands: ['npm run type', 'npm run test:fast'] },
+    reviewer: { required: true },
+    stop: ['root_cause_found', 'tests_green', 'type_green', 'reviewer_pass'],
+  },
+  {
+    id: 'test-fix',
+    kind: 'coding',
+    read_set: ['tests/**', '**/*.test.ts', 'vitest.config*', 'package.json'],
+    steps: ['inspect_error', 'locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_tests', 'summarize'],
+    verify: { commands: ['npm run test:fast'] },
+    reviewer: { required: false },
+    stop: ['tests_green', 'no_unrelated_changes', 'diff_explained'],
+  },
+  {
+    id: 'refactor-safe',
+    kind: 'coding',
+    read_set: ['**/*.ts', '**/*.tsx'],
+    steps: ['locate_files', 'read_context', 'propose_patch', 'apply_patch', 'run_verify', 'run_tests', 'review', 'summarize'],
+    verify: { commands: ['npm run type', 'npm run test:fast'] },
+    reviewer: { required: true },
+    stop: ['behavior_unchanged', 'type_green', 'tests_green', 'reviewer_pass'],
+  },
+  {
+    id: 'review-before-commit',
+    kind: 'coding',
+    read_set: [],
+    steps: ['run_verify', 'run_tests', 'review', 'summarize'],
+    verify: { commands: ['npm run type', 'npm run test:fast'] },
+    reviewer: { required: true },
+    stop: ['verify_green', 'reviewer_pass', 'diff_explained'],
+  },
+]
+
+function loadRecipe(id) {
+  return BUILT_IN_RECIPES.find(r => r.id === id) ?? null
+}
+
+function renderRecipeProtocol(recipe) {
+  const L = []
+  L.push(`<!-- recipe_protocol: ${recipe.id} -->`)
+  L.push(`## Рабочий протокол задачи (recipe: ${recipe.id})`)
+  L.push('Работай по этому жёсткому пошаговому протоколу, а не в свободном агентном режиме. Соблюдай порядок шагов и границы охвата — это важнее скорости.')
+
+  if (recipe.read_set.length > 0) {
+    L.push('\n### Контекст (read_set) — читай только релевантное из:')
+    for (const g of recipe.read_set) L.push(`- ${g}`)
+    L.push('Не выходи за пределы read_set без явной необходимости.')
+  } else {
+    L.push('\n### Контекст: читай только файлы, прямо относящиеся к задаче. Не расширяй охват.')
+  }
+
+  L.push('\n### Шаги (строго по порядку):')
+  recipe.steps.forEach((s, i) => L.push(`${i + 1}. ${STEP_TEXT[s] ?? s}`))
+
+  if (recipe.verify?.commands?.length) {
+    L.push('\n### Верификация (обязательна):')
+    for (const c of recipe.verify.commands) L.push(`- \`${c}\``)
+    L.push('Задача не выполнена, пока верификация не зелёная. Учитывается baseline: ошибки, существовавшие ДО правки, не блокируют — блокируют только новые.')
+  }
+
+  if (recipe.reviewer?.required) {
+    L.push('\n### Ревью перед завершением (обязательно):')
+    L.push('Вызови инструмент review_before_commit — независимый review gate проверит diff + task brief + вывод verify. Не завершай задачу без прохождения гейта.')
+  }
+
+  if (recipe.stop.length > 0) {
+    L.push('\n### Готово, когда выполнено ВСЁ:')
+    for (const x of recipe.stop) L.push(`- ${x}`)
+  }
+
+  L.push('\nГраницы: минимальный патч, никаких несвязанных правок, не глуши ошибки заглушками (any/@ts-ignore/skip тестов) без явной причины.')
+  return L.join('\n')
+}
+
 // ---------------------------------------------------------------------------
 // Чтение промпта
 // ---------------------------------------------------------------------------
@@ -236,9 +366,27 @@ async function readStdin() {
   })
 }
 
-let prompt = positionals.join(' ').trim()
+let recipeSpec = null
+let recipeProtocol = ''
+let prompt = isRecipeRun
+  ? String(values.task ?? positionals.slice(2).join(' ')).trim()
+  : positionals.join(' ').trim()
 if (values.stdin || (!prompt && !process.stdin.isTTY)) {
   prompt = await readStdin()
+}
+
+if (isRecipeRun) {
+  const recipeId = String(values.recipe ?? '').trim()
+  if (!recipeId) {
+    console.error('Ошибка: recipe run требует --recipe <id>')
+    process.exit(1)
+  }
+  recipeSpec = loadRecipe(recipeId)
+  if (!recipeSpec) {
+    console.error(`Ошибка: неизвестный recipe "${recipeId}". Доступно: ${BUILT_IN_RECIPES.map(r => r.id).join(', ')}`)
+    process.exit(1)
+  }
+  recipeProtocol = renderRecipeProtocol(recipeSpec)
 }
 
 if (!prompt) {
@@ -282,7 +430,7 @@ async function streamResponse(res) {
 // Системный промпт
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(projectPath) {
+function buildSystemPrompt(projectPath, recipeProtocol = '') {
   const lines = [
     'Ты — AI-ассистент для разработки. Работаешь в режиме CLI без GUI.',
     `Корень проекта: ${projectPath}`,
@@ -290,6 +438,10 @@ function buildSystemPrompt(projectPath) {
     'Перед правкой кода — прочитай файл. Все пути — относительные от корня проекта.',
     'После изменений — кратко сообщи что сделано.',
   ]
+
+  if (recipeProtocol) {
+    lines.push(`\n--- Headless Recipe Protocol ---\n${recipeProtocol}`)
+  }
 
   // Попробуем загрузить user-layer (CLAUDE.md / AGENTS.md / .verstak/RULES.md)
   const candidates = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.verstak/RULES.md']
@@ -1019,15 +1171,27 @@ function getProviderStream(provider, apiKey, model, messages, tools) {
 // Основной агентный цикл
 // ---------------------------------------------------------------------------
 
-async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt }) {
-  const systemPrompt = buildSystemPrompt(projectPath)
+async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt, recipe, recipeProtocol, maxTurns, traceJson }) {
+  const systemPrompt = buildSystemPrompt(projectPath, recipeProtocol)
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: prompt }
   ]
 
   const allAssistantTexts = []
-  const MAX_TURNS = 20
+  const trace = {
+    provider,
+    model: model ?? '(default)',
+    recipeId: recipe?.id ?? null,
+    toolCalls: [],
+    firstMutatingTool: null,
+    baselineTaken: false,
+    verifyCommands: recipe?.verify?.commands ?? [],
+    reviewGate: recipe?.reviewer?.required ? 'required' : 'not-required',
+    finalStatus: 'running',
+    failureReason: null,
+  }
+  const MAX_TURNS = maxTurns
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let fullText = ''
@@ -1068,6 +1232,10 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     // Выполняем инструменты
     const toolResults = []
     for (const call of toolCalls) {
+      trace.toolCalls.push({ turn, name: call.name, args: scrubTraceArgs(call.args) })
+      if (!trace.firstMutatingTool && isMutatingToolName(call.name)) {
+        trace.firstMutatingTool = call.name
+      }
       let result
       try {
         result = await executeToolCli(call.name, call.args, projectPath, mode)
@@ -1080,6 +1248,8 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     // Добавляем результаты как user-сообщение
     messages.push({ role: 'user', content: '', toolResults })
   }
+
+  trace.finalStatus = 'success'
 
   if (!jsonMode) {
     // Финальный перенос строки если вывод не заканчивается на \n
@@ -1095,9 +1265,24 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       prompt,
       response: allAssistantTexts.join('\n'),
       messages: messages.filter(m => m.role !== 'system'),
+      ...(traceJson || recipe ? { trace } : {}),
     }
     console.log(JSON.stringify(output, null, 2))
   }
+}
+
+function scrubTraceArgs(args) {
+  const out = {}
+  for (const [k, v] of Object.entries(args ?? {})) {
+    if (/key|token|secret|password|cookie|authorization/i.test(k)) out[k] = '[REDACTED]'
+    else if (typeof v === 'string') out[k] = v.length > 300 ? v.slice(0, 300) + '…' : v
+    else out[k] = v
+  }
+  return out
+}
+
+function isMutatingToolName(name) {
+  return new Set(['write_file', 'apply_patch', 'edit_file', 'create_file', 'apply_diff']).has(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1290,33 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
 // ---------------------------------------------------------------------------
 
 try {
+  const maxTurns = Math.max(1, Math.min(100, Number(values['max-turns'] ?? 20) || 20))
+  if (isRecipeRun && values['dry-run']) {
+    const trace = {
+      provider: values.provider,
+      model: values.model ?? '(default)',
+      recipeId: recipeSpec.id,
+      toolCalls: [],
+      firstMutatingTool: null,
+      baselineTaken: false,
+      verifyCommands: recipeSpec.verify?.commands ?? [],
+      reviewGate: recipeSpec.reviewer?.required ? 'required' : 'not-required',
+      finalStatus: 'dry-run',
+      failureReason: null,
+    }
+    const payload = {
+      success: true,
+      command: 'recipe run',
+      projectPath,
+      task: prompt,
+      recipe: recipeSpec,
+      protocol: recipeProtocol,
+      trace,
+    }
+    console.log(values.json || values['trace-json'] ? JSON.stringify(payload, null, 2) : recipeProtocol)
+    process.exit(0)
+  }
+
   const apiKey = resolveApiKey(values.provider, values.key)
   await runAgent({
     provider: values.provider,
@@ -1114,6 +1326,10 @@ try {
     mode: values.mode,
     json: values.json,
     prompt,
+    recipe: recipeSpec,
+    recipeProtocol,
+    maxTurns,
+    traceJson: values['trace-json'],
   })
   process.exit(0)
 } catch (err) {
