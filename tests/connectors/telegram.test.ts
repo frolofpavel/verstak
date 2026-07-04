@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { createTelegramConnector } from '../../electron/connectors/telegram'
 
 const noToken = {
@@ -74,6 +77,33 @@ describe('Telegram connector', () => {
     ) as { error?: string }
     // Должна быть какая-то ошибка, но НЕ not-whitelisted (потому что списка нет)
     expect(res.error).not.toBe('not-whitelisted')
+  })
+
+  it('send_document can upload a local document_path as multipart form data', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gg-tg-doc-'))
+    const file = join(dir, 'proof.pdf')
+    writeFileSync(file, Buffer.from('%PDF-test'))
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
+      ok: true,
+      json: async () => ({ ok: true, result: { document: true } }),
+      text: async () => '{"ok":true}'
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const conn = createTelegramConnector()
+      const res = await conn.query(
+        { op: 'send_document', chat_id: '111', document_path: file, caption: 'Proof Pack' },
+        withToken('["111"]')
+      )
+
+      expect(res).toEqual({ document: true })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(String(url)).toContain('/sendDocument')
+      expect(init.body).toBeInstanceOf(FormData)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('info() с корректными полями', () => {

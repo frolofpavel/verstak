@@ -287,6 +287,12 @@ contextBridge.exposeInMainWorld('api', {
   proof: {
     generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<
       { ok: boolean; jsonPath?: string; htmlPath?: string; markdownPath?: string; html?: string; markdown?: string; error?: string }
+    >,
+    exportPdf: (runId: string) => ipcRenderer.invoke('proof:export-pdf', runId) as Promise<
+      { ok: boolean; pdfPath?: string; error?: string }
+    >,
+    sendTelegram: (runId: string, opts?: { chatId?: string }) => ipcRenderer.invoke('proof:send-telegram', runId, opts) as Promise<
+      { ok: boolean; pdfPath?: string; result?: unknown; error?: string }
     >
   },
   workflows: {

@@ -78,6 +78,32 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
     setProofBusy(false)
   }, [runId, setPreviewArtifact])
 
+  const exportProofPdf = useCallback(async () => {
+    setProofBusy(true); setProofMsg(null)
+    try {
+      const res = await window.api.proof.exportPdf(runId)
+      setProofMsg(res.ok && res.pdfPath
+        ? `✓ PDF Proof Pack собран: ${res.pdfPath}`
+        : `Не удалось собрать PDF: ${res.error ?? 'ошибка'}`)
+    } catch {
+      setProofMsg('Не удалось собрать PDF Proof Pack')
+    }
+    setProofBusy(false)
+  }, [runId])
+
+  const sendProofTelegram = useCallback(async () => {
+    setProofBusy(true); setProofMsg(null)
+    try {
+      const res = await window.api.proof.sendTelegram(runId)
+      setProofMsg(res.ok
+        ? '✓ Proof Pack отправлен в Telegram'
+        : `Не удалось отправить в Telegram: ${res.error ?? 'ошибка'}`)
+    } catch {
+      setProofMsg('Не удалось отправить Proof Pack в Telegram')
+    }
+    setProofBusy(false)
+  }, [runId])
+
   // Skill Capture: сохранить этот прогон как скилл-скаффолд в ~/.verstak/skills/.
   // Это черновик — пользователь правит перед использованием (human-approve).
   const captureSkill = useCallback(async () => {
@@ -138,6 +164,24 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
           title="Собрать доказательство выполнения: изменённые файлы, проверки (DoD), стоимость, таймлайн, решения — в proof.json + proof.html"
         >
           🔏 {proofBusy ? 'Собираю…' : 'Proof Pack'}
+        </button>
+        <button
+          type="button"
+          className="gg-btn gg-btn-sm"
+          onClick={() => void exportProofPdf()}
+          disabled={proofBusy}
+          title="Собрать PDF-файл Proof Pack рядом с proof.json/html/md"
+        >
+          PDF
+        </button>
+        <button
+          type="button"
+          className="gg-btn gg-btn-sm"
+          onClick={() => void sendProofTelegram()}
+          disabled={proofBusy}
+          title="Отправить PDF Proof Pack в Telegram через настроенный telegram_notify_chat_id"
+        >
+          Telegram
         </button>
         <button
           type="button"

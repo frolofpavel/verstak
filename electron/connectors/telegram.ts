@@ -18,6 +18,8 @@
  *     модель сгенерила API key, он не уйдёт клиенту).
  */
 
+import { readFile } from 'fs/promises'
+import { basename } from 'path'
 import type { Connector, ConnectorInfo, ConnectorContext } from './types'
 import { scanText } from '../ai/secret-scanner'
 
@@ -130,13 +132,25 @@ async function sendDocument(token: string, args: Record<string, unknown>, ctx: C
   // Yandex Disk или другое облако, затем шлите ссылку. Multipart добавим в V3.1.
   const chatId = String(args.chat_id ?? '')
   const documentUrl = String(args.document_url ?? '')
+  const documentPath = String(args.document_path ?? '')
   const caption = args.caption ? String(args.caption) : undefined
-  if (!chatId || !documentUrl) {
+  if (!chatId || (!documentUrl && !documentPath)) {
     return { error: 'bad-args', message: 'send_document V1 требует chat_id + document_url (HTTP). Файл должен быть публично доступен.' }
   }
   const whitelistCheck = checkWhitelist(chatId, ctx)
   if (whitelistCheck) return whitelistCheck
   recordSend(chatId)
+  if (documentPath) {
+    const file = await readFile(documentPath)
+    const form = new FormData()
+    form.set('chat_id', chatId)
+    form.set('document', new Blob([file]), basename(documentPath))
+    if (caption) {
+      const scan = scanText(caption)
+      form.set('caption', scan.hits.length > 0 ? scan.redacted : caption)
+    }
+    return await callBotForm(token, 'sendDocument', form, ctx)
+  }
   return await callBot(token, 'sendDocument', {
     chat_id: chatId,
     document: documentUrl,
@@ -175,6 +189,20 @@ async function callBot(token: string, method: string, body: Record<string, unkno
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: ctx.signal
+  })
+  const payload = await res.json() as { ok: boolean; result?: unknown; description?: string; error_code?: number }
+  if (!payload.ok) {
+    throw new Error(`Telegram ${method} failed: ${payload.error_code} ${payload.description}`)
+  }
+  return payload.result
+}
+
+async function callBotForm(token: string, method: string, form: FormData, ctx: ConnectorContext): Promise<unknown> {
+  const url = `${TG_API}/bot${token}/${method}`
+  const res = await fetch(url, {
+    method: 'POST',
+    body: form,
     signal: ctx.signal
   })
   const payload = await res.json() as { ok: boolean; result?: unknown; description?: string; error_code?: number }

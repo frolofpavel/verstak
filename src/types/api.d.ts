@@ -473,6 +473,8 @@ declare global {
       /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html + proof.md). */
       proof: {
         generate: (runId: string) => Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; markdownPath?: string; html?: string; markdown?: string; error?: string }>
+        exportPdf: (runId: string) => Promise<{ ok: boolean; pdfPath?: string; error?: string }>
+        sendTelegram: (runId: string, opts?: { chatId?: string }) => Promise<{ ok: boolean; pdfPath?: string; result?: unknown; error?: string }>
       }
       workflows: {
         list: () => Promise<WorkflowSummary[]>

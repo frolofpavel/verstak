@@ -47,7 +47,13 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
     registerProofIpc({
       agentRuns, verifications,
       getProjectRoot: () => dir,
-      queryAuditForRun: () => []
+      queryAuditForRun: () => [],
+      getSecret: (key) => {
+        if (key === 'telegram_bot_token') return '123:abc'
+        if (key === 'telegram_notify_chat_id') return '777'
+        if (key === 'telegram_chat_whitelist') return '["777"]'
+        return null
+      }
     })
   })
   afterEach(() => { db.close(); rmSync(dir, { recursive: true, force: true }) })
@@ -71,6 +77,33 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
     expect(res.markdown).toContain('## Review Gate')
     // таймлайн содержит значимые события
     expect(pack.timeline.map((e: { kind: string }) => e.kind)).toContain('verify')
+  })
+
+  it('proof:export-pdf writes a local PDF next to the proof pack', async () => {
+    const res = await invoke<Promise<{ ok: boolean; pdfPath?: string }>>('proof:export-pdf', 'run-test1234')
+    expect(res.ok).toBe(true)
+    expect(existsSync(res.pdfPath!)).toBe(true)
+    const pdf = readFileSync(res.pdfPath!)
+    expect(pdf.subarray(0, 5).toString('utf-8')).toBe('%PDF-')
+    expect(pdf.toString('latin1')).toContain('Proof Pack run-test1234')
+  })
+
+  it('proof:send-telegram exports PDF and sends it through Telegram connector', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
+      ok: true,
+      json: async () => ({ ok: true, result: { message_id: 42 } }),
+      text: async () => '{"ok":true}'
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await invoke<Promise<{ ok: boolean; pdfPath?: string; result?: unknown }>>('proof:send-telegram', 'run-test1234')
+
+    expect(res.ok).toBe(true)
+    expect(existsSync(res.pdfPath!)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('/sendDocument')
+    expect(init.body).toBeInstanceOf(FormData)
   })
 
   it('нет прогона → no-run', async () => {

@@ -2,7 +2,9 @@ import { ipcMain } from 'electron'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { assembleProofPack, renderProofPackHtml, renderProofPackMarkdown } from '../ai/proof-pack'
+import { renderSimplePdf } from '../ai/simple-pdf'
 import { artifactsDir } from '../ai/artifacts'
+import { createTelegramConnector } from '../connectors/telegram'
 import { readDiffStat } from './git'
 import type { AgentRun, AgentRunEvent, AgentRuns } from '../storage/agent-runs'
 import type { Verifications } from '../storage/verifications'
@@ -19,6 +21,7 @@ export interface ProofDeps {
   getProjectRoot: () => string | null
   /** Записи audit_log этого прогона (action/detail/timestamp). */
   queryAuditForRun: (runId: string) => Array<{ action: string; detail: string; timestamp: number }>
+  getSecret?: (key: string) => string | null
 }
 
 export interface ProofGenerateResult {
@@ -28,6 +31,19 @@ export interface ProofGenerateResult {
   markdownPath?: string
   html?: string
   markdown?: string
+  error?: string
+}
+
+export interface ProofExportPdfResult {
+  ok: boolean
+  pdfPath?: string
+  error?: string
+}
+
+export interface ProofSendTelegramResult {
+  ok: boolean
+  pdfPath?: string
+  result?: unknown
   error?: string
 }
 
@@ -53,7 +69,7 @@ function relatedReviewEvents(deps: ProofDeps, run: AgentRun, events: AgentRunEve
 }
 
 export function registerProofIpc(deps: ProofDeps): void {
-  ipcMain.handle('proof:generate', async (_e, runId: string): Promise<ProofGenerateResult> => {
+  async function generate(runId: string): Promise<ProofGenerateResult> {
     const projectPath = deps.getProjectRoot()
     if (!projectPath) return { ok: false, error: 'no-project' }
     if (!runId || typeof runId !== 'string') return { ok: false, error: 'no-run-id' }
@@ -108,5 +124,45 @@ export function registerProofIpc(deps: ProofDeps): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
+  }
+
+  async function exportPdf(runId: string): Promise<ProofExportPdfResult> {
+    const generated = await generate(runId)
+    if (!generated.ok || !generated.markdown) return { ok: false, error: generated.error ?? 'proof-generate-failed' }
+    const projectPath = deps.getProjectRoot()
+    if (!projectPath) return { ok: false, error: 'no-project' }
+    try {
+      const dir = artifactsDir(projectPath)
+      await mkdir(dir, { recursive: true })
+      const slug = `proof-${runId.slice(0, 8)}`
+      const pdfPath = join(dir, `${slug}.proof.pdf`)
+      await writeFile(pdfPath, renderSimplePdf(generated.markdown, { title: `Proof Pack ${runId}` }))
+      return { ok: true, pdfPath }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  ipcMain.handle('proof:generate', async (_e, runId: string): Promise<ProofGenerateResult> => generate(runId))
+
+  ipcMain.handle('proof:export-pdf', async (_e, runId: string): Promise<ProofExportPdfResult> => exportPdf(runId))
+
+  ipcMain.handle('proof:send-telegram', async (_e, runId: string, opts?: { chatId?: string }): Promise<ProofSendTelegramResult> => {
+    if (!deps.getSecret) return { ok: false, error: 'settings-unavailable' }
+    const chatId = opts?.chatId || deps.getSecret('telegram_notify_chat_id')
+    if (!chatId) return { ok: false, error: 'no-chat-id' }
+    const pdf = await exportPdf(runId)
+    if (!pdf.ok || !pdf.pdfPath) return { ok: false, error: pdf.error ?? 'pdf-export-failed' }
+    const ac = new AbortController()
+    const result = await createTelegramConnector().query({
+      op: 'send_document',
+      chat_id: chatId,
+      document_path: pdf.pdfPath,
+      caption: `Proof Pack ${runId}`
+    }, { getSecret: deps.getSecret, signal: ac.signal })
+    if (result && typeof result === 'object' && 'error' in result) {
+      return { ok: false, pdfPath: pdf.pdfPath, error: String((result as { error: unknown }).error) }
+    }
+    return { ok: true, pdfPath: pdf.pdfPath, result }
   })
 }

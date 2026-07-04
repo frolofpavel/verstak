@@ -641,7 +641,8 @@ app.whenReady().then(() => {
     agentRuns,
     verifications,
     getProjectRoot: getActiveProjectPath,
-    queryAuditForRun: (runId) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp }))
+    queryAuditForRun: (runId) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp })),
+    getSecret
   })
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
