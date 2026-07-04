@@ -24,6 +24,22 @@ import http from 'node:http'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+const RAW_ARGS = process.argv.slice(2)
+
+function hasCliOption(name, short) {
+  return RAW_ARGS.some((arg, i) => {
+    if (arg === name || (short && arg === short)) return true
+    if (arg.startsWith(`${name}=`)) return true
+    if (short && arg.startsWith(`${short}=`)) return true
+    return false
+  })
+}
+
+const CLI_EXPLICIT = {
+  provider: hasCliOption('--provider', '-p'),
+  model: hasCliOption('--model', '-m'),
+  key: hasCliOption('--key', '-k'),
+}
 
 // ---------------------------------------------------------------------------
 // Аргументы
@@ -41,6 +57,7 @@ const { values, positionals } = parseArgs({
     recipe:   { type: 'string' },
     task:     { type: 'string' },
     workspace:{ type: 'string' },
+    'provider-config': { type: 'string' },
     'max-turns': { type: 'string' },
     'trace-json': { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -74,10 +91,13 @@ Verstak CLI — AI-агент в терминале без GUI
 
 Опции:
   -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
-                   openrouter, deepseek, mistral, groq, ollama
+                   verstak-gateway, openrouter, deepseek, mistral, groq, ollama
                    (YandexGPT/GigaChat — только в GUI, не в CLI)
   -m, --model      Имя модели (по умолч: дефолтная провайдера)
   -k, --key        API-ключ (или через env: GEMINI_API_KEY, ANTHROPIC_API_KEY, …)
+  --provider-config
+                   Named headless config из .verstak/settings.json или ~/.verstak/settings.json.
+                   Порядок: явные CLI args → provider-config → settings/env fallback.
   --project        Директория проекта (по умолч: текущая)
   --mode           Режим агента: auto (по умолч), ask, plan
                    auto — все инструменты без подтверждения
@@ -99,6 +119,7 @@ Env-переменные:
   ANTHROPIC_API_KEY    Claude (Anthropic)
   XAI_API_KEY          Grok (xAI)
   OPENAI_API_KEY       OpenAI
+  VERSTAK_GATEWAY_API_KEY Verstak Gateway (vsk_live_...)
   OPENROUTER_API_KEY   OpenRouter
   DEEPSEEK_API_KEY     DeepSeek
   MISTRAL_API_KEY      Mistral
@@ -129,6 +150,7 @@ const ENV_KEYS = {
   'claude':        'ANTHROPIC_API_KEY',
   'grok':          'XAI_API_KEY',
   'openai':        'OPENAI_API_KEY',
+  'verstak-gateway': 'VERSTAK_GATEWAY_API_KEY',
   'openrouter':    'OPENROUTER_API_KEY',
   'deepseek':      'DEEPSEEK_API_KEY',
   'mistral':       'MISTRAL_API_KEY',
@@ -144,10 +166,111 @@ const SETTINGS_KEY_MAP = {
   'claude': 'anthropic_api_key',
   'grok': 'xai_api_key',
   'openai': 'openai_api_key',
+  'verstak-gateway': 'verstak_gateway_api_key',
   'openrouter': 'openrouter_api_key',
   'deepseek': 'deepseek_api_key',
   'mistral': 'mistral_api_key',
   'groq': 'groq_api_key',
+}
+
+const PROVIDER_BASEURL_SETTINGS_KEY = {
+  'verstak-gateway': 'verstak_gateway_baseurl',
+  'custom-openai': 'custom_openai_baseurl',
+}
+
+const PROVIDER_CONFIGS_KEYS = ['provider_configs', 'providerConfigs']
+
+// ---------------------------------------------------------------------------
+// Путь к проекту
+// ---------------------------------------------------------------------------
+
+const projectPath = resolve(process.cwd(), values.workspace ?? values.project ?? '.')
+
+function headlessSettingsPaths() {
+  const paths = []
+  const home = process.env.USERPROFILE || process.env.HOME
+  if (home) paths.push(resolve(home, '.verstak', 'settings.json'))
+  paths.push(resolve(projectPath, '.verstak', 'settings.json'))
+  return [...new Set(paths)]
+}
+
+function readJsonIfExists(file) {
+  if (!existsSync(file)) return null
+  try {
+    return JSON.parse(readFileSync(file, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+function readHeadlessSettings() {
+  const merged = {}
+  for (const file of headlessSettingsPaths()) {
+    const s = readJsonIfExists(file)
+    if (s && typeof s === 'object' && !Array.isArray(s)) Object.assign(merged, s)
+  }
+  return merged
+}
+
+const HEADLESS_SETTINGS = readHeadlessSettings()
+
+function getProviderConfig(name) {
+  if (!name) return null
+  for (const key of PROVIDER_CONFIGS_KEYS) {
+    const bag = HEADLESS_SETTINGS[key]
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) {
+      const cfg = bag[name]
+      if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) return cfg
+    }
+  }
+  if (name === 'default') {
+    const provider = typeof HEADLESS_SETTINGS.provider === 'string' ? HEADLESS_SETTINGS.provider : undefined
+    if (!provider) return null
+    return {
+      provider,
+      model: HEADLESS_SETTINGS[`model_${provider}`],
+      apiKey: HEADLESS_SETTINGS[SETTINGS_KEY_MAP[provider]],
+      baseUrl: HEADLESS_SETTINGS[PROVIDER_BASEURL_SETTINGS_KEY[provider]],
+    }
+  }
+  return null
+}
+
+const SELECTED_PROVIDER_CONFIG = getProviderConfig(values['provider-config'])
+const providerConfigProvider = typeof SELECTED_PROVIDER_CONFIG?.provider === 'string' ? SELECTED_PROVIDER_CONFIG.provider : undefined
+const providerConfigModel = typeof SELECTED_PROVIDER_CONFIG?.model === 'string' ? SELECTED_PROVIDER_CONFIG.model : undefined
+const providerConfigApiKey = typeof SELECTED_PROVIDER_CONFIG?.apiKey === 'string' ? SELECTED_PROVIDER_CONFIG.apiKey : undefined
+const providerConfigBaseUrl = typeof SELECTED_PROVIDER_CONFIG?.baseUrl === 'string' ? SELECTED_PROVIDER_CONFIG.baseUrl : undefined
+const providerConfigFallbackBaseUrl = typeof SELECTED_PROVIDER_CONFIG?.fallbackBaseUrl === 'string' ? SELECTED_PROVIDER_CONFIG.fallbackBaseUrl : undefined
+
+const activeProvider = CLI_EXPLICIT.provider ? values.provider : (providerConfigProvider ?? values.provider)
+const activeModel = CLI_EXPLICIT.model ? values.model : (values.model ?? providerConfigModel)
+const activeExplicitKey = CLI_EXPLICIT.key ? values.key : (values.key ?? providerConfigApiKey)
+
+function resolveProviderBaseUrl(provider) {
+  if (providerConfigBaseUrl && (!providerConfigProvider || providerConfigProvider === provider)) return providerConfigBaseUrl
+  const settingsKey = PROVIDER_BASEURL_SETTINGS_KEY[provider]
+  if (settingsKey && typeof HEADLESS_SETTINGS[settingsKey] === 'string') return HEADLESS_SETTINGS[settingsKey]
+  return undefined
+}
+
+function resolveProviderFallbackBaseUrl(provider) {
+  if (providerConfigFallbackBaseUrl && (!providerConfigProvider || providerConfigProvider === provider)) return providerConfigFallbackBaseUrl
+  return undefined
+}
+
+function resolveSettingsApiKey(provider) {
+  const settingsKey = SETTINGS_KEY_MAP[provider]
+  if (settingsKey && typeof HEADLESS_SETTINGS[settingsKey] === 'string') return HEADLESS_SETTINGS[settingsKey]
+  return undefined
+}
+
+function missingProviderMessage(provider, envVar) {
+  if (provider === 'verstak-gateway') {
+    return 'Provider "verstak-gateway" is not configured for headless CLI. Run GUI provider setup and export a headless provider config, or pass VERSTAK_GATEWAY_API_KEY / --key.'
+  }
+  const envMsg = envVar ? `\nУстановите ${envVar} или передайте --key` : ''
+  return `API-ключ для провайдера "${provider}" не найден.${envMsg}`
 }
 
 function resolveApiKey(provider, explicit) {
@@ -155,24 +278,10 @@ function resolveApiKey(provider, explicit) {
   const envVar = ENV_KEYS[provider]
   if (envVar === null) return ''  // ollama — без ключа
   if (envVar && process.env[envVar]) return process.env[envVar]
-  // Попробуем .verstak/settings.json
-  const settingsPath = resolve(projectPath, '.verstak', 'settings.json')
-  if (existsSync(settingsPath)) {
-    try {
-      const s = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const settingsKey = SETTINGS_KEY_MAP[provider]
-      if (settingsKey && s[settingsKey]) return s[settingsKey]
-    } catch { /* ignore */ }
-  }
-  const envMsg = envVar ? `\nУстановите ${envVar} или передайте --key` : ''
-  throw new Error(`API-ключ для провайдера "${provider}" не найден.${envMsg}`)
+  const settingsKey = resolveSettingsApiKey(provider)
+  if (settingsKey) return settingsKey
+  throw new Error(missingProviderMessage(provider, envVar))
 }
-
-// ---------------------------------------------------------------------------
-// Путь к проекту
-// ---------------------------------------------------------------------------
-
-const projectPath = resolve(process.cwd(), values.workspace ?? values.project ?? '.')
 
 // ---------------------------------------------------------------------------
 // Bounded local commands (F14, claw-code parity): doctor / status / models —
@@ -185,14 +294,8 @@ function isConfigured(provider) {
   const envVar = ENV_KEYS[provider]
   if (envVar === null) return true // ollama — локальный, ключ не нужен
   if (envVar && process.env[envVar]) return true
-  const settingsPath = resolve(projectPath, '.verstak', 'settings.json')
-  if (existsSync(settingsPath)) {
-    try {
-      const s = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const k = SETTINGS_KEY_MAP[provider]
-      if (k && s[k]) return true
-    } catch { /* ignore */ }
-  }
+  if (providerConfigProvider === provider && providerConfigApiKey) return true
+  if (resolveSettingsApiKey(provider)) return true
   return false
 }
 
@@ -200,6 +303,7 @@ function providerSource(provider) {
   const envVar = ENV_KEYS[provider]
   if (envVar === null) return 'local'
   if (envVar && process.env[envVar]) return 'env'
+  if (providerConfigProvider === provider && providerConfigApiKey) return `provider-config:${values['provider-config']}`
   if (isConfigured(provider)) return 'settings'
   return 'none'
 }
@@ -219,14 +323,33 @@ if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
   }))
   const configuredCount = providers.filter(p => p.configured).length
   if (values.json) {
-    console.log(JSON.stringify({ ok: true, command: COMMAND, version: pkgVersion, project: projectPath, providersConfigured: configuredCount, providersTotal: providers.length, providers }, null, 2))
+    console.log(JSON.stringify({
+      ok: true,
+      command: COMMAND,
+      version: pkgVersion,
+      project: projectPath,
+      activeProvider,
+      activeModel: activeModel ?? null,
+      providerConfig: values['provider-config']
+        ? { name: values['provider-config'], found: !!SELECTED_PROVIDER_CONFIG, provider: providerConfigProvider ?? null, model: providerConfigModel ?? null }
+        : null,
+      providersConfigured: configuredCount,
+      providersTotal: providers.length,
+      providers,
+    }, null, 2))
   } else if (COMMAND === 'models') {
     console.log(`Verstak CLI v${pkgVersion} — провайдеры (флаг -p):`)
     for (const p of providers) {
       console.log(`  ${p.configured ? '✓' : '·'} ${p.provider.padEnd(12)} ${p.envVar ? `env: ${p.envVar}` : 'локальный (ollama)'}`)
     }
+    if (values['provider-config']) {
+      console.log(`Provider config "${values['provider-config']}": ${SELECTED_PROVIDER_CONFIG ? 'found' : 'missing'}${providerConfigProvider ? ` (${providerConfigProvider}${providerConfigModel ? ` / ${providerConfigModel}` : ''})` : ''}`)
+    }
   } else {
     console.log(`Verstak CLI v${pkgVersion} doctor — проект: ${projectPath}`)
+    if (values['provider-config']) {
+      console.log(`Provider config "${values['provider-config']}": ${SELECTED_PROVIDER_CONFIG ? 'found' : 'missing'}${providerConfigProvider ? ` (${providerConfigProvider}${providerConfigModel ? ` / ${providerConfigModel}` : ''})` : ''}`)
+    }
     console.log(`Настроено провайдеров: ${configuredCount}/${providers.length}`)
     for (const p of providers) {
       console.log(`  ${p.configured ? '✓' : '·'} ${p.provider.padEnd(12)} ${p.configured ? `(${p.source})` : (p.envVar ? `задай ${p.envVar} или --key` : '')}`)
@@ -408,6 +531,7 @@ function httpsPost(url, headers, body) {
     const parsedUrl = new URL(url)
     const options = {
       hostname: parsedUrl.hostname,
+      port: parsedUrl.port || undefined,
       path: parsedUrl.pathname + parsedUrl.search,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
@@ -1135,6 +1259,12 @@ const OPENAI_PROVIDER_CONFIGS = {
     models: ['gpt-5', 'gpt-4o', 'gpt-4o-mini', 'o1'],
     default: 'gpt-4o',
   },
+  'verstak-gateway': {
+    baseUrl: 'https://api-ru.agi-iri.ru/v1',
+    fallbackBaseUrl: 'https://api.agi-iri.ru/v1',
+    models: ['verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
+    default: 'verstak/balanced',
+  },
   'grok': {
     baseUrl: 'https://api.x.ai/v1',
     models: ['grok-4', 'grok-4-fast', 'grok-3'],
@@ -1167,7 +1297,7 @@ const OPENAI_PROVIDER_CONFIGS = {
   },
 }
 
-async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools) {
+async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools, fallbackBaseUrl) {
   // Конвертируем в OpenAI-формат
   const oaiMessages = []
   for (const m of messages) {
@@ -1214,7 +1344,13 @@ async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools) {
   }
 
   const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}
-  const res = await httpsPost(`${baseUrl}/chat/completions`, headers, body)
+  let res
+  try {
+    res = await httpsPost(`${baseUrl}/chat/completions`, headers, body)
+  } catch (err) {
+    if (!fallbackBaseUrl || fallbackBaseUrl === baseUrl) throw err
+    res = await httpsPost(`${fallbackBaseUrl}/chat/completions`, headers, body)
+  }
 
   if (res.statusCode !== 200) {
     const errBody = await streamResponse(res)
@@ -1292,7 +1428,9 @@ function getProviderStream(provider, apiKey, model, messages, tools) {
     default: {
       const cfg = OPENAI_PROVIDER_CONFIGS[provider]
       if (!cfg) throw new Error(`Неизвестный провайдер: "${provider}". Используйте --help для списка.`)
-      return sendOpenAiCompat(apiKey, cfg.baseUrl, model ?? cfg.default, messages, tools)
+      const baseUrl = resolveProviderBaseUrl(provider) ?? cfg.baseUrl
+      const fallbackBaseUrl = resolveProviderFallbackBaseUrl(provider) ?? cfg.fallbackBaseUrl
+      return sendOpenAiCompat(apiKey, baseUrl, model ?? cfg.default, messages, tools, fallbackBaseUrl)
     }
   }
 }
@@ -1458,10 +1596,13 @@ function isMutatingToolName(name) {
 
 try {
   const maxTurns = Math.max(1, Math.min(100, Number(values['max-turns'] ?? 20) || 20))
+  if (values['provider-config'] && !SELECTED_PROVIDER_CONFIG && !CLI_EXPLICIT.provider) {
+    throw new Error(`Provider config "${values['provider-config']}" not found for headless CLI. Add it to .verstak/settings.json or ~/.verstak/settings.json, or pass --provider/--key explicitly.`)
+  }
   if (isRecipeRun && values['dry-run']) {
     const trace = {
-      provider: values.provider,
-      model: values.model ?? '(default)',
+      provider: activeProvider,
+      model: activeModel ?? '(default)',
       recipeId: recipeSpec.id,
       toolCalls: [],
       firstMutatingTool: null,
@@ -1479,15 +1620,18 @@ try {
       recipe: recipeSpec,
       protocol: recipeProtocol,
       trace,
+      providerConfig: values['provider-config']
+        ? { name: values['provider-config'], found: !!SELECTED_PROVIDER_CONFIG, provider: providerConfigProvider ?? null, model: providerConfigModel ?? null }
+        : null,
     }
     console.log(values.json || values['trace-json'] ? JSON.stringify(payload, null, 2) : recipeProtocol)
     process.exit(0)
   }
 
-  const apiKey = resolveApiKey(values.provider, values.key)
+  const apiKey = resolveApiKey(activeProvider, activeExplicitKey)
   await runAgent({
-    provider: values.provider,
-    model: values.model,
+    provider: activeProvider,
+    model: activeModel,
     apiKey,
     projectPath,
     mode: values.mode,
@@ -1501,7 +1645,7 @@ try {
   process.exit(0)
 } catch (err) {
   // F14 (claw-code parity): при --json отдаём typed error envelope, иначе текст.
-  const code = /API-ключ.*не найден/.test(err.message) ? 'api_key_not_found'
+  const code = /API-ключ.*не найден|not configured for headless CLI|Provider config .* not found/i.test(err.message) ? 'api_key_not_found'
     : /вне.*проект|outside/i.test(err.message) ? 'path_denied'
     : 'agent_error'
   if (values.json) {
