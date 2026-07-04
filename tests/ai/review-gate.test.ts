@@ -27,6 +27,9 @@ describe('isAllowedVerifyCommand', () => {
     expect(isAllowedVerifyCommand('npx tsc --noEmit')).toBe(true)
     expect(isAllowedVerifyCommand('vitest run')).toBe(true)
     expect(isAllowedVerifyCommand('  npm run lint  ')).toBe(true)
+    expect(isAllowedVerifyCommand('node --check src/sum.mjs')).toBe(true)
+    expect(isAllowedVerifyCommand('node --test')).toBe(true)
+    expect(isAllowedVerifyCommand('node --test test/sum.test.mjs')).toBe(true)
   })
   it('блокирует прочие/опасные команды', () => {
     expect(isAllowedVerifyCommand('')).toBe(false)
@@ -36,6 +39,8 @@ describe('isAllowedVerifyCommand', () => {
     expect(isAllowedVerifyCommand('npm run type && rm x')).toBe(false) // fail-closed: составные команды отклоняются
     expect(isAllowedVerifyCommand('npm run type | tee log')).toBe(false)
     expect(isAllowedVerifyCommand('npm run type > out.txt')).toBe(false)
+    expect(isAllowedVerifyCommand('node evil.js')).toBe(false) // node без verify-флага = произвольный скрипт
+    expect(isAllowedVerifyCommand('node --check x && rm y')).toBe(false)
   })
 })
 

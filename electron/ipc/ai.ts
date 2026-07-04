@@ -2529,6 +2529,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // The renderer re-sends the current conversation with a larger budget if the
   // user clicks Continue.
   exitReason = 'max-turns'
+  // P2 fail-closed на исчерпании бюджета: если рецепт требует ревью, а обязательный
+  // review gate так и не пройден к моменту max-turns — это НЕ штатное завершение.
+  // Помечаем прогон как невыполненный (exitReason='error' → status 'failed'), иначе
+  // модель могла бы «проскочить» гейт, просто израсходовав ходы. «+ходы» для
+  // продолжения сохраняем (turns-exhausted ниже) — пользователь может дать бюджет и
+  // модель довызовет гейт.
+  if (recipeRequiresReview && !reviewGatePassed) {
+    exitReason = 'error'
+    sender.send('ai:event', { id: sendId, event: { type: 'error', message: REVIEW_GATE_STOP_MESSAGE } })
+  }
   const canContinue = turnsBudget < MAX_BUDGET_TURNS
   sender.send('ai:event', {
     id: sendId,

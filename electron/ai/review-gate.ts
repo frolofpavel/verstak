@@ -29,10 +29,14 @@ export function isAllowedVerifyCommand(command: string): boolean {
   // fail-closed: никаких составных команд/редиректов/подстановок — только одиночная verify.
   if (/[;&|`$><]|\|\||&&/.test(c)) return false
   // npm/pnpm/yarn скрипты проверки + прямые tsc/vitest/jest/eslint.
+  // node допускается ТОЛЬКО с verify-флагами --check (синтаксис) и --test (раннер);
+  // `node <script>` не матчится (флаг обязан идти сразу за node) — не даём запустить
+  // произвольный скрипт под видом верификации.
   return (
     /^(npm|pnpm|yarn)\s+(run\s+)?(type|typecheck|test|test:fast|lint|build|check)\b/.test(c) ||
     /^npx\s+(tsc|vitest|jest|eslint)\b/.test(c) ||
-    /^(tsc|vitest|jest|eslint)\b/.test(c)
+    /^(tsc|vitest|jest|eslint)\b/.test(c) ||
+    /^node\s+--(check|test)\b/.test(c)
   )
 }
 
