@@ -243,8 +243,28 @@ const providerConfigApiKey = typeof SELECTED_PROVIDER_CONFIG?.apiKey === 'string
 const providerConfigBaseUrl = typeof SELECTED_PROVIDER_CONFIG?.baseUrl === 'string' ? SELECTED_PROVIDER_CONFIG.baseUrl : undefined
 const providerConfigFallbackBaseUrl = typeof SELECTED_PROVIDER_CONFIG?.fallbackBaseUrl === 'string' ? SELECTED_PROVIDER_CONFIG.fallbackBaseUrl : undefined
 
-const activeProvider = CLI_EXPLICIT.provider ? values.provider : (providerConfigProvider ?? values.provider)
-const activeModel = CLI_EXPLICIT.model ? values.model : (values.model ?? providerConfigModel)
+const COMMAND = positionals[0]
+const SUBCOMMAND = positionals[1]
+const isRecipeRun = COMMAND === 'recipe' && SUBCOMMAND === 'run'
+
+function readAgentModelPolicyDefaults() {
+  try {
+    const policy = JSON.parse(readFileSync(resolve(__dirname, '../electron/ai/agent-model-policy.json'), 'utf-8'))
+    return policy.defaults ?? {}
+  } catch {
+    return {}
+  }
+}
+
+const AGENT_MODEL_DEFAULTS = readAgentModelPolicyDefaults()
+
+const activeProvider = CLI_EXPLICIT.provider
+  ? values.provider
+  : (providerConfigProvider ?? (isRecipeRun ? (AGENT_MODEL_DEFAULTS.provider ?? 'verstak-gateway') : values.provider))
+const policyDefaultModel = isRecipeRun && activeProvider === 'verstak-gateway'
+  ? (AGENT_MODEL_DEFAULTS.coding ?? 'kimi-k2.7-code')
+  : undefined
+const activeModel = CLI_EXPLICIT.model ? values.model : (values.model ?? providerConfigModel ?? policyDefaultModel)
 const activeExplicitKey = CLI_EXPLICIT.key ? values.key : (values.key ?? providerConfigApiKey)
 
 function resolveProviderBaseUrl(provider) {
@@ -308,8 +328,6 @@ function providerSource(provider) {
   return 'none'
 }
 
-const COMMAND = positionals[0]
-const SUBCOMMAND = positionals[1]
 if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
   const pkgVersion = (() => {
     try { return JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8')).version }
@@ -357,8 +375,6 @@ if (COMMAND === 'doctor' || COMMAND === 'status' || COMMAND === 'models') {
   }
   process.exit(0)
 }
-
-const isRecipeRun = COMMAND === 'recipe' && SUBCOMMAND === 'run'
 
 // ---------------------------------------------------------------------------
 // Headless coding recipes
@@ -1262,8 +1278,19 @@ const OPENAI_PROVIDER_CONFIGS = {
   'verstak-gateway': {
     baseUrl: 'https://api-ru.agi-iri.ru/v1',
     fallbackBaseUrl: 'https://api.agi-iri.ru/v1',
-    models: ['verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
-    default: 'verstak/balanced',
+    models: [
+      AGENT_MODEL_DEFAULTS.coding ?? 'kimi-k2.7-code',
+      AGENT_MODEL_DEFAULTS.fallback ?? 'deepseek-chat',
+      'qwen3-coder',
+      'verstak/economy',
+      'verstak/free',
+      'verstak/balanced',
+      'verstak/coder',
+      'verstak/long',
+      'verstak/fast',
+      'verstak/private',
+    ],
+    default: AGENT_MODEL_DEFAULTS.coding ?? 'kimi-k2.7-code',
   },
   'grok': {
     baseUrl: 'https://api.x.ai/v1',

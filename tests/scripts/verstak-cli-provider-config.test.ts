@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import http from 'node:http'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 
 const CLI = resolve(__dirname, '../../scripts/verstak-cli.mjs')
-const TEST_SECRET = 'vsk_live_secret_for_test_123'
+const TEST_SECRET = 'gateway_secret_for_test_123'
 
 let server: http.Server
 let baseUrl = ''
@@ -81,6 +81,9 @@ beforeAll(async () => {
 
   mkdirSync(join(projectDir, '.verstak'), { recursive: true })
   writeFileSync(join(projectDir, '.verstak', 'settings.json'), JSON.stringify({
+    verstak_gateway_api_key: TEST_SECRET,
+    verstak_gateway_baseurl: baseUrl,
+    model_verstak_gateway: 'verstak/fast',
     provider_configs: {
       default: {
         provider: 'verstak-gateway',
@@ -90,6 +93,11 @@ beforeAll(async () => {
       },
     },
   }, null, 2), 'utf8')
+})
+
+beforeEach(() => {
+  seenAuth = ''
+  seenModel = ''
 })
 
 afterAll(() => {
@@ -130,6 +138,68 @@ describe('verstak-cli gateway provider config resolution', () => {
     expect(parsed.trace.provider).toBe('verstak-gateway')
     expect(parsed.trace.model).toBe('qwen/qwen3-coder')
     expect(JSON.stringify(parsed.trace)).not.toContain(TEST_SECRET)
+  })
+
+  it('uses the shared agent policy when recipe provider/model are omitted', async () => {
+    const out = await runCliAsync([
+      'recipe', 'run',
+      '--recipe', 'small-edit',
+      '--workspace', projectDir,
+      '--task', 'return a tiny final answer',
+      '--json',
+      '--trace-json',
+      '--max-turns', '2',
+    ])
+
+    expect(out.status).toBe(0)
+    expect(seenModel).toBe('kimi-k2.7-code')
+    expect(seenAuth).toBe(`Bearer ${TEST_SECRET}`)
+    expect(out.stdout).not.toContain(TEST_SECRET)
+    expect(out.stderr).not.toContain(TEST_SECRET)
+    const parsed = JSON.parse(out.stdout)
+    expect(parsed.provider).toBe('verstak-gateway')
+    expect(parsed.model).toBe('kimi-k2.7-code')
+    expect(parsed.trace.provider).toBe('verstak-gateway')
+    expect(parsed.trace.model).toBe('kimi-k2.7-code')
+    expect(JSON.stringify(parsed.trace)).not.toContain(TEST_SECRET)
+  })
+
+  it('keeps explicit model selection over the shared policy', () => {
+    const out = runCli([
+      'recipe', 'run',
+      '--provider', 'verstak-gateway',
+      '--model', 'qwen3-coder',
+      '--recipe', 'small-edit',
+      '--workspace', projectDir,
+      '--task', 'dry only',
+      '--json',
+      '--trace-json',
+      '--dry-run',
+    ])
+
+    expect(out.status).toBe(0)
+    const parsed = JSON.parse(out.stdout)
+    expect(parsed.trace.provider).toBe('verstak-gateway')
+    expect(parsed.trace.model).toBe('qwen3-coder')
+  })
+
+  it('does not use the not-recommended fast preset as a recipe default', () => {
+    const out = runCli([
+      'recipe', 'run',
+      '--recipe', 'small-edit',
+      '--workspace', projectDir,
+      '--task', 'dry only',
+      '--json',
+      '--trace-json',
+      '--dry-run',
+    ])
+
+    expect(out.status).toBe(0)
+    const parsed = JSON.parse(out.stdout)
+    expect(parsed.trace.provider).toBe('verstak-gateway')
+    expect(parsed.trace.model).toBe('kimi-k2.7-code')
+    expect(parsed.trace.model).not.toBe('verstak/fast')
+    expect(parsed.trace.model).not.toBe('verstak/coder/fast')
   })
 
   it('lets explicit provider/model args win over provider config', () => {
