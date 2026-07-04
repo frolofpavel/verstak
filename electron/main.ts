@@ -111,6 +111,8 @@ import {
 } from './window-state'
 import type { Settings } from './storage/settings'
 
+let mainWindowRef: BrowserWindow | null = null
+
 function createWindow(settings: Settings): BrowserWindow {
   // HERE = out/main in dev and prod
   const iconPath = join(HERE, '../../resources/icon.png')
@@ -471,6 +473,10 @@ app.whenReady().then(() => {
   registerChatsIpc(chats, chatSessions, db)
 
   const mainWindow = createWindow(settings)
+  mainWindowRef = mainWindow
+  mainWindow.on('closed', () => {
+    if (mainWindowRef === mainWindow) mainWindowRef = null
+  })
   bindMainWindowLifecycle(mainWindow)
   bindUiScaleToWindow(mainWindow, settings)
   initNotificationWindow(() => mainWindow)

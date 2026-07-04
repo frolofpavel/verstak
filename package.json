@@ -8,6 +8,7 @@
     "precommit": "node scripts/precommit.cjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "smoke:agency-ui": "npm run electron-rebuild && npm run build && node scripts/smoke-agency-ui.mjs",
     "pretest": "node scripts/safe-rebuild.cjs",
     "test": "vitest run",
     "test:staging": "vitest run tests/autoupdate-state.test.ts",
