@@ -8,7 +8,7 @@
 //     свежий контекст ≠ ревьюер), затем повторная verify+ревью. После 2 неудач — стоп.
 // Политики не обходятся: verify/git через classifyCommand (денилист) + allowlist verify,
 // фиксер пишет через mode-policy.decide и run_command через денилист внутри sub-loop.
-import type { ToolHandler, ToolContext } from './shared'
+import { emitActivity, type ToolHandler, type ToolContext } from './shared'
 import type { ToolCall } from '../../ai/types'
 import { delegateTaskHandler } from './delegation'
 import { buildDiffCommand } from './review-diff'
@@ -79,11 +79,14 @@ export const reviewBeforeCommitHandler: ToolHandler = {
       : undefined
     const baseline: VerifyRun[] | undefined = explicitBaseline ?? ctx.getRecipeBaseline?.()
 
-    const fail = (reason: string) => ({
-      id: call.id,
-      name: call.name,
-      result: `❌ REVIEW GATE: НЕ ПРОЙДЕНО.\nПричина: ${reason}\nНЕ коммить. Устрани причину и вызови гейт снова.`,
-    })
+    const fail = (reason: string) => {
+      emitActivity(ctx, call, 'error', 'review_before_commit', reason)
+      return {
+        id: call.id,
+        name: call.name,
+        result: `❌ REVIEW GATE: НЕ ПРОЙДЕНО.\nПричина: ${reason}\nНЕ коммить. Устрани причину и вызови гейт снова.`,
+      }
+    }
 
     // required verify не задана = fail (гейт без обязательной проверки не пропускает).
     if (verifyCommands.length === 0) {
@@ -113,6 +116,7 @@ export const reviewBeforeCommitHandler: ToolHandler = {
       const verdict = parseReviewVerdict(typeof res.result === 'string' ? res.result : '')
 
       if (vgate.pass && verdict.pass) {
+        emitActivity(ctx, call, 'ok', 'review_before_commit', `${REVIEW_GATE_PASS_MARKER} · confidence ${verdict.confidence}`)
         return {
           id: call.id,
           name: call.name,

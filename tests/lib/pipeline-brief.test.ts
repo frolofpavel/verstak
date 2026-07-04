@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { EMPTY_BRIEF, SAMPLE_BRIEF, isBriefReady, buildPlanPrompt, buildExecutePrompt, pipelineStepIndex, buildPipelineSend, verifyState, resolveProofRunId, resolvePipelineRunId } from '../../src/lib/pipeline-brief'
+import { EMPTY_BRIEF, SAMPLE_BRIEF, isBriefReady, buildPlanPrompt, buildExecutePrompt, pipelineStepIndex, buildPipelineSend, verifyState, resolveProofRunId, resolvePipelineRunId, resolveReviewCandidateRunIds, reviewGateState } from '../../src/lib/pipeline-brief'
 
 describe('pipeline-brief', () => {
   it('EMPTY_BRIEF не готов', () => {
@@ -40,11 +40,18 @@ describe('pipeline-brief', () => {
     expect(p).toContain('attest_verification')
   })
 
-  it('pipelineStepIndex: plan=2/5 … proof=5/5', () => {
-    expect(pipelineStepIndex('plan')).toEqual({ index: 2, total: 5 })
-    expect(pipelineStepIndex('execute')).toEqual({ index: 3, total: 5 })
-    expect(pipelineStepIndex('verify')).toEqual({ index: 4, total: 5 })
-    expect(pipelineStepIndex('proof')).toEqual({ index: 5, total: 5 })
+  it('buildExecutePrompt: agency mode требует review_before_commit', () => {
+    const p = buildExecutePrompt({ goal: 'g', constraints: '', dod: 'npm test' }, 42, true)
+    expect(p).toContain('review_before_commit')
+    expect(p).toContain('REVIEW GATE: ПРОЙДЕНО')
+  })
+
+  it('pipelineStepIndex: plan=2/6 … proof=6/6', () => {
+    expect(pipelineStepIndex('plan')).toEqual({ index: 2, total: 6 })
+    expect(pipelineStepIndex('execute')).toEqual({ index: 3, total: 6 })
+    expect(pipelineStepIndex('verify')).toEqual({ index: 4, total: 6 })
+    expect(pipelineStepIndex('review')).toEqual({ index: 5, total: 6 })
+    expect(pipelineStepIndex('proof')).toEqual({ index: 6, total: 6 })
   })
 
   const brief = { goal: 'fix', constraints: '', dod: 'npm test' }
@@ -61,8 +68,14 @@ describe('pipeline-brief', () => {
     expect(s?.text).toContain('plan id=17')
   })
 
-  it('buildPipelineSend для verify/proof → null (нет авто-send)', () => {
+  it('buildPipelineSend execute в agency → требует review gate', () => {
+    const s = buildPipelineSend('execute', brief, 17, { requireReviewGate: true })
+    expect(s?.text).toContain('review_before_commit')
+  })
+
+  it('buildPipelineSend для verify/review/proof → null (нет авто-send)', () => {
     expect(buildPipelineSend('verify', brief, 1)).toBeNull()
+    expect(buildPipelineSend('review', brief, 1)).toBeNull()
     expect(buildPipelineSend('proof', brief, 1)).toBeNull()
   })
 
@@ -91,5 +104,25 @@ describe('pipeline-brief', () => {
     expect(resolvePipelineRunId('r-pinned', 42, 5, runs)).toBe('r-pinned')
     expect(resolvePipelineRunId(null, 99, 5, runs)).toBe('r-exec')
     expect(resolvePipelineRunId(null, 99, 9, runs)).toBeNull()
+  })
+
+  it('reviewGateState: missing/passed/failed по tool_call timeline', () => {
+    expect(reviewGateState([]).state).toBe('missing')
+    expect(reviewGateState([
+      { kind: 'tool_call', label: 'review_before_commit', detail: 'REVIEW GATE: ПРОЙДЕНО · ok', status: 'ok' },
+    ]).state).toBe('passed')
+    expect(reviewGateState([
+      { kind: 'tool_call', label: 'review_before_commit', detail: 'verify failed', status: 'error' },
+    ]).state).toBe('failed')
+  })
+
+  it('resolveReviewCandidateRunIds: pinned run + свежие run того же чата без дублей', () => {
+    const runs = [
+      { runId: 'r-review', chatId: 5 },
+      { runId: 'r-other-chat', chatId: 9 },
+      { runId: 'r-exec', chatId: 5 },
+    ]
+    expect(resolveReviewCandidateRunIds('r-exec', 5, runs)).toEqual(['r-exec', 'r-review'])
+    expect(resolveReviewCandidateRunIds(null, 5, runs)).toEqual(['r-review', 'r-exec'])
   })
 })

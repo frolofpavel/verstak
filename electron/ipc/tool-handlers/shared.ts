@@ -163,7 +163,7 @@ export interface ToolHandler {
 // list_directory/search_project/find_files/get_project_map и прочую read-only
 // мелочь — иначе Timeline раздувается. Команда/коннектор/делегирование значимы.
 const TIMELINE_TOOL_CALLS = new Set([
-  'run_command', 'connector_query', 'delegate_task', 'delegate_parallel'
+  'run_command', 'connector_query', 'delegate_task', 'delegate_parallel', 'review_before_commit'
 ])
 
 export function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'error', label: string, detail: string): void {

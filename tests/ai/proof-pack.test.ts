@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { assembleProofPack, renderProofPackHtml, type ProofPackInput } from '../../electron/ai/proof-pack'
+import { assembleProofPack, renderProofPackHtml, renderProofPackMarkdown, type ProofPackInput } from '../../electron/ai/proof-pack'
 
 function baseInput(): ProofPackInput {
   return {
@@ -18,6 +18,7 @@ function baseInput(): ProofPackInput {
       { kind: 'session_start', label: null, detail: null, status: null, createdAt: 1 },
       { kind: 'tool_call', label: 'write_file', detail: 'src/auth.ts', status: 'ok', createdAt: 2 },
       { kind: 'verify', label: 'DoD', detail: '5/5', status: 'passed', createdAt: 3 },
+      { kind: 'tool_call', label: 'review_before_commit', detail: 'REVIEW GATE: ПРОЙДЕНО · confidence 0.9', status: 'ok', createdAt: 3 },
       { kind: 'assistant_msg', label: null, detail: 'Готово: починил guard в auth.ts', status: 'completed', createdAt: 4 }
     ],
     audit: [
@@ -48,7 +49,8 @@ describe('assembleProofPack', () => {
     const p = assembleProofPack(baseInput())
     expect(p.result).toBe('Готово: починил guard в auth.ts')
     // session_start/tool_call/verify/assistant_msg — все значимые
-    expect(p.timeline.map(e => e.kind)).toEqual(['session_start', 'tool_call', 'verify', 'assistant_msg'])
+    expect(p.timeline.map(e => e.kind)).toEqual(['session_start', 'tool_call', 'verify', 'tool_call', 'assistant_msg'])
+    expect(p.reviewGate.status).toBe('passed')
   })
 
   it('endedAt=null → durationMs=null', () => {
@@ -65,6 +67,7 @@ describe('renderProofPackHtml', () => {
     expect(html).toContain('src/auth.ts')
     expect(html).toContain('$1.37')
     expect(html).toContain('Готово: починил guard')
+    expect(html).toContain('Review Gate')
   })
 
   it('экранирует HTML в данных (XSS-защита)', () => {
@@ -87,5 +90,21 @@ describe('renderProofPackHtml', () => {
     inp.verification = { overall: 'failed', checksTotal: 5, checksPassed: 2, taskSummary: null }
     const html = renderProofPackHtml(assembleProofPack(inp))
     expect(html).toContain('НЕ ПРОЙДЕНО · 2/5')
+  })
+
+  it('renderProofPackMarkdown пишет review gate и файлы', () => {
+    const md = renderProofPackMarkdown(assembleProofPack(baseInput()))
+    expect(md).toContain('# Proof Pack')
+    expect(md).toContain('## Review Gate')
+    expect(md).toContain('passed')
+    expect(md).toContain('src/auth.ts')
+  })
+
+  it('редактирует секреты в result/timeline', () => {
+    const inp = baseInput()
+    inp.events.push({ kind: 'assistant_msg', label: null, detail: 'token sk-proj-123456789012345678901234567890', status: 'completed', createdAt: 9 })
+    const p = assembleProofPack(inp)
+    expect(p.result).toContain('[REDACTED:openai-key]')
+    expect(JSON.stringify(p)).not.toContain('sk-proj-123456789012345678901234567890')
   })
 })

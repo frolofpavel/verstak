@@ -286,7 +286,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   proof: {
     generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<
-      { ok: boolean; jsonPath?: string; htmlPath?: string; html?: string; error?: string }
+      { ok: boolean; jsonPath?: string; htmlPath?: string; markdownPath?: string; html?: string; markdown?: string; error?: string }
     >
   },
   workflows: {

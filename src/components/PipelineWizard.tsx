@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '../i18n'
 import { EMPTY_BRIEF, isBriefReady } from '../lib/pipeline-brief'
-import type { PipelineBrief, PipelineRun } from '../types/api'
+import type { PipelineBrief, PipelineMode, PipelineRun } from '../types/api'
 
 interface PipelineWizardProps {
+  mode?: PipelineMode
   /** Чат, к которому привязать прогон (опц.). */
   chatId?: number | null
   /** Предзаполнить бриф (напр. демо из онбординга, D10). */
@@ -19,7 +20,7 @@ interface PipelineWizardProps {
  * Done. «Сформировать план» активна только когда заданы цель и DoD (isBriefReady).
  * v1 — только Dev-режим (Agency — позже через WorkflowsPanel).
  */
-export function PipelineWizard({ chatId, initialBrief, onClose, onStarted }: PipelineWizardProps) {
+export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, onStarted }: PipelineWizardProps) {
   const t = useT()
   const [brief, setBrief] = useState<PipelineBrief>(initialBrief ?? EMPTY_BRIEF)
   const [busy, setBusy] = useState(false)
@@ -39,7 +40,7 @@ export function PipelineWizard({ chatId, initialBrief, onClose, onStarted }: Pip
     if (!ready || busy) return
     setBusy(true)
     try {
-      const run = await window.api.pipeline.start({ mode: 'dev', brief, chatId: chatId ?? null })
+      const run = await window.api.pipeline.start({ mode, brief, chatId: chatId ?? null })
       if (run) onStarted(run)
       onClose()
     } finally {

@@ -21,6 +21,7 @@ export type PipelineStep =
   | 'plan'
   | 'execute'
   | 'verify'
+  | 'review'
   | 'proof'
   | 'completed'
   | 'cancelled'

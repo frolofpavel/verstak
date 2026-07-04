@@ -40,6 +40,7 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
     agentRuns.create({ runId: 'run-test1234', projectPath: dir, chatId: 7, title: 'Тестовая задача', providerId: 'claude', model: 'claude-opus-4-8', agentMode: 'ask' })
     agentRuns.appendEvent('run-test1234', 'tool_call', { label: 'write_file', detail: 'src/x.ts', status: 'ok' })
     agentRuns.appendEvent('run-test1234', 'verify', { label: 'DoD', detail: '3/3', status: 'passed' })
+    agentRuns.appendEvent('run-test1234', 'tool_call', { label: 'review_before_commit', detail: 'REVIEW GATE: ПРОЙДЕНО · confidence 0.9', status: 'ok' })
     agentRuns.appendEvent('run-test1234', 'assistant_msg', { detail: 'Готово: сделал X', status: 'completed' })
     agentRuns.finish('run-test1234', 'done', { costCents: 50, toolCount: 1, filesCount: 1 })
     verifications.insert({ projectPath: dir, chatId: 7, runId: 'run-test1234', overall: 'passed', checksTotal: 3, checksPassed: 3, changedFilesCount: 1, artifactPath: 'x.json', htmlPath: 'x.html', taskSummary: 'тесты + typecheck', createdAt: 1_700_000_000_000 })
@@ -52,10 +53,11 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
   afterEach(() => { db.close(); rmSync(dir, { recursive: true, force: true }) })
 
   it('собирает proof.json + proof.html, возвращает пути и html', async () => {
-    const res = await invoke<Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; html?: string }>>('proof:generate', 'run-test1234')
+    const res = await invoke<Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; markdownPath?: string; html?: string; markdown?: string }>>('proof:generate', 'run-test1234')
     expect(res.ok).toBe(true)
     expect(existsSync(res.jsonPath!)).toBe(true)
     expect(existsSync(res.htmlPath!)).toBe(true)
+    expect(existsSync(res.markdownPath!)).toBe(true)
     // HTML: DoD-бейдж + заголовок задачи
     expect(res.html).toContain('ДОКАЗАНО · 3/3')
     expect(res.html).toContain('Тестовая задача')
@@ -64,7 +66,9 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
     expect(pack.run.provider).toBe('claude')
     expect(pack.run.costUsd).toBe(0.5)         // 50 центов
     expect(pack.verification.overall).toBe('passed')
+    expect(pack.reviewGate.status).toBe('passed')
     expect(pack.result).toContain('Готово: сделал X')
+    expect(res.markdown).toContain('## Review Gate')
     // таймлайн содержит значимые события
     expect(pack.timeline.map((e: { kind: string }) => e.kind)).toContain('verify')
   })
@@ -97,6 +101,36 @@ describe('proof:generate IPC (Proof Pack end-to-end)', () => {
     const pack = JSON.parse(readFileSync(res.jsonPath!, 'utf-8'))
     expect(pack.verification.overall).toBe('not_run')
     expect(pack.verification.taskSummary).toBeNull()
+  })
+
+  it('подтягивает review gate из follow-up run того же чата для proof основного выполнения', async () => {
+    agentRuns.create({ runId: 'run-exec-no-review', projectPath: dir, chatId: 8, title: 'Основное выполнение', providerId: 'claude', model: 'm', agentMode: 'accept-edits' })
+    agentRuns.appendEvent('run-exec-no-review', 'tool_call', { label: 'write_file', detail: 'src/y.ts', status: 'ok' })
+    agentRuns.finish('run-exec-no-review', 'done', { toolCount: 1, filesCount: 1 })
+    verifications.insert({
+      projectPath: dir,
+      chatId: 8,
+      runId: 'run-exec-no-review',
+      overall: 'passed',
+      checksTotal: 1,
+      checksPassed: 1,
+      changedFilesCount: 1,
+      artifactPath: 'exec.json',
+      htmlPath: 'exec.html',
+      taskSummary: 'npm test',
+      createdAt: 1_700_000_000_100,
+    })
+
+    agentRuns.create({ runId: 'run-review-followup', projectPath: dir, chatId: 8, title: 'Дожать review gate', providerId: 'claude', model: 'm', agentMode: 'accept-edits' })
+    agentRuns.appendEvent('run-review-followup', 'tool_call', { label: 'review_before_commit', detail: 'REVIEW GATE: ПРОЙДЕНО · confidence 0.9', status: 'ok' })
+    agentRuns.finish('run-review-followup', 'done', { toolCount: 1 })
+
+    const res = await invoke<Promise<{ ok: boolean; jsonPath?: string }>>('proof:generate', 'run-exec-no-review')
+    expect(res.ok).toBe(true)
+    const pack = JSON.parse(readFileSync(res.jsonPath!, 'utf-8'))
+    expect(pack.run.runId).toBe('run-exec-no-review')
+    expect(pack.verification.overall).toBe('passed')
+    expect(pack.reviewGate.status).toBe('passed')
   })
 
   it('run из другого проекта → run-project-mismatch', async () => {

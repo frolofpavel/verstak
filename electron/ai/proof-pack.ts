@@ -9,6 +9,7 @@
  * (raw данные → структура) + renderProofPackHtml (структура → HTML). Тестируемы
  * без БД/Electron.
  */
+import { scanText } from './secret-scanner'
 
 export type ProofVerificationOverall = 'passed' | 'failed' | 'partial' | 'not_run'
 
@@ -73,8 +74,15 @@ export interface ProofPack {
   decisions: Array<{ action: string; detail: string; at: number }>
   /** Сжатый таймлайн ключевых событий прогона. */
   timeline: Array<{ kind: string; label: string | null; detail: string | null; status: string | null; at: number }>
+  /** Mandatory review gate status when review_before_commit participated in the run. */
+  reviewGate: { status: 'passed' | 'failed' | 'missing'; detail: string | null; at: number | null }
   /** Финальный ответ агента (последнее assistant_msg-событие). */
   result: string | null
+}
+
+function redact(s: string | null | undefined): string | null {
+  if (s == null) return null
+  return scanText(String(s)).redacted
 }
 
 /** Чистая сборка Proof Pack из сырых данных источников. */
@@ -95,13 +103,24 @@ export function assembleProofPack(input: ProofPackInput): ProofPack {
   const SIGNIFICANT = new Set(['tool_call', 'verify', 'assistant_msg', 'user_msg', 'status', 'error', 'session_start'])
   const timeline = input.events
     .filter(e => SIGNIFICANT.has(e.kind))
-    .map(e => ({ kind: e.kind, label: e.label, detail: e.detail, status: e.status, at: e.createdAt }))
+    .map(e => ({ kind: e.kind, label: redact(e.label), detail: redact(e.detail), status: e.status, at: e.createdAt }))
+
+  const reviewEvents = input.events.filter(e => e.kind === 'tool_call' && e.label === 'review_before_commit')
+  const review = reviewEvents[reviewEvents.length - 1]
+  const reviewDetail = redact(review?.detail)
+  const reviewGate: ProofPack['reviewGate'] = review
+    ? {
+        status: review.status === 'ok' && (review.detail ?? '').includes('REVIEW GATE: ПРОЙДЕНО') ? 'passed' : 'failed',
+        detail: reviewDetail,
+        at: review.createdAt,
+      }
+    : { status: 'missing', detail: null, at: null }
 
   return {
     generatedAt: input.generatedAt,
     run: {
       runId: run.runId,
-      title: run.title,
+      title: redact(run.title) ?? '',
       provider: run.providerId,
       model: run.model,
       status: run.status,
@@ -114,13 +133,16 @@ export function assembleProofPack(input: ProofPackInput): ProofPack {
       agentsCount: run.agentsCount,
       costUsd: Math.round(run.costCents) / 100,
       turnIndex: run.turnIndex,
-      error: run.error
+      error: redact(run.error)
     },
-    changedFiles: input.changedFiles,
-    verification: input.verification,
-    decisions,
+    changedFiles: input.changedFiles.map(f => ({ ...f, path: redact(f.path) ?? f.path })),
+    verification: input.verification
+      ? { ...input.verification, taskSummary: redact(input.verification.taskSummary) }
+      : null,
+    decisions: decisions.map(d => ({ ...d, action: redact(d.action) ?? d.action, detail: redact(d.detail) ?? '' })),
     timeline,
-    result
+    reviewGate,
+    result: redact(result)
   }
 }
 
@@ -203,6 +225,9 @@ export function renderProofPackHtml(pack: ProofPack): string {
   ${v ? `<h2 style="font-size:15px;border-bottom:1px solid #e1e4e8;padding-bottom:4px;margin-top:20px">Доказательство (DoD)</h2>
   <p style="font-size:13px">Проверок пройдено: <b>${v.checksPassed}/${v.checksTotal}</b>. Задача: ${esc(v.taskSummary ?? '—')}.</p>` : ''}
 
+  <h2 style="font-size:15px;border-bottom:1px solid #e1e4e8;padding-bottom:4px;margin-top:20px">Review Gate</h2>
+  <p style="font-size:13px"><b>${esc(pack.reviewGate.status)}</b>${pack.reviewGate.detail ? ` — ${esc(pack.reviewGate.detail)}` : ''}</p>
+
   <h2 style="font-size:15px;border-bottom:1px solid #e1e4e8;padding-bottom:4px;margin-top:20px">Решения и обходы</h2>
   <ul style="font-size:13px;margin:8px 0;padding-left:20px">${decisionRows}</ul>
 
@@ -216,4 +241,59 @@ export function renderProofPackHtml(pack: ProofPack): string {
     Сгенерировано Verstak · runId ${esc(meta.runId)} · ${new Date(pack.generatedAt).toISOString()}
   </p>
 </body></html>`
+}
+
+function mdCell(s: string | null | undefined): string {
+  return String(s ?? '—').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+/** Чистый рендер Proof Pack -> Markdown для клиентской поставки / ревью в git. */
+export function renderProofPackMarkdown(pack: ProofPack): string {
+  const v = pack.verification
+  const files = pack.changedFiles.length
+    ? pack.changedFiles.map(f => `| ${mdCell(f.path)} | +${f.added} | -${f.removed} | ${mdCell(f.status)} |`).join('\n')
+    : '| — | 0 | 0 | none |'
+  const timeline = pack.timeline.length
+    ? pack.timeline.map(e => `- ${new Date(e.at).toISOString()} · ${e.kind}${e.label ? ` · ${e.label}` : ''}${e.status ? ` · ${e.status}` : ''}${e.detail ? ` · ${e.detail.slice(0, 180)}` : ''}`).join('\n')
+    : '- No timeline events'
+
+  return [
+    '# Proof Pack',
+    '',
+    `Task: ${pack.run.title}`,
+    `Run: ${pack.run.runId}`,
+    `Generated: ${new Date(pack.generatedAt).toISOString()}`,
+    '',
+    '## Run',
+    '',
+    `- Provider/model: ${pack.run.provider ?? '—'} / ${pack.run.model ?? '—'}`,
+    `- Mode: ${pack.run.agentMode ?? '—'}`,
+    `- Status: ${pack.run.status}${pack.run.error ? ` (${pack.run.error})` : ''}`,
+    `- Duration: ${fmtDuration(pack.run.durationMs)}`,
+    `- Tools/files/agents: ${pack.run.toolCount}/${pack.run.filesCount}/${pack.run.agentsCount}`,
+    `- Cost: $${pack.run.costUsd.toFixed(2)}`,
+    '',
+    '## Verification',
+    '',
+    v
+      ? `- Status: ${v.overall}\n- Checks: ${v.checksPassed}/${v.checksTotal}\n- Summary: ${v.taskSummary ?? '—'}`
+      : '- Status: not_run',
+    '',
+    '## Review Gate',
+    '',
+    `- Status: ${pack.reviewGate.status}`,
+    `- Detail: ${pack.reviewGate.detail ?? '—'}`,
+    '',
+    '## Changed Files',
+    '',
+    '| File | Added | Removed | Status |',
+    '| --- | ---: | ---: | --- |',
+    files,
+    '',
+    '## Timeline',
+    '',
+    timeline,
+    '',
+    ...(pack.result ? ['## Result', '', pack.result.slice(0, 2000), ''] : []),
+  ].join('\n')
 }

@@ -470,9 +470,9 @@ declare global {
         updateStep: (id: number, patch: { status?: StepStatus; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) => Promise<void>
         remove: (id: number) => Promise<void>
       }
-      /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html). */
+      /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html + proof.md). */
       proof: {
-        generate: (runId: string) => Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; html?: string; error?: string }>
+        generate: (runId: string) => Promise<{ ok: boolean; jsonPath?: string; htmlPath?: string; markdownPath?: string; html?: string; markdown?: string; error?: string }>
       }
       workflows: {
         list: () => Promise<WorkflowSummary[]>
@@ -990,7 +990,7 @@ export interface DevTaskDetail {
 /** Pipeline Brief→Proof (спек). Зеркало типов electron/storage/pipeline-runs.ts —
  *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
 export type PipelineMode = 'dev' | 'agency'
-export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'proof' | 'completed' | 'cancelled' | 'blocked'
+export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'review' | 'proof' | 'completed' | 'cancelled' | 'blocked'
 
 // Project Brain (зеркало electron/storage/project-brain.ts — renderer без main).
 export interface ProjectBrain {

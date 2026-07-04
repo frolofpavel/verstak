@@ -37,11 +37,11 @@ import { formatDuration } from '../lib/format-duration'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import { resolveSkillOverride } from '../lib/skill-override'
-import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, SAMPLE_BRIEF } from '../lib/pipeline-brief'
+import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveReviewCandidateRunIds, reviewGateState, SAMPLE_BRIEF } from '../lib/pipeline-brief'
 import { decidePipelineGate, type VerifyOutcome } from '../lib/pipeline-gate'
 import { isCliProvider } from '../lib/model-catalog'
 import { toProjectAbsPath } from '../lib/project-path'
-import type { PipelineRun, PipelineStep, PipelineBrief } from '../types/api'
+import type { PipelineRun, PipelineStep, PipelineBrief, PipelineMode } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import {
   formatChatDateDivider,
@@ -628,6 +628,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const pipelineExecuteSendIdRef = useRef<number | null>(null)
   const [pipelineWizardOpen, setPipelineWizardOpen] = useState(false)
   const [pipelineInitialBrief, setPipelineInitialBrief] = useState<PipelineBrief | undefined>(undefined)
+  const [pipelineWizardMode, setPipelineWizardMode] = useState<PipelineMode>('agency')
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false)
   const composerSettingsRef = useRef<HTMLDivElement | null>(null)
   const activePipeline = useProject(s => s.activePipeline)
@@ -1410,6 +1411,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if (v === '1') {
         void window.api.settings.setKey('pipeline_sample_pending', '')
         setPipelineInitialBrief(SAMPLE_BRIEF)
+        setPipelineWizardMode('agency')
         setPipelineWizardOpen(true)
       }
     })
@@ -1418,7 +1420,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   // Pipeline-оркестрация (спек D5): запуск из визарда → активируем прогон + шлём
   // Plan-промпт; «План OK» в баннере → двигаем шаг + шлём Execute-промпт.
   function dispatchPipelineSend(step: PipelineStep, brief: PipelineRun['brief'], planId: number | null) {
-    const params = buildPipelineSend(step, brief, planId)
+    const mode = useProject.getState().activePipeline?.mode ?? 'dev'
+    const params = buildPipelineSend(step, brief, planId, { requireReviewGate: mode === 'agency' })
     if (!params) return
     if (step === 'plan' || step === 'execute') pipelineAutoSendStepRef.current = step
     window.dispatchEvent(new CustomEvent('gg-pipeline-send', { detail: params }))
@@ -1464,7 +1467,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       const thisAttempt = pipeline.verifyAttempts + 1
       const decision = decidePipelineGate(outcome, thisAttempt)
       if (decision.action === 'proof') {
-        void store.advancePipeline({ step: 'proof' })   // Proof-шаг — D7
+        void store.advancePipeline({ step: pipeline.mode === 'agency' ? 'review' : 'proof' })
       } else if (decision.action === 'retry') {
         // Авто-починка: назад на execute (счётчик попытки) + повторный Execute-промпт.
         await store.advancePipeline({ step: 'execute', verifyAttempts: thisAttempt })
@@ -1472,6 +1475,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       } else {
         void store.advancePipeline({ step: 'blocked' }) // честный стоп
       }
+    } else if (step === 'review') {
+      const runs = await window.api.agentRuns.list(pipeline.projectPath, { limit: 10 })
+      const candidateRunIds = resolveReviewCandidateRunIds(pipeline.agentRunId, pipeline.chatId, runs)
+      for (const runId of candidateRunIds) {
+        const detail = await window.api.agentRuns.get(runId).catch(() => null)
+        const gate = reviewGateState(detail?.events ?? [])
+        if (gate.state === 'passed') {
+          void store.advancePipeline({ step: 'proof', agentRunId: pipeline.agentRunId ?? runId })
+          return
+        }
+      }
+      window.dispatchEvent(new CustomEvent('gg-resume-send', {
+        detail: 'Вызови review_before_commit перед финальным ответом. Передай task_brief и verify_commands из DoD; продолжать к Proof Pack можно только после "REVIEW GATE: ПРОЙДЕНО".',
+      }))
     } else if (step === 'proof') {
       // Собрать Proof Pack: нужен точный runId. Без него не завершаем pipeline,
       // иначе можно получить красивый Proof по чужому/случайному прогону.
@@ -2474,6 +2491,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               <div className="gg-chat-empty-quick">
                 <button
                   className="gg-quick-action"
+                  onClick={() => { setPipelineWizardMode('agency'); setPipelineWizardOpen(true) }}
+                  disabled={isCliProvider(provider.id)}
+                  title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
+                >
+                  ▶ Agency task
+                </button>
+                <button
+                  className="gg-quick-action"
                   onClick={() => setInput('/code-review')}
                   title="Запустить скилл «Code Review» — анализ изменений, поиск багов и регрессий"
                 >
@@ -2798,9 +2823,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       <PipelineBanner onPrimary={onPipelinePrimary} />
       {pipelineWizardOpen && (
         <PipelineWizard
+          mode={pipelineWizardMode}
           chatId={activeChatId}
           initialBrief={pipelineInitialBrief}
-          onClose={() => { setPipelineWizardOpen(false); setPipelineInitialBrief(undefined) }}
+          onClose={() => { setPipelineWizardOpen(false); setPipelineInitialBrief(undefined); setPipelineWizardMode('agency') }}
           onStarted={onPipelineStarted}
         />
       )}
@@ -3188,12 +3214,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                             className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
                             onClick={() => {
                               setComposerSettingsOpen(false)
+                              setPipelineWizardMode('agency')
                               setPipelineWizardOpen(true)
                             }}
                             disabled={isCliProvider(provider.id)}
                             title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
                           >
-                            ▶ Pipeline
+                            ▶ Agency task
                           </button>
                         </div>
                       )}
@@ -3228,11 +3255,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 <button
                   type="button"
                   className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-                  onClick={() => setPipelineWizardOpen(true)}
+                  onClick={() => { setPipelineWizardMode('agency'); setPipelineWizardOpen(true) }}
                   disabled={isCliProvider(provider.id)}
                   title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
                 >
-                  ▶ Pipeline
+                  ▶ Agency task
                 </button>
               )}
               {!isHelpChat && <ComposerToolsMenu onInject={injectTemplate} />}

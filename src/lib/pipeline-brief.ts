@@ -1,4 +1,4 @@
-import type { PipelineBrief, PipelineStep, VerificationOverall } from '../types/api'
+import type { AgentRunEvent, PipelineBrief, PipelineStep, VerificationOverall } from '../types/api'
 import { TASK_SPEC_CONTRACT } from './task-spec'
 
 /** Тон Verify-шага + можно ли переходить к Proof. passed → зелёный путь;
@@ -12,14 +12,14 @@ export function verifyState(overall: VerificationOverall | null | undefined): {
   return { tone: 'warn', canProof: false } // partial / not_run / null
 }
 
-/** Шаги «N/5» для баннера: brief(1) собирается в визарде, дальше plan→proof. */
+/** Шаги «N/6» для баннера: brief(1) собирается в визарде, дальше plan→proof. */
 const STEP_ORDER: Record<PipelineStep, number> = {
-  brief: 1, plan: 2, execute: 3, verify: 4, proof: 5, completed: 5, cancelled: 5, blocked: 4,
+  brief: 1, plan: 2, execute: 3, verify: 4, review: 5, proof: 6, completed: 6, cancelled: 6, blocked: 6,
 }
 
-/** {index 1-based, total} шага для баннера «Pipeline · N/5». */
+/** {index 1-based, total} шага для баннера «Pipeline · N/6». */
 export function pipelineStepIndex(step: PipelineStep): { index: number; total: number } {
-  return { index: STEP_ORDER[step] ?? 1, total: 5 }
+  return { index: STEP_ORDER[step] ?? 1, total: 6 }
 }
 
 /** Пустой бриф для инициализации формы визарда. */
@@ -62,13 +62,20 @@ export function buildPlanPrompt(brief: PipelineBrief): string {
  * Промпт Execute-шага (спек §3.3). Выполнить утверждённый план + обязательный
  * attest_verification по DoD на финале.
  */
-export function buildExecutePrompt(brief: PipelineBrief, planId: number): string {
-  return [
+export function buildExecutePrompt(brief: PipelineBrief, planId: number, requireReviewGate = false): string {
+  const lines = [
     `Выполни утверждённый план (plan id=${planId}).`,
     'Иди по шагам ПО ОДНОМУ, строго по detail-ТЗ каждого шага (файлы, что сделать, критерий готовности). Не перескакивай и не объединяй шаги.',
     `DoD: ${brief.dod.trim()}`,
     'По завершении ОБЯЗАТЕЛЬНО вызови attest_verification с task_summary и checks из DoD.',
-  ].join('\n')
+  ]
+  if (requireReviewGate) {
+    lines.push(
+      'Agency gate: after successful attest_verification, call review_before_commit before the final answer.',
+      'Pass task_brief plus verify_commands from DoD. Do not finish until the tool returns "REVIEW GATE: ПРОЙДЕНО".',
+    )
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -105,6 +112,10 @@ export function resolvePipelineRunId(
 /** Режим агента для авто-send шага pipeline. */
 export type PipelineSendMode = 'plan' | 'accept-edits'
 
+export interface PipelineSendOptions {
+  requireReviewGate?: boolean
+}
+
 /**
  * Параметры авто-send для шага pipeline: текст промпта + режим агента.
  *  - plan → read-only (mode 'plan'), buildPlanPrompt;
@@ -115,8 +126,37 @@ export function buildPipelineSend(
   step: PipelineStep,
   brief: PipelineBrief,
   planId: number | null,
+  opts: PipelineSendOptions = {},
 ): { text: string; mode: PipelineSendMode } | null {
   if (step === 'plan') return { text: buildPlanPrompt(brief), mode: 'plan' }
-  if (step === 'execute') return { text: buildExecutePrompt(brief, planId ?? 0), mode: 'accept-edits' }
+  if (step === 'execute') return { text: buildExecutePrompt(brief, planId ?? 0, opts.requireReviewGate === true), mode: 'accept-edits' }
   return null
+}
+
+export type ReviewGateState = 'missing' | 'passed' | 'failed'
+
+export function reviewGateState(
+  events: ReadonlyArray<Pick<AgentRunEvent, 'kind' | 'label' | 'detail' | 'status'>>,
+): { state: ReviewGateState; detail: string | null } {
+  const reviews = events.filter(e => e.kind === 'tool_call' && e.label === 'review_before_commit')
+  const last = reviews[reviews.length - 1]
+  if (!last) return { state: 'missing', detail: null }
+  const detail = last.detail ?? ''
+  if (last.status === 'ok' && detail.includes('REVIEW GATE: ПРОЙДЕНО')) {
+    return { state: 'passed', detail }
+  }
+  return { state: 'failed', detail: detail || last.status || null }
+}
+
+export function resolveReviewCandidateRunIds(
+  agentRunId: string | null,
+  chatId: number | null,
+  runs: ReadonlyArray<{ runId: string; chatId: number | null }>,
+): string[] {
+  const ids: string[] = []
+  if (agentRunId) ids.push(agentRunId)
+  for (const r of runs) {
+    if (r.chatId === chatId && !ids.includes(r.runId)) ids.push(r.runId)
+  }
+  return ids
 }
