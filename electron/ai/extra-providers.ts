@@ -16,6 +16,7 @@
 
 import { createOpenAiCompatProvider } from './openai-compat'
 import type { ChatProvider } from './types'
+import { DEFAULT_AGENT_CODING_MODEL, DEFAULT_AGENT_FALLBACK_MODEL } from './agent-model-policy'
 
 export interface ExtraProviderSpec {
   /** ID для use в registry. */
@@ -50,14 +51,14 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     secretKey: 'verstak_gateway_api_key',
     keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
     keyHint: 'vsk_live_...',
-    // Пресеты вместо зоопарка моделей — в API уходит id (verstak/...), в UI —
-    // русские названия (см. GATEWAY_PRESET_LABELS). Gateway маршрутизирует на
-    // реальный upstream. Fusion-пресеты — Phase 4 (нужен gateway-pipeline).
+    // Stage 12 policy puts the recommended coding/fallback models first.
+    // Old verstak/* presets stay selectable for compatibility and server-side remaps.
     models: [
+      DEFAULT_AGENT_CODING_MODEL,
+      DEFAULT_AGENT_FALLBACK_MODEL,
+      'qwen3-coder',
       'verstak/economy',
-      // Trial-пресет воронки: новый юзер пробует Gateway за 0₽ до пополнения
-      // баланса → конверсия. Шлюз отдаёт verstak/free в публичном /v1/models.
-      // Ставим вторым (economy остаётся models[0] — внутр. дефолт не меняется).
+      // Trial preset stays visible for the Gateway funnel, but it is not a coding default.
       'verstak/free',
       'verstak/balanced',
       'verstak/coder',
@@ -65,7 +66,7 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
       'verstak/fast',
       'verstak/private'
     ],
-    defaultModel: 'verstak/balanced',
+    defaultModel: DEFAULT_AGENT_CODING_MODEL,
     // РФ-релей: api.agi-iri.ru (Амстердам) недостижим стабильно для крупных
     // агентных тел запроса с РФ last-mile (DPI/instability рвёт long-lived HTTPS
     // на ~19-60с). Релей на РФ-сервере (Москва) терминирует юзера коротким
@@ -226,6 +227,9 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
  * пользователю показываем человекочитаемое (значение). Fusion — Phase 4.
  */
 export const GATEWAY_PRESET_LABELS: Record<string, string> = {
+  'kimi-k2.7-code': 'Kimi K2.7 Code - default',
+  'deepseek-chat': 'DeepSeek Chat - fallback',
+  'qwen3-coder': 'Qwen3 Coder - allowed',
   'verstak/economy': 'Эконом',
   'verstak/free': '🎁 Бесплатно — проба',
   'verstak/balanced': 'Баланс',
@@ -263,7 +267,9 @@ export function createExtraProvider(
     ? opts.customModels
     : spec.models
 
-  const defaultModel = models[0] ?? spec.defaultModel
+  const defaultModel = spec.defaultModel && models.includes(spec.defaultModel)
+    ? spec.defaultModel
+    : (models[0] ?? spec.defaultModel)
 
   return createOpenAiCompatProvider({
     id: spec.id,

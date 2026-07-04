@@ -25,7 +25,7 @@ const ROLE_PRESETS: Record<Role, {
 
 const API_KEYS: Record<ApiProvider, { settingKey: string; provider: string; model: string }> = {
   // Рекомендованный для РФ: один ключ vsk_live_ → все модели, рубли, без VPN.
-  'verstak-gateway': { settingKey: 'verstak_gateway_api_key', provider: 'verstak-gateway', model: 'verstak/balanced' },
+  'verstak-gateway': { settingKey: 'verstak_gateway_api_key', provider: 'verstak-gateway', model: 'kimi-k2.7-code' },
   'gemini-api': { settingKey: 'gemini_api_key', provider: 'gemini-api', model: 'gemini-2.5-flash' },
   anthropic: { settingKey: 'anthropic_api_key', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
   yandexgpt: { settingKey: 'yandex_api_key', provider: 'yandexgpt', model: 'yandexgpt/latest' },

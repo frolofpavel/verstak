@@ -36,7 +36,7 @@ export interface TierRecommendation {
  * выигрывает. Список — статика: новые провайдеры добавляются сюда вручную.
  */
 const TIER_PROVIDERS: Record<ModelTier, ProviderId[]> = {
-  cheap: ['deepseek', 'moonshot', 'qwen', 'ollama', 'groq', 'openrouter', 'mistral'],
+  cheap: ['verstak-gateway', 'deepseek', 'moonshot', 'qwen', 'ollama', 'groq', 'openrouter', 'mistral'],
   frontier: ['claude', 'openai', 'gemini-api', 'grok'],
   private: ['yandex-gpt', 'gigachat'],
 }

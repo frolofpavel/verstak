@@ -13,10 +13,11 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
 
   it('пресеты вместо зоопарка моделей (Эконом/Баланс/Кодинг/…)', () => {
     expect(spec!.models).toEqual([
+      'kimi-k2.7-code', 'deepseek-chat', 'qwen3-coder',
       'verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder',
       'verstak/long', 'verstak/fast', 'verstak/private',
     ])
-    expect(spec!.defaultModel).toBe('verstak/balanced')
+    expect(spec!.defaultModel).toBe('kimi-k2.7-code')
   })
 
   it('русские названия пресетов для UI (в API уходит id)', () => {
@@ -29,6 +30,7 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
   it('createExtraProvider строит провайдер (OpenAI-совместимый, как DeepSeek)', () => {
     const p = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_test' })
     expect(p.id).toBe('verstak-gateway')
+    expect(p.models[0]).toBe('kimi-k2.7-code')
     expect(p.models).toContain('verstak/balanced')
   })
 })

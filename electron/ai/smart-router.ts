@@ -8,6 +8,7 @@
 
 import type { ChatMessage } from './types'
 import { PROVIDERS, type ProviderId } from './registry'
+import { recommendAgentModel } from './agent-model-policy'
 
 export type TaskComplexity = 'simple' | 'moderate' | 'complex'
 
@@ -75,6 +76,11 @@ export function recommendModel(providerId: string, complexity: TaskComplexity): 
       simple: 'grok-4-fast',
       moderate: 'grok-4-fast',
       complex: 'grok-4',
+    },
+    'verstak-gateway': {
+      simple: recommendAgentModel('coding'),
+      moderate: recommendAgentModel('coding'),
+      complex: recommendAgentModel('coding'),
     },
   }
 

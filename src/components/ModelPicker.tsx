@@ -44,6 +44,9 @@ function isCliProvider(id: string): boolean {
 // Verstak Gateway: пресеты показываем по-русски (в API уходит id verstak/...).
 // Зеркало GATEWAY_PRESET_LABELS из electron/ai/extra-providers.ts (renderer без main).
 const GATEWAY_PRESET_LABELS: Record<string, string> = {
+  'kimi-k2.7-code': 'Kimi K2.7 Code - default',
+  'deepseek-chat': 'DeepSeek Chat - fallback',
+  'qwen3-coder': 'Qwen3 Coder - allowed',
   'verstak/economy': 'Эконом',
   'verstak/balanced': 'Баланс',
   'verstak/coder': 'Кодинг',

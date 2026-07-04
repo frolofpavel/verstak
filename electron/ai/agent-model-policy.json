@@ -1,0 +1,117 @@
+{
+  "version": "2026-07-04-stage-11",
+  "source": "docs/cheap-model-eval-2026-07-04.md",
+  "defaults": {
+    "provider": "verstak-gateway",
+    "coding": "kimi-k2.7-code",
+    "fallback": "deepseek-chat",
+    "reviewer": "kimi-k2.7-code",
+    "planner": "kimi-k2.7-code",
+    "fastEdit": "deepseek-chat"
+  },
+  "aliases": {
+    "moonshotai-kimi-k2": "kimi-k2.7-code",
+    "moonshotai/kimi-k2": "kimi-k2.7-code",
+    "moonshot/kimi-k2": "kimi-k2.7-code",
+    "qwen/qwen3-coder": "qwen3-coder",
+    "glm-4.6": "z-ai/glm-4.6",
+    "zai-org/glm-4.6": "z-ai/glm-4.6",
+    "minimax/minimax-m1": "minimax-m1"
+  },
+  "gatewayPresetRecommendations": {
+    "verstak/coder/fast": "deepseek-chat",
+    "verstak/fast": "deepseek-chat",
+    "verstak/coder/balanced": "kimi-k2.7-code",
+    "verstak/balanced": "kimi-k2.7-code"
+  },
+  "policies": [
+    {
+      "model": "kimi-k2.7-code",
+      "agentMode": "recommended",
+      "roles": ["coding", "planner", "reviewer"],
+      "recipes": ["small-edit", "bugfix", "test-fix", "typescript-error", "review-before-commit"],
+      "toolMode": "native",
+      "notes": "Stage 11 live matrix: 5/5 strict pass through Verstak Gateway."
+    },
+    {
+      "model": "deepseek-chat",
+      "agentMode": "fallback",
+      "roles": ["coding", "fast-edit", "fallback"],
+      "recipes": ["small-edit", "bugfix", "test-fix", "typescript-error"],
+      "toolMode": "native",
+      "notes": "Stage 11: reliable coding fallback; standalone review-before-commit failed."
+    },
+    {
+      "model": "qwen3-coder",
+      "agentMode": "allowed",
+      "roles": ["coding", "fallback"],
+      "recipes": ["small-edit", "test-fix", "typescript-error", "review-before-commit"],
+      "toolMode": "native",
+      "notes": "Stage 11: 4/5 pass, but bugfix failed before the required review gate."
+    },
+    {
+      "model": "verstak/coder",
+      "agentMode": "allowed",
+      "roles": ["coding", "fallback"],
+      "recipes": ["small-edit", "test-fix", "typescript-error", "review-before-commit"],
+      "toolMode": "native",
+      "notes": "Stage 11: usable for guarded coding, not default for bugfix gate-heavy work."
+    },
+    {
+      "model": "verstak/balanced",
+      "agentMode": "allowed",
+      "roles": ["coding"],
+      "recipes": ["bugfix", "test-fix", "typescript-error", "review-before-commit"],
+      "toolMode": "native",
+      "notes": "Current Gateway preset passed 4/5 but failed small-edit; default policy recommends kimi-k2.7-code instead."
+    },
+    {
+      "model": "verstak/coder/balanced",
+      "agentMode": "allowed",
+      "roles": ["coding"],
+      "recipes": ["bugfix", "test-fix", "typescript-error", "review-before-commit"],
+      "toolMode": "native",
+      "notes": "Policy alias for verstak/balanced; recommended remap target is kimi-k2.7-code."
+    },
+    {
+      "model": "verstak/fast",
+      "agentMode": "not_recommended",
+      "roles": [],
+      "recipes": [],
+      "toolMode": "native",
+      "notes": "Stage 11: 1/5 strict pass. Do not use as an agent default until the Gateway preset is remapped."
+    },
+    {
+      "model": "verstak/coder/fast",
+      "agentMode": "not_recommended",
+      "roles": [],
+      "recipes": [],
+      "toolMode": "native",
+      "notes": "Policy alias for verstak/fast; recommended remap target is deepseek-chat."
+    },
+    {
+      "model": "z-ai/glm-4.6",
+      "agentMode": "not_recommended",
+      "roles": [],
+      "recipes": [],
+      "toolMode": "native",
+      "notes": "Stage 11: 1/5 strict pass. Not suitable for agent mode defaults."
+    },
+    {
+      "model": "minimax-m1",
+      "agentMode": "not_recommended",
+      "roles": [],
+      "recipes": [],
+      "toolMode": "native",
+      "notes": "Stage 11: not tested because Gateway probe returned 400."
+    },
+    {
+      "model": "deepseek-reasoner",
+      "agentMode": "not_recommended",
+      "roles": [],
+      "recipes": [],
+      "toolMode": "native",
+      "notes": "Stage 11: not tested because Gateway probe hit a network error."
+    }
+  ]
+}

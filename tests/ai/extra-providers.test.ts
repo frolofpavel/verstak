@@ -20,7 +20,9 @@ describe('Verstak Gateway пресеты', () => {
     }
   })
 
-  it('defaultModel остаётся verstak/balanced (free — опция, не форсированный дефолт)', () => {
-    expect(gw.defaultModel).toBe('verstak/balanced')
+  it('uses the Stage 12 recommended coding model as the Gateway default', () => {
+    expect(gw.defaultModel).toBe('kimi-k2.7-code')
+    expect(gw.models[0]).toBe('kimi-k2.7-code')
+    expect(gw.models).toContain('deepseek-chat')
   })
 })

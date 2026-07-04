@@ -143,6 +143,11 @@ describe('smart-router per-subtask — выбор модели по сложно
     expect(recommendModel('claude', 'complex')).toBe('claude-opus-4-5')
   })
 
+  it('verstak-gateway routes recipe-agent subtasks to the Stage 12 coding default', () => {
+    expect(recommendModel('verstak-gateway', 'simple')).toBe('kimi-k2.7-code')
+    expect(recommendModel('verstak-gateway', 'complex')).toBe('kimi-k2.7-code')
+  })
+
   it('неизвестный провайдер → null (фоллбэк на defaultModel в оркестраторе)', () => {
     expect(recommendModel('unknown-provider', 'complex')).toBeNull()
   })
