@@ -61,6 +61,7 @@ export function isForbiddenPath(relPath: string): boolean {
   const parts = norm.split('/').filter(Boolean)
   const basename = parts[parts.length - 1] ?? ''
   if (FORBIDDEN_BASENAMES.has(basename)) return true
+  if (FORBIDDEN_DIRS.has(basename)) return true
   // Any dir in the path matching a forbidden dir
   for (const p of parts.slice(0, -1)) {
     if (FORBIDDEN_DIRS.has(p)) return true

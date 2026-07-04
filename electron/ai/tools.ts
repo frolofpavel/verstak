@@ -8,7 +8,7 @@ import type { ToolDefinition } from './types'
 import { classifyCommand } from './command-policy'
 import { isForbiddenPath, scanText } from './secret-scanner'
 import { getProjectMap, invalidateProjectMap, markFileDirty, projectMapToText, getDependencyMap, invalidateDependencyMap } from './project-map'
-import { safeRealJoin } from './path-policy'
+import { resolveReadOnlyPath, safeRealJoin } from './path-policy'
 import { treeKill } from './child-kill'
 import { isDangerousCommand } from '../connectors/ssh'
 import { shq } from '../projects/ssh-fs'
@@ -63,19 +63,19 @@ export function buildRemoteSearchCommand(
 export const TOOL_DEFS: ToolDefinition[] = [
   {
     name: 'read_file',
-    description: 'Прочитать содержимое файла относительно корня проекта',
+    description: 'Прочитать файл. Относительный путь читается из проекта; явный абсолютный путь можно читать как внешний read-only контекст. Секреты/credentials блокируются.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: 'Относительный путь от корня проекта' } },
+      properties: { path: { type: 'string', description: 'Относительный путь от проекта или явный абсолютный путь для read-only чтения' } },
       required: ['path']
     }
   },
   {
     name: 'list_directory',
-    description: 'Перечислить файлы и папки в директории',
+    description: 'Перечислить файлы и папки. Относительный путь читается из проекта; явный абсолютный путь можно просмотреть как внешний read-only контекст. Секретные имена скрываются.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: 'Относительный путь, "." для корня' } },
+      properties: { path: { type: 'string', description: 'Относительный путь, "." для корня проекта, или явный абсолютный путь для read-only просмотра' } },
       required: ['path']
     }
   },
@@ -1201,7 +1201,11 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         if (isForbiddenPath(relPath)) {
           throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
         }
-        const abs = await safeRealJoin(root, relPath)
+        const abs = await resolveReadOnlyPath(root, relPath)
+        const realRel = relative(root, abs)
+        if (isForbiddenPath(abs) || isForbiddenPath(realRel)) {
+          throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+        }
         let st
         try {
           st = await stat(abs)
@@ -1226,11 +1230,19 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         return raw
       }
       if (name === 'list_directory') {
-        const abs = await safeRealJoin(root, String(args.path))
+        const dirArg = String(args.path)
+        if (isForbiddenPath(dirArg)) {
+          throw new Error(`Доступ запрещён политикой безопасности: ${dirArg} (secrets/credentials)`)
+        }
+        const abs = await resolveReadOnlyPath(root, dirArg)
+        const realRel = relative(root, abs)
+        if (isForbiddenPath(abs) || isForbiddenPath(realRel)) {
+          throw new Error(`Доступ запрещён политикой безопасности: ${dirArg} (secrets/credentials)`)
+        }
         const entries = await readdir(abs)
         const out: string[] = []
         for (const e of entries) {
-          const childRel = (String(args.path) === '.' ? e : `${args.path}/${e}`)
+          const childRel = (dirArg === '.' ? e : `${dirArg}/${e}`)
           if (isForbiddenPath(childRel)) continue  // hide secret stores from directory listings
           const st = await stat(join(abs, e))
           out.push(st.isDirectory() ? `${e}/` : e)

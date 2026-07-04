@@ -84,3 +84,24 @@ export async function safeRealJoin(root: string, rel: string): Promise<string> {
     throw err
   }
 }
+
+/**
+ * Read-only resolver for explicit external context.
+ *
+ * Relative paths keep the normal project sandbox. Absolute paths are allowed
+ * only for read-only tools; callers must still apply isForbiddenPath/scanText.
+ * This lets the user point the agent at an exact outside file/folder without
+ * weakening write tools, git, terminal cwd, undo, or project mutation paths.
+ */
+export async function resolveReadOnlyPath(root: string, userPath: string): Promise<string> {
+  if (!isAbsolute(userPath)) return safeRealJoin(root, userPath)
+
+  const abs = resolve(userPath)
+  try {
+    return await realpath(abs)
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    if (e.code === 'ENOENT') return abs
+    throw err
+  }
+}

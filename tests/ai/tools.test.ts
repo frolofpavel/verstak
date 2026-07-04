@@ -20,6 +20,15 @@ describe('file tools', () => {
     expect(result).toBe('# Test')
   })
 
+  it('read_file allows an explicit absolute outside path as read-only context', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const file = join(outside, 'SKILL.md')
+    writeFileSync(file, '# External skill')
+    const tools = createFileTools(root)
+    const result = await tools.execute('read_file', { path: file })
+    expect(result).toBe('# External skill')
+  })
+
   it('list_directory returns entries', async () => {
     const tools = createFileTools(root)
     const result = await tools.execute('list_directory', { path: '.' }) as string[]
@@ -27,9 +36,35 @@ describe('file tools', () => {
     expect(result).toContain('src/')
   })
 
+  it('list_directory allows an explicit absolute outside path but hides secret names', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    writeFileSync(join(outside, 'SKILL.md'), '# ok')
+    writeFileSync(join(outside, '.env'), 'TOKEN=x')
+    const tools = createFileTools(root)
+    const result = await tools.execute('list_directory', { path: outside }) as string[]
+    expect(result).toContain('SKILL.md')
+    expect(result).not.toContain('.env')
+  })
+
   it('rejects path traversal', async () => {
     const tools = createFileTools(root)
     await expect(tools.execute('read_file', { path: '../../../etc/passwd' })).rejects.toThrow()
+  })
+
+  it('still rejects writes to explicit absolute outside paths', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const file = join(outside, 'note.md')
+    const tools = createFileTools(root)
+    await expect(tools.execute('write_file', { path: file, content: 'nope' })).rejects.toThrow()
+  })
+
+  it('blocks explicit absolute secret paths', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const file = join(outside, '.env')
+    writeFileSync(file, 'TOKEN=x')
+    const tools = createFileTools(root)
+    await expect(tools.execute('read_file', { path: file })).rejects.toThrow(/политикой безопасности/)
+    await expect(tools.execute('list_directory', { path: join(outside, '.ssh') })).rejects.toThrow(/политикой безопасности/)
   })
 
   // Регрессия: длинный русский вывод не должен превращаться в мойибейк.

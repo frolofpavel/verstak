@@ -39,6 +39,7 @@ describe('isForbiddenPath', () => {
     expect(isForbiddenPath('apps/web/.env.production')).toBe(true)
   })
   it('blocks .ssh directory contents', () => {
+    expect(isForbiddenPath('.ssh')).toBe(true)
     expect(isForbiddenPath('.ssh/id_ed25519')).toBe(true)
     expect(isForbiddenPath('home/.ssh/config')).toBe(true)
   })

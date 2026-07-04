@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'path'
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
-import { safeJoin, isWithinKnownRoots } from '../../electron/ai/path-policy'
+import { safeJoin, isWithinKnownRoots, resolveReadOnlyPath } from '../../electron/ai/path-policy'
 
 const WIN = process.platform === 'win32'
 const ROOT = WIN ? 'C:\\Users\\Pavel\\proj' : '/home/pavel/proj'
@@ -81,5 +81,23 @@ describe('path-policy isWithinKnownRoots', () => {
     mkdirSync(join(realRoot, 'sub'))
     writeFileSync(join(realRoot, 'sub', 'ok.txt'), 'ok')
     expect(isWithinKnownRoots(join(realRoot, 'sub', 'ok.txt'), [realRoot])).toBe(true)
+  })
+})
+
+describe('path-policy resolveReadOnlyPath', () => {
+  it('keeps relative paths inside the project root', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    writeFileSync(join(realRoot, 'ok.txt'), 'ok')
+    const resolved = await resolveReadOnlyPath(realRoot, 'ok.txt')
+    expect(resolved).toBe(join(realRoot, 'ok.txt'))
+  })
+
+  it('allows explicit absolute paths for read-only external context', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const file = join(outside, 'note.md')
+    writeFileSync(file, 'outside')
+    const resolved = await resolveReadOnlyPath(realRoot, file)
+    expect(resolved).toBe(file)
   })
 })
