@@ -339,7 +339,7 @@ function renderRecipeProtocol(recipe) {
 
   if (recipe.reviewer?.required) {
     L.push('\n### Ревью перед завершением (обязательно):')
-    L.push('Вызови инструмент review_before_commit — независимый review gate проверит diff + task brief + вывод verify. Не завершай задачу без прохождения гейта.')
+    L.push('Вызови инструмент review_before_commit — независимый ревьюер со свежим контекстом проверит diff + описание задачи + вывод verify. Вердикт fail-closed: невалидный/пустой JSON, confidence < 0.7, ревьюер не осмотрел diff или обязательная verify не запускалась = FAIL. Не завершай задачу без прохождения гейта.')
   }
 
   if (recipe.stop.length > 0) {
@@ -349,6 +349,11 @@ function renderRecipeProtocol(recipe) {
 
   L.push('\nГраницы: минимальный патч, никаких несвязанных правок, не глуши ошибки заглушками (any/@ts-ignore/skip тестов) без явной причины.')
   return L.join('\n')
+}
+
+function buildReviewGateRequiredNudge(verifyCommands) {
+  const cmds = verifyCommands.length ? verifyCommands.map(c => `"${c}"`).join(', ') : '(из recipe.verify)'
+  return `Этот recipe требует вызова review_before_commit ПЕРЕД финальным ответом. Вызови инструмент сейчас: передай task_brief (что менял) и verify_commands (${cmds}). Не давай финальный ответ, пока gate не вернёт «${REVIEW_GATE_PASS_MARKER}».`
 }
 
 // ---------------------------------------------------------------------------
@@ -663,7 +668,119 @@ async function toolApplyPatch(args, root, mode) {
   }
 }
 
-async function executeToolCli(name, args, root, mode) {
+const REVIEW_GATE_PASS_MARKER = 'REVIEW GATE: ПРОЙДЕНО'
+const REVIEW_GATE_STOP_MESSAGE =
+  'Остановлено: recipe требует обязательного review_before_commit, но gate не пройден после corrective nudge.'
+
+function isAllowedVerifyCommand(command) {
+  const c = String(command ?? '').trim().toLowerCase()
+  if (!c) return false
+  if (/[;&|`$><]|\|\||&&/.test(c)) return false
+  return (
+    /^(npm|pnpm|yarn)\s+(run\s+)?(type|typecheck|test|test:fast|lint|build|check)\b/.test(c) ||
+    /^npx\s+(tsc|vitest|jest|eslint)\b/.test(c) ||
+    /^(tsc|vitest|jest|eslint)\b/.test(c) ||
+    /^node\s+--(check|test)\b/.test(c)
+  )
+}
+
+function extractErrorSignatures(output) {
+  const lines = String(output ?? '').split(/\r?\n/)
+  const sigs = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    if (/error TS\d+:/i.test(trimmed)) sigs.push(trimmed.replace(/\d+:\d+/g, 'N:N'))
+    else if (/\b(fail|failed|error|exception|syntaxerror|typeerror|assertionerror)\b/i.test(trimmed)) sigs.push(trimmed.slice(0, 300))
+  }
+  return [...new Set(sigs)]
+}
+
+function evaluateVerify(runs, baseline = []) {
+  if (!runs.length) return { pass: false, blocking: ['обязательная верификация не запускалась'] }
+  const baseByCmd = new Map(baseline.map(r => [r.command.trim(), r.output]))
+  const blocking = []
+  for (const run of runs) {
+    const sigs = extractErrorSignatures(run.output)
+    const failedExit = typeof run.exitCode === 'number' && run.exitCode !== 0
+    const base = baseByCmd.get(run.command.trim())
+    if (base !== undefined) {
+      const baseSigs = new Set(extractErrorSignatures(base))
+      const fresh = sigs.filter(s => !baseSigs.has(s))
+      if (fresh.length) blocking.push(...fresh.map(s => `${run.command}: ${s}`))
+    } else if (failedExit || sigs.length) {
+      blocking.push(`${run.command}: ${sigs.length ? sigs.join('; ') : `exit ${run.exitCode}`}`)
+    }
+  }
+  return { pass: blocking.length === 0, blocking }
+}
+
+function runVerifyCommand(command, root) {
+  const cmd = String(command ?? '').trim()
+  if (!isAllowedVerifyCommand(cmd)) {
+    return { command: cmd, output: `verify-команда не в allowlist: "${cmd}"`, exitCode: 127, blocked: true }
+  }
+  try {
+    const stdout = execSync(cmd, {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 120_000,
+      maxBuffer: 6 * 1024 * 1024,
+    })
+    return { command: cmd, output: stdout || '', exitCode: 0 }
+  } catch (e) {
+    return {
+      command: cmd,
+      output: `${e.stdout ?? ''}\n${e.stderr ?? ''}\n${e.message ?? ''}`.trim(),
+      exitCode: typeof e.status === 'number' ? e.status : 1,
+    }
+  }
+}
+
+function snapshotVerifyBaseline(commands, root) {
+  const runs = []
+  for (const cmd of commands ?? []) {
+    if (!isAllowedVerifyCommand(cmd)) continue
+    const run = runVerifyCommand(cmd, root)
+    if (!run.blocked) runs.push(run)
+  }
+  return runs
+}
+
+function getGitDiff(root) {
+  try {
+    return execSync('git diff -- .', { cwd: root, encoding: 'utf-8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })
+  } catch {
+    return ''
+  }
+}
+
+async function toolReviewBeforeCommit(args, root, recipe, trace, baseline) {
+  const verifyCommands = Array.isArray(args?.verify_commands) && args.verify_commands.length
+    ? args.verify_commands
+    : (recipe?.verify?.commands ?? [])
+  const runs = verifyCommands.map(cmd => runVerifyCommand(cmd, root))
+  const blocked = runs.find(r => r.blocked)
+  if (blocked) {
+    trace.reviewGate = 'fail'
+    trace.failureReason = blocked.output
+    return `❌ REVIEW GATE: НЕ ПРОЙДЕНО.\nПричина: ${blocked.output}`
+  }
+
+  const gate = evaluateVerify(runs, baseline)
+  trace.verifyRuns = runs.map(r => ({ command: r.command, exitCode: r.exitCode }))
+  if (!gate.pass) {
+    trace.reviewGate = 'fail'
+    trace.failureReason = gate.blocking.join('\n')
+    return `❌ REVIEW GATE: НЕ ПРОЙДЕНО.\nПричина: ${gate.blocking.join('\n')}`
+  }
+
+  const diff = getGitDiff(root)
+  trace.reviewGate = 'pass'
+  return `${REVIEW_GATE_PASS_MARKER}\nVerify: PASS\nDiff bytes: ${diff.length}\nTask: ${String(args?.task_brief ?? '').slice(0, 500)}`
+}
+
+async function executeToolCli(name, args, root, mode, state = {}) {
   switch (name) {
     case 'read_file':       return toolReadFile(args, root)
     case 'list_directory':  return toolListDirectory(args, root)
@@ -679,6 +796,8 @@ async function executeToolCli(name, args, root, mode) {
       await buildProjectTree(root, root, lines, 0, 4)
       return `Структура проекта:\n${lines.join('\n')}`
     }
+    case 'review_before_commit':
+      return toolReviewBeforeCommit(args, root, state.recipe, state.trace, state.baseline)
     default:
       return `Инструмент "${name}" недоступен в CLI-режиме`
   }
@@ -781,6 +900,17 @@ const CLI_TOOL_DEFS = [
     name: 'get_project_map',
     description: 'Получить структуру проекта (дерево директорий)',
     parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'review_before_commit',
+    description: 'Recipe quality gate: baseline-aware verify + diff check before final answer.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_brief: { type: 'string' },
+        verify_commands: { type: 'array', items: { type: 'string' } }
+      }
+    }
   },
 ]
 
@@ -1192,6 +1322,9 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     failureReason: null,
   }
   const MAX_TURNS = maxTurns
+  let baseline = []
+  let reviewGatePassed = !recipe?.reviewer?.required
+  let reviewGateNudges = 0
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let fullText = ''
@@ -1221,8 +1354,25 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     if (toolCalls.length) assistantMsg.toolCalls = toolCalls
     messages.push(assistantMsg)
 
-    // Нет tool calls — агент завершил работу
-    if (toolCalls.length === 0) break
+    // Нет tool calls — агент пытается завершить работу. Для required-review recipe
+    // финал разрешён только после реального review_before_commit pass marker.
+    if (toolCalls.length === 0) {
+      if (recipe?.reviewer?.required && !reviewGatePassed) {
+        if (reviewGateNudges < 1) {
+          reviewGateNudges++
+          const nudge = buildReviewGateRequiredNudge(recipe.verify?.commands ?? [])
+          trace.toolCalls.push({ turn, name: 'review-gate-nudge', args: {} })
+          messages.push({ role: 'user', content: nudge })
+          continue
+        }
+        trace.finalStatus = 'failed'
+        trace.failureReason = REVIEW_GATE_STOP_MESSAGE
+        const err = new Error(REVIEW_GATE_STOP_MESSAGE)
+        err.trace = trace
+        throw err
+      }
+      break
+    }
 
     // Выводим сообщение о вызовах инструментов (не в json-режиме)
     if (!jsonMode) {
@@ -1235,18 +1385,35 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       trace.toolCalls.push({ turn, name: call.name, args: scrubTraceArgs(call.args) })
       if (!trace.firstMutatingTool && isMutatingToolName(call.name)) {
         trace.firstMutatingTool = call.name
+        if (recipe?.verify?.commands?.length && !trace.baselineTaken) {
+          baseline = snapshotVerifyBaseline(recipe.verify.commands, projectPath)
+          trace.baselineTaken = true
+          trace.baseline = baseline.map(r => ({ command: r.command, exitCode: r.exitCode }))
+        }
       }
       let result
       try {
-        result = await executeToolCli(call.name, call.args, projectPath, mode)
+        result = await executeToolCli(call.name, call.args, projectPath, mode, { recipe, trace, baseline })
       } catch (e) {
         result = `Ошибка: ${e.message}`
+      }
+      if (call.name === 'review_before_commit' && typeof result === 'string' && result.includes(REVIEW_GATE_PASS_MARKER)) {
+        reviewGatePassed = true
+        trace.reviewGate = 'pass'
       }
       toolResults.push({ id: call.id, name: call.name, result })
     }
 
     // Добавляем результаты как user-сообщение
     messages.push({ role: 'user', content: '', toolResults })
+  }
+
+  if (recipe?.reviewer?.required && !reviewGatePassed) {
+    trace.finalStatus = 'failed'
+    trace.failureReason = 'max-turns reached before review_before_commit passed'
+    const err = new Error(trace.failureReason)
+    err.trace = trace
+    throw err
   }
 
   trace.finalStatus = 'success'
@@ -1338,7 +1505,7 @@ try {
     : /вне.*проект|outside/i.test(err.message) ? 'path_denied'
     : 'agent_error'
   if (values.json) {
-    console.error(JSON.stringify({ ok: false, error_code: code, message: err.message }))
+    console.error(JSON.stringify({ ok: false, error_code: code, message: err.message, ...(err.trace ? { trace: err.trace } : {}) }))
   } else {
     console.error(`\nОшибка: ${err.message}`)
   }

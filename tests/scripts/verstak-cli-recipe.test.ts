@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { BUILT_IN_SKILLS } from '../../electron/ai/skills/built-in'
+import { renderRecipeProtocol } from '../../electron/ai/skills/recipe'
 
 const CLI = resolve(__dirname, '../../scripts/verstak-cli.mjs')
 
@@ -27,6 +29,26 @@ describe('verstak-cli headless recipe contract', () => {
     expect(parsed.trace.recipeId).toBe('bugfix')
     expect(parsed.trace.reviewGate).toBe('required')
     expect(parsed.trace.verifyCommands).toEqual(['npm run type', 'npm run test:fast'])
+  })
+
+  it('renders the same protocol as the GUI recipe renderer', () => {
+    const out = runCli([
+      'recipe', 'run',
+      '--recipe', 'bugfix',
+      '--task', 'fix broken sum',
+      '--json',
+      '--dry-run',
+    ])
+
+    expect(out.status).toBe(0)
+    const parsed = JSON.parse(out.stdout)
+    const guiRecipe = BUILT_IN_SKILLS.find(skill => skill.id === 'bugfix')?.recipe
+
+    expect(guiRecipe).toBeTruthy()
+    expect(parsed.protocol).toBe(renderRecipeProtocol(guiRecipe!))
+    expect(parsed.recipe.steps).toEqual(guiRecipe!.steps)
+    expect(parsed.recipe.verify).toEqual(guiRecipe!.verify)
+    expect(parsed.recipe.reviewer).toEqual(guiRecipe!.reviewer)
   })
 
   it('fails fast for an unknown recipe id', () => {
