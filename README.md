@@ -99,7 +99,7 @@ Each is hand-written over the official API (no scraping), read-only by default. 
 - **No telemetry** — nothing leaves your machine except calls to the providers you configure
 - **No cloud dependency** — SQLite local storage, all state on disk
 
-### Known limitations (1.6.2)
+### Known limitations (1.6.3)
 
 - **CLI providers have limited control:** Claude Code, Codex, Gemini CLI, and Grok Build run their own tool loops. Verstak can launch/relay/stop them, but Verstak-side verification artifacts, live tool timeline, MCP, delegation, and crash-resume guards are API-provider features.
 - **Headless recipe-runner parity is intentionally minimal:** `scripts/verstak-cli.mjs recipe run` now shares the recipe protocol, baseline, review gate, and default model policy, but it is not yet a full GUI-equivalent runtime for attachments, timeline, or all provider UX.
