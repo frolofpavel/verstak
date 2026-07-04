@@ -27,6 +27,8 @@ The key idea: never be locked in. If one provider is down or expensive, switch i
 
 Verstak **auto-detects installed CLIs on startup**. Switch provider and model per chat; if one is rate-limited or down, switch in one click without losing the session. Background sessions keep streaming when you switch projects. Automatic fallback on 429/503, smart model routing by task complexity.
 
+**Default agent model policy (2026-07-04):** coding/planner/reviewer default is `kimi-k2.7-code` through Verstak Gateway; coding fallback is `deepseek-chat`; `qwen3-coder` is allowed but not the default for required-review bugfix work. `verstak/fast` / `verstak/coder/fast` are not recommended for agent mode until the Gateway preset is remapped. Explicit user model selection is preserved. Source: [`docs/cheap-model-eval-2026-07-04.md`](docs/cheap-model-eval-2026-07-04.md).
+
 ---
 
 ### Memory (Hermes-style)
@@ -100,7 +102,7 @@ Each is hand-written over the official API (no scraping), read-only by default. 
 ### Known limitations (1.6.2)
 
 - **CLI providers have limited control:** Claude Code, Codex, Gemini CLI, and Grok Build run their own tool loops. Verstak can launch/relay/stop them, but Verstak-side verification artifacts, live tool timeline, MCP, delegation, and crash-resume guards are API-provider features.
-- **Headless recipe-runner parity is not complete:** recipe enforcement is implemented in the Electron agent loop; `scripts/verstak-cli.mjs` is useful for provider smoke checks, but it is not yet a full GUI-equivalent recipe runner.
+- **Headless recipe-runner parity is intentionally minimal:** `scripts/verstak-cli.mjs recipe run` now shares the recipe protocol, baseline, review gate, and default model policy, but it is not yet a full GUI-equivalent runtime for attachments, timeline, or all provider UX.
 - **Reviewer model override is planned:** `review_before_commit` currently uses the existing delegate path; using a separate reviewer/fixer model per recipe is a follow-up.
 - **Connectors are read-only by default:** write/send operations are intentionally narrow and gated where present.
 - **Encrypted local storage depends on the OS keychain:** on Linux, install/use gnome-keyring or KDE Wallet; without it, Electron safeStorage may fall back to weaker local protection.

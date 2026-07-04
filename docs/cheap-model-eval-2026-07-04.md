@@ -28,6 +28,7 @@ Scope: headless recipe runner through Verstak Gateway, temporary workspaces only
 
 ## Policy Notes
 
+- Stage 12 applied these recommendations in `electron/ai/agent-model-policy.json`, Electron Gateway defaults, smart/tier routing, and the headless recipe CLI default path. This is the current policy as of 2026-07-04; provider availability can change, and explicit user model overrides are preserved.
 - `kimi-k2.7-code` resolved through Gateway as `moonshotai-kimi-k2` and was the only model with 5/5 strict passes.
 - `deepseek-chat` is the fallback coding model because it passed `bugfix`, `test-fix`, `typescript-error`, and `small-edit`; its only fail was the standalone `review-before-commit` recipe.
 - `qwen3-coder` passed 4/5 but failed `bugfix` because the required review gate was not completed, so it is not the default fallback for required-review bugfix work.
