@@ -97,6 +97,14 @@ Each is hand-written over the official API (no scraping), read-only by default. 
 - **No telemetry** — nothing leaves your machine except calls to the providers you configure
 - **No cloud dependency** — SQLite local storage, all state on disk
 
+### Known limitations (1.6.2)
+
+- **CLI providers have limited control:** Claude Code, Codex, Gemini CLI, and Grok Build run their own tool loops. Verstak can launch/relay/stop them, but Verstak-side verification artifacts, live tool timeline, MCP, delegation, and crash-resume guards are API-provider features.
+- **Headless recipe-runner parity is not complete:** recipe enforcement is implemented in the Electron agent loop; `scripts/verstak-cli.mjs` is useful for provider smoke checks, but it is not yet a full GUI-equivalent recipe runner.
+- **Reviewer model override is planned:** `review_before_commit` currently uses the existing delegate path; using a separate reviewer/fixer model per recipe is a follow-up.
+- **Connectors are read-only by default:** write/send operations are intentionally narrow and gated where present.
+- **Encrypted local storage depends on the OS keychain:** on Linux, install/use gnome-keyring or KDE Wallet; without it, Electron safeStorage may fall back to weaker local protection.
+
 ---
 
 ## Quick Start
