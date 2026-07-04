@@ -1,0 +1,2077 @@
+{
+  "meta": {
+    "startedAt": "2026-07-04T10:18:52.504Z",
+    "finishedAt": "2026-07-04T10:32:11.997Z",
+    "keyPresent": true,
+    "dryRun": false,
+    "probeOnly": false,
+    "baseUrl": "https://api-ru.agi-iri.ru/v1",
+    "resolvedModels": [
+      {
+        "id": "deepseek-chat",
+        "selected": "deepseek-chat",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "deepseek-chat",
+          "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+        }
+      },
+      {
+        "id": "deepseek-reasoner",
+        "selected": "deepseek-reasoner",
+        "probe": {
+          "ok": false,
+          "status": "network-error",
+          "alias": "deepseek-reasoner",
+          "message": "write ECONNABORTED"
+        }
+      },
+      {
+        "id": "qwen3-coder",
+        "selected": "qwen3-coder",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "qwen3-coder",
+          "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+        }
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "selected": "moonshotai-kimi-k2",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "moonshotai-kimi-k2",
+          "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+        }
+      },
+      {
+        "id": "z-ai/glm-4.6",
+        "selected": "glm-4.6",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "glm-4.6",
+          "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+        }
+      },
+      {
+        "id": "minimax-m1",
+        "selected": "minimax-m1",
+        "probe": {
+          "ok": false,
+          "status": "400",
+          "alias": "minimax/minimax-m1",
+          "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+        }
+      },
+      {
+        "id": "verstak/coder",
+        "selected": "verstak/coder",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "verstak/coder",
+          "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+        }
+      },
+      {
+        "id": "verstak/coder/fast",
+        "selected": "verstak/fast",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "verstak/fast",
+          "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+        }
+      },
+      {
+        "id": "verstak/coder/balanced",
+        "selected": "verstak/balanced",
+        "probe": {
+          "ok": true,
+          "status": "200",
+          "alias": "verstak/balanced",
+          "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+        }
+      }
+    ]
+  },
+  "rows": [
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-chat",
+      "selectedModel": "deepseek-chat",
+      "recipe": "small-edit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 6,
+      "toolCallsCount": 6,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "README.md"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 15747,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "deepseek-chat",
+        "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "le\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH:\\nThis file says helo to Verstak.\\nREPLACE:\\nThis file says hello to Verstak.\\n\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"content\": \"# Fixture\\n\\nThis file says hello to Verstak.\\n\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"unrelated.md\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-deepseek-chat-FQy0N7/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-deepseek-chat-FQy0N7/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-chat",
+      "selectedModel": "deepseek-chat",
+      "recipe": "bugfix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 6,
+      "toolCallsCount": 11,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 1,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 22689,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "deepseek-chat",
+        "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "    },\n      {\n        \"turn\": 4,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Fix add() in calc.mjs: it returned a - b instead of a + b, causing add(2,3) to return -1 instead of 5. Changed `return a - b` to `return a + b`. unrelated.mjs untouched. npm run type (test.mjs) and npm run test:fast both pass.\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ],\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "bugfix-deepseek-chat-Fiv3DO/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nnode:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n-1 !== 5\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-bugfix-deepseek-chat-Fiv3DO/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nwarning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-chat",
+      "selectedModel": "deepseek-chat",
+      "recipe": "typescript-error",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 5,
+      "toolCallsCount": 7,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 1,
+      "changedFiles": [
+        "src/value.ts"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 17724,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "deepseek-chat",
+        "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "\"diff\": \"export const count: number = \\\"3\\\"\\nexport const count: number = 3\\n\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"content\": \"export const count: number = 3\\n\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Fix TypeScript error in src/value.ts: string \\\"3\\\" assigned to number type. Changed \\\"3\\\" to 3 (number literal). Keep exported count as number. Do not touch src/unrelated.ts.\",\n          \"verify_commands\": [\n            \"npm run type\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ],\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-deepseek-chat-tqVnZU/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-deepseek-chat-tqVnZU/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\nwarning: in the working copy of 'src/value.ts', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-chat",
+      "selectedModel": "deepseek-chat",
+      "recipe": "test-fix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 11,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 1,
+      "changedFiles": [
+        "math.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 18633,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "deepseek-chat",
+        "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "\"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"content\": \"export function multiply(a, b) {\\n  return a * b\\n}\\n\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Fix implementation in math.mjs: multiply(3,4) should return 12, not 7. The bug was `return a + b` instead of `return a * b`.\",\n          \"verify_commands\": [\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ],\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "node:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-deepseek-chat-IBkUDO/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nwarning: in the working copy of 'math.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-chat",
+      "selectedModel": "deepseek-chat",
+      "recipe": "review-before-commit",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 1,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 17582,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "deepseek-chat",
+        "message": "{\"id\":\"81247148-f653-47f7-be1d-cf637f288876\",\"created\":1783160090,\"model\":\"deepseek-chat\",\"object\":\"chat.completion\",\"system_fingerprint\":\"fp_8b330d02d0_prod0820_fp8_kvcache_20260402\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":8,\"total_tokens\":9,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cac"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "DULE_NOT_FOUND',\r\n  requireStack: []\r\n}\r\n\r\nNode.js v24.14.0\r\n{\"ok\":false,\"error_code\":\"agent_error\",\"message\":\"max-turns reached before review_before_commit passed\",\"trace\":{\"provider\":\"verstak-gateway\",\"model\":\"deepseek-chat\",\"recipeId\":\"review-before-commit\",\"toolCalls\":[{\"turn\":0,\"name\":\"get_project_map\",\"args\":{}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"package.json\"}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"test.mjs\"}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"unrelated.mjs\"}},{\"turn\":2,\"name\":\"run_command\",\"args\":{\"command\":\"git status\"}},{\"turn\":2,\"name\":\"run_command\",\"args\":{\"command\":\"git diff\"}},{\"turn\":3,\"name\":\"run_command\",\"args\":{\"command\":\"npm run type\"}},{\"turn\":4,\"name\":\"run_command\",\"args\":{\"command\":\"npm run test:fast\"}},{\"turn\":5,\"name\":\"run_command\",\"args\":{\"command\":\"git stash && node test.mjs; git stash pop\"}},{\"turn\":6,\"name\":\"run_command\",\"args\":{\"command\":\"git stash\"}}],\"firstMutatingTool\":null,\"baselineTaken\":false,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"max-turns reached before review_before_commit passed\"}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-reasoner",
+      "selectedModel": "deepseek-reasoner",
+      "recipe": "small-edit",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: network-error",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 2,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "network-error",
+        "alias": "deepseek-reasoner",
+        "message": "write ECONNABORTED"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: network-error"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-reasoner",
+      "selectedModel": "deepseek-reasoner",
+      "recipe": "bugfix",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: network-error",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 1,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "network-error",
+        "alias": "deepseek-reasoner",
+        "message": "write ECONNABORTED"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: network-error"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-reasoner",
+      "selectedModel": "deepseek-reasoner",
+      "recipe": "typescript-error",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: network-error",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 2,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "network-error",
+        "alias": "deepseek-reasoner",
+        "message": "write ECONNABORTED"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: network-error"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-reasoner",
+      "selectedModel": "deepseek-reasoner",
+      "recipe": "test-fix",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: network-error",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 1,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "network-error",
+        "alias": "deepseek-reasoner",
+        "message": "write ECONNABORTED"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: network-error"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "deepseek-reasoner",
+      "selectedModel": "deepseek-reasoner",
+      "recipe": "review-before-commit",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: network-error",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 2,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "network-error",
+        "alias": "deepseek-reasoner",
+        "message": "write ECONNABORTED"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: network-error"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "qwen3-coder",
+      "selectedModel": "qwen3-coder",
+      "recipe": "small-edit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 7,
+      "toolCallsCount": 7,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 2,
+      "changedFiles": [
+        "README.md"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 21043,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "qwen3-coder",
+        "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "o Verstak.\\n=======\\nThis file says hello to Verstak.\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"--- README.md\\n+++ README.md\\n@@ -2 +2 @@\\n-This file says helo to Verstak.\\n+This file says hello to Verstak.\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH:\\nThis file says helo to Verstak.\\n\\nREPLACE:\\nThis file says hello to Verstak.\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"content\": \"# Fixture\\n\\nThis file says hello to Verstak.\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-qwen3-coder-PXtnLR/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-qwen3-coder-PXtnLR/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "qwen3-coder",
+      "selectedModel": "qwen3-coder",
+      "recipe": "bugfix",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "not-called",
+      "diffSize": 2,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 28071,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "qwen3-coder",
+        "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "ed before review_before_commit passed\",\"trace\":{\"provider\":\"verstak-gateway\",\"model\":\"qwen3-coder\",\"recipeId\":\"bugfix\",\"toolCalls\":[{\"turn\":0,\"name\":\"list_directory\",\"args\":{\"path\":\".\"}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":2,\"name\":\"read_file\",\"args\":{\"path\":\"test.mjs\"}},{\"turn\":3,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"SEARCH:\\nexport function add(a, b) {\\n  return a - b\\n}\\n\\nREPLACE:\\nexport function add(a, b) {\\n  return a + b\\n}\"}},{\"turn\":4,\"name\":\"run_command\",\"args\":{\"command\":\"cat calc.mjs\"}},{\"turn\":5,\"name\":\"run_command\",\"args\":{\"command\":\"type calc.mjs\"}},{\"turn\":6,\"name\":\"write_file\",\"args\":{\"path\":\"calc.mjs\",\"content\":\"export function add(a, b) {\\n  return a + b\\n}\"}},{\"turn\":7,\"name\":\"run_command\",\"args\":{\"command\":\"npm run test:fast\"}},{\"turn\":8,\"name\":\"run_command\",\"args\":{\"command\":\"npm run type\"}}],\"firstMutatingTool\":\"apply_patch\",\"baselineTaken\":true,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"max-turns reached before review_before_commit passed\",\"baseline\":[{\"command\":\"npm run type\",\"exitCode\":1},{\"command\":\"npm run test:fast\",\"exitCode\":1}]}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "qwen3-coder",
+      "selectedModel": "qwen3-coder",
+      "recipe": "typescript-error",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 8,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 2,
+      "changedFiles": [
+        "src/value.ts"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 22162,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "qwen3-coder",
+        "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "        \"args\": {\n          \"path\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/unrelated.ts\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"tsconfig.json\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"<<<<<<< SEARCH\\nexport const count: number = \\\"3\\\"\\n=======\\nexport const count: number = 3\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"content\": \"export const count: number = 3\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "s still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-qwen3-coder-eSTIYi/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\nfile:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-qwen3-coder-eSTIYi/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-qwen3-coder-eSTIYi/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "qwen3-coder",
+      "selectedModel": "qwen3-coder",
+      "recipe": "test-fix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 8,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 2,
+      "changedFiles": [
+        "math.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 20411,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "qwen3-coder",
+        "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": ",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"SEARCH:\\nexport function multiply(a, b) {\\n  return a + b\\n}\\n\\nREPLACE:\\nexport function multiply(a, b) {\\n  return a * b\\n}\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"SEARCH:\\n  return a + b\\n\\nREPLACE:\\n  return a * b\\n\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"content\": \"export function multiply(a, b) {\\n  return a * b\\n}\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "node:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-qwen3-coder-llFYDc/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "qwen3-coder",
+      "selectedModel": "qwen3-coder",
+      "recipe": "review-before-commit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 4,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 19668,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "qwen3-coder",
+        "message": "{\"id\":\"chatcmpl-0ec9c7bb-59fb-9f57-98d7-9b0551ccf3c1\",\"created\":1783160432,\"model\":\"qwen3-coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nul"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"qwen3-coder\",\n    \"recipeId\": \"review-before-commit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \".\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Review existing changes in the workspace\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "warning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "kimi-k2.7-code",
+      "selectedModel": "moonshotai-kimi-k2",
+      "recipe": "small-edit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 3,
+      "toolCallsCount": 4,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "README.md"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 13433,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "moonshotai-kimi-k2",
+        "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "\"assistant\",\n      \"content\": \"Done. Changed \\\"helo\\\" → \\\"hello\\\" in README.md. `npm run type` passes.\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"moonshotai-kimi-k2\",\n    \"recipeId\": \"small-edit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"unrelated.md\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"<<<<<<< SEARCH\\nThis file says helo to Verstak.\\n=======\\nThis file says hello to Verstak.\\n>>>>>>> REPLACE\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-kimi-k2.7-code-UzS3aS/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-kimi-k2.7-code-UzS3aS/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "kimi-k2.7-code",
+      "selectedModel": "moonshotai-kimi-k2",
+      "recipe": "bugfix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 6,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 1,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 29684,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "moonshotai-kimi-k2",
+        "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "     },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Fix the failing add() implementation: change a - b to a + b in calc.mjs so add(2, 3) returns 5\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ],\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "gfix-kimi-k2.7-code-aDk8lG/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nnode:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n-1 !== 5\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-bugfix-kimi-k2.7-code-aDk8lG/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nwarning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "kimi-k2.7-code",
+      "selectedModel": "moonshotai-kimi-k2",
+      "recipe": "typescript-error",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 3,
+      "toolCallsCount": 4,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "src/value.ts"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 13517,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "moonshotai-kimi-k2",
+        "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "ent\": \"Done. Fixed by changing the string `\\\"3\\\"` to the number `3` in `src/value.ts`.\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"moonshotai-kimi-k2\",\n    \"recipeId\": \"typescript-error\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"tsconfig.json\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"<<<<<<< SEARCH\\nexport const count: number = \\\"3\\\"\\n=======\\nexport const count: number = 3\\n>>>>>>> REPLACE\\n\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-kimi-k2.7-code-jvr7Sa/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-kimi-k2.7-code-jvr7Sa/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "kimi-k2.7-code",
+      "selectedModel": "moonshotai-kimi-k2",
+      "recipe": "test-fix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 5,
+      "toolCallsCount": 6,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "math.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 19446,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "moonshotai-kimi-k2",
+        "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "le\",\n        \"args\": {\n          \"path\": \"math.test.mjs\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \".\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"export function multiply(a, b) {\\n-  return a + b\\n+  return a * b\\n }\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"content\": \"export function multiply(a, b) {\\n  return a * b\\n}\\n\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "node:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-kimi-k2.7-code-BR2b3Y/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "kimi-k2.7-code",
+      "selectedModel": "moonshotai-kimi-k2",
+      "recipe": "review-before-commit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 3,
+      "toolCallsCount": 5,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 21705,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "moonshotai-kimi-k2",
+        "message": "{\"id\":\"gen-1783160546-R9tXsu8tD2lSpQgaFTp1\",\"created\":1783160546,\"model\":\"moonshotai-kimi-k2\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":13,\"total_tokens\":15,\"completion_tokens_details\":{\"aud"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "mmand\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"git status\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"git diff\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Review existing change: fix add function in calc.mjs from subtraction to addition\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "warning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "z-ai/glm-4.6",
+      "selectedModel": "glm-4.6",
+      "recipe": "small-edit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 4,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "README.md"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 21475,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "glm-4.6",
+        "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "assistant\",\n      \"content\": \"Сделано. Заменил \\\"helo\\\" на \\\"hello\\\" в README.md. Проверка npm run type прошла успешно.\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"glm-4.6\",\n    \"recipeId\": \"small-edit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \".\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"<<<<<<< SEARCH\\nThis file says helo to Verstak.\\n=======\\nThis file says hello to Verstak.\\n>>>>>>> REPLACE\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-z-ai-glm-4.6-vZeQt7/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-z-ai-glm-4.6-vZeQt7/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "z-ai/glm-4.6",
+      "selectedModel": "glm-4.6",
+      "recipe": "bugfix",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 49753,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "glm-4.6",
+        "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "TION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n{\"ok\":false,\"error_code\":\"agent_error\",\"message\":\"Остановлено: recipe требует обязательного review_before_commit, но gate не пройден после corrective nudge.\",\"trace\":{\"provider\":\"verstak-gateway\",\"model\":\"glm-4.6\",\"recipeId\":\"bugfix\",\"toolCalls\":[{\"turn\":0,\"name\":\"get_project_map\",\"args\":{}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":2,\"name\":\"read_file\",\"args\":{\"path\":\"test.mjs\"}},{\"turn\":3,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"@@ -1,2 +1,2 @@\\n export function add(a, b) {\\n-  return a - b\\n+  return a + b\\n }\"}},{\"turn\":4,\"name\":\"get_project_map\",\"args\":{}},{\"turn\":5,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":6,\"name\":\"review-gate-nudge\",\"args\":{}}],\"firstMutatingTool\":\"apply_patch\",\"baselineTaken\":true,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"Остановлено: recipe требует обязательного review_before_commit, но gate не пройден после corrective nudge.\",\"baseline\":[{\"command\":\"npm run type\",\"exitCode\":1},{\"command\":\"npm run test:fast\",\"exitCode\":1}]}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "z-ai/glm-4.6",
+      "selectedModel": "glm-4.6",
+      "recipe": "typescript-error",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 5578,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "glm-4.6",
+        "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "{\n  \"success\": true,\n  \"provider\": \"verstak-gateway\",\n  \"model\": \"glm-4.6\",\n  \"projectPath\": \"C:\\\\Users\\\\Pavel\\\\AppData\\\\Local\\\\Temp\\\\verstak-eval-typescript-error-z-ai-glm-4.6-0Zmh0C\",\n  \"prompt\": \"Fix the TypeScript type error in src/value.ts with the smallest diff. The exported count must stay a number. Do not touch src/unrelated.ts. Run npm run type.\",\n  \"response\": \"\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Fix the TypeScript type error in src/value.ts with the smallest diff. The exported count must stay a number. Do not touch src/unrelated.ts. Run npm run type.\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": \"\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"glm-4.6\",\n    \"recipeId\": \"typescript-error\",\n    \"toolCalls\": [],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null\n  }\n}\n",
+      "stderrTail": ""
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "z-ai/glm-4.6",
+      "selectedModel": "glm-4.6",
+      "recipe": "test-fix",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 6097,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "glm-4.6",
+        "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "{\n  \"success\": true,\n  \"provider\": \"verstak-gateway\",\n  \"model\": \"glm-4.6\",\n  \"projectPath\": \"C:\\\\Users\\\\Pavel\\\\AppData\\\\Local\\\\Temp\\\\verstak-eval-test-fix-z-ai-glm-4.6-ANDNTy\",\n  \"prompt\": \"Fix the implementation, not the test. math.test.mjs expects multiply(3, 4) to equal 12. Keep the diff minimal, do not edit math.test.mjs or unrelated.mjs. Run npm run test:fast.\",\n  \"response\": \"\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Fix the implementation, not the test. math.test.mjs expects multiply(3, 4) to equal 12. Keep the diff minimal, do not edit math.test.mjs or unrelated.mjs. Run npm run test:fast.\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": \"\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"glm-4.6\",\n    \"recipeId\": \"test-fix\",\n    \"toolCalls\": [],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null\n  }\n}\n",
+      "stderrTail": ""
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "z-ai/glm-4.6",
+      "selectedModel": "glm-4.6",
+      "recipe": "review-before-commit",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 11136,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "glm-4.6",
+        "message": "{\"id\":\"2026070418240926a34ae7f93f4434\",\"created\":1783160653,\"model\":\"glm-4.6\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"reasoning_content\":\"\\nThe user wants the specific string \\\"ok\\\" returned. There are no other instructions or constraints.\\n\\n1.  **Analyze the Request:** The user provided a very short command: \\\"Return exactly: ok\\\".\\n2.  **Interpret \\\"Re"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "{\"ok\":false,\"error_code\":\"agent_error\",\"message\":\"Остановлено: recipe требует обязательного review_before_commit, но gate не пройден после corrective nudge.\",\"trace\":{\"provider\":\"verstak-gateway\",\"model\":\"glm-4.6\",\"recipeId\":\"review-before-commit\",\"toolCalls\":[{\"turn\":0,\"name\":\"review-gate-nudge\",\"args\":{}}],\"firstMutatingTool\":null,\"baselineTaken\":false,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"Остановлено: recipe требует обязательного review_before_commit, но gate не пройден после corrective nudge.\"}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "minimax-m1",
+      "selectedModel": "minimax-m1",
+      "recipe": "small-edit",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: 400",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 4,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "400",
+        "alias": "minimax/minimax-m1",
+        "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: 400"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "minimax-m1",
+      "selectedModel": "minimax-m1",
+      "recipe": "bugfix",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: 400",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 3,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "400",
+        "alias": "minimax/minimax-m1",
+        "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: 400"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "minimax-m1",
+      "selectedModel": "minimax-m1",
+      "recipe": "typescript-error",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: 400",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 4,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "400",
+        "alias": "minimax/minimax-m1",
+        "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: 400"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "minimax-m1",
+      "selectedModel": "minimax-m1",
+      "recipe": "test-fix",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "n/a",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: 400",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 2,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "400",
+        "alias": "minimax/minimax-m1",
+        "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: 400"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "minimax-m1",
+      "selectedModel": "minimax-m1",
+      "recipe": "review-before-commit",
+      "result": "not tested",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": false,
+      "reviewGate": "not-called",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "unavailable: 400",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 3,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": false,
+        "status": "400",
+        "alias": "minimax/minimax-m1",
+        "message": "{\"error\":{\"message\":\"Unknown model: minimax/minimax-m1\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\",\"request_id\":\"9c736312af874e4ab19b0b76ceb2c59c\"}}"
+      },
+      "verifyRuns": [],
+      "recommendation": "not tested: unavailable",
+      "stdoutTail": "",
+      "stderrTail": "not tested: 400"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder",
+      "selectedModel": "verstak/coder",
+      "recipe": "small-edit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 4,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "README.md"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 16473,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/coder",
+        "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "eck.\\n\\nTask completed: Changed \\\"helo\\\" to \\\"hello\\\" in README.md and confirmed that npm run type passes.\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"verstak/coder\",\n    \"recipeId\": \"small-edit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"find_files\",\n        \"args\": {\n          \"pattern\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"<<<<<<< SEARCH\\nThis file says helo to Verstak.\\n=======\\nThis file says hello to Verstak.\\n>>>>>>> REPLACE\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-A2rrQA/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-A2rrQA/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder",
+      "selectedModel": "verstak/coder",
+      "recipe": "bugfix",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "not-called",
+      "diffSize": 2,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 29973,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/coder",
+        "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "\":\"max-turns reached before review_before_commit passed\",\"trace\":{\"provider\":\"verstak-gateway\",\"model\":\"verstak/coder\",\"recipeId\":\"bugfix\",\"toolCalls\":[{\"turn\":0,\"name\":\"list_directory\",\"args\":{\"path\":\".\"}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":2,\"name\":\"read_file\",\"args\":{\"path\":\"test.mjs\"}},{\"turn\":3,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"SEARCH:\\n  return a - b\\n\\nREPLACE:\\n  return a + b\"}},{\"turn\":4,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":5,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"SEARCH:\\n  return a - b\\n\\nREPLACE:\\n  return a + b\"}},{\"turn\":6,\"name\":\"write_file\",\"args\":{\"path\":\"calc.mjs\",\"content\":\"export function add(a, b) {\\n  return a + b\\n}\"}},{\"turn\":7,\"name\":\"run_command\",\"args\":{\"command\":\"npm run test:fast\"}},{\"turn\":8,\"name\":\"run_command\",\"args\":{\"command\":\"npm run type\"}}],\"firstMutatingTool\":\"apply_patch\",\"baselineTaken\":true,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"max-turns reached before review_before_commit passed\",\"baseline\":[{\"command\":\"npm run type\",\"exitCode\":1},{\"command\":\"npm run test:fast\",\"exitCode\":1}]}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder",
+      "selectedModel": "verstak/coder",
+      "recipe": "typescript-error",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 7,
+      "toolCallsCount": 7,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "src/value.ts"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 22461,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/coder",
+        "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "   \"turn\": 1,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \"src\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"tsconfig.json\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/unrelated.ts\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"<<<<<<< SEARCH\\nexport const count: number = \\\"3\\\"\\n=======\\nexport const count: number = 3\\n>>>>>>> REPLACE\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-4I9uFB/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-4I9uFB/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder",
+      "selectedModel": "verstak/coder",
+      "recipe": "test-fix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 8,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 2,
+      "changedFiles": [
+        "math.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 21441,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/coder",
+        "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "h\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"SEARCH:\\nexport function multiply(a, b) {\\n  return a + b\\n}\\n\\nREPLACE:\\nexport function multiply(a, b) {\\n  return a * b\\n}\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"SEARCH:\\n  return a + b\\n\\nREPLACE:\\n  return a * b\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"content\": \"export function multiply(a, b) {\\n  return a * b\\n}\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "node:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-verstak-coder-VgQISD/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder",
+      "selectedModel": "verstak/coder",
+      "recipe": "review-before-commit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 4,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 21868,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/coder",
+        "message": "{\"id\":\"chatcmpl-dfef2e2d-a85e-9c9a-a5f1-345bd535ce99\",\"created\":1783160757,\"model\":\"verstak/coder\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":n"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": " {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"verstak/coder\",\n    \"recipeId\": \"review-before-commit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \".\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Review existing changes in the workspace\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "warning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/fast",
+      "selectedModel": "verstak/fast",
+      "recipe": "small-edit",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 7,
+      "toolCallsCount": 7,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 11955,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/fast",
+        "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"helo\\nhello\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH: helo\\nREPLACE: hello\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"helo\\nhello\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH: helo\\nREPLACE: hello\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"search_project\",\n        \"args\": {\n          \"query\": \"helo\",\n          \"regex\": false\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-fast-DwzARr/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-fast-DwzARr/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/fast",
+      "selectedModel": "verstak/fast",
+      "recipe": "bugfix",
+      "result": "fail",
+      "exitCode": 1,
+      "turnsUsed": 0,
+      "toolCallsCount": 0,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "not-called",
+      "diffSize": 2,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": true,
+      "fallbackTriggered": false,
+      "errorClass": "model error",
+      "failureMode": "non-zero exit",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 20775,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/fast",
+        "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "",
+      "stderrTail": "\"toolCalls\":[{\"turn\":0,\"name\":\"get_project_map\",\"args\":{}},{\"turn\":1,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":2,\"name\":\"read_file\",\"args\":{\"path\":\"test.mjs\"}},{\"turn\":3,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"SEARCH/REPLACE\\n---\\nexport function add(a, b) {\\n  return a - b\\n}\\n---\\nexport function add(a, b) {\\n  return a + b\\n}\\n---\"}},{\"turn\":4,\"name\":\"run_command\",\"args\":{\"command\":\"npm run type\"}},{\"turn\":5,\"name\":\"run_command\",\"args\":{\"command\":\"npm run test:fast\"}},{\"turn\":6,\"name\":\"apply_patch\",\"args\":{\"path\":\"calc.mjs\",\"diff\":\"SEARCH/REPLACE\\n---\\nexport function add(a, b) {\\n  return a - b\\n}\\n---\\nexport function add(a, b) {\\n  return a + b\\n}\\n---\"}},{\"turn\":7,\"name\":\"read_file\",\"args\":{\"path\":\"calc.mjs\"}},{\"turn\":8,\"name\":\"write_file\",\"args\":{\"path\":\"calc.mjs\",\"content\":\"export function add(a, b) {\\n  return a + b\\n}\"}}],\"firstMutatingTool\":\"apply_patch\",\"baselineTaken\":true,\"verifyCommands\":[\"npm run type\",\"npm run test:fast\"],\"reviewGate\":\"required\",\"finalStatus\":\"failed\",\"failureReason\":\"max-turns reached before review_before_commit passed\",\"baseline\":[{\"command\":\"npm run type\",\"exitCode\":1},{\"command\":\"npm run test:fast\",\"exitCode\":1}]}}\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/fast",
+      "selectedModel": "verstak/fast",
+      "recipe": "typescript-error",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 8,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 15847,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/fast",
+        "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "th\": \"tsconfig.json\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/unrelated.ts\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"export const count: number = \\\"3\\\"\\n\\n===\\n\\nexport const count: number = 3\\n\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"export const count: number = \\\"3\\\"\\n\\n===\\n\\nexport const count: number = 3\\n\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "ing');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-fast-TLZCqv/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\nfile:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-fast-TLZCqv/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-fast-TLZCqv/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/fast",
+      "selectedModel": "verstak/fast",
+      "recipe": "test-fix",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 8,
+      "toolCallsCount": 9,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 14645,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/fast",
+        "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "     \"turn\": 2,\n        \"name\": \"find_files\",\n        \"args\": {\n          \"pattern\": \"src/**/*.{js,ts}\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \"src\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"list_directory\",\n        \"args\": {\n          \"path\": \".\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.test.mjs\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 7,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"export function multiply(a, b) {\\n  return a + b\\n}\\n---\\nexport function multiply(a, b) {\\n  return a * b\\n}\\n\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "node:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-verstak-coder-fast-mFKZ1i/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/fast",
+      "selectedModel": "verstak/fast",
+      "recipe": "review-before-commit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 2,
+      "toolCallsCount": 3,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 10197,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/fast",
+        "message": "{\"id\":\"chatcmpl-38f7850b-c7b0-984b-aea5-939a0b5852d6\",\"created\":1783160873,\"model\":\"verstak/fast\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null}},\"provider_specific_fields\":{}}],\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":12,\"total_tokens\":13,\"completion_tokens_details\":null,\"prompt_tokens_details\":{\"audio_tokens\":nu"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "way\",\n    \"model\": \"verstak/fast\",\n    \"recipeId\": \"review-before-commit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Review the existing change already present in the workspace. Do not edit files. Run npm run type and npm run test:fast, then call review_before_commit. Only finish after the review gate passes.\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "warning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/balanced",
+      "selectedModel": "verstak/balanced",
+      "recipe": "small-edit",
+      "result": "fail",
+      "exitCode": 0,
+      "turnsUsed": 4,
+      "toolCallsCount": 4,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": false,
+      "reviewGate": "not-required",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "verify failed after run",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 35768,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/balanced",
+        "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 1
+        }
+      ],
+      "recommendation": "do not use for this recipe yet",
+      "stdoutTail": "      \"content\": \"Now I'll make the edit using write_file to ensure the change is applied:\\n\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"verstak/balanced\",\n    \"recipeId\": \"small-edit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH/This file says helo to Verstak./REPLACE/This file says hello to Verstak./\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"README.md\",\n          \"diff\": \"SEARCH/helo/REPLACE/hello/\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"README.md\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-balanced-tP5M2G/verify-type.mjs:3\r\nif (!text.includes('hello to Verstak')) throw new Error('README.md still has typo');\r\n                                              ^\r\n\r\nError: README.md still has typo\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-small-edit-verstak-coder-balanced-tP5M2G/verify-type.mjs:3:47\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/balanced",
+      "selectedModel": "verstak/balanced",
+      "recipe": "bugfix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 7,
+      "toolCallsCount": 7,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 2,
+      "changedFiles": [
+        "calc.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 55255,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/balanced",
+        "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "    \"args\": {\n          \"path\": \"calc.mjs\",\n          \"content\": \"export function add(a, b) {\\n  return a + b\\n}\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type && npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 6,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Fix the failing add() implementation in calc.mjs to return sum instead of difference\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ],\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "er-balanced-bdZuOO/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nnode:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n-1 !== 5\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-bugfix-verstak-coder-balanced-bdZuOO/test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: -1,\r\n  expected: 5,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nwarning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/balanced",
+      "selectedModel": "verstak/balanced",
+      "recipe": "typescript-error",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 5,
+      "toolCallsCount": 5,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 1,
+      "changedFiles": [
+        "src/value.ts"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 30163,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/balanced",
+        "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "Id\": \"typescript-error\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"search_project\",\n        \"args\": {\n          \"query\": \"count\",\n          \"glob\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\"\n        }\n      },\n      {\n        \"turn\": 2,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"diff\": \"SEARCH/REPLACE 1\\nexport const count: number = \\\"3\\\"\\n/export const count: number = 3\\n\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"src/value.ts\",\n          \"content\": \"export const count: number = 3\\n\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run type\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-balanced-J4J18G/typecheck.mjs:3\r\nif (!/count:\\s*number\\s*=\\s*3\\b/.test(value)) throw new Error('src/value.ts still assigns a string');\r\n                                                    ^\r\n\r\nError: src/value.ts still assigns a string\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-typescript-error-verstak-coder-balanced-J4J18G/typecheck.mjs:3:53\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/balanced",
+      "selectedModel": "verstak/balanced",
+      "recipe": "test-fix",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 6,
+      "toolCallsCount": 8,
+      "firstMutatingTool": "apply_patch",
+      "baselineTaken": true,
+      "verifyPass": true,
+      "reviewGate": "not-required",
+      "diffSize": 2,
+      "changedFiles": [
+        "math.mjs"
+      ],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 35297,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/balanced",
+        "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "  }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"apply_patch\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"diff\": \"SEARCH/export function multiply(a, b) {\\n  return a + b\\n}/REPLACE/export function multiply(a, b) {\\n  return a * b\\n}/\"\n        }\n      },\n      {\n        \"turn\": 3,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 4,\n        \"name\": \"read_file\",\n        \"args\": {\n          \"path\": \"math.mjs\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"write_file\",\n        \"args\": {\n          \"path\": \"math.mjs\",\n          \"content\": \"export function multiply(a, b) {\\n  return a * b\\n}\"\n        }\n      },\n      {\n        \"turn\": 5,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      }\n    ],\n    \"firstMutatingTool\": \"apply_patch\",\n    \"baselineTaken\": true,\n    \"verifyCommands\": [\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"not-required\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"baseline\": [\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 1\n      }\n    ]\n  }\n}\n",
+      "stderrTail": " 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-verstak-coder-balanced-cJhJ8q/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\nnode:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\r\n\r\n7 !== 12\r\n\r\n    at file:///C:/Users/Pavel/AppData/Local/Temp/verstak-eval-test-fix-verstak-coder-balanced-cJhJ8q/math.test.mjs:3:8\r\n    at ModuleJob.run (node:internal/modules/esm/module_job:430:25)\r\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)\r\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\r\n  generatedMessage: true,\r\n  code: 'ERR_ASSERTION',\r\n  actual: 7,\r\n  expected: 12,\r\n  operator: 'strictEqual',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.14.0\r\n"
+    },
+    {
+      "provider": "verstak-gateway",
+      "model": "verstak/coder/balanced",
+      "selectedModel": "verstak/balanced",
+      "recipe": "review-before-commit",
+      "result": "pass",
+      "exitCode": 0,
+      "turnsUsed": 2,
+      "toolCallsCount": 3,
+      "firstMutatingTool": null,
+      "baselineTaken": false,
+      "verifyPass": true,
+      "reviewGate": "pass",
+      "diffSize": 0,
+      "changedFiles": [],
+      "unrelatedFilesTouched": false,
+      "malformedToolCalls": false,
+      "fallbackTriggered": false,
+      "errorClass": null,
+      "failureMode": "",
+      "spawnError": null,
+      "traceSecretLeak": false,
+      "durationMs": 22139,
+      "approximateCost": null,
+      "workspace": null,
+      "probe": {
+        "ok": true,
+        "status": "200",
+        "alias": "verstak/balanced",
+        "message": "{\"id\":\"gen-1783160950-rs5rmLULJDxRSQ6FFrEL\",\"created\":1783160950,\"model\":\"verstak/balanced\",\"object\":\"chat.completion\",\"system_fingerprint\":null,\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"ok\",\"role\":\"assistant\",\"tool_calls\":null,\"function_call\":null,\"provider_specific_fields\":{\"refusal\":null,\"reasoning\":null}},\"provider_specific_fields\":{\"native_finish_reason\":\"stop\"}}],\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":7,\"total_tokens\":9,\"completion_tokens_details\":{\"audio_t"
+      },
+      "verifyRuns": [
+        {
+          "command": "npm run type",
+          "exitCode": 0
+        },
+        {
+          "command": "npm run test:fast",
+          "exitCode": 0
+        }
+      ],
+      "recommendation": "candidate",
+      "stdoutTail": "ve been validated and approved. The workspace is ready for the next steps.\"\n    }\n  ],\n  \"trace\": {\n    \"provider\": \"verstak-gateway\",\n    \"model\": \"verstak/balanced\",\n    \"recipeId\": \"review-before-commit\",\n    \"toolCalls\": [\n      {\n        \"turn\": 0,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run type\"\n        }\n      },\n      {\n        \"turn\": 0,\n        \"name\": \"run_command\",\n        \"args\": {\n          \"command\": \"npm run test:fast\"\n        }\n      },\n      {\n        \"turn\": 1,\n        \"name\": \"review_before_commit\",\n        \"args\": {\n          \"task_brief\": \"Review the existing change already present in the workspace.\",\n          \"verify_commands\": [\n            \"npm run type\",\n            \"npm run test:fast\"\n          ]\n        }\n      }\n    ],\n    \"firstMutatingTool\": null,\n    \"baselineTaken\": false,\n    \"verifyCommands\": [\n      \"npm run type\",\n      \"npm run test:fast\"\n    ],\n    \"reviewGate\": \"pass\",\n    \"finalStatus\": \"success\",\n    \"failureReason\": null,\n    \"verifyRuns\": [\n      {\n        \"command\": \"npm run type\",\n        \"exitCode\": 0\n      },\n      {\n        \"command\": \"npm run test:fast\",\n        \"exitCode\": 0\n      }\n    ]\n  }\n}\n",
+      "stderrTail": "warning: in the working copy of 'calc.mjs', LF will be replaced by CRLF the next time Git touches it\n"
+    }
+  ],
+  "recommendations": {
+    "defaultCodingModel": "kimi-k2.7-code",
+    "defaultFallbackModel": "deepseek-chat",
+    "defaultReviewerModel": "kimi-k2.7-code",
+    "defaultPlannerModel": "kimi-k2.7-code",
+    "recipeMap": {
+      "bugfix": "kimi-k2.7-code",
+      "test-fix": "kimi-k2.7-code",
+      "typescript-error": "kimi-k2.7-code",
+      "review-before-commit": "kimi-k2.7-code"
+    },
+    "presets": {
+      "verstak/coder/fast": "deepseek-chat",
+      "verstak/coder/balanced": "kimi-k2.7-code"
+    },
+    "notForAgentMode": [
+      "verstak/coder/fast",
+      "z-ai/glm-4.6"
+    ],
+    "ranked": [
+      {
+        "model": "kimi-k2.7-code",
+        "pass": 5,
+        "warn": 0,
+        "fail": 0,
+        "strict": 5,
+        "recipes": {}
+      },
+      {
+        "model": "qwen3-coder",
+        "pass": 4,
+        "warn": 0,
+        "fail": 1,
+        "strict": 4,
+        "recipes": {}
+      },
+      {
+        "model": "deepseek-chat",
+        "pass": 4,
+        "warn": 0,
+        "fail": 1,
+        "strict": 4,
+        "recipes": {}
+      },
+      {
+        "model": "verstak/coder",
+        "pass": 4,
+        "warn": 0,
+        "fail": 1,
+        "strict": 4,
+        "recipes": {}
+      },
+      {
+        "model": "verstak/coder/balanced",
+        "pass": 4,
+        "warn": 0,
+        "fail": 1,
+        "strict": 4,
+        "recipes": {}
+      },
+      {
+        "model": "verstak/coder/fast",
+        "pass": 1,
+        "warn": 0,
+        "fail": 4,
+        "strict": 1,
+        "recipes": {}
+      },
+      {
+        "model": "z-ai/glm-4.6",
+        "pass": 1,
+        "warn": 0,
+        "fail": 4,
+        "strict": 1,
+        "recipes": {}
+      }
+    ]
+  }
+}
