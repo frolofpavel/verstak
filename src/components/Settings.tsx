@@ -272,6 +272,8 @@ const PROVIDERS: ProviderConfig[] = [
 ]
 
 type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+type SettingsNavTab = { id: Tab; label: string; icon: React.ReactNode; keywords?: string }
+type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
 // TAB_GROUPS is built inside the Settings component to support i18n translations.
 
@@ -1044,26 +1046,44 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const t = useT()
   const activeProjectPath = useProject(s => s.path)
   const [tab, setTab] = useState<Tab>(initialTab ?? 'providers')
+  const [navSearch, setNavSearch] = useState('')
 
-  // Группы для левой sidebar — повторяет OpenCode Desktop структуру.
-  const TAB_GROUPS: ReadonlyArray<{ title: string; tabs: ReadonlyArray<{ id: Tab; label: string; icon: React.ReactNode }> }> = [
-    { title: t.settings.application, tabs: [
-      { id: 'appearance', label: t.settings.appearance, icon: '🎨' },
-      { id: 'notifications', label: t.settings.notifications, icon: '🔔' },
-      { id: 'updates', label: t.settings.updates, icon: '⬆️' },
-      { id: 'profiles',   label: t.settings.profiles,   icon: '👤' }
+  // Смысловые блоки левой панели: не техническая свалка, а маршрут пользователя.
+  const TAB_GROUPS: ReadonlyArray<SettingsNavGroup> = [
+    { title: 'Приложение', tabs: [
+      { id: 'appearance', label: t.settings.appearance, icon: '🎨', keywords: 'theme ui вид масштаб оформление' },
+      { id: 'profiles',   label: t.settings.profiles,   icon: '👤', keywords: 'user profile роль пользователь' },
+      { id: 'notifications', label: t.settings.notifications, icon: '🔔', keywords: 'toast push telegram уведомления' },
+      { id: 'updates', label: t.settings.updates, icon: '⬆️', keywords: 'release installer автообновление версия' }
     ] },
-    { title: t.settings.server, tabs: [
-      { id: 'providers',  label: t.settings.providers,  icon: '🔌' },
-      { id: 'models',     label: t.settings.models,     icon: '✨' },
-      { id: 'connectors', label: t.settings.connectors, icon: <IconPlug size={16} /> },
-      { id: 'mcp',        label: 'MCP',                 icon: '⚡' },
-      { id: 'policy',     label: 'Что разрешено',       icon: '🛡' },
-      { id: 'autonomous', label: t.settings.nightMode,  icon: '🌙' },
-      { id: 'memory',     label: t.settings.memory,     icon: '🧠' },
-      { id: 'audit',      label: 'Audit Log',            icon: '📋' }
+    { title: 'AI и модели', tabs: [
+      { id: 'providers',  label: t.settings.providers,  icon: '🔌', keywords: 'api key gateway cli ключи deepseek kimi qwen openrouter' },
+      { id: 'models',     label: t.settings.models,     icon: '✨', keywords: 'default fallback reviewer planner picker пресеты' }
+    ] },
+    { title: 'Интеграции', tabs: [
+      { id: 'connectors', label: t.settings.connectors, icon: <IconPlug size={16} />, keywords: 'telegram bitrix sheets github yandex http ssh' },
+      { id: 'mcp',        label: 'MCP',                 icon: '⚡', keywords: 'model context protocol servers tools' }
+    ] },
+    { title: 'Контроль агента', tabs: [
+      { id: 'policy',     label: 'Что разрешено',       icon: '🛡', keywords: 'allowlist permissions bash команды политика' },
+      { id: 'autonomous', label: t.settings.nightMode,  icon: '🌙', keywords: 'schedule auto autonomous night loop' },
+      { id: 'audit',      label: 'Audit Log',            icon: '📋', keywords: 'журнал лог трасса безопасность' }
+    ] },
+    { title: 'Проектные данные', tabs: [
+      { id: 'memory',     label: t.settings.memory,     icon: '🧠', keywords: 'memory memories память знания recall' }
     ] }
   ]
+  const navQuery = navSearch.trim().toLowerCase()
+  const visibleTabGroups = TAB_GROUPS
+    .map(g => {
+      if (!navQuery) return g
+      const groupMatched = g.title.toLowerCase().includes(navQuery)
+      const tabs = groupMatched
+        ? g.tabs
+        : g.tabs.filter(x => `${x.label} ${x.id} ${x.keywords ?? ''}`.toLowerCase().includes(navQuery))
+      return { ...g, tabs }
+    })
+    .filter(g => g.tabs.length > 0)
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
@@ -2322,7 +2342,16 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
         <div className="gg-settings-shell">
           <aside className="gg-settings-nav" role="tablist" aria-label="Разделы настроек">
-            {TAB_GROUPS.map(g => (
+            <div className="gg-settings-nav-search-wrap">
+              <input
+                className="gg-input gg-settings-nav-search"
+                value={navSearch}
+                onChange={e => setNavSearch(e.target.value)}
+                placeholder="Поиск настроек..."
+                spellCheck={false}
+              />
+            </div>
+            {visibleTabGroups.map(g => (
               <div key={g.title} className="gg-settings-nav-group">
                 <div className="gg-settings-nav-title">{g.title}</div>
                 {g.tabs.map(t => (
@@ -2340,6 +2369,9 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                 ))}
               </div>
             ))}
+            {visibleTabGroups.length === 0 && (
+              <div className="gg-settings-nav-empty">Ничего не найдено</div>
+            )}
           </aside>
 
           <div className="gg-settings-content">
