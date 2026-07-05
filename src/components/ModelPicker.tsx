@@ -5,6 +5,7 @@ import { useT } from '../i18n'
 import type { ProviderDescriptorDTO } from '../types/api'
 import {
   isProviderAuthorized,
+  modelPolicyHint,
   type CliAuthId,
   type CliAuthStatus,
 } from '../lib/model-catalog'
@@ -44,14 +45,14 @@ function isCliProvider(id: string): boolean {
 // Verstak Gateway: пресеты показываем по-русски (в API уходит id verstak/...).
 // Зеркало GATEWAY_PRESET_LABELS из electron/ai/extra-providers.ts (renderer без main).
 const GATEWAY_PRESET_LABELS: Record<string, string> = {
-  'kimi-k2.7-code': 'Kimi K2.7 Code - default',
-  'deepseek-chat': 'DeepSeek Chat - fallback',
-  'qwen3-coder': 'Qwen3 Coder - allowed',
-  'verstak/economy': 'Эконом',
-  'verstak/balanced': 'Баланс',
-  'verstak/coder': 'Кодинг',
+  'kimi-k2.7-code': 'Kimi K2.7 Code',
+  'deepseek-chat': 'DeepSeek Chat',
+  'qwen3-coder': 'Qwen3 Coder',
+  'verstak/economy': 'Эконом · DeepSeek',
+  'verstak/balanced': 'Баланс · Kimi',
+  'verstak/coder': 'Кодинг · Kimi',
   'verstak/long': 'Длинный контекст',
-  'verstak/fast': 'Быстро',
+  'verstak/fast': 'Быстро · DeepSeek',
   'verstak/private': 'Приватно',
 }
 
@@ -348,9 +349,11 @@ function PickerRow({
   onSelect: () => void
 }) {
   const isCli = isCliProvider(entry.providerId)
+  const policy = modelPolicyHint(entry.model)
   let title: string | undefined
   if (locked) title = 'Нужна авторизация — откроются Настройки'
   else if (isCli) title = CLI_BETA_HINT
+  else if (policy) title = policy.title
   else if (!entry.enabled && entry.isCurrent) {
     title = 'Модель отключена в Настройки → Модели, но активна в чате'
   }
@@ -373,6 +376,9 @@ function PickerRow({
         )}
         {isCli && (
           <span className="gg-mp-row-cli-degraded" title={CLI_BETA_HINT}> · урезанный контроль</span>
+        )}
+        {policy && !isCli && (
+          <span className={`gg-mp-row-policy is-${policy.tone}`} title={policy.title}> · {policy.label}</span>
         )}
       </span>
       <span className="gg-mp-row-meta">

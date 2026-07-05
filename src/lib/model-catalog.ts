@@ -38,6 +38,87 @@ export interface ModelEntry {
 
 export type ModelTag = 'TOOLS' | 'CHAT' | 'CLI' | 'API' | '$$$' | '$'
 
+export type ModelPolicyTone = 'recommended' | 'fallback' | 'allowed' | 'avoid'
+
+export interface ModelPolicyHint {
+  label: string
+  tone: ModelPolicyTone
+  title: string
+}
+
+const MODEL_POLICY_HINTS: Record<string, ModelPolicyHint> = {
+  'kimi-k2.7-code': {
+    label: 'основная',
+    tone: 'recommended',
+    title: 'Default coding / planner / reviewer model. Stage 11: 5/5 strict pass.'
+  },
+  'deepseek-chat': {
+    label: 'запасная',
+    tone: 'fallback',
+    title: 'Fallback для быстрых правок и багфиксов. Review-before-commit не ставим как основной сценарий.'
+  },
+  'qwen3-coder': {
+    label: 'можно',
+    tone: 'allowed',
+    title: 'Разрешена для agent-mode, но не дефолт: в eval были сбои на bugfix/review gate.'
+  },
+  'verstak/coder': {
+    label: 'кодинг',
+    tone: 'allowed',
+    title: 'Рабочий пресет для guarded coding, но прямой Kimi остаётся основным выбором.'
+  },
+  'verstak/balanced': {
+    label: 'баланс',
+    tone: 'allowed',
+    title: 'Баланс-пресет Gateway. Рекомендованная цель политики: kimi-k2.7-code.'
+  },
+  'verstak/long': {
+    label: 'длинный',
+    tone: 'allowed',
+    title: 'Для длинного контекста. Для обычного agent-mode предпочтительнее kimi-k2.7-code.'
+  },
+  'verstak/private': {
+    label: 'локально',
+    tone: 'allowed',
+    title: 'Приватный пресет. Качество зависит от локальной/частной модели.'
+  },
+  'verstak/economy': {
+    label: 'дёшево',
+    tone: 'fallback',
+    title: 'Экономичный режим. Лучше для простых задач, не как главный agent-mode.'
+  },
+  'verstak/fast': {
+    label: 'не agent',
+    tone: 'avoid',
+    title: 'Stage 11: слабая дисциплина. Не использовать как дефолт для agent-mode.'
+  },
+  'verstak/coder/fast': {
+    label: 'не agent',
+    tone: 'avoid',
+    title: 'Alias fast-пресета. Не использовать как дефолт для agent-mode.'
+  },
+  'deepseek-reasoner': {
+    label: 'не agent',
+    tone: 'avoid',
+    title: 'Не рекомендована для agent-mode defaults по Stage 11.'
+  },
+  'z-ai/glm-4.6': {
+    label: 'не agent',
+    tone: 'avoid',
+    title: 'Stage 11: низкий strict pass. Не ставить в agent-mode.'
+  },
+  'minimax-m1': {
+    label: 'не agent',
+    tone: 'avoid',
+    title: 'Не прошла доступность/валидацию в Stage 11. Не ставить в agent-mode.'
+  }
+}
+
+export function modelPolicyHint(model: string | null | undefined): ModelPolicyHint | null {
+  if (!model) return null
+  return MODEL_POLICY_HINTS[model] ?? null
+}
+
 // Дублирует PRICES из src/lib/pricing.ts чтобы не тянуть весь pricing-модуль
 // (он завязан на ProviderId через CLI_FREE — не нужно тут). Цены $ / 1M.
 const PRICES: Record<string, { input: number; output: number }> = {

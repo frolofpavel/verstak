@@ -12,6 +12,7 @@ import {
   buildCatalog,
   connectionStatus,
   isProviderAuthorized,
+  modelPolicyHint,
   providerAuthLink,
   type CliAuthId,
   type CliAuthStatus,
@@ -3000,6 +3001,8 @@ function ProvidersPage(props: ProvidersPageProps) {
   const [cliStatus, setCliStatus] = useState<CliStatusMap | null>(null)
   // Обнаруженные CLI-инструменты на компьютере пользователя.
   const [detectedClis, setDetectedClis] = useState<DetectedCli[]>([])
+  const [cliDetectBusy, setCliDetectBusy] = useState(false)
+  const [cliDetectMessage, setCliDetectMessage] = useState<string | null>(null)
 
   async function loadCliStatus() {
     try {
@@ -3011,6 +3014,30 @@ function ProvidersPage(props: ProvidersPageProps) {
     void loadCliStatus()
     void import('../lib/prefetch-cli').then(m => m.getDetectedClisCached().then(setDetectedClis))
   }, [])
+
+  async function refreshCliDetection() {
+    setCliDetectBusy(true)
+    setCliDetectMessage(null)
+    try {
+      const list = await window.api.cli.detect()
+      setDetectedClis(list)
+      await loadCliStatus()
+      const ready = list.filter(c => c.status === 'ready').length
+      const found = list.length
+      setCliDetectMessage(found > 0
+        ? `Найдено CLI: ${found}, готово: ${ready}`
+        : 'CLI не найдены в PATH и стандартных папках')
+    } catch (err) {
+      setCliDetectMessage(`Не удалось проверить CLI: ${(err as Error).message}`)
+    } finally {
+      setCliDetectBusy(false)
+    }
+  }
+
+  function providerForCli(c: DetectedCli): ProviderConfig | null {
+    const p = providers.find(x => x.id === c.id && x.transport === 'CLI')
+    return p ?? null
+  }
 
   // «Подключён» = доступен для отправки запросов:
   //  - CLI: всегда (бинарь либо есть либо нет — реальный коннект сделает provider при send)
@@ -3127,6 +3154,24 @@ function ProvidersPage(props: ProvidersPageProps) {
           {toast.text}
         </div>
       )}
+
+      <div className="gg-prov-cli-tools">
+        <div className="gg-prov-cli-copy">
+          <div className="gg-prov-cli-title">CLI-среда</div>
+          <div className="gg-prov-cli-text">
+            Проверяет Claude Code, Gemini CLI, Grok Build, Codex CLI и совместимые утилиты на этой машине.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="gg-btn gg-btn-ghost"
+          onClick={() => void refreshCliDetection()}
+          disabled={cliDetectBusy}
+        >
+          {cliDetectBusy ? 'Проверяю…' : 'Найти CLI'}
+        </button>
+        {cliDetectMessage && <div className="gg-prov-cli-message">{cliDetectMessage}</div>}
+      </div>
 
       <div className="gg-settings-section-title" style={{ marginTop: 8 }}>Подключённые провайдеры</div>
       <div className="gg-prov-list">
@@ -3246,20 +3291,37 @@ function ProvidersPage(props: ProvidersPageProps) {
         CLI-провайдеры (Gemini CLI / Claude Code / Grok Build / Codex) подключаются установкой соответствующего CLI вне приложения и логином через подписку. После этого они появляются как «Среда».
       </div>
 
-      {detectedClis.length > 0 && (
-        <div className="gg-prov-detected">
-          <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Обнаруженные CLI</div>
-          <div className="gg-prov-detected-list">
-            {detectedClis.map(c => (
+      <div className="gg-prov-detected">
+        <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Обнаруженные CLI</div>
+        <div className="gg-prov-detected-list">
+          {detectedClis.length === 0 && (
+            <div className="gg-prov-detected-empty">
+              Пока ничего не найдено. Нажми «Найти CLI», чтобы перепроверить окружение.
+            </div>
+          )}
+          {detectedClis.map(c => {
+            const p = providerForCli(c)
+            return (
               <div key={c.id} className="gg-prov-detected-item">
-                <span className={`gg-prov-detected-dot${c.status === 'found' ? ' is-yellow' : ''}`} />
+                <span className={`gg-prov-detected-dot is-${c.status}`} />
                 <span className="gg-prov-detected-name">{c.name}</span>
+                <span className="gg-prov-detected-status">{c.status === 'ready' ? 'готов' : 'найден'}</span>
                 <span className="gg-prov-detected-version">{c.version}</span>
+                {p && (
+                  <button
+                    type="button"
+                    className="gg-btn gg-btn-ghost gg-prov-detected-action"
+                    onClick={() => void relogin(p)}
+                    disabled={busy === p.id}
+                  >
+                    {busy === p.id ? '…' : 'Логин'}
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -3554,6 +3616,13 @@ function ModelsPage(props: ModelsPageProps) {
         Выбери, какие модели показывать в чате. По умолчанию включена только та, к которой ты подключился при входе.
       </p>
 
+      <div className="gg-models-policy-strip" aria-label="Текущая модельная политика">
+        <span className="gg-models-policy-chip is-recommended">Основная: Kimi K2.7 Code</span>
+        <span className="gg-models-policy-chip is-fallback">Запасная: DeepSeek Chat</span>
+        <span className="gg-models-policy-chip is-allowed">Qwen: разрешён, не default</span>
+        <span className="gg-models-policy-chip is-avoid">Fast/Reasoner/GLM/MiniMax: не agent-mode</span>
+      </div>
+
       <div className="gg-models-search-wrap">
         <input
           className="gg-input gg-models-search"
@@ -3627,6 +3696,7 @@ function ModelsPage(props: ModelsPageProps) {
                   {list.map(e => {
                     const enabled = enabledModels.has(e.key)
                     const isCurrentModel = isActiveProvider && (models[p.id] ?? p.defaultModel) === e.model
+                    const policy = modelPolicyHint(e.model)
                     return (
                       <div key={e.key} className={`gg-models-row ${isCurrentModel ? 'is-current' : ''}`}>
                         <button
@@ -3637,6 +3707,11 @@ function ModelsPage(props: ModelsPageProps) {
                         >
                           <span className="gg-models-row-name">{e.model}</span>
                           {isCurrentModel && <span className="gg-models-row-current">Текущий</span>}
+                          {policy && (
+                            <span className={`gg-models-row-policy is-${policy.tone}`} title={policy.title}>
+                              {policy.label}
+                            </span>
+                          )}
                           <span className="gg-models-row-tags">
                             {e.tags.map(tag => (
                               <span key={tag} className={`gg-mpal-tag is-${tag.toLowerCase().replace(/\$/g, 'd')}`}>{tag}</span>
