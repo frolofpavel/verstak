@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'path'
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
-import { safeJoin, isWithinKnownRoots, resolveReadOnlyPath } from '../../electron/ai/path-policy'
+import { safeJoin, isWithinKnownRoots, resolveReadOnlyPath, resolveWritablePath } from '../../electron/ai/path-policy'
 
 const WIN = process.platform === 'win32'
 const ROOT = WIN ? 'C:\\Users\\Pavel\\proj' : '/home/pavel/proj'
@@ -99,5 +99,41 @@ describe('path-policy resolveReadOnlyPath', () => {
     writeFileSync(file, 'outside')
     const resolved = await resolveReadOnlyPath(realRoot, file)
     expect(resolved).toBe(file)
+  })
+})
+
+describe('path-policy resolveWritablePath', () => {
+  it('keeps relative writes inside the project root', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const resolved = await resolveWritablePath(realRoot, 'out/report.md')
+    expect(resolved).toBe(join(realRoot, 'out', 'report.md'))
+  })
+
+  it('allows explicit absolute writes inside Downloads', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const target = join(downloads, 'verstak-report.md')
+    const resolved = await resolveWritablePath(realRoot, target, { downloadsDir: downloads })
+    expect(resolved).toBe(target)
+  })
+
+  it('blocks explicit absolute writes outside Downloads', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    await expect(resolveWritablePath(realRoot, join(outside, 'x.md'), { downloadsDir: downloads }))
+      .rejects.toThrow('Downloads')
+  })
+
+  it('blocks symlink escape from Downloads', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const link = join(downloads, 'escape')
+    let linked = false
+    try { symlinkSync(outside, link, 'dir'); linked = true } catch { /* нет привилегий */ }
+    if (!linked) return
+    await expect(resolveWritablePath(realRoot, join(link, 'x.md'), { downloadsDir: downloads }))
+      .rejects.toThrow('symlink')
   })
 })

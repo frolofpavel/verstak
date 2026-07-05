@@ -1,5 +1,5 @@
-import { readFile, readdir, stat, writeFile } from 'fs/promises'
-import { join, relative } from 'path'
+import { mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
+import { dirname, isAbsolute, join, relative } from 'path'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
@@ -8,7 +8,7 @@ import type { ToolDefinition } from './types'
 import { classifyCommand } from './command-policy'
 import { isForbiddenPath, scanText } from './secret-scanner'
 import { getProjectMap, invalidateProjectMap, markFileDirty, projectMapToText, getDependencyMap, invalidateDependencyMap } from './project-map'
-import { resolveReadOnlyPath, safeRealJoin } from './path-policy'
+import { resolveReadOnlyPath, resolveWritablePath, safeRealJoin } from './path-policy'
 import { treeKill } from './child-kill'
 import { isDangerousCommand } from '../connectors/ssh'
 import { shq } from '../projects/ssh-fs'
@@ -1254,14 +1254,17 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         if (isForbiddenPath(relPath)) {
           throw new Error(`Запись запрещена политикой безопасности: ${relPath}`)
         }
-        const abs = await safeRealJoin(root, relPath)
+        const abs = await resolveWritablePath(root, relPath)
+        await mkdir(dirname(abs), { recursive: true })
         await writeFile(abs, String(args.content), 'utf8')
-        // Incremental project map update — mark only this file dirty so the next
-        // get_project_map re-parses it instead of doing a full rebuild.
-        markFileDirty(root, abs)
-        // Dependency map has no incremental path — re-resolving imports/importedBy
-        // is non-trivial, so keep the full invalidation here.
-        invalidateDependencyMap(root)
+        if (!isAbsolute(relPath)) {
+          // Incremental project map update — mark only this file dirty so the next
+          // get_project_map re-parses it instead of doing a full rebuild.
+          markFileDirty(root, abs)
+          // Dependency map has no incremental path — re-resolving imports/importedBy
+          // is non-trivial, so keep the full invalidation here.
+          invalidateDependencyMap(root)
+        }
         return { ok: true }
       }
       if (name === 'apply_patch') {
@@ -1273,15 +1276,17 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         if (isForbiddenPath(relPath)) {
           throw new Error(`Запись запрещена политикой безопасности: ${relPath}`)
         }
-        const abs = await safeRealJoin(root, relPath)
+        const abs = await resolveWritablePath(root, relPath)
         const before = await readFile(abs, 'utf8')
         const anchorHash = args.anchor_hash ? String(args.anchor_hash) : undefined
         const after = applySearchReplaceBlocks(before, String(args.diff), anchorHash)
         await writeFile(abs, after, 'utf8')
-        // Incremental project map update — apply_patch only modifies an existing
-        // file, so marking it dirty is enough; no full rebuild needed.
-        markFileDirty(root, abs)
-        invalidateDependencyMap(root)
+        if (!isAbsolute(relPath)) {
+          // Incremental project map update — apply_patch only modifies an existing
+          // file, so marking it dirty is enough; no full rebuild needed.
+          markFileDirty(root, abs)
+          invalidateDependencyMap(root)
+        }
         return { ok: true, before, after }
       }
       if (name === 'run_command') {

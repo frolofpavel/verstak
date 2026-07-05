@@ -76,6 +76,15 @@ describe('write_file gating (diffConfirmWrite)', () => {
     expect(res.error).toBeFalsy()
   })
 
+  it('absolute Downloads-style write does not create project undo entry', async () => {
+    const h = harness(dir, 'accept-edits')
+    const target = join(tmpdir(), 'verstak-export.md')
+    const res = await writeFileHandler.handle(call(target, 'export'), h.ctx)
+    expect(h.writes).toEqual([{ path: target, content: 'export' }])
+    expect(h.recordWriteCalls).toBe(0)
+    expect(res.result).toContain(target)
+  })
+
   it('ask → confirm + accept: запись после подтверждения', async () => {
     const h = harness(dir, 'ask')
     const p = writeFileHandler.handle(call(), h.ctx)

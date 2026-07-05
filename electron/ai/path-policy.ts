@@ -13,9 +13,10 @@
  * renderer or model supplies. Mixing the two is how layered defence leaks.
  */
 
-import { resolve, relative, sep, isAbsolute } from 'path'
+import { resolve, relative, sep, isAbsolute, dirname, join } from 'path'
 import { realpath } from 'fs/promises'
 import { realpathSync } from 'fs'
+import { homedir } from 'os'
 
 /**
  * True, если target лежит внутри (или совпадает с) одним из knownRoots.
@@ -104,4 +105,54 @@ export async function resolveReadOnlyPath(root: string, userPath: string): Promi
     if (e.code === 'ENOENT') return abs
     throw err
   }
+}
+
+function isInside(root: string, target: string): boolean {
+  const r = relative(root, target)
+  return r === '' || (!r.startsWith('..') && !r.includes('..' + sep) && !isAbsolute(r))
+}
+
+export function defaultDownloadsDir(): string {
+  return join(homedir(), 'Downloads')
+}
+
+/**
+ * Writable resolver for explicit user exports.
+ *
+ * Relative paths stay inside the project sandbox. Absolute paths are allowed
+ * only inside the user's Downloads directory, so prompts like "положи файл в
+ * Downloads" work without opening arbitrary filesystem writes.
+ */
+export async function resolveWritablePath(
+  root: string,
+  userPath: string,
+  opts?: { downloadsDir?: string }
+): Promise<string> {
+  if (!isAbsolute(userPath)) return safeRealJoin(root, userPath)
+
+  const target = resolve(userPath)
+  const downloads = resolve(opts?.downloadsDir ?? defaultDownloadsDir())
+  if (!isInside(downloads, target)) {
+    throw new Error(`Абсолютная запись разрешена только в Downloads: ${userPath}`)
+  }
+
+  let realDownloads: string
+  try { realDownloads = await realpath(downloads) } catch { realDownloads = downloads }
+
+  let probe = target
+  while (probe !== dirname(probe)) {
+    try {
+      const realProbe = await realpath(probe)
+      if (!isInside(realDownloads, realProbe)) {
+        throw new Error(`Запрещён выход из Downloads через symlink: ${userPath}`)
+      }
+      break
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      if (e.code !== 'ENOENT') throw err
+      probe = dirname(probe)
+    }
+  }
+
+  return target
 }

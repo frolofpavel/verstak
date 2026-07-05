@@ -3,7 +3,7 @@ import type { ToolHandler, ToolContext } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 import { emitActivity, summarizeToolCall } from './shared'
 import { existsSync } from 'fs'
-import { join } from 'path'
+import { isAbsolute, join } from 'path'
 import { randomUUID } from 'crypto'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
@@ -78,12 +78,16 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
   // (revert → unlink) от «был, но пустой» (revert → восстановить пустым). Иначе
   // before='' для существующего пустого файла трактовался как «не было» и revert
   // удалял его (B4). null = не существовал, '' = существовал пустым.
-  const existedBefore = existsSync(join(ctx.projectPath, path))
+  const isExternalWrite = isAbsolute(path)
+  const physicalPath = isExternalWrite ? path : join(ctx.projectPath, path)
+  const existedBefore = existsSync(physicalPath)
   try {
     await ctx.tools.execute('write_file', { path, content: after })
-    try { ctx.recordWrite(ctx.projectPath, path, existedBefore ? before : null, after) } catch { /* undo not critical */ }
-    // Incremental project map update — mark file dirty instead of full rebuild
-    markFileDirty(ctx.projectPath, join(ctx.projectPath, path))
+    if (!isExternalWrite) {
+      try { ctx.recordWrite(ctx.projectPath, path, existedBefore ? before : null, after) } catch { /* undo not critical */ }
+      // Incremental project map update — mark file dirty instead of full rebuild
+      markFileDirty(ctx.projectPath, join(ctx.projectPath, path))
+    }
     // Timeline задачи (Фаза 4): принятая запись файла. ref/label = путь (панель
     // строит секцию «Файлы» из событий file_write). best-effort.
     try { ctx.recordRunEvent?.('file_write', { label: path, ref: path, status: 'ok' }) } catch { /* best-effort */ }
