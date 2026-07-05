@@ -314,6 +314,12 @@ declare global {
         /** Рекомендует тир+провайдера+модель под текст задачи. null = нет подходящего. */
         recommend: (taskText: string) => Promise<TierRecommendation | null>
       }
+      projectRules: {
+        status: (projectPath: string | null) => Promise<UserLayerStatus>
+        ensure: (projectPath: string) => Promise<{ created: boolean; path: string | null }>
+        open: (projectPath: string | null, sourceId: string) => Promise<{ ok: boolean; error: string | null }>
+        reveal: (projectPath: string | null, sourceId: string) => Promise<{ ok: boolean; error: string | null }>
+      }
       policy: {
         /** Снимок политики разрешений агента: матрица decide() × режимы + опасные команды. */
         matrix: () => Promise<PolicyMatrixDTO>
@@ -706,6 +712,24 @@ export interface DetectedCli {
   binary: string
   version: string
   status: 'ready' | 'found' | 'error'
+}
+
+export interface RuleSourceStatus {
+  id: string
+  label: string
+  path: string
+  absPath: string
+  exists: boolean
+  active: boolean
+  scope: 'global' | 'project'
+  size: number | null
+  tooLarge: boolean
+}
+
+export interface UserLayerStatus {
+  activePath: string | null
+  global: RuleSourceStatus
+  project: RuleSourceStatus[]
 }
 
 /** Локальный OpenAI-compatible сервер моделей, найденный на компьютере. */

@@ -1,12 +1,12 @@
 import { app, dialog, ipcMain, BrowserWindow, shell } from 'electron'
 import { mkdirSync, existsSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
 import { parseRemoteSource, isRemoteSource, remoteProjectPath } from '../projects/remote-source'
 import { runRemoteDoctor } from '../projects/remote-doctor'
 import { setActiveProjectPath } from '../state/project-state'
-import { ensureUserLayer } from '../ai/user-layer'
+import { ensureUserLayer, inspectUserLayer, PROJECT_RULE_CANDIDATES } from '../ai/user-layer'
 import { warmProjectMaps } from '../ai/project-map'
 import type { Database } from 'better-sqlite3'
 import type { Projects } from '../storage/projects'
@@ -52,6 +52,11 @@ function gitClone(url: string, dest: string): Promise<{ ok: true } | { ok: false
 }
 
 export function registerProjectIpc(projects: Projects, projectGroups: ProjectGroups, db: Database): void {
+  function isKnownProjectPath(projectPath: string | null): boolean {
+    if (!projectPath) return false
+    return projects.list().some(p => p.path === projectPath)
+  }
+
   ipcMain.handle('projects:pick', async () => {
     const win = BrowserWindow.getFocusedWindow()
     if (!win) return null
@@ -119,6 +124,38 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
     void shell.openExternal(url)
     return true
+  })
+
+  ipcMain.handle('project-rules:status', (_e, projectPath: string | null) => {
+    return inspectUserLayer(isKnownProjectPath(projectPath) ? projectPath : null)
+  })
+
+  ipcMain.handle('project-rules:ensure', async (_e, projectPath: string) => {
+    if (!isKnownProjectPath(projectPath)) return { created: false, path: null }
+    return ensureUserLayer(projectPath)
+  })
+
+  ipcMain.handle('project-rules:open', async (_e, projectPath: string | null, sourceId: string) => {
+    const safeProjectPath = isKnownProjectPath(projectPath) ? projectPath : null
+    const status = await inspectUserLayer(safeProjectPath)
+    const sources = [status.global, ...status.project]
+    const source = sources.find(s => s.id === sourceId)
+    if (!source || !source.exists) return { ok: false, error: 'Файл правил не найден' }
+    if (source.scope === 'project' && !PROJECT_RULE_CANDIDATES.includes(source.path as typeof PROJECT_RULE_CANDIDATES[number])) {
+      return { ok: false, error: 'Недопустимый файл правил' }
+    }
+    const err = await shell.openPath(source.absPath)
+    return { ok: err === '', error: err || null }
+  })
+
+  ipcMain.handle('project-rules:reveal', async (_e, projectPath: string | null, sourceId: string) => {
+    const safeProjectPath = isKnownProjectPath(projectPath) ? projectPath : null
+    const status = await inspectUserLayer(safeProjectPath)
+    const sources = [status.global, ...status.project]
+    const source = sources.find(s => s.id === sourceId)
+    if (!source) return { ok: false, error: 'Источник правил не найден' }
+    const err = await shell.openPath(dirname(source.absPath))
+    return { ok: err === '', error: err || null }
   })
 
   ipcMain.handle('projects:clients-root', () => getClientsRoot())

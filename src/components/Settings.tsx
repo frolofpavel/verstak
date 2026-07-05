@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useProject } from '../store/projectStore'
-import type { Memory, DetectedCli, AuditEntry, PolicyMatrixDTO, PolicyDecision, AgentModeId } from '../types/api'
+import type { Memory, DetectedCli, AuditEntry, PolicyMatrixDTO, PolicyDecision, AgentModeId, RuleSourceStatus, UserLayerStatus } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import { useTheme, THEMES } from '../hooks/useTheme'
 import { useUiScale, UI_SCALE_PRESETS, MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT } from '../hooks/useUiScale'
@@ -271,7 +271,7 @@ const PROVIDERS: ProviderConfig[] = [
   }
 ]
 
-type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy' | 'rules'
 type SettingsNavTab = { id: Tab; label: string; icon: React.ReactNode; keywords?: string }
 type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
@@ -1070,6 +1070,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       { id: 'audit',      label: 'Audit Log',            icon: '📋', keywords: 'журнал лог трасса безопасность' }
     ] },
     { title: 'Проектные данные', tabs: [
+      { id: 'rules',      label: 'Правила',             icon: '📜', keywords: 'agents rules claude gemini permissions инструкции проект' },
       { id: 'memory',     label: t.settings.memory,     icon: '🧠', keywords: 'memory memories память знания recall' }
     ] }
   ]
@@ -1089,6 +1090,10 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [models, setModels] = useState<Record<string, string>>({})
   const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set())
   const [saved, setSaved] = useState(false)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const savedSnapshotRef = useRef<string | null>(null)
   const [onec, setOneC] = useState({ url: '', user: '', pass: '' })
   const [autonomous, setAutonomousState] = useState<AutonomousStatus>({
     enabled: false, intervalMin: 30, lastRunAt: null, lastRunSuggestions: 0, lastRunError: null, nextRunAt: null
@@ -1330,9 +1335,82 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       } else {
         setEnabledModels(defaultEnabledModels(valid, modelVals))
       }
+      setSettingsLoaded(true)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const settingsSnapshot = JSON.stringify({
+    activeProvider,
+    keys,
+    models,
+    enabledModels: [...enabledModels].sort(),
+    onec,
+    httpEndpoints,
+    gsheetsJson,
+    telegramBotToken,
+    telegramWhitelist,
+    telegramNotifyChatId,
+    sshHost,
+    sshKeyPath,
+    bitrixWebhook,
+    yDirectToken,
+    dadataApiKey,
+    dadataSecret,
+    yMetrikaToken,
+    avitoClientId,
+    avitoClientSecret,
+    yWebmasterToken,
+    yWordstatToken,
+    ozonClientId,
+    ozonApiKey,
+    wbToken,
+    yookassaShopId,
+    yookassaSecretKey,
+    vkToken,
+    amocrmSubdomain,
+    amocrmToken,
+    moyskladToken,
+    yTrackerToken,
+    yTrackerOrgId,
+    sendpulseClientId,
+    sendpulseClientSecret,
+    unisenderApiKey,
+    ga4Token,
+    ga4PropertyId,
+    notionToken,
+    konturFocusKey,
+    mpstatsToken,
+    ozonPerfClientId,
+    ozonPerfClientSecret,
+    jiraBaseUrl,
+    jiraEmail,
+    jiraApiToken,
+    trelloApiKey,
+    trelloToken,
+    yDirectLogin,
+    skillsServerBase,
+    claudeOauthToken,
+    yDiskToken,
+    githubToken,
+    socialTgChannels,
+    socialVkToken,
+    socialVkGroupId,
+    socialWebhooks,
+    costCap,
+    customOpenaiBaseUrl,
+    customOpenaiModels
+  })
+
+  useEffect(() => {
+    if (!settingsLoaded) return
+    if (savedSnapshotRef.current === null) {
+      savedSnapshotRef.current = settingsSnapshot
+      setSettingsDirty(false)
+      return
+    }
+    setSettingsDirty(savedSnapshotRef.current !== settingsSnapshot)
+  }, [settingsLoaded, settingsSnapshot])
 
   const loadMemories = useCallback(async (path: string) => {
     try {
@@ -1585,6 +1663,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   }, [tab])
 
   async function save() {
+    setSaving(true)
+    try {
     await window.api.settings.setKey('provider', activeProvider)
     for (const p of PROVIDERS) {
       if (p.secretKey && keys[p.secretKey] !== undefined) {
@@ -1665,8 +1745,13 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
     await window.api.settings.setKey('custom_openai_baseurl', customOpenaiBaseUrl)
     await window.api.settings.setKey('custom_openai_models', customOpenaiModels)
+    savedSnapshotRef.current = settingsSnapshot
+    setSettingsDirty(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function renderConnectorForm(id: string): React.ReactNode {
@@ -2675,6 +2760,10 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
         {tab === 'profiles' && (<ProfilesTab />)}
 
+        {tab === 'rules' && (
+        <ProjectRulesPage projectPath={activeProjectPath} />
+        )}
+
         {tab === 'memory' && (
         <div className="gg-settings-extra">
           <div className="gg-settings-section-title">🧠 Память агента</div>
@@ -2965,9 +3054,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         </div>{/* /gg-settings-shell */}
 
         <div className="gg-modal-footer">
+          <div className={`gg-settings-save-status ${settingsDirty ? 'is-dirty' : saved ? 'is-saved' : ''}`}>
+            {saving ? 'Сохраняю…' : saved ? 'Сохранено' : settingsDirty ? 'Есть несохранённые изменения' : 'Изменений нет'}
+          </div>
           <button className="gg-btn gg-btn-ghost" onClick={onClose}>{t.common.close}</button>
-          <button className="gg-btn gg-btn-primary" onClick={save}>
-            {saved ? t.settings.saved : t.settings.save}
+          <button className="gg-btn gg-btn-primary" onClick={save} disabled={saving || !settingsLoaded}>
+            {saving ? 'Сохраняю…' : saved ? t.settings.saved : t.settings.save}
           </button>
         </div>
       </div>
@@ -2976,6 +3068,125 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+function formatRuleSize(size: number | null): string {
+  if (size == null) return 'нет файла'
+  if (size < 1024) return `${size} Б`
+  return `${(size / 1024).toFixed(1)} КБ`
+}
+
+function ProjectRulesPage({ projectPath }: { projectPath: string | null }) {
+  const [status, setStatus] = useState<UserLayerStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const s = await window.api.projectRules.status(projectPath)
+    setStatus(s)
+  }, [projectPath])
+
+  useEffect(() => {
+    void load().catch(err => setMessage((err as Error).message))
+  }, [load])
+
+  async function ensureProjectRules() {
+    if (!projectPath) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const res = await window.api.projectRules.ensure(projectPath)
+      setMessage(res.created ? `Создан ${res.path}` : (res.path ? `Уже есть ${res.path}` : 'Не удалось создать правила'))
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openSource(source: RuleSourceStatus) {
+    setMessage(null)
+    const res = await window.api.projectRules.open(projectPath, source.id)
+    if (!res.ok) setMessage(res.error ?? 'Не удалось открыть файл')
+  }
+
+  async function revealSource(source: RuleSourceStatus) {
+    setMessage(null)
+    const res = await window.api.projectRules.reveal(projectPath, source.id)
+    if (!res.ok) setMessage(res.error ?? 'Не удалось открыть папку')
+  }
+
+  const sources = status ? [status.global, ...status.project] : []
+
+  return (
+    <div className="gg-settings-extra gg-rules-page">
+      <h2 className="gg-settings-page-title">Правила проекта</h2>
+      <p className="gg-models-intro">
+        Здесь видно, какие инструкции реально попадают в agent context. Глобальные правила идут первыми, затем первый найденный проектный файл.
+      </p>
+
+      <div className="gg-rules-summary">
+        <div>
+          <div className="gg-rules-summary-label">Активный слой</div>
+          <div className="gg-rules-summary-value">{status?.activePath ?? 'правила не найдены'}</div>
+        </div>
+        <button
+          type="button"
+          className="gg-btn gg-btn-primary"
+          disabled={!projectPath || busy}
+          onClick={() => void ensureProjectRules()}
+        >
+          {busy ? 'Создаю…' : 'Создать правила проекта'}
+        </button>
+      </div>
+
+      {!projectPath && (
+        <div className="gg-settings-hint" style={{ marginTop: 14 }}>
+          Открой проект, чтобы увидеть проектные AGENTS/RULES файлы.
+        </div>
+      )}
+
+      {message && <div className="gg-prov-toast is-ok" role="status">{message}</div>}
+
+      <div className="gg-rules-list">
+        {sources.map(source => (
+          <div key={source.id} className={`gg-rules-row ${source.active ? 'is-active' : ''}`}>
+            <div className="gg-rules-row-main">
+              <div className="gg-rules-row-title">
+                {source.label}
+                {source.active && <span className="gg-rules-badge is-active">активно</span>}
+                {source.tooLarge && <span className="gg-rules-badge is-warn">слишком большой</span>}
+              </div>
+              <div className="gg-rules-row-meta">
+                <code>{source.path}</code>
+                <span>{source.exists ? formatRuleSize(source.size) : 'не найден'}</span>
+              </div>
+            </div>
+            <div className="gg-rules-row-actions">
+              <button
+                type="button"
+                className="gg-btn gg-btn-ghost"
+                disabled={!source.exists}
+                onClick={() => void openSource(source)}
+              >
+                Открыть
+              </button>
+              <button
+                type="button"
+                className="gg-btn gg-btn-ghost"
+                onClick={() => void revealSource(source)}
+              >
+                Папка
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="gg-settings-hint" style={{ marginTop: 16 }}>
+        Приоритет проектных правил: <code>AGENTS.md</code> → <code>CLAUDE.md</code> → <code>GEMINI.md</code> → <code>.verstak/RULES.md</code>. Системный протокол безопасности они дополняют, но не отменяют.
+      </div>
+    </div>
+  )
+}
+
 // ProvidersPage — OpenCode Desktop-style: «Подключённые» (с бейджем + Отключить)
 // + «Доступные» (карточки с кнопкой Подключить, раскрывается inline-форма с
 // ключом / hint'ом). Источник провайдеров — массив PROVIDERS (тот же что в

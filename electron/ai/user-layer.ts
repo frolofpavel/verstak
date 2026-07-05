@@ -15,7 +15,8 @@ import { homedir } from 'os'
  * The combined prompt is built by `composeSystemPrompt`.
  */
 
-const CANDIDATES = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.verstak/RULES.md']
+export const PROJECT_RULE_CANDIDATES = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.verstak/RULES.md'] as const
+type ProjectRuleCandidate = typeof PROJECT_RULE_CANDIDATES[number]
 const MAX_BYTES = 64 * 1024  // 64 KB safety cap for user layer
 
 export interface UserLayer {
@@ -23,6 +24,24 @@ export interface UserLayer {
   path: string | null
   /** Raw markdown content; empty string if nothing loaded. */
   content: string
+}
+
+export interface RuleSourceStatus {
+  id: string
+  label: string
+  path: string
+  absPath: string
+  exists: boolean
+  active: boolean
+  scope: 'global' | 'project'
+  size: number | null
+  tooLarge: boolean
+}
+
+export interface UserLayerStatus {
+  activePath: string | null
+  global: RuleSourceStatus
+  project: RuleSourceStatus[]
 }
 
 /** Прочитать файл, если он есть и не превышает cap. Иначе null. */
@@ -50,7 +69,7 @@ export async function loadUserLayer(
   let projPath: string | null = null
   let projContent = ''
   if (projectRoot) {
-    for (const rel of CANDIDATES) {
+    for (const rel of PROJECT_RULE_CANDIDATES) {
       const c = await readCappedFile(join(projectRoot, rel))
       if (c !== null) { projPath = rel; projContent = c; break }
     }
@@ -106,7 +125,7 @@ const DEFAULT_RULES = `# Verstak Rules
  * present. Called on project open.
  */
 export async function ensureUserLayer(projectRoot: string): Promise<{ created: boolean; path: string | null }> {
-  for (const rel of CANDIDATES) {
+  for (const rel of PROJECT_RULE_CANDIDATES) {
     const abs = join(projectRoot, rel)
     try {
       const st = await stat(abs)
@@ -121,4 +140,69 @@ export async function ensureUserLayer(projectRoot: string): Promise<{ created: b
   } catch {
     return { created: false, path: null }
   }
+}
+
+async function inspectRuleSource(input: {
+  id: string
+  label: string
+  path: string
+  absPath: string
+  scope: 'global' | 'project'
+  active: boolean
+}): Promise<RuleSourceStatus> {
+  try {
+    const st = await stat(input.absPath)
+    const exists = st.isFile()
+    return {
+      ...input,
+      exists,
+      size: exists ? st.size : null,
+      tooLarge: exists && st.size > MAX_BYTES,
+      active: input.active && exists && st.size <= MAX_BYTES
+    }
+  } catch {
+    return { ...input, exists: false, size: null, tooLarge: false, active: false }
+  }
+}
+
+export async function inspectUserLayer(
+  projectRoot: string | null,
+  globalRulesPath: string = join(homedir(), '.verstak', 'RULES.md')
+): Promise<UserLayerStatus> {
+  let activeProjectPath: ProjectRuleCandidate | null = null
+  if (projectRoot) {
+    for (const rel of PROJECT_RULE_CANDIDATES) {
+      const c = await readCappedFile(join(projectRoot, rel))
+      if (c !== null) { activeProjectPath = rel; break }
+    }
+  }
+
+  const globalExists = await readCappedFile(globalRulesPath)
+  const global = await inspectRuleSource({
+    id: 'global',
+    label: 'Глобальные правила',
+    path: '~/.verstak/RULES.md',
+    absPath: globalRulesPath,
+    scope: 'global',
+    active: globalExists !== null
+  })
+
+  const project: RuleSourceStatus[] = []
+  if (projectRoot) {
+    for (const rel of PROJECT_RULE_CANDIDATES) {
+      project.push(await inspectRuleSource({
+        id: rel,
+        label: rel,
+        path: rel,
+        absPath: join(projectRoot, rel),
+        scope: 'project',
+        active: rel === activeProjectPath
+      }))
+    }
+  }
+
+  const active: string[] = []
+  if (global.active) active.push(global.path)
+  if (activeProjectPath) active.push(activeProjectPath)
+  return { activePath: active.length ? active.join(' + ') : null, global, project }
 }

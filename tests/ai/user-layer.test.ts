@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { loadUserLayer } from '../../electron/ai/user-layer'
+import { inspectUserLayer, loadUserLayer } from '../../electron/ai/user-layer'
 
 describe('loadUserLayer — глобальный + проектный слой (OpenCode instruction hierarchy)', () => {
   let dir: string
@@ -60,5 +60,19 @@ describe('loadUserLayer — глобальный + проектный слой (
     const r = await loadUserLayer(dir, noGlobal)
     expect(r.path).toBe('.verstak/RULES.md')
     expect(r.content).toBe('VRULES')
+  })
+
+  it('inspectUserLayer показывает активный источник и кандидаты', async () => {
+    const globalPath = join(dir, 'global.md')
+    writeFileSync(globalPath, 'GLOBAL', 'utf8')
+    writeFileSync(join(dir, 'AGENTS.md'), 'A', 'utf8')
+    writeFileSync(join(dir, 'CLAUDE.md'), 'C', 'utf8')
+
+    const status = await inspectUserLayer(dir, globalPath)
+
+    expect(status.activePath).toBe('~/.verstak/RULES.md + AGENTS.md')
+    expect(status.global.active).toBe(true)
+    expect(status.project.find(x => x.path === 'AGENTS.md')?.active).toBe(true)
+    expect(status.project.find(x => x.path === 'CLAUDE.md')?.active).toBe(false)
   })
 })

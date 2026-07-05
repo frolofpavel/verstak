@@ -133,6 +133,12 @@ contextBridge.exposeInMainWorld('api', {
   router: {
     recommend: (taskText: string) => ipcRenderer.invoke('router:recommend', taskText)
   },
+  projectRules: {
+    status: (projectPath: string | null) => ipcRenderer.invoke('project-rules:status', projectPath),
+    ensure: (projectPath: string) => ipcRenderer.invoke('project-rules:ensure', projectPath),
+    open: (projectPath: string | null, sourceId: string) => ipcRenderer.invoke('project-rules:open', projectPath, sourceId),
+    reveal: (projectPath: string | null, sourceId: string) => ipcRenderer.invoke('project-rules:reveal', projectPath, sourceId)
+  },
   policy: {
     matrix: () => ipcRenderer.invoke('policy:matrix')
   },

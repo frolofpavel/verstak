@@ -3710,6 +3710,103 @@ body.gg-rail-toggling .gg-msg-actions {
   font-size: var(--text-sm);
   color: var(--text-tertiary);
 }
+.gg-rules-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  margin-bottom: 14px;
+}
+.gg-rules-summary-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.gg-rules-summary-value {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+.gg-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gg-rules-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.gg-rules-row.is-active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border-subtle));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.gg-rules-row-main { min-width: 0; }
+.gg-rules-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.gg-rules-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-rules-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gg-rules-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+}
+.gg-rules-badge.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gg-rules-badge.is-warn {
+  color: var(--warning, #facc15);
+  border-color: color-mix(in srgb, var(--warning, #facc15) 35%, transparent);
+  background: color-mix(in srgb, var(--warning, #facc15) 10%, transparent);
+}
+.gg-settings-save-status {
+  margin-right: auto;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+.gg-settings-save-status.is-dirty {
+  color: var(--warning, #facc15);
+}
+.gg-settings-save-status.is-saved {
+  color: var(--success);
+}
 .gg-settings-content {
   flex: 1;
   min-width: 0;
