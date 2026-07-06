@@ -1,9 +1,11 @@
 import { createHash } from 'crypto'
 import { spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'fs'
 import type { Dirent } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { nativeFs } from './native-fs'
+
+const { existsSync, mkdirSync, readdirSync, readFileSync, statSync } = nativeFs
 
 const REQUIRED_FILES = ['Verstak.exe', join('resources', 'app.asar')]
 const APP_ASAR_MIN_BYTES = 10_000_000

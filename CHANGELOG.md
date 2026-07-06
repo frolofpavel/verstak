@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.6 - 2026-07-06
+
+### Fixed
+- Windows installer now copies and verifies `resources/app.asar` through Electron's `original-fs`, so the payload asar is treated as a real file instead of an Electron virtual archive.
+- Silent install / update no longer fails with a false `empty resources\app.asar` payload error.
+
+### Verification
+- `npm run type` passed.
+- Installer targeted tests passed.
+
 ## 1.8.5 - 2026-07-05
 
 ### Added

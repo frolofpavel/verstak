@@ -1,5 +1,7 @@
-import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { dirname, join, relative } from 'path'
+import { nativeFsPromises } from './native-fs'
+
+const { cp, mkdir, readFile, readdir, rm, stat, writeFile } = nativeFsPromises
 
 const STALE_UNPACKED = join('resources', 'app.asar.unpacked')
 

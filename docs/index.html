@@ -90,11 +90,11 @@
     <p class="sub">18 моделей в одном окне, полная прозрачность каждого действия, работает локально — без VPN и подписок на чужие сервисы.</p>
 
     <div class="cta">
-      <a class="dlbtn" id="dl" href="https://github.com/frolofpavel/verstak/releases/latest">
+      <a class="dlbtn" id="dl" href="https://github.com/frolofpavel/verstak/releases/download/v1.8.6/Verstak-Setup-1.8.6-x64.exe">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 19h16" stroke="#1a1206" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Скачать для Windows
       </a>
-      <div class="dlmeta" id="meta">Бесплатно · Windows 10/11 · 64-bit</div>
+      <div class="dlmeta" id="meta">Бесплатно · Windows 10/11 · 64-bit · прямая загрузка установщика</div>
     </div>
   </section>
 
@@ -122,7 +122,8 @@
 
 <script>
 // Авто-определение последней версии установщика через GitHub API.
-// Кнопка всегда ведёт на свежий Verstak-Setup-*.exe, без ручного обновления ссылки.
+// Базовая ссылка уже ведёт напрямую на последний проверенный Setup.exe.
+// JS только обновляет её на свежий GitHub Release, если API доступен.
 (function(){
   var API='https://api.github.com/repos/frolofpavel/verstak/releases/latest';
   fetch(API).then(function(r){return r.ok?r.json():null;}).then(function(rel){
