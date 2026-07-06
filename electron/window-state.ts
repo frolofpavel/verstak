@@ -1,5 +1,6 @@
 import { screen, type BrowserWindow, type BrowserWindowConstructorOptions } from 'electron'
 import type { Settings } from './storage/settings'
+import { logRuntime } from './runtime-log'
 import {
   DEFAULT_MAIN_WINDOW_STATE,
   MAIN_WINDOW_STATE_KEY,
@@ -98,8 +99,18 @@ export function trackMainWindowState(win: BrowserWindow, settings: Settings, res
     persistState(win, settings, normalBounds)
   })
 
-  win.once('ready-to-show', () => {
+  let revealed = false
+  const reveal = (reason: string) => {
+    if (revealed || win.isDestroyed()) return
+    revealed = true
     if (restored.isMaximized) win.maximize()
     win.show()
-  })
+    win.focus()
+    logRuntime('window.reveal', { reason, bounds: win.getBounds(), isMaximized: win.isMaximized() })
+  }
+
+  win.once('ready-to-show', () => reveal('ready-to-show'))
+  win.webContents.once('did-finish-load', () => reveal('did-finish-load'))
+  win.webContents.once('dom-ready', () => reveal('dom-ready'))
+  setTimeout(() => reveal('fallback-timeout'), 1500)
 }

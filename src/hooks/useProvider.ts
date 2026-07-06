@@ -74,6 +74,14 @@ function getDefaultModel(id: string): string {
   return ''
 }
 
+function normalizeStoredModel(providerId: string, model: string | null): string {
+  const meta = _providerCache?.[providerId]
+  if (!meta) return model ?? ''
+  if (!model) return meta.defaultModel
+  if (meta.models.length === 0) return model
+  return meta.models.includes(model) ? model : meta.defaultModel
+}
+
 /** Проверка валидности модели для провайдера (используется в projectStore). */
 export function isModelValidForProvider(providerId: string, model: string): boolean {
   const meta = _providerCache?.[providerId]
@@ -99,6 +107,8 @@ const POLL_INTERVAL_MS = 1500
 interface UseProviderResult extends ProviderInfo {
   /** Persist a new model id for the active provider and refresh state. */
   setModel: (model: string) => Promise<void>
+  /** Persist a model for a specific provider, even before React state switches to that provider. */
+  setProviderModel: (providerId: ProviderId, model: string) => Promise<void>
   /** Switch to a different provider; existing model selection per provider is preserved. */
   setProviderId: (id: ProviderId) => Promise<void>
 }
@@ -113,7 +123,7 @@ export function useProvider(): UseProviderResult {
     const pid = parseProviderId(rawId)
     setId(pid)
     const rawModel = await window.api.settings.getKey(`model_${pid}`)
-    setModelState(rawModel ?? getDefaultModel(pid))
+    setModelState(normalizeStoredModel(pid, rawModel))
   }, [])
 
   useEffect(() => {
@@ -128,13 +138,18 @@ export function useProvider(): UseProviderResult {
     setModelState(next)
   }, [id])
 
+  const setProviderModel = useCallback(async (providerId: ProviderId, next: string) => {
+    await window.api.settings.setKey(`model_${providerId}`, next)
+    if (providerId === id) setModelState(next)
+  }, [id])
+
   const setProviderId = useCallback(async (next: ProviderId) => {
     await window.api.settings.setKey('provider', next)
     setId(next)
     const stored = await window.api.settings.getKey(`model_${next}`)
-    setModelState(stored ?? getDefaultModel(next))
+    setModelState(normalizeStoredModel(next, stored))
   }, [])
 
   const meta = getMeta(id)
-  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, supportsTools: meta.supportsTools, setModel, setProviderId }
+  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, supportsTools: meta.supportsTools, setModel, setProviderModel, setProviderId }
 }

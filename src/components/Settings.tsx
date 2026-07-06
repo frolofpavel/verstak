@@ -64,7 +64,7 @@ const PROVIDERS: ProviderConfig[] = [
     defaultModel: 'gemini-3.5-flash',
     secretKey: 'gemini_api_key',
     keyHint: 'AIzaSy…',
-    keyLink: { url: 'https://aistudio.google.com', label: 'AI Studio' },
+    keyLink: { url: 'https://aistudio.google.com/app/apikey', label: 'Google AI Studio API keys' },
     supportsTools: true
   },
   {
@@ -87,7 +87,7 @@ const PROVIDERS: ProviderConfig[] = [
     defaultModel: 'claude-sonnet-4-5-20251101',
     secretKey: 'anthropic_api_key',
     keyHint: 'sk-ant-…',
-    keyLink: { url: 'https://console.anthropic.com', label: 'Anthropic Console' },
+    keyLink: { url: 'https://platform.claude.com/settings/keys', label: 'Claude API keys' },
     supportsTools: true
   },
   {
@@ -106,11 +106,11 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Grok',
     transport: 'API',
     description: 'xAI. Полный агентский режим с tools.',
-    models: ['grok-4', 'grok-4-fast', 'grok-3'],
-    defaultModel: 'grok-4',
+    models: ['grok-4.3', 'grok-build-0.1'],
+    defaultModel: 'grok-4.3',
     secretKey: 'xai_api_key',
     keyHint: 'xai-…',
-    keyLink: { url: 'https://console.x.ai', label: 'xAI Console' },
+    keyLink: { url: 'https://console.x.ai/team/default/api-keys', label: 'xAI API keys' },
     supportsTools: true
   },
   {
@@ -118,7 +118,7 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Grok Build',
     transport: 'CLI',
     description: 'Твоя x.com/SuperGrok подписка через grok CLI.',
-    models: ['grok-composer-2.5-fast', 'grok-build', 'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'grok-3'],
+    models: ['grok-composer-2.5-fast', 'grok-build'],
     defaultModel: 'grok-composer-2.5-fast',
     secretKey: null,
     keyHint: '',
@@ -155,7 +155,7 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'OpenRouter',
     transport: 'API',
     description: 'Один ключ → все модели (Claude, GPT, Gemini, Grok, open-source).',
-    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
+    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4.3', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
     defaultModel: 'anthropic/claude-sonnet-4-6',
     secretKey: 'openrouter_api_key',
     keyHint: 'sk-or-...',
@@ -3850,13 +3850,21 @@ function ModelsPage(props: ModelsPageProps) {
     if (p.models.length === 0) return false
     if (!search.trim()) return true
     return grouped.has(p.id)
+  }).sort((a, b) => {
+    const authDelta = Number(isAuthorized(b)) - Number(isAuthorized(a))
+    if (authDelta !== 0) return authDelta
+    const activeDelta = Number(b.id === activeProvider) - Number(a.id === activeProvider)
+    if (activeDelta !== 0) return activeDelta
+    return a.name.localeCompare(b.name, 'ru')
   })
+  const hasAuthorizedModelProviders = visibleProviders.some(p => isAuthorized(p))
+  const firstLockedModelProviderIndex = visibleProviders.findIndex(p => !isAuthorized(p))
 
   return (
     <div className="gg-settings-extra gg-models-page">
       <h2 className="gg-settings-page-title">Модели</h2>
       <p className="gg-models-intro">
-        Выбери, какие модели показывать в чате. По умолчанию включена только та, к которой ты подключился при входе.
+        Выбери, какие модели будут отображаться в инструментах чата. По умолчанию включена только та, к которой ты подключился при входе.
       </p>
 
       <div className="gg-models-policy-strip" aria-label="Текущая модельная политика">
@@ -3877,7 +3885,7 @@ function ModelsPage(props: ModelsPageProps) {
       </div>
 
       <div className="gg-models-cards">
-        {visibleProviders.map(p => {
+        {visibleProviders.map((p, index) => {
           const list = grouped.get(p.id) ?? []
           const authorized = isAuthorized(p)
           const enabledCount = countEnabled(p)
@@ -3885,98 +3893,114 @@ function ModelsPage(props: ModelsPageProps) {
           const isActiveProvider = activeProvider === p.id
 
           return (
-            <div
-              key={p.id}
-              className={`gg-models-card ${isActiveProvider ? 'is-current' : ''}`}
-            >
-              <div className="gg-models-card-head">
-                <div className="gg-models-card-title">
-                  <span className="gg-models-card-name">{p.name}</span>
-                  <span
-                    className={`gg-models-caps-badge ${p.transport === 'CLI' ? 'is-cli' : 'is-api'}`}
-                    title={p.transport === 'CLI' ? t.settings.capsCliHint : t.settings.capsFullHint}
-                  >
-                    {p.transport === 'CLI' ? t.settings.capsCli : t.settings.capsFull}
-                  </span>
-                  {isActiveProvider && <span className="gg-models-card-active">текущий</span>}
+            <React.Fragment key={p.id}>
+              {index === 0 && hasAuthorizedModelProviders && (
+                <div className="gg-models-section-title">Подключённые модели</div>
+              )}
+              {index === firstLockedModelProviderIndex && (
+                <div className="gg-models-section-title is-locked">Нужно подключить</div>
+              )}
+              <div
+                className={`gg-models-card ${isActiveProvider ? 'is-current' : ''}`}
+              >
+                <div className="gg-models-card-head">
+                  <div className="gg-models-card-title">
+                    <span className="gg-models-card-name">{p.name}</span>
+                    <span
+                      className={`gg-models-caps-badge ${p.transport === 'CLI' ? 'is-cli' : 'is-api'}`}
+                      title={p.transport === 'CLI' ? t.settings.capsCliHint : t.settings.capsFullHint}
+                    >
+                      {p.transport === 'CLI' ? t.settings.capsCli : t.settings.capsFull}
+                    </span>
+                    {isActiveProvider && <span className="gg-models-card-active">текущий</span>}
+                  </div>
+                  <div className="gg-models-card-meta">
+                    <span className="gg-models-card-count">{enabledCount} / {p.models.length} в picker</span>
+                    {!authorized && <span className="gg-models-card-lock">нужна авторизация</span>}
+                    {!authorized && p.keyLink && p.secretKey && (
+                      <button
+                        type="button"
+                        className="gg-models-key-link"
+                        onClick={() => void openAuthSite(p)}
+                      >
+                        Где взять ключ
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="gg-models-card-meta">
-                  <span className="gg-models-card-count">{enabledCount} / {p.models.length} в picker</span>
-                  {!authorized && <span className="gg-models-card-lock">нужна авторизация</span>}
-                </div>
-              </div>
 
-              <div className="gg-models-card-actions">
-                <label className="gg-models-card-toggle">
-                  <span className="gg-models-card-toggle-label">Все модели</span>
+                <div className="gg-models-card-actions">
+                  <label className="gg-models-card-toggle">
+                    <span className="gg-models-card-toggle-label">Все модели</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={enabledCount > 0}
+                      className={`gg-toggle ${enabledCount > 0 ? 'is-on' : ''}`}
+                      onClick={() => toggleAllModels(p)}
+                      title={enabledCount > 0 ? 'Выключить все модели провайдера' : 'Включить все модели провайдера'}
+                    >
+                      <span className="gg-toggle-knob" />
+                    </button>
+                  </label>
                   <button
                     type="button"
-                    role="switch"
-                    aria-checked={enabledCount > 0}
-                    className={`gg-toggle ${enabledCount > 0 ? 'is-on' : ''}`}
-                    onClick={() => toggleAllModels(p)}
-                    title={enabledCount > 0 ? 'Выключить все модели провайдера' : 'Включить все модели провайдера'}
+                    className={`gg-btn gg-btn-ghost gg-models-card-btn ${isDetail ? 'is-active' : ''}`}
+                    onClick={() => toggleDetail(p.id)}
                   >
-                    <span className="gg-toggle-knob" />
+                    {isDetail ? 'Свернуть список' : 'Выбрать отдельные'}
                   </button>
-                </label>
-                <button
-                  type="button"
-                  className={`gg-btn gg-btn-ghost gg-models-card-btn ${isDetail ? 'is-active' : ''}`}
-                  onClick={() => toggleDetail(p.id)}
-                >
-                  {isDetail ? 'Свернуть список' : 'Выбрать отдельные'}
-                </button>
-              </div>
-
-              {isDetail && (
-                <div className="gg-models-card-list">
-                  {list.length === 0 && (
-                    <div className="gg-text-tertiary" style={{ padding: '10px 4px', fontSize: 'var(--text-sm)' }}>
-                      Ничего не найдено
-                    </div>
-                  )}
-                  {list.map(e => {
-                    const enabled = enabledModels.has(e.key)
-                    const isCurrentModel = isActiveProvider && (models[p.id] ?? p.defaultModel) === e.model
-                    const policy = modelPolicyHint(e.model)
-                    return (
-                      <div key={e.key} className={`gg-models-row ${isCurrentModel ? 'is-current' : ''}`}>
-                        <button
-                          type="button"
-                          className="gg-models-row-main"
-                          onClick={() => setDefault(p.id, e.model)}
-                          title="Сделать текущей моделью в чате"
-                        >
-                          <span className="gg-models-row-name">{e.model}</span>
-                          {isCurrentModel && <span className="gg-models-row-current">Текущий</span>}
-                          {policy && (
-                            <span className={`gg-models-row-policy is-${policy.tone}`} title={policy.title}>
-                              {policy.label}
-                            </span>
-                          )}
-                          <span className="gg-models-row-tags">
-                            {e.tags.map(tag => (
-                              <span key={tag} className={`gg-mpal-tag is-${tag.toLowerCase().replace(/\$/g, 'd')}`}>{tag}</span>
-                            ))}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={enabled}
-                          className={`gg-toggle ${enabled ? 'is-on' : ''}`}
-                          onClick={() => toggleModel(p, e.key, !enabled)}
-                          title={enabled ? 'Скрыть из picker' : 'Показать в picker'}
-                        >
-                          <span className="gg-toggle-knob" />
-                        </button>
-                      </div>
-                    )
-                  })}
                 </div>
-              )}
-            </div>
+
+                {isDetail && (
+                  <div className="gg-models-card-list">
+                    {list.length === 0 && (
+                      <div className="gg-text-tertiary" style={{ padding: '10px 4px', fontSize: 'var(--text-sm)' }}>
+                        Ничего не найдено
+                      </div>
+                    )}
+                    {list.map(e => {
+                      const enabled = enabledModels.has(e.key)
+                      const isCurrentModel = isActiveProvider && (models[p.id] ?? p.defaultModel) === e.model
+                      const policy = modelPolicyHint(e.model)
+                      return (
+                        <div key={e.key} className={`gg-models-row ${isCurrentModel ? 'is-current' : ''}`}>
+                          <button
+                            type="button"
+                            className="gg-models-row-main"
+                            onClick={() => setDefault(p.id, e.model)}
+                            title="Сделать текущей моделью в чате"
+                          >
+                            <span className="gg-models-row-name">{e.model}</span>
+                            {isCurrentModel && <span className="gg-models-row-current">Текущий</span>}
+                            {policy && (
+                              <span className={`gg-models-row-policy is-${policy.tone}`} title={policy.title}>
+                                {policy.label}
+                              </span>
+                            )}
+                            <span className="gg-models-row-tags">
+                              {e.tags.map(tag => (
+                                <span key={tag} className={`gg-mpal-tag is-${tag.toLowerCase().replace(/\$/g, 'd')}`}>{tag}</span>
+                              ))}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={enabled}
+                            className={`gg-toggle ${enabled ? 'is-on' : ''}`}
+                            onClick={() => toggleModel(p, e.key, !enabled)}
+                            title={enabled ? 'Скрыть из picker' : 'Показать в picker'}
+                          >
+                            <span className="gg-toggle-knob" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
           )
         })}
       </div>

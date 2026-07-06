@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
@@ -16,7 +16,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
-type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent'
+type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree'
+type WorktreeStatus = { active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }
 
 export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => void }) {
   const path = useProject(s => s.path)
@@ -25,6 +26,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   const checkpointId = useProject(s => s.checkpointId)
   const checkpointMessageId = useProject(s => s.checkpointMessageId)
   const isStreaming = useProject(s => s.isStreaming)
+  const helpMode = useProject(s => s.helpMode)
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)
   const startReview = useProject(s => s.startReview)
@@ -41,6 +43,9 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   const [openSub, setOpenSub] = useState<SubId | null>(null)
   const [defaultReviewer, setDefaultReviewer] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState<string | null>(null)
+  const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus>({ active: false })
+  const [worktreeBusy, setWorktreeBusy] = useState(false)
+  const [worktreeErr, setWorktreeErr] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const activeSkill = activeSkillId ? skills.find(s => s.id === activeSkillId) : null
@@ -94,10 +99,51 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     }
   }, [open, openSub])
 
+  const refreshWorktree = useCallback(() => {
+    if (helpMode || activeChatId == null) {
+      setWorktreeStatus({ active: false })
+      return
+    }
+    void window.api.worktree.status(activeChatId)
+      .then(setWorktreeStatus)
+      .catch(() => setWorktreeStatus({ active: false }))
+  }, [activeChatId, helpMode])
+
+  useEffect(() => { refreshWorktree() }, [refreshWorktree, isStreaming])
+
   function toggleSub(id: SubId) {
     if (id === 'review' && !hasAssistantContent) return
     if (id === 'checkpoint' && !path) return
+    if (id === 'worktree' && (helpMode || activeChatId == null)) return
     setOpenSub(prev => (prev === id ? null : id))
+  }
+
+  async function runWorktree(fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setWorktreeBusy(true)
+    setWorktreeErr(null)
+    try {
+      const result = await fn()
+      if (!result.ok) {
+        setWorktreeErr(result.error ?? 'Не удалось включить изоляцию')
+        return false
+      }
+      refreshWorktree()
+      return true
+    } catch {
+      setWorktreeErr('Не удалось включить изоляцию')
+      return false
+    } finally {
+      setWorktreeBusy(false)
+    }
+  }
+
+  async function isolateWorktree() {
+    if (activeChatId == null || !path) return
+    const ok = await runWorktree(() => window.api.worktree.isolate(activeChatId, path))
+    if (ok) {
+      setOpenSub(null)
+      setOpen(false)
+    }
   }
 
   async function createCheckpoint() {
@@ -214,7 +260,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     ? (activeSkill.name ?? activeSkill.id)
     : skills.length > 0
       ? `${skills.length} доступно`
-      : 'нет скиллов'
+      : 'нет инструментов'
   const reviewMeta = hasAssistantContent
     ? (defaultReviewer ? PROVIDER_LABELS[defaultReviewer] ?? defaultReviewer : 'выбрать модель')
     : 'нужен ответ агента'
@@ -223,6 +269,13 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     : checkpointId === null
       ? 'не установлен'
       : `активен #${checkpointId === 0 ? 'start' : checkpointId}`
+  const worktreeMeta = !path
+    ? 'открой проект'
+    : activeChatId == null
+      ? 'нет чата'
+      : worktreeStatus.active
+        ? 'уже включена'
+        : 'отдельная git-копия'
 
   function pickMultiAgent(template: string) {
     onInject(template)
@@ -230,10 +283,10 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
   }
 
   const triggerHint = activeSkill
-    ? `Скилл: ${activeSkill.name ?? activeSkill.id}`
+    ? `Инструмент: ${activeSkill.name ?? activeSkill.id}`
     : checkpointId !== null
       ? 'Чекпоинт установлен'
-      : 'Скилл, ревью, мультиагент, чекпоинт'
+      : 'Инструмент, ревью, мультиагент, чекпоинт'
 
   return (
     <div className={`gg-tools-wrap ${open ? 'is-open' : ''}`} ref={wrapRef}>
@@ -244,7 +297,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
         title={triggerHint}
         aria-expanded={open}
       >
-        <span>Инструменты</span>
+        <span>Выбрать</span>
         <span className="gg-tools-chevron" aria-hidden>{open ? '▴' : '▾'}</span>
       </button>
 
@@ -262,14 +315,14 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                 aria-expanded={openSub === 'skill'}
                 onClick={() => toggleSub('skill')}
               >
-                <span className="gg-tools-menu-label">Скилл</span>
+                <span className="gg-tools-menu-label">Инструмент</span>
                 <span className="gg-tools-menu-meta">{skillMeta}</span>
                 <span className="gg-tools-menu-arrow" aria-hidden>›</span>
               </button>
               {openSub === 'skill' && (
                 <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
                   <div className="gg-tools-submenu-head">
-                    <span className="gg-tools-submenu-title">Скиллы</span>
+                    <span className="gg-tools-submenu-title">Инструменты</span>
                     <button
                       type="button"
                       className="gg-tools-refresh"
@@ -287,7 +340,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                   </div>
                   {activeSkillId && (
                     <button type="button" className="gg-tools-row" onClick={() => pickSkill(null)}>
-                      <span className="gg-tools-row-label">Без скилла</span>
+                      <span className="gg-tools-row-label">Без инструмента</span>
                       <span className="gg-tools-row-meta">Обычный чат</span>
                     </button>
                   )}
@@ -308,7 +361,7 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                     ))
                   })}
                   {skills.length === 0 && !loading && (
-                    <div className="gg-tools-empty">Скиллов нет</div>
+                    <div className="gg-tools-empty">Инструментов нет</div>
                   )}
                 </div>
               )}
@@ -391,6 +444,46 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                       <span className="gg-tools-row-meta">/{t.trigger}</span>
                     </button>
                   ))}
+                </div>
+              )}
+            </li>
+
+            <li
+              className={`gg-tools-menu-item ${openSub === 'worktree' ? 'is-submenu-open' : ''}`}
+              role="none"
+            >
+              <button
+                type="button"
+                className={`gg-tools-menu-trigger ${!path || helpMode || activeChatId == null ? 'is-disabled' : ''}`}
+                role="menuitem"
+                aria-expanded={openSub === 'worktree'}
+                disabled={!path || helpMode || activeChatId == null}
+                onClick={() => toggleSub('worktree')}
+              >
+                <span className="gg-tools-menu-label">Изоляция</span>
+                <span className="gg-tools-menu-meta">{worktreeMeta}</span>
+                <span className="gg-tools-menu-arrow" aria-hidden>›</span>
+              </button>
+              {openSub === 'worktree' && (
+                <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
+                  <div className="gg-tools-submenu-title">Изолированная сессия</div>
+                  {!path ? (
+                    <div className="gg-tools-empty">Открой проект слева</div>
+                  ) : worktreeStatus.active ? (
+                    <div className="gg-tools-empty">Изоляция уже включена. Управление показано над полем чата.</div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="gg-tools-row"
+                      onClick={() => void isolateWorktree()}
+                      disabled={worktreeBusy || isStreaming || activeChatId == null}
+                      title="Правки агента пойдут в отдельную git-копию и не затронут основной проект до применения"
+                    >
+                      <span className="gg-tools-row-label">🌿 Изолировать сессию</span>
+                      <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения ответа' : 'отдельная git-копия для правок агента'}</span>
+                    </button>
+                  )}
+                  {worktreeErr && <div className="gg-tools-empty">{worktreeErr}</div>}
                 </div>
               )}
             </li>
