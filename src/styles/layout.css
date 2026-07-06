@@ -733,9 +733,8 @@
   border-color: var(--accent);
   border-width: 2px;
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--bg-base) 85%, transparent),
-    0 0 12px color-mix(in srgb, var(--accent) 55%, transparent),
-    0 0 24px color-mix(in srgb, var(--accent) 28%, transparent);
+    0 0 0 2px color-mix(in srgb, var(--bg-base) 88%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
   content: '';
@@ -746,15 +745,28 @@
   z-index: 0;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 88%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--accent) 34%, transparent),
-    0 0 14px color-mix(in srgb, var(--accent) 72%, transparent),
-    0 0 26px color-mix(in srgb, var(--accent) 46%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar {
   position: relative;
   z-index: 1;
   border-color: var(--accent);
   border-width: 2px;
+  box-shadow: var(--shadow-sm);
+}
+html[data-theme="light"] .gg-rail-chip.is-shell-expanded.is-active .gg-rail-avatar {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg-base) 96%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 86%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar {
+  border-color: var(--accent);
   box-shadow: var(--shadow-sm);
 }
 .gg-rail-chip-text {
@@ -3439,6 +3451,8 @@ body.gg-rail-toggling .gg-msg-actions {
 }
 .gg-model-pill {
   display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0;
+  overflow: hidden;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -3455,10 +3469,18 @@ body.gg-rail-toggling .gg-msg-actions {
   border-color: var(--border-default);
   color: var(--text-primary);
 }
-.gg-model-pill-name { font-weight: 500; }
+.gg-model-pill-name { font-weight: 500; flex-shrink: 0; white-space: nowrap; }
 .gg-model-pill-sep { color: var(--text-disabled); }
-.gg-model-pill-transport { color: var(--text-tertiary); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
-
+.gg-model-pill-transport {
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* ─── Model picker popover ─── */
 .gg-mp-wrap { position: relative; display: inline-block; }
 .gg-mp-wrap.is-footer {
@@ -3479,6 +3501,10 @@ body.gg-rail-toggling .gg-msg-actions {
   bottom: calc(100% + 8px);
   right: 0;
   min-width: 260px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(360px, 58vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -3506,7 +3532,7 @@ body.gg-rail-toggling .gg-msg-actions {
   font-size: 10px;
   margin-left: 4px;
 }
-/* Ревью F1: CLI = урезанный контроль (warning-окраска, не disabled). */
+/* Ревью F1: CLI = ограниченный контроль (warning-окраска, не disabled). */
 .gg-mp-row-cli-degraded {
   color: var(--warning, #d98a2b);
   font-size: 10px;
@@ -3520,6 +3546,24 @@ body.gg-rail-toggling .gg-msg-actions {
   text-transform: uppercase;
   color: var(--text-tertiary);
   padding: 6px 10px 4px;
+}
+.gg-mp-provider-group + .gg-mp-provider-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-default);
+}
+.gg-mp-provider-title {
+  display: inline-flex;
+  align-items: center;
+  margin: 4px 8px 6px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 24%, var(--border-default));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 11%, var(--bg-elevated));
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
 }
 .gg-mp-row {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
@@ -3537,15 +3581,16 @@ body.gg-rail-toggling .gg-msg-actions {
 .gg-mp-row:hover { background: var(--bg-hover); }
 .gg-mp-row.is-active { background: var(--accent-muted); color: var(--accent); }
 .gg-mp-row-label {
-  font-weight: 500; flex: 1;
+  font-weight: 500;
+  flex: 1;
   display: flex; align-items: baseline; gap: 6px;
   min-width: 0;
 }
-.gg-mp-row-provider { flex-shrink: 0; }
+.gg-mp-row-provider { display: none; }
 .gg-mp-row-model {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3559,7 +3604,8 @@ body.gg-rail-toggling .gg-msg-actions {
 .gg-mp-row-stack {
   flex-direction: column;
   align-items: stretch;
-  gap: 3px;
+  gap: 6px;
+  padding: 9px 10px;
 }
 .gg-mp-row-top {
   display: flex;
@@ -3569,9 +3615,69 @@ body.gg-rail-toggling .gg-msg-actions {
   width: 100%;
 }
 .gg-mp-row-stack .gg-mp-row-label {
-  font-weight: 600;
+  font-weight: 500;
   flex: 1;
   min-width: 0;
+}
+.gg-mp-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.gg-mp-row-stack .gg-mp-row-model {
+  color: inherit;
+  font-weight: 500;
+  min-width: 0;
+}
+.gg-mp-row-state {
+  flex-shrink: 0;
+  min-width: 24px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-mp-row-stack.is-active .gg-mp-row-state {
+  color: var(--accent);
+}
+.gg-mp-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 18px;
+}
+.gg-mp-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--bg-base) 74%, transparent);
+}
+.gg-mp-badge.is-cli {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 38%, transparent);
+  background: color-mix(in srgb, #d8a657 10%, transparent);
+}
+.gg-mp-badge.is-api {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.gg-mp-badge.is-warning {
+  color: #d8a657;
+}
+.gg-mp-badge.is-muted {
+  color: var(--text-disabled);
+}
+.gg-mp-badge-transport {
+  flex-shrink: 0;
 }
 .gg-mp-row-shortcut {
   flex-shrink: 0;
@@ -3859,52 +3965,6 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
 .gg-prov-badge.is-missing{ color: var(--warning, #facc15); border-color: var(--warning, #facc15); }
 .gg-prov-badge.is-recommended { color: var(--text-secondary); background: var(--bg-input); }
 
-/* Бейдж CLI в композере — янтарная обводка + всплывашка при наведении. */
-.gg-provider-caps-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-input);
-  color: var(--text-tertiary);
-  cursor: help;
-  white-space: nowrap;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-.gg-provider-caps-badge.is-cli {
-  border-color: #d8a657;
-  color: #d8a657;
-}
-.gg-cli-hint-tooltip {
-  position: fixed;
-  transform: translateY(-100%);
-  padding: 8px 12px;
-  box-sizing: border-box;
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.45;
-  color: #f0d9a8;
-  background: color-mix(in srgb, #1a1408 88%, #d8a657 12%);
-  border: 1px solid color-mix(in srgb, #d8a657 45%, transparent);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  white-space: normal;
-  overflow-wrap: break-word;
-  word-break: break-word;
-  pointer-events: none;
-  z-index: 10000;
-}
 /* Живой инструмент running-прогона в карточке «Задачи» (аудит P0 #3). */
 .gg-run-stat-livetool {
   color: var(--accent, #5865f2);
@@ -3934,6 +3994,24 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   border-radius: 0;
   overflow: visible;
   background: transparent;
+}
+.gg-models-section-title {
+  margin: 14px 0 7px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.gg-models-section-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.gg-models-section-title.is-locked {
+  color: var(--text-tertiary);
 }
 .gg-models-card {
   padding: 14px 16px;
@@ -4034,6 +4112,21 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   color: var(--text-tertiary);
 }
 .gg-models-card-lock { color: var(--warning, #facc15); }
+.gg-models-key-link {
+  align-self: flex-end;
+  padding: 2px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gg-models-key-link:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .gg-models-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4473,7 +4566,7 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 80;
-  width: min(360px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - 32px));
   padding: 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -4492,10 +4585,57 @@ html.gg-atelier .gg-settings-shell .gg-btn-primary:hover,
 }
 .gg-chat-settings-item {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: 34px;
+}
+.gg-chat-settings-item--model,
+.gg-chat-settings-item--mode {
+  grid-column: 1 / -1;
+}
+.gg-chat-settings-model-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gg-chat-settings-model-control .gg-mp-wrap,
+.gg-chat-settings-model-control .gg-model-pill {
+  min-width: 0;
+  width: 100%;
+}
+.gg-chat-settings-model-control .gg-model-pill {
+  justify-content: flex-start;
+}
+.gg-chat-settings-model-control .gg-mp-chevron {
+  margin-left: auto;
+}
+.gg-chat-settings-model-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+}
+.gg-chat-settings-model-kind.is-cli {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 42%, var(--border-subtle));
+  background: color-mix(in srgb, #d8a657 10%, var(--bg-base));
+}
+.gg-chat-settings-model-kind.is-api {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
 }
 .gg-chat-settings-label {
   color: var(--text-tertiary);
@@ -4508,6 +4648,11 @@ html[data-theme="light"] .gg-chat-settings-popover {
   background: #ffffff;
   background-color: #ffffff;
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18), 0 0 0 1px var(--border-subtle);
+}
+html[data-theme="light"] .gg-mp-provider-title {
+  border-color: color-mix(in srgb, var(--text-primary) 30%, var(--border-default));
+  background: color-mix(in srgb, var(--text-primary) 8%, var(--bg-elevated));
+  color: color-mix(in srgb, var(--text-primary) 88%, #000);
 }
 .gg-composer-meta > button,
 .gg-composer-meta .gg-composer-meta-cluster > button,
@@ -4618,11 +4763,15 @@ html[data-theme="light"] .gg-chat-settings-popover {
   opacity: 0.7;
 }
 .gg-composer-meta .gg-model-pill-transport {
+  min-width: 0;
   font-size: 10px;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .gg-composer-meta .gg-provider-dot {
   width: 6px;

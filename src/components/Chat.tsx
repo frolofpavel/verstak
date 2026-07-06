@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
-import { createPortal } from 'react-dom'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
@@ -774,8 +773,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   }, [provider.id])
 
   async function switchVisionModel(nextProviderId: ProviderId, model: string) {
+    await provider.setProviderModel(nextProviderId, model)
     await provider.setProviderId(nextProviderId)
-    await provider.setModel(model)
     if (activeChatId != null) {
       try {
         await window.api.chatSessions.setModel(activeChatId, nextProviderId, model)
@@ -3188,7 +3187,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 {composerSettingsOpen && (
                   <div className="gg-chat-settings-popover">
                     <div className="gg-chat-settings-grid">
-                      <div className="gg-chat-settings-item">
+                      <div className="gg-chat-settings-item gg-chat-settings-item--model">
+                        <span className="gg-chat-settings-label">Модель</span>
+                        <div className="gg-chat-settings-model-control">
+                          <ModelPicker onOpenSettings={onOpenSettings} />
+                          <span className={`gg-chat-settings-model-kind ${isCliProvider(provider.id) ? 'is-cli' : 'is-api'}`}>
+                            {isCliProvider(provider.id) ? 'CLI' : 'API'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="gg-chat-settings-item gg-chat-settings-item--mode">
                         <span className="gg-chat-settings-label">Режим</span>
                         <ModePicker
                           mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
@@ -3196,13 +3204,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                           locked={isHelpChat}
                         />
                       </div>
-                      <div className="gg-chat-settings-item">
-                        <span className="gg-chat-settings-label">Модель</span>
-                        <ModelPicker onOpenSettings={onOpenSettings} />
-                      </div>
                       {!isHelpChat && (
                         <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">Скиллы</span>
+                          <span className="gg-chat-settings-label">Инструменты</span>
                           <ComposerToolsMenu onInject={injectTemplate} />
                         </div>
                       )}
@@ -3222,12 +3226,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                           >
                             ▶ Agency task
                           </button>
-                        </div>
-                      )}
-                      {isCliProvider(provider.id) && (
-                        <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">CLI</span>
-                          <CliComposerBadge hint={t.chat.cliStrip} />
                         </div>
                       )}
                     </div>
@@ -3270,14 +3268,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               />
               {!isHelpChat && <IntensityToggle />}
               <ModelPicker onOpenSettings={onOpenSettings} />
-              {/* Бейдж возможностей провайдера (аудит P1 #12): у CLI-провайдеров
-                  правки делает внешний агент в субпроцессе — контрольные гарантии
-                  Verstak (per-file undo / checkpoint / подтверждение write / mode-
-                  policy) НЕ действуют, вложения уходят текстовым хинтом. Бейдж
-                  закрывает дыру «выглядит одинаково, ведёт себя по-разному». */}
-              {isCliProvider(provider.id) && (
-                <CliComposerBadge hint={t.chat.cliStrip} />
-              )}
             </div>
           </div>
         </div>
@@ -3303,52 +3293,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         </div>
       )}
     </div>
-  )
-}
-
-function CliComposerBadge({ hint }: { hint: string }) {
-  const anchorRef = useRef<HTMLSpanElement>(null)
-  const [open, setOpen] = useState(false)
-  const [tip, setTip] = useState<{ top: number; left: number; width: number } | null>(null)
-
-  function placeTooltip() {
-    const el = anchorRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const width = Math.min(280, window.innerWidth - 24)
-    const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
-    setTip({ top: rect.top - 8, left, width })
-    setOpen(true)
-  }
-
-  return (
-    <>
-      <span
-        ref={anchorRef}
-        className="gg-provider-caps-badge is-cli"
-        onMouseEnter={placeTooltip}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={placeTooltip}
-        onBlur={() => setOpen(false)}
-        tabIndex={0}
-      >
-        CLI
-      </span>
-      {open && tip && createPortal(
-        <div
-          className="gg-cli-hint-tooltip"
-          role="tooltip"
-          style={{
-            top: tip.top,
-            left: tip.left,
-            width: tip.width,
-          }}
-        >
-          {hint}
-        </div>,
-        document.body,
-      )}
-    </>
   )
 }
 

@@ -12,7 +12,7 @@ import {
 // Ревью F1: честная degraded-индикация. На CLI инструменты, проверка (DoD),
 // живой таймлайн и crash-resume идут ВНУТРИ бинаря и не видны Verstak — moat
 // «контроль» там урезан. Текст выводит это явно, а не «если не отвечает».
-const CLI_BETA_HINT = 'CLI-режим: урезанный контроль. Инструменты, проверка (DoD), живой таймлайн и crash-resume работают ВНУТРИ CLI и не видны Verstak. Полный контроль и доказательство выполнения — на API-провайдере.'
+const CLI_BETA_HINT = 'CLI-режим: ограниченный контроль. Инструменты, проверка (DoD), живой таймлайн и crash-resume работают внутри CLI и не видны Verstak. Полный контроль и доказательство выполнения — на API-провайдере.'
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
@@ -39,6 +39,19 @@ function modelKey(providerId: string, model: string): string {
 
 function isCliProvider(id: string): boolean {
   return id.endsWith('-cli')
+}
+
+function groupEntriesByProvider(entries: PickerEntry[]): Array<{ key: string; label: string; entries: PickerEntry[] }> {
+  const groups: Array<{ key: string; label: string; entries: PickerEntry[] }> = []
+  for (const entry of entries) {
+    let group = groups.find(g => g.key === entry.providerId)
+    if (!group) {
+      group = { key: entry.providerId, label: entry.providerLabel, entries: [] }
+      groups.push(group)
+    }
+    group.entries.push(entry)
+  }
+  return groups
 }
 
 // Verstak Gateway: пресеты показываем по-русски (в API уходит id verstak/...).
@@ -221,7 +234,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
   )
 
   const readyEntries = entries.filter(e => e.authorized)
-  const lockedEntries = entries.filter(e => !e.authorized)
+  const readyGroups = useMemo(() => groupEntriesByProvider(readyEntries), [readyEntries])
 
   async function persistOnSession(providerId: ProviderId, model: string | null) {
     if (!activeChatId) return
@@ -241,8 +254,8 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
       onOpenSettings()
       return
     }
+    await provider.setProviderModel(entry.providerId, entry.model)
     await provider.setProviderId(entry.providerId)
-    await provider.setModel(entry.model)
     await persistOnSession(entry.providerId, entry.model)
     setCurrentAuthorized(true)
     setOpen(false)
@@ -294,8 +307,13 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
           {readyEntries.length > 0 && (
             <div className="gg-mp-section">
               <div className="gg-mp-section-title">{t.modelPicker.connected}</div>
-              {readyEntries.map(e => (
-                <PickerRow key={modelKey(e.providerId, e.model)} entry={e} onSelect={() => void selectEntry(e)} />
+              {readyGroups.map(group => (
+                <div key={group.key} className="gg-mp-provider-group">
+                  <div className="gg-mp-provider-title">{group.label}</div>
+                  {group.entries.map(e => (
+                    <PickerRow key={modelKey(e.providerId, e.model)} entry={e} onSelect={() => void selectEntry(e)} />
+                  ))}
+                </div>
               ))}
             </div>
           )}
@@ -306,20 +324,6 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
                 <span className="gg-mp-row-label">{t.modelPicker.noConnected}</span>
                 <span className="gg-mp-row-meta">{t.modelPicker.enableIn}</span>
               </div>
-            </div>
-          )}
-
-          {lockedEntries.length > 0 && (
-            <div className="gg-mp-section">
-              <div className="gg-mp-section-title">{t.modelPicker.needAuth}</div>
-              {lockedEntries.map(e => (
-                <PickerRow
-                  key={`${e.providerId}::locked`}
-                  entry={e}
-                  locked
-                  onSelect={() => void selectEntry(e)}
-                />
-              ))}
             </div>
           )}
 
@@ -348,6 +352,7 @@ function PickerRow({
   onSelect: () => void
 }) {
   const isCli = isCliProvider(entry.providerId)
+  const showHiddenBadge = !entry.enabled && entry.authorized && !entry.isCurrent
   let title: string | undefined
   if (locked) title = 'Нужна авторизация — откроются Настройки'
   else if (isCli) title = CLI_BETA_HINT
@@ -358,26 +363,34 @@ function PickerRow({
   return (
     <button
       type="button"
-      className={`gg-mp-row ${entry.isCurrent ? 'is-active' : ''} ${locked ? 'is-unconfigured' : ''}`}
+      className={`gg-mp-row gg-mp-row-stack ${entry.isCurrent ? 'is-active' : ''} ${locked ? 'is-unconfigured' : ''}`}
       title={title}
       onClick={onSelect}
       role="option"
       aria-selected={entry.isCurrent}
     >
-      <span className="gg-mp-row-label">
-        {locked && <span className="gg-mp-lock">🔒</span>}
-        <span className="gg-mp-row-provider">{entry.providerLabel}</span>
-        <span className="gg-mp-row-model">{shortModel(entry.model)}</span>
-        {!entry.enabled && entry.authorized && !entry.isCurrent && (
-          <span className="gg-mp-row-hidden-mark"> · скрыта</span>
-        )}
-        {isCli && (
-          <span className="gg-mp-row-cli-degraded" title={CLI_BETA_HINT}> · урезанный контроль</span>
-        )}
+      <span className="gg-mp-row-top">
+        <span className="gg-mp-row-label">
+          {locked && <span className="gg-mp-lock">🔒</span>}
+          <span className="gg-mp-row-title">
+            <span className="gg-mp-row-model">{shortModel(entry.model)}</span>
+            <span className={`gg-mp-badge gg-mp-badge-transport ${entry.transport === 'CLI' ? 'is-cli' : 'is-api'}`}>{entry.transport}</span>
+          </span>
+        </span>
+        <span className="gg-mp-row-state">
+          {entry.isCurrent ? '✓' : ''}
+        </span>
       </span>
-      <span className="gg-mp-row-meta">
-        {entry.isCurrent ? '✓' : entry.transport}
-      </span>
+      {showHiddenBadge && (
+        <span className="gg-mp-row-badges">
+          <span
+            className="gg-mp-badge is-muted"
+            title="Модель подключена, но выключена в настройках отображения. В списке она показана только потому, что сейчас выбрана в этом чате."
+          >
+            Скрыта
+          </span>
+        </span>
+      )}
     </button>
   )
 }

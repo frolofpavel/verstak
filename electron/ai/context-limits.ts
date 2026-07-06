@@ -21,9 +21,8 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'claude-sonnet-4-5': 200_000,
   'claude-haiku-4-5': 200_000,
   // Grok
-  'grok-4': 131_072,
-  'grok-4-fast': 131_072,
-  'grok-3': 131_072,
+  'grok-4.3': 1_000_000,
+  'grok-build-0.1': 256_000,
   // OpenAI
   'gpt-5': 200_000,
   'gpt-5-mini': 200_000,

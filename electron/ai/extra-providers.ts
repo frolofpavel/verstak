@@ -95,7 +95,7 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
       'openai/gpt-5-mini',
       'google/gemini-3-pro',
       'google/gemini-3.5-flash',
-      'x-ai/grok-4',
+      'x-ai/grok-4.3',
       'moonshotai/kimi-k2.7-code',
       'deepseek/deepseek-v3',
       'meta-llama/llama-3.3-70b-instruct'

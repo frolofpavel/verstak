@@ -116,11 +116,7 @@ interface GrokCliOptions {
 
 export const GROK_CLI_MODELS = [
   'grok-composer-2.5-fast',
-  'grok-build',
-  'grok-4',
-  'grok-4-fast',
-  'grok-code-fast-1',
-  'grok-3'
+  'grok-build'
 ]
 
 export const DEFAULT_GROK_CLI_MODEL = 'grok-composer-2.5-fast'
@@ -236,7 +232,10 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       }
 
       const args = ['--output-format', 'streaming-json', '--no-alt-screen']
-      const selectedModel = opts.model && opts.model !== 'auto' ? opts.model : DEFAULT_GROK_CLI_MODEL
+      const requestedModel = opts.model && opts.model !== 'auto' ? opts.model : DEFAULT_GROK_CLI_MODEL
+      const selectedModel = GROK_CLI_MODELS.includes(requestedModel)
+        ? requestedModel
+        : DEFAULT_GROK_CLI_MODEL
       args.push('-m', selectedModel)
       // Back to -p argv (this is what worked before parity changes). stdin
       // through cmd.exe wrapper on Windows turned out to be even more unstable.

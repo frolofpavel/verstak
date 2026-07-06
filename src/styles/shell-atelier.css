@@ -149,8 +149,9 @@ html.gg-atelier body {
 }
 
 .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active .gg-rail-avatar {
-  border-color: var(--accent);
-  box-shadow: none;
+  border-color: var(--accent) !important;
+  border-width: 2px !important;
+  box-shadow: none !important;
 }
 
 .gg-app-atelier .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-chip-btn {
@@ -163,19 +164,42 @@ html.gg-atelier body {
 .gg-app-atelier .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
   content: none;
   display: none;
+  border: 0;
+  box-shadow: none;
 }
 
 .gg-app-atelier .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent),
-    var(--shadow-sm);
+  border-color: var(--accent) !important;
+  border-width: 2px !important;
+  box-shadow: var(--shadow-sm) !important;
 }
 
 .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar {
   position: relative;
   z-index: 1;
-  border-color: var(--accent);
+  border-color: var(--accent) !important;
+  border-width: 2px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap::after {
+  content: none;
+  display: none;
+  border: 0;
+  box-shadow: none;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar {
+  border-color: var(--accent) !important;
+  border-width: 2px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap::after {
+  content: none;
+  display: none;
+  border: 0;
+  box-shadow: none;
 }
 
 .gg-app-atelier .gg-rail-status.is-unread {

@@ -54,8 +54,8 @@ export function TierRecommendation({ input }: Props) {
   async function apply() {
     if (!rec) return
     const pid = rec.providerId as ProviderId
+    await provider.setProviderModel(pid, rec.model)
     await provider.setProviderId(pid)
-    await provider.setModel(rec.model)
     if (activeChatId) {
       try {
         await window.api.chatSessions.setModel(activeChatId, pid, rec.model)

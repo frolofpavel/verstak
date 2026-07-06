@@ -35,19 +35,7 @@ export function WorktreeBar() {
     } catch { setErr('ошибка') } finally { setBusy(false) }
   }
 
-  if (!status.active) {
-    return (
-      <div className="gg-worktree-bar">
-        <button
-          className="gg-btn gg-btn-ghost gg-worktree-isolate"
-          disabled={busy || isStreaming}
-          onClick={() => void run(() => window.api.worktree.isolate(activeChatId, path))}
-          title="Изолировать сессию в отдельной git-копии — правки агента не затронут основное дерево до «Применить»"
-        >🌿 Изолировать сессию</button>
-        {err && <span className="gg-worktree-err">{err}</span>}
-      </div>
-    )
-  }
+  if (!status.active) return null
 
   return (
     <div className="gg-worktree-bar is-active">

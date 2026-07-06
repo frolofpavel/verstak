@@ -36,9 +36,8 @@ const PRICES: Record<string, ModelPrice> = {
   'o1':                          { input: 15.0, output: 60.0 },
   'o1-mini':                     { input: 3.0,  output: 12.0 },
   // xAI — x.ai/api
-  'grok-4':                      { input: 5.0,  output: 15.0 },
-  'grok-4-fast':                 { input: 0.20, output: 0.50 },
-  'grok-3':                      { input: 3.0,  output: 15.0 },
+  'grok-4.3':                    { input: 1.25, output: 2.50 },
+  'grok-build-0.1':              { input: 1.00, output: 2.00 },
   // 🇷🇺 YandexGPT — yandex.cloud pricing (₽→$ ~90, консервативно вверх)
   'yandexgpt/latest':            { input: 0.50, output: 0.50 },
   'yandexgpt-32k/latest':        { input: 0.50, output: 0.50 },

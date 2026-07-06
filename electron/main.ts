@@ -147,22 +147,31 @@ function createWindow(settings: Settings): BrowserWindow {
   // ошибка загрузки. Логируется в main-процесс (видно в ELECTRON_ENABLE_LOGGING).
   // Полезно и в проде: молчаливый краш рендерера в упаковке иначе не отследить.
   win.webContents.on('render-process-gone', (_e, details) => {
+    logRuntime('window.render_process_gone', { reason: details.reason, exitCode: details.exitCode }, 'error')
     console.error('[render-process-gone]', JSON.stringify(details))
   })
   win.webContents.on('preload-error', (_e, preloadPath, err) => {
+    logRuntimeError('window.preload_error', err, { preloadPath })
     console.error('[preload-error]', preloadPath, err && err.message ? err.message : String(err))
   })
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    logRuntime('window.did_fail_load', { code, desc, url }, 'error')
     console.error('[did-fail-load]', code, desc, url)
   })
+  win.webContents.on('dom-ready', () => logRuntime('window.dom_ready'))
+  win.webContents.on('did-finish-load', () => logRuntime('window.did_finish_load'))
+  win.once('ready-to-show', () => logRuntime('window.ready_to_show'))
+  win.on('show', () => logRuntime('window.show', { bounds: win.getBounds(), isVisible: win.isVisible() }))
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     console.log('[renderer]', level, `${message} (${sourceId}:${line})`)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void win.loadURL(process.env.ELECTRON_RENDERER_URL).catch(err => logRuntimeError('window.load_url.fail', err))
   } else {
-    win.loadFile(join(HERE, '../renderer/index.html'))
+    void win.loadFile(join(HERE, '../renderer/index.html')).catch(err => {
+      logRuntimeError('window.load_file.fail', err, { path: join(HERE, '../renderer/index.html') })
+    })
   }
   return win
 }
@@ -323,6 +332,7 @@ app.whenReady().then(() => {
     return
   }
   const settings = createSettings(db, safeStorage)
+  logRuntime('startup.settings.ready')
 
   // Затухание памяти — после показа окна, не блокирует старт
   setImmediate(() => {
@@ -366,11 +376,14 @@ app.whenReady().then(() => {
   const chatSessions = createChatSessions(db)
   const subSessions = createSubSessions(db)
   const sessionTodos = createSessionTodos(db)
+  logRuntime('startup.chat_storage.ready')
   // Multi-agent Manager (Фаза 2) — фундамент «задач» поверх run_id. ai.ts пишет
   // прогоны (create на старте / finish на завершении), панель Задач читает их.
   const agentRuns = createAgentRuns(db)
+  logRuntime('startup.agent_runs.ready')
   // #5 worktree-lifecycle: персистентная изоляция чата в git-worktree.
   const worktreeSessions = createWorktreeSessions(db)
+  logRuntime('startup.worktree_sessions.ready')
   // Реконсайл зависших прогонов: строки running/queued без ended_at — это
   // прогоны, прерванные крахом/выходом приложения (без живого процесса).
   // Помечаем их failed один раз на старте, чтобы они не висели «в работе».
@@ -392,6 +405,7 @@ app.whenReady().then(() => {
     logRuntimeError('agent_runs.reconcile_stale.fail', err)
     console.warn('[agent-runs] reconcileStale failed:', err instanceof Error ? err.message : err)
   }
+  logRuntime('startup.agent_runs.reconciled')
   // Verification Artifact (Фаза 3) — история DoD поверх файла-артефакта.
   // attest_verification пишет строку, Review подтягивает latest по чату.
   const verifications = createVerifications(db)
@@ -399,6 +413,7 @@ app.whenReady().then(() => {
   // (registerDevTaskIpc ниже) + привязка прогонов к активной задаче чата. git-write
   // (ветки/commit) придёт в Фазах 3-5.
   const devTasks = createDevTasks(db)
+  logRuntime('startup.dev_tasks.ready')
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
   registerPipelineIpc({ pipeline: createPipelineRuns(db), getProjectRoot: getActiveProjectPath })
@@ -407,6 +422,7 @@ app.whenReady().then(() => {
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const reminders = createReminders(db)
+  logRuntime('startup.core_storage.ready')
   let journalRolloverTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleJournalRollover = () => {
     const now = new Date()
@@ -440,6 +456,7 @@ app.whenReady().then(() => {
   const feedback = createFeedback(db)
   const connectorRegistry = createConnectorRegistry()
   const userProfiles = createUserProfiles(db)
+  logRuntime('startup.project_storage.ready')
 
   // Skill registry — собирает скиллы из server API + ~/.verstak/skills/ +
   // built-in. См. electron/ai/skills/loader.ts. Конфиг сервера читается из
@@ -471,8 +488,11 @@ app.whenReady().then(() => {
   registerProjectMapIpc(knownRoots)
   registerFilesIpc({ getProjectRoot: getActiveProjectPath, getKnownRoots: knownRoots })
   registerChatsIpc(chats, chatSessions, db)
+  logRuntime('startup.minimal_ipc.ready')
 
+  logRuntime('startup.window.create.begin')
   const mainWindow = createWindow(settings)
+  logRuntime('startup.window.create.ok')
   mainWindowRef = mainWindow
   mainWindow.on('closed', () => {
     if (mainWindowRef === mainWindow) mainWindowRef = null

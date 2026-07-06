@@ -126,7 +126,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
     transport: 'API',
     secretKey: 'xai_api_key',
     models: GROK_MODELS,
-    defaultModel: 'grok-4',
+    defaultModel: 'grok-4.3',
     supportsTools: true,
     shortLabel: 'Grok'
   },
