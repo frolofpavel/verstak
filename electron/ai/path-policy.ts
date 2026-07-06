@@ -120,31 +120,37 @@ export function defaultDownloadsDir(): string {
  * Writable resolver for explicit user exports.
  *
  * Relative paths stay inside the project sandbox. Absolute paths are allowed
- * only inside the user's Downloads directory, so prompts like "положи файл в
- * Downloads" work without opening arbitrary filesystem writes.
+ * only inside Downloads or explicitly configured external write roots, so
+ * prompts like "положи файл в Downloads" or "write to this allowed folder" work
+ * without opening arbitrary filesystem writes.
  */
 export async function resolveWritablePath(
   root: string,
   userPath: string,
-  opts?: { downloadsDir?: string }
+  opts?: { downloadsDir?: string; allowedRoots?: string[] }
 ): Promise<string> {
   if (!isAbsolute(userPath)) return safeRealJoin(root, userPath)
 
   const target = resolve(userPath)
-  const downloads = resolve(opts?.downloadsDir ?? defaultDownloadsDir())
-  if (!isInside(downloads, target)) {
-    throw new Error(`Абсолютная запись разрешена только в Downloads: ${userPath}`)
+  const roots = [opts?.downloadsDir ?? defaultDownloadsDir(), ...(opts?.allowedRoots ?? [])]
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean)
+    .map((candidate) => resolve(candidate))
+  const allowedRoot = roots.find((candidate) => isInside(candidate, target))
+
+  if (!allowedRoot) {
+    throw new Error(`Абсолютная запись разрешена только в Downloads или явно разрешённые папки: ${userPath}`)
   }
 
-  let realDownloads: string
-  try { realDownloads = await realpath(downloads) } catch { realDownloads = downloads }
+  let realAllowedRoot: string
+  try { realAllowedRoot = await realpath(allowedRoot) } catch { realAllowedRoot = allowedRoot }
 
   let probe = target
   while (probe !== dirname(probe)) {
     try {
       const realProbe = await realpath(probe)
-      if (!isInside(realDownloads, realProbe)) {
-        throw new Error(`Запрещён выход из Downloads через symlink: ${userPath}`)
+      if (!isInside(realAllowedRoot, realProbe)) {
+        throw new Error(`Запрещён выход из разрешённой папки через symlink: ${userPath}`)
       }
       break
     } catch (err) {

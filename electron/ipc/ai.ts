@@ -46,6 +46,7 @@ import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
 import { runLspDiagnostics } from '../ai/lsp-diagnose'
+import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
 import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
@@ -349,7 +350,9 @@ export async function runScheduledHeadless(
 
     // Headless sender — события дропаем (нет UI); итог берём из result.text.
     const sender: TaggedSender = { send: () => {}, exec: async () => undefined }
-    const tools = createToolsForProject(opts.projectPath, opts.signal)
+    const tools = createToolsForProject(opts.projectPath, opts.signal, {
+      allowedWriteRoots: parseAllowedWriteRoots(deps.getSecret(ALLOWED_WRITE_ROOTS_KEY))
+    })
     const ctx: ToolContext = {
       sender, sendId: -1, signal: opts.signal, projectPath: opts.projectPath, tools,
       recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, recordJournal: deps.recordJournal,
@@ -936,7 +939,9 @@ export function registerAiIpc(deps: AiDeps): void {
       // #5: изолированный чат → весь прогон на его worktree (tools + ctx.projectPath →
       // recordWrite/undo/context). projectPath здесь narrowed string, isolatedRoot — наш.
       const runRoot = isolatedRoot ?? projectPath
-      const tools = createToolsForProject(runRoot, ctrl.signal)
+      const tools = createToolsForProject(runRoot, ctrl.signal, {
+        allowedWriteRoots: parseAllowedWriteRoots(deps.getSecret(ALLOWED_WRITE_ROOTS_KEY))
+      })
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {
@@ -1689,7 +1694,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
     sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` } })
     fallbackOpts.triedProviders.add(nextId)
-    const fallbackTools = createToolsForProject(projectPath, signal)
+    const fallbackTools = createToolsForProject(projectPath, signal, {
+      allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
+    })
     const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
     handedOff = true
     return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
@@ -1704,7 +1711,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     forcedJsonThisRun = true
     handedOff = true
     sender.send('ai:event', { id: sendId, event: { type: 'info', text: '↻ Модель игнорирует инструменты — включаю JSON-режим вызовов' } })
-    const jsonTools = createToolsForProject(projectPath, signal)
+    const jsonTools = createToolsForProject(projectPath, signal, {
+      allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
+    })
     return runApiConversation({ ...ctx, isFallbackFrame: true, forceToolMode: 'json', tools: jsonTools, initialMessages: currentMessages })
   }
 

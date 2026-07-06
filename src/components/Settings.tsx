@@ -409,6 +409,7 @@ function PolicyTab() {
   const [currentMode, setCurrentMode] = useState<AgentModeId | null>(null)
   const [dodMode, setDodMode] = useState<string>('warn')
   const [allowlist, setAllowlist] = useState<string>('')
+  const [allowedWriteRoots, setAllowedWriteRoots] = useState<string>('')
   const [planGate, setPlanGate] = useState(false)
   const [autoEdits, setAutoEdits] = useState(false)
   const [autoCommands, setAutoCommands] = useState(false)
@@ -428,6 +429,8 @@ function PolicyTab() {
       setDodMode(dm || 'warn')
       const al = await window.api.settings.getKey('bash_allowlist')
       setAllowlist(al || '')
+      const awr = await window.api.settings.getKey('allowed_write_roots')
+      setAllowedWriteRoots(awr || '')
       const pg = await window.api.settings.getKey('plan_approval_gate')
       setPlanGate(pg === 'true')
       setAutoEdits((await window.api.settings.getKey('auto_approve_edits')) === 'true')
@@ -460,6 +463,11 @@ function PolicyTab() {
   const changeAllowlist = async (v: string) => {
     setAllowlist(v)
     await window.api.settings.setKey('bash_allowlist', v)
+  }
+
+  const changeAllowedWriteRoots = async (v: string) => {
+    setAllowedWriteRoots(v)
+    await window.api.settings.setKey('allowed_write_roots', v)
   }
 
   if (!matrix) {
@@ -545,6 +553,20 @@ function PolicyTab() {
         spellCheck={false}
         rows={4}
         style={{ maxWidth: 420, fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+      />
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>📁 Разрешённые внешние папки для записи</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        По одной папке на строку. Агент по-прежнему пишет внутри проекта и в Downloads, а сюда добавляй только явные рабочие зоны: например <code>C:\Users\Pavel\Downloads</code> или отдельную папку с артефактами. Секретные файлы и выход через symlink остаются заблокированы.
+      </div>
+      <textarea
+        className="gg-input"
+        value={allowedWriteRoots}
+        onChange={e => void changeAllowedWriteRoots(e.target.value)}
+        placeholder={'C:\\Users\\Pavel\\Downloads\\verstak-exports\nC:\\Users\\Pavel\\Progetc\\_artifacts'}
+        spellCheck={false}
+        rows={4}
+        style={{ maxWidth: 560, fontFamily: 'var(--font-mono)', fontSize: '12px' }}
       />
 
       <div className="gg-settings-section-title" style={{ marginTop: 22 }}>✅ Доказательство выполнения (DoD)</div>

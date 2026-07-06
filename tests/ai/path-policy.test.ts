@@ -125,6 +125,29 @@ describe('path-policy resolveWritablePath', () => {
       .rejects.toThrow('Downloads')
   })
 
+  it('allows explicit absolute writes inside configured external roots', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const allowed = mkdtempSync(join(tmpdir(), 'gg-allowed-'))
+    const target = join(allowed, 'report.md')
+    const resolved = await resolveWritablePath(realRoot, target, {
+      downloadsDir: downloads,
+      allowedRoots: [allowed]
+    })
+    expect(resolved).toBe(target)
+  })
+
+  it('blocks writes next to configured external roots', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const allowed = mkdtempSync(join(tmpdir(), 'gg-allowed-'))
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    await expect(resolveWritablePath(realRoot, join(outside, 'x.md'), {
+      downloadsDir: downloads,
+      allowedRoots: [allowed]
+    })).rejects.toThrow('разрешённые папки')
+  })
+
   it('blocks symlink escape from Downloads', async () => {
     const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
     const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
@@ -135,5 +158,20 @@ describe('path-policy resolveWritablePath', () => {
     if (!linked) return
     await expect(resolveWritablePath(realRoot, join(link, 'x.md'), { downloadsDir: downloads }))
       .rejects.toThrow('symlink')
+  })
+
+  it('blocks symlink escape from configured external roots', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'gg-root-'))
+    const downloads = mkdtempSync(join(tmpdir(), 'gg-downloads-'))
+    const allowed = mkdtempSync(join(tmpdir(), 'gg-allowed-'))
+    const outside = mkdtempSync(join(tmpdir(), 'gg-outside-'))
+    const link = join(allowed, 'escape')
+    let linked = false
+    try { symlinkSync(outside, link, 'dir'); linked = true } catch { /* нет привилегий */ }
+    if (!linked) return
+    await expect(resolveWritablePath(realRoot, join(link, 'x.md'), {
+      downloadsDir: downloads,
+      allowedRoots: [allowed]
+    })).rejects.toThrow('symlink')
   })
 })

@@ -890,6 +890,10 @@ export interface FileTools {
   classifyCommand: typeof classifyCommand
 }
 
+export interface FileToolsOptions {
+  allowedWriteRoots?: string[]
+}
+
 /**
  * Apply one or more SEARCH/REPLACE blocks to a string and return the result.
  * Each SEARCH must match EXACTLY ONCE in the current state of the buffer
@@ -1115,7 +1119,7 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(pattern)
 }
 
-export function createFileTools(root: string, signal?: AbortSignal): FileTools {
+export function createFileTools(root: string, signal?: AbortSignal, opts: FileToolsOptions = {}): FileTools {
   async function runCommand(command: string) {
     // Spawn the shell ourselves so we can treeKill the entire process group on
     // Windows when Stop is pressed. execFileAsync only kills the top-level
@@ -1254,7 +1258,7 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         if (isForbiddenPath(relPath)) {
           throw new Error(`Запись запрещена политикой безопасности: ${relPath}`)
         }
-        const abs = await resolveWritablePath(root, relPath)
+        const abs = await resolveWritablePath(root, relPath, { allowedRoots: opts.allowedWriteRoots })
         await mkdir(dirname(abs), { recursive: true })
         await writeFile(abs, String(args.content), 'utf8')
         if (!isAbsolute(relPath)) {
@@ -1276,7 +1280,7 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
         if (isForbiddenPath(relPath)) {
           throw new Error(`Запись запрещена политикой безопасности: ${relPath}`)
         }
-        const abs = await resolveWritablePath(root, relPath)
+        const abs = await resolveWritablePath(root, relPath, { allowedRoots: opts.allowedWriteRoots })
         const before = await readFile(abs, 'utf8')
         const anchorHash = args.anchor_hash ? String(args.anchor_hash) : undefined
         const after = applySearchReplaceBlocks(before, String(args.diff), anchorHash)
@@ -1364,12 +1368,12 @@ export function createFileTools(root: string, signal?: AbortSignal): FileTools {
  * Выбрать FileTools по project_path: ssh://… → удалённый ssh-backend (Вариант B),
  * иначе локальная ФС. Единая точка — agent-loop зовёт её вместо createFileTools.
  */
-export function createToolsForProject(projectPath: string, signal?: AbortSignal): FileTools {
+export function createToolsForProject(projectPath: string, signal?: AbortSignal, opts: FileToolsOptions = {}): FileTools {
   const target = parseSshProjectPath(projectPath)
   if (target) {
     return createSshFileTools(createSshBackend(target.remoteRoot, makeSshExec(target, signal)))
   }
-  return createFileTools(projectPath, signal)
+  return createFileTools(projectPath, signal, opts)
 }
 
 export function createSshFileTools(backend: SshBackend): FileTools {
