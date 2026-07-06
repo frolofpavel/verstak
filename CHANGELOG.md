@@ -2,36 +2,38 @@
 
 ## 1.8.6 - 2026-07-06
 
-### Fixed
-- Windows installer now copies and verifies `resources/app.asar` through Electron's `original-fs`, so the payload asar is treated as a real file instead of an Electron virtual archive.
-- Silent install / update no longer fails with a false `empty resources\app.asar` payload error.
+### Исправлено
+- Установщик Windows теперь копирует и проверяет `resources/app.asar` через Electron `original-fs`, поэтому payload asar обрабатывается как обычный файл, а не как виртуальный архив.
+- Silent install / автообновление больше не падает с ложной ошибкой `empty resources\app.asar`.
+- Self-extract wrapper корректно передаёт `--silent --install-dir` во внутренний установщик.
 
-### Verification
-- `npm run type` passed.
-- Installer targeted tests passed.
+### Проверка
+- `npm run type` прошёл.
+- Installer targeted tests прошли.
+- Self-extract silent install прошёл с `LASTEXITCODE=0`.
 
 ## 1.8.5 - 2026-07-05
 
-### Added
-- Settings navigation is now grouped into clear blocks for app, AI/models, integrations, agent control, and project data.
-- Provider settings include an explicit `Find CLI` action for installed CLI agents.
-- Model settings and the model picker show the default agent model policy: Kimi K2.7 Code as the main coding/planner/reviewer model, DeepSeek Chat as fallback, and unsafe agent-mode choices marked clearly.
-- Settings now has a `Rules` tab that shows global and project rules candidates, the active layer, file status, and safe open/create actions.
-- Explicit absolute `write_file` / `apply_patch` exports are allowed only inside the user's Downloads directory.
+### Добавлено
+- Навигация Settings сгруппирована в понятные блоки: приложение, AI/модели, интеграции, контроль агента, проектные данные.
+- В настройках провайдеров появилась явная кнопка `Найти CLI` для установленных CLI-агентов.
+- Settings → Модели и ModelPicker показывают default agent model policy: Kimi K2.7 Code — основная coding/planner/reviewer модель, DeepSeek Chat — fallback, неподходящие agent-mode модели помечены явно.
+- В Settings появилась вкладка `Правила` с глобальными и проектными rules-кандидатами, активным слоем, статусом файла и безопасными действиями create/open/folder.
+- Явные абсолютные `write_file` / `apply_patch` exports разрешены только внутри пользовательского Downloads.
 
-### Changed
-- External absolute paths remain read-only context by default, while project writes stay project-bound unless the target is an explicit Downloads export.
-- Settings footer now distinguishes unsaved, saving, and saved state instead of looking inert after instant settings.
+### Изменено
+- Внешние абсолютные пути по умолчанию остаются read-only context, а проектные записи остаются внутри project root, кроме явного Downloads export.
+- Footer Settings теперь различает состояния: есть несохранённые изменения, сохраняю, сохранено.
 
-### Security
-- Downloads exports use real-path checks to block symlink escape.
-- Secret paths such as `.env`, `.ssh`, key files, credentials, and cookies remain blocked for read/write.
-- Rules IPC is limited to registered projects and known rules filenames.
+### Безопасность
+- Downloads exports проходят real-path проверку против symlink escape.
+- Секретные пути вроде `.env`, `.ssh`, key files, credentials и cookies остаются заблокированы для read/write.
+- Rules IPC ограничен зарегистрированными проектами и известными rules-файлами.
 
-### Verification
-- `npm run type` passed.
-- `npm run test:fast` passed: 2102 tests, 7 skipped.
-- `npm run build` passed.
+### Проверка
+- `npm run type` прошёл.
+- `npm run test:fast` прошёл: 2102 tests, 7 skipped.
+- `npm run build` прошёл.
 
 ## 1.8.0 - 2026-07-04
 

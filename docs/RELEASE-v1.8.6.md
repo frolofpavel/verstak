@@ -1,17 +1,18 @@
 # Verstak v1.8.6
 
-Hotfix over v1.8.5.
+Горячее исправление поверх v1.8.5.
 
-## Fixed
+## Что исправлено
 
-- Windows installer now uses Electron `original-fs` for payload file operations.
-- Silent install / update no longer treats `resources/app.asar` as a virtual asar archive and falsely reports it as empty.
+- Установщик Windows теперь работает с payload-файлами через Electron `original-fs`.
+- Silent install / автообновление больше не воспринимает `resources/app.asar` как виртуальный asar-архив и не падает с ложной ошибкой, что файл пустой.
+- Self-extract wrapper корректно передаёт `--silent --install-dir` во внутренний установщик.
 
-## Verification
+## Проверка
 
 - `npm run type`
 - targeted installer tests
 - `npm run test:fast`
 - `npm run build`
 - `npm run dist:win`
-- silent install over the existing local Verstak installation
+- self-extract silent install поверх существующей локальной установки

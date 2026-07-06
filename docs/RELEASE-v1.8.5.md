@@ -1,22 +1,22 @@
 # Verstak v1.8.5
 
-Release focus: settings mechanics, model policy visibility, project rules visibility, and safer explicit file exports.
+Фокус релиза: настройки, видимость model policy, правила проекта и безопасные явные exports файлов.
 
-## Highlights
+## Главное
 
-- Settings navigation is grouped into practical blocks: app, AI/models, integrations, agent control, project data.
-- Provider settings now has `Find CLI` for installed external CLI agents.
-- Model policy is visible in Settings and ModelPicker: Kimi K2.7 Code is the main coding/planner/reviewer model, DeepSeek Chat is fallback, and models that should not run agent mode are marked.
-- Settings has a `Rules` tab for global and project rules files, with safe create/open/folder actions.
-- Explicit writes outside the active project are supported only for user-requested exports into Downloads.
+- Навигация Settings сгруппирована по смысловым блокам: приложение, AI/модели, интеграции, контроль агента, проектные данные.
+- В настройках провайдеров появилась кнопка `Найти CLI` для поиска установленных внешних CLI-агентов.
+- Model policy видна в Settings и ModelPicker: Kimi K2.7 Code — основная модель для coding/planner/reviewer, DeepSeek Chat — fallback, модели неподходящие для agent mode явно помечены.
+- Добавлена вкладка Settings → `Правила`: глобальные и проектные rules-файлы, активный слой, статусы и безопасные действия create/open/folder.
+- Явные записи вне активного проекта разрешены только как пользовательские exports в Downloads.
 
-## Safety Notes
+## Безопасность
 
-- External absolute paths remain read-only context unless they are explicit Downloads exports.
-- Secret paths remain blocked.
-- Rules actions are constrained to registered projects and known rules candidates.
+- Внешние абсолютные пути остаются read-only context, кроме явных exports в Downloads.
+- Секретные пути остаются заблокированы.
+- Действия с rules ограничены зарегистрированными проектами и известными rules-кандидатами.
 
-## Verification
+## Проверка
 
 - `npm run type`
 - `npm run test:fast` - 2102 passed / 7 skipped
