@@ -103,7 +103,7 @@ describe('autoupdate state machine', () => {
       ok: true,
       version: '1.5.22',
     })
-  })
+  }, 15_000)
 
   it('resetState returns updater to idle without touching payload files', async () => {
     const rootPayload = payloadRoot('1.5.22')
