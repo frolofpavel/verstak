@@ -301,3 +301,11 @@ Added worktree registry contracts `worktree:list`, `worktree:snapshot`, `worktre
 WorktreeBar now has a visible `Снимок` action for the active isolated session. Existing merge/discard remain local-only and no-push.
 Release checklist for worktree v1: verify isolate -> edit -> status dirty -> snapshot -> discard/delete -> restore from snapshot -> merge clean path; verify no `git push` path; verify `npm run type`, targeted worktree suite, `npm run test:fast`, `npm run build`.
 Targeted verification: `npx vitest run tests/storage/worktree-sessions.test.ts tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 29 tests; `npm run type` -> green.
+
+## 2026-07-07 run lifecycle/wait update
+
+Run lifecycle foundation is now in code.
+Added `electron/ai/run-lifecycle.ts` with public `RunStatus`, storage-to-public status mapping, `ExitReason` mapping, terminal-state detection, and `waitForRun()`.
+Added IPC `ai:wait(runId, { timeoutMs, pollMs })` through the agent-runs registry, exposed it as `window.api.ai.wait`, and synced renderer types with `RunWaitResult`.
+Added `docs/RUN_LIFECYCLE.md` with the state diagram and wait contract. CLI now accepts explicit `--wait`; standalone CLI already waits synchronously, so the flag records/communicates explicit wait mode without changing execution flow.
+Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.

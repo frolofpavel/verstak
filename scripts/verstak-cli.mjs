@@ -60,6 +60,7 @@ const { values, positionals } = parseArgs({
     'provider-config': { type: 'string' },
     'max-turns': { type: 'string' },
     'trace-json': { type: 'boolean', default: false },
+    wait: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
     help:     { type: 'boolean', short: 'h', default: false },
     version:  { type: 'boolean', short: 'v', default: false },
@@ -108,6 +109,7 @@ Verstak CLI — AI-агент в терминале без GUI
   --workspace      Alias для --project
   --max-turns      Лимит ходов agent loop (по умолч: 20)
   --trace-json     Добавить machine-readable trace в JSON output
+  --wait           Явно ждать финального статуса. В standalone CLI это поведение по умолчанию
   --dry-run        Для recipe run: показать protocol/trace без вызова провайдера
   --stdin          Читать промпт из stdin
   --json           Вывод в JSON-формате
@@ -1466,7 +1468,7 @@ function getProviderStream(provider, apiKey, model, messages, tools) {
 // Основной агентный цикл
 // ---------------------------------------------------------------------------
 
-async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt, recipe, recipeProtocol, maxTurns, traceJson }) {
+async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt, recipe, recipeProtocol, maxTurns, traceJson, wait }) {
   const systemPrompt = buildSystemPrompt(projectPath, recipeProtocol)
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -1594,6 +1596,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       provider,
       model: model ?? '(default)',
       projectPath,
+      waitMode: wait ? 'explicit' : 'implicit',
       prompt,
       response: allAssistantTexts.join('\n'),
       messages: messages.filter(m => m.role !== 'system'),
@@ -1646,6 +1649,7 @@ try {
       task: prompt,
       recipe: recipeSpec,
       protocol: recipeProtocol,
+      waitMode: values.wait ? 'explicit' : 'implicit',
       trace,
       providerConfig: values['provider-config']
         ? { name: values['provider-config'], found: !!SELECTED_PROVIDER_CONFIG, provider: providerConfigProvider ?? null, model: providerConfigModel ?? null }
@@ -1668,6 +1672,7 @@ try {
     recipeProtocol,
     maxTurns,
     traceJson: values['trace-json'],
+    wait: values.wait,
   })
   process.exit(0)
 } catch (err) {

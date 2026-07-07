@@ -42,6 +42,7 @@ import { shouldFallback, getNextFallback, classifyFallbackReason } from '../ai/s
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from '../ai/tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
+import { exitReasonToAgentRunStatus } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
@@ -49,7 +50,7 @@ import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-server
 import { runLspDiagnostics } from '../ai/lsp-diagnose'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
 import { join as joinPath } from 'node:path'
-import type { AgentRuns, AgentRunOwner, AgentRunStatus } from '../storage/agent-runs'
+import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { expandOfficeAttachments } from '../ai/attachment-text'
 import { logRuntime, logRuntimeError } from '../runtime-log'
@@ -1154,18 +1155,6 @@ export function registerAiIpc(deps: AiDeps): void {
  * (бюджет ходов исчерпан / детектор зацикливания) — это не сбой выполнения,
  * пользователь может «↻ Переотправить» (Resume V1). Ошибкой это не считаем.
  */
-function exitReasonToStatus(reason: ExitReason): AgentRunStatus {
-  switch (reason) {
-    case 'completed': return 'done'
-    case 'aborted': return 'stopped'
-    case 'error':
-    case 'crashed': return 'failed'
-    case 'max-turns':
-    case 'loop-detected': return 'done'
-    default: return 'done'
-  }
-}
-
 /** Опции smart fallback — пробрасываются из ai:send в conversation runners. */
 interface FallbackOpts {
   /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
@@ -1415,7 +1404,7 @@ async function runPlainConversation(
         if (lastAssistantText.trim()) {
           agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
         }
-        agentRuns.finish(runId, exitReasonToStatus(exitReason), {
+        agentRuns.finish(runId, exitReasonToAgentRunStatus(exitReason), {
           costCents: costGuard?.current() ?? 0,
           error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
         })
@@ -2720,7 +2709,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         }
         // #4 suspend: приостановленный прогон помечаем 'suspended' (не 'stopped').
         // delete — в общем cleanup (для обоих путей); здесь только читаем.
-        const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToStatus(exitReason)
+        const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToAgentRunStatus(exitReason)
         agentRuns.finish(runId, finishStatus, {
           costCents: costGuard?.current() ?? 0,
           toolCount: toolCallCount,

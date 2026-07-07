@@ -480,8 +480,8 @@
   export function exitReasonToRunStatus(reason: ExitReason): RunStatus  // уже есть в ipc/ai.ts:1135 — вынести
   ```
 - **done:**
-  - [ ] Тип принят
-  - [ ] `docs/RUN_LIFECYCLE.md` со state diagram
+  - [x] Тип принят
+  - [x] `docs/RUN_LIFECYCLE.md` со state diagram
 
 ### RUN-02 · lifecycleGeneration stale-reject (M)
 - **source:** OpenClaw `src/infra/agent-events.ts:118, :200 assertAgentRunLifecycleGenerationCurrent`.
@@ -492,11 +492,11 @@
 
 ### RUN-03 · `ai:wait` для headless (M)
 - **source:** OpenClaw `cron-exit-watchers.ts:147 await run.wait()`.
-- **target:** IPC `ai:wait(runId, { timeout? })` в `electron/ipc/ai.ts`, bridge в `preload.ts` + `api.d.ts`, использование в `scripts/verstak-cli.mjs`.
+- **target:** IPC `ai:wait(runId, { timeout? })` в `electron/ipc/agent-runs.ts`, bridge в `preload.ts` + `api.d.ts`, использование в `scripts/verstak-cli.mjs`.
 - **contract:** `ai:wait` resolves с финальным `RunStatus` или reject по timeout.
 - **done:**
-  - [ ] `await api.ai.wait(runId)` работает
-  - [ ] CLI `--wait` флаг
+  - [x] `await api.ai.wait(runId)` работает
+  - [x] CLI `--wait` флаг
 
 ### RUN-04 · Per-chat lane queue (M)
 - **target:** SendRegistry в `src/store/projectStore.ts`.
@@ -835,3 +835,11 @@
 - **Тесты owner-bound routing**: `tests/ipc/agent-loop.test.ts` проверяет, что process completion текущего `sendId` попадает в следующий turn, а чужой `sendId` не утекает.
 - **Тесты anti-orphan**: `tests/ai/process-anti-orphan.test.ts` проверяет отсутствие живого parent/grandchild после `stop_process`/`ProcessRegistry.kill`.
 - **Проверка на момент записи**: targeted `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts tests/ipc/agent-loop.test.ts` -> green, 3 files / 32 tests; `npm run type` -> green.
+
+### Дополнение 2026-07-07: RUN-01/RUN-03 compact wait foundation закрыт
+- **RUN-01**: добавлен `electron/ai/run-lifecycle.ts` с публичным `RunStatus`, маппингом `agent_runs.status -> RunStatus`, маппингом `ExitReason -> AgentRunStatus/RunStatus`, terminal-state helper и `RunWaitResult`.
+- **RUN-01 docs**: добавлен `docs/RUN_LIFECYCLE.md` со state diagram и контрактом ожидания.
+- **RUN-03 wait primitive**: добавлен IPC `ai:wait(runId, { timeoutMs, pollMs })` через `registerAgentRunsIpc`; preload и `src/types/api.d.ts` синхронизированы как `window.api.ai.wait`.
+- **CLI parity seed**: `scripts/verstak-cli.mjs` теперь принимает явный `--wait`. Standalone CLI уже синхронный, поэтому флаг фиксирует explicit wait mode без смены исполнения.
+- **Ограничение**: lifecycle generation stale-reject, per-chat lane queue, stuck diagnostics и timeout semantics остаются отдельными RUN-задачами, чтобы не смешивать их с базовым wait-контрактом.
+- **Проверка на момент записи**: targeted `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.

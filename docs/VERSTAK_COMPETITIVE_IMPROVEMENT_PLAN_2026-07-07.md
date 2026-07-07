@@ -170,6 +170,10 @@ Remaining process scope: none for process-manager v1; `189-PROC-10` covered by t
 | 190-RUN-08 | Timeout semantics | Fail-closed, не silent hang | agent loop | timeout -> non-zero/headless fail | test |
 | 190-RUN-09 | Headless trace aligns with GUI events | CLI parity | scripts/runner | same lifecycle fields | trace test |
 
+**Status 2026-07-07 RUN update:** `190-RUN-01` and the compact `190-RUN-04` wait primitive are closed.
+Added `electron/ai/run-lifecycle.ts`, `docs/RUN_LIFECYCLE.md`, IPC `ai:wait`, preload/types `window.api.ai.wait`, and explicit CLI `--wait` compatibility.
+Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
+
 ## Phase 5. 1.9.0: Skill Governance
 
 | ID | Задача | Зачем | Где | Готово, когда | Проверка |

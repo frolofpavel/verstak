@@ -4,6 +4,7 @@ import type { AgentRuns, AgentRunStatus, AgentRunOwner, ResumableRun } from '../
 import type { SubSessions } from '../storage/sub-sessions'
 import type { SessionTodos } from '../storage/session-todos'
 import { getRunInput } from '../storage/run-inputs'
+import { waitForRun, type RunWaitOptions } from '../ai/run-lifecycle'
 
 /**
  * IPC для вкладки «Задачи» (Multi-agent Manager).
@@ -42,6 +43,10 @@ export function registerAgentRunsIpc(
 
   // #2 per-session stats: агрегат cost/инструменты/файлы/время по всем прогонам чата.
   ipcMain.handle('agent-runs:session-stats', (_e, chatId: number) => agentRuns.sessionStats(chatId))
+
+  ipcMain.handle('ai:wait', (_e, runId: string, opts?: RunWaitOptions) =>
+    waitForRun(agentRuns, runId, opts)
+  )
 
   ipcMain.handle('agent-runs:get', (_e, runId: string) => {
     const run = agentRuns.get(runId)

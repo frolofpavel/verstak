@@ -1,0 +1,125 @@
+import { describe, expect, it } from 'vitest'
+import type { AgentRun, AgentRunStatus } from '../../electron/storage/agent-runs'
+import {
+  agentRunStatusToRunStatus,
+  buildRunWaitResult,
+  exitReasonToAgentRunStatus,
+  exitReasonToRunStatus,
+  isTerminalAgentRunStatus,
+  waitForRun,
+} from '../../electron/ai/run-lifecycle'
+
+function run(status: AgentRunStatus, endedAt: number | null = null): AgentRun {
+  return {
+    runId: 'r1',
+    projectPath: '/p',
+    chatId: 1,
+    owner: 'main',
+    title: 'Run',
+    status,
+    providerId: 'test',
+    model: 'test-model',
+    sendId: 1,
+    agentsCount: 0,
+    toolCount: 0,
+    filesCount: 0,
+    costCents: 0,
+    error: status === 'failed' ? 'boom' : null,
+    startedAt: 1,
+    endedAt,
+    turnIndex: 0,
+    lastToolName: null,
+    lastCheckpointId: null,
+    agentMode: 'ask',
+    updatedAt: 1,
+  }
+}
+
+describe('run lifecycle', () => {
+  it('maps agent-run storage statuses to public run statuses', () => {
+    expect(agentRunStatusToRunStatus('queued')).toBe('queued')
+    expect(agentRunStatusToRunStatus('running')).toBe('running')
+    expect(agentRunStatusToRunStatus('waiting_review')).toBe('waiting_review')
+    expect(agentRunStatusToRunStatus('done')).toBe('completed')
+    expect(agentRunStatusToRunStatus('failed')).toBe('failed')
+    expect(agentRunStatusToRunStatus('stopped')).toBe('cancelled')
+    expect(agentRunStatusToRunStatus('suspended')).toBe('suspended')
+    expect(agentRunStatusToRunStatus('interrupted')).toBe('interrupted')
+  })
+
+  it('keeps exit-reason mapping aligned for storage and public status', () => {
+    expect(exitReasonToAgentRunStatus('completed')).toBe('done')
+    expect(exitReasonToRunStatus('completed')).toBe('completed')
+    expect(exitReasonToAgentRunStatus('aborted')).toBe('stopped')
+    expect(exitReasonToRunStatus('aborted')).toBe('cancelled')
+    expect(exitReasonToAgentRunStatus('crashed')).toBe('failed')
+    expect(exitReasonToRunStatus('crashed')).toBe('failed')
+    expect(exitReasonToAgentRunStatus('max-turns')).toBe('done')
+    expect(exitReasonToRunStatus('loop-detected')).toBe('completed')
+  })
+
+  it('marks only ended storage states as terminal for wait', () => {
+    expect(isTerminalAgentRunStatus('queued')).toBe(false)
+    expect(isTerminalAgentRunStatus('running')).toBe(false)
+    expect(isTerminalAgentRunStatus('waiting_review')).toBe(false)
+    expect(isTerminalAgentRunStatus('done')).toBe(true)
+    expect(isTerminalAgentRunStatus('failed')).toBe(true)
+    expect(isTerminalAgentRunStatus('stopped')).toBe(true)
+    expect(isTerminalAgentRunStatus('suspended')).toBe(true)
+    expect(isTerminalAgentRunStatus('interrupted')).toBe(true)
+  })
+
+  it('builds machine-readable wait result without exposing extra run fields', () => {
+    expect(buildRunWaitResult(run('failed', 50))).toEqual({
+      runId: 'r1',
+      status: 'failed',
+      agentRunStatus: 'failed',
+      endedAt: 50,
+      error: 'boom',
+    })
+  })
+
+  it('waitForRun resolves immediately for finished runs', async () => {
+    await expect(waitForRun({ get: () => run('done', 100) }, 'r1', { timeoutMs: 1 })).resolves.toEqual({
+      runId: 'r1',
+      status: 'completed',
+      agentRunStatus: 'done',
+      endedAt: 100,
+      error: null,
+    })
+  })
+
+  it('waitForRun polls until the run reaches a terminal state', async () => {
+    let current = run('running')
+    const result = await waitForRun(
+      { get: () => current },
+      'r1',
+      {
+        timeoutMs: 100,
+        pollMs: 10,
+        sleep: async () => { current = run('done', 20) },
+      }
+    )
+    expect(result.status).toBe('completed')
+    expect(result.endedAt).toBe(20)
+  })
+
+  it('waitForRun rejects unknown runs', async () => {
+    await expect(waitForRun({ get: () => null }, 'missing', { timeoutMs: 1 }))
+      .rejects.toThrow('run not found')
+  })
+
+  it('waitForRun rejects on timeout', async () => {
+    let t = 0
+    await expect(waitForRun(
+      { get: () => run('running') },
+      'r1',
+      {
+        timeoutMs: 25,
+        pollMs: 10,
+        now: () => t,
+        sleep: async (ms) => { t += ms },
+      }
+    )).rejects.toThrow('timeout')
+  })
+})

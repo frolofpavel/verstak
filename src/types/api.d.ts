@@ -352,6 +352,7 @@ declare global {
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
+        wait: (runId: string, opts?: { timeoutMs?: number; pollMs?: number }) => Promise<RunWaitResult>
         suspend: (sendId: number) => Promise<boolean>
         /** Дополнить контекст активного API agent-loop (Ctrl+Enter во время стрима). */
         appendContext: (sendId: number, text: string) => Promise<
@@ -867,6 +868,15 @@ export interface SessionTodo {
  */
 export type AgentRunOwner = 'main' | 'review' | 'delegate' | 'background'
 export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended' | 'interrupted'
+export type RunStatus = 'queued' | 'running' | 'waiting_review' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'suspended' | 'interrupted'
+
+export interface RunWaitResult {
+  runId: string
+  status: RunStatus
+  agentRunStatus: AgentRunStatus
+  endedAt: number | null
+  error: string | null
+}
 
 export interface AgentRun {
   runId: string
