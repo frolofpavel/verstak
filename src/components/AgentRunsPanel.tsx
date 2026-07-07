@@ -40,6 +40,7 @@ function eventIcon(kind: string): string {
     case 'user_msg': return '💬'
     case 'assistant_msg': return '🗨️'
     case 'tool_call': return '🔧'
+    case 'process': return '⚙️'
     case 'delegate': return '🤖'
     case 'todo': return '☑️'
     case 'file_write': return '📄'

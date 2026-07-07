@@ -11,7 +11,7 @@ import type { Database } from 'better-sqlite3'
  * Status — queued → running → (waiting_review) → done/failed/stopped.
  *
  * agent_run_events — append-only Timeline задачи (user_msg / assistant_msg /
- * tool_call / delegate / todo / file_write / artifact / verify / status / error).
+ * tool_call / process / delegate / todo / file_write / artifact / verify / status / error).
  *
  * ВАЖНО: эту таблицу позже дополнит Crash-resume (P1) колонками живого прогресса
  * (turn_index / last_tool_name / …) через ALTER — не дублировать таблицу.

@@ -812,7 +812,7 @@
 - **Тесты**: `tests/ai/worktree-lifecycle.test.ts` покрывает refuse dirty without force, forced dirty snapshot+restore, unpushed commit preserve+restore, clean remove без snapshot, no-push helper guard.
 - **Проверка на момент записи**: targeted `npx vitest run tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/storage/worktree-sessions.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 28 tests; `npm run type` -> green.
 
-### Дополнение 2026-07-07: PROC-01/PROC-02/PROC-03/PROC-04/PROC-05/PROC-06/PROC-07 закрыты
+### Дополнение 2026-07-07: PROC-01..08 закрыты
 - **PROC-01**: добавлен `electron/ai/process-registry.ts`: `ProcessRegistry`, `ProcessHandle`, `spawn/get/list/appendOutput/markExited/kill/pruneFinished/startSweeper`.
 - **PROC-01 runtime detail**: на Windows registry не использует `detached:true`, потому что detached shell теряет stdout/stderr pipe; tree kill остаётся через `taskkill /T /F`. На Unix detached process group сохраняется.
 - **PROC-02**: добавлен tool `spawn_process` в `TOOL_DEFS` и handler registry; команда проходит denylist/mode-policy/allowlist/confirm/smart-approve gate перед запуском.
@@ -821,7 +821,8 @@
 - **PROC-05**: добавлен TTL cleanup API `pruneFinished` + `startSweeper(...).unref()`.
 - **PROC-06**: добавлен real OS anti-orphan smoke `tests/ai/process-anti-orphan.test.ts`: temp parent Node запускает grandchild Node, `ProcessRegistry.kill()` обязан погасить оба PID. Тест поймал настоящий Windows race: `treeKill` запускал `taskkill` асинхронно и сразу убивал shell, из-за чего дерево могло осиротеть. Фикс: `taskkill /T /F` теперь синхронный перед fallback `child.kill()`.
 - **PROC-07**: stdout/stderr перед попаданием в `outputTail` проходят `scanText`; tail bounded до 30KB и режется UTF-16-safe через `Array.from`.
-- **Ограничение**: `PROC-08` UI timeline polish ещё не закрыт.
+- **PROC-08**: process exit пишется отдельным `agent_run_events.kind='process'` (`process <id> exited`) и Runs panel показывает его с отдельной gear-иконкой, а не как generic tool call.
+- **Ограничение**: process-manager v1 закрыт; дальнейший polish относится уже к run lifecycle/wait или worktree UI.
 - **Тесты**: `tests/ai/process-registry.test.ts` и `tests/ipc/process-tools.test.ts` покрывают spawn/list/get/exit/kill, PID-reuse guard, bounded tail, redaction, tool gating, confirm flow, cwd guard, status/read/stop.
 - **Тесты owner-bound routing**: `tests/ipc/agent-loop.test.ts` проверяет, что process completion текущего `sendId` попадает в следующий turn, а чужой `sendId` не утекает.
 - **Тесты anti-orphan**: `tests/ai/process-anti-orphan.test.ts` проверяет отсутствие живого parent/grandchild после `stop_process`/`ProcessRegistry.kill`.

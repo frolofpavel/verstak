@@ -1677,8 +1677,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       })
       if (agentRuns && runId) {
         try {
-          agentRuns.appendEvent(runId, 'tool_call', {
-            label: 'process exited',
+          agentRuns.appendEvent(runId, 'process', {
+            label: `process ${completion.id} exited`,
             detail: `${completion.id}: ${completion.status}, exit ${completion.exitCode ?? 'unknown'}`,
             status: completion.status === 'completed' ? 'ok' : 'error',
           })

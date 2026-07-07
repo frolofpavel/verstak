@@ -610,7 +610,7 @@ describe('agent-loop Этап 2 — fallback routing', () => {
     expect(secondTurn).toContain('background process p-2 finished')
     expect(secondTurn).toContain('server ready')
     expect(secondTurn).not.toContain('foreign watcher')
-    expect(runs.appendEvent).toHaveBeenCalledWith('r1', 'tool_call', expect.objectContaining({ label: 'process exited' }))
+    expect(runs.appendEvent).toHaveBeenCalledWith('r1', 'process', expect.objectContaining({ label: 'process p-2 exited' }))
     const remaining = registry.drainCompletions()
     expect(remaining).toHaveLength(1)
     expect(remaining[0].command).toBe('foreign watcher')

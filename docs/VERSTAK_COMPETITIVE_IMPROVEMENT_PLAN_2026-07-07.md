@@ -148,7 +148,8 @@ bounded redacted output tail, TTL prune/sweeper API, PID-reuse guard, command ga
 and a redacted owner-filtered `drainCompletions()` queue for `notifyOnExit` processes. `runApiConversation`
 injects only current-`sendId` completions into the next turn; cross-chat leakage is covered by agent-loop tests.
 `tests/ai/process-anti-orphan.test.ts` caught and locked a Windows race where async `taskkill` + immediate `child.kill()` could orphan the real Node child; `treeKill` now runs `taskkill /T /F` synchronously.
-Remaining process scope: UI timeline polish (`189-PROC-08`; `189-PROC-10` covered by targeted tests).
+Process exits are now dedicated `process` run timeline events and render in Runs panel with a gear icon.
+Remaining process scope: none for process-manager v1; `189-PROC-10` covered by targeted tests.
 
 ## Phase 4. 1.9.0: Run Lifecycle / Wait Contract
 

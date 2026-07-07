@@ -291,4 +291,5 @@ PROC-04 is now owner-bound: `notifyOnExit` processes enter a redacted completion
 Targeted verification: `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts tests/ipc/agent-loop.test.ts` -> green, 3 files / 32 tests; `npm run type` -> green.
 PROC-06 anti-orphan smoke is closed after a real Windows bugfix: `treeKill` now runs `taskkill /T /F` synchronously before fallback `child.kill()`, preventing shell-death races that orphaned the real Node child. New smoke tracks parent PID + grandchild PID and waits for both to die.
 Targeted anti-orphan verification: `npx vitest run tests/ai/process-anti-orphan.test.ts tests/ai/process-registry.test.ts` -> green, 2 files / 10 tests.
-Remaining process scope: UI timeline polish.
+PROC-08 UI timeline polish is closed: process exits are written as dedicated `process` run events (`process <id> exited`) and Runs panel renders them with a gear icon instead of hiding them as generic tool calls.
+Remaining process scope: none for process-manager v1; next master-plan area is managed-worktree UI/release checklist or run lifecycle/wait.
