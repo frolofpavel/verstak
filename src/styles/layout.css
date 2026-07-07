@@ -10557,6 +10557,19 @@ textarea.gg-input {
 .gg-skills-header .gg-input:focus {
   border-color: var(--accent);
 }
+.gg-skills-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.gg-skills-section-title {
+  font-size: var(--text-xs, 11px);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
 .gg-skills-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -10577,13 +10590,31 @@ textarea.gg-input {
   font-size: inherit;
   color: inherit;
 }
+.gg-skill-card.is-archived {
+  opacity: 0.82;
+}
 .gg-skill-card:hover {
   border-color: var(--accent);
   background: var(--bg-hover);
 }
+.gg-skill-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
 .gg-skill-card-icon {
   font-size: 24px;
   line-height: 1;
+  flex: 0 0 auto;
 }
 .gg-skill-card-body {
   flex: 1;
@@ -10634,6 +10665,32 @@ textarea.gg-input {
 .gg-skill-source-server {
   background: rgba(168,85,247,0.12);
   color: #a855f7;
+}
+.gg-skill-source-archived {
+  background: rgba(148,163,184,0.14);
+  color: var(--text-tertiary);
+}
+.gg-skill-usage {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.gg-skill-action {
+  margin-left: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.gg-skill-action:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
 }
 .gg-skills-empty {
   padding: 48px 0;

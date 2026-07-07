@@ -575,7 +575,6 @@ Scope note: generated candidates, Settings grouping, and prompt hygiene stay ope
 
 **Status 2026-07-08 Skill Archive seed:** SKILL-03/SKILL-04 compact scope closed.
 Built-ins are protected from physical deletion by using `skill_usage.state='archived'`, the registry filters archived skills from `list/get`, local user markdown skills move to `~/.verstak/skills/.archive/`, and restore moves archived markdown back when present.
-Scope note: Settings UI controls for archive/restore are not mounted in this pass; IPC/bridge/types are ready for that follow-up.
 
 ### SKILL-05 · Generated-skill candidates, gated (M)
 - **source:** Hermes curator + `is_curation_eligible:447`.
@@ -586,8 +585,12 @@ Scope note: Settings UI controls for archive/restore are not mounted in this pas
 ### SKILL-06 · Settings: grouped by provenance (M)
 - **target:** `src/components/SkillPicker.tsx` / `Settings.tsx`.
 - **done:**
-  - [ ] Группы built-in/user/imported/generated
-  - [ ] Usage badges visible
+  - [x] Группы built-in/user/imported/generated
+  - [x] Usage badges visible
+
+**Status 2026-07-08 Skill UI grouping:** SKILL-06 compact scope closed.
+`SkillsView` groups visible skills by built-in/user/server provenance, shows usage badges from `skill_usage`, exposes archive actions on active cards, and shows archived skills with restore actions.
+Scope note: generated skill candidates and prompt-context hygiene stay open as SKILL-05/SKILL-07.
 
 ### SKILL-07 · Context injection hygiene (S)
 - **target:** `electron/ai/compose-system.ts`.

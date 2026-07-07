@@ -3,7 +3,9 @@
 > Единый живой план работ. Открой — и сразу видно: что в проде, что осталось, что в бэклоге.
 > **Обновляется в конце каждой рабочей сессии.** Не держи это в голове — держи здесь.
 
-**Обновлено:** 2026-07-08 · **В проде:** `1.8.7` 🚀 (GitHub Release + installer опубликованы; автообновление активно) · **Тесты:** targeted SG archive 28/28, targeted RUN hardening 66/66, `npm run type` pass, `npm run test:fast` 2231 pass / 7 skipped, `npm run build` pass · **Ветка:** main · **Хвост:** Skill Governance archive / 1.8.8 mechanics
+**Обновлено:** 2026-07-08 · **В проде:** `1.8.7` 🚀 (GitHub Release + installer опубликованы; автообновление активно) · **Тесты:** targeted SG UI 9/9, targeted RUN hardening 66/66, `npm run type` pass, `npm run test:fast` 2231 pass / 7 skipped, `npm run build` pass · **Ветка:** main · **Хвост:** Skill Governance UI / 1.8.8 mechanics
+
+> **Skill Governance UI grouping (08.07, local PASS).** Skills view теперь не плоская витрина: активные скиллы сгруппированы по provenance (`built-in` / `user` / `server`), показывают usage badges, дают команду `Архив`, а archived-записи показываются отдельным блоком с `Вернуть`. Это подключает уже сделанные `skill_usage`, archive/restore IPC и registry filter к реальному UI без отдельного большого Settings refactor. Проверки: `npm run type` pass, targeted SG UI-adjacent suite 9/9 pass, `npm run build` pass, `npm run test:fast` 2231 pass / 7 skipped.
 
 > **Skill Governance archive (08.07, local PASS).** Закрыт компактный блок SG-03/SG-04: built-in skills больше не предполагают физическое удаление, archive работает через `skill_usage.state='archived'`, registry фильтрует archived skills из `list/get`, локальные `~/.verstak/skills/*.md` переносятся в `.archive/`, restore возвращает matching markdown обратно. IPC/bridge/types получили `skills.archive` / `skills.restore`; Settings UI-кнопки остаются отдельным маленьким follow-up. Проверки: `npm run type` pass, targeted SG archive suite 28/28 pass, `npm run test:fast` 2231 pass / 7 skipped, `npm run build` pass.
 

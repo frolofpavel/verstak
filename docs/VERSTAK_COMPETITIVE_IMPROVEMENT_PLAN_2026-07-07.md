@@ -202,6 +202,10 @@ Targeted verification: `npx vitest run tests/storage/skill-usage.test.ts tests/s
 Archived skills are hidden by `skill_usage.state='archived'` instead of deleting built-ins, local `~/.verstak/skills/*.md` files move to `.archive/`, restore moves matching archived markdown back, and IPC/bridge/types expose `skills.archive` / `skills.restore` for the future Settings controls.
 Targeted verification: `npx vitest run tests/storage/skill-usage.test.ts tests/ai/skill-archive.test.ts tests/ai/skill-registry-governance.test.ts tests/store/skill-store.test.ts tests/ai/skills-frontmatter.test.ts tests/ai/skills-loaders.test.ts tests/ai/skills-server-load.test.ts` -> green, 7 files / 28 tests; `npm run type` -> green.
 
+**Status 2026-07-08 SG UI grouping:** compact `190-SG-06` is closed.
+`SkillsView` now loads skills plus usage stats, groups active cards by provenance, shows usage badges, exposes archive on active cards, and shows archived records with restore actions.
+Verification: `npm run type`, targeted SG UI-adjacent tests, `npm run build`, and `npm run test:fast` -> green.
+
 ## Phase 6. 1.9.x: Eval / Trajectory / Proof
 
 | ID | Задача | Зачем | Где | Готово, когда | Проверка |
