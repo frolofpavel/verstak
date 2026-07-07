@@ -84,6 +84,7 @@ export type ChatEvent =
   /** Model's internal reasoning. Streamed separately from text so the UI
    *  can render it as a collapsible block. */
   | { type: 'thought'; text: string }
+  | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'tool-call'; call: ToolCall }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
   | { type: 'pending-command'; callId: string; command: string }

@@ -574,7 +574,9 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
           className={`gg-project-button ${path ? 'has-project' : ''}`}
           onClick={() => setShowCreateClient(true)}
         >
-          <span>{path ? '📁' : '＋'}</span>
+          {path
+            ? <span className="gg-project-button-icon gg-folder-icon" aria-hidden="true" />
+            : <span className="gg-project-button-icon gg-plus-icon" aria-hidden="true">＋</span>}
           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {shortPath ?? t.rail.createClient}
           </span>

@@ -178,7 +178,7 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
       if (cancelled) return
       const current = useProject.getState().chatSnapshots[sideChatId]
       if (current && current.messages.length > 0) return
-      store.seedChatSnapshot(sideChatId, history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })))
+      store.seedChatSnapshot(sideChatId, history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })))
     }).catch(() => {})
     return () => { cancelled = true }
   }, [sideChatId])

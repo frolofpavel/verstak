@@ -19,6 +19,7 @@ export function openDb(path: string): DB {
       project_path TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      applied_skills TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_chats_project ON chats(project_path, created_at);
@@ -104,6 +105,7 @@ export function openDb(path: string): DB {
   `)
 
   runMigrations(db)
+  repairSchema(db)
 
   return db
 }
@@ -911,6 +913,16 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec("ALTER TABLE chats ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
       }
     }
+  },
+  {
+    version: 37,
+    description: 'chats.applied_skills: metadata for per-message skill attachments shown in UI and used as hidden model context.',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('applied_skills')) {
+        db.exec("ALTER TABLE chats ADD COLUMN applied_skills TEXT NOT NULL DEFAULT '[]'")
+      }
+    }
   }
 ]
 
@@ -944,5 +956,35 @@ function runMigrations(db: DB): void {
       console.error(`[db] migration v${m.version} (${m.description}) failed:`, err)
       throw err  // abort startup — corrupt schema is worse than crash
     }
+  }
+}
+
+function repairSchema(db: DB): void {
+  const tableExists = (name: string) => Boolean(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
+  )
+  const columns = (table: string) => {
+    if (!tableExists(table)) return []
+    return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name)
+  }
+
+  const chatCols = columns('chats')
+  if (chatCols.length > 0) {
+    if (!chatCols.includes('thinking')) {
+      db.exec("ALTER TABLE chats ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
+    }
+    if (!chatCols.includes('applied_skills')) {
+      db.exec("ALTER TABLE chats ADD COLUMN applied_skills TEXT NOT NULL DEFAULT '[]'")
+    }
+  }
+
+  if (!tableExists('undo_floors')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS undo_floors (
+        project_path TEXT NOT NULL,
+        floor_id INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_undo_floors_project ON undo_floors(project_path);
+    `)
   }
 }

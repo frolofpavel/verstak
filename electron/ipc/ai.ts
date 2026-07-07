@@ -200,6 +200,152 @@ function tagSender(sender: Electron.WebContents, projectPath: string | null): Ta
   }
 }
 
+type AgentProgressPhase =
+  | 'understand'
+  | 'context'
+  | 'model'
+  | 'reasoning'
+  | 'tool'
+  | 'command'
+  | 'write'
+  | 'verify'
+  | 'final'
+
+type AgentProgressStatus = 'pending' | 'running' | 'done' | 'error' | 'blocked'
+
+interface AgentProgressPayload {
+  id?: string
+  phase: AgentProgressPhase
+  title: string
+  detail?: string
+  status?: AgentProgressStatus
+}
+
+function compactProgressText(value: unknown, max = 220): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const clean = value
+    .replace(/```[\s\S]*?```/g, 'фрагмент кода')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!clean) return undefined
+  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean
+}
+
+function modelProgressLabel(providerId?: ProviderId, model?: string | null): string {
+  const providerName = providerId ? (PROVIDERS[providerId]?.name ?? providerId) : ''
+  return [providerName, model].filter(Boolean).join(' · ') || 'модель'
+}
+
+function emitAgentProgress(sender: TaggedSender, sendId: number, payload: AgentProgressPayload): void {
+  try {
+    sender.send('ai:event', {
+      id: sendId,
+      event: {
+        type: 'agent-progress',
+        id: payload.id,
+        phase: payload.phase,
+        title: payload.title,
+        detail: compactProgressText(payload.detail),
+        status: payload.status ?? 'running'
+      }
+    })
+  } catch {
+    // Progress telemetry must never break the actual AI response.
+  }
+}
+
+function createModelWaitHeartbeat(
+  sender: TaggedSender,
+  sendId: number,
+  opts: { id: string; label: string; detail?: string; intervalMs?: number }
+): { stop: (status?: AgentProgressStatus, detail?: string) => void } {
+  const startedAt = Date.now()
+  const intervalMs = opts.intervalMs ?? 12000
+  let stopped = false
+  let lastStageKey: string | null = null
+
+  const stageForElapsed = (elapsedSec: number): { key: string; title: string; detail: string; checkpointTitle: string; checkpointDetail: string } => {
+    if (elapsedSec < 18) {
+      return {
+        key: 'accepted',
+        title: `${opts.label} анализирует запрос`,
+        detail: opts.detail ?? 'Задача и контекст переданы модели. Жду первый видимый фрагмент или служебный сигнал.',
+        checkpointTitle: 'Запрос передан модели',
+        checkpointDetail: 'Verstak отправил задачу внешнему агенту и держит активный поток.'
+      }
+    }
+    if (elapsedSec < 45) {
+      return {
+        key: 'forming',
+        title: `${opts.label} формирует ответ`,
+        detail: `${elapsedSec} сек. Модель работает внутри внешнего агента; Verstak пока не получил новый текст, инструмент или служебный сигнал хода работы.`,
+        checkpointTitle: 'Жду первый видимый результат',
+        checkpointDetail: 'Модель уже работает, но внешний агент пока не прислал текст, инструмент или понятный промежуточный статус.'
+      }
+    }
+    if (elapsedSec < 90) {
+      return {
+        key: 'internal',
+        title: `${opts.label} выполняет долгий внутренний шаг`,
+        detail: `${elapsedSec} сек. Запрос активен. Точные промежуточные действия этот CLI-провайдер сейчас не отдаёт, поэтому показываю честный статус ожидания без засорения ленты.`,
+        checkpointTitle: 'Долгий внутренний шаг',
+        checkpointDetail: 'Внешний агент молчит дольше обычного, но процесс не закрыт и поток остаётся активным.'
+      }
+    }
+    return {
+      key: 'long-wait',
+      title: `${opts.label} всё ещё работает`,
+      detail: `${elapsedSec} сек. Verstak держит активный поток и ждёт первый видимый результат; если провайдер отдаст текст, служебный ход работы или инструмент, этап сразу сменится.`,
+      checkpointTitle: 'Продолжаю ждать внешний агент',
+      checkpointDetail: 'Это не новый запрос и не повтор. Verstak удерживает текущую задачу активной до первого результата или ошибки.'
+    }
+  }
+
+  const tick = () => {
+    if (stopped) return
+    const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+    const stage = stageForElapsed(elapsedSec)
+    if (stage.key !== lastStageKey) {
+      lastStageKey = stage.key
+      emitAgentProgress(sender, sendId, {
+        id: `${opts.id}-stage-${stage.key}`,
+        phase: 'model',
+        title: stage.checkpointTitle,
+        detail: stage.checkpointDetail,
+        status: 'done'
+      })
+    }
+    emitAgentProgress(sender, sendId, {
+      id: `${opts.id}-wait`,
+      phase: 'model',
+      title: stage.title,
+      detail: stage.detail,
+      status: 'running'
+    })
+  }
+
+  const timer = setInterval(tick, intervalMs)
+  tick()
+
+  return {
+    stop(status: AgentProgressStatus = 'done', detail?: string) {
+      if (stopped) return
+      stopped = true
+      clearInterval(timer)
+      if (detail) {
+        emitAgentProgress(sender, sendId, {
+          id: `${opts.id}-wait`,
+          phase: 'model',
+          title: status === 'done' ? `${opts.label} отдал первый сигнал` : `${opts.label}: ожидание завершилось`,
+          detail,
+          status
+        })
+      }
+    }
+  }
+}
+
 // Keyed by `${sendId}::${callId}` so concurrent ai:send invocations cannot
 // resolve each other's pending confirmations. The renderer still identifies
 // modals by callId (it doesn't know about sendId), so we look up by callId
@@ -449,6 +595,22 @@ export function registerAiIpc(deps: AiDeps): void {
     const runId = randomUUID()
     const ctrl = new AbortController()
     activeAborts.set(sendId, ctrl)
+    const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
+    const lastUserText = compactProgressText([...messages].reverse().find(m => m.role === 'user')?.content, 260)
+    emitAgentProgress(taggedSender, sendId, {
+      id: 'run-accepted',
+      phase: 'understand',
+      title: 'Принял задачу',
+      detail: lastUserText ? `Запрос: ${lastUserText}` : 'Получил новое сообщение и готовлю запуск.',
+      status: 'done'
+    })
+    emitAgentProgress(taggedSender, sendId, {
+      id: 'context',
+      phase: 'context',
+      title: 'Собираю контекст',
+      detail: 'Проверяю память проекта, настройки чата, скиллы и историю, которые могут повлиять на ответ.',
+      status: 'running'
+    })
     /**
      * Cleanup MUST handle every dangling state owned by this sendId. Per Gemini
      * audit finding 2.1 + 2.5: previously cleanup only wiped activeAborts,
@@ -517,6 +679,13 @@ export function registerAiIpc(deps: AiDeps): void {
     let memories: { type: string; content: string; tags: string[] }[] = []
     let consolidationHint: string | null = null
     if (shouldInjectMemory) {
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'context-memory',
+        phase: 'context',
+        title: 'Ищу память проекта',
+        detail: 'Подбираю сохранённые факты и недавние записи, которые могут быть полезны для ответа.',
+        status: 'running'
+      })
       try {
         // #1 релевантный recall + ось 4 #1 RRF-fusion: блендим два канала вместо бинарного
         // «релевантные ИЛИ недавние». Канал релевантности (FTS5/BM25 по последнему user-
@@ -532,10 +701,26 @@ export function registerAiIpc(deps: AiDeps): void {
         // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
         // накопились/задублировались — мягко предлагаем модели консолидировать.
         consolidationHint = deps.memoryConsolidationHint?.(projectPath!) ?? null
+        emitAgentProgress(taggedSender, sendId, {
+          id: 'context-memory',
+          phase: 'context',
+          title: memories.length > 0 ? 'Память проекта добавлена' : 'Память проверена',
+          detail: memories.length > 0
+            ? `Нашёл ${memories.length} подходящих записей и добавил их в контекст.`
+            : 'Подходящих записей не нашёл, продолжаю по истории чата и настройкам проекта.',
+          status: 'done'
+        })
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
         logRuntimeError('ai.memories.search.fail', err, { sendId, runId, projectPath })
         console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)
+        emitAgentProgress(taggedSender, sendId, {
+          id: 'context-memory',
+          phase: 'context',
+          title: 'Память проекта недоступна',
+          detail: 'Не блокирую ответ: продолжаю без сохранённой памяти проекта.',
+          status: 'done'
+        })
       }
     }
 
@@ -551,6 +736,15 @@ export function registerAiIpc(deps: AiDeps): void {
     // Нет recipe → возвращает overrides.systemPrompt как есть (обычный skill не меняется).
     // Reviewer override не задаёт recipe → изоляция ревьюера не нарушается.
     const skillLayerPrompt = applyRecipeToSkillPrompt(overrides?.systemPrompt, overrides?.recipe)
+    emitAgentProgress(taggedSender, sendId, {
+      id: 'context-build',
+      phase: 'context',
+      title: 'Готовлю рабочий запрос',
+      detail: descriptor.transport === 'API'
+        ? 'Собираю системный слой, память, скиллы, режим чата и последние сообщения в один запрос.'
+        : 'Собираю prompt для внешнего CLI-агента с учётом скиллов, памяти и текущего режима.',
+      status: 'running'
+    })
     // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
     // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
     // независимый разбор. Давать ему system-layer + user-layer = заставить
@@ -619,10 +813,19 @@ export function registerAiIpc(deps: AiDeps): void {
       messagesWithSystem = [{ role: 'system', content: skillLayerPrompt ?? overrides.systemPrompt }, ...messages]
     }
 
-    const taggedSender = tagSender(e.sender, projectPath)
     // Project Brain (Итер.4 + Phase 3): бейдж «использован прогретый контекст» +
     // метрика экономии — сколько токенов контекста мозг дал готовыми (агент не
     // пере-сканировал проект). Честный показатель ценности прогрева.
+    emitAgentProgress(taggedSender, sendId, {
+      id: 'context-build',
+      phase: 'context',
+      title: 'Рабочий контекст готов',
+      detail: descriptor.transport === 'API'
+        ? 'Передаю модели собранный контекст и историю чата.'
+        : 'Передаю внешнему агенту подготовленный prompt.',
+      status: 'done'
+    })
+
     if (brain) {
       const te = brain.tokenEstimate
       const saved = te && te > 0
@@ -774,6 +977,13 @@ export function registerAiIpc(deps: AiDeps): void {
       } catch { /* snapshot not critical — CLI run continues unaffected */ }
     }
 
+    emitAgentProgress(taggedSender, sendId, {
+      id: 'provider-create',
+      phase: 'model',
+      title: 'Подключаю модель',
+      detail: modelProgressLabel(providerId, model),
+      status: 'running'
+    })
     let provider: ChatProvider
     try {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
@@ -827,8 +1037,22 @@ export function registerAiIpc(deps: AiDeps): void {
         agentMode
       })
       logRuntime('ai.provider.created', { sendId, runId, providerId, model, transport: descriptor.transport })
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'provider-create',
+        phase: 'model',
+        title: 'Модель подключена',
+        detail: `${modelProgressLabel(providerId, model)} · ${descriptor.transport}`,
+        status: 'done'
+      })
     } catch (err) {
       logRuntimeError('ai.provider.create.fail', err, { sendId, runId, providerId, model })
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'provider-create',
+        phase: 'model',
+        title: 'Не удалось подключить модель',
+        detail: err instanceof Error ? err.message : String(err),
+        status: 'error'
+      })
       taggedSender.send('ai:event', {
         id: 0,
         event: { type: 'error', message: err instanceof Error ? err.message : String(err) }
@@ -958,6 +1182,13 @@ export function registerAiIpc(deps: AiDeps): void {
         turnsBudget,
         toolCount: TOOL_DEFS.length
       })
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'agent-loop',
+        phase: 'model',
+        title: 'Запускаю агентный цикл',
+        detail: `Модель может отвечать текстом или вызывать инструменты. Лимит шагов: ${turnsBudget}.`,
+        status: 'running'
+      })
       void runApiConversation({
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
@@ -984,6 +1215,13 @@ export function registerAiIpc(deps: AiDeps): void {
         providerId,
         model,
         transport: descriptor.transport
+      })
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'plain-loop',
+        phase: 'model',
+        title: 'Передаю задачу модели',
+        detail: `${modelProgressLabel(providerId, model)} получил запрос. Жду первые признаки работы.`,
+        status: 'running'
       })
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
@@ -1216,6 +1454,13 @@ async function runPlainConversation(
         role: 'user',
         content: formatConversationSupplement(text)
       })
+      emitAgentProgress(sender, sendId, {
+        id: `supplement-${Date.now()}`,
+        phase: 'context',
+        title: 'Добавил новый контекст в текущую задачу',
+        detail: compactProgressText(text, 180),
+        status: 'done'
+      })
       added = true
       if (agentRuns && runId) {
         try { agentRuns.appendEvent(runId, 'user_msg', { detail: text.slice(0, 500) }) } catch { /* best-effort */ }
@@ -1235,10 +1480,20 @@ async function runPlainConversation(
       drainSupplements()
       let roundText = ''
       let roundHadError = false
+      let roundSawText = false
+      let roundSawThought = false
+      const providerLabel = modelProgressLabel(providerId, model)
+      const waitHeartbeat = createModelWaitHeartbeat(sender, sendId, {
+        id: `plain-${Date.now()}`,
+        label: providerLabel,
+        detail: 'Внешний агент может молчать до первого фрагмента; Verstak держит запрос активным.'
+      })
 
+      try {
       for await (const event of provider.send(currentMessages, [])) {
         if (signal.aborted) {
           exitReason = 'aborted'
+          waitHeartbeat.stop('done', 'Запрос остановлен.')
           sender.send('ai:event', { id: sendId, event: { type: 'done' } })
           return
         }
@@ -1246,8 +1501,31 @@ async function runPlainConversation(
         // CLI providers stream text in chunks via { type: 'text' } — same shape
         // as API providers.
         if (event.type === 'text' && typeof event.text === 'string') {
+          if (!roundSawText) {
+            roundSawText = true
+            waitHeartbeat.stop('done', 'Появился первый видимый фрагмент ответа.')
+            emitAgentProgress(sender, sendId, {
+              id: `plain-first-text-${Date.now()}`,
+              phase: 'final',
+              title: 'Модель начала писать ответ',
+              detail: compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
+              status: 'running'
+            })
+          }
           roundText += event.text
           lastAssistantText += event.text
+        } else if (event.type === 'thought') {
+          if (!roundSawThought) {
+            roundSawThought = true
+            waitHeartbeat.stop('done', 'Модель начала отдавать служебный ход работы.')
+            emitAgentProgress(sender, sendId, {
+              id: `plain-first-thought-${Date.now()}`,
+              phase: 'reasoning',
+              title: 'Модель разбирает задачу',
+              detail: 'Получил служебный сигнал хода работы от провайдера; жду видимый ответ.',
+              status: 'running'
+            })
+          }
         } else if (event.type === 'usage' && event.usage) {
           sessionUsage.inputTokens += event.usage.inputTokens ?? 0
           sessionUsage.outputTokens += event.usage.outputTokens ?? 0
@@ -1260,6 +1538,7 @@ async function runPlainConversation(
             )
             if (check.exceeded) {
               exitReason = 'error'
+              waitHeartbeat.stop('error', check.message ?? 'Превышен лимит стоимости.')
               logRuntime('ai.cost_cap.exceeded', {
                 sendId,
                 runId: runId ?? null,
@@ -1277,11 +1556,15 @@ async function runPlainConversation(
         } else if (event.type === 'error') {
           exitReason = 'error'
           roundHadError = true
+          waitHeartbeat.stop('error', 'Провайдер вернул ошибку.')
         }
         if (event.type !== 'done') {
           sender.send('ai:event', { id: sendId, event })
         }
         if (event.type === 'done' || event.type === 'error') break
+      }
+      } finally {
+        waitHeartbeat.stop()
       }
 
       if (signal.aborted) {
@@ -1292,6 +1575,18 @@ async function runPlainConversation(
       if (roundHadError) {
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
+      }
+
+      if (!roundText.trim()) {
+        emitAgentProgress(sender, sendId, {
+          id: `plain-empty-${Date.now()}`,
+          phase: 'final',
+          title: 'Модель завершила шаг без видимого ответа',
+          detail: roundSawThought
+            ? 'Провайдер отдал только служебный сигнал хода работы. Жду следующий шаг или финальный текст.'
+            : 'Провайдер завершил поток без текста. Это будет видно в логах запуска.',
+          status: 'blocked'
+        })
       }
 
       if (roundText.trim()) {
@@ -1525,6 +1820,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     toolCount: TOOL_DEFS.length,
     messageCount: initialMessages.length
   })
+  emitAgentProgress(sender, sendId, {
+    id: 'agent-loop',
+    phase: 'model',
+    title: 'Агентный цикл запущен',
+    detail: `Готовлю пошаговую работу: до ${turnsBudget} шагов, доступно инструментов: ${TOOL_DEFS.length}.`,
+    status: 'running'
+  })
   // #3 plan-gate: режим прогона — МУТАБЕЛЬНЫЙ holder (не per-turn const). approve
   // плана переключает его на accept-edits через ctx.setAgentMode, и СЛЕДУЮЩИЙ turn
   // (где ctx пересоздаётся) видит новый режим — иначе одобренный план не выполнить.
@@ -1563,6 +1865,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       currentMessages.push({
         role: 'user',
         content: formatConversationSupplement(text)
+      })
+      emitAgentProgress(sender, sendId, {
+        id: `supplement-${Date.now()}`,
+        phase: 'context',
+        title: 'Добавил новый контекст в текущую задачу',
+        detail: compactProgressText(text, 180),
+        status: 'done'
       })
       added = true
       if (agentRuns && runId) {
@@ -1856,6 +2165,25 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       ? [...messagesForProvider, { role: 'user' as const, content: MAX_STEPS_REPORT }]
       : messagesForProvider
 
+    emitAgentProgress(sender, sendId, {
+      id: `turn-${turnNum}`,
+      phase: 'model',
+      title: `Шаг ${turnNum}: отправляю запрос модели`,
+      detail: isLastTurn
+        ? 'Это последний разрешённый шаг: прошу модель подвести итог и не начинать новый цикл.'
+        : 'Жду текст, служебный сигнал хода работы или выбор инструмента.',
+      status: 'running'
+    })
+    let turnSawText = false
+    let turnSawThought = false
+    let turnSawTool = false
+    const turnHeartbeat = createModelWaitHeartbeat(sender, sendId, {
+      id: `turn-${turnNum}-${Date.now()}`,
+      label: modelProgressLabel(providerId, model),
+      detail: `Идёт шаг ${turnNum}; модель ещё не вернула текст или инструмент.`
+    })
+
+    try {
     for await (const event of withInitialRetry(
       () => provider.send(messagesToSend, allToolDefs, undefined, signal),
       {
@@ -1879,18 +2207,52 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     )) {
       if (signal.aborted) {
         exitReason = 'aborted'
+        turnHeartbeat.stop('done', 'Запрос остановлен.')
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
       if (event.type === 'text') {
+        if (!turnSawText) {
+          turnSawText = true
+          turnHeartbeat.stop('done', 'Модель начала отдавать видимый текст.')
+          emitAgentProgress(sender, sendId, {
+            id: `turn-${turnNum}-text`,
+            phase: 'final',
+            title: `Шаг ${turnNum}: пишу ответ`,
+            detail: compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
+            status: 'running'
+          })
+        }
         assistantText += event.text
         lastAssistantText = assistantText
         sender.send('ai:event', { id: sendId, event })
       } else if (event.type === 'thought') {
+        if (!turnSawThought) {
+          turnSawThought = true
+          turnHeartbeat.stop('done', 'Модель начала разбор задачи.')
+          emitAgentProgress(sender, sendId, {
+            id: `turn-${turnNum}-thought`,
+            phase: 'reasoning',
+            title: `Шаг ${turnNum}: модель разбирает задачу`,
+            detail: 'Получил служебный сигнал хода работы от провайдера; жду текст или инструмент.',
+            status: 'running'
+          })
+        }
         // Forward chain-of-thought verbatim — renderer accumulates into the
         // assistant message's `thinking` field for collapsed display.
         sender.send('ai:event', { id: sendId, event })
       } else if (event.type === 'tool-call') {
+        if (!turnSawTool) {
+          turnSawTool = true
+          turnHeartbeat.stop('done', 'Модель выбрала инструмент для следующего действия.')
+        }
+        emitAgentProgress(sender, sendId, {
+          id: `turn-${turnNum}-tool-${event.call.id}`,
+          phase: 'tool',
+          title: `Шаг ${turnNum}: выбран инструмент`,
+          detail: event.call.name,
+          status: 'running'
+        })
         toolCalls.push(event.call)
       } else if (event.type === 'usage') {
         sessionUsage.inputTokens += event.usage.inputTokens ?? 0
@@ -1906,6 +2268,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           )
           if (check.exceeded) {
             exitReason = 'error'
+            turnHeartbeat.stop('error', check.message ?? 'Превышен лимит стоимости.')
             logRuntime('ai.cost_cap.exceeded', {
               sendId,
               runId: runId ?? null,
@@ -1949,6 +2312,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           return
         }
       } else if (event.type === 'error') {
+        turnHeartbeat.stop('error', 'Провайдер вернул ошибку.')
         const provErr = new Error(String((event as { message?: unknown }).message ?? 'provider error'))
         const reason = classifyFallbackReason(provErr)
         // Этап 2, приоритет 4: context_overflow → форс-компакция существующим summary-
@@ -1996,6 +2360,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         sender.send('ai:event', { id: sendId, event })
         return
       }
+    }
+    } finally {
+      turnHeartbeat.stop()
     }
     if (toolCalls.length === 0) {
       if (continueAfterPlainReply(assistantText)) {

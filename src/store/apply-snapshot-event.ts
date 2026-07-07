@@ -1,6 +1,7 @@
 import type { SessionSnapshot } from './session-snapshot'
 import { stampDurationOnStreamEnd } from '../lib/response-duration'
 import { appendOrStartAssistant, appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
+import { reduceAgentProgress } from '../lib/agent-progress'
 
 /** Стрим-событие из main (ai:event) — минимум полей для роутинга в снапшот. */
 export interface SnapshotEvent {
@@ -20,37 +21,41 @@ export interface SnapshotEvent {
  * снапшот без изменений, чтобы caller добил его своими ветками.
  */
 export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent): SessionSnapshot {
+  const withProgress = (next: SessionSnapshot): SessionSnapshot => ({
+    ...next,
+    agentProgress: reduceAgentProgress(next.agentProgress ?? [], event)
+  })
   const t = event.type
   if (t === 'text' && typeof event.text === 'string') {
-    return { ...snap, messages: appendOrStartAssistant(snap.messages, event.text) }
+    return withProgress({ ...snap, messages: appendOrStartAssistant(snap.messages, event.text) })
   }
   if (t === 'thought' && typeof event.text === 'string') {
-    return { ...snap, messages: appendThinkingToLastAssistant(snap.messages, event.text) }
+    return withProgress({ ...snap, messages: appendThinkingToLastAssistant(snap.messages, event.text) })
   }
   if (t === 'done' || t === 'error') {
     const messages = (t === 'error' && typeof event.message === 'string')
       ? appendToLastAssistant(snap.messages, `\n\n[Ошибка: ${event.message}]`)
       : snap.messages
     const base = { ...snap, messages }
-    return { ...base, ...stampDurationOnStreamEnd(base) }
+    return withProgress({ ...base, ...stampDurationOnStreamEnd(base) })
   }
   // command-result → команда зарезолвлена в main ЛЮБЫМ путём (подтверждение/stop/
   // ошибка). Снять pendingCommand этого callId, иначе в Inbox висит ghost-approval
   // на уже завершённую команду (ревью 24.06). Покрывает все callers ядра.
   if (t === 'command-result' && snap.pendingCommand
       && (typeof event.callId !== 'string' || snap.pendingCommand.callId === event.callId)) {
-    return { ...snap, pendingCommand: null }
+    return withProgress({ ...snap, pendingCommand: null })
   }
   if (t === 'usage' && event.usage && typeof event.usage === 'object') {
     const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
-    return {
+    return withProgress({
       ...snap,
       sessionUsage: {
         inputTokens: snap.sessionUsage.inputTokens + (u.inputTokens ?? 0),
         outputTokens: snap.sessionUsage.outputTokens + (u.outputTokens ?? 0),
         cachedInputTokens: snap.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0),
       },
-    }
+    })
   }
-  return snap
+  return withProgress(snap)
 }

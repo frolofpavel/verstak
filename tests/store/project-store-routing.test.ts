@@ -28,6 +28,7 @@ function resetStore() {
     pendingWrites: [],
     pendingCommand: null,
     activity: [],
+    agentProgress: [],
     preflights: [],
     touchedFiles: {},
     activeChatId: null,
@@ -68,6 +69,7 @@ describe('reconcileStreamingState', () => {
           pendingWrites: [],
           pendingCommand: null,
           activity: [],
+          agentProgress: [],
           sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
           runningPlanStep: null,
           hasUnread: false,
@@ -185,6 +187,56 @@ describe('Routing — события фонового чата идут в chatS
     useProject.getState().applyEventToChat(7, { type: 'done', projectPath: 'C:/real-project' })
 
     expect(appendSpy).toHaveBeenCalledWith(7, 'C:/real-project', 'assistant', 'ответ из другого проекта')
+  })
+
+  it('background project chat event lands in the project session, not in the currently opened project chatSnapshots', () => {
+    useProject.setState({
+      path: 'C:/project-b',
+      activeChatId: 22,
+      messages: [{ role: 'user', content: 'project b task' }] as ChatMessage[],
+      sessions: {
+        'C:/project-a': {
+          chatId: 11,
+          messages: [
+            { role: 'user', content: 'project a task' },
+            { role: 'assistant', content: '' }
+          ] as ChatMessage[],
+          isStreaming: true,
+          streamStartedAt: 1000,
+          pendingWrites: [],
+          pendingCommand: null,
+          activity: [],
+          agentProgress: [],
+          sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+          runningPlanStep: null,
+          hasUnread: false,
+          checkpointId: null,
+          checkpointMessageId: null,
+          preflights: [],
+          subagentRuns: []
+        }
+      }
+    }, false)
+
+    useProject.getState().applyEventToSession('C:/project-a', {
+      type: 'text',
+      text: 'finished while user was elsewhere',
+      chatId: 11,
+      projectPath: 'C:/project-a'
+    })
+    useProject.getState().applyEventToSession('C:/project-a', {
+      type: 'done',
+      chatId: 11,
+      projectPath: 'C:/project-a'
+    })
+
+    const st = useProject.getState()
+    expect(st.messages).toEqual([{ role: 'user', content: 'project b task' }])
+    expect(st.chatSnapshots[11]).toBeUndefined()
+    expect(st.sessions['C:/project-a'].chatId).toBe(11)
+    expect(st.sessions['C:/project-a'].messages.at(-1)?.content).toBe('finished while user was elsewhere')
+    expect(st.sessions['C:/project-a'].isStreaming).toBe(false)
+    expect(st.sessions['C:/project-a'].hasUnread).toBe(true)
   })
 
   it('error event дописывает текст ошибки в последнее сообщение фонового чата', () => {

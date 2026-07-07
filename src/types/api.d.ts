@@ -14,8 +14,9 @@ export interface DependencyMapDTO {
   files: Record<string, { imports: string[]; importedBy: string[]; exports: string[] }>
 }
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
-export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
-export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; createdAt: number }
+export interface AppliedSkillRef { id: string; name?: string; icon?: string; description?: string }
+export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; appliedSkills?: AppliedSkillRef[]; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
+export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; appliedSkills?: AppliedSkillRef[]; createdAt: number }
 export type ChatKind = 'main' | 'review' | 'help'
 export interface ChatSession {
   id: number
@@ -182,6 +183,7 @@ export interface UsageDelta {
 export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'thought'; text: string }
+  | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
   | { type: 'pending-command'; callId: string; command: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
@@ -357,7 +359,7 @@ declare global {
       }
       chats: {
         list: (sessionId: number) => Promise<StoredChatMessage[]>
-        append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => Promise<StoredChatMessage>
+        append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => Promise<StoredChatMessage>
         maxMessageId: (sessionId: number) => Promise<number>
         truncateAfter: (sessionId: number, afterMessageId: number) => Promise<number>
         updateMessage: (messageId: number, content: string) => Promise<boolean>

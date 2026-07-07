@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../types/api'
+import type { AgentProgressEntry } from '../lib/agent-progress'
 
 // Pure, store-agnostic building blocks вынесены из projectStore.ts:
 // типы одной сессии/чата + фабрика пустого снапшота + touch-marker данные.
@@ -76,6 +77,9 @@ export interface SubagentRunCard {
 }
 
 export interface SessionSnapshot {
+  /** Chat session this snapshot belongs to. Needed when a project is restored
+   *  after a background answer finished while another project was open. */
+  chatId?: number | null
   messages: ChatMessage[]
   isStreaming: boolean
   /** Когда начался текущий прогон ассистента (для live-таймера). */
@@ -83,6 +87,7 @@ export interface SessionSnapshot {
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   activity: ActivityEntry[]
+  agentProgress: AgentProgressEntry[]
   sessionUsage: SessionUsage
   runningPlanStep: RunningPlanStep | null
   /** Undo entry ID точки «📍 Чекпоинт» этого чата — кнопка отката. Per-chat:
@@ -127,12 +132,14 @@ export function selectInboxApprovals(state: {
 
 export function freshSnapshot(): SessionSnapshot {
   return {
+    chatId: null,
     messages: [],
     isStreaming: false,
     streamStartedAt: null,
     pendingWrites: [],
     pendingCommand: null,
     activity: [],
+    agentProgress: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
     runningPlanStep: null,
     checkpointId: null,
@@ -152,14 +159,16 @@ export type ChatStateBundle = Omit<SessionSnapshot, 'hasUnread'>
  *  пользователь только что его смотрел. Заменяет 3 рукописные копии литерала
  *  bundle в setProject / switchChatSession / newChatSession (источник #8/#17:
  *  «забыли поле в одной из копий»). */
-export function captureBundle(s: ChatStateBundle): SessionSnapshot {
+export function captureBundle(s: ChatStateBundle & { activeChatId?: number | null }): SessionSnapshot {
   return {
+    chatId: s.activeChatId ?? null,
     messages: s.messages,
     isStreaming: s.isStreaming,
     streamStartedAt: s.streamStartedAt,
     pendingWrites: s.pendingWrites,
     pendingCommand: s.pendingCommand,
     activity: s.activity,
+    agentProgress: s.agentProgress,
     sessionUsage: s.sessionUsage,
     runningPlanStep: s.runningPlanStep,
     checkpointId: s.checkpointId,
@@ -180,6 +189,7 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
     pendingWrites: snap.pendingWrites,
     pendingCommand: snap.pendingCommand,
     activity: snap.activity,
+    agentProgress: snap.agentProgress ?? [],
     sessionUsage: snap.sessionUsage,
     runningPlanStep: snap.runningPlanStep,
     checkpointId: snap.checkpointId,

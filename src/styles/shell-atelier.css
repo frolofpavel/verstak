@@ -195,15 +195,11 @@ html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar
   box-shadow: var(--shadow-sm) !important;
 }
 
-html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap::after {
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap:not(.is-status-streaming):not(.is-status-unread):not(.is-status-interrupted)::after {
   content: none;
   display: none;
   border: 0;
   box-shadow: none;
-}
-
-.gg-app-atelier .gg-rail-status.is-unread {
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .gg-app-atelier .gg-rail.is-shell-expanded.is-expanded .gg-rail-add {
@@ -395,7 +391,9 @@ html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-lg) var(--radius-sm) var(--radius-lg) var(--radius-lg);
   padding: 11px 15px;
-  box-shadow: var(--shadow-md), inset 0 1px 0 var(--vol-highlight);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 var(--vol-highlight);
 }
 
 .gg-app-atelier .gg-msg-assistant .gg-msg-bubble {
@@ -457,6 +455,10 @@ html[data-theme="nord"] .gg-app-atelier .gg-chat-empty-modes {
   padding: 12px 28px 18px;
   border-top: none;
   background: linear-gradient(0deg, color-mix(in srgb, var(--bg-elevated) 92%, transparent) 0%, transparent 100%);
+}
+
+.gg-app-atelier .gg-agent-progress-host + .gg-composer {
+  padding-top: 4px;
 }
 
 .gg-app-atelier .gg-composer > * {

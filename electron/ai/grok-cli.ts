@@ -9,6 +9,7 @@ import { buildCliPrompt } from './cli-prompt'
 import { describeAttachments } from './history-serializer'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
+import { logRuntime } from '../runtime-log'
 
 /**
  * Grok-4 / Grok Build (xAI) в режиме `streaming-json` стримит ВСЁ как обычный
@@ -121,6 +122,128 @@ export const GROK_CLI_MODELS = [
 
 export const DEFAULT_GROK_CLI_MODEL = 'grok-composer-2.5-fast'
 
+const GROK_COMPOSER_MODEL = 'grok-composer-2.5-fast'
+const NO_VISIBLE_ANSWER_MESSAGE =
+  'Grok CLI завершил ответ без видимого текста. Попробуй повторить запрос или переключи чат на Grok API.'
+
+function stripAnsi(input: string): string {
+  return input
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+}
+
+function normalizePlainGrokOutput(raw: string): string {
+  return stripAnsi(raw)
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.trimEnd())
+    .join('\n')
+    .trim()
+}
+
+async function* runGrokComposerPlain(opts: {
+  binary: string
+  cwd: string
+  payload: string
+  model: string
+  signal?: AbortSignal
+}): AsyncIterable<ChatEvent> {
+  const args = [
+    '--output-format', 'plain',
+    '--no-alt-screen',
+    '--no-plan',
+    '--no-subagents',
+    '--no-wait-for-background',
+    '--verbatim',
+    '-m', opts.model
+  ]
+  const ARGV_CAP = 8000
+  let promptFile: string | null = null
+  if (opts.payload.length > ARGV_CAP) {
+    promptFile = join(tmpdir(), `grok-composer-prompt-${randomUUID()}.txt`)
+    writeFileSync(promptFile, opts.payload, 'utf8')
+    args.push('--prompt-file', promptFile)
+  } else {
+    args.push('-p', opts.payload)
+  }
+
+  const child = spawn(opts.binary, args, {
+    cwd: opts.cwd,
+    shell: opts.binary.endsWith('.cmd') || opts.binary.endsWith('.ps1'),
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+
+  try { child.stdin.end() } catch { /* noop */ }
+
+  let stdoutBuffer = ''
+  let stderrBuffer = ''
+  let closeCode: number | null = null
+  let closed = false
+  let wake: (() => void) | null = null
+  let abortListener: (() => void) | null = null
+
+  if (opts.signal) {
+    abortListener = () => { treeKill(child) }
+    opts.signal.addEventListener('abort', abortListener, { once: true })
+  }
+
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', (chunk: string) => { stdoutBuffer += chunk })
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => { stderrBuffer += chunk })
+  child.on('error', (err) => {
+    stderrBuffer += `\n${err.message}`
+    closed = true
+    if (wake) { const r = wake; wake = null; r() }
+  })
+  child.on('close', (code) => {
+    closeCode = code
+    closed = true
+    if (promptFile) {
+      try { unlinkSync(promptFile) } catch { /* noop */ }
+    }
+    if (wake) { const r = wake; wake = null; r() }
+  })
+
+  try {
+    while (!closed) await new Promise<void>(r => { wake = r })
+
+    const answer = normalizePlainGrokOutput(stdoutBuffer)
+    logRuntime('grok-cli.composer-plain.complete', {
+      model: opts.model,
+      code: closeCode,
+      stdoutChars: stdoutBuffer.length,
+      stderrChars: stderrBuffer.length
+    }, closeCode === 0 ? 'info' : 'warn')
+
+    if (closeCode !== 0) {
+      yield { type: 'error', message: normalizeGrokCliError(stderrBuffer || `Grok CLI exit ${closeCode}`) }
+      return
+    }
+    if (!answer) {
+      logRuntime('grok-cli.no-visible-answer', {
+        model: opts.model,
+        reason: 'composer-plain-empty',
+        code: closeCode,
+        stderr: stderrBuffer.slice(0, 1000)
+      }, 'warn')
+      yield { type: 'error', message: NO_VISIBLE_ANSWER_MESSAGE }
+      return
+    }
+
+    yield { type: 'text', text: answer }
+    yield { type: 'done' }
+  } finally {
+    if (promptFile) {
+      try { unlinkSync(promptFile) } catch { /* noop */ }
+    }
+    if (opts.signal && abortListener) {
+      try { opts.signal.removeEventListener('abort', abortListener) } catch { /* noop */ }
+    }
+  }
+}
+
 function findBinary(): string {
   const home = process.env.USERPROFILE || process.env.HOME || ''
   if (home) {
@@ -231,11 +354,16 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         }
       }
 
-      const args = ['--output-format', 'streaming-json', '--no-alt-screen']
       const requestedModel = opts.model && opts.model !== 'auto' ? opts.model : DEFAULT_GROK_CLI_MODEL
       const selectedModel = GROK_CLI_MODELS.includes(requestedModel)
         ? requestedModel
         : DEFAULT_GROK_CLI_MODEL
+      if (selectedModel === GROK_COMPOSER_MODEL) {
+        yield* runGrokComposerPlain({ binary, cwd, payload, model: selectedModel, signal: opts.signal })
+        return
+      }
+
+      const args = ['--output-format', 'streaming-json', '--no-alt-screen']
       args.push('-m', selectedModel)
       // Back to -p argv (this is what worked before parity changes). stdin
       // through cmd.exe wrapper on Windows turned out to be even more unstable.
@@ -270,6 +398,10 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       let stdoutBuffer = ''
       let stderrBuffer = ''
       let textBuffer = ''   // полный сырой text-стрим Grok'а; чистим в самом конце
+      let thoughtChars = 0
+      let textEvents = 0
+      let thoughtEvents = 0
+      let completionEvents = 0
       const queue: ChatEvent[] = []
       let done = false
       let finalQueued = false
@@ -279,12 +411,30 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       function queueFinalFromBuffer(): boolean {
         if (finalQueued) return true
         const { answer, reasoning } = cleanGrokOutput(textBuffer)
-        if (reasoning) queue.push({ type: 'thought', text: reasoning })
         if (answer) {
+          if (reasoning) queue.push({ type: 'thought', text: reasoning })
           queue.push({ type: 'text', text: answer })
         } else if (!reasoning && textBuffer.trim()) {
           queue.push({ type: 'text', text: textBuffer.trim() })
         } else {
+          logRuntime('grok-cli.no-visible-answer', {
+            model: selectedModel,
+            reason: 'queue-final-empty',
+            textChars: textBuffer.length,
+            thoughtChars,
+            textEvents,
+            thoughtEvents,
+            completionEvents,
+            stderr: stderrBuffer.slice(0, 1000)
+          }, 'warn')
+          queue.push({
+            type: 'error',
+            message: NO_VISIBLE_ANSWER_MESSAGE
+          })
+          finalQueued = true
+          textBuffer = ''
+          done = true
+          wake()
           return false
         }
         finalQueued = true
@@ -305,7 +455,10 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         // type='thought' (если CLI вдруг эмитит явно) сразу в thought-канал.
         if (ev.type === 'thought') {
           const text = eventText(ev)
-          if (text) { queue.push({ type: 'thought', text }); wake() }
+          if (text) {
+            thoughtEvents += 1
+            thoughtChars += text.length
+          }
         }
         // Любой text-event — буферизуем, НЕ стримим. Grok всегда мешает
         // reasoning с ответом, поэтому чистим в самом конце через
@@ -316,6 +469,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         else if (ev.type === 'text' || ev.type === 'assistant_message_delta' || ev.type === 'message_delta') {
           const text = eventText(ev)
           if (text) {
+            textEvents += 1
             textBuffer += text
             if (/<answer>[\s\S]*?<\/answer>/i.test(textBuffer)) {
               queueFinalFromBuffer()
@@ -324,12 +478,29 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         }
         // Completion event — здесь разбираем буфер и эмитим
         else if (ev.type === 'turn_complete' || ev.type === 'done' || ev.type === 'message_complete' || ev.type === 'final') {
+          completionEvents += 1
           const { answer, reasoning } = cleanGrokOutput(textBuffer)
-          if (reasoning) queue.push({ type: 'thought', text: reasoning })
-          if (answer)   queue.push({ type: 'text', text: answer })
-          else if (!reasoning && textBuffer.trim()) {
+          const rawVisible = !reasoning && textBuffer.trim() ? textBuffer.trim() : ''
+          if (answer || rawVisible) {
+            if (reasoning) queue.push({ type: 'thought', text: reasoning })
+            queue.push({ type: 'text', text: answer || rawVisible })
+          } else {
             // Защита: если парсер ничего не выделил, но текст был — отдаём как есть
-            queue.push({ type: 'text', text: textBuffer.trim() })
+            logRuntime('grok-cli.no-visible-answer', {
+              model: selectedModel,
+              reason: 'completion-empty',
+              eventType: ev.type,
+              textChars: textBuffer.length,
+              thoughtChars,
+              textEvents,
+              thoughtEvents,
+              completionEvents,
+              stderr: stderrBuffer.slice(0, 1000)
+            }, 'warn')
+            queue.push({
+              type: 'error',
+              message: NO_VISIBLE_ANSWER_MESSAGE
+            })
           }
           queue.push({ type: 'done' }); wake()
         }
@@ -373,10 +544,28 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         // так делают), но в буфере есть текст — флашим вручную.
         if (textBuffer.length > 0 && !queue.some(e => e.type === 'text' || e.type === 'done')) {
           const { answer, reasoning } = cleanGrokOutput(textBuffer)
-          if (reasoning) queue.push({ type: 'thought', text: reasoning })
-          if (answer)   queue.push({ type: 'text', text: answer })
-          else queue.push({ type: 'text', text: textBuffer.trim() })
+          const rawVisible = !reasoning && textBuffer.trim() ? textBuffer.trim() : ''
+          if (answer || rawVisible) {
+            if (reasoning) queue.push({ type: 'thought', text: reasoning })
+            queue.push({ type: 'text', text: answer || rawVisible })
+          }
           textBuffer = ''
+        }
+        if (code === 0 && textBuffer.length === 0 && !queue.some(e => e.type === 'text' || e.type === 'done' || e.type === 'error')) {
+          logRuntime('grok-cli.no-visible-answer', {
+            model: selectedModel,
+            reason: 'close-empty',
+            code,
+            thoughtChars,
+            textEvents,
+            thoughtEvents,
+            completionEvents,
+            stderr: stderrBuffer.slice(0, 1000)
+          }, 'warn')
+          queue.push({
+            type: 'error',
+            message: NO_VISIBLE_ANSWER_MESSAGE
+          })
         }
         if (code !== 0 && !queue.some(e => e.type === 'done')) {
           // 0xC0000005 (3221225477) = Windows STATUS_ACCESS_VIOLATION.

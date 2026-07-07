@@ -22,6 +22,7 @@ import {
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
 import { appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
+import { reduceAgentProgress, upsertAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
 import { createPipelineSlice, type PipelineSlice } from './pipeline-slice'
 import { createReviewSlice, type ReviewSlice } from './review-slice'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
@@ -62,6 +63,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
   pendingPlan: { callId: string; title: string; stepCount: number; sendId?: number } | null
   activity: ActivityEntry[]
+  agentProgress: AgentProgressEntry[]
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
   preflights: PreflightCard[]
   /** Sub-agent runs текущей сессии (fan-out V1). Эфемерные — чистятся на send. */
@@ -139,6 +141,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pushActivity: (entry: ActivityEntry) => void
   updateActivity: (id: string, patch: Partial<ActivityEntry>) => void
   clearActivity: () => void
+  setAgentProgress: (entries: AgentProgressEntry[]) => void
+  pushAgentProgress: (entry: AgentProgressEntry) => void
+  applyAgentProgressEvent: (event: { type: string; [k: string]: unknown }) => void
   /** Добавить preflight-карточку (агент объявил план). */
   pushPreflight: (card: PreflightCard) => void
   /** Upsert sub-agent run card по callId (running → done/error). */
@@ -208,6 +213,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   appendHelpLastAssistantThinking: (text: string) => void
   clearHelpActivity: () => void
   pushHelpActivity: (entry: ActivityEntry) => void
+  setHelpAgentProgress: (entries: AgentProgressEntry[]) => void
+  pushHelpAgentProgress: (entry: AgentProgressEntry) => void
   addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
   /** Зарегистрировать сгенерированный артефакт (для Timeline pill). */
   recordArtifact: (a: { kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number; overall?: 'passed' | 'failed' | 'partial' | 'not_run'; checksPassed?: number; checksTotal?: number }) => void
@@ -284,6 +291,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   pendingCommand: null,
   pendingPlan: null,
   activity: [],
+  agentProgress: [],
   preflights: [],
   subagentRuns: [],
   touchedFiles: {},
@@ -389,7 +397,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSessions = [created]
     }
 
-    const activeChatId = chatSessions[0]?.id ?? null
+    const restoredChatId = target.chatId != null && chatSessions.some(c => c.id === target.chatId)
+      ? target.chatId
+      : null
+    const activeChatId = restoredChatId ?? chatSessions[0]?.id ?? null
     const needsDbHydrate = Boolean(
       activeChatId && (!existing || existing.messages.length === 0)
     )
@@ -405,6 +416,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       pendingWrites: target.pendingWrites,
       pendingCommand: target.pendingCommand,
       activity: target.activity,
+      agentProgress: target.agentProgress ?? [],
       sessionUsage: target.sessionUsage,
       runningPlanStep: target.runningPlanStep,
       // checkpointId/preflights/subagentRuns теперь per-chat в bundle —
@@ -445,7 +457,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         if (myToken !== setProjectToken) return
         const cur = get()
         if (cur.path !== path || cur.activeChatId !== hydrateChatId) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -472,6 +484,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     pendingCommand: null,
     pendingPlan: null, // #3 plan-gate: проект закрыт → снять модалку плана
     activity: [],
+    agentProgress: [],
     preflights: [],
     subagentRuns: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
@@ -511,7 +524,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const state = get()
     const composerDrafts = pruneComposerDraftsForProject(state.composerDrafts, path)
     if (state.path === path) {
-      set({ path: null, tree: [], messages: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
+      set({ path: null, tree: [], messages: [], agentProgress: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
     } else {
       set({ projectList, composerDrafts })
     }
@@ -561,7 +574,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   updateActivity: (id, patch) => set(s => ({
     activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
-  clearActivity: () => set({ activity: [], preflights: [], subagentRuns: [] }),
+  clearActivity: () => set({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] }),
+  setAgentProgress: (entries) => set({ agentProgress: entries }),
+  pushAgentProgress: (entry) => set(s => ({ agentProgress: upsertAgentProgress(s.agentProgress ?? [], entry) })),
+  applyAgentProgressEvent: (event) => set(s => ({
+    agentProgress: reduceAgentProgress(s.agentProgress ?? [], event)
+  })),
   pushPreflight: (card) => set(s => ({ preflights: [...s.preflights, card] })),
   upsertSubagentRun: (card) => set(s => {
     const idx = s.subagentRuns.findIndex(r => r.callId === card.callId)
@@ -602,6 +620,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   applyEventToSession: (projectPath, event) => set(s => {
     const existing = s.sessions[projectPath] ?? freshSnapshot()
     let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    if (typeof event.chatId === 'number') {
+      next = { ...next, chatId: event.chatId }
+    }
     // pending-write/command — специфика фоновой ПРОЕКТНОЙ сессии (не в общем ядре).
     const t = event.type
     if (t === 'pending-write' && typeof event.callId === 'string') {
@@ -669,6 +690,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         pendingWrites: [],
         pendingCommand: null,
         activity: [],
+        agentProgress: [],
         sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
         runningPlanStep: null,
         chatSnapshots: nextSnapshots,
@@ -684,7 +706,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         const history = await window.api.chats.list(id)
         if (myToken !== switchChatSessionToken) return
         if (get().activeChatId !== id) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -825,6 +847,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSnapshots: nextSnapshots,
       messages: [],
       activity: [],
+      agentProgress: [],
       pendingWrites: [],
       pendingCommand: null,
       runningPlanStep: null,
@@ -912,10 +935,16 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   }),
   appendHelpLastAssistantThinking: (text) => set(s => ({ help: { ...s.help, messages: appendThinkingToLastAssistant(s.help.messages, text) } })),
   clearHelpActivity: () => set(s => ({
-    help: { ...s.help, activity: [] }
+    help: { ...s.help, activity: [], agentProgress: [] }
   })),
   pushHelpActivity: (entry) => set(s => ({
     help: { ...s.help, activity: [...s.help.activity, entry] }
+  })),
+  setHelpAgentProgress: (entries) => set(s => ({
+    help: { ...s.help, agentProgress: entries }
+  })),
+  pushHelpAgentProgress: (entry) => set(s => ({
+    help: { ...s.help, agentProgress: upsertAgentProgress(s.help.agentProgress ?? [], entry) }
   })),
   addHelpUsage: (delta) => set(s => ({
     help: {
@@ -978,7 +1007,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const history = await window.api.chats.list(helpSession.id)
       helpState = {
         ...helpState,
-        messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
+        messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
       }
     }
     set({

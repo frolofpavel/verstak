@@ -152,7 +152,9 @@ export function CreateClientModal({ onClose, onOpened, onGroupsChanged }: Create
                 onClick={() => void handleOpenExisting()}
                 disabled={busy}
               >
-                <span className="gg-create-client-choice-icon" aria-hidden>📁</span>
+                <span className="gg-create-client-choice-icon" aria-hidden>
+                  <span className="gg-folder-icon" aria-hidden="true" />
+                </span>
                 <span className="gg-create-client-choice-title">{t.rail.openExistingClient}</span>
                 <span className="gg-create-client-choice-desc">{t.rail.openExistingClientHint}</span>
               </button>

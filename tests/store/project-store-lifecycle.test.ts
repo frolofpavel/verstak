@@ -33,6 +33,7 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     pendingWrites: [{ callId: `w-${tag}`, path: 'a.ts', before: '', after: 'x' }],
     pendingCommand: { callId: `c-${tag}`, command: `cmd-${tag}` },
     activity: [{ id: `act-${tag}`, kind: 'read', label: 'r', status: 'ok', timestamp: 1 }],
+    agentProgress: [{ id: `prog-${tag}`, phase: 'context', title: 'ctx', status: 'running', timestamp: 2 }],
     sessionUsage: { inputTokens: 11, outputTokens: 22, cachedInputTokens: 3 },
     runningPlanStep: { planId: 1, stepId: 2, title: `plan-${tag}` },
     checkpointId: 500, checkpointMessageId: 501,
@@ -50,6 +51,7 @@ function resetStore() {
     pendingWrites: [],
     pendingCommand: null,
     activity: [],
+    agentProgress: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
     runningPlanStep: null,
     activeChatId: null,
@@ -80,6 +82,7 @@ describe('switchChatSession — snapshot уходящего чата', () => {
       pendingWrites: active.pendingWrites,
       pendingCommand: active.pendingCommand,
       activity: active.activity,
+      agentProgress: active.agentProgress,
       sessionUsage: active.sessionUsage,
       runningPlanStep: active.runningPlanStep,
       checkpointId: active.checkpointId,
@@ -97,6 +100,7 @@ describe('switchChatSession — snapshot уходящего чата', () => {
     expect(snap.pendingWrites).toBe(active.pendingWrites)
     expect(snap.pendingCommand).toBe(active.pendingCommand)
     expect(snap.activity).toBe(active.activity)
+    expect(snap.agentProgress).toBe(active.agentProgress)
     expect(snap.sessionUsage).toBe(active.sessionUsage)
     expect(snap.runningPlanStep).toBe(active.runningPlanStep)
     // finding 2/3: checkpointId/preflights/subagentRuns теперь тоже в снапшоте.
@@ -133,6 +137,7 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.pendingWrites).toBe(saved.pendingWrites)
     expect(st.pendingCommand).toBe(saved.pendingCommand)
     expect(st.activity).toBe(saved.activity)
+    expect(st.agentProgress).toBe(saved.agentProgress)
     expect(st.sessionUsage).toBe(saved.sessionUsage)
     expect(st.runningPlanStep).toBe(saved.runningPlanStep)
     // finding 2/3: checkpointId/preflights/subagentRuns восстанавливаются per-chat.

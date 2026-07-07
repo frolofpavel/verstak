@@ -25,6 +25,10 @@
       "to": "app-payload.7z"
     },
     {
+      "from": "release/app-payload-manifest.json",
+      "to": "app-payload-manifest.json"
+    },
+    {
       "from": "node_modules/7zip-bin/win/x64/7za.exe",
       "to": "7za.exe"
     }

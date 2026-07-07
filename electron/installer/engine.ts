@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
 import { dirname, join, relative } from 'path'
 
 const STALE_UNPACKED = join('resources', 'app.asar.unpacked')
@@ -55,9 +56,34 @@ async function readPayloadManifest(payloadRoot: string): Promise<{ fileCount: nu
   return null
 }
 
+async function readPackagedPayloadManifest(): Promise<{ fileCount: number; payloadBytes: number } | null> {
+  const candidates = [
+    join(process.resourcesPath, 'app-payload-manifest.json'),
+    join(process.cwd(), 'release', 'app-payload-manifest.json'),
+    join(process.cwd(), 'release', 'app-payload-staging', 'payload-manifest.json'),
+  ]
+  for (const manifestPath of candidates) {
+    if (!existsSync(manifestPath)) continue
+    try {
+      const raw = await readFile(manifestPath, 'utf8')
+      const parsed = JSON.parse(raw) as { fileCount?: number; payloadBytes?: number }
+      if (typeof parsed.fileCount === 'number' && typeof parsed.payloadBytes === 'number') {
+        return { fileCount: parsed.fileCount, payloadBytes: parsed.payloadBytes }
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null
+}
+
 export async function getInstallDefaults(version: string, productName: string): Promise<InstallDefaults> {
-  const payloadRoot = resolvePayloadRoot()
-  const stats = (await readPayloadManifest(payloadRoot)) ?? await collectPayloadStats(payloadRoot)
+  const packagedManifest = await readPackagedPayloadManifest()
+  let stats = packagedManifest
+  if (!stats) {
+    const payloadRoot = resolvePayloadRoot()
+    stats = (await readPayloadManifest(payloadRoot)) ?? await collectPayloadStats(payloadRoot)
+  }
   return {
     version,
     productName,
@@ -191,9 +217,8 @@ export async function runInstall(
   const ownDir = await dirIsOursToWipe(normalized)
   let payloadRoot = ''
   try {
-    payloadRoot = resolvePayloadRoot()
-
     emit(onProgress, { phase: 'preparing' }, 0, 0, 0, 0, '')
+    payloadRoot = resolvePayloadRoot()
 
     await removeStaleUnpacked(normalized)
     await copyPayload(payloadRoot, normalized, onProgress)
