@@ -5,6 +5,7 @@ import type { FileTools } from '../../ai/tools'
 import type { VerifyRun } from '../../ai/review-gate'
 import type { AgentMode } from '../../ai/mode-policy'
 import type { SmartApproveContext, SmartApproveResult } from '../../ai/smart-approve'
+import type { ProcessRegistry } from '../../ai/process-registry'
 import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
 import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-brain'
@@ -69,6 +70,8 @@ export interface ToolContext {
   /** APP-03: optional smart-approval guard for command auto-accept paths. Disabled by default. */
   smartApproveEnabled?: boolean
   smartApprove?: (ctx: SmartApproveContext) => Promise<SmartApproveResult>
+  /** PROC-01: background process registry for spawn_process/process_status/read_process/stop_process tools. */
+  processRegistry?: ProcessRegistry
   /** H (ось 3): new_task — агент пакует дистиллят, контекст очистится до него на след. turn. */
   requestNewTask?: (summary: string) => void
   /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).

@@ -282,3 +282,10 @@ Full gate still required before commit/release: `npm run test:security`, `npm ru
 Managed worktree lifecycle moved beyond schema/detector: snapshot-before-remove, restore-from-snapshot, lossless remove, and no-push regression are now implemented.
 `worktree:merge` and `worktree:discard` use lossless removal, store `snapshot_ref`/`base_ref`, and mark `removed_at` after physical remove.
 Targeted verification: `npx vitest run tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/storage/worktree-sessions.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 28 tests; `npm run type` -> green.
+## 2026-07-07 process manager update
+
+Background process manager foundation is now in code.
+Added `ProcessRegistry`, tools `spawn_process`, `process_status`, `read_process`, `stop_process`, bounded/redacted `outputTail`, PID-reuse guard, TTL prune/sweeper API, and command gating before background spawn.
+Windows detail: registry keeps the shell handle non-detached so stdout/stderr tail works; process tree stop still uses `taskkill /T /F` through `treeKill`.
+Targeted verification: `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts` -> green, 2 files / 11 tests; `npm run type` -> green.
+Remaining process scope: completion notification into next agent turn, full OS anti-orphan smoke, UI timeline polish.

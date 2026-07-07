@@ -27,6 +27,7 @@
 import { delegateTaskHandler, delegateParallelHandler, orchestrateHandler, swarmHandler, oracleHandler, newTaskHandler } from './tool-handlers/delegation'
 export { dedupeTaskIds, parseDecomposition, decomposeGoal, buildSwarmRoster } from './tool-handlers/delegation'
 import { runCommandHandler, runUntilGreenHandler } from './tool-handlers/command'
+import { spawnProcessHandler, processStatusHandler, readProcessHandler, stopProcessHandler } from './tool-handlers/process'
 import { browserHandler } from './tool-handlers/browser'
 import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
@@ -59,6 +60,10 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Sequential, side-effecting
   'run_command': runCommandHandler,
   'run_until_green': runUntilGreenHandler,
+  'spawn_process': spawnProcessHandler,
+  'process_status': processStatusHandler,
+  'read_process': readProcessHandler,
+  'stop_process': stopProcessHandler,
   'browser_navigate': browserHandler,
   'browser_read_page': browserHandler,
   'browser_click': browserHandler,  // Tier-2 #5

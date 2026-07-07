@@ -137,6 +137,54 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'spawn_process',
+    description: 'Запустить долгую shell-команду в фоне и сразу вернуть process_id. Проходит те же command safety gates, что run_command. Используй для dev-server, watcher, долгого build/test, когда надо читать статус позже.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell-команда для запуска.' },
+        cwd: { type: 'string', description: 'Опциональная папка запуска внутри проекта. По умолчанию корень проекта.' },
+        timeout_ms: { type: 'number', description: 'Опциональный timeout процесса в миллисекундах.' },
+        notify_on_exit: { type: 'boolean', description: 'Если true, runtime может уведомить агента при завершении процесса.' }
+      },
+      required: ['command']
+    }
+  },
+  {
+    name: 'process_status',
+    description: 'Получить статус фонового процесса: running/completed/failed/killed, exitCode, runtimeMs и redacted outputTail.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'process_id из spawn_process.' },
+        process_id: { type: 'string', description: 'Алиас для id.' }
+      }
+    }
+  },
+  {
+    name: 'read_process',
+    description: 'Прочитать redacted tail stdout/stderr фонового процесса.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'process_id из spawn_process.' },
+        process_id: { type: 'string', description: 'Алиас для id.' },
+        lines: { type: 'number', description: 'Сколько последних строк вернуть. По умолчанию весь bounded tail.' }
+      }
+    }
+  },
+  {
+    name: 'stop_process',
+    description: 'Остановить фоновый процесс и его дочерние процессы через tree kill.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'process_id из spawn_process.' },
+        process_id: { type: 'string', description: 'Алиас для id.' }
+      }
+    }
+  },
+  {
     name: 'search_project',
     description: 'Полнотекстовый поиск по проекту (ripgrep). Возвращает совпадения в формате file:line:text. Игнорирует node_modules / .git / out / dist. Используй для нахождения определений функций, использований переменных, текстовых фрагментов.',
     parameters: {

@@ -142,6 +142,11 @@ covers clean/dirty/unpushed/all-three/non-git on real temp git repos.
 Snapshot-before-remove, restore-from-snapshot, lossless remove, and no-push regression are implemented.
 Remaining managed-worktree scope starts at snapshot retention prune, registry UI/actions, and release checklist (`189-WT-07`, `189-WT-09`).
 
+**Status 2026-07-07 PROC:** process manager foundation closed for `189-PROC-01..03`, `189-PROC-05`, `189-PROC-07`.
+Added `ProcessRegistry`, background tools `spawn_process`/`process_status`/`read_process`/`stop_process`,
+bounded redacted output tail, TTL prune/sweeper API, PID-reuse guard, and command gating before spawn.
+Remaining process scope: completion notification into next agent turn, full OS anti-orphan smoke, and UI timeline polish (`189-PROC-04`, `189-PROC-06`, `189-PROC-08..10`).
+
 ## Phase 4. 1.9.0: Run Lifecycle / Wait Contract
 
 | ID | Задача | Зачем | Где | Готово, когда | Проверка |
