@@ -48,7 +48,7 @@ export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'work
  * - 'review': sub-chat ревьюера. parentChatId — какой main-чат он ревьюит.
  */
 export type SendOwner =
-  | { kind: 'chat'; chatId: number; isHelp?: boolean; projectPath?: string | null }
+  | { kind: 'chat'; chatId: number; isHelp?: boolean; projectPath?: string | null; laneGeneration?: number }
   | { kind: 'review'; reviewChatId: number; parentChatId: number }
 
 export interface ProjectState extends PipelineSlice, ReviewSlice {
@@ -106,6 +106,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
    *
    *  See SendOwner type для возможных видов владельцев. */
   sendOwners: Record<number, SendOwner>
+  /** Monotonic per-chat lane generation. New send in the same lane invalidates stale owners. */
+  chatLaneGenerations: Record<string, number>
   /** Артефакты сгенерированные агентом в активной сессии (generate_html /
    *  generate_docx). Сбрасываются при switchChatSession. */
   artifacts: Array<{ kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number; ts: number; overall?: 'passed' | 'failed' | 'partial' | 'not_run'; checksPassed?: number; checksTotal?: number }>
@@ -170,6 +172,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** Найти владельца sendId. Используется в Chat.tsx event handler для
    *  роутинга событий (text/done/error в нужный snapshot). */
   lookupSendOwner: (sendId: number) => SendOwner | null
+  /** True when the chat/help lane already has a live owner. Used to queue instead of racing. */
+  hasActiveChatLane: (chatId: number, isHelp?: boolean) => boolean
   /** Убрать sendId из реестра — обычно при done/error event. */
   forgetSendOwner: (sendId: number) => void
   /** Apply an ai:event to a background CHAT snapshot (within active project,
@@ -248,11 +252,18 @@ export const LAST_PROJECT_PATH_KEY = 'last_project_path'
 function hasInflightChatSend(
   sendOwners: ProjectState['sendOwners'],
   chatId: number,
-  isHelp: boolean
+  isHelp: boolean,
+  chatLaneGenerations?: ProjectState['chatLaneGenerations']
 ): boolean {
-  return Object.values(sendOwners).some(
-    o => o.kind === 'chat' && !!o.isHelp === isHelp && o.chatId === chatId
-  )
+  return Object.values(sendOwners).some(o => {
+    if (o.kind !== 'chat' || !!o.isHelp !== isHelp || o.chatId !== chatId) return false
+    if (!chatLaneGenerations || o.laneGeneration == null) return true
+    return chatLaneGenerations[chatLaneKey(o.chatId, !!o.isHelp)] === o.laneGeneration
+  })
+}
+
+function chatLaneKey(chatId: number, isHelp: boolean): string {
+  return `${isHelp ? 'help' : 'chat'}:${chatId}`
 }
 
 function hasInflightProjectSend(
@@ -302,6 +313,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   sessions: {},
   chatSnapshots: {},
   sendOwners: {},
+  chatLaneGenerations: {},
   artifacts: [],
   previewArtifactId: null,
   effortLevel: 'standard',
@@ -481,6 +493,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     chatSnapshots: {},
     sessions: {},
     sendOwners: {},
+    chatLaneGenerations: {},
     reviews: {},
     openedReviewId: null,
     touchedFiles: {},
@@ -632,7 +645,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         ...nextSnapshots,
         [s.activeChatId]: keepStreamingOnlyWhenInflight(
           nextSnapshots[s.activeChatId],
-          hasInflightChatSend(s.sendOwners, s.activeChatId, false)
+          hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
         )
       }
     }
@@ -643,7 +656,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       delete nextSnapshots[id]
       const restoredSafe = keepStreamingOnlyWhenInflight(
         restored,
-        hasInflightChatSend(s.sendOwners, id, false)
+        hasInflightChatSend(s.sendOwners, id, false, s.chatLaneGenerations)
       )
       set({
         ...restoreBundle(restoredSafe),
@@ -703,10 +716,27 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
     void get().refreshReviewsFor(id)
   },
-  registerSendOwner: (sendId, owner) => set(s => ({
-    sendOwners: { ...s.sendOwners, [sendId]: owner }
-  })),
-  lookupSendOwner: (sendId) => get().sendOwners[sendId] ?? null,
+  registerSendOwner: (sendId, owner) => set(s => {
+    if (owner.kind !== 'chat') {
+      return { sendOwners: { ...s.sendOwners, [sendId]: owner } }
+    }
+    const key = chatLaneKey(owner.chatId, !!owner.isHelp)
+    const laneGeneration = (s.chatLaneGenerations[key] ?? 0) + 1
+    return {
+      chatLaneGenerations: { ...s.chatLaneGenerations, [key]: laneGeneration },
+      sendOwners: { ...s.sendOwners, [sendId]: { ...owner, laneGeneration } }
+    }
+  }),
+  lookupSendOwner: (sendId) => {
+    const owner = get().sendOwners[sendId] ?? null
+    if (owner?.kind !== 'chat') return owner
+    const current = get().chatLaneGenerations[chatLaneKey(owner.chatId, !!owner.isHelp)]
+    return owner.laneGeneration === current ? owner : null
+  },
+  hasActiveChatLane: (chatId, isHelp = false) => {
+    const s = get()
+    return hasInflightChatSend(s.sendOwners, chatId, isHelp, s.chatLaneGenerations)
+  },
   forgetSendOwner: (sendId) => set(s => {
     if (!(sendId in s.sendOwners)) return {}
     const next = { ...s.sendOwners }
@@ -815,7 +845,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         ...nextSnapshots,
         [s.activeChatId]: keepStreamingOnlyWhenInflight(
           nextSnapshots[s.activeChatId],
-          hasInflightChatSend(s.sendOwners, s.activeChatId, false)
+          hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
         )
       }
     }
@@ -868,7 +898,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     if (snap && chatId != null) {
       const nextSnapshots = { ...s.chatSnapshots }
       delete nextSnapshots[chatId]
-      const inflight = hasInflightChatSend(s.sendOwners, chatId, false)
+      const inflight = hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)
       set({
         helpMode: false,
         // restoreBundle — единая форма восстановления (вкл. checkpointId/preflights/
@@ -1039,7 +1069,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         let nextChatSnapshots: ProjectState['chatSnapshots'] | null = null
         for (const [chatIdRaw, snap] of Object.entries(s.chatSnapshots)) {
           const chatId = Number(chatIdRaw)
-          if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false)) continue
+          if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)) continue
           nextChatSnapshots = nextChatSnapshots ?? { ...s.chatSnapshots }
           nextChatSnapshots[chatId] = { ...snap, isStreaming: false, streamStartedAt: null }
         }

@@ -927,6 +927,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('removed_at')) db.exec('ALTER TABLE worktree_sessions ADD COLUMN removed_at INTEGER')
       db.exec('CREATE INDEX IF NOT EXISTS idx_worktree_sessions_removed ON worktree_sessions(project_path, removed_at)')
     }
+  },
+  {
+    version: 39,
+    description: 'agent_runs lifecycle generation for stale-event rejection.',
+    run: (db: DB) => {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_runs'").get()
+      if (!table) return
+      const cols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('generation')) {
+        db.exec('ALTER TABLE agent_runs ADD COLUMN generation INTEGER NOT NULL DEFAULT 0')
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_lane_generation ON agent_runs(project_path, chat_id, owner, generation)')
+    }
   }
 ]
 

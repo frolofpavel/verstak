@@ -1931,12 +1931,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const modelText = (opts?.modelText ?? text).trim()
     const displayText = (opts?.displayText ?? text).trim()
     if (!text && attachments.length === 0) return
-    if (!opts?.fromQueue && isStreaming) return
+    if (!opts?.fromQueue && isStreaming) {
+      if (text) queueFollowUp(text)
+      return
+    }
     const store = useProject.getState()
 
     if (store.helpMode) {
       const helpChatId = store.helpChatId
       if (helpChatId == null) return
+      if (!opts?.fromQueue && store.hasActiveChatLane(helpChatId, true)) {
+        queueFollowUp(text)
+        return
+      }
       const userAttachments = attachments
       store.clearHelpActivity()
       setExhausted(null)
@@ -2014,6 +2021,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     }
     const path = ctx.path
     const userAttachments = attachments
+    if (!opts?.fromQueue && ctx.activeChatId != null && store.hasActiveChatLane(ctx.activeChatId, false)) {
+      queueFollowUp(text)
+      return
+    }
     store.clearActivity()
     setExhausted(null)  // new send wipes any pending continue state
     setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify

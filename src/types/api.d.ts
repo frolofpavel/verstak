@@ -888,6 +888,7 @@ export interface AgentRun {
   providerId: string | null
   model: string | null
   sendId: number | null
+  generation: number
   agentsCount: number
   toolCount: number
   filesCount: number

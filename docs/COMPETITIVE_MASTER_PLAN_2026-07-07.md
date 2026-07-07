@@ -488,7 +488,7 @@
 - **target:** `electron/ipc/ai.ts` event routing + колонка `generation INTEGER DEFAULT 0` в `agent_runs` (мигр. **39**).
 - **contract:** each run has `generation`. При cancel/restart generation++. Старые события с прошлой generation отклоняются.
 - **done:**
-  - [ ] Событие от прошлой generation не попадает в UI
+  - [x] Событие от прошлой generation не попадает в UI
 
 ### RUN-03 · `ai:wait` для headless (M)
 - **source:** OpenClaw `cron-exit-watchers.ts:147 await run.wait()`.
@@ -502,8 +502,8 @@
 - **target:** SendRegistry в `src/store/projectStore.ts`.
 - **contract:** 2-й send в тот же chat пока 1-й активен → deterministic (queue, не race).
 - **done:**
-  - [ ] Параллельные send в 1 чат не ломают состояние
-  - [ ] Тест есть
+  - [x] Параллельные send в 1 чат не ломают состояние
+  - [x] Тест есть
 
 ### RUN-05 · Stuck-session diagnostics (S)
 - **source:** Hermes `gateway/run.py:7472 _session_expiry_watcher`.
@@ -515,12 +515,16 @@
 ### RUN-06 · Cancel/timeout → terminal event (S)
 - **target:** `electron/ipc/ai.ts` finally-block (существующий).
 - **done:**
-  - [ ] 100% cancel/timeout → финальное событие + `agent_runs.status` updated
+  - [x] 100% cancel/timeout → финальное событие + `agent_runs.status` updated
 
 ### RUN-07 · Headless trace parity (M)
 - **target:** `scripts/verstak-cli.mjs --trace-json`.
 - **done:**
-  - [ ] diff GUI events vs CLI trace → одинаковые lifecycle-поля
+  - [x] diff GUI events vs CLI trace → одинаковые lifecycle-поля
+
+**Status 2026-07-08 RUN hardening:** RUN-02/RUN-04/RUN-06/RUN-07 compact scope closed.
+`agent_runs.generation` is persisted by migration 39, SendRegistry now keeps per-chat/help lane generations and rejects stale owners before routing events, same-chat sends are queued instead of racing, `agentRuns.finish()` records exactly one terminal timeline event, and CLI `--trace-json` now emits GUI-aligned lifecycle/counter fields.
+Scope note: this closes deterministic stale-event/terminal-event behavior; a separate timeout policy engine remains a later RUN item if we want configurable time budgets.
 
 ---
 

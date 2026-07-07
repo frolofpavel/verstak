@@ -30,6 +30,7 @@ export interface AgentRun {
   providerId: string | null
   model: string | null
   sendId: number | null
+  generation: number
   agentsCount: number
   toolCount: number
   filesCount: number
@@ -179,9 +180,10 @@ export interface AgentRuns {
     providerId?: string | null
     model?: string | null
     sendId?: number | null
+    generation?: number
     /** Crash-resume: режим прогона (ask/accept-edits/plan/auto/bypass). */
     agentMode?: string | null
-  }) => void
+  }) => number
   /**
    * Crash-resume: записать ЖИВОЙ прогресс прогона (на каждом turn агентного
    * цикла). Обновляет turn_index/last_tool_name/last_checkpoint_id + updated_at.
@@ -268,6 +270,7 @@ export interface RunCheckpoint {
 const SELECT_RUN = `
   SELECT run_id as runId, project_path as projectPath, chat_id as chatId,
          owner, title, status, provider_id as providerId, model, send_id as sendId,
+         generation,
          agents_count as agentsCount, tool_count as toolCount,
          files_count as filesCount, cost_cents as costCents,
          error, started_at as startedAt, ended_at as endedAt,
@@ -289,24 +292,35 @@ export function createAgentRuns(db: Database): AgentRuns {
   return {
     create(opts) {
       const now = Date.now()
+      const owner = opts.owner ?? 'main'
+      const chatId = opts.chatId ?? null
+      const generation = opts.generation ?? (chatId == null ? 0 : (
+        (db.prepare(`
+          SELECT COALESCE(MAX(generation), -1) + 1 as generation
+          FROM agent_runs
+          WHERE project_path = ? AND chat_id = ? AND owner = ?
+        `).get(opts.projectPath, chatId, owner) as { generation?: number } | undefined)?.generation ?? 0
+      ))
       db.prepare(
         `INSERT INTO agent_runs
           (run_id, project_path, chat_id, owner, title, status,
-           provider_id, model, send_id, agent_mode, turn_index, updated_at, started_at)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 0, ?, ?)`
+           provider_id, model, send_id, generation, agent_mode, turn_index, updated_at, started_at)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?)`
       ).run(
         opts.runId,
         opts.projectPath,
-        opts.chatId ?? null,
-        opts.owner ?? 'main',
+        chatId,
+        owner,
         opts.title,
         opts.providerId ?? null,
         opts.model ?? null,
         opts.sendId ?? null,
+        generation,
         opts.agentMode ?? null,
         now,
         now
       )
+      return generation
     },
     tick(runId, patch) {
       const sets: string[] = ['updated_at = ?']
@@ -338,6 +352,12 @@ export function createAgentRuns(db: Database): AgentRuns {
       )
     },
     finish(runId, status, opts) {
+      const current = db.prepare('SELECT ended_at as endedAt FROM agent_runs WHERE run_id = ?').get(runId) as { endedAt: number | null } | undefined
+      if (!current || current.endedAt != null) return
+      db.prepare(
+        `INSERT INTO agent_run_events (run_id, kind, label, detail, ref, status, created_at)
+         VALUES (?, 'status', 'terminal', ?, NULL, ?, ?)`
+      ).run(runId, `terminal:${status}`, status, Date.now())
       const sets: string[] = ['status = ?', 'ended_at = ?']
       const vals: unknown[] = [status, Date.now()]
       if (opts?.costCents !== undefined) { sets.push('cost_cents = ?'); vals.push(opts.costCents) }

@@ -20,6 +20,7 @@ function run(status: AgentRunStatus, endedAt: number | null = null): AgentRun {
     providerId: 'test',
     model: 'test-model',
     sendId: 1,
+    generation: 0,
     agentsCount: 0,
     toolCount: 0,
     filesCount: 0,

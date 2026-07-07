@@ -43,6 +43,7 @@ describe('agent-runs (migration 16)', () => {
     expect(row!.providerId).toBe('grok')
     expect(row!.model).toBe('grok-4')
     expect(row!.sendId).toBe(42)
+    expect(row!.generation).toBe(0)
     expect(row!.agentsCount).toBe(0)
     expect(row!.toolCount).toBe(0)
     expect(row!.filesCount).toBe(0)
@@ -94,6 +95,7 @@ describe('agent-runs (migration 16)', () => {
     runs.finish('r1', 'stopped', {})
     const afterStop = runs.get('r1')!
     expect(afterStop.status).toBe('stopped')
+    expect(runs.getEvents('r1').filter(e => e.kind === 'status' && e.label === 'terminal')).toHaveLength(1)
     const endedAt = afterStop.endedAt
     expect(endedAt).not.toBeNull()
     // 2) Естественный finally runner'а по exitReason='aborted' тоже зовёт finish.
@@ -105,6 +107,7 @@ describe('agent-runs (migration 16)', () => {
     expect(afterSecond.toolCount).toBe(0)        // второй finish — no-op
     expect(afterSecond.costCents).toBe(0)
     expect(afterSecond.error).toBeNull()
+    expect(runs.getEvents('r1').filter(e => e.kind === 'status' && e.label === 'terminal')).toHaveLength(1)
     db.close()
   })
 
@@ -229,6 +232,35 @@ describe('agent-runs (migration 16)', () => {
  * Crash-resume (P1) — миграция 19 (ALTER agent_runs) + tick + findResumable
  * + гард деструктива isAutoResumable.
  */
+describe('agent-runs lifecycle generation (migration 39)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-runs-gen-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  it('migration 39 adds generation column to agent_runs', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const cols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
+    expect(cols).toContain('generation')
+    db.close()
+  })
+
+  it('create increments generation per project/chat/owner lane', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+
+    expect(runs.create({ runId: 'r1', projectPath: '/p', chatId: 7, title: 'A' })).toBe(0)
+    expect(runs.create({ runId: 'r2', projectPath: '/p', chatId: 7, title: 'B' })).toBe(1)
+    expect(runs.create({ runId: 'r3', projectPath: '/p', chatId: 8, title: 'C' })).toBe(0)
+    expect(runs.create({ runId: 'r4', projectPath: '/p', chatId: 7, owner: 'review', title: 'D' })).toBe(0)
+
+    expect(runs.get('r1')!.generation).toBe(0)
+    expect(runs.get('r2')!.generation).toBe(1)
+    expect(runs.get('r3')!.generation).toBe(0)
+    expect(runs.get('r4')!.generation).toBe(0)
+    db.close()
+  })
+})
+
 describe('crash-resume (migration 19)', () => {
   let dir: string
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-resume-')) })

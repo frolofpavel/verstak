@@ -28,6 +28,10 @@ describe('verstak-cli headless recipe contract', () => {
     expect(parsed.protocol).toContain('review_before_commit')
     expect(parsed.trace.recipeId).toBe('bugfix')
     expect(parsed.trace.reviewGate).toBe('required')
+    expect(parsed.trace.lifecycleEvents.map((e: { type: string }) => e.type)).toEqual(['accepted', 'end'])
+    expect(parsed.trace.toolCallsCount).toBe(0)
+    expect(parsed.trace.turnsUsed).toBe(0)
+    expect(parsed.trace.traceSecretLeak).toBe(false)
     expect(parsed.trace.verifyCommands).toEqual(['npm run type', 'npm run test:fast'])
   })
 

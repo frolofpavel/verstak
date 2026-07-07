@@ -1470,6 +1470,8 @@ function getProviderStream(provider, apiKey, model, messages, tools) {
 
 async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt, recipe, recipeProtocol, maxTurns, traceJson, wait }) {
   const systemPrompt = buildSystemPrompt(projectPath, recipeProtocol)
+  const startedAt = Date.now()
+  const runId = `headless-${startedAt}-${Math.random().toString(36).slice(2, 8)}`
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: prompt }
@@ -1477,14 +1479,29 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
 
   const allAssistantTexts = []
   const trace = {
+    runId,
     provider,
     model: model ?? '(default)',
     recipeId: recipe?.id ?? null,
+    lifecycleEvents: [
+      { type: 'accepted', status: 'queued', at: startedAt },
+      { type: 'running', status: 'running', at: startedAt },
+    ],
     toolCalls: [],
+    toolCallsCount: 0,
     firstMutatingTool: null,
     baselineTaken: false,
     verifyCommands: recipe?.verify?.commands ?? [],
+    verifyPass: null,
     reviewGate: recipe?.reviewer?.required ? 'required' : 'not-required',
+    reviewGatePassed: !recipe?.reviewer?.required,
+    turnsUsed: 0,
+    malformedToolCalls: false,
+    fallbackTriggered: false,
+    runtimeError: false,
+    modelError: false,
+    traceSecretLeak: false,
+    durationMs: 0,
     finalStatus: 'running',
     failureReason: null,
   }
@@ -1494,6 +1511,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   let reviewGateNudges = 0
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    trace.turnsUsed = turn + 1
     let fullText = ''
     const toolCalls = []
 
@@ -1508,8 +1526,15 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         toolCalls.push(event.call)
       }
       if (event.type === 'error') {
+        trace.modelError = true
+        trace.finalStatus = 'failed'
+        trace.failureReason = String(event.message ?? 'provider error')
+        trace.lifecycleEvents.push({ type: 'error', status: 'failed', at: Date.now(), detail: trace.failureReason })
+        trace.durationMs = Date.now() - startedAt
         if (!jsonMode) process.stderr.write(`\nОшибка провайдера: ${event.message}\n`)
-        process.exit(1)
+        const err = new Error(trace.failureReason)
+        err.trace = trace
+        throw err
       }
       if (event.type === 'done') break
     }
@@ -1529,11 +1554,14 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
           reviewGateNudges++
           const nudge = buildReviewGateRequiredNudge(recipe.verify?.commands ?? [])
           trace.toolCalls.push({ turn, name: 'review-gate-nudge', args: {} })
+          trace.toolCallsCount = trace.toolCalls.length
           messages.push({ role: 'user', content: nudge })
           continue
         }
         trace.finalStatus = 'failed'
         trace.failureReason = REVIEW_GATE_STOP_MESSAGE
+        trace.lifecycleEvents.push({ type: 'end', status: 'failed', at: Date.now(), detail: trace.failureReason })
+        trace.durationMs = Date.now() - startedAt
         const err = new Error(REVIEW_GATE_STOP_MESSAGE)
         err.trace = trace
         throw err
@@ -1550,6 +1578,8 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     const toolResults = []
     for (const call of toolCalls) {
       trace.toolCalls.push({ turn, name: call.name, args: scrubTraceArgs(call.args) })
+      trace.toolCallsCount = trace.toolCalls.length
+      trace.lifecycleEvents.push({ type: 'tool', status: 'running', at: Date.now(), tool: call.name })
       if (!trace.firstMutatingTool && isMutatingToolName(call.name)) {
         trace.firstMutatingTool = call.name
         if (recipe?.verify?.commands?.length && !trace.baselineTaken) {
@@ -1562,11 +1592,14 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       try {
         result = await executeToolCli(call.name, call.args, projectPath, mode, { recipe, trace, baseline })
       } catch (e) {
+        trace.runtimeError = true
         result = `Ошибка: ${e.message}`
       }
       if (call.name === 'review_before_commit' && typeof result === 'string' && result.includes(REVIEW_GATE_PASS_MARKER)) {
         reviewGatePassed = true
         trace.reviewGate = 'pass'
+        trace.reviewGatePassed = true
+        trace.verifyPass = true
       }
       toolResults.push({ id: call.id, name: call.name, result })
     }
@@ -1578,12 +1611,16 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   if (recipe?.reviewer?.required && !reviewGatePassed) {
     trace.finalStatus = 'failed'
     trace.failureReason = 'max-turns reached before review_before_commit passed'
+    trace.lifecycleEvents.push({ type: 'end', status: 'failed', at: Date.now(), detail: trace.failureReason })
+    trace.durationMs = Date.now() - startedAt
     const err = new Error(trace.failureReason)
     err.trace = trace
     throw err
   }
 
   trace.finalStatus = 'success'
+  trace.lifecycleEvents.push({ type: 'end', status: 'completed', at: Date.now() })
+  trace.durationMs = Date.now() - startedAt
 
   if (!jsonMode) {
     // Финальный перенос строки если вывод не заканчивается на \n
@@ -1593,6 +1630,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   } else {
     const output = {
       success: true,
+      runId,
       provider,
       model: model ?? '(default)',
       projectPath,
@@ -1630,21 +1668,39 @@ try {
     throw new Error(`Provider config "${values['provider-config']}" not found for headless CLI. Add it to .verstak/settings.json or ~/.verstak/settings.json, or pass --provider/--key explicitly.`)
   }
   if (isRecipeRun && values['dry-run']) {
+    const startedAt = Date.now()
+    const runId = `headless-dry-${startedAt}`
     const trace = {
+      runId,
       provider: activeProvider,
       model: activeModel ?? '(default)',
       recipeId: recipeSpec.id,
+      lifecycleEvents: [
+        { type: 'accepted', status: 'queued', at: startedAt },
+        { type: 'end', status: 'dry-run', at: startedAt },
+      ],
       toolCalls: [],
+      toolCallsCount: 0,
       firstMutatingTool: null,
       baselineTaken: false,
       verifyCommands: recipeSpec.verify?.commands ?? [],
+      verifyPass: null,
       reviewGate: recipeSpec.reviewer?.required ? 'required' : 'not-required',
+      reviewGatePassed: !recipeSpec.reviewer?.required,
+      turnsUsed: 0,
+      malformedToolCalls: false,
+      fallbackTriggered: false,
+      runtimeError: false,
+      modelError: false,
+      traceSecretLeak: false,
+      durationMs: 0,
       finalStatus: 'dry-run',
       failureReason: null,
     }
     const payload = {
       success: true,
       command: 'recipe run',
+      runId,
       projectPath,
       task: prompt,
       recipe: recipeSpec,

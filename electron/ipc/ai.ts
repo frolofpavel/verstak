@@ -875,8 +875,9 @@ export function registerAiIpc(deps: AiDeps): void {
     // finally по exitReason. Best-effort: agentRuns опционален + try/catch.
     const runOwner: AgentRunOwner = overrides?.useReviewerPrompt ? 'review' : 'main'
     const runTitle = ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
+    let runGeneration = 0
     try {
-      deps.agentRuns?.create({
+      const createdGeneration = deps.agentRuns?.create({
         runId,
         projectPath: projectPath ?? '',
         chatId: chatId ? Number(chatId) : null,
@@ -891,6 +892,7 @@ export function registerAiIpc(deps: AiDeps): void {
       })
       // Timeline: исходный запрос пользователя первым событием — чтобы лента
       // читалась как нарратив (запрос → действия → итог), а не только механика.
+      if (typeof createdGeneration === 'number') runGeneration = createdGeneration
       logRuntime('agent_runs.create', {
         runId,
         sendId,
@@ -898,7 +900,8 @@ export function registerAiIpc(deps: AiDeps): void {
         chatId: chatId ? Number(chatId) : null,
         owner: runOwner,
         providerId,
-        model
+        model,
+        generation: runGeneration
       })
       if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
     } catch (err) {

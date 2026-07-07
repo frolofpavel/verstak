@@ -33,6 +33,7 @@ function resetStore() {
     activeChatId: null,
     chatSnapshots: {},
     sendOwners: {},
+    chatLaneGenerations: {},
     reviews: {},
     openedReviewId: null
   }, false)
@@ -94,7 +95,7 @@ describe('SendRegistry — registerSendOwner / lookupSendOwner / forgetSendOwner
   it('register затем lookup возвращает того же владельца (chat)', () => {
     const owner: SendOwner = { kind: 'chat', chatId: 42 }
     useProject.getState().registerSendOwner(7, owner)
-    expect(useProject.getState().lookupSendOwner(7)).toEqual(owner)
+    expect(useProject.getState().lookupSendOwner(7)).toEqual({ ...owner, laneGeneration: 1 })
   })
 
   it('forget удаляет владельца, после чего lookup возвращает null', () => {
@@ -110,7 +111,7 @@ describe('SendRegistry — registerSendOwner / lookupSendOwner / forgetSendOwner
   it('forget несуществующего id не падает и не трогает другие записи', () => {
     useProject.getState().registerSendOwner(1, { kind: 'chat', chatId: 10 })
     useProject.getState().forgetSendOwner(123)
-    expect(useProject.getState().lookupSendOwner(1)).toEqual({ kind: 'chat', chatId: 10 })
+    expect(useProject.getState().lookupSendOwner(1)).toEqual({ kind: 'chat', chatId: 10, laneGeneration: 1 })
   })
 
   it('review-owner и chat-owner живут параллельно под разными sendId', () => {
@@ -118,8 +119,27 @@ describe('SendRegistry — registerSendOwner / lookupSendOwner / forgetSendOwner
     const reviewOwner: SendOwner = { kind: 'review', reviewChatId: 55, parentChatId: 10 }
     useProject.getState().registerSendOwner(1, chatOwner)
     useProject.getState().registerSendOwner(2, reviewOwner)
-    expect(useProject.getState().lookupSendOwner(1)).toEqual(chatOwner)
+    expect(useProject.getState().lookupSendOwner(1)).toEqual({ ...chatOwner, laneGeneration: 1 })
     expect(useProject.getState().lookupSendOwner(2)).toEqual(reviewOwner)
+  })
+
+  it('lifecycle generation отклоняет stale owner, если в том же чате стартовал новый send', () => {
+    useProject.getState().registerSendOwner(1, { kind: 'chat', chatId: 10 })
+    expect(useProject.getState().hasActiveChatLane(10, false)).toBe(true)
+    expect(useProject.getState().lookupSendOwner(1)).toEqual({ kind: 'chat', chatId: 10, laneGeneration: 1 })
+
+    useProject.getState().registerSendOwner(2, { kind: 'chat', chatId: 10 })
+
+    expect(useProject.getState().lookupSendOwner(1)).toBeNull()
+    expect(useProject.getState().lookupSendOwner(2)).toEqual({ kind: 'chat', chatId: 10, laneGeneration: 2 })
+  })
+
+  it('help lane и project-chat lane не инвалидируют друг друга', () => {
+    useProject.getState().registerSendOwner(1, { kind: 'chat', chatId: 10 })
+    useProject.getState().registerSendOwner(2, { kind: 'chat', chatId: 10, isHelp: true })
+
+    expect(useProject.getState().lookupSendOwner(1)).toEqual({ kind: 'chat', chatId: 10, laneGeneration: 1 })
+    expect(useProject.getState().lookupSendOwner(2)).toEqual({ kind: 'chat', chatId: 10, isHelp: true, laneGeneration: 1 })
   })
 })
 
@@ -312,7 +332,7 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     expect(st.lookupSendOwner(1)).toBeNull()
     expect(st.lookupSendOwner(2)).toBeNull()
     // unrelated chat 20 owner survives
-    expect(st.lookupSendOwner(3)).toEqual({ kind: 'chat', chatId: 20 })
+    expect(st.lookupSendOwner(3)).toEqual({ kind: 'chat', chatId: 20, laneGeneration: 1 })
     // §5 распил, страж partial-merge: cleanupReviewsFor (review-slice) пишет
     // sendOwners (поле MainSlice) одним set — main-поля НЕ должны обнулиться.
     expect(st.path).toBe('C:/proj')
