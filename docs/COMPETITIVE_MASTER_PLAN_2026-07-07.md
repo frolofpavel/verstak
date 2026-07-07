@@ -557,21 +557,25 @@ Scope note: this closes deterministic stale-event/terminal-event behavior; a sep
 
 **Status 2026-07-08 Skill Governance seed:** SKILL-01/SKILL-02 compact scope closed.
 `docs/SKILL_GOVERNANCE_AUDIT_2026-07-08.md` records the current loader/import/built-ins map, migration 40 adds `skill_usage`, active skill selection records best-effort usage through IPC, and current `Skill.source` remains the provenance field for built-in/user/server origin.
-Scope note: protected built-ins, archive/restore, generated candidates, Settings grouping, and prompt hygiene stay open as SKILL-03..07.
+Scope note: generated candidates, Settings grouping, and prompt hygiene stay open as SKILL-05..07.
 
 ### SKILL-03 · Protected built-ins (S)
 - **source:** Hermes `skill_usage.py:66 PROTECTED_BUILTIN_SKILLS`.
 - **target:** `electron/ai/skills/built-in.ts`, `electron/ipc/skills.ts` delete handler.
 - **done:**
-  - [ ] Protected skill нельзя удалить (только archive)
+  - [x] Protected skill нельзя удалить (только archive)
 
 ### SKILL-04 · Archive/restore (M)
 - **source:** Hermes `archive_skill:696`, `restore_skill:757`.
 - **target:** `electron/ai/skills/loader.ts`.
 - **done:**
-  - [ ] `archiveSkill(id)` → move `.md` в `~/.verstak/skills/.archive/`
-  - [ ] `restoreSkill(id)` → обратно
-  - [ ] Loader игнорирует `.archive/`
+  - [x] `archiveSkill(id)` → move `.md` в `~/.verstak/skills/.archive/`
+  - [x] `restoreSkill(id)` → обратно
+  - [x] Loader игнорирует `.archive/`
+
+**Status 2026-07-08 Skill Archive seed:** SKILL-03/SKILL-04 compact scope closed.
+Built-ins are protected from physical deletion by using `skill_usage.state='archived'`, the registry filters archived skills from `list/get`, local user markdown skills move to `~/.verstak/skills/.archive/`, and restore moves archived markdown back when present.
+Scope note: Settings UI controls for archive/restore are not mounted in this pass; IPC/bridge/types are ready for that follow-up.
 
 ### SKILL-05 · Generated-skill candidates, gated (M)
 - **source:** Hermes curator + `is_curation_eligible:447`.

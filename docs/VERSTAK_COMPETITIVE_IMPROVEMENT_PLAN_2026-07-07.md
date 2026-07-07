@@ -198,6 +198,10 @@ Targeted verification: `npx vitest run tests/store/project-store-routing.test.ts
 Added `docs/SKILL_GOVERNANCE_AUDIT_2026-07-08.md`, append-only migration 40 for `skill_usage`, storage facade `electron/storage/skill-usage.ts`, IPC `skills:usage` / `skills:record-use`, and best-effort usage counting from `setActiveSkill(id)`.
 Targeted verification: `npx vitest run tests/storage/skill-usage.test.ts tests/store/skill-store.test.ts tests/ai/skills-frontmatter.test.ts tests/ai/skills-loaders.test.ts tests/ai/skills-server-load.test.ts` -> green, 5 files / 24 tests; `npm run type` -> green.
 
+**Status 2026-07-08 SG archive update:** `190-SG-03` and compact `190-SG-04` are closed.
+Archived skills are hidden by `skill_usage.state='archived'` instead of deleting built-ins, local `~/.verstak/skills/*.md` files move to `.archive/`, restore moves matching archived markdown back, and IPC/bridge/types expose `skills.archive` / `skills.restore` for the future Settings controls.
+Targeted verification: `npx vitest run tests/storage/skill-usage.test.ts tests/ai/skill-archive.test.ts tests/ai/skill-registry-governance.test.ts tests/store/skill-store.test.ts tests/ai/skills-frontmatter.test.ts tests/ai/skills-loaders.test.ts tests/ai/skills-server-load.test.ts` -> green, 7 files / 28 tests; `npm run type` -> green.
+
 ## Phase 6. 1.9.x: Eval / Trajectory / Proof
 
 | ID | Задача | Зачем | Где | Готово, когда | Проверка |

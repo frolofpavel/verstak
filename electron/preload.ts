@@ -258,6 +258,8 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('skills:status'),
     usage: () => ipcRenderer.invoke('skills:usage'),
     recordUse: (skillId: string) => ipcRenderer.invoke('skills:record-use', skillId),
+    archive: (skillId: string) => ipcRenderer.invoke('skills:archive', skillId),
+    restore: (skillId: string) => ipcRenderer.invoke('skills:restore', skillId),
     runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
       ipcRenderer.invoke('skills:run-loaders', skillId, opts),
     capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>

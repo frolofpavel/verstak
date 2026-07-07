@@ -466,7 +466,9 @@ app.whenReady().then(() => {
   // не блокирует window open.
   const skillRegistry = createSkillRegistry(() => ({
     serverBase: settings.getSecret('skills_server_base')
-  }))
+  }), {
+    isArchived: (skillId) => skillUsage.get(skillId)?.state === 'archived'
+  })
   void skillRegistry.refresh().catch(err => {
     console.warn('[skills] initial refresh failed:', err instanceof Error ? err.message : err)
   })

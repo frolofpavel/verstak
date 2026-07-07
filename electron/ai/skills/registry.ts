@@ -11,17 +11,23 @@
 import { loadAllSkills, type LoaderConfig } from './loader'
 import type { Skill, SkillRegistry } from './types'
 
-export function createSkillRegistry(getConfig: () => LoaderConfig): SkillRegistry {
+export interface SkillRegistryOptions {
+  isArchived?: (skillId: string) => boolean
+}
+
+export function createSkillRegistry(getConfig: () => LoaderConfig, opts: SkillRegistryOptions = {}): SkillRegistry {
   let skills: Skill[] = []
   let lastRefreshAt: number | null = null
   let serverReachable = false
+  const visible = () => skills.filter(s => !opts.isArchived?.(s.id))
 
   return {
     list() {
-      return skills
+      return visible()
     },
     get(id: string) {
-      return skills.find(s => s.id === id) ?? null
+      const skill = skills.find(s => s.id === id) ?? null
+      return skill && !opts.isArchived?.(skill.id) ? skill : null
     },
     async refresh() {
       const before = new Map(skills.map(s => [s.id, s]))

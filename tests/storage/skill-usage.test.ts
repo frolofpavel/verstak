@@ -38,4 +38,24 @@ describe('skill_usage governance storage (migration 40)', () => {
     expect(usage.list().map(r => [r.skillId, r.useCount])).toEqual([['code-review', 2]])
     db.close()
   })
+
+  it('archive and restore preserve counters while toggling state', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const usage = createSkillUsageStore(db)
+
+    usage.recordUse('code-review', 1000)
+    expect(usage.archive('code-review', 2000)).toMatchObject({
+      skillId: 'code-review',
+      useCount: 1,
+      state: 'archived',
+      archivedAt: 2000
+    })
+    expect(usage.restore('code-review')).toMatchObject({
+      skillId: 'code-review',
+      useCount: 1,
+      state: 'active',
+      archivedAt: null
+    })
+    db.close()
+  })
 })

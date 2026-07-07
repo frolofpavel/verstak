@@ -17,6 +17,7 @@ import type { SkillRegistry } from '../ai/skills/types'
 import { lookupLoader } from '../ai/skills/loaders'
 import { buildCapturedSkill, deriveSkillId } from '../ai/skills/capture'
 import { USER_SKILLS_DIR } from '../ai/skills/loader'
+import { archiveUserSkillFile, restoreArchivedUserSkillFile } from '../ai/skills/archive'
 import type { SkillUsageStore } from '../storage/skill-usage'
 
 interface RunLoadersDeps {
@@ -34,6 +35,20 @@ export function registerSkillsIpc(registry: SkillRegistry, deps: RunLoadersDeps 
     const skill = registry.get(skillId)
     if (!skill) throw new Error(`Unknown skill: ${skillId}`)
     return deps.skillUsage?.recordUse(skill.id) ?? null
+  })
+  ipcMain.handle('skills:archive', async (_e, skillId: string) => {
+    const skill = registry.get(skillId)
+    if (!skill) throw new Error(`Unknown skill: ${skillId}`)
+    const file = await archiveUserSkillFile(skill)
+    const usage = deps.skillUsage?.archive(skill.id) ?? null
+    await registry.refresh()
+    return { ok: true as const, id: skill.id, source: skill.source, file, usage }
+  })
+  ipcMain.handle('skills:restore', async (_e, skillId: string) => {
+    const file = await restoreArchivedUserSkillFile(skillId)
+    const usage = deps.skillUsage?.restore(skillId) ?? null
+    await registry.refresh()
+    return { ok: true as const, id: skillId, file, usage }
   })
 
   /**

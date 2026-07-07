@@ -181,6 +181,13 @@ export interface SkillUsageRecord {
   archivedAt: number | null
 }
 
+export interface SkillArchiveMove {
+  moved: boolean
+  from?: string
+  to?: string
+  reason?: string
+}
+
 export interface ScheduledTask {
   id: number
   project_path: string
@@ -457,6 +464,8 @@ declare global {
         status: () => Promise<{ lastRefreshAt: number | null; serverReachable: boolean; total: number }>
         usage: () => Promise<SkillUsageRecord[]>
         recordUse: (skillId: string) => Promise<SkillUsageRecord | null>
+        archive: (skillId: string) => Promise<{ ok: true; id: string; source: Skill['source']; file: SkillArchiveMove; usage: SkillUsageRecord | null }>
+        restore: (skillId: string) => Promise<{ ok: true; id: string; file: SkillArchiveMove; usage: SkillUsageRecord | null }>
         runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
           Promise<{ context: string; labels: string[] }>
         /** Skill Capture: сохранить прогон как скилл-скаффолд в ~/.verstak/skills/. */
