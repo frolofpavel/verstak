@@ -142,12 +142,13 @@ covers clean/dirty/unpushed/all-three/non-git on real temp git repos.
 Snapshot-before-remove, restore-from-snapshot, lossless remove, and no-push regression are implemented.
 Remaining managed-worktree scope starts at snapshot retention prune, registry UI/actions, and release checklist (`189-WT-07`, `189-WT-09`).
 
-**Status 2026-07-07 PROC:** process manager foundation closed for `189-PROC-01..07`, plus owner-bound completion routing into the next agent turn.
+**Status 2026-07-07 PROC:** process manager foundation closed for `189-PROC-01..07`, plus owner-bound completion routing into the next agent turn and real OS anti-orphan smoke.
 Added `ProcessRegistry`, background tools `spawn_process`/`process_status`/`read_process`/`stop_process`,
 bounded redacted output tail, TTL prune/sweeper API, PID-reuse guard, command gating before spawn,
 and a redacted owner-filtered `drainCompletions()` queue for `notifyOnExit` processes. `runApiConversation`
 injects only current-`sendId` completions into the next turn; cross-chat leakage is covered by agent-loop tests.
-Remaining process scope: full OS anti-orphan smoke and UI timeline polish (`189-PROC-08..09`; `189-PROC-10` covered by targeted tests).
+`tests/ai/process-anti-orphan.test.ts` caught and locked a Windows race where async `taskkill` + immediate `child.kill()` could orphan the real Node child; `treeKill` now runs `taskkill /T /F` synchronously.
+Remaining process scope: UI timeline polish (`189-PROC-08`; `189-PROC-10` covered by targeted tests).
 
 ## Phase 4. 1.9.0: Run Lifecycle / Wait Contract
 

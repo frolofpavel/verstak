@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process'
+import { spawnSync, type ChildProcess } from 'child_process'
 import { platform } from 'os'
 
 /**
@@ -12,9 +12,10 @@ import { platform } from 'os'
  * Grok CLI parity audit (2026-05-21, finding 2.4): "корректное убийство
  * child-процессов во всех CLI" — addressed here.
  *
- * On Unix `child.kill('SIGTERM')` already propagates to the process group when
- * we spawn with detached:false, so the default works. We only need the special
- * treatment on Windows.
+ * On Unix, callers that spawn with detached:true create a process group whose
+ * id is the child pid. Kill that group first; if there is no such group (for
+ * non-detached callers), the fallback child.kill() below still handles the
+ * immediate process.
  *
  * Best-effort: silent on errors. Caller should also keep calling child.kill()
  * for the immediate handle so the SIGTERM path still works if treeKill fails.
@@ -24,12 +25,14 @@ export function treeKill(child: ChildProcess): void {
   if (platform() === 'win32') {
     // /F = force, /T = include process tree. taskkill is shipped with Windows.
     try {
-      const k = spawn('taskkill', ['/pid', String(child.pid), '/F', '/T'], {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/F', '/T'], {
         windowsHide: true,
-        stdio: 'ignore'
+        stdio: 'ignore',
+        timeout: 5000
       })
-      k.on('error', () => { /* taskkill missing — fall through */ })
     } catch { /* noop */ }
+  } else {
+    try { process.kill(-child.pid, 'SIGTERM') } catch { /* no detached group */ }
   }
   try { child.kill() } catch { /* already exited */ }
 }

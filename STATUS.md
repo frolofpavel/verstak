@@ -289,4 +289,6 @@ Added `ProcessRegistry`, tools `spawn_process`, `process_status`, `read_process`
 Windows detail: registry keeps the shell handle non-detached so stdout/stderr tail works; process tree stop still uses `taskkill /T /F` through `treeKill`.
 PROC-04 is now owner-bound: `notifyOnExit` processes enter a redacted completion queue once, carry `sendId/runId/chatId` ownership, and `runApiConversation` drains only completions for its own `sendId` into the next agent turn. Cross-chat leakage is covered by tests; process exit also writes a best-effort run timeline event.
 Targeted verification: `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts tests/ipc/agent-loop.test.ts` -> green, 3 files / 32 tests; `npm run type` -> green.
-Remaining process scope: full OS anti-orphan smoke and UI timeline polish.
+PROC-06 anti-orphan smoke is closed after a real Windows bugfix: `treeKill` now runs `taskkill /T /F` synchronously before fallback `child.kill()`, preventing shell-death races that orphaned the real Node child. New smoke tracks parent PID + grandchild PID and waits for both to die.
+Targeted anti-orphan verification: `npx vitest run tests/ai/process-anti-orphan.test.ts tests/ai/process-registry.test.ts` -> green, 2 files / 10 tests.
+Remaining process scope: UI timeline polish.
