@@ -20,14 +20,21 @@ interface FakeProcessHandle {
   status: 'running' | 'completed' | 'failed' | 'killed'
   outputTail: string
   notifyOnExit: boolean
+  owner?: { sendId?: number; runId?: string | null; chatId?: number | null }
 }
 
 function fakeRegistry() {
   const handles = new Map<string, FakeProcessHandle>()
-  const calls: Array<{ command: string; cwd: string; timeout?: number; notifyOnExit?: boolean }> = []
+  const calls: Array<{
+    command: string
+    cwd: string
+    timeout?: number
+    notifyOnExit?: boolean
+    owner?: { sendId?: number; runId?: string | null; chatId?: number | null }
+  }> = []
   return {
     calls,
-    spawn(command: string, opts: { cwd: string; timeout?: number; notifyOnExit?: boolean }) {
+    spawn(command: string, opts: { cwd: string; timeout?: number; notifyOnExit?: boolean; owner?: { sendId?: number; runId?: string | null; chatId?: number | null } }) {
       calls.push({ command, ...opts })
       const handle: FakeProcessHandle = {
         id: `p-${calls.length}`,
@@ -38,6 +45,7 @@ function fakeRegistry() {
         status: 'running',
         outputTail: 'line1\nline2\nline3',
         notifyOnExit: opts.notifyOnExit === true,
+        owner: opts.owner ? { ...opts.owner } : undefined,
       }
       handles.set(handle.id, handle)
       return { ...handle }
@@ -97,7 +105,12 @@ describe('process tools', () => {
     }), h.ctx)
     expect(res.error).toBeFalsy()
     expect(res.result).toMatchObject({ process_id: 'p-1', pid: 1001, status: 'running' })
-    expect(h.registry.calls[0]).toMatchObject({ command: 'npm run dev', notifyOnExit: true, timeout: 1000 })
+    expect(h.registry.calls[0]).toMatchObject({
+      command: 'npm run dev',
+      notifyOnExit: true,
+      timeout: 1000,
+      owner: { sendId: 1, runId: null, chatId: null },
+    })
   })
 
   it('spawn_process denylist blocks before registry spawn', async () => {

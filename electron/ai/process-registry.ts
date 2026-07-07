@@ -6,6 +6,12 @@ import { scanText } from './secret-scanner'
 
 export type ProcessStatus = 'running' | 'completed' | 'failed' | 'killed'
 
+export interface ProcessOwner {
+  sendId?: number
+  runId?: string | null
+  chatId?: number | null
+}
+
 export interface ProcessHandle {
   id: string
   pid: number
@@ -18,6 +24,7 @@ export interface ProcessHandle {
   outputTail: string
   notifyOnExit: boolean
   hostStartTime?: string | null
+  owner?: ProcessOwner
 }
 
 export interface ProcessCompletion {
@@ -30,12 +37,26 @@ export interface ProcessCompletion {
   exitCode?: number
   status: ProcessStatus
   outputTail: string
+  owner?: ProcessOwner
 }
 
 export interface ProcessRegistryDeps {
   now?: () => number
   treeKill?: (child: ChildProcess) => void
   getHostStartTime?: (pid: number) => string | null
+}
+
+export interface ProcessSpawnOptions {
+  cwd: string
+  timeout?: number
+  notifyOnExit?: boolean
+  owner?: ProcessOwner
+}
+
+export interface ProcessCompletionFilter {
+  ownerSendId?: number
+  ownerRunId?: string | null
+  ownerChatId?: number | null
 }
 
 interface InternalProcessHandle extends ProcessHandle {
@@ -55,7 +76,14 @@ function trimTail(text: string, maxChars = DEFAULT_TAIL_CHARS): string {
 
 function cloneHandle(handle: InternalProcessHandle): ProcessHandle {
   const { child: _child, timeout: _timeout, ...safe } = handle
-  return { ...safe }
+  return { ...safe, owner: safe.owner ? { ...safe.owner } : undefined }
+}
+
+function completionMatches(completion: ProcessCompletion, filter: ProcessCompletionFilter): boolean {
+  if (filter.ownerSendId !== undefined && completion.owner?.sendId !== filter.ownerSendId) return false
+  if (filter.ownerRunId !== undefined && completion.owner?.runId !== filter.ownerRunId) return false
+  if (filter.ownerChatId !== undefined && completion.owner?.chatId !== filter.ownerChatId) return false
+  return true
 }
 
 export function getProcessStartTime(pid: number): string | null {
@@ -95,7 +123,7 @@ export class ProcessRegistry {
     this.hostStartTime = deps.getHostStartTime ?? getProcessStartTime
   }
 
-  spawn(command: string, opts: { cwd: string; timeout?: number; notifyOnExit?: boolean }): ProcessHandle {
+  spawn(command: string, opts: ProcessSpawnOptions): ProcessHandle {
     const child = spawnChild(command, {
       cwd: opts.cwd,
       shell: true,
@@ -118,6 +146,7 @@ export class ProcessRegistry {
       outputTail: '',
       notifyOnExit: opts.notifyOnExit === true,
       hostStartTime: this.hostStartTime(child.pid),
+      owner: opts.owner ? { ...opts.owner } : undefined,
       child,
     }
     this.processes.set(id, handle)
@@ -190,8 +219,17 @@ export class ProcessRegistry {
     this.killTree(handle.child)
   }
 
-  drainCompletions(): ProcessCompletion[] {
-    return this.completions.splice(0)
+  drainCompletions(filter: ProcessCompletionFilter = {}): ProcessCompletion[] {
+    if (Object.keys(filter).length === 0) return this.completions.splice(0)
+    const drained: ProcessCompletion[] = []
+    const kept: ProcessCompletion[] = []
+    for (const completion of this.completions) {
+      if (completionMatches(completion, filter)) drained.push(completion)
+      else kept.push(completion)
+    }
+    this.completions.length = 0
+    this.completions.push(...kept)
+    return drained
   }
 
   pruneFinished(ttlMs = DEFAULT_TTL_MS): number {
@@ -240,6 +278,7 @@ export class ProcessRegistry {
       exitCode: handle.exitCode,
       status: handle.status,
       outputTail: handle.outputTail,
+      owner: handle.owner ? { ...handle.owner } : undefined,
     })
   }
 }

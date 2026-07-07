@@ -43,6 +43,8 @@ type Overrides = {
   signal?: AbortSignal
   recordJournal?: ReturnType<typeof vi.fn>
   agentMode?: string
+  sendId?: number
+  processRegistry?: unknown
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -53,7 +55,7 @@ function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefine
 function args(dir: string, o: Overrides): unknown[] {
   const signal = o.signal ?? new AbortController().signal
   const ctx = {
-    sender: o.sender ?? makeSender(), sendId: 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
+    sender: o.sender ?? makeSender(), sendId: o.sendId ?? 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
     initialMessages: o.messages ?? [{ role: 'user', content: 'hi' }], signal,
     recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: o.recordJournal ?? vi.fn(), readJournal: vi.fn(() => []),
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
@@ -64,12 +66,68 @@ function args(dir: string, o: Overrides): unknown[] {
     mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
     parentChatId: null, subSessions: undefined, sessionTodos: undefined,
     agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: null,
+    processRegistry: o.processRegistry,
   }
   return [ctx]
 }
 
 function mockRuns() {
   return { finish: vi.fn(), appendEvent: vi.fn(), tick: vi.fn(), saveCheckpoint: vi.fn(), clearCheckpoint: vi.fn() }
+}
+
+function completionRegistry() {
+  const completions: Array<{
+    id: string
+    pid: number
+    command: string
+    cwd: string
+    startedAt: number
+    exitedAt: number
+    exitCode: number
+    status: 'completed'
+    outputTail: string
+    owner?: { sendId?: number; runId?: string | null; chatId?: number | null }
+  }> = []
+  return {
+    spawn(command: string, opts: { cwd: string; notifyOnExit?: boolean; owner?: { sendId?: number; runId?: string | null; chatId?: number | null } }) {
+      const id = `p-${completions.length + 1}`
+      if (opts.notifyOnExit) {
+        completions.push({
+          id,
+          pid: 9000 + completions.length,
+          command,
+          cwd: opts.cwd,
+          startedAt: 100,
+          exitedAt: 150,
+          exitCode: 0,
+          status: 'completed',
+          outputTail: 'server ready',
+          owner: opts.owner ? { ...opts.owner } : undefined,
+        })
+      }
+      return {
+        id,
+        pid: 9000,
+        command,
+        cwd: opts.cwd,
+        startedAt: 100,
+        status: 'running',
+        outputTail: '',
+        notifyOnExit: opts.notifyOnExit === true,
+        owner: opts.owner,
+      }
+    },
+    get: vi.fn(),
+    list: vi.fn(() => []),
+    kill: vi.fn(),
+    drainCompletions(filter: { ownerSendId?: number } = {}) {
+      const drained = completions.filter(c => filter.ownerSendId === undefined || c.owner?.sendId === filter.ownerSendId)
+      const kept = completions.filter(c => !drained.includes(c))
+      completions.length = 0
+      completions.push(...kept)
+      return drained
+    },
+  }
 }
 
 describe('agent-loop (runApiConversation) — харнес', () => {
@@ -509,4 +567,52 @@ describe('agent-loop Этап 2 — fallback routing', () => {
     // Записи не произошло — policy заблокировала даже в escalation-фрейме.
     expect(existsSync(join(dir, 'blocked.txt'))).toBe(false)
   }, 20000)
+
+  it('process completion routed only to owner sendId on the next turn', async () => {
+    const runs = mockRuns()
+    const registry = completionRegistry()
+    registry.spawn('foreign watcher', {
+      cwd: dir,
+      notifyOnExit: true,
+      owner: { sendId: 999, runId: 'foreign', chatId: 999 },
+    })
+    const seen: ChatMessage[][] = []
+    const p: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        seen.push(messages)
+        if (seen.length === 1) {
+          yield {
+            type: 'tool-call',
+            call: { id: 'proc-1', name: 'spawn_process', args: { command: 'npm run dev', notify_on_exit: true } }
+          }
+          yield { type: 'done' }
+        } else {
+          yield { type: 'text', text: 'увидел завершение процесса' }
+          yield { type: 'done' }
+        }
+      },
+    }
+
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      costGuard: createCostGuard(100),
+      agentRuns: runs,
+      runId: 'r1',
+      sendId: 42,
+      processRegistry: registry,
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(seen.length).toBeGreaterThanOrEqual(2)
+    const secondTurn = JSON.stringify(seen[1])
+    expect(secondTurn).toContain('background process p-2 finished')
+    expect(secondTurn).toContain('server ready')
+    expect(secondTurn).not.toContain('foreign watcher')
+    expect(runs.appendEvent).toHaveBeenCalledWith('r1', 'tool_call', expect.objectContaining({ label: 'process exited' }))
+    const remaining = registry.drainCompletions()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].command).toBe('foreign watcher')
+  }, 15000)
 })

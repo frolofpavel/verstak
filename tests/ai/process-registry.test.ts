@@ -103,6 +103,30 @@ describe('ProcessRegistry', () => {
     expect(registry.drainCompletions()).toEqual([])
   })
 
+  it('drains completions by owner without leaking other sendIds', async () => {
+    const registry = createRegistry()
+    const first = registry.spawn(nodeCommand("console.log('first')"), {
+      cwd: process.cwd(),
+      notifyOnExit: true,
+      owner: { sendId: 1, runId: 'r1', chatId: 10 },
+    })
+    const second = registry.spawn(nodeCommand("console.log('second')"), {
+      cwd: process.cwd(),
+      notifyOnExit: true,
+      owner: { sendId: 2, runId: 'r2', chatId: 20 },
+    })
+    await waitFor(() => registry.get(first.id), value => value?.status === 'completed')
+    await waitFor(() => registry.get(second.id), value => value?.status === 'completed')
+
+    const firstOnly = registry.drainCompletions({ ownerSendId: 1 })
+    expect(firstOnly).toHaveLength(1)
+    expect(firstOnly[0]).toMatchObject({ id: first.id, owner: { sendId: 1, runId: 'r1', chatId: 10 } })
+
+    const remaining = registry.drainCompletions()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]).toMatchObject({ id: second.id, owner: { sendId: 2, runId: 'r2', chatId: 20 } })
+  })
+
   it('kill marks process as killed and calls tree kill', async () => {
     const killTree = vi.fn()
     const registry = createRegistry({ treeKill: killTree, getHostStartTime: () => 'same-start' })

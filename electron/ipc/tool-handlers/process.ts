@@ -102,6 +102,11 @@ export const spawnProcessHandler: ToolHandler = {
         cwd,
         timeout,
         notifyOnExit: call.args.notify_on_exit === true,
+        owner: {
+          sendId: ctx.sendId,
+          runId: ctx.runId ?? null,
+          chatId: ctx.parentChatId ?? null,
+        },
       })
       ctx.recordRunEvent?.('tool_call', { label: 'spawn_process', detail: `${handle.id} · ${command}`, status: 'ok' })
       return { id: call.id, name: call.name, result: { process_id: handle.id, pid: handle.pid, status: handle.status } }

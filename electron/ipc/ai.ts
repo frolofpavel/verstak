@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent } from '../ai/run-notify'
 import { scanText } from '../ai/secret-scanner'
+import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from '../ai/process-registry'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
 import { fuseRanks } from '../ai/memory-fusion'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
@@ -159,6 +160,20 @@ function formatConversationSupplement(text: string): string {
     'Если уже был составлен план, скорректируй его. Не завершай старый вариант работы так, будто этого дополнения нет.',
     '',
     text.trim(),
+  ].join('\n')
+}
+
+function formatProcessCompletionNote(completion: ProcessCompletion): string {
+  const runtimeMs = Math.max(0, completion.exitedAt - completion.startedAt)
+  const tail = completion.outputTail.trim()
+  return [
+    `[SYSTEM: background process ${completion.id} finished]`,
+    `status: ${completion.status}`,
+    `exitCode: ${completion.exitCode ?? 'unknown'}`,
+    `runtimeMs: ${runtimeMs}`,
+    `command: ${completion.command}`,
+    'redacted output tail:',
+    tail || '(empty)',
   ].join('\n')
 }
 
@@ -1230,7 +1245,6 @@ async function runPlainConversation(
     }
     return added
   }
-
   let lastAssistantText = ''
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
@@ -1495,6 +1509,7 @@ export interface AgentRunContext {
   runId?: string
   verifications?: AiDeps['verifications']
   toolsAllow?: string[] | null
+  processRegistry?: ProcessRegistry
   /** F1-фикс: помечает рекурсивный smart-fallback-фрейм. SessionStart/UserPromptSubmit-
    *  хуки НЕ перефаерятся в нём (симметрично Stop-хуку под !handedOff) — иначе на одну
    *  отправку при N фолбэках старт-хуки исполнились бы N+1 раз. */
@@ -1518,6 +1533,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+    processRegistry = globalProcessRegistry,
     isFallbackFrame,
   } = ctx
   const startedAt = Date.now()
@@ -1645,6 +1661,32 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // Cross-verify: накапливаем изменённые файлы с контентом для ревью другим провайдером.
   const sessionChanges: TurnChange[] = []
   let lastAssistantText = ''
+  const drainProcessCompletionsForRun = (assistantTextBeforeNote = ''): boolean => {
+    const completions = processRegistry.drainCompletions({ ownerSendId: sendId })
+    if (completions.length === 0) return false
+    if (assistantTextBeforeNote.trim()) {
+      currentMessages.push({ role: 'assistant', content: assistantTextBeforeNote })
+      lastAssistantText = assistantTextBeforeNote
+    }
+    for (const completion of completions) {
+      const note = formatProcessCompletionNote(completion)
+      currentMessages.push({ role: 'user', content: note })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'info', text: `⚙ process ${completion.id} exited (${completion.exitCode ?? '?'})` }
+      })
+      if (agentRuns && runId) {
+        try {
+          agentRuns.appendEvent(runId, 'tool_call', {
+            label: 'process exited',
+            detail: `${completion.id}: ${completion.status}, exit ${completion.exitCode ?? 'unknown'}`,
+            status: completion.status === 'completed' ? 'ok' : 'error',
+          })
+        } catch { /* best-effort */ }
+      }
+    }
+    return true
+  }
   // Attachments collected from browser_screenshot etc. — flushed into the
   // next user message so vision-capable providers see them.
   const pendingAttachments: Attachment[] = []
@@ -1791,6 +1833,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
 
   turnLoop: for (let turn = 0; turn < turnsBudget; turn++) {
     drainSupplements()
+    drainProcessCompletionsForRun()
     if (signal.aborted) {
       exitReason = 'aborted'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
@@ -1940,6 +1983,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             assistantText = ''
             continue turnLoop
           }
+          if (drainProcessCompletionsForRun()) { assistantText = ''; continue turnLoop }
           // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
           const esc = maybeEscalateNoTools()
           if (esc) return esc
@@ -2010,6 +2054,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
     if (toolCalls.length === 0) {
       if (continueAfterPlainReply(assistantText)) {
+        assistantText = ''
+        continue
+      }
+      if (drainProcessCompletionsForRun()) {
         assistantText = ''
         continue
       }
@@ -2155,6 +2203,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       },
       // F2: декларативные permission-правила (загружены 1 раз на прогон выше).
       permissionRules,
+      processRegistry,
       currentProviderId: providerId,
       mcpClient: mcpClientRef,
       appendAudit: appendAuditFn,
