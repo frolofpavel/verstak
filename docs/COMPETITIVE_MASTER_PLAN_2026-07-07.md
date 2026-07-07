@@ -812,6 +812,14 @@
 - **Тесты**: `tests/ai/worktree-lifecycle.test.ts` покрывает refuse dirty without force, forced dirty snapshot+restore, unpushed commit preserve+restore, clean remove без snapshot, no-push helper guard.
 - **Проверка на момент записи**: targeted `npx vitest run tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/storage/worktree-sessions.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 28 tests; `npm run type` -> green.
 
+### Дополнение 2026-07-07: WT-07/WT-09 v1 закрыты
+- **WT-07 registry/actions**: добавлены IPC `worktree:list`, `worktree:snapshot`, `worktree:restore`, `worktree:delete`; preload и `src/types/api.d.ts` синхронизированы.
+- **WT-07 storage**: `electron/storage/worktree-sessions.ts` умеет `getLatest` и `listProject`, поэтому registry видит active + closed/restorable sessions.
+- **WT-07 UI**: в существующую `WorktreeBar` добавлена кнопка `Снимок` для активной изолированной сессии. Большой отдельный `WorktreePanel` не добавлялся в этот проход, чтобы не раздувать UI.
+- **WT-09 release checklist**: добавлен в `STATUS.md`: isolate -> edit -> status dirty -> snapshot -> discard/delete -> restore from snapshot -> merge clean path; no-push guard; type/targeted/fast/build.
+- **Тесты**: `tests/storage/worktree-sessions.test.ts` покрывает `getLatest`/`listProject` для closed/restorable sessions.
+- **Проверка на момент записи**: targeted `npx vitest run tests/storage/worktree-sessions.test.ts tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 29 tests; `npm run type` -> green.
+
 ### Дополнение 2026-07-07: PROC-01..08 закрыты
 - **PROC-01**: добавлен `electron/ai/process-registry.ts`: `ProcessRegistry`, `ProcessHandle`, `spawn/get/list/appendOutput/markExited/kill/pruneFinished/startSweeper`.
 - **PROC-01 runtime detail**: на Windows registry не использует `detached:true`, потому что detached shell теряет stdout/stderr pipe; tree kill остаётся через `taskkill /T /F`. На Unix detached process group сохраняется.

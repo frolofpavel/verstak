@@ -101,4 +101,22 @@ describe('worktree-sessions lifecycle storage', () => {
     const active = wts.listActive('/p')
     expect(active.map(s => s.chatId).sort()).toEqual([1])
   })
+
+  it('getLatest and listProject include closed/restorable sessions', () => {
+    db = openDb(join(dir, 't.db'))
+    const wts = createWorktreeSessions(db)
+    wts.create(1, '/p', '/tmp/a')
+    wts.setRefs(1, { snapshotRef: 'refs/verstak/snap-a', baseRef: 'abc123' })
+    wts.finish(1, 'dismissed')
+    wts.markRemoved(1, '/tmp/a', 1000)
+    wts.create(2, '/p', '/tmp/b')
+
+    expect(wts.getLatest(1)).toMatchObject({
+      chatId: 1,
+      state: 'dismissed',
+      snapshotRef: 'refs/verstak/snap-a',
+      removedAt: 1000,
+    })
+    expect(wts.listProject('/p').map(s => s.chatId).sort()).toEqual([1, 2])
+  })
 })

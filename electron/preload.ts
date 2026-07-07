@@ -517,9 +517,13 @@ contextBridge.exposeInMainWorld('api', {
   // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
   worktree: {
     isolate: (chatId: number, projectPath: string) => ipcRenderer.invoke('worktree:isolate', chatId, projectPath),
+    list: (projectPath: string) => ipcRenderer.invoke('worktree:list', projectPath),
     status: (chatId: number) => ipcRenderer.invoke('worktree:status', chatId),
     merge: (chatId: number) => ipcRenderer.invoke('worktree:merge', chatId),
     discard: (chatId: number) => ipcRenderer.invoke('worktree:discard', chatId),
+    snapshot: (chatId: number) => ipcRenderer.invoke('worktree:snapshot', chatId),
+    restore: (chatId: number) => ipcRenderer.invoke('worktree:restore', chatId),
+    delete: (chatId: number) => ipcRenderer.invoke('worktree:delete', chatId),
   },
   // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
   verifications: {

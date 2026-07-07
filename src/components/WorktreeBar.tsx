@@ -49,6 +49,12 @@ export function WorktreeBar() {
       <button
         className="gg-btn gg-btn-ghost"
         disabled={busy || isStreaming}
+        onClick={() => void run(() => window.api.worktree.snapshot(activeChatId))}
+        title="Сохранить snapshot изолированной сессии для восстановления"
+      >◇ Снимок</button>
+      <button
+        className="gg-btn gg-btn-ghost"
+        disabled={busy || isStreaming}
         onClick={() => void run(() => window.api.worktree.discard(activeChatId))}
         title="Отбросить изоляцию и все её изменения"
       >✕ Отбросить</button>

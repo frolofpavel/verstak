@@ -18,12 +18,14 @@ export interface WorktreeSession {
 export interface WorktreeSessions {
   create: (chatId: number, projectPath: string, worktreePath: string) => WorktreeSession
   getActive: (chatId: number) => WorktreeSession | null
+  getLatest: (chatId: number) => WorktreeSession | null
   activePath: (chatId: number) => string | null
   finish: (chatId: number, state: 'merged' | 'dismissed') => void
   touch: (chatId: number, when?: number) => void
   setRefs: (chatId: number, refs: { snapshotRef?: string | null; baseRef?: string | null }) => void
   markRemoved: (chatId: number, worktreePath: string, when?: number) => void
   listActive: (projectPath: string) => WorktreeSession[]
+  listProject: (projectPath: string) => WorktreeSession[]
 }
 
 const SELECT = `
@@ -63,6 +65,10 @@ export function createWorktreeSessions(db: Database): WorktreeSessions {
       const row = db.prepare(`${SELECT} WHERE chat_id = ? AND state = 'active' ORDER BY created_at DESC LIMIT 1`).get(chatId) as WorktreeSession | undefined
       return row ?? null
     },
+    getLatest(chatId) {
+      const row = db.prepare(`${SELECT} WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1`).get(chatId) as WorktreeSession | undefined
+      return row ?? null
+    },
     activePath(chatId) {
       const row = db.prepare("SELECT worktree_path as p FROM worktree_sessions WHERE chat_id = ? AND state = 'active' ORDER BY created_at DESC LIMIT 1").get(chatId) as { p: string } | undefined
       return row?.p ?? null
@@ -83,6 +89,9 @@ export function createWorktreeSessions(db: Database): WorktreeSessions {
     },
     listActive(projectPath) {
       return db.prepare(`${SELECT} WHERE project_path = ? AND state = 'active' ORDER BY created_at DESC`).all(projectPath) as WorktreeSession[]
+    },
+    listProject(projectPath) {
+      return db.prepare(`${SELECT} WHERE project_path = ? ORDER BY created_at DESC`).all(projectPath) as WorktreeSession[]
     },
   }
 }

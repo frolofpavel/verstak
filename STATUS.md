@@ -293,3 +293,11 @@ PROC-06 anti-orphan smoke is closed after a real Windows bugfix: `treeKill` now 
 Targeted anti-orphan verification: `npx vitest run tests/ai/process-anti-orphan.test.ts tests/ai/process-registry.test.ts` -> green, 2 files / 10 tests.
 PROC-08 UI timeline polish is closed: process exits are written as dedicated `process` run events (`process <id> exited`) and Runs panel renders them with a gear icon instead of hiding them as generic tool calls.
 Remaining process scope: none for process-manager v1; next master-plan area is managed-worktree UI/release checklist or run lifecycle/wait.
+
+## 2026-07-07 worktree registry update
+
+Managed worktree UI/actions layer is now in code.
+Added worktree registry contracts `worktree:list`, `worktree:snapshot`, `worktree:restore`, `worktree:delete` through IPC/preload/renderer types. Storage now exposes `getLatest` and `listProject` so active and closed/restorable sessions can be listed instead of only the current active worktree.
+WorktreeBar now has a visible `Снимок` action for the active isolated session. Existing merge/discard remain local-only and no-push.
+Release checklist for worktree v1: verify isolate -> edit -> status dirty -> snapshot -> discard/delete -> restore from snapshot -> merge clean path; verify no `git push` path; verify `npm run type`, targeted worktree suite, `npm run test:fast`, `npm run build`.
+Targeted verification: `npx vitest run tests/storage/worktree-sessions.test.ts tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 29 tests; `npm run type` -> green.

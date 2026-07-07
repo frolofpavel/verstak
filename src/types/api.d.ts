@@ -31,6 +31,21 @@ export interface ChatSession {
 export interface Task { id: number; text: string; done: boolean; createdAt: number; doneAt: number | null }
 export type JournalKind = 'manual' | 'session' | 'tool' | 'note'
 export interface JournalEntry { id: number; kind: JournalKind; title: string; detail: string | null; createdAt: number }
+export interface WorktreeGitStateDTO { dirty: boolean; unpushed: boolean; clean: boolean; dirtyFiles?: number; unpushedCommits?: number }
+export interface WorktreeSessionDTO {
+  chatId: number
+  projectPath: string
+  worktreePath: string
+  state: 'active' | 'merged' | 'dismissed'
+  snapshotRef: string | null
+  baseRef: string | null
+  lastActiveAt: number | null
+  removedAt: number | null
+  restorable: boolean
+  fileCount?: number
+  hasChanges?: boolean
+  gitState?: WorktreeGitStateDTO
+}
 export type ReminderTarget = 'notification' | 'chat'
 export type ReminderStatus = 'pending' | 'delivered' | 'dismissed'
 export interface Reminder {
@@ -642,9 +657,13 @@ declare global {
       // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
       worktree: {
         isolate(chatId: number, projectPath: string): Promise<{ ok: true; worktreePath: string } | { ok: false; error: string }>
-        status(chatId: number): Promise<{ active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean; gitState?: { dirty: boolean; unpushed: boolean; clean: boolean; dirtyFiles?: number; unpushedCommits?: number } }>
+        list(projectPath: string): Promise<WorktreeSessionDTO[]>
+        status(chatId: number): Promise<{ active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean; gitState?: WorktreeGitStateDTO }>
         merge(chatId: number): Promise<{ ok: boolean; error?: string }>
         discard(chatId: number): Promise<{ ok: boolean; error?: string }>
+        snapshot(chatId: number): Promise<{ ok: true; snapshotRef: string | null; baseRef: string | null } | { ok: false; error: string }>
+        restore(chatId: number): Promise<{ ok: true; worktreePath: string } | { ok: false; error: string }>
+        delete(chatId: number): Promise<{ ok: boolean; error?: string }>
       }
       // История Verification Artifact (Фаза 3) — DoD-доказательства поверх файла-артефакта.
       verifications: {

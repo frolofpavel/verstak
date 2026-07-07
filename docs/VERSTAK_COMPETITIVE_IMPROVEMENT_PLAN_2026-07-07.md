@@ -142,6 +142,11 @@ covers clean/dirty/unpushed/all-three/non-git on real temp git repos.
 Snapshot-before-remove, restore-from-snapshot, lossless remove, and no-push regression are implemented.
 Remaining managed-worktree scope starts at snapshot retention prune, registry UI/actions, and release checklist (`189-WT-07`, `189-WT-09`).
 
+**Status 2026-07-07 WT update:** `189-WT-07`/`189-WT-09` closed as a compact v1.
+Added worktree registry/actions IPC (`list`, `snapshot`, `restore`, `delete`), preload/types, storage `getLatest`/`listProject`,
+and a visible `Снимок` action in the existing WorktreeBar. Release checklist is now recorded in `STATUS.md`.
+Large standalone WorktreePanel remains optional polish, not a blocker for the v1 lifecycle.
+
 **Status 2026-07-07 PROC:** process manager foundation closed for `189-PROC-01..07`, plus owner-bound completion routing into the next agent turn and real OS anti-orphan smoke.
 Added `ProcessRegistry`, background tools `spawn_process`/`process_status`/`read_process`/`stop_process`,
 bounded redacted output tail, TTL prune/sweeper API, PID-reuse guard, command gating before spawn,
