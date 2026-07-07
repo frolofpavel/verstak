@@ -20,6 +20,18 @@ export interface ProcessHandle {
   hostStartTime?: string | null
 }
 
+export interface ProcessCompletion {
+  id: string
+  pid: number
+  command: string
+  cwd: string
+  startedAt: number
+  exitedAt: number
+  exitCode?: number
+  status: ProcessStatus
+  outputTail: string
+}
+
 export interface ProcessRegistryDeps {
   now?: () => number
   treeKill?: (child: ChildProcess) => void
@@ -29,6 +41,7 @@ export interface ProcessRegistryDeps {
 interface InternalProcessHandle extends ProcessHandle {
   child: ChildProcess
   timeout?: NodeJS.Timeout
+  completionQueued?: boolean
 }
 
 const DEFAULT_TAIL_CHARS = 30 * 1024
@@ -74,6 +87,7 @@ export class ProcessRegistry {
   private readonly killTree: (child: ChildProcess) => void
   private readonly hostStartTime: (pid: number) => string | null
   private sweeper?: NodeJS.Timeout
+  private readonly completions: ProcessCompletion[] = []
 
   constructor(deps: ProcessRegistryDeps = {}) {
     this.now = deps.now ?? Date.now
@@ -155,6 +169,7 @@ export class ProcessRegistry {
     handle.exitedAt = this.now()
     if (handle.status === 'killed') return
     handle.status = exitCode === 0 ? 'completed' : 'failed'
+    this.queueCompletion(handle)
   }
 
   async kill(id: string): Promise<void> {
@@ -171,7 +186,12 @@ export class ProcessRegistry {
     handle.exitedAt = this.now()
     handle.exitCode = -1
     if (handle.timeout) clearTimeout(handle.timeout)
+    this.queueCompletion(handle)
     this.killTree(handle.child)
+  }
+
+  drainCompletions(): ProcessCompletion[] {
+    return this.completions.splice(0)
   }
 
   pruneFinished(ttlMs = DEFAULT_TTL_MS): number {
@@ -205,6 +225,22 @@ export class ProcessRegistry {
     const current = this.hostStartTime(handle.pid)
     if (!current) return true
     return current === handle.hostStartTime
+  }
+
+  private queueCompletion(handle: InternalProcessHandle): void {
+    if (!handle.notifyOnExit || handle.completionQueued || !handle.exitedAt) return
+    handle.completionQueued = true
+    this.completions.push({
+      id: handle.id,
+      pid: handle.pid,
+      command: handle.command,
+      cwd: handle.cwd,
+      startedAt: handle.startedAt,
+      exitedAt: handle.exitedAt,
+      exitCode: handle.exitCode,
+      status: handle.status,
+      outputTail: handle.outputTail,
+    })
   }
 }
 

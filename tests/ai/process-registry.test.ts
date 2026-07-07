@@ -80,6 +80,29 @@ describe('ProcessRegistry', () => {
     expect(done?.outputTail).not.toContain('AKIAIOSFODNN7EXAMPLE')
   })
 
+  it('queues notifyOnExit completion once with redacted tail', async () => {
+    const registry = createRegistry()
+    const handle = registry.spawn(nodeCommand("console.log('key=AKIAIOSFODNN7EXAMPLE')"), {
+      cwd: process.cwd(),
+      notifyOnExit: true,
+    })
+    await waitFor(() => registry.get(handle.id), value => value?.status === 'completed')
+
+    const completions = registry.drainCompletions()
+    expect(completions).toHaveLength(1)
+    expect(completions[0]).toMatchObject({ id: handle.id, status: 'completed', exitCode: 0 })
+    expect(completions[0].outputTail).toContain('[REDACTED:aws-access-key]')
+    expect(completions[0].outputTail).not.toContain('AKIAIOSFODNN7EXAMPLE')
+    expect(registry.drainCompletions()).toEqual([])
+  })
+
+  it('does not queue completion when notifyOnExit is false', async () => {
+    const registry = createRegistry()
+    const handle = registry.spawn(nodeCommand("console.log('done')"), { cwd: process.cwd() })
+    await waitFor(() => registry.get(handle.id), value => value?.status === 'completed')
+    expect(registry.drainCompletions()).toEqual([])
+  })
+
   it('kill marks process as killed and calls tree kill', async () => {
     const killTree = vi.fn()
     const registry = createRegistry({ treeKill: killTree, getHostStartTime: () => 'same-start' })

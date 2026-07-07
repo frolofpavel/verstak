@@ -287,5 +287,6 @@ Targeted verification: `npx vitest run tests/ai/worktree-lifecycle.test.ts tests
 Background process manager foundation is now in code.
 Added `ProcessRegistry`, tools `spawn_process`, `process_status`, `read_process`, `stop_process`, bounded/redacted `outputTail`, PID-reuse guard, TTL prune/sweeper API, and command gating before background spawn.
 Windows detail: registry keeps the shell handle non-detached so stdout/stderr tail works; process tree stop still uses `taskkill /T /F` through `treeKill`.
-Targeted verification: `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts` -> green, 2 files / 11 tests; `npm run type` -> green.
-Remaining process scope: completion notification into next agent turn, full OS anti-orphan smoke, UI timeline polish.
+PROC-04 foundation is partially closed: `notifyOnExit` processes now enter a redacted `drainCompletions()` queue exactly once. It is not yet injected into the next agent turn because completions need owner/chat binding first; routing a global process completion into the wrong chat would be a correctness bug.
+Targeted verification: `npx vitest run tests/ai/process-registry.test.ts tests/ipc/process-tools.test.ts` -> green, 2 files / 13 tests; `npm run type` -> green.
+Remaining process scope: owner-bound completion notification into next agent turn, full OS anti-orphan smoke, UI timeline polish.
