@@ -11771,6 +11771,18 @@ textarea.gg-input {
 .gg-run-stat { white-space: nowrap; }
 .gg-run-stat-cost { color: var(--text-secondary); }
 .gg-run-stat-dur { font-family: var(--font-mono); }
+.gg-run-stat-last { font-family: var(--font-mono); color: var(--text-tertiary); }
+.gg-run-stat-last.is-warning { color: var(--warning, #facc15); }
+.gg-run-stuck-badge {
+  padding: 2px 6px;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 4px;
+  background: rgba(250, 204, 21, 0.12);
+  color: var(--warning, #facc15);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .gg-run-card-caret { color: var(--text-tertiary); font-size: 11px; }
 
 /* Lifecycle-кнопки задачи (Multi-agent Manager, Фаза 4) — Stop / Переотправить.

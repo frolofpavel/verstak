@@ -309,3 +309,9 @@ Added `electron/ai/run-lifecycle.ts` with public `RunStatus`, storage-to-public 
 Added IPC `ai:wait(runId, { timeoutMs, pollMs })` through the agent-runs registry, exposed it as `window.api.ai.wait`, and synced renderer types with `RunWaitResult`.
 Added `docs/RUN_LIFECYCLE.md` with the state diagram and wait contract. CLI now accepts explicit `--wait`; standalone CLI already waits synchronously, so the flag records/communicates explicit wait mode without changing execution flow.
 Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
+
+## 2026-07-07 run diagnostics update
+
+Stuck-session diagnostics v1 is now in code.
+`agent_runs` DTO exposes `lastEventAt` from stored run events without a new migration. Runs panel shows last activity age for running/queued runs and displays a compact warning badge when a run has no events for 5+ minutes.
+Targeted verification: `npx vitest run tests/storage/agent-runs.test.ts tests/ai/run-lifecycle.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.

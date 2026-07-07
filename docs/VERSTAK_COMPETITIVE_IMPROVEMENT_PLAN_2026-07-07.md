@@ -174,6 +174,10 @@ Remaining process scope: none for process-manager v1; `189-PROC-10` covered by t
 Added `electron/ai/run-lifecycle.ts`, `docs/RUN_LIFECYCLE.md`, IPC `ai:wait`, preload/types `window.api.ai.wait`, and explicit CLI `--wait` compatibility.
 Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
 
+**Status 2026-07-07 RUN diagnostics update:** `190-RUN-06` compact v1 is closed.
+`agent_runs` DTO exposes `lastEventAt`, Runs panel shows last activity age for active runs, and warns when a running/queued run has no events for 5+ minutes.
+Targeted verification: `npx vitest run tests/storage/agent-runs.test.ts tests/ai/run-lifecycle.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
+
 ## Phase 5. 1.9.0: Skill Governance
 
 | ID | Задача | Зачем | Где | Готово, когда | Проверка |

@@ -124,6 +124,7 @@ describe('agent-runs (migration 16)', () => {
     expect(events[1].id).toBeLessThan(events[2].id)
     expect(events[1].ref).toBe('read_file')
     expect(events[1].status).toBe('ok')
+    expect(runs.get('r1')!.lastEventAt).toBeGreaterThan(0)
     db.close()
   })
 

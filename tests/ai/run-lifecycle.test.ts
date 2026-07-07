@@ -32,6 +32,7 @@ function run(status: AgentRunStatus, endedAt: number | null = null): AgentRun {
     lastCheckpointId: null,
     agentMode: 'ask',
     updatedAt: 1,
+    lastEventAt: null,
   }
 }
 

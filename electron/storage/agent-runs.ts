@@ -44,6 +44,7 @@ export interface AgentRun {
   lastCheckpointId: number | null
   agentMode: string | null
   updatedAt: number | null
+  lastEventAt: number | null
 }
 
 /**
@@ -272,7 +273,8 @@ const SELECT_RUN = `
          error, started_at as startedAt, ended_at as endedAt,
          turn_index as turnIndex, last_tool_name as lastToolName,
          last_checkpoint_id as lastCheckpointId, agent_mode as agentMode,
-         updated_at as updatedAt
+         updated_at as updatedAt,
+         (SELECT MAX(created_at) FROM agent_run_events e WHERE e.run_id = agent_runs.run_id) as lastEventAt
   FROM agent_runs
 `
 

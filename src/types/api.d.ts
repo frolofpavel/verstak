@@ -901,6 +901,7 @@ export interface AgentRun {
   lastCheckpointId: number | null
   agentMode: string | null
   updatedAt: number | null
+  lastEventAt: number | null
 }
 
 /** Событие Timeline прогона (append-only). */

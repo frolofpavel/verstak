@@ -20,6 +20,17 @@ function fmtCost(cents: number): string | null {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+const STUCK_RUN_AFTER_MS = 5 * 60 * 1000
+
+function lastRunActivityAt(run: AgentRun): number {
+  return run.lastEventAt ?? run.updatedAt ?? run.startedAt
+}
+
+function isRunPossiblyStuck(run: AgentRun): boolean {
+  if (run.status !== 'running' && run.status !== 'queued') return false
+  return Date.now() - lastRunActivityAt(run) >= STUCK_RUN_AFTER_MS
+}
+
 function formatLiveProgress(run: AgentRun, t: Translations): string | null {
   if (run.status === 'queued') {
     return t.agentRuns.liveQueued.replace('{duration}', fmtDuration(run.startedAt, run.endedAt))
@@ -328,6 +339,8 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
   const t = useT()
   const cost = fmtCost(run.costCents)
   const liveProgress = formatLiveProgress(run, t)
+  const lastActivityAge = fmtDuration(lastRunActivityAt(run), null)
+  const possiblyStuck = isRunPossiblyStuck(run)
   const canStop = run.status === 'running' || run.status === 'queued'
   const canResume = run.status === 'failed' || run.status === 'stopped' || run.status === 'suspended' || run.status === 'interrupted'
   const ownerLabel = t.agentRuns.owner[run.owner as keyof typeof t.agentRuns.owner] ?? run.owner
@@ -344,6 +357,17 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
           {run.toolCount > 0 && <span className="gg-run-stat" title="tools">🔧{run.toolCount}</span>}
           {run.filesCount > 0 && <span className="gg-run-stat" title="files">📄{run.filesCount}</span>}
           {cost && <span className="gg-run-stat gg-run-stat-cost">{cost}</span>}
+          {canStop && (
+            <span
+              className={`gg-run-stat gg-run-stat-last${possiblyStuck ? ' is-warning' : ''}`}
+              title={t.agentRuns.lastEvent.replace('{age}', lastActivityAge)}
+            >⏱{lastActivityAge}</span>
+          )}
+          {possiblyStuck && (
+            <span className="gg-run-stuck-badge" title={t.agentRuns.possiblyStuckTitle}>
+              {t.agentRuns.possiblyStuck}
+            </span>
+          )}
           {!liveProgress && (
             <span className="gg-run-stat gg-run-stat-dur">{fmtDuration(run.startedAt, run.endedAt)}</span>
           )}

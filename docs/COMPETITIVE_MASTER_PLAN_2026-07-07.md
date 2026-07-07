@@ -509,8 +509,8 @@
 - **source:** Hermes `gateway/run.py:7472 _session_expiry_watcher`.
 - **target:** `src/components/RunsPanel.tsx`, `electron/ipc/agent-runs.ts`.
 - **done:**
-  - [ ] `lastEventAt` + age visible
-  - [ ] Бейдж «⚠ возможно завис» если running > N мин без событий
+  - [x] `lastEventAt` + age visible
+  - [x] Бейдж «⚠ возможно завис» если running > N мин без событий
 
 ### RUN-06 · Cancel/timeout → terminal event (S)
 - **target:** `electron/ipc/ai.ts` finally-block (существующий).
@@ -843,3 +843,10 @@
 - **CLI parity seed**: `scripts/verstak-cli.mjs` теперь принимает явный `--wait`. Standalone CLI уже синхронный, поэтому флаг фиксирует explicit wait mode без смены исполнения.
 - **Ограничение**: lifecycle generation stale-reject, per-chat lane queue, stuck diagnostics и timeout semantics остаются отдельными RUN-задачами, чтобы не смешивать их с базовым wait-контрактом.
 - **Проверка на момент записи**: targeted `npx vitest run tests/ai/run-lifecycle.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
+
+### Дополнение 2026-07-07: RUN-05 stuck-session diagnostics v1 закрыт
+- **RUN-05 storage**: `agent_runs` DTO теперь отдаёт `lastEventAt` через `MAX(agent_run_events.created_at)` без новой миграции.
+- **RUN-05 UI**: `AgentRunsPanel` показывает возраст последней активности для running/queued и бейдж `возможно завис`, если прогон молчит больше 5 минут.
+- **RUN-05 i18n/styles**: добавлены RU/EN строки и компактный warning-style badge.
+- **Ограничение**: это диагностика видимости, не lifecycle-generation guard и не timeout engine.
+- **Проверка на момент записи**: targeted `npx vitest run tests/storage/agent-runs.test.ts tests/ai/run-lifecycle.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.

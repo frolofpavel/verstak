@@ -171,6 +171,9 @@ export const en = {
     liveStarting: 'Starting',
     liveTurn: 'Turn {n}',
     liveNow: 'now: {tool}',
+    lastEvent: 'Last activity: {age} ago',
+    possiblyStuck: 'possibly stuck',
+    possiblyStuckTitle: 'This run has not written events for a while. Check details or stop the task.',
     status: {
       queued: 'queued',
       running: 'running',

@@ -169,6 +169,9 @@ export const ru: Translations = {
     liveStarting: 'запуск',
     liveTurn: 'ход {n}',
     liveNow: 'сейчас: {tool}',
+    lastEvent: 'Последняя активность: {age} назад',
+    possiblyStuck: 'возможно завис',
+    possiblyStuckTitle: 'Прогон давно не писал событий. Проверьте детали или остановите задачу.',
     status: {
       queued: 'в очереди',
       running: 'идёт',
