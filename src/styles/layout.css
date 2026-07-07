@@ -2245,7 +2245,7 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   position: absolute;
   inset: 0;
   background: var(--folder-stroke);
-  clip-path: polygon(0 30%, 29% 30%, 37% 8%, 58% 8%, 68% 30%, 100% 30%, 100% 100%, 0 100%);
+  clip-path: polygon(0 32%, 8% 32%, 15% 10%, 42% 10%, 50% 32%, 100% 32%, 100% 100%, 0 100%);
 }
 .gg-folder-icon::after {
   content: '';
@@ -2253,7 +2253,7 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   inset: 1.5px;
   background:
     linear-gradient(180deg, var(--folder-fill-top), var(--folder-fill-bottom));
-  clip-path: polygon(0 32%, 29% 32%, 37% 8%, 58% 8%, 68% 32%, 100% 32%, 100% 100%, 0 100%);
+  clip-path: polygon(0 34%, 8% 34%, 15% 10%, 42% 10%, 50% 34%, 100% 34%, 100% 100%, 0 100%);
 }
 html[data-theme="light"] .gg-folder-icon {
   --folder-stroke: color-mix(in srgb, var(--accent) 54%, var(--border-default));
