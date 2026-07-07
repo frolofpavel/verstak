@@ -47,6 +47,7 @@ import { createChatSessions } from './storage/chat-sessions'
 import { createSubSessions } from './storage/sub-sessions'
 import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
+import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
@@ -456,6 +457,7 @@ app.whenReady().then(() => {
   const feedback = createFeedback(db)
   const connectorRegistry = createConnectorRegistry()
   const userProfiles = createUserProfiles(db)
+  const skillUsage = createSkillUsageStore(db)
   logRuntime('startup.project_storage.ready')
 
   // Skill registry — собирает скиллы из server API + ~/.verstak/skills/ +
@@ -732,7 +734,7 @@ app.whenReady().then(() => {
   // getKnownRoots — корни проектов пользователя для валидации cwd терминала
   // (см. resolveSafeTerminalCwd). Та же лямбда, что и для files/project-map.
   registerTerminalIpc(knownRoots)
-  registerSkillsIpc(skillRegistry, { getSecret })
+  registerSkillsIpc(skillRegistry, { getSecret, skillUsage })
   registerMemoryIpc(db)
   registerCommandsIpc(knownRoots)
   registerMcpIpc(settings)

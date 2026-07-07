@@ -45,6 +45,11 @@ export const useSkills = create<SkillState>((set, get) => ({
   },
   setActiveSkill(id) {
     set({ activeSkillId: id })
+    if (id) {
+      void window.api.skills.recordUse(id).catch(err => {
+        console.warn('[skills] record use failed:', err)
+      })
+    }
   },
   resolve(idOrSlash) {
     const s = get().skills

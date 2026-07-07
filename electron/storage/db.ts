@@ -940,6 +940,24 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_lane_generation ON agent_runs(project_path, chat_id, owner, generation)')
     }
+  },
+  {
+    version: 40,
+    description: 'skill_usage governance counters.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_usage (
+          skill_id TEXT PRIMARY KEY,
+          use_count INTEGER NOT NULL DEFAULT 0,
+          view_count INTEGER NOT NULL DEFAULT 0,
+          last_used_at INTEGER,
+          state TEXT NOT NULL DEFAULT 'active',
+          pinned INTEGER NOT NULL DEFAULT 0,
+          archived_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_usage_state ON skill_usage(state, pinned, last_used_at);
+      `)
+    }
   }
 ]
 

@@ -256,6 +256,8 @@ contextBridge.exposeInMainWorld('api', {
     get: (id: string) => ipcRenderer.invoke('skills:get', id),
     refresh: () => ipcRenderer.invoke('skills:refresh'),
     status: () => ipcRenderer.invoke('skills:status'),
+    usage: () => ipcRenderer.invoke('skills:usage'),
+    recordUse: (skillId: string) => ipcRenderer.invoke('skills:record-use', skillId),
     runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
       ipcRenderer.invoke('skills:run-loaders', skillId, opts),
     capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>

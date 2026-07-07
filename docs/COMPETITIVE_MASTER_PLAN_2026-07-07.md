@@ -546,14 +546,18 @@ Scope note: this closes deterministic stale-event/terminal-event behavior; a sep
   );
   ```
 - **done:**
-  - [ ] Каждая активация skill инкрементит use_count
-  - [ ] Storage-тест зелёный
+  - [x] Каждая активация skill инкрементит use_count
+  - [x] Storage-тест зелёный
 
 ### SKILL-02 · Provenance field (S)
 - **source:** Hermes `skill_provenance.py:37`.
 - **task:** колонка `provenance TEXT` (built-in|user|imported|generated|hub). Заполняется при install/import.
 - **done:**
-  - [ ] У каждого skill виден origin
+  - [x] У каждого skill виден origin
+
+**Status 2026-07-08 Skill Governance seed:** SKILL-01/SKILL-02 compact scope closed.
+`docs/SKILL_GOVERNANCE_AUDIT_2026-07-08.md` records the current loader/import/built-ins map, migration 40 adds `skill_usage`, active skill selection records best-effort usage through IPC, and current `Skill.source` remains the provenance field for built-in/user/server origin.
+Scope note: protected built-ins, archive/restore, generated candidates, Settings grouping, and prompt hygiene stay open as SKILL-03..07.
 
 ### SKILL-03 · Protected built-ins (S)
 - **source:** Hermes `skill_usage.py:66 PROTECTED_BUILTIN_SKILLS`.

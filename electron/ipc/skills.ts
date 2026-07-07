@@ -17,9 +17,11 @@ import type { SkillRegistry } from '../ai/skills/types'
 import { lookupLoader } from '../ai/skills/loaders'
 import { buildCapturedSkill, deriveSkillId } from '../ai/skills/capture'
 import { USER_SKILLS_DIR } from '../ai/skills/loader'
+import type { SkillUsageStore } from '../storage/skill-usage'
 
 interface RunLoadersDeps {
   getSecret?: (key: string) => string | null
+  skillUsage?: SkillUsageStore
 }
 
 export function registerSkillsIpc(registry: SkillRegistry, deps: RunLoadersDeps = {}): void {
@@ -27,6 +29,12 @@ export function registerSkillsIpc(registry: SkillRegistry, deps: RunLoadersDeps 
   ipcMain.handle('skills:get', (_e, id: string) => registry.get(id))
   ipcMain.handle('skills:refresh', () => registry.refresh())
   ipcMain.handle('skills:status', () => registry.status())
+  ipcMain.handle('skills:usage', () => deps.skillUsage?.list() ?? [])
+  ipcMain.handle('skills:record-use', (_e, skillId: string) => {
+    const skill = registry.get(skillId)
+    if (!skill) throw new Error(`Unknown skill: ${skillId}`)
+    return deps.skillUsage?.recordUse(skill.id) ?? null
+  })
 
   /**
    * Skill Capture: сохранить успешный прогон как скилл-скаффолд в

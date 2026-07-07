@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Skill } from '../../src/types/api'
 
 const setKey = vi.fn(async () => {})
-const windowStub = { api: { settings: { setKey } } }
+const recordUse = vi.fn(async () => null)
+const windowStub = { api: { settings: { setKey }, skills: { recordUse } } }
 vi.stubGlobal('window', windowStub)
 
 import { useSkills } from '../../src/store/skillStore'
@@ -15,6 +16,7 @@ describe('skillStore setActiveSkill', () => {
   beforeEach(() => {
     vi.stubGlobal('window', windowStub)
     setKey.mockClear()
+    recordUse.mockClear()
     useSkills.setState({ activeSkillId: null, skills: [] }, false)
   })
 
@@ -23,16 +25,19 @@ describe('skillStore setActiveSkill', () => {
     useSkills.getState().setActiveSkill('receivables')
     expect(useSkills.getState().activeSkillId).toBe('receivables')
     expect(setKey).not.toHaveBeenCalled()
+    expect(recordUse).toHaveBeenCalledWith('receivables')
   })
 
   it('скилл без default_mode → режим не трогается', () => {
     useSkills.setState({ skills: [skill({ id: 'plain' })] }, false)
     useSkills.getState().setActiveSkill('plain')
     expect(setKey).not.toHaveBeenCalled()
+    expect(recordUse).toHaveBeenCalledWith('plain')
   })
 
   it('снятие скилла (null) → режим не трогается', () => {
     useSkills.getState().setActiveSkill(null)
     expect(setKey).not.toHaveBeenCalled()
+    expect(recordUse).not.toHaveBeenCalled()
   })
 })
