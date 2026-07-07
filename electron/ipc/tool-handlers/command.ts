@@ -5,6 +5,75 @@ import { scanText } from '../../ai/secret-scanner'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
+import { hashCommandForAudit, type SmartApproveResult } from '../../ai/smart-approve'
+
+function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
+  return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
+}
+
+const smartApproveEscalationsBySend = new Map<string, number>()
+const MAX_SMART_APPROVE_ESCALATIONS_PER_SEND = 2
+
+export function clearSmartApproveForSend(sendId: number | string): void {
+  smartApproveEscalationsBySend.delete(String(sendId))
+}
+
+function smartApproveEscalationCount(sendId: number | string): number {
+  return smartApproveEscalationsBySend.get(String(sendId)) ?? 0
+}
+
+function recordSmartApproveEscalation(sendId: number | string): void {
+  const key = String(sendId)
+  smartApproveEscalationsBySend.set(key, (smartApproveEscalationsBySend.get(key) ?? 0) + 1)
+}
+
+async function evaluateSmartApprove(
+  command: string,
+  ctx: Parameters<ToolHandler['handle']>[1]
+): Promise<SmartApproveResult> {
+  if (smartApproveEscalationCount(ctx.sendId) >= MAX_SMART_APPROVE_ESCALATIONS_PER_SEND) {
+    return {
+      verdict: 'escalate',
+      reason: 'smart approval escalation limit reached for this run',
+      model: 'not-called',
+      durationMs: 0
+    }
+  }
+  if (!ctx.smartApprove) {
+    return {
+      verdict: 'escalate',
+      reason: 'smart approval is enabled but no guard provider is configured',
+      model: 'unconfigured',
+      durationMs: 0
+    }
+  }
+  return ctx.smartApprove({
+    command,
+    cwd: ctx.projectPath,
+    agentMode: ctx.agentMode,
+    projectPath: ctx.projectPath
+  })
+}
+
+function recordSmartApproveAudit(
+  command: string,
+  callId: string,
+  result: SmartApproveResult,
+  ctx: Parameters<ToolHandler['handle']>[1]
+): void {
+  if (!ctx.appendAudit) return
+  try {
+    const reason = scanText(result.reason).redacted.slice(0, 240)
+    ctx.appendAudit('smart_approve', JSON.stringify({
+      callId,
+      cmd_hash: hashCommandForAudit(command),
+      verdict: result.verdict,
+      model: result.model,
+      durationMs: result.durationMs,
+      reason
+    }))
+  } catch { /* best-effort */ }
+}
 
 export const runCommandHandler: ToolHandler = {
   mode: 'sequential',
@@ -39,8 +108,25 @@ export const runCommandHandler: ToolHandler = {
     // отсекает сам.
     const allowlisted = decision !== 'auto-accept'
       && matchesAllowlist(command, parseAllowlist(ctx.getSecretForDelegate?.('bash_allowlist') ?? null))
+    let forceConfirm = false
+    if (isSmartApproveEnabled(ctx)) {
+      const smart = await evaluateSmartApprove(command, ctx)
+      recordSmartApproveAudit(command, call.id, smart, ctx)
+      if (smart.verdict === 'deny') {
+        const reason = `smart-approve denied: ${scanText(smart.reason).redacted}`
+        ctx.sender.send('ai:event', {
+          id: ctx.sendId,
+          event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason }
+        })
+        return { id: call.id, name: call.name, result: `Command: ${command}`, error: reason }
+      }
+      if (smart.verdict === 'escalate') {
+        recordSmartApproveEscalation(ctx.sendId)
+        forceConfirm = true
+      }
+    }
     let accepted: boolean
-    if (decision === 'auto-accept' || allowlisted) {
+    if (!forceConfirm && (decision === 'auto-accept' || allowlisted)) {
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
         event: { type: 'tool-activity', callId: call.id, name: 'run_command', label: allowlisted ? 'run_command (авто · allowlist)' : 'run_command (авто)', detail: command, status: 'ok' }

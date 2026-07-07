@@ -12,6 +12,7 @@
     "pretest": "node scripts/safe-rebuild.cjs",
     "test": "vitest run",
     "test:staging": "vitest run tests/autoupdate-state.test.ts",
+    "test:security": "vitest run tests/security",
     "pretest:fast": "node scripts/safe-rebuild.cjs",
     "test:fast": "vitest run",
     "type": "tsc --noEmit",

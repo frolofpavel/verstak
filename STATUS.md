@@ -270,3 +270,15 @@
 ---
 
 *Правило ведения: после каждого закрытого блока — двигаю строку из «Открытые хвосты»/«Бэклог» в «Сделано», обновляю дату/версию сверху. Источники истины по фактам — память (`MEMORY.md`).*
+## 2026-07-07 execution update
+
+Competitive master-plan is being closed as implementation, not only planning.
+Completed in this pass: `SEC-01..08`, `APP-01..04 + APP-05 seed`, and worktree foundation `WT-01/WT-02` (`189-WT-01..03` in compact plan).
+New worktree lifecycle metadata migration `38`, storage model `touch`/`setRefs`/`markRemoved`, and real git dirty/unpushed detector are in code.
+Current verification: targeted worktree/storage 12/12 pass, `npm run type` pass.
+Full gate still required before commit/release: `npm run test:security`, `npm run test:fast`, `npm run build`.
+## 2026-07-07 worktree safety update
+
+Managed worktree lifecycle moved beyond schema/detector: snapshot-before-remove, restore-from-snapshot, lossless remove, and no-push regression are now implemented.
+`worktree:merge` and `worktree:discard` use lossless removal, store `snapshot_ref`/`base_ref`, and mark `removed_at` after physical remove.
+Targeted verification: `npx vitest run tests/ai/worktree-lifecycle.test.ts tests/ai/worktree-status.test.ts tests/storage/worktree-sessions.test.ts tests/ai/git-worktree.test.ts` -> green, 4 files / 28 tests; `npm run type` -> green.

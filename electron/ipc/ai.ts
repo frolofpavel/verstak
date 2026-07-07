@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent } from '../ai/run-notify'
 import { scanText } from '../ai/secret-scanner'
-import { clearRunUntilGreenForSend } from './tool-handlers/command'
+import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
 import { fuseRanks } from '../ai/memory-fusion'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
@@ -478,6 +478,8 @@ export function registerAiIpc(deps: AiDeps): void {
       suspendedSends.delete(sendId)
       // ось 3 E: чистим серверный счётчик run_until_green этого прогона (иначе Map течёт).
       clearRunUntilGreenForSend(sendId)
+      // APP-04: чистим bounded smart-approve escalation counter этого прогона.
+      clearSmartApproveForSend(sendId)
       // sendIdToChatId mapping cleared via separate ai:event done handler in
       // renderer — no need to touch from main.
       // Push-наблюдаемость: на завершении прогона шлём в Telegram done/failed/нужен-

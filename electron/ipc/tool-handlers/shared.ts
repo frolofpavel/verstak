@@ -4,6 +4,7 @@ import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
 import type { FileTools } from '../../ai/tools'
 import type { VerifyRun } from '../../ai/review-gate'
 import type { AgentMode } from '../../ai/mode-policy'
+import type { SmartApproveContext, SmartApproveResult } from '../../ai/smart-approve'
 import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
 import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-brain'
@@ -65,6 +66,9 @@ export interface ToolContext {
    *  Грузятся из ~/.verstak/permissions.json + project. Хендлеры решают через
    *  resolveDecision(). deny бьёт даже bypass; правила не ослабляют plan. См. permission-rules. */
   permissionRules?: import('../../ai/permission-rules').CompiledPermissionRules
+  /** APP-03: optional smart-approval guard for command auto-accept paths. Disabled by default. */
+  smartApproveEnabled?: boolean
+  smartApprove?: (ctx: SmartApproveContext) => Promise<SmartApproveResult>
   /** H (ось 3): new_task — агент пакует дистиллят, контекст очистится до него на след. turn. */
   requestNewTask?: (summary: string) => void
   /** #3 plan-gate: переключить режим прогона на остаток (approve → выполнение).

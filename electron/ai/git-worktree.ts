@@ -9,6 +9,7 @@
  * Всё graceful: не-git / ошибка git → null / [] / '', НИКОГДА не кидает.
  */
 import { execFileSync } from 'child_process'
+import { createHash } from 'crypto'
 import { mkdtempSync, rmSync, realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
@@ -59,7 +60,7 @@ export function isGitRepo(repoRoot: string): boolean {
  * Создать detached worktree на текущем HEAD во временной папке.
  * Возвращает путь к worktree или null (не git / нет коммитов / ошибка).
  */
-export function addWorktree(repoRoot: string, label = 'wt'): string | null {
+export function addWorktree(repoRoot: string, label = 'wt', ref = 'HEAD'): string | null {
   if (!isGitRepo(repoRoot)) return null
   let parent: string
   try {
@@ -70,12 +71,74 @@ export function addWorktree(repoRoot: string, label = 'wt'): string | null {
   // git создаёт сам подпапку dir (её не должно существовать). Санитизируем label.
   const safe = label.replace(/[^a-zA-Z0-9_-]/g, '') || 'wt'
   const dir = join(parent, safe)
-  const out = git(repoRoot, ['worktree', 'add', '--detach', dir, 'HEAD'])
+  const out = git(repoRoot, ['worktree', 'add', '--detach', dir, ref])
   if (out == null) {
     try { rmSync(parent, { recursive: true, force: true }) } catch { /* best-effort */ }
     return null
   }
   return dir
+}
+
+export type WorktreeSnapshotKind = 'stash' | 'head'
+
+export interface WorktreeSnapshotResult {
+  ok: boolean
+  snapshotRef: string | null
+  snapshotKind: WorktreeSnapshotKind | null
+  baseRef: string | null
+  error?: string
+}
+
+function snapshotId(worktreePath: string): string {
+  const hash = createHash('sha1').update(worktreePath).update(String(Date.now())).digest('hex').slice(0, 12)
+  return `${Date.now()}-${hash}`
+}
+
+export function snapshotWorktree(repoRoot: string, worktreePath: string, options: { preserveHead?: boolean } = {}): WorktreeSnapshotResult {
+  if (!isGitRepo(repoRoot) || !isGitRepo(worktreePath)) {
+    return { ok: false, snapshotRef: null, snapshotKind: null, baseRef: null, error: 'not a git worktree' }
+  }
+
+  const baseRef = (git(worktreePath, ['rev-parse', 'HEAD']) ?? '').trim()
+  if (!baseRef) return { ok: false, snapshotRef: null, snapshotKind: null, baseRef: null, error: 'cannot resolve worktree HEAD' }
+
+  git(worktreePath, ['add', '-A'])
+  const stashCommit = (git(worktreePath, ['stash', 'create', `verstak snapshot ${new Date().toISOString()}`]) ?? '').trim()
+  if (stashCommit) {
+    const ref = `refs/verstak/worktree-snapshots/stash/${snapshotId(worktreePath)}`
+    if (git(repoRoot, ['update-ref', ref, stashCommit]) == null) {
+      return { ok: false, snapshotRef: null, snapshotKind: null, baseRef, error: 'cannot store worktree snapshot ref' }
+    }
+    return { ok: true, snapshotRef: ref, snapshotKind: 'stash', baseRef }
+  }
+
+  if (options.preserveHead) {
+    const ref = `refs/verstak/worktree-snapshots/head/${snapshotId(worktreePath)}`
+    if (git(repoRoot, ['update-ref', ref, baseRef]) == null) {
+      return { ok: false, snapshotRef: null, snapshotKind: null, baseRef, error: 'cannot store worktree HEAD ref' }
+    }
+    return { ok: true, snapshotRef: ref, snapshotKind: 'head', baseRef }
+  }
+
+  return { ok: true, snapshotRef: null, snapshotKind: null, baseRef }
+}
+
+export function restoreWorktreeSnapshot(repoRoot: string, snapshotRef: string, baseRef: string | null, label = 'restored'): { ok: boolean; worktreePath?: string; error?: string } {
+  if (!snapshotRef) return { ok: false, error: 'missing snapshot ref' }
+
+  const restoreRef = snapshotRef.includes('/head/') ? snapshotRef : (baseRef || 'HEAD')
+  const worktreePath = addWorktree(repoRoot, label, restoreRef)
+  if (!worktreePath) return { ok: false, error: 'cannot create restore worktree' }
+
+  if (snapshotRef.includes('/stash/')) {
+    const withIndex = git(worktreePath, ['stash', 'apply', '--index', snapshotRef])
+    if (withIndex == null && git(worktreePath, ['stash', 'apply', snapshotRef]) == null) {
+      removeWorktree(repoRoot, worktreePath)
+      return { ok: false, error: 'cannot apply worktree snapshot' }
+    }
+  }
+
+  return { ok: true, worktreePath }
 }
 
 /**

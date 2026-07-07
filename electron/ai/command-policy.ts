@@ -17,6 +17,7 @@
  */
 
 import { isForbiddenPath } from './secret-scanner'
+import { dangerousCommandReasons, detectDangerousCommand } from './dangerous-commands'
 
 export interface CommandClassification {
   /** Pass to user-confirmation UI. */
@@ -24,39 +25,6 @@ export interface CommandClassification {
   /** Reason shown to user / model if blocked. */
   reason?: string
 }
-
-interface DenyRule {
-  pattern: RegExp
-  reason: string
-}
-
-const DENY_RULES: DenyRule[] = [
-  // rm catch-all: any rm invocation with -r AND -f flags (combined or split) targeting root/home/parent
-  { pattern: /\brm\b(?=[^\n]*\b-[a-z]*r[a-z]*\b|[^\n]*-r\b)(?=[^\n]*-[a-z]*f|[^\n]*-f\b)[^\n]*\s+(\/|~|\$HOME|\.\.)/i, reason: 'Запрещено: rm -r -f за пределами проекта или на корень' },
-  // Also block plain rm -rf on root regardless of flag order (legacy/simpler)
-  { pattern: /\brm\s+(-[a-z]*r[a-z]*f?|-rf|-fr|-r\s+-f|-f\s+-r)\s+(\/|~|\$HOME|\.\.)/i, reason: 'Запрещено: rm -rf за пределами проекта или на корень' },
-  { pattern: /\b(format|mkfs|fdisk|diskpart)\b/i,                       reason: 'Запрещено: операции над дисками / файловой системой' },
-  { pattern: /\bdd\s+if=.*of=\/dev\b/i,                                  reason: 'Запрещено: запись на сырой блочный девайс через dd' },
-  { pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,           reason: 'Запрещено: fork-bomb' },
-  { pattern: /\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b/i,           reason: 'Запрещено: выключение / перезагрузка системы' },
-  { pattern: /\bcurl\b[^|]*\|\s*(sh|bash|zsh|powershell|pwsh|cmd)\b/i,   reason: 'Запрещено: pipe curl-вывода в shell (классический RCE-вектор)' },
-  { pattern: /\b(wget|iwr|invoke-webrequest)\b[^|]*\|\s*(sh|bash|iex|powershell|pwsh|cmd)\b/i, reason: 'Запрещено: pipe сетевого ответа в shell' },
-  { pattern: /\bbase64\b[\s\S]*?(?:-d|--decode)[\s\S]*?\|\s*(?:sh|bash|zsh|powershell|pwsh|cmd|iex)\b/i, reason: 'Запрещено: декодирование base64 в shell (обфускация RCE)' },
-  { pattern: /\bsudo\s+rm\b/i,                                           reason: 'Запрещено: sudo rm' },
-  { pattern: /\bgit\s+push\s+.*--force\b/i,                              reason: 'Запрещено: git push --force (фиксить вручную при необходимости)' },
-  { pattern: /\bgit\s+(reset\s+--hard\s+HEAD~|clean\s+-fdx|filter-(repo|branch))/i, reason: 'Запрещено: разрушающие git операции' },
-  // find -exec/-execdir rm -rf {} — массовое удаление: цель внутри find ({}), поэтому
-  // правила rm-rf выше (требуют путь /|~|..) её НЕ ловят (ревью: обход денилиста).
-  { pattern: /\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-[a-z]*r[a-z]*f|\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-rf/i, reason: 'Запрещено: массовое удаление через find -exec rm -rf' },
-  { pattern: /\.ssh|\.ss\*|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\bid_[a-z0-9]*\*|\.aws[\/\\]|\.kube[\/\\]|\.docker[\/\\]|\.azure[\/\\]|\.config[\/\\]gcloud|kubeconfig|\.npmrc|\.netrc|\.gnupg|authorized_keys|known_hosts/i, reason: 'Запрещено: чтение/копирование ключей и токенов' },
-  // PowerShell EncodedCommand bypass: payload is base64, denylist can't inspect contents.
-  // Аудит M13: штатный бинарь PowerShell 7 на Win11 называется pwsh — без него обход.
-  { pattern: /\b(?:powershell|pwsh)(\.exe)?\b[^\n]*\s-[eE](?:nc(?:oded(?:command)?)?)?\b/i, reason: 'Запрещено: powershell/pwsh -EncodedCommand (запутанная команда)' },
-  // cmd /c with variable expansion is a common obfuscation pattern
-  { pattern: /\bcmd(\.exe)?\s+\/[cC]\b[^\n]*(%[^%\s]+%|![\w]+!)/i,        reason: 'Запрещено: cmd /c с переменными расширения — попытка обфускации' },
-  // Invoke-Expression (PowerShell eval) is RCE-by-design
-  { pattern: /\b(iex|invoke-expression)\b/i,                              reason: 'Запрещено: PowerShell Invoke-Expression / iex' }
-]
 
 /**
  * Normalize a command before checking — collapses whitespace runs so patterns
@@ -69,37 +37,20 @@ function normalize(s: string): string {
 /** Деобфусцированная копия для матчинга денилиста: убирает кавычки, backticks
  *  и caret (cmd ^), которыми прячут опасные токены: c'a't, c"a"t, c`a`t, ca^t.
  *  Для ДЕТЕКЦИИ (не для исполнения) — на исполнение команды это не влияет. */
-function deobfuscate(s: string): string {
-  return s.replace(/[`'"^]/g, '')
-}
-
 /**
  * Человекочитаемый список того, что денилист команд блокирует НАВСЕГДА
  * (даже с подтверждением пользователя). Используется Policy Center для показа
  * правил «опасных команд» — единый источник истины, без дублирования паттернов.
  */
 export function dangerousCommandLabels(): string[] {
-  // Уникализируем reason'ы (некоторые правила делят формулировку), сохраняя порядок.
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const rule of DENY_RULES) {
-    if (!seen.has(rule.reason)) {
-      seen.add(rule.reason)
-      out.push(rule.reason)
-    }
-  }
-  return out
+  return dangerousCommandReasons()
 }
 
 export function classifyCommand(command: string): CommandClassification {
   const trimmed = normalize(command)
   if (!trimmed) return { allowed: false, reason: 'Пустая команда' }
-  const candidates = [trimmed, normalize(deobfuscate(command))]
-  for (const rule of DENY_RULES) {
-    if (candidates.some(c => rule.pattern.test(c))) {
-      return { allowed: false, reason: rule.reason }
-    }
-  }
+  const hit = detectDangerousCommand(command)
+  if (hit.hit && hit.severity === 'block') return { allowed: false, reason: hit.reason ?? `Запрещено: ${hit.pattern ?? 'опасная команда'}` }
   return { allowed: true }
 }
 

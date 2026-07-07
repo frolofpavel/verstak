@@ -642,7 +642,7 @@ declare global {
       // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
       worktree: {
         isolate(chatId: number, projectPath: string): Promise<{ ok: true; worktreePath: string } | { ok: false; error: string }>
-        status(chatId: number): Promise<{ active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }>
+        status(chatId: number): Promise<{ active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean; gitState?: { dirty: boolean; unpushed: boolean; clean: boolean; dirtyFiles?: number; unpushedCommits?: number } }>
         merge(chatId: number): Promise<{ ok: boolean; error?: string }>
         discard(chatId: number): Promise<{ ok: boolean; error?: string }>
       }

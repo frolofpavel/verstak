@@ -911,6 +911,22 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec("ALTER TABLE chats ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
       }
     }
+  },
+  {
+    version: 38,
+    description: 'worktree_sessions lifecycle metadata: snapshot/base refs, activity timestamp, removed marker.',
+    run: (db: DB) => {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='worktree_sessions'").get()
+      if (!table) return
+
+      const cols = (db.prepare('PRAGMA table_info(worktree_sessions)').all() as Array<{ name: string }>).map(c => c.name)
+      const has = (name: string): boolean => cols.includes(name)
+      if (!has('snapshot_ref')) db.exec('ALTER TABLE worktree_sessions ADD COLUMN snapshot_ref TEXT')
+      if (!has('base_ref')) db.exec('ALTER TABLE worktree_sessions ADD COLUMN base_ref TEXT')
+      if (!has('last_active_at')) db.exec('ALTER TABLE worktree_sessions ADD COLUMN last_active_at INTEGER')
+      if (!has('removed_at')) db.exec('ALTER TABLE worktree_sessions ADD COLUMN removed_at INTEGER')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_worktree_sessions_removed ON worktree_sessions(project_path, removed_at)')
+    }
   }
 ]
 
