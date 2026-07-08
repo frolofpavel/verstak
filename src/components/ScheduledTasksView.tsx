@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
-import type { ScheduledTask } from '../types/api'
+import type { ScheduledTask, SchedulerHealth } from '../types/api'
+
+function formatAge(ms: number | null): string {
+  if (ms == null) return 'нет heartbeat'
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  if (totalSeconds < 60) return `${totalSeconds} сек назад`
+  const minutes = Math.floor(totalSeconds / 60)
+  if (minutes < 60) return `${minutes} мин назад`
+  const hours = Math.floor(minutes / 60)
+  return `${hours} ч ${minutes % 60} мин назад`
+}
 
 /**
  * NL-cron (флагман) — вкладка расписаний. Создание задачи на естественном языке
@@ -14,10 +24,18 @@ export function ScheduledTasksView() {
   const [prompt, setPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [health, setHealth] = useState<SchedulerHealth | null>(null)
 
   async function load() {
-    if (!projectPath) { setTasks([]); return }
-    try { setTasks(await window.api.scheduler.list(projectPath)) } catch { /* ignore */ }
+    if (!projectPath) { setTasks([]); setHealth(null); return }
+    try {
+      const [nextTasks, nextHealth] = await Promise.all([
+        window.api.scheduler.list(projectPath),
+        window.api.scheduler.health(),
+      ])
+      setTasks(nextTasks)
+      setHealth(nextHealth)
+    } catch { /* ignore */ }
   }
   useEffect(() => { void load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectPath])
 
@@ -42,6 +60,13 @@ export function ScheduledTasksView() {
         Задачи выполняются по расписанию без вашего участия (читают код/коннекторы, НЕ пишут).
         Итог приходит в Telegram, если настроены уведомления. Только исходящая автоматизация.
       </p>
+
+      {health && (
+        <div className={`gg-scheduler-health ${health.stalled ? 'is-stalled' : ''}`}>
+          {health.stalled ? '⚠ Планировщик застрял' : '✓ Планировщик работает'}
+          <span>{formatAge(health.heartbeatAgeMs)}</span>
+        </div>
+      )}
 
       <div className="gg-scheduler-form">
         <input
@@ -73,6 +98,11 @@ export function ScheduledTasksView() {
               {t.last_run_at && (
                 <div className="gg-scheduler-last">
                   {t.last_status === 'error' ? '⚠ ошибка' : '✓'} последний запуск: {new Date(t.last_run_at).toLocaleString('ru-RU')}
+                </div>
+              )}
+              {t.next_run_at && (
+                <div className="gg-scheduler-last">
+                  следующий слот: {new Date(t.next_run_at).toLocaleString('ru-RU')}
                 </div>
               )}
             </div>

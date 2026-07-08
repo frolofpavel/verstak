@@ -6,7 +6,7 @@ vi.mock('../../electron/connectors/telegram', () => ({
   createTelegramConnector: () => ({ info: () => ({}), query: queryMock }),
 }))
 
-import { shouldNotifyStatus, formatRunNotification, notifyRunEvent } from '../../electron/ai/run-notify'
+import { shouldNotifyStatus, shouldSendAutoProofReport, formatRunNotification, notifyRunEvent } from '../../electron/ai/run-notify'
 
 describe('run-notify: shouldNotifyStatus', () => {
   it('пушим done/failed/waiting_review, молчим на stopped/queued/running', () => {
@@ -17,6 +17,31 @@ describe('run-notify: shouldNotifyStatus', () => {
     expect(shouldNotifyStatus('stopped')).toBe(false) // юзер сам остановил
     expect(shouldNotifyStatus('queued')).toBe(false)
     expect(shouldNotifyStatus('running')).toBe(false)
+  })
+})
+
+describe('run-notify: auto proof report gating', () => {
+  const secrets = (m: Record<string, string>) => ({ getSecret: (k: string) => m[k] ?? null })
+
+  it('requires explicit opt-in, long main done run, project, and Telegram settings', () => {
+    const ev = { runId: 'run-1', status: 'done' as const, owner: 'main', projectName: 'verstak', durationMs: 11 * 60_000 }
+    expect(shouldSendAutoProofReport(ev, secrets({
+      proof_auto_send_telegram: 'true',
+      telegram_notify_chat_id: '123',
+      telegram_bot_token: 'tok',
+    }))).toBe(true)
+
+    expect(shouldSendAutoProofReport(ev, secrets({ telegram_notify_chat_id: '123', telegram_bot_token: 'tok' }))).toBe(false)
+    expect(shouldSendAutoProofReport({ ...ev, durationMs: 30_000 }, secrets({
+      proof_auto_send_telegram: 'true',
+      telegram_notify_chat_id: '123',
+      telegram_bot_token: 'tok',
+    }))).toBe(false)
+    expect(shouldSendAutoProofReport({ ...ev, owner: 'delegate' }, secrets({
+      proof_auto_send_telegram: 'true',
+      telegram_notify_chat_id: '123',
+      telegram_bot_token: 'tok',
+    }))).toBe(false)
   })
 })
 

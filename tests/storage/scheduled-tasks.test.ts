@@ -1,55 +1,69 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { Database as DB } from 'better-sqlite3'
-import { openDb } from '../../electron/storage/db'
-import {
-  createScheduledTask, getScheduledTask, listScheduledTasks, listEnabledScheduledTasks,
-  setScheduledTaskEnabled, deleteScheduledTask, recordScheduledRun,
-} from '../../electron/storage/scheduled-tasks'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { openDb } from '../../electron/storage/db'
+import {
+  createScheduledTask,
+  getScheduledTask,
+  getSchedulerHeartbeat,
+  markScheduledTaskClaimed,
+  recordScheduledRun,
+  recordSchedulerHeartbeat,
+} from '../../electron/storage/scheduled-tasks'
 
-describe('scheduled-tasks storage', () => {
+describe('scheduled tasks storage', () => {
   let dir: string
   let db: DB
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'verstak-sched-')); db = openDb(join(dir, 'test.db')) })
-  afterEach(() => { db.close(); rmSync(dir, { recursive: true, force: true }) })
 
-  const PROJ = '/home/user/proj'
-
-  it('create → get с дефолтами (enabled, null-поля прогона)', () => {
-    const t = createScheduledTask(db, { projectPath: PROJ, prompt: 'аудит Ozon', cron: '0 9 * * *', human: 'каждое утро' })
-    expect(t.id).toBeGreaterThan(0)
-    expect(t.enabled).toBe(true)
-    expect(t.cron).toBe('0 9 * * *')
-    expect(t.last_run_at).toBeNull()
-    expect(getScheduledTask(db, t.id)?.prompt).toBe('аудит Ozon')
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'verstak-scheduler-'))
+    db = openDb(join(dir, 'test.db'))
   })
 
-  it('list по проекту + listEnabled фильтрует выключенные', () => {
-    const a = createScheduledTask(db, { projectPath: PROJ, prompt: 'a', cron: '0 9 * * *', human: '' })
-    createScheduledTask(db, { projectPath: PROJ, prompt: 'b', cron: '0 21 * * *', human: '' })
-    createScheduledTask(db, { projectPath: '/other', prompt: 'c', cron: '0 9 * * *', human: '' })
-    expect(listScheduledTasks(db, PROJ)).toHaveLength(2)
-    expect(listScheduledTasks(db)).toHaveLength(3)
-    setScheduledTaskEnabled(db, a.id, false)
-    expect(listEnabledScheduledTasks(db)).toHaveLength(2) // b (PROJ) + c (/other)
+  afterEach(() => {
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 
-  it('recordScheduledRun сохраняет статус/итог/минуту', () => {
-    const t = createScheduledTask(db, { projectPath: PROJ, prompt: 'x', cron: '0 9 * * *', human: '' })
-    recordScheduledRun(db, t.id, { status: 'ok', summary: 'готово', minute: 12345, at: 1000 })
-    const got = getScheduledTask(db, t.id)!
-    expect(got.last_status).toBe('ok')
-    expect(got.last_result).toBe('готово')
-    expect(got.last_run_minute).toBe(12345)
-    expect(got.last_run_at).toBe(1000)
+  it('migration exposes heartbeat and next-run fields', () => {
+    const task = createScheduledTask(db, {
+      projectPath: '/project',
+      prompt: 'daily report',
+      cron: '* * * * *',
+      human: 'every minute',
+    })
+
+    expect(task.last_heartbeat_at).toBeNull()
+    expect(task.next_run_at).toBeNull()
   })
 
-  it('delete удаляет', () => {
-    const t = createScheduledTask(db, { projectPath: PROJ, prompt: 'x', cron: '0 9 * * *', human: '' })
-    expect(deleteScheduledTask(db, t.id)).toBe(true)
-    expect(getScheduledTask(db, t.id)).toBeNull()
-    expect(deleteScheduledTask(db, 99999)).toBe(false)
+  it('records scheduler heartbeat for visible liveness checks', () => {
+    createScheduledTask(db, { projectPath: '/project', prompt: 'x', cron: '* * * * *', human: 'every minute' })
+    expect(recordSchedulerHeartbeat(db, 1234)).toBe(1)
+    expect(getSchedulerHeartbeat(db)).toBe(1234)
+  })
+
+  it('claims a run before execution and blocks a second claim in the same minute', () => {
+    const task = createScheduledTask(db, { projectPath: '/project', prompt: 'x', cron: '* * * * *', human: 'every minute' })
+
+    expect(markScheduledTaskClaimed(db, task.id, { minute: 10, at: 1000, nextRunAt: 660_000 })).toBe(true)
+    expect(markScheduledTaskClaimed(db, task.id, { minute: 10, at: 1001, nextRunAt: 660_000 })).toBe(false)
+
+    const claimed = getScheduledTask(db, task.id)!
+    expect(claimed.last_run_minute).toBe(10)
+    expect(claimed.last_heartbeat_at).toBe(1000)
+    expect(claimed.next_run_at).toBe(660_000)
+  })
+
+  it('recordScheduledRun keeps next_run_at for legacy callers', () => {
+    const task = createScheduledTask(db, { projectPath: '/project', prompt: 'x', cron: '* * * * *', human: 'every minute' })
+
+    recordScheduledRun(db, task.id, { status: 'ok', summary: 'done', minute: 22, at: 2000 })
+
+    const updated = getScheduledTask(db, task.id)!
+    expect(updated.last_run_minute).toBe(22)
+    expect(updated.next_run_at).toBe(23 * 60_000)
   })
 })

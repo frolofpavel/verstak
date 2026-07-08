@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.0 - 2026-07-08
+
+### Добавлено
+- Run lifecycle hardening: `ai:send` получил timeout policy, статус `timed_out`, единое отличие ручного Stop от watchdog-abort и синхронизацию с `ai:wait`, timeline и Telegram notify.
+- Cron heartbeat: планировщик пишет liveness heartbeat, показывает stalled-состояние в UI и фиксирует `next_run_at` / `last_run_minute` claim до запуска задачи.
+- Frozen memory snapshot: память для agent run замораживается на старте, логируется только fingerprint/counts без содержимого и не дрейфует между API/CLI ветками.
+- Proof Delivery: длинные успешные прогоны могут opt-in отправлять Proof report в Telegram; PDF/Telegram proof IPC оставлен совместимым.
+
+### Безопасность
+- Scheduled tasks отклоняют lifecycle-prompts вроде остановки Verstak, shutdown/reboot и kill scheduler.
+- Inbound remote mutations остаются design-only: внешние команды не получают тихий write/run/control канал без локального approval.
+- Proof auto-send требует явного `proof_auto_send_telegram=true`, chat id, bot token и минимальную длительность run.
+
+### Проверка
+- Targeted 1.9 suite прошёл: scheduler/storage/memory/proof/notify — 36 tests.
+- `npm run type` прошёл.
+- `npm run test:fast` прошёл: 2252 tests, 7 skipped.
+
 ## 1.8.9 - 2026-07-08
 
 ### Добавлено

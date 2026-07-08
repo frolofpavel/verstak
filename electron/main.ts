@@ -92,7 +92,7 @@ import { registerMcpIpc } from './ipc/mcp'
 import { mcpClient } from './mcp/client'
 import { registerAuditIpc } from './ipc/audit'
 import { appendAudit, queryAudit } from './storage/audit-log'
-import { registerProofIpc } from './ipc/proof'
+import { createProofService, registerProofIpc } from './ipc/proof'
 import { registerDebugIpc } from './ipc/debug'
 import { saveRunInput } from './storage/run-inputs'
 import { trackToolForPatterns } from './ai/procedural-memory'
@@ -526,6 +526,14 @@ app.whenReady().then(() => {
   }
 
   const registerDeferredIpc = () => {
+  const proofDeps = {
+    agentRuns,
+    verifications,
+    getProjectRoot: getActiveProjectPath,
+    queryAuditForRun: (runId: string) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp })),
+    getSecret
+  }
+  const proofService = createProofService(proofDeps)
   const aiDeps: Parameters<typeof registerAiIpc>[0] = {
     getSecret,
     getProviderId,
@@ -607,6 +615,10 @@ app.whenReady().then(() => {
     saveRunInput: (input) => {
       saveRunInput(db, input)
     },
+    sendProofReport: async (runId) => {
+      const res = await proofService.sendTelegram(runId)
+      return res.ok ? { ok: true } : { ok: false, error: res.error }
+    },
     // Персистентные суб-сессии (Фаза 2) — delegate_* пишут историю субов в БД.
     subSessions: {
       create: (opts) => subSessions.create(opts),
@@ -661,13 +673,7 @@ app.whenReady().then(() => {
   // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
   registerVerificationsIpc(verifications)
   // Proof Pack — доказательство выполнения прогона (proof.json + proof.html).
-  registerProofIpc({
-    agentRuns,
-    verifications,
-    getProjectRoot: getActiveProjectPath,
-    queryAuditForRun: (runId) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp })),
-    getSecret
-  })
+  registerProofIpc(proofDeps, proofService)
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)

@@ -20,9 +20,34 @@ export interface RunNotifyEvent {
   error?: string | null
 }
 
+export interface AutoProofReportEvent extends RunNotifyEvent {
+  runId: string
+}
+
 /** Какие терминальные статусы достойны пуша. stopped = юзер сам остановил → молчим. */
 export function shouldNotifyStatus(status: AgentRunStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'timed_out' || status === 'waiting_review'
+}
+
+export function autoProofReportMinDurationMs(getSecret: (key: string) => string | null): number {
+  const raw = getSecret('proof_auto_send_min_minutes')
+  const minutes = raw ? Number(raw) : 10
+  if (!Number.isFinite(minutes) || minutes <= 0) return 10 * 60_000
+  return Math.max(1, Math.min(360, minutes)) * 60_000
+}
+
+export function shouldSendAutoProofReport(
+  ev: AutoProofReportEvent,
+  deps: { getSecret: (key: string) => string | null }
+): boolean {
+  if (deps.getSecret('proof_auto_send_telegram') !== 'true') return false
+  if (ev.owner && ev.owner !== 'main') return false
+  if (ev.status !== 'done') return false
+  if (!ev.projectName) return false
+  if (!ev.durationMs || ev.durationMs < autoProofReportMinDurationMs(deps.getSecret)) return false
+  if (!deps.getSecret('telegram_notify_chat_id')) return false
+  if (!deps.getSecret('telegram_bot_token')) return false
+  return true
 }
 
 /** Чистый форматтер сообщения (тестируемый). */

@@ -14,6 +14,7 @@ import { parseSchedule, cronMatches, type TimeParts } from '../ai/schedule-parse
 import {
   createScheduledTask, listScheduledTasks, listEnabledScheduledTasks,
   setScheduledTaskEnabled, deleteScheduledTask, recordScheduledRun, getScheduledTask,
+  recordSchedulerHeartbeat, getSchedulerHeartbeat, markScheduledTaskClaimed,
   type ScheduledTask,
 } from '../storage/scheduled-tasks'
 import { createTelegramConnector } from '../connectors/telegram'
@@ -33,6 +34,13 @@ export interface SchedulerDeps {
 // длиться >1 мин), поэтому одного его недостаточно — тик/run-now могли бы запустить ту же
 // задачу повторно параллельно (ревью HIGH). Set отсекает уже бегущие.
 const running = new Set<number>()
+const STALLED_AFTER_MS = 3 * 60_000
+
+export interface SchedulerHealth {
+  lastHeartbeatAt: number | null
+  heartbeatAgeMs: number | null
+  stalled: boolean
+}
 
 /**
  * Какие задачи запускать в данную минуту: cron совпал И не запускались уже в эту
@@ -41,6 +49,29 @@ const running = new Set<number>()
  */
 export function selectDueTasks(tasks: ScheduledTask[], parts: TimeParts, minuteIdx: number): ScheduledTask[] {
   return tasks.filter(t => t.enabled && t.last_run_minute !== minuteIdx && cronMatches(t.cron, parts))
+}
+
+export function schedulerHealth(lastHeartbeatAt: number | null, now = Date.now()): SchedulerHealth {
+  const heartbeatAgeMs = lastHeartbeatAt ? Math.max(0, now - lastHeartbeatAt) : null
+  return {
+    lastHeartbeatAt,
+    heartbeatAgeMs,
+    stalled: heartbeatAgeMs != null && heartbeatAgeMs > STALLED_AFTER_MS,
+  }
+}
+
+const LIFECYCLE_GUARD_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\b(verstak\s+(stop|restart|shutdown)|(stop|restart|shutdown)\s+verstak)\b/i, reason: 'Команда управляет жизненным циклом Verstak.' },
+  { pattern: /\b(shutdown|poweroff|reboot)\b/i, reason: 'Команда может выключить или перезапустить систему.' },
+  { pattern: /\bkill\s+(scheduler|verstak)\b/i, reason: 'Команда может остановить планировщик.' },
+  { pattern: /\b(taskkill|pkill|killall)\b/i, reason: 'Команда может завершить процесс приложения.' },
+  { pattern: /\bsystemctl\s+(stop|restart|kill)\b/i, reason: 'Команда может остановить системный сервис.' },
+]
+
+export function schedulerPromptLifecycleRisk(prompt: string): string | null {
+  const text = prompt.trim()
+  if (!text) return null
+  return LIFECYCLE_GUARD_PATTERNS.find(rule => rule.pattern.test(text))?.reason ?? null
 }
 
 function nowParts(d: Date): TimeParts {
@@ -60,6 +91,16 @@ async function runOne(db: Database, deps: SchedulerDeps, taskId: number, minuteI
   const task = getScheduledTask(db, taskId)
   if (!task) return
   running.add(taskId)
+  const claimedAt = Date.now()
+  const claimed = markScheduledTaskClaimed(db, taskId, {
+    minute: minuteIdx,
+    at: claimedAt,
+    nextRunAt: (minuteIdx + 1) * 60_000,
+  })
+  if (!claimed) {
+    running.delete(taskId)
+    return
+  }
   const providerId = (task.provider_id as ProviderId | null) ?? deps.getProviderId()
   const model = task.model ?? deps.getProviderModel(providerId)
   const ac = new AbortController()
@@ -90,6 +131,7 @@ let timer: NodeJS.Timeout | null = null
 
 function tick(db: Database, deps: SchedulerDeps): void {
   const now = new Date()
+  recordSchedulerHeartbeat(db, now.getTime())
   const minuteIdx = Math.floor(now.getTime() / 60_000)
   const due = selectDueTasks(listEnabledScheduledTasks(db), nowParts(now), minuteIdx)
   for (const task of due) void runOne(db, deps, task.id, minuteIdx)
@@ -97,8 +139,11 @@ function tick(db: Database, deps: SchedulerDeps): void {
 
 export function registerSchedulerIpc(db: Database, deps: SchedulerDeps): void {
   ipcMain.handle('scheduler:list', (_e, projectPath?: string) => listScheduledTasks(db, projectPath))
+  ipcMain.handle('scheduler:health', () => schedulerHealth(getSchedulerHeartbeat(db)))
   ipcMain.handle('scheduler:create', (_e, input: { projectPath: string; prompt: string; nl: string }) => {
     const prompt = (input.prompt ?? '').trim()
+    const lifecycleRisk = schedulerPromptLifecycleRisk(prompt)
+    if (lifecycleRisk) return { error: `Cron-задача отклонена: ${lifecycleRisk}` }
     if (!prompt) return { error: 'Пустая задача.' }
     if (!isWithinKnownRoots(input.projectPath, deps.getKnownRoots())) return { error: 'Путь проекта не зарегистрирован.' }
     const parsed = parseSchedule(input.nl ?? '')

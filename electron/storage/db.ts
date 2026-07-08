@@ -1008,6 +1008,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_agent_runs_lane_generation ON agent_runs(project_path, chat_id, owner, generation);
       `)
     }
+  },
+  {
+    version: 42,
+    description: 'NL-cron heartbeat and at-most-once claim metadata.',
+    run: (db: DB) => {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_tasks'").get()
+      if (!table) return
+      const cols = (db.prepare('PRAGMA table_info(scheduled_tasks)').all() as Array<{ name: string }>).map(c => c.name)
+      const has = (name: string): boolean => cols.includes(name)
+      if (!has('last_heartbeat_at')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN last_heartbeat_at INTEGER')
+      if (!has('next_run_at')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN next_run_at INTEGER')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(enabled, next_run_at)')
+    }
   }
 ]
 

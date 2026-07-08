@@ -5835,6 +5835,25 @@ html[data-theme="light"] .gg-mp-row-hidden-pill {
 .gg-view-title { font-size: var(--text-lg); margin: 0 0 6px; }
 .gg-scheduler-form { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin-bottom: 20px; }
 .gg-scheduler-form .gg-input { width: 100%; }
+.gg-scheduler-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--success, #5cc985) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--success, #5cc985) 10%, transparent);
+  font-size: var(--text-xs);
+}
+.gg-scheduler-health span { color: var(--text-tertiary); }
+.gg-scheduler-health.is-stalled {
+  border-color: color-mix(in srgb, var(--warning, #f2b84b) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning, #f2b84b) 12%, transparent);
+}
 .gg-scheduler-error { color: var(--error); font-size: var(--text-sm); }
 .gg-scheduler-list { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
 .gg-scheduler-item {

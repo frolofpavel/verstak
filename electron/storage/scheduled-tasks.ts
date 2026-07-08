@@ -20,6 +20,8 @@ export interface ScheduledTask {
   last_status: 'ok' | 'error' | null
   last_result: string | null
   last_run_minute: number | null
+  last_heartbeat_at: number | null
+  next_run_at: number | null
 }
 
 interface Row extends Omit<ScheduledTask, 'enabled'> { enabled: number }
@@ -67,6 +69,27 @@ export function deleteScheduledTask(db: Database, id: number): boolean {
   return db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id).changes > 0
 }
 
+export function recordSchedulerHeartbeat(db: Database, at = Date.now()): number {
+  return db.prepare('UPDATE scheduled_tasks SET last_heartbeat_at = ?').run(at).changes
+}
+
+export function getSchedulerHeartbeat(db: Database): number | null {
+  const row = db.prepare('SELECT MAX(last_heartbeat_at) AS last_heartbeat_at FROM scheduled_tasks').get() as { last_heartbeat_at: number | null } | undefined
+  return row?.last_heartbeat_at ?? null
+}
+
+export function markScheduledTaskClaimed(
+  db: Database,
+  id: number,
+  claim: { minute: number; at: number; nextRunAt: number | null }
+): boolean {
+  return db.prepare(
+    `UPDATE scheduled_tasks
+     SET last_run_minute = ?, next_run_at = ?, last_heartbeat_at = ?
+     WHERE id = ? AND (last_run_minute IS NULL OR last_run_minute != ?)`
+  ).run(claim.minute, claim.nextRunAt, claim.at, id, claim.minute).changes > 0
+}
+
 /** Записать результат прогона. minute — порядковый номер минуты (анти-двойное срабатывание). */
 export function recordScheduledRun(
   db: Database,
@@ -74,6 +97,9 @@ export function recordScheduledRun(
   result: { status: 'ok' | 'error'; summary: string; minute: number; at: number }
 ): void {
   db.prepare(
-    'UPDATE scheduled_tasks SET last_run_at = ?, last_status = ?, last_result = ?, last_run_minute = ? WHERE id = ?'
-  ).run(result.at, result.status, result.summary.slice(0, 2000), result.minute, id)
+    `UPDATE scheduled_tasks
+     SET last_run_at = ?, last_status = ?, last_result = ?, last_run_minute = ?,
+         next_run_at = COALESCE(next_run_at, ?)
+     WHERE id = ?`
+  ).run(result.at, result.status, result.summary.slice(0, 2000), result.minute, (result.minute + 1) * 60_000, id)
 }

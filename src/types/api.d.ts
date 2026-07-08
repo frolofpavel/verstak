@@ -202,6 +202,14 @@ export interface ScheduledTask {
   last_status: 'ok' | 'error' | null
   last_result: string | null
   last_run_minute: number | null
+  last_heartbeat_at: number | null
+  next_run_at: number | null
+}
+
+export interface SchedulerHealth {
+  lastHeartbeatAt: number | null
+  heartbeatAgeMs: number | null
+  stalled: boolean
 }
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
 export interface UsageDelta {
@@ -614,6 +622,7 @@ declare global {
       }
       scheduler: {
         list: (projectPath?: string) => Promise<ScheduledTask[]>
+        health: () => Promise<SchedulerHealth>
         create: (input: { projectPath: string; prompt: string; nl: string }) => Promise<{ task?: ScheduledTask; error?: string }>
         toggle: (id: number, enabled: boolean) => Promise<boolean>
         remove: (id: number) => Promise<boolean>

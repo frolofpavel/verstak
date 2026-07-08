@@ -382,6 +382,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   scheduler: {
     list: (projectPath?: string) => ipcRenderer.invoke('scheduler:list', projectPath),
+    health: () => ipcRenderer.invoke('scheduler:health'),
     create: (input: { projectPath: string; prompt: string; nl: string }) => ipcRenderer.invoke('scheduler:create', input),
     toggle: (id: number, enabled: boolean) => ipcRenderer.invoke('scheduler:toggle', id, enabled),
     remove: (id: number) => ipcRenderer.invoke('scheduler:delete', id),

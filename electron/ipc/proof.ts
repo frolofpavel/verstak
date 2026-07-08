@@ -47,6 +47,12 @@ export interface ProofSendTelegramResult {
   error?: string
 }
 
+export interface ProofService {
+  generate(runId: string): Promise<ProofGenerateResult>
+  exportPdf(runId: string): Promise<ProofExportPdfResult>
+  sendTelegram(runId: string, opts?: { chatId?: string }): Promise<ProofSendTelegramResult>
+}
+
 function isReviewGateEvent(e: AgentRunEvent): boolean {
   return e.kind === 'tool_call' && e.label === 'review_before_commit'
 }
@@ -68,7 +74,7 @@ function relatedReviewEvents(deps: ProofDeps, run: AgentRun, events: AgentRunEve
   return []
 }
 
-export function registerProofIpc(deps: ProofDeps): void {
+export function createProofService(deps: ProofDeps): ProofService {
   async function generate(runId: string): Promise<ProofGenerateResult> {
     const projectPath = deps.getProjectRoot()
     if (!projectPath) return { ok: false, error: 'no-project' }
@@ -143,11 +149,7 @@ export function registerProofIpc(deps: ProofDeps): void {
     }
   }
 
-  ipcMain.handle('proof:generate', async (_e, runId: string): Promise<ProofGenerateResult> => generate(runId))
-
-  ipcMain.handle('proof:export-pdf', async (_e, runId: string): Promise<ProofExportPdfResult> => exportPdf(runId))
-
-  ipcMain.handle('proof:send-telegram', async (_e, runId: string, opts?: { chatId?: string }): Promise<ProofSendTelegramResult> => {
+  async function sendTelegram(runId: string, opts?: { chatId?: string }): Promise<ProofSendTelegramResult> {
     if (!deps.getSecret) return { ok: false, error: 'settings-unavailable' }
     const chatId = opts?.chatId || deps.getSecret('telegram_notify_chat_id')
     if (!chatId) return { ok: false, error: 'no-chat-id' }
@@ -164,5 +166,15 @@ export function registerProofIpc(deps: ProofDeps): void {
       return { ok: false, pdfPath: pdf.pdfPath, error: String((result as { error: unknown }).error) }
     }
     return { ok: true, pdfPath: pdf.pdfPath, result }
-  })
+  }
+
+  return { generate, exportPdf, sendTelegram }
+}
+
+export function registerProofIpc(deps: ProofDeps, service = createProofService(deps)): void {
+  ipcMain.handle('proof:generate', async (_e, runId: string): Promise<ProofGenerateResult> => service.generate(runId))
+
+  ipcMain.handle('proof:export-pdf', async (_e, runId: string): Promise<ProofExportPdfResult> => service.exportPdf(runId))
+
+  ipcMain.handle('proof:send-telegram', async (_e, runId: string, opts?: { chatId?: string }): Promise<ProofSendTelegramResult> => service.sendTelegram(runId, opts))
 }

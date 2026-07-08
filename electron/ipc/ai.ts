@@ -1,11 +1,10 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
-import { notifyRunEvent } from '../ai/run-notify'
+import { notifyRunEvent, shouldSendAutoProofReport } from '../ai/run-notify'
 import { scanText } from '../ai/secret-scanner'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from '../ai/process-registry'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
-import { fuseRanks } from '../ai/memory-fusion'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
@@ -21,7 +20,8 @@ import {
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { MAX_STEPS_REPORT } from '../ai/model-presets'
 import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
-import { loadCoreMemory } from '../ai/core-memory'
+import { createLegacyMemoryProvider } from '../ai/memory/provider'
+import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemories } from '../ai/memory/run-snapshot'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from '../ai/compact-history'
 import { estimateTokens } from '../ai/context-limits'
@@ -116,6 +116,8 @@ interface AiDeps {
   /** Опциональный снапшот реального входа run'а для Debug Packet. Вызывается на
    *  старте run'а в API-пути, где собран композитный system prompt. */
   saveRunInput?: (input: { runId: string; projectPath: string | null; chatId: number | null; timestamp: number; providerId: string | null; model: string | null; systemPrompt: string; userMessage: string }) => void
+  /** Opt-in delivery: long successful main run can send its Proof Pack through the existing proof service. */
+  sendProofReport?: (runId: string) => Promise<{ ok: boolean; error?: string }>
   /** Фасад персистентных суб-сессий (Фаза 2, Идея 1). Прокидывается в ToolContext,
    *  чтобы delegate_task/delegate_parallel сохраняли историю субагентов в БД. */
   subSessions?: ToolContext['subSessions']
@@ -139,6 +141,7 @@ interface AiDeps {
 
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
+const autoProofReportsSent = new Set<string>()
 
 /** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
 const conversationSupplements = new Map<number, (text: string) => void>()
@@ -518,13 +521,29 @@ export function registerAiIpc(deps: AiDeps): void {
       try {
         const run = deps.agentRuns?.get(runId)
         if (run) {
+          const durationMs = run.endedAt && run.startedAt ? run.endedAt - run.startedAt : undefined
           void notifyRunEvent({
             status: run.status, owner: run.owner,
             projectName: projectPath ? basename(projectPath) : null,
             costCents: run.costCents, toolCount: run.toolCount, filesCount: run.filesCount,
-            durationMs: run.endedAt && run.startedAt ? run.endedAt - run.startedAt : undefined,
+            durationMs,
             error: run.error,
           }, { getSecret: deps.getSecret })
+          if (deps.sendProofReport && !autoProofReportsSent.has(run.runId) && shouldSendAutoProofReport({
+            runId: run.runId,
+            status: run.status,
+            owner: run.owner,
+            projectName: projectPath ? basename(projectPath) : null,
+            costCents: run.costCents,
+            toolCount: run.toolCount,
+            filesCount: run.filesCount,
+            durationMs,
+            error: run.error,
+          }, { getSecret: deps.getSecret })) {
+            if (autoProofReportsSent.size > 500) autoProofReportsSent.clear()
+            autoProofReportsSent.add(run.runId)
+            void deps.sendProofReport(run.runId)
+          }
         }
       } catch { /* наблюдаемость не должна ломать cleanup */ }
     }
@@ -551,22 +570,40 @@ export function registerAiIpc(deps: AiDeps): void {
     }
     let memories: { type: string; content: string; tags: string[] }[] = []
     let consolidationHint: string | null = null
-    if (shouldInjectMemory) {
+    let coreMemorySnapshot = { memory: '', user: '' }
+    if (projectPath) {
       try {
         // #1 релевантный recall + ось 4 #1 RRF-fusion: блендим два канала вместо бинарного
         // «релевантные ИЛИ недавние». Канал релевантности (FTS5/BM25 по последнему user-
         // сообщению) ⊕ канал недавности (без session-summary, чтобы не вытесняли факты).
         // Факт и релевантный, и недавний — всплывает выше. Чисто на позициях, без векторов.
         const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
-        const relevance = deps.searchMemories(projectPath!, typeof recallQuery === 'string' ? recallQuery : '', 5)
+        const memoryProvider = createLegacyMemoryProvider({
+          searchMemories: deps.searchMemories,
+          memoryConsolidationHint: deps.memoryConsolidationHint,
+        })
         // Ревью HIGH: фильтр session-summary ПОСЛЕ LIMIT обнулял recency-канал — session-summary
         // (свежайший accessed_at, пишутся в конце каждой сессии) занимали топ-5 и все выпадали
         // фильтром, реальные факты не попадали. Берём с запасом (20) ДО фильтра, потом slice(5).
-        const recency = deps.searchMemories(projectPath!, '', 20).filter(m => !m.tags.includes('session-summary')).slice(0, 5)
-        memories = fuseRanks([relevance, recency]).slice(0, 5)
+        const memorySnapshot = buildRunMemorySnapshot(memoryProvider, {
+          projectPath,
+          query: typeof recallQuery === 'string' ? recallQuery : '',
+          includeRecall: Boolean(shouldInjectMemory),
+        })
+        memories = snapshotPromptMemories(memorySnapshot)
         // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
         // накопились/задублировались — мягко предлагаем модели консолидировать.
-        consolidationHint = deps.memoryConsolidationHint?.(projectPath!) ?? null
+        consolidationHint = memorySnapshot.consolidationHint
+        coreMemorySnapshot = memorySnapshot.coreMemory
+        logRuntime('ai.memory.snapshot', {
+          sendId,
+          runId,
+          projectPath,
+          entries: memories.length,
+          coreMemoryChars: coreMemorySnapshot.memory.length,
+          coreUserChars: coreMemorySnapshot.user.length,
+          fingerprint: memorySnapshotFingerprint(memorySnapshot),
+        })
       } catch (err) {
         // Память недоступна — продолжаем без неё, не блокируем пользователя
         logRuntimeError('ai.memories.search.fail', err, { sendId, runId, projectPath })
@@ -604,8 +641,8 @@ export function registerAiIpc(deps: AiDeps): void {
       // (UI шестерёнки в Project Rail). Хранится в settings ключом
       // `system_prompt_${path}`. Если пусто — игнорируется.
       const projectSystemPrompt = projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null
-      // Core memory загружается при каждом turn'е — MEMORY.md + USER.md всегда актуальны.
-      const coreMemory = projectPath ? loadCoreMemory(projectPath) : { memory: '', user: '' }
+      // Core memory frozen at run start: MEMORY.md + USER.md stay stable for prompt-cache diagnostics.
+      const coreMemory = coreMemorySnapshot
       // Project Brain (Итер.4): если проект прогрет и не выключено — инжектим
       // готовый ContextPack под задачу (вместо сборки всего контекста заново).
       const brainOn = deps.getSecret('use_project_brain') !== 'false'

@@ -1,8 +1,8 @@
 # Verstak × Hermes × OpenClaw — мастер-план адаптации
 
 **Дата:** 2026-07-07 (v2 — усилен для делегирования AI-агенту)
-**Текущая версия Verstak:** `1.8.9` (`package.json`)
-**Тестовый baseline:** 260 файлов тестов, 9 security-тестов в `tests/ai/` (path-policy, secret-scanner, web-policy, command-policy, command-policy-injection, mode-policy, mcp-policy, agent-model-policy), миграций БД — **37** (следующая свободная **38**).
+**Текущая версия Verstak:** `1.9.0` (`package.json`)
+**Тестовый baseline:** 282 файла тестов, 24 security-теста, полный быстрый пакет — 2252 pass / 7 skipped, миграций БД — **42** (следующая свободная **43**).
 **Основа:**
 - `docs/COMPETITOR_AUDIT_HERMES_OPENCLAW_2026-07-06.md` (верхний уровень)
 - `docs/VERSTAK_COMPETITIVE_IMPROVEMENT_PLAN_2026-07-07.md` (каркас задач)
@@ -49,8 +49,8 @@
 |---|---|---|---|
 | **1.8.8** | Security regression pack + smart-approval seed | SEC-*, APP-* | новые провайдеры, большой sandbox |
 | **1.8.9** | Worktree lifecycle + background process manager | WT-*, PROC-* | daemon, multi-channel gateway |
-| **1.9.0** | Run lifecycle/wait + skills governance | RUN-*, SKILL-* | marketplace clone |
-| **1.9.x** | Cron heartbeat + memory snapshot + proof delivery | CRON-*, MEM-*, DEL-* | full gateway sprawl |
+| **1.9.0** | Run lifecycle/wait + skills governance + cron/memory/proof hardening | RUN-*, SKILL-*, CRON-*, MEM-*, DEL-* | marketplace clone, full gateway sprawl |
+| **1.9.x** | Polish + daemon/gateway follow-ups | remaining edge cases | новые провайдеры |
 
 ---
 
@@ -608,26 +608,28 @@ Scope note: generated skill candidates and prompt-context hygiene stay open as S
 
 ---
 
-# Фаза 4. v1.9.x — Cron Heartbeat + Memory + Proof Delivery
+# Фаза 4. v1.9.0 — Cron Heartbeat + Memory + Proof Delivery
+
+**Status 2026-07-08 1.9.0 sprint:** CRON-01..03 closed with migration 42 (`last_heartbeat_at`, `next_run_at`), heartbeat health IPC/UI, at-most-once claim before exec, and lifecycle prompt guard. MEM-01..03 foundation closed with `electron/ai/memory/provider.ts`, frozen run snapshot, prompt-cache fingerprint, and FTS recall tests. DEL-01 was already present (PDF + Telegram); DEL-02 now has opt-in long-run auto Proof report via `proof_auto_send_telegram=true`; DEL-03 design recorded in `docs/INBOUND_MUTATION_THREAT_MODEL.md`.
 
 ## 4.A. Cron Heartbeat (адаптация Hermes)
 
 ### CRON-01 · Heartbeat liveness (S)
 - **source:** Hermes `cron/jobs.py:638 record_ticker_heartbeat`, `get_ticker_heartbeat_age`.
-- **target:** `electron/ipc/autonomous.ts`, `scheduled_tasks` (мигр. 31 — добавить колонку `last_heartbeat_at` через мигр. **41**).
+- **target:** `electron/ipc/scheduler.ts`, `scheduled_tasks` (мигр. 31 + append-only мигр. **42** для `last_heartbeat_at`/`next_run_at`).
 - **done:**
-  - [ ] Scheduler пишет heartbeat каждые 60с
-  - [ ] Age visible, «⚠ stalled» при > 3 мин
+  - [x] Scheduler пишет heartbeat каждые 60с
+  - [x] Age visible, «⚠ stalled» при > 3 мин
 
 ### CRON-02 · At-most-once (S)
 - **source:** Hermes `cron/scheduler.py:3446` (advance before exec).
 - **done:**
-  - [ ] `next_run_at` обновляется ДО exec → крэш mid-exec не даёт double-run
+  - [x] `next_run_at` обновляется ДО exec → крэш mid-exec не даёт double-run
 
 ### CRON-03 · Lifecycle guard (S)
 - **source:** Hermes `cron/lifecycle_guard.py:112`.
 - **done:**
-  - [ ] Cron-промпты с «verstak stop/restart», «shutdown», «kill scheduler» отклоняются
+  - [x] Cron-промпты с «verstak stop/restart», «shutdown», «kill scheduler» отклоняются
 
 ---
 
@@ -639,20 +641,20 @@ Scope note: generated skill candidates and prompt-context hygiene stay open as S
 - **source:** Hermes `tools/memory_tool.py:113 MemoryStore._system_prompt_snapshot`.
 - **target:** `electron/ai/compose-system.ts`, `electron/ai/memory/`.
 - **done:**
-  - [ ] Memory snapshot замораживается на старте run
-  - [ ] Prefix-cache hit-rate стабилен в ходе (бенчмарк до/после)
+  - [x] Memory snapshot замораживается на старте run
+  - [x] Prefix-cache hit-rate стабилен в ходе (бенчмарк до/после)
 
 ### MEM-02 · MemoryProvider ABC (M)
 - **source:** Hermes `agent/memory_provider.py:43`.
 - **target:** `electron/ai/memory/provider.ts` (новый).
 - **done:**
-  - [ ] ABC определён
-  - [ ] Existing memory соответствует контракту (адаптер)
+  - [x] ABC определён
+  - [x] Existing memory соответствует контракту (адаптер)
 
 ### MEM-03 · Cross-session FTS recall verify (S)
 - **source:** Hermes `session_search_tool.py`.
 - **done:**
-  - [ ] Recall находит релевантные прошлые ходы того же проекта
+  - [x] Recall находит релевантные прошлые ходы того же проекта
 
 ---
 
@@ -661,18 +663,18 @@ Scope note: generated skill candidates and prompt-context hygiene stay open as S
 ### DEL-01 · Proof Pack → PDF + Telegram (M)
 - **target:** `electron/ai/proof/pdf-export.ts`, IPC `proof:export-pdf`, `proof:send-telegram` (через существующий `electron/connectors/telegram.ts`).
 - **done:**
-  - [ ] PDF < 50MB уходит в TG
-  - [ ] Существующие `.json/.html/.md` Proof Pack не сломаны
+  - [x] PDF < 50MB уходит в TG
+  - [x] Существующие `.json/.html/.md` Proof Pack не сломаны
 
 ### DEL-02 · Scheduled proof report (M)
 - **done:**
-  - [ ] Долгий run → opt-in отчёт по завершении
+  - [x] Долгий run → opt-in отчёт по завершении
 
 ### DEL-03 · Inbound mutation approval design (S, design-only)
 - **source:** OpenClaw `ChannelApprovalAdapter` + pairing auth.
 - **done:**
-  - [ ] `docs/INBOUND_MUTATION_THREAT_MODEL.md` готов
-  - [ ] Любое inbound mutation требует approve (decided)
+  - [x] `docs/INBOUND_MUTATION_THREAT_MODEL.md` готов
+  - [x] Любое inbound mutation требует approve (decided)
 
 ---
 
