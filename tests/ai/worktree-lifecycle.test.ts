@@ -9,7 +9,12 @@ import {
   removeWorktree,
   restoreWorktreeSnapshot,
 } from '../../electron/ai/git-worktree'
-import { removeWorktreeLossless } from '../../electron/ai/worktree-lifecycle'
+import {
+  removeWorktreeLossless,
+  gcWorktrees,
+  reconcileOrphanWorktrees,
+  type WorktreeGcEntry,
+} from '../../electron/ai/worktree-lifecycle'
 
 vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
 
@@ -142,6 +147,52 @@ describe('worktree lifecycle snapshots', () => {
     expect(result.snapshotRef).toBeNull()
     expect(result.baseRef).toBeNull()
     expect(existsSync(wt)).toBe(false)
+  })
+
+  it('gcWorktrees removes idle clean ended sessions, keeps active/fresh/dirty (WT-05)', async () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const T = 1_000_000_000_000
+
+    const wtIdle = addWorktree(repo, 'idle-ended')!       // ended + idle + clean → удаляем
+    const wtFresh = addWorktree(repo, 'fresh-ended')!     // ended, но не idle → бережём
+    const wtActive = addWorktree(repo, 'active-idle')!    // idle, но активна → не осиротим
+    const wtDirty = addWorktree(repo, 'dirty-ended')!     // ended + idle, но грязный → бережём
+    writeFileSync(join(wtDirty, 'a.txt'), 'uncommitted\n')
+
+    const sessions: WorktreeGcEntry[] = [
+      { chatId: 1, worktreePath: wtIdle, state: 'dismissed', lastActiveAt: T - 10 * DAY, removedAt: null },
+      { chatId: 2, worktreePath: wtFresh, state: 'merged', lastActiveAt: T, removedAt: null },
+      { chatId: 3, worktreePath: wtActive, state: 'active', lastActiveAt: T - 10 * DAY, removedAt: null },
+      { chatId: 4, worktreePath: wtDirty, state: 'dismissed', lastActiveAt: T - 10 * DAY, removedAt: null },
+    ]
+    const markRemoved = vi.fn()
+
+    const res = await gcWorktrees(repo, {
+      now: () => T,
+      listSessions: () => sessions,
+      markRemoved,
+    })
+
+    expect(res.removed).toEqual([wtIdle])
+    expect(existsSync(wtIdle)).toBe(false)
+    expect(existsSync(wtFresh)).toBe(true)   // не idle
+    expect(existsSync(wtActive)).toBe(true)  // активная
+    expect(existsSync(wtDirty)).toBe(true)   // грязная — бережём (lossless без force)
+    expect(res.skipped).toContain(wtDirty)
+    expect(markRemoved).toHaveBeenCalledTimes(1)
+    expect(markRemoved).toHaveBeenCalledWith(1, wtIdle, T)
+  })
+
+  it('reconcileOrphanWorktrees removes orphans absent from active registry (WT-05)', () => {
+    const wtKeep = addWorktree(repo, 'registered')!
+    const wtOrphan = addWorktree(repo, 'orphan')!
+
+    const res = reconcileOrphanWorktrees(repo, { activePaths: () => [wtKeep] })
+
+    expect(existsSync(wtOrphan)).toBe(false)
+    expect(existsSync(wtKeep)).toBe(true)
+    expect(res.removed.some(p => samePath(p, wtOrphan))).toBe(true)
+    expect(res.removed.some(p => samePath(p, wtKeep))).toBe(false)
   })
 
   it('keeps lifecycle helpers push-free', () => {

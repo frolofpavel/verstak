@@ -4,11 +4,10 @@ import {
   worktreeDiff,
   mergeWorktreeToMain,
   isGitRepo,
-  sweepStaleWorktrees,
   snapshotWorktree,
   restoreWorktreeSnapshot,
 } from '../ai/git-worktree'
-import { removeWorktreeLossless } from '../ai/worktree-lifecycle'
+import { removeWorktreeLossless, reconcileOrphanWorktrees, gcWorktrees } from '../ai/worktree-lifecycle'
 import { detectWorktreeState } from '../ai/worktree-status'
 import type { WorktreeSession, WorktreeSessions } from '../storage/worktree-sessions'
 
@@ -71,8 +70,22 @@ export function registerWorktreeIpc(wts: WorktreeSessions): void {
       return { ok: true, worktreePath: existing.worktreePath }
     }
 
+    // WT-05: перед новой изоляцией чистим осиротевшие (reconcile по реестру) и
+    // GC'им давно неактивные завершённые сессии (idle 7д + clean). Best-effort.
     try {
-      sweepStaleWorktrees(projectPath, wts.listActive(projectPath).map(s => s.worktreePath))
+      reconcileOrphanWorktrees(projectPath, {
+        activePaths: () => wts.listActive(projectPath).map(s => s.worktreePath),
+      })
+      void gcWorktrees(projectPath, {
+        listSessions: () => wts.listProject(projectPath).map(s => ({
+          chatId: s.chatId,
+          worktreePath: s.worktreePath,
+          state: s.state,
+          lastActiveAt: s.lastActiveAt,
+          removedAt: s.removedAt,
+        })),
+        markRemoved: (chatId, worktreePath, when) => wts.markRemoved(chatId, worktreePath, when),
+      }).catch(() => { /* best-effort GC */ })
     } catch {
       // best-effort cleanup only
     }

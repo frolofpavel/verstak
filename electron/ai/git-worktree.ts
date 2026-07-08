@@ -190,15 +190,25 @@ export function worktreeDiff(worktreePath: string): string {
  * из-за file-lock (Windows), или от удалённых чатов. Вызывать перед новой изоляцией.
  */
 export function sweepStaleWorktrees(repoRoot: string, keepPaths: string[]): number {
+  return reconcileOrphanWorktreePaths(repoRoot, keepPaths).length
+}
+
+/**
+ * Как sweepStaleWorktrees, но возвращает СПИСОК удалённых путей (для reconcile-отчёта
+ * WT-05). Удаляем наши (verstak-wt) worktree'ы репозитория, которых НЕТ в keepPaths
+ * (активные сессии реестра) — осиротевшие после краша/удалённого чата/ручного вмешательства.
+ * canonPath: realpath + без хвостовых слэшей + lower на Windows. Основное дерево не трогаем.
+ */
+export function reconcileOrphanWorktreePaths(repoRoot: string, keepPaths: string[]): string[] {
   const keep = new Set(keepPaths.map(canonPath))
   const root = canonPath(repoRoot)
-  let removed = 0
+  const removed: string[] = []
   for (const wt of listWorktrees(repoRoot)) {
     const w = canonPath(wt)
     if (w === root) continue // основное дерево не трогаем
     if (!/[\\/]verstak-wt-/.test(w)) continue // только свои
     if (keep.has(w)) continue // активный — оставляем
-    if (removeWorktree(repoRoot, wt)) removed++
+    if (removeWorktree(repoRoot, wt)) removed.push(wt)
   }
   return removed
 }

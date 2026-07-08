@@ -1025,6 +1025,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('next_run_at')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN next_run_at INTEGER')
       db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(enabled, next_run_at)')
     }
+  },
+  {
+    version: 43,
+    description: 'scheduler_meta: single-row heartbeat store (M5) — не размазывать last_heartbeat_at по всем задачам; heartbeat виден даже при нуле задач.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduler_meta (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          last_heartbeat_at INTEGER
+        )
+      `)
+      db.exec('INSERT OR IGNORE INTO scheduler_meta (id, last_heartbeat_at) VALUES (1, NULL)')
+    }
   }
 ]
 
