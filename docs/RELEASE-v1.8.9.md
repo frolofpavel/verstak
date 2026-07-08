@@ -24,4 +24,4 @@
 
 - Полный daemon/multi-channel gateway не входит в 1.8.9.
 - Большая отдельная WorktreePanel остаётся polish-задачей, базовый lifecycle уже есть через существующий WorktreeBar и IPC.
-- Перед публичной выкладкой нужны upload и обновление публичной download-ссылки.
+- GitHub Release asset может быть дозалит отдельно; публичная download-кнопка уже ведёт на `agi-iri.ru`.
