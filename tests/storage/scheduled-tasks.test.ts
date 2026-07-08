@@ -45,6 +45,18 @@ describe('scheduled tasks storage', () => {
     expect(getSchedulerHeartbeat(db)).toBe(1234)
   })
 
+  it('records heartbeat even with zero tasks and does not smear across tasks (M5)', () => {
+    // Ключевое: без задач heartbeat всё равно виден (раньше UPDATE 0 строк → null →
+    // ложный «stalled»).
+    expect(recordSchedulerHeartbeat(db, 5555)).toBe(1)
+    expect(getSchedulerHeartbeat(db)).toBe(5555)
+    // Появление задач не сбрасывает и не размазывает heartbeat по их строкам.
+    const t = createScheduledTask(db, { projectPath: '/p', prompt: 'x', cron: '* * * * *', human: 'm' })
+    recordSchedulerHeartbeat(db, 6666)
+    expect(getSchedulerHeartbeat(db)).toBe(6666)
+    expect(getScheduledTask(db, t.id)!.last_heartbeat_at).toBeNull()
+  })
+
   it('claims a run before execution and blocks a second claim in the same minute', () => {
     const task = createScheduledTask(db, { projectPath: '/project', prompt: 'x', cron: '* * * * *', human: 'every minute' })
 
@@ -53,7 +65,8 @@ describe('scheduled tasks storage', () => {
 
     const claimed = getScheduledTask(db, task.id)!
     expect(claimed.last_run_minute).toBe(10)
-    expect(claimed.last_heartbeat_at).toBe(1000)
+    // M5: claim больше не пишет last_heartbeat_at в строку задачи (heartbeat в scheduler_meta).
+    expect(claimed.last_heartbeat_at).toBeNull()
     expect(claimed.next_run_at).toBe(660_000)
   })
 

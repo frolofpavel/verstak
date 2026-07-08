@@ -912,6 +912,10 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       }
     }
   },
+  // ПРИМЕЧАНИЕ: версия 37 намеренно отсутствует (нумерация 36 → 38). Миграции 37
+  // никогда не было — при добавлении хотфикс-схемы взяли следующий свободный номер
+  // как 38. schema_version хранит только максимум применённой, дыра безопасна.
+  // Следующая свободная миграция — 43. НЕ переиспользовать 37.
   {
     version: 38,
     description: 'worktree_sessions lifecycle metadata: snapshot/base refs, activity timestamp, removed marker.',
@@ -1020,6 +1024,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('last_heartbeat_at')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN last_heartbeat_at INTEGER')
       if (!has('next_run_at')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN next_run_at INTEGER')
       db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(enabled, next_run_at)')
+    }
+  },
+  {
+    version: 43,
+    description: 'scheduler_meta: single-row heartbeat store (M5) — не размазывать last_heartbeat_at по всем задачам; heartbeat виден даже при нуле задач.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduler_meta (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          last_heartbeat_at INTEGER
+        )
+      `)
+      db.exec('INSERT OR IGNORE INTO scheduler_meta (id, last_heartbeat_at) VALUES (1, NULL)')
     }
   }
 ]

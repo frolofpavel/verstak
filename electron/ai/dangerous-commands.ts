@@ -33,11 +33,17 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
   { id: 'sudo-rm', pattern: /\b(?:sudo|doas)\s+rm\b/i, severity: 'block', reason: 'Запрещено: sudo rm' },
   { id: 'git-force-push', pattern: /\bgit\s+push\s+.*--force\b/i, severity: 'block', reason: 'Запрещено: git push --force (фиксить вручную при необходимости)' },
   { id: 'git-destructive', pattern: /\bgit\s+(reset\s+--hard\s+HEAD~|clean\s+-fdx|filter-(repo|branch))/i, severity: 'block', reason: 'Запрещено: разрушающие git операции' },
-  { id: 'find-exec-rm-rf', pattern: /\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-[a-z]*r[a-z]*f|\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*-rf/i, severity: 'block', reason: 'Запрещено: массовое удаление через find -exec rm -rf' },
+  { id: 'find-exec-rm-recursive', pattern: /\bfind\b[\s\S]*-exec(?:dir)?\b[\s\S]*\brm\b[\s\S]*(?:-[a-z]*r|--recursive)/i, severity: 'block', reason: 'Запрещено: рекурсивное удаление через find -exec rm -r' },
   { id: 'secret-paths', pattern: /\.ssh|\.ss\*|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\bid_[a-z0-9]*\*|\.aws[\/\\]|\.kube[\/\\]|\.docker[\/\\]|\.azure[\/\\]|\.config[\/\\]gcloud|kubeconfig|\.npmrc|\.netrc|\.gnupg|authorized_keys|known_hosts/i, severity: 'block', reason: 'Запрещено: чтение/копирование ключей и токенов' },
   { id: 'powershell-encoded-command', pattern: /\b(?:powershell|pwsh)(\.exe)?\b[^\n]*\s-[eE](?:nc(?:oded(?:command)?)?)?\b/i, severity: 'block', reason: 'Запрещено: powershell/pwsh -EncodedCommand (запутанная команда)' },
   { id: 'cmd-variable-expansion', pattern: /\bcmd(\.exe)?\s+\/[cC]\b[^\n]*(%[^%\s]+%|![\w]+!)/i, severity: 'block', reason: 'Запрещено: cmd /c с переменными расширения — попытка обфускации' },
   { id: 'powershell-eval', pattern: /\b(iex|invoke-expression)\b/i, severity: 'block', reason: 'Запрещено: PowerShell Invoke-Expression / iex' },
+  // eval динамики/декодированного payload — обход детектора: сам rm/base64 спрятан
+  // в подстановке ($(...)/backtick), переменной ($X) или декодере. eval требуется
+  // в командной позиции (начало/после ;&|() ), чтобы не ловить «eval» как подстроку
+  // (напр. npm run test:eval). Known-limit: чистая индирекция через переменную без
+  // eval (X=rm; $X -rf /) не ловится — нужна shell-семантика, не regex.
+  { id: 'shell-eval-dynamic', pattern: /(?:^|[\n;&|(])\s*eval\s+[^\n]*(?:\$\(|`|\$\{?[A-Za-z_]|\bbase64\b|\bxxd\b|\bopenssl\b)/i, severity: 'block', reason: 'Запрещено: eval динамического/декодированного содержимого (обфускация RCE)' },
   { id: 'chmod-world-writable', pattern: /\bchmod\b[^\n]*(?:-R|--recursive)[^\n]*777\b/i, severity: 'block', reason: 'Запрещено: chmod -R 777' },
   { id: 'chown-recursive-system', pattern: /\bchown\b[^\n]*(?:-R|--recursive)[^\n]*(?:\/|~|\$HOME|\.\.)/i, severity: 'block', reason: 'Запрещено: chown -R системных или внешних путей' },
   { id: 'network-shell', pattern: /\b(?:nc|ncat|netcat|socat)\b[^\n]*(?:-e\s|exec:|\/dev\/tcp\/|\bconnect:)/i, severity: 'block', reason: 'Запрещено: сетевой shell / reverse shell' },

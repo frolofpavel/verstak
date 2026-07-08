@@ -69,15 +69,25 @@ export function deleteScheduledTask(db: Database, id: number): boolean {
   return db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id).changes > 0
 }
 
+// M5: heartbeat живёт в отдельной 1-строчной scheduler_meta, а не размазан по всем
+// строкам scheduled_tasks (постоянная фоновая запись N строк + рост WAL). Бонус:
+// heartbeat виден даже когда задач ноль (иначе UPDATE 0 строк → ложный «stalled»).
 export function recordSchedulerHeartbeat(db: Database, at = Date.now()): number {
-  return db.prepare('UPDATE scheduled_tasks SET last_heartbeat_at = ?').run(at).changes
+  return db.prepare(
+    `INSERT INTO scheduler_meta (id, last_heartbeat_at) VALUES (1, ?)
+     ON CONFLICT(id) DO UPDATE SET last_heartbeat_at = excluded.last_heartbeat_at`
+  ).run(at).changes
 }
 
 export function getSchedulerHeartbeat(db: Database): number | null {
-  const row = db.prepare('SELECT MAX(last_heartbeat_at) AS last_heartbeat_at FROM scheduled_tasks').get() as { last_heartbeat_at: number | null } | undefined
+  const row = db.prepare('SELECT last_heartbeat_at FROM scheduler_meta WHERE id = 1').get() as { last_heartbeat_at: number | null } | undefined
   return row?.last_heartbeat_at ?? null
 }
 
+// M6: next_run_at — ДИАГНОСТИЧЕСКОЕ поле (когда планировщик ждёт следующего запуска),
+// НЕ защитный механизм. At-most-once обеспечивают last_run_minute (пишется claim'ом ДО
+// exec) + in-flight Set в scheduler.ts. selectDueTasks фильтрует по last_run_minute, а
+// next_run_at не читает. Не полагаться на него как на гейт — иначе фантомная гарантия.
 export function markScheduledTaskClaimed(
   db: Database,
   id: number,
@@ -85,9 +95,9 @@ export function markScheduledTaskClaimed(
 ): boolean {
   return db.prepare(
     `UPDATE scheduled_tasks
-     SET last_run_minute = ?, next_run_at = ?, last_heartbeat_at = ?
+     SET last_run_minute = ?, next_run_at = ?
      WHERE id = ? AND (last_run_minute IS NULL OR last_run_minute != ?)`
-  ).run(claim.minute, claim.nextRunAt, claim.at, id, claim.minute).changes > 0
+  ).run(claim.minute, claim.nextRunAt, id, claim.minute).changes > 0
 }
 
 /** Записать результат прогона. minute — порядковый номер минуты (анти-двойное срабатывание). */

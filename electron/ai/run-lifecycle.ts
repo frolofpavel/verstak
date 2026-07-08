@@ -145,6 +145,17 @@ export function isAgentRunTimeoutAbort(signal: AbortSignal): boolean {
   return reason instanceof Error && reason.name === AGENT_RUN_TIMEOUT_ABORT_NAME
 }
 
+/**
+ * Гейт таймаут-watchdog'а: срабатывать ТОЛЬКО если прогон ещё не оборван и ещё не
+ * завершён. finish() проставляет endedAt в inner-finally ДО clearTimeout в cleanup,
+ * поэтому проверка endedAt закрывает гонку «watchdog vs успешный финал» (M2): иначе
+ * успешно завершённый прогон мог получить ложный timeout-тост, если таймер сработал
+ * в окне между finish() и clearRunTimeout().
+ */
+export function shouldFireRunTimeout(aborted: boolean, endedAt: number | null | undefined): boolean {
+  return !aborted && endedAt == null
+}
+
 export async function waitForRun(
   agentRuns: Pick<AgentRuns, 'get'>,
   runId: string,

@@ -7,7 +7,12 @@ import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 import { scanText } from '../../ai/secret-scanner'
-import { hashCommandForAudit } from '../../ai/smart-approve'
+import {
+  isSmartApproveEnabled,
+  evaluateSmartApprove,
+  recordSmartApproveEscalation,
+  recordSmartApproveAudit,
+} from './command'
 
 function registry(ctx: Parameters<ToolHandler['handle']>[1]) {
   return ctx.processRegistry ?? globalProcessRegistry
@@ -49,23 +54,18 @@ async function authorizeProcessCommand(call: Parameters<ToolHandler['handle']>[0
     return reason
   }
 
+  // M4: переиспользуем общий evaluateSmartApprove из command.ts — тот несёт
+  // per-send лимит эскалаций (иначе spawn_process дёргал guard-модель без предела)
+  // и единый audit. Ветку больше не дублируем.
   let forceConfirm = false
-  if (ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true') {
-    const smart = ctx.smartApprove
-      ? await ctx.smartApprove({ command, cwd: ctx.projectPath, agentMode: ctx.agentMode, projectPath: ctx.projectPath })
-      : { verdict: 'escalate' as const, reason: 'smart approval is enabled but no guard provider is configured', model: 'unconfigured', durationMs: 0 }
-    try {
-      ctx.appendAudit?.('smart_approve', JSON.stringify({
-        callId: call.id,
-        cmd_hash: hashCommandForAudit(command),
-        verdict: smart.verdict,
-        model: smart.model,
-        durationMs: smart.durationMs,
-        reason: scanText(smart.reason).redacted.slice(0, 240)
-      }))
-    } catch { /* best-effort */ }
+  if (isSmartApproveEnabled(ctx)) {
+    const smart = await evaluateSmartApprove(command, ctx)
+    recordSmartApproveAudit(command, call.id, smart, ctx)
     if (smart.verdict === 'deny') return `smart-approve denied: ${scanText(smart.reason).redacted}`
-    if (smart.verdict === 'escalate') forceConfirm = true
+    if (smart.verdict === 'escalate') {
+      recordSmartApproveEscalation(ctx.sendId)
+      forceConfirm = true
+    }
   }
 
   const allowlisted = decision !== 'auto-accept'

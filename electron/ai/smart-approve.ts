@@ -1,3 +1,11 @@
+// СТАТУС (M1, аудит 08.07): это SEED. Модуль и его anti-injection обёртка полностью
+// протестированы, НО в проде guard не активен: ctx.smartApprove не собирается в
+// ipc/ai.ts, флаг USE_SMART_APPROVE=off по умолчанию, отдельного 3с-таймаута нет
+// (только catch на reject callLlm). Поведение fail-closed (нет guard-провайдера →
+// escalate → ручное подтверждение), поэтому дыры безопасности нет — но заявленная
+// «LLM классифицирует опасную команду» в собранном приложении НЕ работает.
+// Полноценная активация (прошить ctx.smartApprove + Settings-флаг + таймаут) —
+// отдельная фича, не хотфикс. До неё метрику «Smart-approval: да» считать SEED.
 import { recommendAgentModel } from './agent-model-policy'
 import { detectDangerousCommand } from './dangerous-commands'
 import type { AgentMode } from './mode-policy'

@@ -7,7 +7,7 @@ import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 import { hashCommandForAudit, type SmartApproveResult } from '../../ai/smart-approve'
 
-function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
+export function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
   return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
 }
 
@@ -22,12 +22,12 @@ function smartApproveEscalationCount(sendId: number | string): number {
   return smartApproveEscalationsBySend.get(String(sendId)) ?? 0
 }
 
-function recordSmartApproveEscalation(sendId: number | string): void {
+export function recordSmartApproveEscalation(sendId: number | string): void {
   const key = String(sendId)
   smartApproveEscalationsBySend.set(key, (smartApproveEscalationsBySend.get(key) ?? 0) + 1)
 }
 
-async function evaluateSmartApprove(
+export async function evaluateSmartApprove(
   command: string,
   ctx: Parameters<ToolHandler['handle']>[1]
 ): Promise<SmartApproveResult> {
@@ -55,7 +55,7 @@ async function evaluateSmartApprove(
   })
 }
 
-function recordSmartApproveAudit(
+export function recordSmartApproveAudit(
   command: string,
   callId: string,
   result: SmartApproveResult,
