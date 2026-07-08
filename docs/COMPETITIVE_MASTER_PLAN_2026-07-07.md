@@ -1,7 +1,7 @@
 # Verstak × Hermes × OpenClaw — мастер-план адаптации
 
 **Дата:** 2026-07-07 (v2 — усилен для делегирования AI-агенту)
-**Текущая версия Verstak:** `1.8.7` (`package.json`)
+**Текущая версия Verstak:** `1.8.9` (`package.json`)
 **Тестовый baseline:** 260 файлов тестов, 9 security-тестов в `tests/ai/` (path-policy, secret-scanner, web-policy, command-policy, command-policy-injection, mode-policy, mcp-policy, agent-model-policy), миграций БД — **37** (следующая свободная **38**).
 **Основа:**
 - `docs/COMPETITOR_AUDIT_HERMES_OPENCLAW_2026-07-06.md` (верхний уровень)

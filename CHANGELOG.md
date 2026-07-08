@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.8.9 - 2026-07-08
+
+### Добавлено
+- Managed worktree lifecycle v1: dirty/unpushed detector, snapshot-before-remove, restore-from-snapshot, lossless remove and no-push regression coverage.
+- Worktree registry actions for list/snapshot/restore/delete through IPC/preload/types and visible snapshot action in the WorktreeBar.
+- Background process manager v1: `spawn_process`, `process_status`, `read_process`, `stop_process`, bounded redacted output tail, PID-reuse guard, TTL pruning and owner-bound completion queue.
+- Process completion events can be routed into the next agent turn without cross-chat leakage.
+
+### Безопасность
+- Background process spawn uses the same command policy, permission rules, bash allowlist and optional smart-approval path as foreground commands.
+- Real Windows anti-orphan smoke covers process-tree stop behavior.
+
+### Проверка
+- `npm run test:security` прошёл: 24 tests.
+- Targeted 1.8.9 suite прошёл: 69 tests across dangerous commands, smart approval, worktree lifecycle/status and process tools.
+
+## 1.8.8 - 2026-07-08
+
+### Добавлено
+- Security Regression Pack: typed security catalog in `tests/security/_catalog.ts`, markdown registry in `docs/SECURITY_REGRESSION_PACK.md`, and focused `npm run test:security`.
+- Deterministic dangerous-command detector with deobfuscation for destructive shell commands, credential access, shell-pipe installers, force push and common RCE patterns.
+- Smart Approval seed: LLM guard contract, anti-injection prompt wrapping, strict verdict parsing, deterministic deny for known-dangerous commands and hash-only audit support.
+
+### Безопасность
+- Covered classes now include path escape, command approval binding, SSRF/private redirects, skill install safety, config mutation, dotenv guard and URL secret redaction.
+
+### Проверка
+- `npm run test:security` прошёл: 7 files / 24 tests.
+
 ## 1.8.7 - 2026-07-06
 
 ### Изменено

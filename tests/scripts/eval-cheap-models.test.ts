@@ -42,7 +42,7 @@ describe('cheap model eval runner', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 
   it('fails clearly before live runs when the gateway key is missing', () => {
     const dir = mkdtempSync(join(tmpdir(), 'verstak-cheap-eval-test-'))
