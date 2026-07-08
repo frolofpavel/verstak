@@ -33,6 +33,12 @@ interface ScoredSkillSuggestion {
   score: number
 }
 
+export interface BoundSkillSuggestion {
+  skill: Skill
+  score: number
+  domain: SkillTokenIndex['domain']
+}
+
 const BLOCKED_SKILL_IDS = new Set([
   'verstak-guide',
   'client-run',
@@ -245,6 +251,17 @@ export function suggestManyFromIndex(
   excludedSkillIds: ReadonlySet<string> = new Set(),
   limit = 4
 ): Skill[] {
+  return suggestScoredFromIndex(draft, index, activeSkillId, excludedSkillIds, limit)
+    .map(item => item.skill)
+}
+
+export function suggestScoredFromIndex(
+  draft: string,
+  index: SkillTokenIndex[],
+  activeSkillId: string | null,
+  excludedSkillIds: ReadonlySet<string> = new Set(),
+  limit = 4
+): BoundSkillSuggestion[] {
   const draftTokens = new Set(tokenize(draft))
   if (draftTokens.size === 0) return []
   const marketingScore = marketingIntentScore(draft, draftTokens)
@@ -264,7 +281,7 @@ export function suggestManyFromIndex(
     .filter(item => !(hasOperationSuggestion && item.entry.domain === 'client-marketing'))
     .sort((a, b) => b.score - a.score || a.entry.skill.id.localeCompare(b.entry.skill.id))
     .slice(0, Math.max(1, limit))
-    .map(item => item.entry.skill)
+    .map(item => ({ skill: item.entry.skill, score: item.score, domain: item.entry.domain }))
 }
 
 /**

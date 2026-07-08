@@ -251,7 +251,9 @@ contextBridge.exposeInMainWorld('api', {
     runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
       ipcRenderer.invoke('skills:run-loaders', skillId, opts),
     capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
-      ipcRenderer.invoke('skills:capture', input)
+      ipcRenderer.invoke('skills:capture', input),
+    importPreview: () => ipcRenderer.invoke('skills:import-preview'),
+    importCommit: (input: { token: string; replace?: boolean }) => ipcRenderer.invoke('skills:import-commit', input)
   },
   cliAuth: {
     logout: (providerId: string) => ipcRenderer.invoke('cli-auth:logout', providerId),

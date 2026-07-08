@@ -122,6 +122,12 @@ export function App() {
 
   const t = getTranslations(lang)
 
+  function openSettings(tab?: 'models') {
+    if (tab) setSettingsInitialTab(tab)
+    void settingsImport()
+    setShowSettings(true)
+  }
+
   // ── Auth gate: null = загрузка, false = нужна авторизация, true = готово ──
   const [authDone, setAuthDone] = useState<boolean | null>(() => {
     try {
@@ -391,13 +397,13 @@ export function App() {
     <div className={`gg-app gg-app-atelier ${!sidebarOpen ? 'is-sidebar-collapsed' : ''}`}>
       <ProjectRail
         onOpenProjectSettings={setProjectSettingsTarget}
-        onOpenAppSettings={() => setShowSettings(true)}
+        onOpenAppSettings={() => openSettings()}
         onOpenHelp={() => void useProject.getState().openHelpChat()}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(v => !v)}
       />
       <Sidebar
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => openSettings()}
         aria-hidden={!sidebarOpen}
       />
       <div
@@ -412,9 +418,10 @@ export function App() {
             теряет ответ. Прячем через display:none, слушатель остаётся жив. */}
         <div className="gg-chat-area" style={activeView === 'chat' ? undefined : { display: 'none' }}>
             <Chat
-              onOpenSettings={() => setShowSettings(true)}
+              onOpenSettings={() => openSettings()}
               rightPanel={effectiveRightPanel}
               onSelectRightPanel={setRightPanel}
+              isSettingsOpen={showSettings}
               onOpenSideChat={() => void openSideChat()}
             />
             {effectiveRightPanel === 'terminal' && (
@@ -523,8 +530,7 @@ export function App() {
         active={authDone === true && !showSettings}
         recheckToken={modelPromptRecheck}
         onOpenModelsSettings={() => {
-          setSettingsInitialTab('models')
-          setShowSettings(true)
+          openSettings('models')
         }}
       />
       {projectSettingsTarget && (

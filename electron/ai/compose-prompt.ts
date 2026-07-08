@@ -30,6 +30,8 @@ const SKILL_COMPLIANCE_CONTRACT = `<skill_compliance_contract>
 If a <skill_layer> is present, it is mandatory execution guidance, not optional advice.
 - Before acting, identify which parts/checklists of the skill apply to the user's request.
 - Execute every applicable required step from the skill. Do not silently skip steps because they are inconvenient or time-consuming.
+- User-specified parameters in the current request override skill defaults: thresholds, amounts, date ranges, campaign lists, exceptions, and output format. Treat them as explicit overrides while keeping the skill process/checks mandatory.
+- Skill defaults apply only when the user did not provide a concrete value. Skill prohibitions and safety checks are not defaults: if the user asks to bypass them, ask for explicit confirmation instead of silently ignoring the skill.
 - If a skill step is impossible because data/tool/access is missing, stop and report the blocker instead of pretending it was optional.
 - Before the final answer, self-check the completed work against the applicable skill steps. If something was missed, complete it or clearly report the blocker.
 - Never answer that you "decided to skip", "ignored", or "did not follow" an applicable skill.

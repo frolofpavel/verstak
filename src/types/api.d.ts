@@ -157,6 +157,34 @@ export interface Skill {
   recipe?: RecipeSpec
 }
 
+export interface SkillImportComparison {
+  currentRuleCount: number
+  incomingRuleCount: number
+  sameRules: string[]
+  addedRules: string[]
+  removedRules: string[]
+  changedRules: Array<{ current: string; incoming: string }>
+  summary: string
+}
+
+export interface SkillImportPreviewItem {
+  id: string
+  name: string
+  description?: string
+  sourcePath: string
+  targetPath: string
+  existing: { id: string; name?: string; source: Skill['source']; sourceRef: string } | null
+  comparison: SkillImportComparison
+}
+
+export type SkillImportPreviewResult =
+  | { ok: true; token: string; skills: SkillImportPreviewItem[] }
+  | { ok: false; cancelled?: boolean; error?: string }
+
+export type SkillImportCommitResult =
+  | { ok: true; installed: string[]; skipped: string[]; backups: string[] }
+  | { ok: false; error: string }
+
 export interface ScheduledTask {
   id: number
   project_path: string
@@ -430,6 +458,8 @@ declare global {
         /** Skill Capture: сохранить прогон как скилл-скаффолд в ~/.verstak/skills/. */
         capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
           Promise<{ ok: true; id: string; path: string } | { ok: false; error: string }>
+        importPreview: () => Promise<SkillImportPreviewResult>
+        importCommit: (input: { token: string; replace?: boolean }) => Promise<SkillImportCommitResult>
       }
       cliAuth: {
         logout: (providerId: string) => Promise<{
