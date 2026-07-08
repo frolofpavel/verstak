@@ -13,6 +13,7 @@ const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const UNPACKED = path.join(ROOT, 'release', 'win-unpacked')
 const STAGING = path.join(ROOT, 'release', 'app-payload-staging')
 const PAYLOAD_ARCHIVE = path.join(ROOT, 'release', 'app-payload.7z')
+const PAYLOAD_MANIFEST = path.join(ROOT, 'release', 'app-payload-manifest.json')
 const SEVEN_ZA = path.join(ROOT, 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe')
 const APP_STAGING = path.join(ROOT, 'release', 'installer-app-staging')
 const INSTALLER_OUT = path.join(ROOT, 'release', 'installer-build')
@@ -203,10 +204,9 @@ copyDirFiltered(UNPACKED, STAGING)
 const appAsarCheck = verifyPackedAppAsar(path.join(STAGING, 'resources', 'app.asar'))
 console.log(`[build-setup] verified app.asar: ${appAsarCheck.version} (${appAsarCheck.main})`)
 const manifest = computePayloadManifest(STAGING)
-fs.writeFileSync(
-  path.join(STAGING, 'payload-manifest.json'),
-  `${JSON.stringify(manifest, null, 2)}\n`,
-)
+const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`
+fs.writeFileSync(path.join(STAGING, 'payload-manifest.json'), manifestJson)
+fs.writeFileSync(PAYLOAD_MANIFEST, manifestJson)
 console.log(`[build-setup] payload: ${(manifest.payloadBytes / (1024 * 1024)).toFixed(1)} MB, ${manifest.fileCount} files`)
 
 if (!fs.existsSync(SEVEN_ZA)) {

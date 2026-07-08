@@ -331,7 +331,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
           <div className="gg-mp-section">
             <button
               type="button"
-              className="gg-mp-row"
+              className="gg-mp-row gg-mp-settings-row"
               onClick={() => { setOpen(false); onOpenSettings() }}
             >
               <span className="gg-mp-row-label">{t.settings.settingsAndKeys}</span>
@@ -382,19 +382,19 @@ function PickerRow({
           </span>
         </span>
         <span className="gg-mp-row-state">
-          {entry.isCurrent ? '✓' : ''}
-        </span>
-      </span>
-      {(showHiddenBadge || isCli || (policy && !isCli)) && (
-        <span className="gg-mp-row-badges">
           {showHiddenBadge && (
             <span
-              className="gg-mp-badge is-muted"
-              title="Модель подключена, но выключена в настройках отображения. В списке она показана только потому, что сейчас выбрана в этом чате."
+              className="gg-mp-row-hidden-pill"
+              title="Модель подключена, но скрыта в настройках отображения. Здесь она видна только потому, что сейчас выбрана в этом чате."
             >
               Скрыта
             </span>
           )}
+          {entry.isCurrent ? '✓' : ''}
+        </span>
+      </span>
+      {(isCli || (policy && !isCli)) && (
+        <span className="gg-mp-row-badges">
           {isCli && (
             <span className="gg-mp-badge is-muted" title={CLI_BETA_HINT}>Урезанный контроль</span>
           )}

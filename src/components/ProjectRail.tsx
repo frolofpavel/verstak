@@ -159,7 +159,14 @@ function ProjectChip({
   onSettings
 }: ProjectChipProps) {
   const [hover, setHover] = useState(false)
-  const status = streaming ? 'streaming' : interrupted ? 'interrupted' : unread ? 'unread' : null
+  const status = interrupted ? 'interrupted' : streaming ? 'streaming' : unread ? 'unread' : null
+  const statusTitle = interrupted
+    ? 'Работа была прервана - открой проект для восстановления'
+    : streaming
+      ? 'AI работает в этом проекте'
+      : unread
+        ? 'Есть новый ответ'
+        : undefined
 
   return (
     <div
@@ -173,14 +180,12 @@ function ProjectChip({
         className="gg-rail-chip-btn"
         onClick={onClick}
       >
-        <span className="gg-rail-avatar-wrap">
+        <span
+          className={`gg-rail-avatar-wrap ${status ? `is-status-${status}` : ''}`}
+          title={statusTitle}
+        >
           <ProjectAvatar project={project} className="gg-rail-avatar" size={34} />
-          {status && (
-            <span
-              className={`gg-rail-status ${status === 'interrupted' ? 'is-interrupted' : status === 'streaming' ? 'is-streaming' : 'is-unread'}`}
-              title={interrupted ? 'Работа была прервана - открой проект для восстановления' : streaming ? 'AI работает в этом проекте' : 'Есть новый ответ'}
-            />
-          )}
+          {status && <span className="gg-rail-status-mark" aria-hidden="true" />}
         </span>
         <span className="gg-rail-chip-text" aria-hidden={!contentExpanded}>
           <span className="gg-rail-label">{project.name}</span>
@@ -431,6 +436,14 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     const list = await window.api.projects.listGroups()
     setProjectGroups(list)
   }
+
+  useEffect(() => {
+    const onGroupsChanged = () => {
+      void refreshGroups()
+    }
+    window.addEventListener('gg-project-groups-changed', onGroupsChanged)
+    return () => window.removeEventListener('gg-project-groups-changed', onGroupsChanged)
+  }, [])
 
   function openSearch() {
     setRailExpanded(true)
@@ -736,14 +749,8 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
             aria-label={t.help.title}
             aria-pressed={helpMode}
           >
-            <span className="gg-rail-help-status-wrap">
+            <span className={`gg-rail-help-status-wrap ${help.isStreaming ? 'is-status-streaming' : help.hasUnread ? 'is-status-unread' : ''}`}>
               <span className="gg-rail-help-icon" aria-hidden>?</span>
-              {(help.isStreaming || help.hasUnread) && (
-                <span
-                  className={`gg-rail-status ${help.isStreaming ? 'is-streaming' : 'is-unread'}`}
-                  title={help.isStreaming ? 'Справка: ответ готовится' : 'Справка: новый ответ'}
-                />
-              )}
             </span>
           </button>
         </div>

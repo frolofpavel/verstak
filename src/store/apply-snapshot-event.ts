@@ -1,6 +1,7 @@
 import type { SessionSnapshot } from './session-snapshot'
 import { stampDurationOnStreamEnd } from '../lib/response-duration'
 import { appendOrStartAssistant, appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
+import { reduceAgentProgress } from '../lib/agent-progress'
 
 /** Стрим-событие из main (ai:event) — минимум полей для роутинга в снапшот. */
 export interface SnapshotEvent {
@@ -20,37 +21,39 @@ export interface SnapshotEvent {
  * снапшот без изменений, чтобы caller добил его своими ветками.
  */
 export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent): SessionSnapshot {
+  const agentProgress = reduceAgentProgress(snap.agentProgress ?? [], event)
+  const baseSnap = agentProgress === snap.agentProgress ? snap : { ...snap, agentProgress }
   const t = event.type
   if (t === 'text' && typeof event.text === 'string') {
-    return { ...snap, messages: appendOrStartAssistant(snap.messages, event.text) }
+    return { ...baseSnap, messages: appendOrStartAssistant(baseSnap.messages, event.text) }
   }
   if (t === 'thought' && typeof event.text === 'string') {
-    return { ...snap, messages: appendThinkingToLastAssistant(snap.messages, event.text) }
+    return { ...baseSnap, messages: appendThinkingToLastAssistant(baseSnap.messages, event.text) }
   }
   if (t === 'done' || t === 'error') {
     const messages = (t === 'error' && typeof event.message === 'string')
-      ? appendToLastAssistant(snap.messages, `\n\n[Ошибка: ${event.message}]`)
-      : snap.messages
-    const base = { ...snap, messages }
+      ? appendToLastAssistant(baseSnap.messages, `\n\n[Ошибка: ${event.message}]`)
+      : baseSnap.messages
+    const base = { ...baseSnap, messages }
     return { ...base, ...stampDurationOnStreamEnd(base) }
   }
   // command-result → команда зарезолвлена в main ЛЮБЫМ путём (подтверждение/stop/
   // ошибка). Снять pendingCommand этого callId, иначе в Inbox висит ghost-approval
   // на уже завершённую команду (ревью 24.06). Покрывает все callers ядра.
-  if (t === 'command-result' && snap.pendingCommand
-      && (typeof event.callId !== 'string' || snap.pendingCommand.callId === event.callId)) {
-    return { ...snap, pendingCommand: null }
+  if (t === 'command-result' && baseSnap.pendingCommand
+      && (typeof event.callId !== 'string' || baseSnap.pendingCommand.callId === event.callId)) {
+    return { ...baseSnap, pendingCommand: null }
   }
   if (t === 'usage' && event.usage && typeof event.usage === 'object') {
     const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
     return {
-      ...snap,
+      ...baseSnap,
       sessionUsage: {
-        inputTokens: snap.sessionUsage.inputTokens + (u.inputTokens ?? 0),
-        outputTokens: snap.sessionUsage.outputTokens + (u.outputTokens ?? 0),
-        cachedInputTokens: snap.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0),
+        inputTokens: baseSnap.sessionUsage.inputTokens + (u.inputTokens ?? 0),
+        outputTokens: baseSnap.sessionUsage.outputTokens + (u.outputTokens ?? 0),
+        cachedInputTokens: baseSnap.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0),
       },
     }
   }
-  return snap
+  return baseSnap
 }

@@ -75,10 +75,18 @@ describe('applySnapshotEvent — общее ядро роутинга стрим
     expect(r.isStreaming).toBe(false)
   })
 
-  it('неизвестный тип (pending-write) — снапшот без изменений (caller добьёт)', () => {
+  it('pending-write: сохраняет снапшот и добавляет видимый progress-шаг', () => {
     const s = snap([{ role: 'assistant', content: 'a' }])
     const r = applySnapshotEvent(s, { type: 'pending-write', callId: 'c1' })
-    expect(r).toEqual(s)
+    expect(r.messages).toEqual(s.messages)
+    expect(r.agentProgress).toEqual([
+      expect.objectContaining({
+        id: 'write-c1',
+        phase: 'write',
+        status: 'running',
+        title: 'Нужно подтвердить изменение файла',
+      }),
+    ])
   })
 
   it('сохраняет hasUnread и прочие поля снапшота при text', () => {

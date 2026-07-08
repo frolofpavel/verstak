@@ -49,6 +49,8 @@ import {
   isSameLocalDay,
 } from '../lib/chat-timestamps'
 import { ComposerPendingBar } from './ComposerPendingBar'
+import { AgentProgressPanel } from './AgentProgressPanel'
+import { activateModelProgress, buildInitialAgentProgress } from '../lib/agent-progress'
 import {
   formatSupplementForAgent,
   nextComposerItemId,
@@ -256,6 +258,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     isStreaming: projectIsStreaming, setStreaming, streamStartedAt: projectStreamStartedAt,
     finalizeActiveStreamDuration, finalizeHelpStreamDuration,
     activity: projectActivity, preflights, subagentRuns,
+    agentProgress: projectAgentProgress,
     sessionUsage: projectSessionUsage,
     path: activePath, chatSessions, activeChatId,
     addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
@@ -270,6 +273,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const isStreaming = helpMode ? help.isStreaming : projectIsStreaming
   const streamStartedAt = helpMode ? help.streamStartedAt : projectStreamStartedAt
   const activity = helpMode ? help.activity : projectActivity
+  const agentProgress = helpMode ? help.agentProgress : projectAgentProgress
   const sessionUsage = helpMode ? help.sessionUsage : projectSessionUsage
   const [tickNow, setTickNow] = useState(() => Date.now())
   useEffect(() => {
@@ -912,6 +916,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       // новый стрим активного чата (#17). registerSendOwner ставится синхронно
       // до событий, так что у живого активного send'а owner всегда есть.
       if (!owner) return
+      store.applyAgentProgressEvent(event as unknown as { type: string; [k: string]: unknown })
       if (event.type === 'text') updateLastAssistant(event.text)
       else if (event.type === 'thought') store.appendLastAssistantThinking(event.text)
       else if (event.type === 'pending-write') {
@@ -1946,6 +1951,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       }
       const userAttachments = attachments
       store.clearHelpActivity()
+      store.setHelpAgentProgress(buildInitialAgentProgress(text || modelText || 'Новый запрос', provider.label))
       setExhausted(null)
       setCrossVerify(null)
       if (!opts?.text) {
@@ -2005,10 +2011,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         const errorText = '\n\n[Ошибка: провайдер недоступен]'
         updateHelpLastAssistant(errorText)
         void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+        useProject.getState().applyEventToHelp({ type: 'error', message: 'Провайдер недоступен' })
         setHelpStreaming(false)
         currentSendIdRef.current = null
         return
       }
+      useProject.getState().setHelpAgentProgress(activateModelProgress(useProject.getState().help.agentProgress ?? [], provider.label))
       registerChatSendOwner(sendId, helpChatId, true, null)
       if (sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
       return
@@ -2026,6 +2034,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       return
     }
     store.clearActivity()
+    store.setAgentProgress(buildInitialAgentProgress(text || modelText || 'Новый запрос', provider.label))
     setExhausted(null)  // new send wipes any pending continue state
     setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify
     if (!opts?.text || opts?.modelText) {
@@ -2159,6 +2168,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       const errorText = '\n\n[Ошибка: провайдер недоступен]'
       updateLastAssistant(errorText)
       if (assistantRow) void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+      useProject.getState().applyAgentProgressEvent({ type: 'error', message: 'Провайдер недоступен' })
       setStreaming(false)
       currentSendIdRef.current = null
       return
@@ -2166,6 +2176,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     if (pipelineAutoSendStepRef.current === 'execute') {
       pipelineExecuteSendIdRef.current = sendId
     }
+    useProject.getState().setAgentProgress(activateModelProgress(useProject.getState().agentProgress ?? [], provider.label))
     // Bind this send to the chat that initiated it — if user switches to
     // another chat mid-stream, the event handler will route events into
     // chatSnapshots[activeChatId] rather than corrupting the new active chat.
@@ -2576,6 +2587,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           const isStreamingAssistant = isLast && m.role === 'assistant' && isStreaming
           // Render activity rows just before the (last) assistant message
           const showActivity = isLast && m.role === 'assistant' && activity.length > 0
+          const showAgentProgress = isLast && m.role === 'assistant' && agentProgress.length > 0
           const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
           const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
@@ -2593,6 +2605,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               </div>
             )}
             <div className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}${supplement ? ' is-supplement' : ''}`}>
+              {showAgentProgress && (
+                <AgentProgressPanel
+                  entries={agentProgress}
+                  isStreaming={isStreamingAssistant}
+                  elapsedMs={isStreamingAssistant && streamStartedAt != null ? tickNow - streamStartedAt : null}
+                  durationMs={m.responseDurationMs ?? null}
+                />
+              )}
               {showActivity && (
                 <div className="gg-activity-list">
                   {activity.map(a => (

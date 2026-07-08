@@ -22,6 +22,7 @@ function stepIndex(step: Step): number {
 
 export function SetupWizard() {
   const [defaults, setDefaults] = useState<InstallDefaults | null>(null)
+  const [defaultsError, setDefaultsError] = useState('')
   const [step, setStep] = useState<Step>('welcome')
   const [installDir, setInstallDir] = useState('')
   const [runAfter, setRunAfter] = useState(true)
@@ -31,10 +32,19 @@ export function SetupWizard() {
   const [installedDir, setInstalledDir] = useState('')
 
   useEffect(() => {
-    void window.installer.getDefaults().then((d) => {
-      setDefaults(d)
-      setInstallDir(d.defaultInstallDir)
-    })
+    let cancelled = false
+    void window.installer.getDefaults()
+      .then((d) => {
+        if (cancelled) return
+        setDefaults(d)
+        setInstallDir(d.defaultInstallDir)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        setDefaultsError(message || 'Не удалось подготовить мастер установки.')
+      })
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -75,6 +85,18 @@ export function SetupWizard() {
   }
 
   function renderContent() {
+    if (defaultsError) {
+      return (
+        <>
+          <h1 className="gg-installer-title">Не удалось запустить установщик</h1>
+          <p className="gg-installer-text">
+            Verstak Setup не смог прочитать пакет приложения. Перезапустите установщик или скачайте файл заново.
+          </p>
+          <div className="gg-installer-error">{defaultsError}</div>
+        </>
+      )
+    }
+
     if (!defaults) {
       return (
         <InstallerLoader
@@ -167,6 +189,14 @@ export function SetupWizard() {
   }
 
   function renderFooter() {
+    if (defaultsError) {
+      return (
+        <button type="button" className="gg-btn gg-btn-primary" onClick={() => void window.installer.window.close()}>
+          Закрыть
+        </button>
+      )
+    }
+
     if (step === 'welcome') {
       return (
         <>

@@ -22,6 +22,7 @@ import {
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
 import { appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
+import { reduceAgentProgress, upsertAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
 import { createPipelineSlice, type PipelineSlice } from './pipeline-slice'
 import { createReviewSlice, type ReviewSlice } from './review-slice'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
@@ -62,6 +63,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
   pendingPlan: { callId: string; title: string; stepCount: number; sendId?: number } | null
   activity: ActivityEntry[]
+  agentProgress: AgentProgressEntry[]
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
   preflights: PreflightCard[]
   /** Sub-agent runs текущей сессии (fan-out V1). Эфемерные — чистятся на send. */
@@ -141,6 +143,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pushActivity: (entry: ActivityEntry) => void
   updateActivity: (id: string, patch: Partial<ActivityEntry>) => void
   clearActivity: () => void
+  setAgentProgress: (entries: AgentProgressEntry[]) => void
+  pushAgentProgress: (entry: AgentProgressEntry) => void
+  applyAgentProgressEvent: (event: { type: string; [k: string]: unknown }) => void
   /** Добавить preflight-карточку (агент объявил план). */
   pushPreflight: (card: PreflightCard) => void
   /** Upsert sub-agent run card по callId (running → done/error). */
@@ -211,6 +216,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   updateHelpLastAssistant: (text: string) => void
   appendHelpLastAssistantThinking: (text: string) => void
   clearHelpActivity: () => void
+  setHelpAgentProgress: (entries: AgentProgressEntry[]) => void
   pushHelpActivity: (entry: ActivityEntry) => void
   addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
   /** Зарегистрировать сгенерированный артефакт (для Timeline pill). */
@@ -295,6 +301,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   pendingCommand: null,
   pendingPlan: null,
   activity: [],
+  agentProgress: [],
   preflights: [],
   subagentRuns: [],
   touchedFiles: {},
@@ -417,6 +424,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       pendingWrites: target.pendingWrites,
       pendingCommand: target.pendingCommand,
       activity: target.activity,
+      agentProgress: target.agentProgress ?? [],
       sessionUsage: target.sessionUsage,
       runningPlanStep: target.runningPlanStep,
       // checkpointId/preflights/subagentRuns теперь per-chat в bundle —
@@ -484,6 +492,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     pendingCommand: null,
     pendingPlan: null, // #3 plan-gate: проект закрыт → снять модалку плана
     activity: [],
+    agentProgress: [],
     preflights: [],
     subagentRuns: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
@@ -524,7 +533,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const state = get()
     const composerDrafts = pruneComposerDraftsForProject(state.composerDrafts, path)
     if (state.path === path) {
-      set({ path: null, tree: [], messages: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
+      set({ path: null, tree: [], messages: [], agentProgress: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
     } else {
       set({ projectList, composerDrafts })
     }
@@ -574,7 +583,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   updateActivity: (id, patch) => set(s => ({
     activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
-  clearActivity: () => set({ activity: [], preflights: [], subagentRuns: [] }),
+  clearActivity: () => set({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] }),
+  setAgentProgress: (entries) => set({ agentProgress: entries }),
+  pushAgentProgress: (entry) => set(s => ({ agentProgress: upsertAgentProgress(s.agentProgress ?? [], entry) })),
+  applyAgentProgressEvent: (event) => set(s => ({
+    agentProgress: reduceAgentProgress(s.agentProgress ?? [], event)
+  })),
   pushPreflight: (card) => set(s => ({ preflights: [...s.preflights, card] })),
   upsertSubagentRun: (card) => set(s => {
     const idx = s.subagentRuns.findIndex(r => r.callId === card.callId)
@@ -682,6 +696,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         pendingWrites: [],
         pendingCommand: null,
         activity: [],
+        agentProgress: [],
         sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
         runningPlanStep: null,
         chatSnapshots: nextSnapshots,
@@ -855,6 +870,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSnapshots: nextSnapshots,
       messages: [],
       activity: [],
+      agentProgress: [],
       pendingWrites: [],
       pendingCommand: null,
       runningPlanStep: null,
@@ -942,7 +958,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   }),
   appendHelpLastAssistantThinking: (text) => set(s => ({ help: { ...s.help, messages: appendThinkingToLastAssistant(s.help.messages, text) } })),
   clearHelpActivity: () => set(s => ({
-    help: { ...s.help, activity: [] }
+    help: { ...s.help, activity: [], agentProgress: [] }
+  })),
+  setHelpAgentProgress: (entries) => set(s => ({
+    help: { ...s.help, agentProgress: entries }
   })),
   pushHelpActivity: (entry) => set(s => ({
     help: { ...s.help, activity: [...s.help.activity, entry] }

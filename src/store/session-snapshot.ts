@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../types/api'
+import type { AgentProgressEntry } from '../lib/agent-progress'
 
 // Pure, store-agnostic building blocks вынесены из projectStore.ts:
 // типы одной сессии/чата + фабрика пустого снапшота + touch-marker данные.
@@ -83,6 +84,7 @@ export interface SessionSnapshot {
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   activity: ActivityEntry[]
+  agentProgress: AgentProgressEntry[]
   sessionUsage: SessionUsage
   runningPlanStep: RunningPlanStep | null
   /** Undo entry ID точки «📍 Чекпоинт» этого чата — кнопка отката. Per-chat:
@@ -133,6 +135,7 @@ export function freshSnapshot(): SessionSnapshot {
     pendingWrites: [],
     pendingCommand: null,
     activity: [],
+    agentProgress: [],
     sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
     runningPlanStep: null,
     checkpointId: null,
@@ -160,6 +163,7 @@ export function captureBundle(s: ChatStateBundle): SessionSnapshot {
     pendingWrites: s.pendingWrites,
     pendingCommand: s.pendingCommand,
     activity: s.activity,
+    agentProgress: s.agentProgress,
     sessionUsage: s.sessionUsage,
     runningPlanStep: s.runningPlanStep,
     checkpointId: s.checkpointId,
@@ -180,6 +184,7 @@ export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
     pendingWrites: snap.pendingWrites,
     pendingCommand: snap.pendingCommand,
     activity: snap.activity,
+    agentProgress: snap.agentProgress ?? [],
     sessionUsage: snap.sessionUsage,
     runningPlanStep: snap.runningPlanStep,
     checkpointId: snap.checkpointId,
