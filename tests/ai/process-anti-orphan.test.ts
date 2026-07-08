@@ -22,13 +22,20 @@ async function waitFor<T>(fn: () => T, predicate: (value: T) => boolean, timeout
 
 function pidAlive(pid: number): boolean {
   if (!Number.isFinite(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    // Fall through to tasklist on Windows: process.kill(pid, 0) is fast but not
+    // always authoritative across shells/permissions.
+  }
   if (platform() === 'win32') {
     try {
       const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
         encoding: 'utf8',
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 3000,
+        timeout: 8000,
       })
       return out.includes(`"${pid}"`) || out.includes(`,${pid},`)
     } catch {
@@ -87,8 +94,8 @@ setInterval(() => {}, 1000)
       await waitFor(() => existsSync(pidFile), Boolean)
       parentPid = Number(readFileSync(parentPidFile, 'utf8').trim())
       grandchildPid = Number(readFileSync(pidFile, 'utf8').trim())
-      expect(pidAlive(parentPid)).toBe(true)
-      expect(pidAlive(grandchildPid)).toBe(true)
+      await waitFor(() => pidAlive(parentPid), alive => alive, 10_000)
+      await waitFor(() => pidAlive(grandchildPid), alive => alive, 10_000)
 
       await registry.kill(handle.id)
       await waitFor(() => pidAlive(parentPid), alive => !alive)
@@ -101,5 +108,5 @@ setInterval(() => {}, 1000)
       killPid(grandchildPid)
       rmSync(dir, { recursive: true, force: true })
     }
-  }, 15000)
+  }, 30_000)
 })

@@ -162,4 +162,32 @@ describe('ProcessRegistry', () => {
     expect(registry.pruneFinished(1_000)).toBe(1)
     expect(registry.get(handle.id)).toBeUndefined()
   })
+
+  it('redacts secrets split across chunk boundaries (H3)', () => {
+    const registry = createRegistry()
+    const handle = registry.spawn(nodeCommand('setTimeout(() => {}, 500)'), { cwd: process.cwd() })
+    // Секрет AKIAIOSFODNN7EXAMPLE приходит двумя чанками — как при TCP/pipe-фрагментации.
+    registry.appendOutput(handle.id, 'key=AKIAIOSF')
+    registry.appendOutput(handle.id, 'ODNN7EXAMPLE done')
+    const updated = registry.get(handle.id)!
+    expect(updated.outputTail).not.toContain('AKIAIOSFODNN7EXAMPLE')
+    expect(updated.outputTail).toContain('[REDACTED:aws-access-key]')
+  })
+
+  it('prunes orphan notifyOnExit completions together with the finished process (H2)', () => {
+    let now = 1_000
+    const registry = createRegistry({ now: () => now })
+    const handle = registry.spawn(nodeCommand('setInterval(() => {}, 1000)'), {
+      cwd: process.cwd(),
+      notifyOnExit: true,
+      owner: { sendId: 99 },
+    })
+    registry.markExited(handle.id, 0)
+    // completion поставлен в очередь, но владелец (sendId 99) уже завершил ход и не дренирует.
+    now += 10_000
+    expect(registry.pruneFinished(1_000)).toBe(1)
+    expect(registry.get(handle.id)).toBeUndefined()
+    // осиротевший completion не должен жить вечно — чистится вместе с процессом.
+    expect(registry.drainCompletions()).toEqual([])
+  })
 })

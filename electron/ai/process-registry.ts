@@ -63,6 +63,9 @@ interface InternalProcessHandle extends ProcessHandle {
   child: ChildProcess
   timeout?: NodeJS.Timeout
   completionQueued?: boolean
+  // Нередактированный хвост stdout/stderr (bounded), чтобы секрет, разбитый по
+  // границе двух чанков, воссоединялся до scanText. Наружу не отдаётся.
+  rawTail?: string
 }
 
 const DEFAULT_TAIL_CHARS = 30 * 1024
@@ -75,7 +78,7 @@ function trimTail(text: string, maxChars = DEFAULT_TAIL_CHARS): string {
 }
 
 function cloneHandle(handle: InternalProcessHandle): ProcessHandle {
-  const { child: _child, timeout: _timeout, ...safe } = handle
+  const { child: _child, timeout: _timeout, rawTail: _rawTail, completionQueued: _cq, ...safe } = handle
   return { ...safe, owner: safe.owner ? { ...safe.owner } : undefined }
 }
 
@@ -186,8 +189,10 @@ export class ProcessRegistry {
   appendOutput(id: string, chunk: string): void {
     const handle = this.processes.get(id)
     if (!handle) return
-    const redacted = scanText(chunk).redacted
-    handle.outputTail = trimTail(handle.outputTail + redacted)
+    // Копим сырой хвост и редактируем его целиком — иначе секрет, попавший на
+    // стык двух чанков, не совпал бы ни с одним pattern при по-чанковом scanText.
+    handle.rawTail = trimTail((handle.rawTail ?? '') + chunk)
+    handle.outputTail = trimTail(scanText(handle.rawTail).redacted)
   }
 
   markExited(id: string, exitCode: number): void {
@@ -235,11 +240,22 @@ export class ProcessRegistry {
   pruneFinished(ttlMs = DEFAULT_TTL_MS): number {
     const cutoff = this.now() - ttlMs
     let removed = 0
+    const removedIds = new Set<string>()
     for (const [id, handle] of this.processes) {
       if (handle.status === 'running') continue
       if ((handle.exitedAt ?? handle.startedAt) > cutoff) continue
       this.processes.delete(id)
+      removedIds.add(id)
       removed++
+    }
+    // Вычищаем осиротевшие completion'ы удалённых процессов: их владелец (sendId)
+    // уже завершил ход и никогда не дренирует — иначе они копятся всю сессию.
+    if (removedIds.size > 0 && this.completions.length > 0) {
+      const kept = this.completions.filter(c => !removedIds.has(c.id))
+      if (kept.length !== this.completions.length) {
+        this.completions.length = 0
+        this.completions.push(...kept)
+      }
     }
     return removed
   }

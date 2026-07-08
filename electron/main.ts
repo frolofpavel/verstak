@@ -29,6 +29,7 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
 import { registerAiIpc, abortSend, runScheduledHeadless } from './ipc/ai'
+import { globalProcessRegistry } from './ai/process-registry'
 import { registerSchedulerIpc } from './ipc/scheduler'
 import { registerChatsIpc } from './ipc/chats'
 import { registerHandoffIpc } from './ipc/handoff'
@@ -751,6 +752,11 @@ app.whenReady().then(() => {
   registerSuggestionsIpc(db)
   registerVoiceIpc()
   registerNotifyIpc(() => mainWindow, settings)
+
+  // Фоновый sweeper реестра процессов: чистит завершённые handle'ы и осиротевшие
+  // completion'ы, иначе они копятся всю сессию (spawn_process долгих команд).
+  globalProcessRegistry.startSweeper()
+  app.once('before-quit', () => globalProcessRegistry.stopSweeper())
   }
 
   setImmediate(registerDeferredIpc)

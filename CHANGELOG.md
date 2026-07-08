@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.1 - 2026-07-08
+
+### Исправлено
+- Background process registry больше не пропускает секреты, если токен пришёл на границе двух stdout/stderr chunks: редактирование идёт по накопленному raw tail.
+- Sweeper реестра фоновых процессов теперь запускается в production и останавливается при выходе приложения.
+- `notifyOnExit` completion'ы завершённых фоновых процессов чистятся вместе с удаляемыми handles, чтобы не копиться всю сессию.
+- Windows anti-orphan smoke стал устойчивее: проверка PID не зависит только от медленного `tasklist`.
+- Native-module тест больше не обращается к несуществующему диску `Z:\`, который может зависать на Windows.
+
+### Проверка
+- Targeted audit-fix suite прошёл: `process-registry`, `process-tools`, `agent-loop` — 34 tests.
+- Previously failing timeout set прошёл: 56 tests.
+- `npm run type` прошёл.
+- `npm run test:fast` прошёл: 2254 tests, 7 skipped.
+
 ## 1.9.0 - 2026-07-08
 
 ### Добавлено

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import {
   isNativeModuleError,
   probeBetterSqlite3Node,
@@ -6,7 +8,7 @@ import {
 
 describe('native-modules', () => {
   it('probeBetterSqlite3Node returns missing for absent path', () => {
-    expect(probeBetterSqlite3Node('Z:\\no-such\\better_sqlite3.node')).toBe('missing')
+    expect(probeBetterSqlite3Node(join(tmpdir(), 'verstak-no-such-native', 'better_sqlite3.node'))).toBe('missing')
   })
 
   it('isNativeModuleError detects ABI mismatch text', () => {
