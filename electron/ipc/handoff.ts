@@ -7,6 +7,7 @@ import { generateHandoff } from '../ai/handoff'
 import { buildHandoffFileName, sanitizeHandoffFilePart } from '../ai/handoff-file'
 import { buildTranscriptMarkdown } from '../ai/transcript'
 import type { ChatMessage } from '../ai/types'
+import type { AgentRuns } from '../storage/agent-runs'
 
 export type HandoffSaveResult =
   | { ok: true; path: string; markdown: string }
@@ -17,16 +18,48 @@ export type HandoffSaveResult =
  * отдаёт markdown-handoff. Сами сообщения в storage плоские (role + content),
  * поэтому файлы извлекаются через regex-фоллбэк внутри generateHandoff.
  */
-export function registerHandoffIpc(chats: Chats, sessions: ChatSessions): void {
+export function registerHandoffIpc(chats: Chats, sessions: ChatSessions, agentRuns?: AgentRuns): void {
   function buildMarkdown(sessionId: number, parentId?: string | null): { markdown: string; title?: string | null } {
     const session = sessions.get(sessionId)
     const stored = chats.listBySession(sessionId)
     const messages: ChatMessage[] = stored.map(m => ({ role: m.role, content: m.content }))
+    const stats = agentRuns?.sessionStats(sessionId)
+    const recentRuns = session && agentRuns
+      ? agentRuns.list(session.projectPath, { limit: 20 }).filter(r => r.chatId === sessionId).slice(0, 3)
+      : []
+    const recentEvents = agentRuns && recentRuns.length > 0
+      ? recentRuns.flatMap(r => agentRuns.getEvents(r.runId).slice(-4)).slice(-8)
+      : []
     return {
       markdown: generateHandoff(messages, {
         title: session?.title,
         provider: session?.providerId ?? undefined,
-        parentId: parentId ?? null
+        parentId: parentId ?? null,
+        runSummary: stats ? {
+          runs: stats.runs,
+          toolCount: stats.toolCount,
+          filesCount: stats.filesCount,
+          agentsCount: stats.agentsCount,
+          durationMs: stats.durationMs,
+          recentRuns: recentRuns.map(r => ({
+            title: r.title,
+            status: r.status,
+            provider: r.providerId,
+            model: r.model,
+            startedAt: r.startedAt,
+            endedAt: r.endedAt,
+            error: r.error,
+            toolCount: r.toolCount,
+            filesCount: r.filesCount,
+            agentsCount: r.agentsCount,
+          })),
+          recentEvents: recentEvents.map(e => ({
+            label: e.label,
+            detail: e.detail,
+            status: e.status,
+            createdAt: e.createdAt,
+          })),
+        } : null,
       }),
       title: session?.title
     }

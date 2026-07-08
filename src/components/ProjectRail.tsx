@@ -170,7 +170,7 @@ function ProjectChip({
 
   return (
     <div
-      className={`gg-rail-chip ${active ? 'is-active' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${nested ? 'is-nested' : ''}`}
+      className={`gg-rail-chip ${active ? 'is-active' : ''} ${status ? `is-status-${status}` : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${nested ? 'is-nested' : ''}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       title={contentExpanded ? project.path : `${project.name}\n${project.path}`}
@@ -185,6 +185,14 @@ function ProjectChip({
           title={statusTitle}
         >
           <ProjectAvatar project={project} className="gg-rail-avatar" size={34} />
+          {streaming && (
+            <span className="gg-rail-status-arc" aria-hidden="true">
+              <svg viewBox="0 0 34 34" focusable="false">
+                <circle className="gg-rail-status-arc-track" cx="17" cy="17" r="15.7" />
+                <circle className="gg-rail-status-arc-sweep" cx="17" cy="17" r="15.7" />
+              </svg>
+            </span>
+          )}
           {status && <span className="gg-rail-status-mark" aria-hidden="true" />}
         </span>
         <span className="gg-rail-chip-text" aria-hidden={!contentExpanded}>

@@ -1,25 +1,34 @@
+import { AgentProgressPanel } from './AgentProgressPanel'
+import type { AgentProgressEntry } from '../lib/agent-progress'
 import { useProject } from '../store/projectStore'
 import type { ResumableRun } from '../types/api'
 
-/**
- * Crash-resume (P1) — баннер «сессия была прервана».
- *
- * При открытии проекта projectStore.loadResumableRuns подтягивает зависшие
- * после краха прогоны (agent_runs, помеченные failed реконсайлом этого старта,
- * с сохранённым вводом). Баннер ненавязчиво предлагает что с ними сделать.
- *
- * КРИТИЧНО (безопасность): деструктив НИКОГДА не доигрывается сам. Гард
- * считается на стороне main (isAutoResumable → ResumableRun.autoResumable):
- *  - autoResumable=true  (read-only последний tool + режим ask/accept-edits/plan)
- *    → кнопка «Возобновить» = честный re-send последнего запроса (gg-resume-send,
- *    тот же путь что Multi-agent Manager resume).
- *  - autoResumable=false (last_tool ∈ write_file/apply_patch/run_command/ssh/
- *    delegate/connector ИЛИ режим auto/bypass) → НЕТ авто-resume; вместо неё
- *    «Показать что было» (открывает вкладку «Задачи» на этом прогоне) + «Отклонить».
- *
- * Re-send переиспользует существующий механизм gg-resume-send (Chat.tsx) —
- * новый путь отправки не вводим.
- */
+function trimRequest(text: string, limit = 120): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= limit) return normalized
+  return `${normalized.slice(0, limit - 1)}...`
+}
+
+function buildInterruptedRunProgress(run: ResumableRun): AgentProgressEntry[] {
+  const title = run.autoResumable ? 'Ответ можно повторить' : 'Ответ прерван'
+  const request = trimRequest(run.lastUserRequest)
+  const toolNote = run.lastToolName ? ` Последний инструмент: ${run.lastToolName}.` : ''
+  const detail = run.autoResumable
+    ? `Verstak нашёл задачу, которая оборвалась при закрытии приложения. Можно повторить последний запрос: "${request}".${toolNote}`
+    : `Модель начала работу, но приложение было закрыто до безопасного завершения. Последнее действие могло менять файлы или систему, поэтому автоматическое продолжение отключено. Запрос: "${request}".${toolNote}`
+
+  return [
+    {
+      id: `resume-${run.runId}`,
+      phase: 'final',
+      title,
+      detail,
+      status: run.autoResumable ? 'blocked' : 'error',
+      timestamp: Date.now()
+    }
+  ]
+}
+
 export function ResumeBanner() {
   const resumableRuns = useProject(s => s.resumableRuns)
   const dismissResumableRun = useProject(s => s.dismissResumableRun)
@@ -29,84 +38,65 @@ export function ResumeBanner() {
   if (resumableRuns.length === 0) return null
 
   async function resume(run: ResumableRun) {
-    // Честный re-send: тот же gg-resume-send, что у Manager-resume. КРИТИЧНО —
-    // сначала переключаемся на чат прогона (run.chatId), иначе re-send уедет в
-    // текущий активный чат (чужой контекст), если пользователь успел сменить
-    // чат/проект после старта app (аудит P0). Паттерн — как AgentRunsPanel.
     try {
       if (run.chatId != null) await switchChatSession(run.chatId)
-    } catch { /* переключение не критично — уйдёт в текущий чат */ }
+    } catch {
+      // Если переключение не удалось, оставляем текущий чат и не блокируем действие.
+    }
     setActiveView('chat')
-    // Следующий тик — даём чату перерендериться на нужной сессии до автоотправки.
     setTimeout(() => {
-      // Фаза 2: передаём runId — Chat прокинет resumeFromRunId, и ai:send продолжит
-      // с накопленным контекстом из чекпойнта (нет чекпойнта → мягкий фоллбэк на
-      // обычный re-send текста).
-      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: { text: run.lastUserRequest, resumeFromRunId: run.runId } }))
+      window.dispatchEvent(new CustomEvent('gg-resume-send', {
+        detail: { text: run.lastUserRequest, resumeFromRunId: run.runId }
+      }))
     }, 0)
     dismissResumableRun(run.runId)
   }
 
   function showWhatWasDone(run: ResumableRun) {
-    // Деструктив/auto: не доигрываем — открываем вкладку «Задачи», где видны
-    // Timeline прогона, затронутые файлы и проверки. Решение принимает человек.
     setActiveView('tasks-manager')
     dismissResumableRun(run.runId)
   }
 
   return (
-    <div className="gg-resume-banner-stack">
-      {resumableRuns.map(run => {
-        const req = run.lastUserRequest.length > 90
-          ? run.lastUserRequest.slice(0, 90) + '…'
-          : run.lastUserRequest
-        const toolNote = run.lastToolName ? `, последний инструмент: ${run.lastToolName}` : ''
-        return (
-          <div key={run.runId} className="gg-resume-banner" role="status">
-            <span className="gg-resume-banner-icon">⏸</span>
-            <div className="gg-resume-banner-body">
-              <div className="gg-resume-banner-title">Сессия была прервана</div>
-              <div className="gg-resume-banner-detail">
-                «{req}» (ход {run.turnIndex}{toolNote})
-              </div>
-              {!run.autoResumable && (
-                <div className="gg-resume-banner-warn">
-                  ⚠ Последнее действие могло менять файлы/систему — авто-возобновление отключено.
-                </div>
-              )}
-            </div>
-            <div className="gg-resume-banner-actions">
-              {run.autoResumable ? (
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-primary"
-                  onClick={() => resume(run)}
-                  title="Переотправить последний запрос (read-only последний шаг — безопасно)"
-                >
-                  ↻ Возобновить
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="gg-btn"
-                  onClick={() => showWhatWasDone(run)}
-                  title="Открыть задачу: Timeline, затронутые файлы, проверки — решите вручную"
-                >
-                  Показать что было
-                </button>
-              )}
+    <div className="gg-resume-progress-stack">
+      {resumableRuns.map(run => (
+        <div key={run.runId} className="gg-agent-progress-inline is-standalone gg-resume-progress">
+          <AgentProgressPanel
+            entries={buildInterruptedRunProgress(run)}
+            isStreaming={false}
+            finishedAt={Date.now()}
+          />
+          <div className="gg-resume-progress-actions">
+            {run.autoResumable ? (
+              <button
+                type="button"
+                className="gg-btn gg-btn-primary"
+                onClick={() => resume(run)}
+                title="Повторить последний запрос в нужном чате"
+              >
+                Повторить запрос
+              </button>
+            ) : (
               <button
                 type="button"
                 className="gg-btn"
-                onClick={() => dismissResumableRun(run.runId)}
-                title="Скрыть — больше не предлагать в этом сеансе"
+                onClick={() => showWhatWasDone(run)}
+                title="Открыть вкладку задач и посмотреть, на чём остановилась работа"
               >
-                Отклонить
+                Показать что было
               </button>
-            </div>
+            )}
+            <button
+              type="button"
+              className="gg-btn"
+              onClick={() => dismissResumableRun(run.runId)}
+              title="Скрыть это уведомление в текущем сеансе"
+            >
+              Отклонить
+            </button>
           </div>
-        )
-      })}
+        </div>
+      ))}
     </div>
   )
 }

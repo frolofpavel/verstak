@@ -670,6 +670,13 @@
     0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
     0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
 }
+.gg-rail-chip.is-shell-expanded.is-active.is-status-streaming .gg-rail-chip-btn,
+.gg-rail-chip.is-shell-expanded.is-active.is-status-unread .gg-rail-chip-btn,
+.gg-rail-chip.is-shell-expanded.is-active.is-status-interrupted .gg-rail-chip-btn {
+  background: var(--bg-hover);
+  border-color: transparent;
+  box-shadow: none;
+}
 .gg-rail-chip:not(.is-shell-expanded) .gg-rail-chip-btn {
   border: 1px solid transparent;
   box-sizing: border-box;
@@ -688,6 +695,63 @@
   flex-shrink: 0;
   display: inline-flex;
   overflow: visible;
+}
+.gg-rail-avatar-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  box-sizing: border-box;
+  transition: opacity 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.gg-rail-avatar-wrap::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+}
+.gg-rail-status-arc {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  pointer-events: none;
+}
+.gg-rail-status-arc svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+.gg-rail-status-arc-track,
+.gg-rail-status-arc-sweep {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.gg-rail-status-arc-track {
+  stroke: color-mix(in srgb, var(--rail-avatar-status) 24%, transparent);
+  stroke-width: 2;
+}
+.gg-rail-status-arc-sweep {
+  stroke: color-mix(in srgb, var(--rail-avatar-status) 92%, white 8%);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 32 67;
+  transform-box: fill-box;
+  transform-origin: center;
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--rail-avatar-status) 18%, transparent));
+  animation: gg-avatar-scan-arc 1.25s linear infinite;
 }
 .gg-rail-chip:not(.is-shell-expanded) .gg-rail-avatar-wrap {
   isolation: isolate;
@@ -736,13 +800,9 @@
     0 0 0 2px color-mix(in srgb, var(--bg-base) 88%, transparent),
     0 0 0 4px color-mix(in srgb, var(--accent) 38%, transparent);
 }
+.gg-rail-chip.is-shell-expanded.is-active .gg-rail-avatar-wrap::after,
 .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 0;
+  opacity: 1;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 88%, transparent),
     0 0 0 3px color-mix(in srgb, var(--accent) 34%, transparent);
@@ -760,10 +820,12 @@ html[data-theme="light"] .gg-rail-chip.is-shell-expanded.is-active .gg-rail-avat
     0 0 0 2px color-mix(in srgb, var(--bg-base) 96%, transparent),
     0 0 0 4px color-mix(in srgb, var(--accent) 34%, transparent);
 }
+html[data-theme="light"] .gg-rail-chip.is-shell-expanded.is-active .gg-rail-avatar-wrap::after,
 html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar-wrap::after {
+  opacity: 1;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 86%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--accent) 88%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rail-avatar {
   border-color: var(--accent);
@@ -775,14 +837,56 @@ html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rai
   --rail-avatar-status: var(--accent);
   isolation: isolate;
 }
+.gg-rail-chip.is-status-streaming,
 .gg-rail-avatar-wrap.is-status-streaming { --rail-avatar-status: #7fd49a; }
+.gg-rail-chip.is-status-unread,
 .gg-rail-avatar-wrap.is-status-unread { --rail-avatar-status: #7fd49a; }
+.gg-rail-chip.is-status-interrupted,
 .gg-rail-avatar-wrap.is-status-interrupted { --rail-avatar-status: #d46b73; }
 
+.gg-rail-avatar-wrap.is-status-streaming::after {
+  --gg-rail-status-sweep: 36deg;
+  opacity: 0;
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  will-change: auto;
+  animation: none;
+}
+.gg-rail-avatar-wrap.is-status-unread::after {
+  opacity: 1;
+  border: 2px solid color-mix(in srgb, var(--rail-avatar-status) 86%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--rail-avatar-status) 12%, transparent),
+    0 0 6px color-mix(in srgb, var(--rail-avatar-status) 18%, transparent);
+  animation: gg-avatar-ready-pulse 2.2s ease-in-out infinite;
+}
+.gg-rail-avatar-wrap.is-status-interrupted::after {
+  opacity: 1;
+  border: 2px solid color-mix(in srgb, var(--rail-avatar-status) 84%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--rail-avatar-status) 12%, transparent),
+    0 0 6px color-mix(in srgb, var(--rail-avatar-status) 22%, transparent);
+  animation: gg-avatar-ready-pulse 1.2s ease-in-out infinite;
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming::after,
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-unread::after,
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-interrupted::after {
+  box-shadow: none;
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming::after {
+  background: transparent;
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar,
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-interrupted .gg-rail-avatar {
+  border-color: color-mix(in srgb, var(--border-default) 80%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
 .gg-rail-status-mark {
-  position: absolute;
-  pointer-events: none;
-  z-index: 3;
+  display: none;
 }
 
 @property --gg-rail-status-sweep {
@@ -793,19 +897,9 @@ html[data-theme="light"] .gg-rail-chip:not(.is-shell-expanded).is-active .gg-rai
 
 .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-mark {
   --gg-rail-status-sweep: 36deg;
-  inset: -2px;
-  border-radius: 50%;
-  background: conic-gradient(
-    from -90deg,
-    color-mix(in srgb, var(--rail-avatar-status) 88%, transparent) 0deg var(--gg-rail-status-sweep),
-    transparent var(--gg-rail-status-sweep) 360deg
-  );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
-  opacity: 0.9;
-  will-change: transform;
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--rail-avatar-status) 26%, transparent));
-  animation: gg-avatar-status-cycle 2.25s ease-in-out infinite;
+  display: none;
+  opacity: 0;
+  animation: none;
 }
 
 .gg-rail-avatar-wrap.is-status-interrupted .gg-rail-status-mark {
@@ -874,8 +968,80 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-streaming,
 html[data-theme="light"] .gg-rail-avatar-wrap.is-status-unread {
   --rail-avatar-status: #249b72;
 }
+html[data-theme="light"] .gg-rail-chip.is-status-streaming,
+html[data-theme="light"] .gg-rail-chip.is-status-unread {
+  --rail-avatar-status: #249b72;
+}
 html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   --rail-avatar-status: #c84652;
+}
+html[data-theme="light"] .gg-rail-chip.is-status-interrupted {
+  --rail-avatar-status: #c84652;
+}
+.gg-rail-status-mark {
+  display: none !important;
+}
+
+/* Canonical avatar ring: active, loading, ready and error share one exact geometry. */
+.gg-rail-chip.is-active .gg-rail-avatar,
+.gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
+.gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar,
+.gg-rail-avatar-wrap.is-status-interrupted .gg-rail-avatar {
+  position: relative;
+  z-index: 1;
+  border-color: transparent !important;
+  box-shadow: var(--shadow-sm);
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap::after,
+.gg-rail-avatar-wrap.is-status-streaming::after,
+.gg-rail-avatar-wrap.is-status-unread::after,
+.gg-rail-avatar-wrap.is-status-interrupted::after {
+  content: '' !important;
+  position: absolute;
+  inset: 0 !important;
+  display: block !important;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  box-sizing: border-box;
+  opacity: 1;
+  transform: none;
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap:not(.is-status-streaming):not(.is-status-unread):not(.is-status-interrupted)::after {
+  border: 2px solid var(--accent);
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+}
+.gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming::after,
+.gg-rail-avatar-wrap.is-status-streaming::after {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+}
+.gg-rail-avatar-wrap.is-status-streaming::before {
+  opacity: 0;
+  animation: none;
+}
+.gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc {
+  display: block;
+}
+.gg-rail-avatar-wrap.is-status-unread::after,
+.gg-rail-avatar-wrap.is-status-interrupted::after {
+  border: 2px solid color-mix(in srgb, var(--rail-avatar-status) 88%, transparent);
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--rail-avatar-status) 14%, transparent));
+  animation: gg-avatar-ring-soft-pulse 2.2s ease-in-out infinite;
 }
 @keyframes gg-avatar-status-cycle {
   0% {
@@ -884,12 +1050,12 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
     opacity: 0.78;
   }
   44% {
-    --gg-rail-status-sweep: 360deg;
+    --gg-rail-status-sweep: 356deg;
     transform: rotate(190deg);
     opacity: 1;
   }
   64% {
-    --gg-rail-status-sweep: 360deg;
+    --gg-rail-status-sweep: 356deg;
     transform: rotate(258deg);
     opacity: 1;
   }
@@ -907,6 +1073,42 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   50% {
     opacity: 1;
     transform: scale(1.015);
+  }
+}
+@keyframes gg-avatar-ring-soft-pulse {
+  0%, 100% {
+    opacity: 0.78;
+    filter: drop-shadow(0 0 1px color-mix(in srgb, var(--rail-avatar-status) 10%, transparent));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--rail-avatar-status) 18%, transparent));
+  }
+}
+@keyframes gg-avatar-ring-orbit {
+  0% {
+    transform: rotate(0deg);
+    opacity: 0.88;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(360deg);
+    opacity: 0.88;
+  }
+}
+@keyframes gg-avatar-scan-arc {
+  0% {
+    transform: rotate(-96deg);
+    opacity: 0.96;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(264deg);
+    opacity: 0.96;
   }
 }
 @keyframes gg-avatar-status-alert {
@@ -1168,9 +1370,9 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   margin-left: 1px;
 }
 .gg-ps-path-icon.gg-folder-icon {
-  width: 17px;
-  height: 13px;
-  flex-basis: 17px;
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
 }
 .gg-ps-path-text {
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1602,7 +1804,7 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
 }
 .gg-create-client-choice-icon .gg-folder-icon {
   width: 18px;
-  height: 14px;
+  height: 18px;
   flex-basis: 18px;
 }
 .gg-create-client-choice-title {
@@ -2230,35 +2432,26 @@ html[data-theme="light"] .gg-rail-avatar-wrap.is-status-interrupted {
   line-height: 1;
 }
 .gg-folder-icon {
-  --folder-stroke: color-mix(in srgb, var(--accent) 62%, var(--border-default));
-  --folder-fill-top: color-mix(in srgb, var(--accent) 11%, var(--bg-elevated));
-  --folder-fill-bottom: color-mix(in srgb, var(--accent) 4%, var(--bg-input));
-  position: relative;
   display: inline-block;
   width: 18px;
-  height: 14px;
+  height: 18px;
   flex: 0 0 18px;
-  background: transparent;
+  color: var(--accent);
+  background: currentColor;
+  opacity: 0.86;
+  mask: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .gg-folder-icon::before {
   content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--folder-stroke);
-  clip-path: polygon(0 32%, 8% 32%, 15% 10%, 42% 10%, 50% 32%, 100% 32%, 100% 100%, 0 100%);
+  display: none;
 }
 .gg-folder-icon::after {
   content: '';
-  position: absolute;
-  inset: 1.5px;
-  background:
-    linear-gradient(180deg, var(--folder-fill-top), var(--folder-fill-bottom));
-  clip-path: polygon(0 34%, 8% 34%, 15% 10%, 42% 10%, 50% 34%, 100% 34%, 100% 100%, 0 100%);
+  display: none;
 }
 html[data-theme="light"] .gg-folder-icon {
-  --folder-stroke: color-mix(in srgb, var(--accent) 54%, var(--border-default));
-  --folder-fill-top: color-mix(in srgb, var(--accent) 8%, #fff);
-  --folder-fill-bottom: color-mix(in srgb, var(--accent) 4%, var(--bg-input));
+  color: color-mix(in srgb, var(--accent) 72%, var(--text-secondary));
 }
 
 .gg-project-path {
@@ -2495,14 +2688,49 @@ html[data-theme="light"] .gg-folder-icon {
   margin: 0 auto 3px;
   padding: 0;
   z-index: 3;
+  max-height: min(42vh, 360px);
 }
 .gg-agent-progress-host + .gg-composer {
   padding-top: 4px;
+}
+.gg-agent-progress-host .gg-agent-progress[open] {
+  max-height: min(42vh, 360px);
+  display: flex;
+  flex-direction: column;
+}
+.gg-agent-progress-host .gg-agent-progress[open] .gg-agent-progress-body {
+  min-height: 0;
+  max-height: calc(min(42vh, 360px) - 38px);
 }
 .gg-agent-progress-inline {
   width: 100%;
   max-width: 920px;
   margin: 0 0 8px;
+}
+.gg-msg-agent-progress-standalone {
+  align-items: center;
+}
+.gg-agent-progress-inline.is-standalone {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto 8px;
+}
+.gg-resume-progress-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.gg-resume-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gg-resume-progress-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 0 2px;
 }
 
 .gg-agent-progress {
@@ -2540,8 +2768,8 @@ html[data-theme="light"] .gg-folder-icon {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
 }
 .gg-agent-progress-current {
@@ -2637,8 +2865,8 @@ html[data-theme="light"] .gg-folder-icon {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
 }
 .gg-agent-progress-now-title {
@@ -2676,8 +2904,8 @@ html[data-theme="light"] .gg-folder-icon {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
 }
 .gg-agent-progress-event {
@@ -3198,9 +3426,9 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
 }
 .gg-chat-project-icon.gg-folder-icon {
   opacity: 1;
-  width: 17px;
-  height: 13px;
-  flex-basis: 17px;
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
 }
 .gg-chat-project-name { font-weight: 600; color: var(--text-primary); }
 .gg-chat-project-sep { color: var(--text-disabled); }
@@ -3423,6 +3651,92 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   align-items: center;
   color: var(--accent);
   opacity: 0.9;
+}
+
+.gg-chat-export-notice-anchor {
+  position: absolute;
+  right: 18px;
+  bottom: 68px;
+  z-index: 24;
+  width: min(460px, calc(100% - 36px));
+  pointer-events: none;
+}
+
+.gg-chat-export-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 12px 12px 12px 13px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent-muted));
+  color: var(--text-primary);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+  animation: gg-toast-slide-in 180ms ease-out;
+}
+
+.gg-chat-export-notice.is-error {
+  border-color: color-mix(in srgb, var(--error) 48%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-elevated) 90%, var(--error) 10%);
+}
+
+.gg-chat-export-notice-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bg-base);
+  background: var(--success);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.gg-chat-export-notice.is-error .gg-chat-export-notice-icon {
+  background: var(--error);
+}
+
+.gg-chat-export-notice-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gg-chat-export-notice-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gg-chat-export-notice-detail {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.gg-chat-export-notice-close {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.gg-chat-export-notice-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+html[data-theme="light"] .gg-chat-export-notice {
+  box-shadow: 0 14px 28px rgba(46, 52, 64, 0.16);
 }
 .gg-composer-pending-bar {
   position: absolute;
@@ -6079,7 +6393,7 @@ html[data-theme="light"] .gg-mp-row-hidden-pill {
 }
 .gg-active-skill-kicker {
   color: var(--text-tertiary);
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -6329,8 +6643,8 @@ html[data-theme="light"] .gg-skill-suggest-toast {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  font-weight: 500;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
 }
 .gg-applied-skills-draft-list {
@@ -6352,7 +6666,7 @@ html[data-theme="light"] .gg-skill-suggest-toast {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 .gg-applied-skill-chip > span:last-of-type {
   overflow: hidden;
@@ -13150,3 +13464,5 @@ html[data-theme="light"] .gg-skill-card.is-selected {
   padding: 3px 10px;
   font-size: var(--text-xs);
 }
+
+

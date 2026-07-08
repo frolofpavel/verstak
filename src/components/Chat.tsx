@@ -51,6 +51,7 @@ import {
 } from '../lib/chat-timestamps'
 import { ComposerPendingBar } from './ComposerPendingBar'
 import {
+  CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
   nextComposerItemId,
   parseSupplementMessage,
@@ -63,7 +64,7 @@ import {
   CHAT_FILE_ACCEPT,
   isLegacyDoc,
 } from '../lib/chat-attachments'
-import { activateModelProgress, buildInitialAgentProgress, reduceAgentProgress } from '../lib/agent-progress'
+import { activateModelProgress, buildInitialAgentProgress, reduceAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
 
 interface ComposerPendingState {
   queuedMessages: QueuedComposerMessage[]
@@ -212,6 +213,20 @@ function readAutoScrollPref(): boolean {
     if (v === '1') return true
   } catch { /* private mode */ }
   return true
+}
+
+function buildInterruptedAnswerProgress(createdAt: number | undefined, providerLabel: string): AgentProgressEntry[] {
+  const timestamp = createdAt ?? Date.now()
+  return [
+    {
+      id: 'interrupted-answer',
+      phase: 'final',
+      title: 'Ответ прерван',
+      detail: `${providerLabel} начал отвечать, но приложение было закрыто до сохранения видимого ответа. Запуск не удалось восстановить автоматически — если задача ещё актуальна, повтори запрос.`,
+      status: 'error',
+      timestamp
+    }
+  ]
 }
 
 type RightPanel = 'none' | 'terminal' | 'sidechat'
@@ -532,7 +547,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     finalizeActiveStreamDuration, finalizeHelpStreamDuration,
     activity: projectActivity, agentProgress: projectAgentProgress, preflights, subagentRuns,
     sessionUsage: projectSessionUsage,
-    path: activePath, chatSessions, activeChatId,
+    path: activePath, chatSessions, activeChatId, resumableRuns,
     addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
     setHelpStreaming, clearHelpActivity, pushHelpActivity, setHelpAgentProgress, addHelpUsage,
     appendHelpLastAssistantThinking,
@@ -580,8 +595,27 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const lastAssistantMessage = lastAssistantInfo?.message ?? null
   const lastAssistantAnimationKey = lastAssistantInfo?.key ?? null
   const [animatedAssistantText, setAnimatedAssistantText] = useState<{ key: string; shown: string; target: string } | null>(null)
+  const [chatWindowActive, setChatWindowActive] = useState(() => (
+    typeof document === 'undefined'
+      ? true
+      : document.visibilityState === 'visible' && document.hasFocus()
+  ))
   const assistantAnimationSeenRef = useRef(false)
   const assistantAnimationPlayedKeysRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    function refreshWindowActive() {
+      setChatWindowActive(document.visibilityState === 'visible' && document.hasFocus())
+    }
+    refreshWindowActive()
+    window.addEventListener('focus', refreshWindowActive)
+    window.addEventListener('blur', refreshWindowActive)
+    document.addEventListener('visibilitychange', refreshWindowActive)
+    return () => {
+      window.removeEventListener('focus', refreshWindowActive)
+      window.removeEventListener('blur', refreshWindowActive)
+      document.removeEventListener('visibilitychange', refreshWindowActive)
+    }
+  }, [])
   useEffect(() => {
     if (!lastAssistantAnimationKey || !lastAssistantMessage) {
       setAnimatedAssistantText(null)
@@ -602,7 +636,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         return { ...prev, target }
       }
       const alreadyPlayed = assistantAnimationPlayedKeysRef.current.has(lastAssistantAnimationKey)
-      const shouldAnimate = !alreadyPlayed && (isStreaming || (assistantAnimationSeenRef.current && isFreshAssistant))
+      const shouldAnimate = !alreadyPlayed
+        && chatWindowActive
+        && !isSettingsOpen
+        && isStreaming
+        && isFreshAssistant
       if (shouldAnimate) assistantAnimationPlayedKeysRef.current.add(lastAssistantAnimationKey)
       return {
         key: lastAssistantAnimationKey,
@@ -611,12 +649,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       }
     })
     assistantAnimationSeenRef.current = true
-  }, [lastAssistantAnimationKey, lastAssistantMessage?.content, lastAssistantMessage?.createdAt, isStreaming])
+  }, [lastAssistantAnimationKey, lastAssistantMessage?.content, lastAssistantMessage?.createdAt, isStreaming, chatWindowActive, isSettingsOpen])
   const assistantAnimationRafRef = useRef<number | null>(null)
   const assistantAnimationLastFrameRef = useRef<number | null>(null)
   const assistantAnimationCarryRef = useRef(0)
   useEffect(() => {
-    if (isSettingsOpen) {
+    if (isSettingsOpen || !chatWindowActive) {
       setAnimatedAssistantText(prev => prev ? { ...prev, shown: prev.target } : prev)
       return
     }
@@ -659,7 +697,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       if (assistantAnimationRafRef.current != null) window.cancelAnimationFrame(assistantAnimationRafRef.current)
       assistantAnimationRafRef.current = null
     }
-  }, [animatedAssistantText?.key, animatedAssistantText?.target, isSettingsOpen])
+  }, [animatedAssistantText?.key, animatedAssistantText?.target, isSettingsOpen, chatWindowActive])
   const agentProgressElapsedMs = isStreaming && streamStartedAt != null
     ? tickNow - streamStartedAt
     : null
@@ -708,6 +746,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     } catch { /* своп не критичен — режим уже применён */ }
   }, [setAgentMode, isHelpChat, provider, activeChatId])
   const [input, setInput] = useState('')
+  const [suggestionInput, setSuggestionInput] = useState('')
   const [appliedSkills, setAppliedSkills] = useState<AppliedSkillRef[]>([])
   const appliedSkillIds = useMemo(() => new Set(appliedSkills.map(skill => skill.id)), [appliedSkills])
   // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
@@ -723,10 +762,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const suggestedSkills = useMemo(() => {
     if (isHelpChat) return []
     if (!skillSuggestionsEnabled) return []
-    if (input.trim().startsWith('/')) return [] // слэш-команда — пользователь уже выбирает
+    if (suggestionInput.trim().startsWith('/')) return [] // слэш-команда — пользователь уже выбирает
     const excluded = new Set([...appliedSkillIds, ...dismissedSuggestIds])
-    return suggestManyFromIndex(input, skillIndex, activeSkillId, excluded, 4)
-  }, [isHelpChat, skillSuggestionsEnabled, input, skillIndex, activeSkillId, appliedSkillIds, dismissedSuggestIds])
+    return suggestManyFromIndex(suggestionInput, skillIndex, activeSkillId, excluded, 4)
+  }, [isHelpChat, skillSuggestionsEnabled, suggestionInput, skillIndex, activeSkillId, appliedSkillIds, dismissedSuggestIds])
   // Этап 4: детерминированное предложение coding-recipe по интенту задачи. Только
   // явный интент (не фоллбэк small-edit), только если такой recipe-скилл есть и не
   // активен. Чисто предложение через chip — без auto-run.
@@ -734,14 +773,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const suggestedRecipe = useMemo(() => {
     if (isHelpChat) return null
     if (!skillSuggestionsEnabled) return null
-    if (input.trim().startsWith('/')) return null
-    if (!hasExplicitRecipeIntent(input)) return null
-    const id = suggestRecipe(input)
+    if (suggestionInput.trim().startsWith('/')) return null
+    if (!hasExplicitRecipeIntent(suggestionInput)) return null
+    const id = suggestRecipe(suggestionInput)
     if (id === activeSkillId || id === dismissedRecipeId) return null
     if (appliedSkillIds.has(id)) return null
     const skill = allSkills.find(s => s.id === id && s.recipe)
     return skill ?? null
-  }, [isHelpChat, skillSuggestionsEnabled, input, activeSkillId, dismissedRecipeId, appliedSkillIds, allSkills])
+  }, [isHelpChat, skillSuggestionsEnabled, suggestionInput, activeSkillId, dismissedRecipeId, appliedSkillIds, allSkills])
   // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
   useEffect(() => { if (!input.trim()) { setDismissedSuggestIds(new Set()); setDismissedRecipeId(null) } }, [input])
   const [chatReminderPins, setChatReminderPins] = useState<Reminder[]>([])
@@ -786,6 +825,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const composerInputRef = useRef(input)
   const composerAttachmentsRef = useRef(attachments)
   const composerAppliedSkillsRef = useRef(appliedSkills)
+  const composerDraftSaveTimerRef = useRef<number | null>(null)
+  const lastComposerHeightRef = useRef(0)
   reminderPinsPrefsRef.current = reminderPinsPrefs
   composerInputRef.current = input
   composerAttachmentsRef.current = attachments
@@ -795,6 +836,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const key = composerDraftKeyRef.current
     if (key) clearComposerDraft(key)
     setInput('')
+    setSuggestionInput('')
     setAttachments([])
     setAppliedSkills([])
   }
@@ -820,6 +862,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         ? useProject.getState().getComposerDraft(nextKey)
         : EMPTY_COMPOSER_DRAFT
       setInput(loaded.text)
+      setSuggestionInput(loaded.text)
       setAttachments(loaded.attachments)
       setAppliedSkills(loaded.appliedSkills ?? [])
       composerDraftKeyRef.current = nextKey
@@ -827,13 +870,33 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }, [helpMode, activePath, activeChatId, setComposerDraft])
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSuggestionInput(input)
+    }, 140)
+    return () => window.clearTimeout(timer)
+  }, [input])
+
+  useEffect(() => {
     const key = composerDraftKeyRef.current
     if (!key) return
-    setComposerDraft(key, { text: input, attachments, appliedSkills })
+    if (composerDraftSaveTimerRef.current != null) {
+      window.clearTimeout(composerDraftSaveTimerRef.current)
+    }
+    composerDraftSaveTimerRef.current = window.setTimeout(() => {
+      composerDraftSaveTimerRef.current = null
+      setComposerDraft(key, { text: composerInputRef.current, attachments: composerAttachmentsRef.current, appliedSkills: composerAppliedSkillsRef.current })
+    }, 220)
+    return () => {
+      if (composerDraftSaveTimerRef.current != null) {
+        window.clearTimeout(composerDraftSaveTimerRef.current)
+        composerDraftSaveTimerRef.current = null
+      }
+    }
   }, [input, attachments, appliedSkills, setComposerDraft])
   const [dragOver, setDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [queueNotice, setQueueNotice] = useState<string | null>(null)
+  const [exportNotice, setExportNotice] = useState<{ title: string; detail: string; ok: boolean } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [contextCompactNotice, setContextCompactNotice] = useState<{ text: string; loading: boolean } | null>(null)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
@@ -850,6 +913,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const screenshotCounter = useRef(0)
   const warningTimer = useRef<number | null>(null)
   const queueNoticeTimer = useRef<number | null>(null)
+  const exportNoticeTimer = useRef<number | null>(null)
   const contextCompactTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
   const persistedAssistantBySendIdRef = useRef(new Map<number, {
@@ -1077,6 +1141,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     queueNoticeTimer.current = window.setTimeout(() => setQueueNotice(null), 5000)
   }
 
+  function flashExportNotice(title: string, detail: string, ok = true) {
+    setExportNotice({ title, detail, ok })
+    if (exportNoticeTimer.current) window.clearTimeout(exportNoticeTimer.current)
+    exportNoticeTimer.current = window.setTimeout(() => setExportNotice(null), 7000)
+  }
+
   function flushPersistedAssistant(sendId: number, kind: 'content' | 'thinking' | 'both' = 'both') {
     const tracked = persistedAssistantBySendIdRef.current.get(sendId)
     if (!tracked) return
@@ -1139,17 +1209,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     try {
       const result = await window.api.handoff.saveToDownloads(activeChatId)
       if (!result.ok) {
-        flashQueueNotice(`Handoff не сохранён: ${result.error}`)
+        flashExportNotice('Контекст не сохранён', result.error, false)
         return
       }
       try {
         await navigator.clipboard.writeText(result.markdown)
-        flashQueueNotice('Handoff сохранён в Загрузки и скопирован')
+        flashExportNotice('Контекст для передачи готов', `Файл сохранён: ${result.path}. Текст скопирован в буфер обмена.`)
       } catch {
-        flashQueueNotice('Handoff сохранён в Загрузки')
+        flashExportNotice('Контекст для передачи готов', `Файл сохранён: ${result.path}. Буфер обмена недоступен.`)
       }
     } catch (err) {
-      flashQueueNotice(`Handoff не сохранён: ${err instanceof Error ? err.message : String(err)}`)
+      flashExportNotice('Контекст не сохранён', err instanceof Error ? err.message : String(err), false)
     } finally {
       setHandoffBusy(false)
     }
@@ -1160,10 +1230,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setHandoffBusy(true)
     try {
       const result = await window.api.handoff.exportTranscript(activeChatId)
-      if (!result.ok) { flashQueueNotice(`Транскрипт не сохранён: ${result.error}`); return }
-      flashQueueNotice('Транскрипт (полный) сохранён в Загрузки')
+      if (!result.ok) { flashExportNotice('Экспорт чата не сохранён', result.error, false); return }
+      flashExportNotice('Экспорт чата готов', `Полная история сохранена: ${result.path}.`)
     } catch (err) {
-      flashQueueNotice(`Транскрипт не сохранён: ${err instanceof Error ? err.message : String(err)}`)
+      flashExportNotice('Экспорт чата не сохранён', err instanceof Error ? err.message : String(err), false)
     } finally {
       setHandoffBusy(false)
     }
@@ -1696,6 +1766,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     pinChatToBottom(behavior)
   }
 
+  function handleAgentProgressToggle() {
+    if (!autoScrollEnabledRef.current) return
+    requestAnimationFrame(() => {
+      pinChatToBottom('smooth')
+      requestAnimationFrame(() => pinChatToBottom('smooth'))
+    })
+  }
+
   function toggleAutoScroll() {
     setAutoScrollEnabled(prev => {
       const next = !prev
@@ -1723,16 +1801,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
 
   useEffect(() => {
     if (!autoScrollEnabled) return
-    pendingPinToBottomRef.current = false
-    stickToBottomRef.current = true
-    pinChatToBottom('auto')
+    if (pendingPinToBottomRef.current || stickToBottomRef.current) {
+      pendingPinToBottomRef.current = false
+      pinChatToBottom('auto')
+    } else {
+      setShowScrollDown(messages.length > 0)
+    }
   }, [messages, autoScrollEnabled])
 
   const animatedAssistantShownLength = animatedAssistantText?.shown.length ?? 0
   useEffect(() => {
     if (!autoScrollEnabled || animatedAssistantShownLength <= 0) return
-    stickToBottomRef.current = true
-    pinChatToBottom('auto')
+    if (pendingPinToBottomRef.current || stickToBottomRef.current) {
+      pendingPinToBottomRef.current = false
+      pinChatToBottom('auto')
+    } else {
+      setShowScrollDown(true)
+    }
   }, [animatedAssistantShownLength, autoScrollEnabled])
 
   useEffect(() => {
@@ -1742,6 +1827,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       if (!el) return
       const atBottom = isNearBottom(el)
       if (pendingPinToBottomRef.current) {
+        if (!atBottom) pendingPinToBottomRef.current = false
         setShowScrollDown(!atBottom && messages.length > 0)
         return
       }
@@ -1806,8 +1892,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const ta = textareaRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'
-    if (autoScrollEnabledRef.current) pinChatToBottom('auto')
+    const nextHeight = Math.min(ta.scrollHeight, 220)
+    ta.style.height = `${nextHeight}px`
+    if (nextHeight !== lastComposerHeightRef.current) {
+      lastComposerHeightRef.current = nextHeight
+      if (autoScrollEnabledRef.current) pinChatToBottom('auto')
+    }
   }
   useEffect(autoGrow, [input])
 
@@ -2001,6 +2091,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   useEffect(() => () => {
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
     if (queueNoticeTimer.current) window.clearTimeout(queueNoticeTimer.current)
+    if (exportNoticeTimer.current) window.clearTimeout(exportNoticeTimer.current)
     if (contextCompactTimer.current) window.clearTimeout(contextCompactTimer.current)
     for (const [sendId] of persistedAssistantBySendIdRef.current) {
       finishPersistedAssistant(sendId)
@@ -2326,13 +2417,44 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setQueuedMessagesState(queuedMessagesRef.current.filter(m => m.id !== id))
   }
 
+  async function removePendingSupplement(id: string) {
+    const item = pendingSupplementsRef.current.find(s => s.id === id)
+    if (!item) return
+    const nextSupplements = pendingSupplementsRef.current.filter(s => s.id !== id)
+    setPendingSupplements(nextSupplements)
+    if (queuedMessagesRef.current.length === 0 && nextSupplements.length === 0) {
+      setPendingBarExpanded(false)
+    }
+
+    if (item.messageId) {
+      void window.api.chats.updateMessage(item.messageId, CANCELLED_SUPPLEMENT_CONTENT).catch(() => {})
+      useProject.setState(state => ({
+        messages: state.messages.map(message =>
+          message.dbId === item.messageId
+            ? { ...message, content: CANCELLED_SUPPLEMENT_CONTENT }
+            : message
+        )
+      }))
+    }
+    flashQueueNotice(t.chat.pendingBarSupplementRemoved)
+  }
+
   async function appendTextToCurrentContext(text: string): Promise<boolean> {
     const clean = text.trim()
     if (!clean || !isStreaming) return false
     const sendId = currentSendIdRef.current
     const ctx = await ensureProjectForChat()
     const formatted = formatSupplementForAgent(clean)
-    insertMessageBeforeLast({ role: 'user', content: formatted })
+    let messageId: number | undefined
+    if (ctx?.path && ctx.activeChatId) {
+      try {
+        const row = await window.api.chats.append(ctx.activeChatId, ctx.path, 'user', formatted)
+        messageId = row.id
+      } catch {
+        messageId = undefined
+      }
+    }
+    insertMessageBeforeLast({ role: 'user', content: formatted, ...(messageId ? { dbId: messageId } : {}) })
     armAutoScrollForOutgoing()
 
     let status: PendingSupplementStatus = 'deferred'
@@ -2355,12 +2477,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       text: clean,
       at: Date.now(),
       status,
+      ...(messageId ? { messageId } : {}),
     }])
     setPendingBarExpanded(true)
-
-    if (ctx?.path && ctx.activeChatId) {
-      await window.api.chats.append(ctx.activeChatId, ctx.path, 'user', formatted)
-    }
     return true
   }
 
@@ -2891,35 +3010,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             <div className="gg-chat-project-actions">
               <button
                 type="button"
-                className="gg-terminal-bar-btn"
-                onClick={() => void saveHandoffToDownloads()}
-                disabled={handoffBusy || activeChatId == null}
-                title="Сохранить handoff в Загрузки и скопировать для другого агента"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                <span>{handoffBusy ? 'Сохраняю' : 'Handoff'}</span>
-              </button>
-              <button
-                type="button"
-                className="gg-terminal-bar-btn"
-                onClick={() => void exportTranscript()}
-                disabled={handoffBusy || activeChatId == null}
-                title="Экспортировать полный транскрипт диалога в Markdown (Загрузки)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="8" y1="13" x2="16" y2="13" />
-                  <line x1="8" y1="17" x2="16" y2="17" />
-                </svg>
-                <span>Транскрипт</span>
-              </button>
-              <button
-                type="button"
                 className={`gg-terminal-bar-btn ${rightPanel === 'terminal' ? 'is-open' : ''}`}
                 onClick={() => onSelectRightPanel(rightPanel === 'terminal' ? 'none' : 'terminal')}
                 title={t.chat.dockTerminal}
@@ -3146,6 +3236,37 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           const renderedContent = isAnimatedAssistant
             ? (animatedAssistantText?.shown ?? m.content)
             : m.content
+          const isEmptyInterruptedAssistant = m.role === 'assistant'
+            && !isStreamingAssistant
+            && !renderedContent?.trim()
+            && !m.thinking?.trim()
+            && !m.attachments?.length
+            && !showInlineAgentProgress
+            && !showActivity
+            && !showPreflights
+            && !showSubagents
+          if (isEmptyInterruptedAssistant) {
+            if (resumableRuns.length > 0) return null
+            return (
+              <Fragment key={i}>
+                {showDateDivider && (
+                  <div className="gg-chat-date-divider" role="separator" aria-label={formatChatDateDivider(m.createdAt!)}>
+                    <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
+                  </div>
+                )}
+                <div className="gg-msg gg-msg-assistant gg-msg-agent-progress-standalone">
+                  <div className="gg-agent-progress-inline is-standalone">
+                    <AgentProgressPanel
+                      entries={buildInterruptedAnswerProgress(m.createdAt, provider.label)}
+                      isStreaming={false}
+                      finishedAt={m.createdAt ?? null}
+                      onToggleOpen={handleAgentProgressToggle}
+                    />
+                  </div>
+                </div>
+              </Fragment>
+            )
+          }
           return (
             <Fragment key={i}>
             {showDateDivider && (
@@ -3161,6 +3282,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                     isStreaming={false}
                     durationMs={agentProgressDurationMs}
                     finishedAt={agentProgressFinishedAt}
+                    onToggleOpen={handleAgentProgressToggle}
                   />
                 </div>
               )}
@@ -3403,6 +3525,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             </div>
           </div>
         )}
+        {exportNotice && (
+          <div className="gg-chat-export-notice-anchor">
+            <div className={`gg-chat-export-notice ${exportNotice.ok ? 'is-ok' : 'is-error'}`} role="status" aria-live="polite">
+              <div className="gg-chat-export-notice-icon" aria-hidden>{exportNotice.ok ? '✓' : '!'}</div>
+              <div className="gg-chat-export-notice-copy">
+                <div className="gg-chat-export-notice-title">{exportNotice.title}</div>
+                <div className="gg-chat-export-notice-detail">{exportNotice.detail}</div>
+              </div>
+              <button
+                type="button"
+                className="gg-chat-export-notice-close"
+                onClick={() => setExportNotice(null)}
+                aria-label="Закрыть уведомление"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         {(queuedMessages.length > 0 || (isStreaming && pendingSupplements.length > 0)) && (
           <ComposerPendingBar
             queueItems={queuedMessages}
@@ -3410,6 +3551,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             expanded={pendingBarExpanded}
             onToggle={() => setPendingBarExpanded(v => !v)}
             onRemoveQueueItem={removeQueuedMessage}
+            onRemoveSupplement={id => void removePendingSupplement(id)}
             onMoveQueueItemToContext={id => void moveQueuedMessageToContext(id)}
             onEditQueueItem={editQueuedMessage}
           />
@@ -3437,6 +3579,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             elapsedMs={agentProgressElapsedMs}
             durationMs={agentProgressDurationMs}
             finishedAt={agentProgressFinishedAt}
+            onToggleOpen={handleAgentProgressToggle}
           />
         </div>
       )}
@@ -3904,7 +4047,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                       {!isHelpChat && (
                         <div className="gg-chat-settings-item">
                           <span className="gg-chat-settings-label">Инструменты</span>
-                          <ComposerToolsMenu onInject={injectTemplate} />
+                          <ComposerToolsMenu
+                            onInject={injectTemplate}
+                            onSaveHandoff={saveHandoffToDownloads}
+                            onExportTranscript={exportTranscript}
+                            exportBusy={handoffBusy}
+                          />
                         </div>
                       )}
                       {!isHelpChat && (
@@ -3973,7 +4121,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   ▶ Agency task
                 </button>
               )}
-              {!isHelpChat && <ComposerToolsMenu onInject={injectTemplate} />}
+              {!isHelpChat && (
+                <ComposerToolsMenu
+                  onInject={injectTemplate}
+                  onSaveHandoff={saveHandoffToDownloads}
+                  onExportTranscript={exportTranscript}
+                  exportBusy={handoffBusy}
+                />
+              )}
               <ModePicker
                 mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
                 onChange={applyMode}

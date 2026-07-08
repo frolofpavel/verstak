@@ -8,6 +8,7 @@ interface AgentProgressPanelProps {
   elapsedMs?: number | null
   durationMs?: number | null
   finishedAt?: number | null
+  onToggleOpen?: () => void
 }
 
 const STATUS_LABEL: Record<AgentProgressStatus, string> = {
@@ -70,7 +71,8 @@ export function AgentProgressPanel({
   isStreaming,
   elapsedMs,
   durationMs,
-  finishedAt
+  finishedAt,
+  onToggleOpen
 }: AgentProgressPanelProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const current = useMemo(() => currentEntry(entries), [entries])
@@ -102,7 +104,7 @@ export function AgentProgressPanel({
 
   return (
     <details className={`gg-agent-progress ${isStreaming ? 'is-live' : 'is-settled'}`}>
-      <summary className="gg-agent-progress-summary">
+      <summary className="gg-agent-progress-summary" onClick={() => onToggleOpen?.()}>
         <span className="gg-agent-progress-kicker">Ход работы</span>
         {current && (
           <span className={`gg-agent-progress-current is-${current.status}`}>

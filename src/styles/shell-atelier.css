@@ -189,9 +189,60 @@ html.gg-atelier body {
   box-shadow: none;
 }
 
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-chip-btn,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-unread .gg-rail-chip-btn,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-interrupted .gg-rail-chip-btn {
+  background: var(--vol-recessed-bg);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-unread .gg-rail-avatar,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-interrupted .gg-rail-avatar {
+  border-color: color-mix(in srgb, var(--border-default) 80%, transparent) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::after,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-unread .gg-rail-avatar-wrap::after,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-interrupted .gg-rail-avatar-wrap::after {
+  content: '' !important;
+  display: block !important;
+  opacity: 1;
+  border-radius: 50%;
+}
+
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::after {
+  --gg-rail-status-sweep: 36deg;
+  border: 0;
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+}
+
+.gg-app-atelier .gg-rail-chip.is-active.is-status-unread .gg-rail-avatar-wrap::after,
+.gg-app-atelier .gg-rail-chip.is-active.is-status-interrupted .gg-rail-avatar-wrap::after {
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--rail-avatar-status) 86%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--rail-avatar-status) 12%, transparent),
+    0 0 6px color-mix(in srgb, var(--rail-avatar-status) 18%, transparent);
+  animation: gg-avatar-ready-pulse 2.2s ease-in-out infinite;
+}
+
 html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar {
   border-color: var(--accent) !important;
   border-width: 2px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active.is-status-unread .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active.is-status-interrupted .gg-rail-avatar {
+  border-color: color-mix(in srgb, var(--border-default) 78%, transparent) !important;
   box-shadow: var(--shadow-sm) !important;
 }
 
@@ -200,6 +251,92 @@ html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar
   display: none;
   border: 0;
   box-shadow: none;
+}
+
+/* Atelier final avatar ring override: keep status ring exactly where active blue ring lives. */
+.gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted .gg-rail-avatar {
+  border-color: transparent !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap::after,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::after,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-unread::after,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-unread::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted::after {
+  content: '' !important;
+  position: absolute;
+  inset: 0 !important;
+  display: block !important;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  box-sizing: border-box;
+  opacity: 1;
+  transform: none;
+}
+.gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap:not(.is-status-streaming):not(.is-status-unread):not(.is-status-interrupted)::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap:not(.is-status-streaming):not(.is-status-unread):not(.is-status-interrupted)::after {
+  border: 2px solid var(--accent);
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+}
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::after,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::after {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+}
+.gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::before,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::before,
+html[data-theme="light"] .gg-app-atelier .gg-rail-chip.is-active.is-status-streaming .gg-rail-avatar-wrap::before,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::before {
+  opacity: 0;
+  animation: none;
+}
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc {
+  display: block;
+}
+.gg-app-atelier .gg-rail-status-arc-track,
+html[data-theme="light"] .gg-app-atelier .gg-rail-status-arc-track {
+  stroke: color-mix(in srgb, var(--rail-avatar-status) 24%, transparent);
+}
+.gg-app-atelier .gg-rail-status-arc-sweep,
+html[data-theme="light"] .gg-app-atelier .gg-rail-status-arc-sweep {
+  stroke: color-mix(in srgb, var(--rail-avatar-status) 92%, white 8%);
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--rail-avatar-status) 18%, transparent));
+}
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-unread::after,
+.gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-unread::after,
+html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-interrupted::after {
+  border: 2px solid color-mix(in srgb, var(--rail-avatar-status) 88%, transparent);
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--rail-avatar-status) 14%, transparent));
+  animation: gg-avatar-ring-soft-pulse 2.2s ease-in-out infinite;
 }
 
 .gg-app-atelier .gg-rail.is-shell-expanded.is-expanded .gg-rail-add {
