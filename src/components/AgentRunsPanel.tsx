@@ -342,7 +342,7 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
   const lastActivityAge = fmtDuration(lastRunActivityAt(run), null)
   const possiblyStuck = isRunPossiblyStuck(run)
   const canStop = run.status === 'running' || run.status === 'queued'
-  const canResume = run.status === 'failed' || run.status === 'stopped' || run.status === 'suspended' || run.status === 'interrupted'
+  const canResume = run.status === 'failed' || run.status === 'stopped' || run.status === 'timed_out' || run.status === 'suspended' || run.status === 'interrupted'
   const ownerLabel = t.agentRuns.owner[run.owner as keyof typeof t.agentRuns.owner] ?? run.owner
 
   return (

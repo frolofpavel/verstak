@@ -11515,6 +11515,7 @@ textarea.gg-input {
 .gg-agent-status-dot.is-done { background: var(--success, #3fb950); }
 .gg-agent-status-dot.is-error { background: var(--error); }
 .gg-agent-status-dot.is-interrupted { background: var(--warning, #facc15); }
+.gg-agent-status-dot.is-timed_out { background: var(--warning, #facc15); }
 .gg-agent-status-dot.is-cancelled { background: var(--text-tertiary); }
 
 @keyframes gg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -11925,6 +11926,7 @@ textarea.gg-input {
 .gg-run-card.is-running { border-color: var(--accent); }
 .gg-run-card.is-failed { border-color: var(--error); }
 .gg-run-card.is-interrupted { border-color: var(--warning, #facc15); }
+.gg-run-card.is-timed_out { border-color: var(--warning, #facc15); }
 .gg-run-card.is-waiting_review { border-color: var(--warning, #facc15); }
 .gg-run-card.is-stopped { opacity: 0.75; }
 .gg-run-card.is-expanded { box-shadow: 0 0 0 1px var(--border-subtle); }

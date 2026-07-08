@@ -181,6 +181,7 @@ export const en = {
       done: 'done',
       failed: 'failed',
       stopped: 'stopped',
+      timed_out: 'timed out',
       interrupted: 'interrupted',
     },
     owner: {

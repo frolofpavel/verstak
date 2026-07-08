@@ -958,6 +958,56 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_skill_usage_state ON skill_usage(state, pinned, last_used_at);
       `)
     }
+  },
+  {
+    version: 41,
+    description: "agent_runs.status: + 'timed_out' для runtime watchdog таймаутов.",
+    run: (db: DB) => {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_runs'").get()
+      if (!table) return
+      const createSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_runs'").get() as { sql?: string } | undefined)?.sql ?? ''
+      if (createSql.includes("'timed_out'")) return
+      db.exec(`
+        ALTER TABLE agent_runs RENAME TO agent_runs_old_41;
+
+        CREATE TABLE agent_runs (
+          run_id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          owner TEXT NOT NULL DEFAULT 'main' CHECK(owner IN ('main','review','delegate','background')),
+          title TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('queued','running','waiting_review','done','failed','stopped','timed_out','suspended','interrupted')),
+          provider_id TEXT, model TEXT, send_id INTEGER,
+          generation INTEGER NOT NULL DEFAULT 0,
+          agents_count INTEGER NOT NULL DEFAULT 0, tool_count INTEGER NOT NULL DEFAULT 0,
+          files_count INTEGER NOT NULL DEFAULT 0, cost_cents INTEGER NOT NULL DEFAULT 0,
+          error TEXT, started_at INTEGER NOT NULL, ended_at INTEGER,
+          turn_index INTEGER DEFAULT 0, last_tool_name TEXT, last_checkpoint_id INTEGER,
+          agent_mode TEXT, updated_at INTEGER
+        );
+
+        INSERT INTO agent_runs (
+          run_id, project_path, chat_id, owner, title, status,
+          provider_id, model, send_id, generation,
+          agents_count, tool_count, files_count, cost_cents,
+          error, started_at, ended_at,
+          turn_index, last_tool_name, last_checkpoint_id, agent_mode, updated_at
+        )
+        SELECT
+          run_id, project_path, chat_id, owner, title, status,
+          provider_id, model, send_id, COALESCE(generation, 0),
+          agents_count, tool_count, files_count, cost_cents,
+          error, started_at, ended_at,
+          COALESCE(turn_index, 0), last_tool_name, last_checkpoint_id, agent_mode, updated_at
+        FROM agent_runs_old_41
+        ORDER BY rowid ASC;
+
+        DROP TABLE agent_runs_old_41;
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs(project_path, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(project_path, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_lane_generation ON agent_runs(project_path, chat_id, owner, generation);
+      `)
+    }
   }
 ]
 

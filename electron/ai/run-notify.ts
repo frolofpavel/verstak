@@ -22,7 +22,7 @@ export interface RunNotifyEvent {
 
 /** Какие терминальные статусы достойны пуша. stopped = юзер сам остановил → молчим. */
 export function shouldNotifyStatus(status: AgentRunStatus): boolean {
-  return status === 'done' || status === 'failed' || status === 'waiting_review'
+  return status === 'done' || status === 'failed' || status === 'timed_out' || status === 'waiting_review'
 }
 
 /** Чистый форматтер сообщения (тестируемый). */
@@ -34,6 +34,10 @@ export function formatRunNotification(ev: RunNotifyEvent): string {
   }
   if (ev.status === 'waiting_review') {
     return `👀 Verstak — прогон ждёт ревью${proj}`
+  }
+  if (ev.status === 'timed_out') {
+    const err = ev.error ? `: ${ev.error.slice(0, 200)}` : ''
+    return `⏱ Verstak — прогон остановлен по таймауту${proj}${err}`
   }
   const bits: string[] = []
   if (ev.toolCount) bits.push(`${ev.toolCount} инстр.`)

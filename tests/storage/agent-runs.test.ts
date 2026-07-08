@@ -111,6 +111,19 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
+  it('finish(timed_out) round-trip для runtime watchdog', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A' })
+    runs.finish('r1', 'timed_out', { error: 'timeout' })
+    const row = runs.get('r1')!
+    expect(row.status).toBe('timed_out')
+    expect(row.error).toBe('timeout')
+    expect(row.endedAt).not.toBeNull()
+    expect(runs.getEvents('r1').filter(e => e.kind === 'status' && e.label === 'terminal')).toHaveLength(1)
+    db.close()
+  })
+
   it('appendEvent + getEvents возвращает события в порядке id', () => {
     const db = openDb(join(dir, 'test.db'))
     const runs = createAgentRuns(db)
@@ -241,6 +254,15 @@ describe('agent-runs lifecycle generation (migration 39)', () => {
     const db = openDb(join(dir, 'test.db'))
     const cols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
     expect(cols).toContain('generation')
+    db.close()
+  })
+
+  it('migration 41 allows timed_out status in agent_runs', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'timeout', projectPath: '/p', title: 'Timeout' })
+    expect(() => runs.finish('timeout', 'timed_out', { error: 'timeout' })).not.toThrow()
+    expect(runs.get('timeout')!.status).toBe('timed_out')
     db.close()
   })
 

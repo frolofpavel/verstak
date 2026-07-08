@@ -522,9 +522,17 @@
 - **done:**
   - [x] diff GUI events vs CLI trace → одинаковые lifecycle-поля
 
-**Status 2026-07-08 RUN hardening:** RUN-02/RUN-04/RUN-06/RUN-07 compact scope closed.
+### RUN-08 · Configurable timeout semantics (S)
+- **target:** `electron/ai/run-lifecycle.ts`, `electron/ipc/ai.ts`, `electron/storage/db.ts`.
+- **done:**
+  - [x] runtime watchdog aborts hung `ai:send` via shared `AbortController`
+  - [x] `agent_runs.status='timed_out'` через миграцию 41
+  - [x] `RunStatus.timed_out` / `ai:wait` / UI status / Telegram notify aligned
+  - [x] timeout policy reads `agent_run_timeout_ms` setting or `VERSTAK_AGENT_RUN_TIMEOUT_MS`, with safe clamp bounds
+
+**Status 2026-07-08 RUN hardening:** RUN-02/RUN-04/RUN-06/RUN-07/RUN-08 compact scope closed.
 `agent_runs.generation` is persisted by migration 39, SendRegistry now keeps per-chat/help lane generations and rejects stale owners before routing events, same-chat sends are queued instead of racing, `agentRuns.finish()` records exactly one terminal timeline event, and CLI `--trace-json` now emits GUI-aligned lifecycle/counter fields.
-Scope note: this closes deterministic stale-event/terminal-event behavior; a separate timeout policy engine remains a later RUN item if we want configurable time budgets.
+Timeout policy is now fail-closed for GUI/API/CLI-provider runs: first terminal writer wins, so watchdog `timed_out` cannot be overwritten by the later abort unwind.
 
 ---
 

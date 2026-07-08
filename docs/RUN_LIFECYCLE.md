@@ -68,3 +68,13 @@ Behavior:
 - does not create, stop, resume, or mutate the run.
 
 This is intentionally a small polling primitive over the existing `agent_runs` storage. It does not replace the GUI event stream and does not introduce a new run engine.
+
+## Runtime Timeout Policy
+
+`ai:send` arms a watchdog for every run. The timeout value is resolved in this order:
+
+1. setting `agent_run_timeout_ms`;
+2. env `VERSTAK_AGENT_RUN_TIMEOUT_MS`;
+3. default `30 min`.
+
+The policy is clamped to a safe range (`30s..6h`). When the watchdog fires, it writes `agent_runs.status='timed_out'`, appends a timeout event, emits a chat error, and aborts the shared run `AbortController`. The runner then unwinds normally, but `agentRuns.finish()` is idempotent, so the later abort cleanup cannot overwrite the `timed_out` terminal state.

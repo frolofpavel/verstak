@@ -178,9 +178,12 @@ Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/stor
 `agent_runs` DTO exposes `lastEventAt`, Runs panel shows last activity age for active runs, and warns when a running/queued run has no events for 5+ minutes.
 Targeted verification: `npx vitest run tests/storage/agent-runs.test.ts tests/ai/run-lifecycle.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 3 files / 37 tests; `npm run type` -> green.
 
-**Status 2026-07-08 RUN hardening update:** `190-RUN-05`, compact `190-RUN-07`, and `190-RUN-09` are closed; `190-RUN-08` stays open for a configurable timeout policy engine.
+**Status 2026-07-08 RUN hardening update:** `190-RUN-05`, compact `190-RUN-07`, `190-RUN-08`, and `190-RUN-09` are closed.
 Added per-chat/help lane generations in the renderer store, stale chat owners are ignored before event routing, same-lane concurrent sends queue deterministically, `agent_runs.finish()` writes one terminal status event, and headless recipe traces now expose lifecycle events, counters, status, duration, and error classification without secrets.
 Targeted verification: `npx vitest run tests/store/project-store-routing.test.ts tests/storage/agent-runs.test.ts tests/scripts/verstak-cli-recipe.test.ts tests/ai/run-lifecycle.test.ts` -> green, 4 files / 66 tests; `npm run type` -> green.
+
+**Status 2026-07-08 RUN timeout update:** `190-RUN-08` adds a runtime watchdog policy (`agent_run_timeout_ms` setting / `VERSTAK_AGENT_RUN_TIMEOUT_MS` env, safe clamp bounds), storage status `timed_out` via migration 41, timeout-aware abort reason, UI status/resend handling, and Telegram notification formatting. First terminal writer wins, so watchdog `timed_out` is not overwritten by the later abort unwind.
+Targeted verification: `npx vitest run tests/ai/run-lifecycle.test.ts tests/ai/run-notify.test.ts tests/storage/agent-runs.test.ts tests/ipc/agent-runs-wait.test.ts` -> green, 4 files / 55 tests; `npm run type` -> green.
 
 ## Phase 5. 1.9.0: Skill Governance
 

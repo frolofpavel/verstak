@@ -12,6 +12,7 @@ describe('run-notify: shouldNotifyStatus', () => {
   it('пушим done/failed/waiting_review, молчим на stopped/queued/running', () => {
     expect(shouldNotifyStatus('done')).toBe(true)
     expect(shouldNotifyStatus('failed')).toBe(true)
+    expect(shouldNotifyStatus('timed_out')).toBe(true)
     expect(shouldNotifyStatus('waiting_review')).toBe(true)
     expect(shouldNotifyStatus('stopped')).toBe(false) // юзер сам остановил
     expect(shouldNotifyStatus('queued')).toBe(false)
@@ -37,6 +38,12 @@ describe('run-notify: formatRunNotification', () => {
   })
   it('waiting_review — 👀', () => {
     expect(formatRunNotification({ status: 'waiting_review', projectName: null })).toContain('👀')
+  })
+  it('timed_out — timeout message', () => {
+    const t = formatRunNotification({ status: 'timed_out', projectName: 'verstak', error: 'Agent run timed out' })
+    expect(t).toContain('таймауту')
+    expect(t).toContain('verstak')
+    expect(t).toContain('Agent run timed out')
   })
 })
 

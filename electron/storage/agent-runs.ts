@@ -18,7 +18,7 @@ import type { Database } from 'better-sqlite3'
  */
 
 export type AgentRunOwner = 'main' | 'review' | 'delegate' | 'background'
-export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended' | 'interrupted'
+export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'timed_out' | 'suspended' | 'interrupted'
 
 export interface AgentRun {
   runId: string

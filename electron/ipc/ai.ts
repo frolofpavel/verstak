@@ -42,7 +42,13 @@ import { shouldFallback, getNextFallback, classifyFallbackReason } from '../ai/s
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from '../ai/tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
-import { exitReasonToAgentRunStatus } from '../ai/run-lifecycle'
+import {
+  AGENT_RUN_TIMEOUT_SETTING_KEY,
+  abortAgentRunForTimeout,
+  exitReasonToAgentRunStatus,
+  isAgentRunTimeoutAbort,
+  resolveAgentRunTimeoutPolicy,
+} from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
@@ -468,6 +474,13 @@ export function registerAiIpc(deps: AiDeps): void {
     const runId = randomUUID()
     const ctrl = new AbortController()
     activeAborts.set(sendId, ctrl)
+    let runTimeout: ReturnType<typeof setTimeout> | null = null
+    const clearRunTimeout = () => {
+      if (runTimeout) {
+        clearTimeout(runTimeout)
+        runTimeout = null
+      }
+    }
     /**
      * Cleanup MUST handle every dangling state owned by this sendId. Per Gemini
      * audit finding 2.1 + 2.5: previously cleanup only wiped activeAborts,
@@ -477,6 +490,7 @@ export function registerAiIpc(deps: AiDeps): void {
      * next session with similar callId.
      */
     const cleanup = () => {
+      clearRunTimeout()
       activeAborts.delete(sendId)
       // Drain pending confirmations for this sendId — resolving with false so
       // any awaiter unwinds cleanly instead of leaking the Promise.
@@ -921,6 +935,37 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
 
+    const timeoutPolicy = resolveAgentRunTimeoutPolicy(deps.getSecret(AGENT_RUN_TIMEOUT_SETTING_KEY))
+    const timeoutMinutes = Math.max(1, Math.round(timeoutPolicy.timeoutMs / 60_000))
+    const timeoutMessage = `Прогон остановлен по таймауту ${timeoutMinutes} мин. Можно переотправить задачу или увеличить agent_run_timeout_ms.`
+    runTimeout = setTimeout(() => {
+      if (ctrl.signal.aborted) return
+      logRuntime('ai.run.timeout', {
+        sendId,
+        runId,
+        projectPath,
+        chatId: chatId ?? null,
+        providerId,
+        model,
+        timeoutMs: timeoutPolicy.timeoutMs,
+        source: timeoutPolicy.source,
+        clamped: timeoutPolicy.clamped
+      }, 'warn')
+      try {
+        deps.agentRuns?.appendEvent(runId, 'status', {
+          label: 'timeout',
+          detail: timeoutMessage,
+          status: 'timed_out'
+        })
+        deps.agentRuns?.finish(runId, 'timed_out', { error: timeoutMessage })
+      } catch (err) {
+        logRuntimeError('agent_runs.timeout.finish.fail', err, { runId, sendId, projectPath })
+      }
+      taggedSender.send('ai:event', { id: sendId, event: { type: 'error', message: timeoutMessage } })
+      abortAgentRunForTimeout(ctrl, timeoutPolicy.timeoutMs)
+    }, timeoutPolicy.timeoutMs)
+    runTimeout.unref?.()
+
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
 
@@ -1242,6 +1287,7 @@ async function runPlainConversation(
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
   }
   let exitReason: ExitReason = 'completed'
+  const signalExitReason = (): ExitReason => isAgentRunTimeoutAbort(signal) ? 'timeout' : 'aborted'
   let handedOff = false // #15: при fallback финализирует рекурсивный фрейм
   try {
     while (!signal.aborted) {
@@ -1251,7 +1297,7 @@ async function runPlainConversation(
 
       for await (const event of provider.send(currentMessages, [])) {
         if (signal.aborted) {
-          exitReason = 'aborted'
+          exitReason = signalExitReason()
           sender.send('ai:event', { id: sendId, event: { type: 'done' } })
           return
         }
@@ -1298,7 +1344,7 @@ async function runPlainConversation(
       }
 
       if (signal.aborted) {
-        exitReason = 'aborted'
+        exitReason = signalExitReason()
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
@@ -1317,6 +1363,11 @@ async function runPlainConversation(
       }
     }
   } catch (err) {
+    if (signal.aborted) {
+      exitReason = signalExitReason()
+      sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+      return
+    }
     logRuntimeError('ai.runner.error', err, {
       sendId,
       runId: runId ?? null,
@@ -1687,6 +1738,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // returns abnormally (uncaught exception during streaming) the journal
   // still captures it. Per Gemini audit 2.2 + Idea B.
   let exitReason: ExitReason = 'crashed'
+  const signalExitReason = (): ExitReason => isAgentRunTimeoutAbort(signal) ? 'timeout' : 'aborted'
   // #15: при smart-fallback финализацию (journal + agentRuns.finish) делает
   // рекурсивный fallback-фрейм — внешний finally её пропускает, иначе успешный
   // fallback писался бы статусом 'crashed' упавшей попытки.
@@ -1827,7 +1879,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     drainSupplements()
     drainProcessCompletionsForRun()
     if (signal.aborted) {
-      exitReason = 'aborted'
+      exitReason = signalExitReason()
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
@@ -1924,7 +1976,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       }
     )) {
       if (signal.aborted) {
-        exitReason = 'aborted'
+        exitReason = signalExitReason()
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
@@ -2610,7 +2662,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // видел страшный error-тост, а run писался 'failed'. signal.aborted = он сам
     // нажал Стоп → чистое завершение, без error-события и без фолбэка. (Ревью 23.06)
     if (signal.aborted) {
-      exitReason = 'aborted'
+      exitReason = signalExitReason()
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }

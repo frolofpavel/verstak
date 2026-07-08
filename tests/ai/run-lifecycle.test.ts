@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest'
 import type { AgentRun, AgentRunStatus } from '../../electron/storage/agent-runs'
 import {
   agentRunStatusToRunStatus,
+  abortAgentRunForTimeout,
   buildRunWaitResult,
+  DEFAULT_AGENT_RUN_TIMEOUT_MS,
   exitReasonToAgentRunStatus,
   exitReasonToRunStatus,
+  isAgentRunTimeoutAbort,
   isTerminalAgentRunStatus,
+  MAX_AGENT_RUN_TIMEOUT_MS,
+  MIN_AGENT_RUN_TIMEOUT_MS,
+  resolveAgentRunTimeoutPolicy,
   waitForRun,
 } from '../../electron/ai/run-lifecycle'
 
@@ -45,6 +51,7 @@ describe('run lifecycle', () => {
     expect(agentRunStatusToRunStatus('done')).toBe('completed')
     expect(agentRunStatusToRunStatus('failed')).toBe('failed')
     expect(agentRunStatusToRunStatus('stopped')).toBe('cancelled')
+    expect(agentRunStatusToRunStatus('timed_out')).toBe('timed_out')
     expect(agentRunStatusToRunStatus('suspended')).toBe('suspended')
     expect(agentRunStatusToRunStatus('interrupted')).toBe('interrupted')
   })
@@ -54,6 +61,8 @@ describe('run lifecycle', () => {
     expect(exitReasonToRunStatus('completed')).toBe('completed')
     expect(exitReasonToAgentRunStatus('aborted')).toBe('stopped')
     expect(exitReasonToRunStatus('aborted')).toBe('cancelled')
+    expect(exitReasonToAgentRunStatus('timeout')).toBe('timed_out')
+    expect(exitReasonToRunStatus('timeout')).toBe('timed_out')
     expect(exitReasonToAgentRunStatus('crashed')).toBe('failed')
     expect(exitReasonToRunStatus('crashed')).toBe('failed')
     expect(exitReasonToAgentRunStatus('max-turns')).toBe('done')
@@ -67,6 +76,7 @@ describe('run lifecycle', () => {
     expect(isTerminalAgentRunStatus('done')).toBe(true)
     expect(isTerminalAgentRunStatus('failed')).toBe(true)
     expect(isTerminalAgentRunStatus('stopped')).toBe(true)
+    expect(isTerminalAgentRunStatus('timed_out')).toBe(true)
     expect(isTerminalAgentRunStatus('suspended')).toBe(true)
     expect(isTerminalAgentRunStatus('interrupted')).toBe(true)
   })
@@ -123,5 +133,38 @@ describe('run lifecycle', () => {
         sleep: async (ms) => { t += ms },
       }
     )).rejects.toThrow('timeout')
+  })
+
+  it('resolves configurable agent-run timeout policy with clamp bounds', () => {
+    expect(resolveAgentRunTimeoutPolicy(null, null)).toEqual({
+      timeoutMs: DEFAULT_AGENT_RUN_TIMEOUT_MS,
+      source: 'default',
+      clamped: false,
+    })
+    expect(resolveAgentRunTimeoutPolicy('120000', '60000')).toEqual({
+      timeoutMs: 120_000,
+      source: 'setting',
+      clamped: false,
+    })
+    expect(resolveAgentRunTimeoutPolicy(null, '1000')).toEqual({
+      timeoutMs: MIN_AGENT_RUN_TIMEOUT_MS,
+      source: 'env',
+      clamped: true,
+    })
+    expect(resolveAgentRunTimeoutPolicy(String(MAX_AGENT_RUN_TIMEOUT_MS + 1), null)).toEqual({
+      timeoutMs: MAX_AGENT_RUN_TIMEOUT_MS,
+      source: 'setting',
+      clamped: true,
+    })
+  })
+
+  it('marks timeout aborts through AbortSignal.reason', () => {
+    const timeoutCtrl = new AbortController()
+    abortAgentRunForTimeout(timeoutCtrl, 1000)
+    expect(isAgentRunTimeoutAbort(timeoutCtrl.signal)).toBe(true)
+
+    const stopCtrl = new AbortController()
+    stopCtrl.abort()
+    expect(isAgentRunTimeoutAbort(stopCtrl.signal)).toBe(false)
   })
 })

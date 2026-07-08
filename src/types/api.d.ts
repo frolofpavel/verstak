@@ -888,7 +888,7 @@ export interface SessionTodo {
  * тип дублируется здесь. Один ai:send = одна строка.
  */
 export type AgentRunOwner = 'main' | 'review' | 'delegate' | 'background'
-export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'suspended' | 'interrupted'
+export type AgentRunStatus = 'queued' | 'running' | 'waiting_review' | 'done' | 'failed' | 'stopped' | 'timed_out' | 'suspended' | 'interrupted'
 export type RunStatus = 'queued' | 'running' | 'waiting_review' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'suspended' | 'interrupted'
 
 export interface RunWaitResult {

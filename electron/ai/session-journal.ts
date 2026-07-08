@@ -1,6 +1,6 @@
 import type { ToolCall } from './types'
 
-export type ExitReason = 'completed' | 'aborted' | 'error' | 'max-turns' | 'loop-detected' | 'crashed'
+export type ExitReason = 'completed' | 'aborted' | 'timeout' | 'error' | 'max-turns' | 'loop-detected' | 'crashed'
 
 export function callSignature(call: ToolCall): string {
   return `${call.name}::${JSON.stringify(call.args)}`
@@ -56,6 +56,7 @@ export function writeSessionJournal(
   // Title prefix communicates outcome at a glance
   const tag = reason === 'completed' ? '' :
               reason === 'aborted' ? '⏹ Прерывание · ' :
+              reason === 'timeout' ? '⏱ Таймаут · ' :
               reason === 'error' ? '✗ Ошибка · ' :
               reason === 'max-turns' ? '⏸ Лимит ходов · ' :
               reason === 'loop-detected' ? '🔁 Зацикливание · ' :
