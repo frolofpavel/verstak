@@ -912,6 +912,10 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       }
     }
   },
+  // ПРИМЕЧАНИЕ: версия 37 намеренно отсутствует (нумерация 36 → 38). Миграции 37
+  // никогда не было — при добавлении хотфикс-схемы взяли следующий свободный номер
+  // как 38. schema_version хранит только максимум применённой, дыра безопасна.
+  // Следующая свободная миграция — 43. НЕ переиспользовать 37.
   {
     version: 38,
     description: 'worktree_sessions lifecycle metadata: snapshot/base refs, activity timestamp, removed marker.',

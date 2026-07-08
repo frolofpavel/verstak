@@ -8,6 +8,7 @@ import {
   readProcessHandler,
   stopProcessHandler,
 } from '../../electron/ipc/tool-handlers/process'
+import { clearSmartApproveForSend } from '../../electron/ipc/tool-handlers/command'
 
 interface FakeProcessHandle {
   id: string
@@ -164,5 +165,28 @@ describe('process tools', () => {
 
     const stopped = await stopProcessHandler.handle(call('stop_process', { id: 'p-7' }), h.ctx)
     expect(stopped.result).toEqual({ killed: true, status: 'killed' })
+  })
+
+  it('spawn_process shares the bounded smart-approve escalation limit (M4)', async () => {
+    clearSmartApproveForSend(1)
+    let guardCalls = 0
+    const h = harness('auto', {
+      smartApproveEnabled: true,
+      smartApprove: async () => {
+        guardCalls++
+        return { verdict: 'escalate' as const, reason: 'uncertain', model: 'guard', durationMs: 1 }
+      },
+    })
+    // Три spawn'а в одном sendId: guard зовётся максимум дважды, третий уходит в
+    // ручное подтверждение по достижении per-send лимита, не дёргая guard-модель.
+    for (let i = 0; i < 3; i++) {
+      const c: ToolCall = { id: `c${i}`, name: 'spawn_process', args: { command: `sleep ${i}` } }
+      const pending = spawnProcessHandler.handle(c, h.ctx)
+      await tick()
+      for (const [, pc] of h.ctx.pendingCommands) pc.resolve(true)
+      await pending
+    }
+    expect(guardCalls).toBe(2)
+    clearSmartApproveForSend(1)
   })
 })

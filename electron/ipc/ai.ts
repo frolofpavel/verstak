@@ -48,6 +48,7 @@ import {
   exitReasonToAgentRunStatus,
   isAgentRunTimeoutAbort,
   resolveAgentRunTimeoutPolicy,
+  shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
@@ -976,7 +977,10 @@ export function registerAiIpc(deps: AiDeps): void {
     const timeoutMinutes = Math.max(1, Math.round(timeoutPolicy.timeoutMs / 60_000))
     const timeoutMessage = `Прогон остановлен по таймауту ${timeoutMinutes} мин. Можно переотправить задачу или увеличить agent_run_timeout_ms.`
     runTimeout = setTimeout(() => {
-      if (ctrl.signal.aborted) return
+      // M2: не слать таймаут, если прогон уже оборван ИЛИ уже успешно завершён
+      // (endedAt проставлен finish() до clearRunTimeout в cleanup) — иначе ложный
+      // timeout-тост на успешном прогоне в окне гонки finish→clearTimeout.
+      if (!shouldFireRunTimeout(ctrl.signal.aborted, deps.agentRuns?.get(runId)?.endedAt)) return
       logRuntime('ai.run.timeout', {
         sendId,
         runId,

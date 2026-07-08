@@ -12,6 +12,7 @@ import {
   MAX_AGENT_RUN_TIMEOUT_MS,
   MIN_AGENT_RUN_TIMEOUT_MS,
   resolveAgentRunTimeoutPolicy,
+  shouldFireRunTimeout,
   waitForRun,
 } from '../../electron/ai/run-lifecycle'
 
@@ -156,6 +157,18 @@ describe('run lifecycle', () => {
       source: 'setting',
       clamped: true,
     })
+  })
+
+  it('does not fire the timeout watchdog once the run has settled (M2 false-toast race)', () => {
+    // Нормальный случай: не оборван и не завершён → таймаут легитимен.
+    expect(shouldFireRunTimeout(false, null)).toBe(true)
+    expect(shouldFireRunTimeout(false, undefined)).toBe(true)
+    // Уже оборван (Stop / прошлый таймаут) → не дублируем.
+    expect(shouldFireRunTimeout(true, null)).toBe(false)
+    // Прогон уже успешно завершился (endedAt проставлен finish() до clearTimeout)
+    // → watchdog не должен слать ложный timeout-тост на успешный прогон.
+    expect(shouldFireRunTimeout(false, 123_456)).toBe(false)
+    expect(shouldFireRunTimeout(true, 123_456)).toBe(false)
   })
 
   it('marks timeout aborts through AbortSignal.reason', () => {
