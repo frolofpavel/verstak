@@ -2,8 +2,7 @@ import { createOpenAiCompatProvider } from './openai-compat'
 import type { ChatProvider } from './types'
 
 export const GROK_MODELS = [
-  'grok-4.3',
-  'grok-build-0.1'
+  'grok-4.5'
 ]
 
 const DEFAULT_MODEL = GROK_MODELS[0]

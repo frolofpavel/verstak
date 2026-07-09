@@ -35,9 +35,8 @@ const PRICES: Record<string, ModelPrice> = {
   'gpt-4o-mini':                 { input: 0.15, output: 0.60 },
   'o1':                          { input: 15.0, output: 60.0 },
   'o1-mini':                     { input: 3.0,  output: 12.0 },
-  // xAI — x.ai/api
-  'grok-4.3':                    { input: 1.25, output: 2.50 },
-  'grok-build-0.1':              { input: 1.00, output: 2.00 },
+  // xAI — docs.x.ai/developers/models
+  'grok-4.5':                    { input: 2.00, output: 6.00 },
   // 🇷🇺 YandexGPT — yandex.cloud pricing (₽→$ ~90, консервативно вверх)
   'yandexgpt/latest':            { input: 0.50, output: 0.50 },
   'yandexgpt-32k/latest':        { input: 0.50, output: 0.50 },
@@ -59,6 +58,11 @@ const PRICES: Record<string, ModelPrice> = {
   'moonshot-v1-128k':            { input: 2.00, output: 5.00 },
   'moonshot-v1-32k':             { input: 1.00, output: 3.00 },
   'moonshot-v1-8k':              { input: 0.20, output: 2.00 },
+  // Подписочные coding-планы (Kimi Code / GLM Coding Plan) — фикс-цена за месяц,
+  // маржинальная цена токена $0 (как CLI-подписки).
+  'kimi-for-coding':             { input: 0, output: 0 },
+  'glm-5.2':                     { input: 0, output: 0 },
+  'glm-5-turbo':                 { input: 0, output: 0 },
   // Qwen (Alibaba DashScope)
   'qwen3-max':                   { input: 1.60, output: 6.40 },
   'qwen3-coder-plus':            { input: 1.00, output: 5.00 },

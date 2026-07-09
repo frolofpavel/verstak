@@ -23,7 +23,7 @@ export type ToolMode = 'native' | 'json'
  *  (claude/openai/gemini/grok) и RU (yandex/gigachat) исполняют надёжно —
  *  им nudge не нужен (ложные срабатывания на обычном Q&A-ответе). */
 const COAXABLE_PROVIDERS = new Set<string>([
-  'deepseek', 'qwen', 'moonshot', 'mistral', 'groq',
+  'deepseek', 'qwen', 'moonshot', 'kimi-coding', 'zai-coding', 'mistral', 'groq',
   'openrouter', 'ollama', 'custom-openai',
 ])
 

@@ -9,7 +9,7 @@ export type ProviderId =
   | 'grok' | 'grok-cli'
   | 'openai' | 'codex-cli'
   | 'yandex-gpt' | 'gigachat'
-  | 'openrouter' | 'deepseek' | 'moonshot' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway'
+  | 'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'
 
 export interface ProviderInfo {
   id: ProviderId
@@ -94,7 +94,7 @@ export function isModelValidForProvider(providerId: string, model: string): bool
 const KNOWN_IDS: ProviderId[] = [
   'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli',
   'yandex-gpt', 'gigachat',
-  'openrouter', 'deepseek', 'moonshot', 'qwen', 'mistral', 'groq', 'ollama', 'custom-openai', 'verstak-gateway'
+  'openrouter', 'deepseek', 'moonshot', 'kimi-coding', 'qwen', 'mistral', 'groq', 'ollama', 'custom-openai', 'verstak-gateway', 'zai-coding'
 ]
 
 function parseProviderId(v: string | null | undefined): ProviderId {

@@ -277,6 +277,8 @@ function shortProviderTag(id: string): string {
   if (id === 'qwen') return 'QWN'
   if (id === 'mistral') return 'MST'
   if (id === 'moonshot') return 'MSH'
+  if (id === 'kimi-coding') return 'KMC'
+  if (id === 'zai-coding') return 'GLM'
   if (id === 'groq') return 'GRQ'
   if (id === 'openrouter') return 'OPR'
   if (id === 'ollama') return 'OLM'

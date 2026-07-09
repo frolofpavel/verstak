@@ -73,9 +73,9 @@ export function recommendModel(providerId: string, complexity: TaskComplexity): 
       complex: 'o1',
     },
     'grok': {
-      simple: 'grok-4.3',
-      moderate: 'grok-4.3',
-      complex: 'grok-4.3',
+      simple: 'grok-4.5',
+      moderate: 'grok-4.5',
+      complex: 'grok-4.5',
     },
     'verstak-gateway': {
       simple: recommendAgentModel('coding'),

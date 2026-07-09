@@ -35,8 +35,7 @@ const PRICES: Record<string, ModelPrice> = {
   'gpt-4o-mini':           { input: 0.15, output: 0.60 },
   'o1':                    { input: 15.0, output: 60.0 },
   'o1-mini':               { input: 3.0,  output: 12.0 },
-  'grok-4.3':              { input: 1.25, output: 2.50 },
-  'grok-build-0.1':        { input: 1.00, output: 2.00 },
+  'grok-4.5':              { input: 2.00, output: 6.00 },
   // 🇷🇺 YandexGPT — yandex.cloud/ru/docs/foundation-models/pricing (₽→$ по ~90,
   //  округлено консервативно вверх). Lite дешевле Pro.
   'yandexgpt/latest':      { input: 0.50, output: 0.50 },

@@ -20,7 +20,7 @@ import { DEFAULT_AGENT_CODING_MODEL, DEFAULT_AGENT_FALLBACK_MODEL } from './agen
 
 export interface ExtraProviderSpec {
   /** ID для use в registry. */
-  id: 'openrouter' | 'deepseek' | 'moonshot' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway'
+  id: 'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'
   /** Человекочитаемое имя. */
   name: string
   /** Описание для UI карточки. */
@@ -95,7 +95,7 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
       'openai/gpt-5-mini',
       'google/gemini-3-pro',
       'google/gemini-3.5-flash',
-      'x-ai/grok-4.3',
+      'x-ai/grok-4.5',
       'moonshotai/kimi-k2.7-code',
       'deepseek/deepseek-v3',
       'meta-llama/llama-3.3-70b-instruct'
@@ -141,6 +141,33 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     ],
     defaultModel: 'kimi-k2.7-code',
     baseUrl: 'https://api.moonshot.ai/v1'
+  },
+  {
+    id: 'kimi-coding',
+    name: 'Kimi Code (подписка)',
+    description: 'Подписка kimi.com: фикс-цена вместо оплаты за токены. Ключ создаётся в Kimi Code Console (нужно членство Kimi + активированный Kimi Code); квота общая с подпиской. Модель kimi-for-coding = K2.7 Code, 256K контекст.',
+    secretKey: 'kimi_coding_api_key',
+    keyLink: { url: 'https://www.kimi.com/code', label: 'Kimi Code Console' },
+    keyHint: 'sk-...',
+    // Единственный model id подписочного endpoint'а (kimi.com/code/docs, июль 2026):
+    // и OpenAI-, и Anthropic-протокол принимают только 'kimi-for-coding'.
+    models: ['kimi-for-coding'],
+    defaultModel: 'kimi-for-coding',
+    baseUrl: 'https://api.kimi.com/coding/v1'
+  },
+  {
+    id: 'zai-coding',
+    name: 'Z.ai GLM Coding (подписка)',
+    description: 'GLM Coding Plan от Z.ai (та же подписка, что в приложении ZCode): фикс-цена, лимит в промптах за 5 часов. Модели GLM-5.2 / GLM-5-Turbo. OpenAI-совместим.',
+    secretKey: 'zai_coding_api_key',
+    keyLink: { url: 'https://z.ai/manage-apikey/apikey-list', label: 'z.ai → API Keys' },
+    keyHint: '...',
+    // Модели из доков GLM Coding Plan (zcode.z.ai/en/docs/configuration, июль 2026).
+    models: ['glm-5.2', 'glm-5-turbo'],
+    defaultModel: 'glm-5.2',
+    // Критично: строго coding-endpoint. Общий /api/paas/v4 НЕ принимает ключи
+    // Coding Plan — endpoints не взаимозаменяемы (доки Z.ai).
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4'
   },
   {
     id: 'qwen',

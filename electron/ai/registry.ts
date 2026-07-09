@@ -126,7 +126,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
     transport: 'API',
     secretKey: 'xai_api_key',
     models: GROK_MODELS,
-    defaultModel: 'grok-4.3',
+    defaultModel: 'grok-4.5',
     supportsTools: true,
     shortLabel: 'Grok'
   },
@@ -283,6 +283,8 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
     case 'openrouter':
     case 'deepseek':
     case 'moonshot':
+    case 'kimi-coding':
+    case 'zai-coding':
     case 'qwen':
     case 'mistral':
     case 'groq':

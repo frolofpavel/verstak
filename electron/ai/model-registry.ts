@@ -60,6 +60,13 @@ export const MODEL_REGISTRY: ModelRegistryEntry[] = [
   { providerId: 'moonshot', model: 'moonshot-v1-32k', contextLimit: 32_000, pricePerM: { input: 1.00, output: 3.00 }, agentMode: 'allowed' },
   { providerId: 'moonshot', model: 'moonshot-v1-8k', contextLimit: 8_000, pricePerM: { input: 0.20, output: 2.00 }, agentMode: 'allowed' },
 
+  // Подписочные coding-планы: цена за токен 0 (фикс-подписка, лимиты в промптах).
+  // kimi-for-coding = K2.7 Code через членство kimi.com; контекст 262144 из доков Kimi Code.
+  { providerId: 'kimi-coding', model: 'kimi-for-coding', contextLimit: 262_144, pricePerM: { input: 0, output: 0 }, agentMode: 'recommended', defaultRoles: ['coding'] },
+  // GLM Coding Plan заявляет до 1M у GLM-5.2 — держим консервативно 200K, пока не проверено вживую.
+  { providerId: 'zai-coding', model: 'glm-5.2', contextLimit: 200_000, pricePerM: { input: 0, output: 0 }, agentMode: 'allowed' },
+  { providerId: 'zai-coding', model: 'glm-5-turbo', contextLimit: 128_000, pricePerM: { input: 0, output: 0 }, agentMode: 'allowed' },
+
   { providerId: 'deepseek', model: 'deepseek-v4-flash', contextLimit: 1_000_000, pricePerM: { input: 0.28, output: 0.42 }, agentMode: 'allowed' },
   { providerId: 'deepseek', model: 'deepseek-v4-pro', contextLimit: 1_000_000, pricePerM: { input: 0.55, output: 2.19 }, agentMode: 'allowed' },
   { providerId: 'deepseek', model: 'deepseek-chat', contextLimit: 1_000_000, pricePerM: { input: 0.28, output: 0.42 }, agentMode: 'allowed', defaultRoles: ['fallback', 'fast-edit'] },
