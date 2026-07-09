@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useT } from '../i18n'
 import type { AuditEntry, DebugPacket } from '../types/api'
 import { computeContextBudget } from '../lib/context-budget'
 import { diffSections, diffLines, sectionMap, type SectionDiff, type SectionDiffStatus } from '../lib/context-diff'
+import { runtimeCapability } from '../lib/runtime-capability'
 
 /**
  * Agent Run Inspector — flagship transparency screen.
@@ -183,8 +185,17 @@ function formatDetail(detail: string): string {
 }
 
 function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string) => void }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const hasError = run.entries.some(e => e.action === 'error')
+  // Честный уровень контроля этого прогона: CLI-прогон НЕ был «полным контролем».
+  const isCli = (run.providerId ?? '').endsWith('-cli')
+  const cap = runtimeCapability(run.providerId ?? '', isCli ? 'CLI' : 'API')
+  const tierBadge = cap.tier === 'observed'
+    ? { label: t.runtime.observedLabel, hint: t.runtime.observedHint }
+    : cap.tier === 'limited'
+      ? { label: t.runtime.limitedLabel, hint: t.runtime.limitedHint }
+      : null
   return (
     <div className={`gg-run-card ${hasError ? 'has-error' : ''}`}>
       <div className="gg-run-head-row">
@@ -192,6 +203,7 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           <span className="gg-run-caret">{open ? '▾' : '▸'}</span>
           <span className="gg-run-provider">{run.providerId ?? 'неизвестно'}</span>
           {run.model && <span className="gg-run-model">{run.model}</span>}
+          {tierBadge && <span className={`gg-run-tier is-${cap.tier}`} title={tierBadge.hint}>{tierBadge.label}</span>}
           <span className="gg-run-time">{formatTime(run.start)}</span>
           <span className="gg-run-summary">{summarize(run.entries)}</span>
           <span className="gg-run-count">{run.entries.length} · {formatDuration(run.end - run.start)}</span>

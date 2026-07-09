@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProvider, type ProviderId } from '../hooks/useProvider'
 import { useProject } from '../store/projectStore'
-import { useT } from '../i18n'
+import { useT, type Translations } from '../i18n'
 import type { ProviderDescriptorDTO } from '../types/api'
 import {
   isProviderAuthorized,
@@ -9,11 +9,17 @@ import {
   type CliAuthId,
   type CliAuthStatus,
 } from '../lib/model-catalog'
+import { runtimeCapability, type RuntimeTier } from '../lib/runtime-capability'
 
-// Ревью F1: честная degraded-индикация. На CLI инструменты, проверка (DoD),
-// живой таймлайн и crash-resume идут ВНУТРИ бинаря и не видны Verstak — moat
-// «контроль» там урезан. Текст выводит это явно, а не «если не отвечает».
-const CLI_BETA_HINT = 'CLI-режим: ограниченный контроль. Инструменты, проверка (DoD), живой таймлайн и crash-resume работают внутри CLI и не видны Verstak. Полный контроль и доказательство выполнения — на API-провайдере.'
+// Ревью F1 + срез 3: честная degraded-индикация уровня контроля. Считаем tier
+// из provider+transport (runtime-capability), а не из одного transport — после
+// проекции tool-таймлайна (срезы 1-2) claude/codex CLI стали «наблюдаемыми»,
+// прочие CLI остаются «урезанными». Ни один CLI не показывается как full control.
+function tierBadge(t: Translations, tier: RuntimeTier): { label: string; hint: string; tone: 'observed' | 'limited' } | null {
+  if (tier === 'observed') return { label: t.runtime.observedLabel, hint: t.runtime.observedHint, tone: 'observed' }
+  if (tier === 'limited') return { label: t.runtime.limitedLabel, hint: t.runtime.limitedHint, tone: 'limited' }
+  return null // full — контроль полный, бейдж не нужен (чистый дефолт).
+}
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
@@ -352,12 +358,15 @@ function PickerRow({
   locked?: boolean
   onSelect: () => void
 }) {
+  const t = useT()
   const isCli = isCliProvider(entry.providerId)
+  const cap = runtimeCapability(entry.providerId, entry.transport)
+  const badge = tierBadge(t, cap.tier)
   const policy = modelPolicyHint(entry.model)
   const showHiddenBadge = !entry.enabled && entry.authorized && !entry.isCurrent
   let title: string | undefined
   if (locked) title = 'Нужна авторизация — откроются Настройки'
-  else if (isCli) title = CLI_BETA_HINT
+  else if (badge) title = badge.hint
   else if (policy) title = policy.title
   else if (!entry.enabled && entry.isCurrent) {
     title = 'Модель отключена в Настройки → Модели, но активна в чате'
@@ -393,10 +402,10 @@ function PickerRow({
           {entry.isCurrent ? '✓' : ''}
         </span>
       </span>
-      {(isCli || (policy && !isCli)) && (
+      {(badge || (policy && !isCli)) && (
         <span className="gg-mp-row-badges">
-          {isCli && (
-            <span className="gg-mp-badge is-muted" title={CLI_BETA_HINT}>Урезанный контроль</span>
+          {badge && (
+            <span className={`gg-mp-badge is-muted is-${badge.tone}`} title={badge.hint}>{badge.label}</span>
           )}
           {policy && !isCli && (
             <span className={`gg-mp-badge gg-mp-row-policy is-${policy.tone}`} title={policy.title}>{policy.label}</span>

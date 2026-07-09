@@ -362,6 +362,16 @@ export const en = {
     noConnected: 'No connected models',
   },
 
+  // Honest runtime-control labels (computed from provider+transport, not just transport).
+  runtime: {
+    fullLabel: 'Full control',
+    fullHint: 'Verstak runs and gates the tools itself, verifies the result (DoD) and can undo the edits.',
+    observedLabel: 'Observed',
+    observedHint: 'The tool timeline is visible, but the CLI runs the tools itself. Verification (DoD), undo and crash-resume happen outside Verstak. For full control and proof of work, use an API provider.',
+    limitedLabel: 'Limited control',
+    limitedHint: 'Tools, timeline, verification and undo run inside the CLI and are not visible to Verstak. For full control and proof of work, use an API provider.',
+  },
+
   modelRequired: {
     title: 'Choose a model',
     body: 'To use Verstak you need at least one connected AI model. Open Models settings, connect a provider, and enable the models you want in the picker.',

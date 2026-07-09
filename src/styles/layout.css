@@ -4562,6 +4562,17 @@ body.gg-rail-toggling .gg-msg-actions {
 .gg-mp-badge.is-muted {
   color: var(--text-disabled);
 }
+/* Честные tier-тона (срез 3): observed = наблюдаемый (жёлтый), limited = урезанный (серо-красный). */
+.gg-mp-badge.is-observed {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 34%, transparent);
+  background: color-mix(in srgb, #d8a657 9%, transparent);
+}
+.gg-mp-badge.is-limited {
+  color: color-mix(in srgb, #e78a8a 88%, var(--text-tertiary));
+  border-color: color-mix(in srgb, #e78a8a 30%, transparent);
+  background: color-mix(in srgb, #e78a8a 8%, transparent);
+}
 .gg-mp-badge-transport {
   flex-shrink: 0;
 }
@@ -8529,6 +8540,29 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   flex-shrink: 0;
+}
+/* Честный tier-бейдж прогона (срез 3): CLI-прогон не был «полным контролем». */
+.gg-run-tier {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  letter-spacing: .02em;
+  flex-shrink: 0;
+  cursor: help;
+}
+.gg-run-tier.is-observed {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 34%, transparent);
+  background: color-mix(in srgb, #d8a657 9%, transparent);
+}
+.gg-run-tier.is-limited {
+  color: color-mix(in srgb, #e78a8a 88%, var(--text-tertiary));
+  border-color: color-mix(in srgb, #e78a8a 30%, transparent);
+  background: color-mix(in srgb, #e78a8a 8%, transparent);
 }
 .gg-run-time {
   font-family: var(--font-mono);
