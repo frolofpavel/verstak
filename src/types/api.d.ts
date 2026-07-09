@@ -189,6 +189,20 @@ export interface SkillArchiveMove {
   reason?: string
 }
 
+/** Аккаунт подписочного/CLI-провайдера (1.9.3 мультиаккаунт). Без секрета — только метаданные. */
+export interface SubscriptionAccountDto {
+  id: number
+  providerId: string
+  label: string
+  configDir: string | null
+  baseUrl: string | null
+  active: boolean
+  state: string
+  createdAt: number
+  lastUsedAt: number | null
+  hasSecret: boolean
+}
+
 export interface SkillImportComparison {
   currentRuleCount: number
   incomingRuleCount: number
@@ -531,6 +545,14 @@ declare global {
           loggedIn: boolean
           credPath?: string
         }>>
+      }
+      subscriptionAccounts: {
+        list: (providerId?: string) => Promise<SubscriptionAccountDto[]>
+        create: (input: { providerId: string; label: string; secret: string; configDir?: string | null; baseUrl?: string | null }) =>
+          Promise<{ ok: true; account: SubscriptionAccountDto } | { ok: false; error: string }>
+        setActive: (providerId: string, id: number) => Promise<{ ok: boolean }>
+        rename: (id: number, label: string) => Promise<{ ok: boolean; error?: string }>
+        remove: (id: number) => Promise<{ ok: boolean }>
       }
       userProfiles: {
         list: () => Promise<UserProfile[]>

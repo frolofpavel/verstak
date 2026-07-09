@@ -14481,3 +14481,98 @@ html[data-theme="light"] .gg-skill-card.is-selected {
 }
 
 
+
+/* ===== Subscription accounts panel (1.9.3 мультиаккаунт CLI-подписок) ===== */
+.gg-subacct {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.gg-subacct-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.gg-subacct-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.gg-subacct-empty {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.gg-subacct-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gg-subacct-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+.gg-subacct-item.is-active {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+.gg-subacct-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.gg-subacct-dot.is-active {
+  background: var(--accent);
+}
+.gg-subacct-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.gg-subacct-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.gg-subacct-spacer { flex: 1; }
+.gg-subacct-use { padding: 2px 8px !important; font-size: 12px !important; }
+.gg-subacct-action {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.gg-subacct-action:hover { color: var(--text-primary); background: var(--bg-elevated); }
+.gg-subacct-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+.gg-subacct-error {
+  font-size: 12px;
+  color: var(--error);
+}
+.gg-subacct-add-actions {
+  display: flex;
+  gap: 8px;
+}

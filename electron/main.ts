@@ -28,6 +28,7 @@ import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
+import { registerSubscriptionAccountsIpc } from './ipc/subscription-accounts'
 import { registerAiIpc, abortSend, runScheduledHeadless } from './ipc/ai'
 import { globalProcessRegistry } from './ai/process-registry'
 import { registerSchedulerIpc } from './ipc/scheduler'
@@ -50,6 +51,7 @@ import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
+import { getActiveAccount, touchSubscriptionAccount } from './storage/subscription-accounts'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
@@ -488,6 +490,7 @@ app.whenReady().then(() => {
   registerSettingsIpc(settings)
   registerConnectorsIpc(connectorRegistry, settings)
   registerCliAuthIpc(settings)
+  registerSubscriptionAccountsIpc(db, settings)
   registerUserProfilesIpc(userProfiles)
   registerProjectIpc(projects, projectGroups, db)
   registerProjectMapIpc(knownRoots)
@@ -539,6 +542,14 @@ app.whenReady().then(() => {
     getSecret,
     getProviderId,
     getProviderModel,
+    // 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера → секрет из SafeStorage
+    // по cred_ref + метаданные env-биндинга; touch last_used_at на каждом резолве.
+    resolveSubscriptionAccount: (providerId) => {
+      const acct = getActiveAccount(db, providerId)
+      if (!acct) return null
+      touchSubscriptionAccount(db, acct.id)
+      return { accountId: acct.id, secret: getSecret(acct.credRef), configDir: acct.configDir, baseUrl: acct.baseUrl }
+    },
     getKnownRoots: knownRoots,
     recordWrite: (projectPath, filePath, before, after) => {
       undoStack.push(projectPath, filePath, before, after)

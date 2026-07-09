@@ -272,6 +272,14 @@ contextBridge.exposeInMainWorld('api', {
     relogin: (providerId: string) => ipcRenderer.invoke('cli-auth:relogin', providerId),
     statusAll: () => ipcRenderer.invoke('cli-auth:status-all')
   },
+  subscriptionAccounts: {
+    list: (providerId?: string) => ipcRenderer.invoke('subscription-accounts:list', providerId),
+    create: (input: { providerId: string; label: string; secret: string; configDir?: string | null; baseUrl?: string | null }) =>
+      ipcRenderer.invoke('subscription-accounts:create', input),
+    setActive: (providerId: string, id: number) => ipcRenderer.invoke('subscription-accounts:set-active', providerId, id),
+    rename: (id: number, label: string) => ipcRenderer.invoke('subscription-accounts:rename', id, label),
+    remove: (id: number) => ipcRenderer.invoke('subscription-accounts:delete', id)
+  },
   userProfiles: {
     list: () => ipcRenderer.invoke('user-profiles:list'),
     getActive: () => ipcRenderer.invoke('user-profiles:get-active'),

@@ -17,6 +17,7 @@ import {
   useNotifySettings
 } from '../hooks/useNotifySettings'
 import { UpdatesSettings } from './UpdatesSettings'
+import { SubscriptionAccountsPanel } from './SubscriptionAccountsPanel'
 import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
 import {
@@ -4001,6 +4002,9 @@ function ProvidersPage(props: ProvidersPageProps) {
                     setCustomOpenaiModels={setCustomOpenaiModels}
                     hint="После изменения нажми «Сохранить» внизу окна настроек"
                   />
+                  {p.id === 'claude-cli' && (
+                    <SubscriptionAccountsPanel providerId="claude-cli" secretLabel="OAuth-токен (claude setup-token)" />
+                  )}
                 </section>
               )}
             </div>

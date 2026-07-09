@@ -68,6 +68,10 @@ interface AiDeps {
   getSecret: (key: string) => string | null
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
+  /** 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера. Резолвит секрет из
+   *  SafeStorage по cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит
+   *  last_used_at. null = нет заведённых аккаунтов (тогда рантайм падает на legacy-секрет). */
+  resolveSubscriptionAccount?: (providerId: string) => { accountId: number; secret: string | null; configDir: string | null; baseUrl: string | null } | null
   /** Корни зарегистрированных проектов — для валидации projectPath из рендерера. */
   getKnownRoots: () => string[]
   /** Persist a write so the user can ↶ revert it later. */
@@ -1060,9 +1064,13 @@ export function registerAiIpc(deps: AiDeps): void {
     let provider: ChatProvider
     try {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
-      // Если задан в settings, передаётся как env var дочернему claude процессу.
+      // 1.9.3 мультиаккаунт: если заведён активный claude-cli аккаунт — берём его токен
+      // (пул Claude Max, ротация лимита); иначе падаем на legacy-одиночный токен settings.
+      const claudeAccount = providerId === 'claude-cli'
+        ? (deps.resolveSubscriptionAccount?.('claude-cli') ?? null)
+        : null
       const claudeOauthToken = providerId === 'claude-cli'
-        ? deps.getSecret('claude_code_oauth_token')
+        ? (claudeAccount?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.

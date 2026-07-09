@@ -1046,6 +1046,27 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       `)
       db.exec('INSERT OR IGNORE INTO scheduler_meta (id, last_heartbeat_at) VALUES (1, NULL)')
     }
+  },
+  {
+    version: 44,
+    description: 'subscription_accounts: мультиаккаунт CLI/подписочных провайдеров (1.9.3). Секреты не в таблице — только cred_ref в SafeStorage.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS subscription_accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          provider_id TEXT NOT NULL,
+          label TEXT NOT NULL,
+          cred_ref TEXT NOT NULL,
+          config_dir TEXT,
+          base_url TEXT,
+          active INTEGER NOT NULL DEFAULT 0,
+          state TEXT NOT NULL DEFAULT 'ready',
+          created_at INTEGER NOT NULL,
+          last_used_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_subscription_accounts_provider ON subscription_accounts(provider_id, active);
+      `)
+    }
   }
 ]
 
