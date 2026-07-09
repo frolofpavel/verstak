@@ -20,10 +20,11 @@ export function generateSuggestions(db: Database, projectPath: string): Suggesti
   } catch { /* игнорируем — таблица может не существовать */ }
 
   for (const entry of journal) {
+    if (isSessionSummaryEntry(entry)) continue
     if (entry.detail?.includes('TODO') || entry.detail?.includes('осталось') || entry.detail?.includes('remaining')) {
       suggestions.push({
-        title: 'Continue: ' + entry.title.slice(0, 60),
-        description: entry.detail?.slice(0, 150) ?? '',
+        title: 'Продолжить: ' + entry.title.slice(0, 60),
+        description: cleanSuggestionDetail(entry.detail),
         source: 'journal',
         priority: 'high'
       })
@@ -57,4 +58,23 @@ export function generateSuggestions(db: Database, projectPath: string): Suggesti
   } catch { /* память может быть недоступна */ }
 
   return suggestions.slice(0, 5)
+}
+
+function isSessionSummaryEntry(entry: { title: string; detail: string | null }): boolean {
+  if (/^Сводка (дня|сессии)/i.test(entry.title)) return true
+  const detail = entry.detail?.trim()
+  if (!detail) return false
+  try {
+    const parsed = JSON.parse(detail) as { type?: unknown }
+    return parsed?.type === 'session-summary'
+  } catch {
+    return false
+  }
+}
+
+function cleanSuggestionDetail(detail: string | null): string {
+  if (!detail) return ''
+  const trimmed = detail.trim()
+  if (trimmed.startsWith('{')) return ''
+  return trimmed.replace(/\s+/g, ' ').slice(0, 150)
 }

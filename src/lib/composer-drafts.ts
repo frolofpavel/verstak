@@ -1,12 +1,13 @@
 import { HELP_PROJECT_PATH } from './help-scope'
-import type { Attachment } from '../types/api'
+import type { AppliedSkillRef, Attachment } from '../types/api'
 
 export interface ComposerDraft {
   text: string
   attachments: Attachment[]
+  appliedSkills?: AppliedSkillRef[]
 }
 
-export const EMPTY_COMPOSER_DRAFT: ComposerDraft = { text: '', attachments: [] }
+export const EMPTY_COMPOSER_DRAFT: ComposerDraft = { text: '', attachments: [], appliedSkills: [] }
 
 export const HELP_COMPOSER_DRAFT_KEY = `help:${HELP_PROJECT_PATH}`
 
@@ -27,7 +28,7 @@ export function resolveComposerDraftKey(opts: {
 }
 
 export function isEmptyComposerDraft(d: ComposerDraft): boolean {
-  return !d.text.trim() && d.attachments.length === 0
+  return !d.text.trim() && d.attachments.length === 0 && !(d.appliedSkills?.length)
 }
 
 const PROJECT_CHAT_DRAFT_PREFIX = 'chat:'

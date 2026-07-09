@@ -1,5 +1,6 @@
 /** Маркер user-сообщения, дополненного во время активного прогона агента. */
 export const SUPPLEMENT_TAG = '[Дополнение к текущей задаче]'
+export const CANCELLED_SUPPLEMENT_CONTENT = '[Дополнение отменено]\nПользователь отменил ранее добавленное дополнение к текущей задаче. Не учитывай его в будущих ответах.'
 
 export function formatSupplementForAgent(text: string): string {
   return `${SUPPLEMENT_TAG}\n${text.trim()}`
@@ -34,4 +35,5 @@ export interface PendingSupplement {
   text: string
   at: number
   status: PendingSupplementStatus
+  messageId?: number
 }

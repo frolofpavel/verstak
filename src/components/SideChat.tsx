@@ -75,8 +75,8 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
       setSideModel(provider.model ?? null)
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sideChatId])
+    // Existing side-chat sessions keep their own saved model; new side chats mirror the main chat.
+  }, [sideChatId, provider.id, provider.model, refreshChatSessions])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -178,7 +178,7 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
       if (cancelled) return
       const current = useProject.getState().chatSnapshots[sideChatId]
       if (current && current.messages.length > 0) return
-      store.seedChatSnapshot(sideChatId, history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })))
+      store.seedChatSnapshot(sideChatId, history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })))
     }).catch(() => {})
     return () => { cancelled = true }
   }, [sideChatId])
@@ -252,81 +252,85 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
         title="Изменить ширину параллельного чата"
       />
       <div className="gg-sidechat-header">
-        <div className="gg-sidechat-title">
-          <span className="gg-sidechat-title-icon"><SideChatPanelIcon /></span>
-          <span>{t.chat.sideChatTitle}</span>
-        </div>
-        <select
-          className="gg-sidechat-session-select"
-          value={sideChatId ?? 'new'}
-          onChange={e => selectSideChat(e.target.value)}
-          disabled={isStreaming}
-          title="Выбрать чат для правой панели"
-        >
-          <option value="new">Новый параллельный</option>
-          {chatSessions.map(session => (
-            <option key={session.id} value={session.id}>
-              {session.title?.trim() || `Чат ${session.id}`}
-            </option>
-          ))}
-        </select>
-        <div className="gg-sidechat-mp" ref={pickerRef}>
+        <div className="gg-sidechat-header-main">
+          <div className="gg-sidechat-title">
+            <span className="gg-sidechat-title-icon"><SideChatPanelIcon /></span>
+            <span>{t.chat.sideChatTitle}</span>
+          </div>
           <button
-            type="button"
-            className="gg-sidechat-mp-pill"
-            onClick={() => setPickerOpen(v => !v)}
-            title={t.chat.sideChatModelPickerTitle}
-          >
-            <span className="gg-sidechat-mp-name">{sideLabel}</span>
-            <span className="gg-sidechat-mp-sep">·</span>
-            <span className="gg-sidechat-mp-model">{sideModelLabel}</span>
-          </button>
-          {pickerOpen && (
-            <div className="gg-sidechat-mp-popover">
-              <div className="gg-sidechat-mp-section-title">Провайдер</div>
-              {providers.map(p => {
-                const isConfigured = configuredIds.has(p.id)
-                const isActive = p.id === sideProviderId
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className={`gg-sidechat-mp-row ${isActive ? 'is-active' : ''} ${!isConfigured ? 'is-unconfigured' : ''}`}
-                    disabled={!isConfigured}
-                    title={isConfigured ? undefined : 'API-ключ не задан (Настройки)'}
-                    onClick={() => { if (isConfigured) void selectProvider(p).then(() => setPickerOpen(false)) }}
-                  >
-                    <span className="gg-sidechat-mp-row-label">
-                      {!isConfigured && '🔒 '}{p.shortLabel || p.name}
-                    </span>
-                    <span className="gg-sidechat-mp-row-meta">{p.transport}</span>
-                  </button>
-                )
-              })}
-              {sideProvider && sideProvider.models.length > 1 && (
-                <>
-                  <div className="gg-sidechat-mp-section-title">Модель</div>
-                  {sideProvider.models.map(m => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={`gg-sidechat-mp-row ${m === sideModel ? 'is-active' : ''}`}
-                      onClick={() => void selectModel(m).then(() => setPickerOpen(false))}
-                    >
-                      <span className="gg-sidechat-mp-row-label">{m}</span>
-                      {m === sideModel && <span className="gg-sidechat-mp-row-meta">✓</span>}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
+            className="gg-sidechat-close"
+            onClick={onClose}
+            title={t.chat.sideChatClose}
+          >×</button>
         </div>
-        <button
-          className="gg-sidechat-close"
-          onClick={onClose}
-          title={t.chat.sideChatClose}
-        >×</button>
+        <div className="gg-sidechat-header-controls">
+          <select
+            className="gg-sidechat-session-select"
+            value={sideChatId ?? 'new'}
+            onChange={e => selectSideChat(e.target.value)}
+            disabled={isStreaming}
+            title="Выбрать чат для правой панели"
+          >
+            <option value="new">Новый параллельный</option>
+            {chatSessions.map(session => (
+              <option key={session.id} value={session.id}>
+                {session.title?.trim() || `Чат ${session.id}`}
+              </option>
+            ))}
+          </select>
+          <div className="gg-sidechat-mp" ref={pickerRef}>
+            <button
+              type="button"
+              className="gg-sidechat-mp-pill"
+              onClick={() => setPickerOpen(v => !v)}
+              title={t.chat.sideChatModelPickerTitle}
+            >
+              <span className="gg-sidechat-mp-name">{sideLabel}</span>
+              <span className="gg-sidechat-mp-sep">·</span>
+              <span className="gg-sidechat-mp-model">{sideModelLabel}</span>
+            </button>
+            {pickerOpen && (
+              <div className="gg-sidechat-mp-popover">
+                <div className="gg-sidechat-mp-section-title">Провайдер</div>
+                {providers.map(p => {
+                  const isConfigured = configuredIds.has(p.id)
+                  const isActive = p.id === sideProviderId
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`gg-sidechat-mp-row ${isActive ? 'is-active' : ''} ${!isConfigured ? 'is-unconfigured' : ''}`}
+                      disabled={!isConfigured}
+                      title={isConfigured ? undefined : 'API-ключ не задан (Настройки)'}
+                      onClick={() => { if (isConfigured) void selectProvider(p).then(() => setPickerOpen(false)) }}
+                    >
+                      <span className="gg-sidechat-mp-row-label">
+                        {!isConfigured && '🔒 '}{p.shortLabel || p.name}
+                      </span>
+                      <span className="gg-sidechat-mp-row-meta">{p.transport}</span>
+                    </button>
+                  )
+                })}
+                {sideProvider && sideProvider.models.length > 1 && (
+                  <>
+                    <div className="gg-sidechat-mp-section-title">Модель</div>
+                    {sideProvider.models.map(m => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`gg-sidechat-mp-row ${m === sideModel ? 'is-active' : ''}`}
+                        onClick={() => void selectModel(m).then(() => setPickerOpen(false))}
+                      >
+                        <span className="gg-sidechat-mp-row-label">{m}</span>
+                        {m === sideModel && <span className="gg-sidechat-mp-row-meta">✓</span>}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
       <div className="gg-sidechat-stream" ref={streamRef}>
         {messages.map((m, i) => {

@@ -24,15 +24,10 @@ export function WhatsNewModal() {
         const current = await window.api.app.getVersion()
         const last = await window.api.settings.getKey(LAST_WHATS_NEW_KEY)
 
-        if (!last) {
-          await window.api.settings.setKey(LAST_WHATS_NEW_KEY, current)
-          return
-        }
-
-        if (!semverGt(current, last)) return
+        if (last && !semverGt(current, last)) return
 
         let fetched = await window.api.updater.getReleaseNotes({
-          sinceVersion: last,
+          sinceVersion: last || current,
           upToVersion: current,
         })
 
@@ -41,16 +36,13 @@ export function WhatsNewModal() {
           if (currentNote.length > 0) fetched = currentNote
         }
 
-        if (fetched.length === 0) {
-          await window.api.settings.setKey(LAST_WHATS_NEW_KEY, current)
-          return
-        }
+        if (fetched.length === 0) return
 
         setNotes(fetched)
         setVersion(current)
         setOpen(true)
         setSkippedCount(fetched.length)
-        setSinceVersion(last)
+        setSinceVersion(last || current)
       } catch (err) {
         console.warn('[whats-new] skipped:', err)
       }

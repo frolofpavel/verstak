@@ -42,6 +42,6 @@ describe('composer-drafts', () => {
   })
 
   it('EMPTY_COMPOSER_DRAFT — пустой шаблон', () => {
-    expect(EMPTY_COMPOSER_DRAFT).toEqual({ text: '', attachments: [] })
+    expect(EMPTY_COMPOSER_DRAFT).toEqual({ text: '', attachments: [], appliedSkills: [] })
   })
 })

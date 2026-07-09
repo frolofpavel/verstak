@@ -16,10 +16,20 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
-type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree'
+type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree' | 'export'
 type WorktreeStatus = { active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }
 
-export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => void }) {
+export function ComposerToolsMenu({
+  onInject,
+  onSaveHandoff,
+  onExportTranscript,
+  exportBusy = false,
+}: {
+  onInject: (text: string) => void
+  onSaveHandoff?: () => Promise<void> | void
+  onExportTranscript?: () => Promise<void> | void
+  exportBusy?: boolean
+}) {
   const path = useProject(s => s.path)
   const messages = useProject(s => s.messages)
   const activeChatId = useProject(s => s.activeChatId)
@@ -115,7 +125,15 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
     if (id === 'review' && !hasAssistantContent) return
     if (id === 'checkpoint' && !path) return
     if (id === 'worktree' && (helpMode || activeChatId == null)) return
+    if (id === 'export' && (helpMode || activeChatId == null)) return
     setOpenSub(prev => (prev === id ? null : id))
+  }
+
+  async function runExport(action?: () => Promise<void> | void) {
+    if (!action || exportBusy || activeChatId == null) return
+    await action()
+    setOpenSub(null)
+    setOpen(false)
   }
 
   async function runWorktree(fn: () => Promise<{ ok: boolean; error?: string }>) {
@@ -484,6 +502,49 @@ export function ComposerToolsMenu({ onInject }: { onInject: (text: string) => vo
                     </button>
                   )}
                   {worktreeErr && <div className="gg-tools-empty">{worktreeErr}</div>}
+                </div>
+              )}
+            </li>
+
+            <li
+              className={`gg-tools-menu-item ${openSub === 'export' ? 'is-submenu-open' : ''}`}
+              role="none"
+            >
+              <button
+                type="button"
+                className={`gg-tools-menu-trigger ${helpMode || activeChatId == null ? 'is-disabled' : ''}`}
+                role="menuitem"
+                aria-expanded={openSub === 'export'}
+                disabled={helpMode || activeChatId == null}
+                onClick={() => toggleSub('export')}
+              >
+                <span className="gg-tools-menu-label">Экспорт</span>
+                <span className="gg-tools-menu-meta">контекст и история</span>
+                <span className="gg-tools-menu-arrow" aria-hidden>›</span>
+              </button>
+              {openSub === 'export' && (
+                <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
+                  <div className="gg-tools-submenu-title">Экспорт и передача</div>
+                  <button
+                    type="button"
+                    className="gg-tools-row"
+                    onClick={() => void runExport(onSaveHandoff)}
+                    disabled={exportBusy || !onSaveHandoff}
+                    title="Сжать текущую сессию в Markdown для передачи другому агенту или продолжения работы"
+                  >
+                    <span className="gg-tools-row-label">{exportBusy ? 'Готовлю контекст...' : 'Передать контекст'}</span>
+                    <span className="gg-tools-row-meta">сжатый handoff + буфер обмена</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="gg-tools-row"
+                    onClick={() => void runExport(onExportTranscript)}
+                    disabled={exportBusy || !onExportTranscript}
+                    title="Сохранить полную историю текущего чата в Markdown"
+                  >
+                    <span className="gg-tools-row-label">{exportBusy ? 'Сохраняю...' : 'Экспорт чата'}</span>
+                    <span className="gg-tools-row-meta">полная история в Markdown</span>
+                  </button>
                 </div>
               )}
             </li>

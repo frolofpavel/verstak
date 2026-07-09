@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
-import type { ProjectMeta, RemoteDoctorResult, RemoteDoctorStatus } from '../types/api'
+import type { ProjectGroup, ProjectMeta, RemoteDoctorResult, RemoteDoctorStatus } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
 import { DeleteCountdownButton } from './DeleteCountdownButton'
 import { useT } from '../i18n'
@@ -28,6 +28,16 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
   const [remoteDoctorBusy, setRemoteDoctorBusy] = useState(false)
   const [remoteDoctor, setRemoteDoctor] = useState<RemoteDoctorResult | null>(null)
   const [remoteDoctorError, setRemoteDoctorError] = useState<string | null>(null)
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupBusy, setGroupBusy] = useState(false)
+  const [groupSaved, setGroupSaved] = useState(false)
+  const [groupError, setGroupError] = useState<string | null>(null)
+
+  const currentGroup = useMemo(
+    () => projectGroups.find(group => group.projectPaths.includes(project.path)) ?? null,
+    [projectGroups, project.path]
+  )
 
   useEffect(() => {
     setDisplayName(project.name)
@@ -47,6 +57,23 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       const val = await window.api.settings.getKey(`system_prompt_${project.path}`) as string | null
       setSystemPrompt(val ?? '')
     })()
+  }, [project.path])
+
+  useEffect(() => {
+    let cancelled = false
+    setGroupsLoading(true)
+    setGroupError(null)
+    void window.api.projects.listGroups()
+      .then(groups => {
+        if (!cancelled) setProjectGroups(groups)
+      })
+      .catch(err => {
+        if (!cancelled) setGroupError(err instanceof Error ? err.message : 'Не удалось загрузить группы')
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false)
+      })
+    return () => { cancelled = true }
   }, [project.path])
 
   function applyUpdated(next: ProjectMeta) {
@@ -109,6 +136,49 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
     if (updated) {
       applyUpdated(updated)
       await refreshProjectList()
+    }
+  }
+
+  async function handleProjectGroupChange(value: string) {
+    const nextGroupId = value ? Number(value) : null
+    if ((currentGroup?.id ?? null) === nextGroupId) return
+
+    setGroupBusy(true)
+    setGroupSaved(false)
+    setGroupError(null)
+    try {
+      const latestGroups = await window.api.projects.listGroups()
+      const latestCurrent = latestGroups.find(group => group.projectPaths.includes(project.path)) ?? null
+      const nextGroup = nextGroupId === null
+        ? null
+        : latestGroups.find(group => group.id === nextGroupId) ?? null
+
+      if (nextGroupId !== null && !nextGroup) {
+        throw new Error('Группа не найдена')
+      }
+
+      if (nextGroup) {
+        const projectPaths = nextGroup.projectPaths.includes(project.path)
+          ? nextGroup.projectPaths
+          : [...nextGroup.projectPaths, project.path]
+        const result = await window.api.projects.updateGroup(nextGroup.id, { projectPaths })
+        if (!result.ok) throw new Error(result.error)
+      } else if (latestCurrent) {
+        const projectPaths = latestCurrent.projectPaths.filter(path => path !== project.path)
+        const result = await window.api.projects.updateGroup(latestCurrent.id, { projectPaths })
+        if (!result.ok) throw new Error(result.error)
+      }
+
+      const updatedGroups = await window.api.projects.listGroups()
+      setProjectGroups(updatedGroups)
+      await refreshProjectList()
+      window.dispatchEvent(new CustomEvent('gg-project-groups-changed'))
+      setGroupSaved(true)
+      window.setTimeout(() => setGroupSaved(false), 2000)
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : 'Не удалось изменить группу проекта')
+    } finally {
+      setGroupBusy(false)
     }
   }
 
@@ -229,7 +299,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
           <section className="gg-ps-section">
             <div className="gg-ps-section-label">Папка на диске</div>
             <div className="gg-ps-path">
-              <span className="gg-ps-path-icon">📁</span>
+              <span className="gg-ps-path-icon gg-folder-icon" aria-hidden="true" />
               <span className="gg-ps-path-text" title={project.path}>{project.path}</span>
               <button
                 className="gg-ps-path-open"
@@ -237,6 +307,42 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                 title="Открыть в проводнике"
               >↗</button>
             </div>
+          </section>
+
+          <section className="gg-ps-section">
+            <div className="gg-ps-section-label">
+              Группа проекта
+              <span className="gg-ps-section-hint">Перемещает проект в уже созданную группу в левом списке</span>
+            </div>
+            <div className="gg-ps-group-row">
+              <select
+                className="gg-ps-select"
+                value={currentGroup?.id ?? ''}
+                onChange={e => void handleProjectGroupChange(e.target.value)}
+                disabled={groupsLoading || groupBusy || projectGroups.length === 0}
+                aria-label="Группа проекта"
+              >
+                <option value="">Без группы</option>
+                {projectGroups.map(group => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
+              <span className={`gg-ps-group-status ${groupSaved ? 'is-saved' : ''}`}>
+                {groupBusy
+                  ? 'Сохраняю...'
+                  : groupSaved
+                    ? 'Сохранено'
+                    : currentGroup
+                      ? `Сейчас: ${currentGroup.name}`
+                      : 'Сейчас: без группы'}
+              </span>
+            </div>
+            {!groupsLoading && projectGroups.length === 0 && (
+              <p className="gg-ps-section-hint-block">
+                Сначала создайте группу в левой панели проектов.
+              </p>
+            )}
+            {groupError && <div className="gg-ps-group-error" role="alert">{groupError}</div>}
           </section>
 
           {isSshProject && (

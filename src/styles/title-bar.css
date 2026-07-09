@@ -14,7 +14,7 @@
 }
 
 .gg-titlebar {
-  --titlebar-h: 40px;
+  --titlebar-h: 24px;
   --titlebar-bg: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
 
   height: var(--titlebar-h);
@@ -37,25 +37,25 @@
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-left: 14px;
+  gap: 7px;
+  padding-left: 10px;
   min-width: 0;
   -webkit-app-region: drag;
   app-region: drag;
 }
 
 .gg-titlebar-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
   object-fit: contain;
   flex-shrink: 0;
 }
 
 .gg-titlebar-brand {
-  font-size: 12px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -69,7 +69,7 @@
 }
 
 .gg-titlebar-btn {
-  width: 46px;
+  width: 34px;
   height: 100%;
   border: none;
   background: transparent;

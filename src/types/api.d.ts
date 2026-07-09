@@ -14,8 +14,9 @@ export interface DependencyMapDTO {
   files: Record<string, { imports: string[]; importedBy: string[]; exports: string[] }>
 }
 export interface Attachment { name: string; mimeType: string; data: string; size: number }
-export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
-export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; createdAt: number }
+export interface AppliedSkillRef { id: string; name?: string; icon?: string; description?: string }
+export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; appliedSkills?: AppliedSkillRef[]; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
+export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; appliedSkills?: AppliedSkillRef[]; createdAt: number }
 export type ChatKind = 'main' | 'review' | 'help'
 export interface ChatSession {
   id: number
@@ -188,6 +189,34 @@ export interface SkillArchiveMove {
   reason?: string
 }
 
+export interface SkillImportComparison {
+  currentRuleCount: number
+  incomingRuleCount: number
+  sameRules: string[]
+  addedRules: string[]
+  removedRules: string[]
+  changedRules: Array<{ current: string; incoming: string }>
+  summary: string
+}
+
+export interface SkillImportPreviewItem {
+  id: string
+  name: string
+  description?: string
+  sourcePath: string
+  targetPath: string
+  existing: { id: string; name?: string; source: Skill['source']; sourceRef: string } | null
+  comparison: SkillImportComparison
+}
+
+export type SkillImportPreviewResult =
+  | { ok: true; token: string; skills: SkillImportPreviewItem[] }
+  | { ok: false; cancelled?: boolean; error?: string }
+
+export type SkillImportCommitResult =
+  | { ok: true; installed: string[]; skipped: string[]; backups: string[] }
+  | { ok: false; error: string }
+
 export interface ScheduledTask {
   id: number
   project_path: string
@@ -222,6 +251,7 @@ export interface UsageDelta {
 export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'thought'; text: string }
+  | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
   | { type: 'pending-command'; callId: string; command: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
@@ -404,7 +434,7 @@ declare global {
       }
       chats: {
         list: (sessionId: number) => Promise<StoredChatMessage[]>
-        append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => Promise<StoredChatMessage>
+        append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => Promise<StoredChatMessage>
         maxMessageId: (sessionId: number) => Promise<number>
         truncateAfter: (sessionId: number, afterMessageId: number) => Promise<number>
         updateMessage: (messageId: number, content: string) => Promise<boolean>
@@ -479,6 +509,8 @@ declare global {
         /** Skill Capture: сохранить прогон как скилл-скаффолд в ~/.verstak/skills/. */
         capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
           Promise<{ ok: true; id: string; path: string } | { ok: false; error: string }>
+        importPreview: () => Promise<SkillImportPreviewResult>
+        importCommit: (input: { token: string; replace?: boolean }) => Promise<SkillImportCommitResult>
       }
       cliAuth: {
         logout: (providerId: string) => Promise<{
@@ -637,6 +669,7 @@ declare global {
       updater: {
         install(): Promise<{ ok: boolean; reason?: string }>
         ensureDownload(): Promise<{ ok: boolean; reason?: string; phase?: string }>
+        cleanupTemp(): Promise<{ ok: boolean; deletedBytes: number; deletedPaths: string[]; reason?: string }>
         getReleaseNotes(opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }): Promise<Array<{
           version: string
           name: string
@@ -645,8 +678,8 @@ declare global {
           publishedAt?: string
         }>>
         check(): Promise<{ available: boolean; version?: string; installedVersion?: string; error?: string; errorCode?: string; rateLimitMinutes?: number; phase?: string; pendingRelease?: boolean }>
-        getState(): Promise<{ phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string }>
-        onState(cb: (data: { phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean }) => void): () => void
+        getState(): Promise<{ phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string; updatedAt?: number }>
+        onState(cb: (data: { phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; updatedAt?: number }) => void): () => void
         onAvailable(cb: (data: { version: string; pendingRelease?: boolean }) => void): () => void
         onDownloaded(cb: (data: { version: string }) => void): () => void
         onReady(cb: (data: { version: string }) => void): () => void

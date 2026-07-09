@@ -29,6 +29,34 @@ export interface HandoffOptions {
   parentId?: string | null
   /** Момент генерации (для тестируемости). По умолчанию — Date.now(). */
   now?: number
+  /** Runtime-сводка из agent_runs: статусы, счетчики и последние события. */
+  runSummary?: HandoffRunSummary | null
+}
+
+export interface HandoffRunSummary {
+  runs: number
+  toolCount: number
+  filesCount: number
+  agentsCount: number
+  durationMs: number
+  recentRuns?: Array<{
+    title: string
+    status: string
+    provider?: string | null
+    model?: string | null
+    startedAt?: number | null
+    endedAt?: number | null
+    error?: string | null
+    toolCount?: number | null
+    filesCount?: number | null
+    agentsCount?: number | null
+  }>
+  recentEvents?: Array<{
+    label?: string | null
+    detail?: string | null
+    status?: string | null
+    createdAt?: number | null
+  }>
 }
 
 const MAX_FACTS = 6
@@ -39,6 +67,42 @@ const MAX_TURNS = 6
 function compactLine(text: string, limit = 200): string {
   const line = text.trim().replace(/\s+/g, ' ')
   return line.length > limit ? `${line.slice(0, limit - 1)}…` : line
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0 сек'
+  const sec = Math.round(ms / 1000)
+  const min = Math.floor(sec / 60)
+  const rest = sec % 60
+  if (min <= 0) return `${rest} сек`
+  return `${min} мин ${rest} сек`
+}
+
+function formatRunSummary(summary: HandoffRunSummary | null | undefined): string[] {
+  if (!summary || summary.runs <= 0) return ['- Прогоны агента не зафиксированы.']
+  const lines: string[] = [
+    `- Прогонов агента: ${summary.runs}; инструментов: ${summary.toolCount}; файлов: ${summary.filesCount}; субагентов: ${summary.agentsCount}; суммарное время: ${formatDuration(summary.durationMs)}.`
+  ]
+  for (const run of summary.recentRuns ?? []) {
+    const model = [run.provider, run.model].filter(Boolean).join(' · ') || 'модель не указана'
+    const parts = [
+      `status=${run.status}`,
+      `model=${model}`,
+      `tools=${run.toolCount ?? 0}`,
+      `files=${run.filesCount ?? 0}`,
+    ]
+    if (run.error) parts.push(`error=${compactLine(run.error, 90)}`)
+    lines.push(`- ${compactLine(run.title || 'Прогон', 90)}: ${parts.join('; ')}.`)
+  }
+  if (summary.recentEvents?.length) {
+    lines.push('- Последние события:')
+    for (const event of summary.recentEvents) {
+      const label = compactLine(event.label || event.status || 'Событие', 80)
+      const detail = event.detail ? ` — ${compactLine(event.detail, 140)}` : ''
+      lines.push(`  - ${label}${detail}`)
+    }
+  }
+  return lines.slice(0, 14)
 }
 
 /**
@@ -163,6 +227,7 @@ export function generateHandoff(messages: ChatMessage[], opts: HandoffOptions = 
   const facts = extractFacts(messages)
   const turns = lastTurns(messages)
   const nextStep = inferNextStep(messages)
+  const runSummary = formatRunSummary(opts.runSummary)
 
   const userCount = visible.filter(m => m.role === 'user').length
 
@@ -210,6 +275,10 @@ export function generateHandoff(messages: ChatMessage[], opts: HandoffOptions = 
     '## Что сделано',
     '',
     ...doneLines,
+    '',
+    '## Прогоны агента',
+    '',
+    ...runSummary,
     '',
     '## Текущее состояние',
     '',

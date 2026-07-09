@@ -216,8 +216,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   updateHelpLastAssistant: (text: string) => void
   appendHelpLastAssistantThinking: (text: string) => void
   clearHelpActivity: () => void
-  setHelpAgentProgress: (entries: AgentProgressEntry[]) => void
   pushHelpActivity: (entry: ActivityEntry) => void
+  setHelpAgentProgress: (entries: AgentProgressEntry[]) => void
+  pushHelpAgentProgress: (entry: AgentProgressEntry) => void
   addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
   /** Зарегистрировать сгенерированный артефакт (для Timeline pill). */
   recordArtifact: (a: { kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number; overall?: 'passed' | 'failed' | 'partial' | 'not_run'; checksPassed?: number; checksTotal?: number }) => void
@@ -408,7 +409,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSessions = [created]
     }
 
-    const activeChatId = chatSessions[0]?.id ?? null
+    const restoredChatId = target.chatId != null && chatSessions.some(c => c.id === target.chatId)
+      ? target.chatId
+      : null
+    const activeChatId = restoredChatId ?? chatSessions[0]?.id ?? null
     const needsDbHydrate = Boolean(
       activeChatId && (!existing || existing.messages.length === 0)
     )
@@ -465,7 +469,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         if (myToken !== setProjectToken) return
         const cur = get()
         if (cur.path !== path || cur.activeChatId !== hydrateChatId) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -629,6 +633,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   applyEventToSession: (projectPath, event) => set(s => {
     const existing = s.sessions[projectPath] ?? freshSnapshot()
     let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+    if (typeof event.chatId === 'number') {
+      next = { ...next, chatId: event.chatId }
+    }
     // pending-write/command — специфика фоновой ПРОЕКТНОЙ сессии (не в общем ядре).
     const t = event.type
     if (t === 'pending-write' && typeof event.callId === 'string') {
@@ -712,7 +719,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         const history = await window.api.chats.list(id)
         if (myToken !== switchChatSessionToken) return
         if (get().activeChatId !== id) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id })) })
+        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
       })()
     }
 
@@ -960,11 +967,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   clearHelpActivity: () => set(s => ({
     help: { ...s.help, activity: [], agentProgress: [] }
   })),
+  pushHelpActivity: (entry) => set(s => ({
+    help: { ...s.help, activity: [...s.help.activity, entry] }
+  })),
   setHelpAgentProgress: (entries) => set(s => ({
     help: { ...s.help, agentProgress: entries }
   })),
-  pushHelpActivity: (entry) => set(s => ({
-    help: { ...s.help, activity: [...s.help.activity, entry] }
+  pushHelpAgentProgress: (entry) => set(s => ({
+    help: { ...s.help, agentProgress: upsertAgentProgress(s.help.agentProgress ?? [], entry) }
   })),
   addHelpUsage: (delta) => set(s => ({
     help: {
@@ -1027,7 +1037,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const history = await window.api.chats.list(helpSession.id)
       helpState = {
         ...helpState,
-        messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
+        messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
       }
     }
     set({

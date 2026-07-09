@@ -7,7 +7,15 @@ export interface ChatMessage {
   role: Role
   content: string
   thinking: string
+  appliedSkills: AppliedSkillRef[]
   createdAt: number
+}
+
+export interface AppliedSkillRef {
+  id: string
+  name?: string
+  icon?: string
+  description?: string
 }
 
 export interface ChatSearchResult {
@@ -17,13 +25,17 @@ export interface ChatSearchResult {
   created_at: number
 }
 
+type ChatMessageRow = Omit<ChatMessage, 'appliedSkills'> & {
+  appliedSkillsJson?: string
+}
+
 export interface Chats {
   /** List messages — new API: by sessionId. */
   listBySession: (sessionId: number) => ChatMessage[]
   /** Legacy: list all messages of a project (across sessions) — left for back-compat callers. */
   list: (projectPath: string) => ChatMessage[]
   /** Append a message to a specific session. */
-  appendToSession: (sessionId: number, projectPath: string, role: Role, content: string) => ChatMessage
+  appendToSession: (sessionId: number, projectPath: string, role: Role, content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => ChatMessage
   /** Update an existing message body. Used for streaming assistant persistence. */
   updateMessage: (messageId: number, content: string) => boolean
   /** Update an existing message thinking stream. Used for crash-resume context. */
@@ -37,18 +49,74 @@ export interface Chats {
 
 export function createChats(db: Database): Chats {
   const touchSession = db.prepare('UPDATE chat_sessions SET last_message_at = ? WHERE id = ?')
+  const chatColumns = (db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map(c => c.name)
+  const hasThinkingColumn = chatColumns.includes('thinking')
+  const hasAppliedSkillsColumn = chatColumns.includes('applied_skills')
+  const thinkingSelect = hasThinkingColumn ? "COALESCE(thinking, '')" : "''"
+  const appliedSkillsSelect = hasAppliedSkillsColumn ? "COALESCE(applied_skills, '[]')" : "'[]'"
+
+  function parseAppliedSkills(raw: unknown): AppliedSkillRef[] {
+    if (typeof raw !== 'string' || !raw.trim()) return []
+    try {
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.flatMap((item): AppliedSkillRef[] => {
+        if (!item || typeof item !== 'object') return []
+        const src = item as Record<string, unknown>
+        const id = typeof src.id === 'string' ? src.id.trim() : ''
+        if (!id) return []
+        return [{
+          id,
+          ...(typeof src.name === 'string' && src.name.trim() ? { name: src.name } : {}),
+          ...(typeof src.icon === 'string' && src.icon.trim() ? { icon: src.icon } : {}),
+          ...(typeof src.description === 'string' && src.description.trim() ? { description: src.description } : {}),
+        }]
+      })
+    } catch {
+      return []
+    }
+  }
+
+  function stringifyAppliedSkills(skills: AppliedSkillRef[] | undefined): string {
+    if (!skills?.length) return '[]'
+    const clean = skills.flatMap((skill): AppliedSkillRef[] => {
+      const id = skill.id?.trim()
+      if (!id) return []
+      return [{
+        id,
+        ...(skill.name?.trim() ? { name: skill.name.trim() } : {}),
+        ...(skill.icon?.trim() ? { icon: skill.icon.trim() } : {}),
+        ...(skill.description?.trim() ? { description: skill.description.trim() } : {}),
+      }]
+    })
+    return JSON.stringify(clean)
+  }
+
+  function mapMessage(row: ChatMessageRow): ChatMessage {
+    return {
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      thinking: row.thinking,
+      appliedSkills: parseAppliedSkills(row.appliedSkillsJson),
+      createdAt: row.createdAt
+    }
+  }
+
   return {
     listBySession(sessionId) {
-      return db.prepare(
-        'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id ASC'
-      ).all(sessionId) as ChatMessage[]
+      const rows = db.prepare(
+        `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id ASC`
+      ).all(sessionId) as ChatMessageRow[]
+      return rows.map(mapMessage)
     },
     list(projectPath) {
-      return db.prepare(
-        'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE project_path = ? ORDER BY id ASC'
-      ).all(projectPath) as ChatMessage[]
+      const rows = db.prepare(
+        `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE project_path = ? ORDER BY id ASC`
+      ).all(projectPath) as ChatMessageRow[]
+      return rows.map(mapMessage)
     },
-    appendToSession(sessionId, projectPath, role, content) {
+    appendToSession(sessionId, projectPath, role, content, meta) {
       // 5.2 (review P0): один финальный assistant-ответ может прийти в append
       // дважды (active-чат Chat.tsx + snapshot-путь applyEventToChat) — голый
       // INSERT плодил дубль. Дедупим ПОВТОР того же assistant-сообщения, если
@@ -56,22 +124,28 @@ export function createChats(db: Database): Chats {
       // двойного персиста, а намеренный повтор пользователя терять нельзя.
       if (role === 'assistant') {
         const last = db.prepare(
-          'SELECT id, role, content, COALESCE(thinking, \'\') as thinking, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT 1'
-        ).get(sessionId) as ChatMessage | undefined
+          `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT 1`
+        ).get(sessionId) as ChatMessageRow | undefined
         if (last && last.role === 'assistant' && last.content === content) {
-          return last
+          return mapMessage(last)
         }
       }
       const now = Date.now()
-      const info = db.prepare(
-        'INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
-      ).run(sessionId, projectPath, role, content, now)
+      const appliedSkills = stringifyAppliedSkills(meta?.appliedSkills)
+      const info = hasAppliedSkillsColumn
+        ? db.prepare(
+          'INSERT INTO chats (session_id, project_path, role, content, applied_skills, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(sessionId, projectPath, role, content, appliedSkills, now)
+        : db.prepare(
+          'INSERT INTO chats (session_id, project_path, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(sessionId, projectPath, role, content, now)
       touchSession.run(now, sessionId)
       return {
         id: Number(info.lastInsertRowid),
         role,
         content,
         thinking: '',
+        appliedSkills: parseAppliedSkills(appliedSkills),
         createdAt: now
       }
     },
@@ -83,6 +157,7 @@ export function createChats(db: Database): Chats {
       return info.changes > 0
     },
     updateThinking(messageId, thinking) {
+      if (!hasThinkingColumn) return false
       const now = Date.now()
       const info = db.prepare('UPDATE chats SET thinking = ? WHERE id = ?').run(thinking, messageId)
       const row = db.prepare('SELECT session_id as sessionId FROM chats WHERE id = ?').get(messageId) as { sessionId: number } | undefined

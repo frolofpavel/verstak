@@ -35,6 +35,21 @@ export function registerAgentRunsIpc(
   // перезапуске app reconciledAt сменится и старый failed-прогон уже не попадёт
   // в findResumable). Минимальное решение по ТЗ.
   const dismissed = new Set<string>()
+  function getRecoverableUserRequest(runId: string): string | null {
+    const input = getRunInput(db, runId)
+    if (input?.userMessage?.trim()) return input.userMessage
+
+    const run = agentRuns.get(runId)
+    if (!run?.chatId) return null
+    const row = db.prepare(`
+      SELECT content
+      FROM chats
+      WHERE session_id = ? AND role = 'user' AND TRIM(content) <> ''
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(run.chatId) as { content: string } | undefined
+    return row?.content?.trim() || null
+  }
   ipcMain.handle(
     'agent-runs:list',
     (_e, projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }) =>
@@ -104,11 +119,11 @@ export function registerAgentRunsIpc(
   ipcMain.handle('agent-runs:resume', (_e, runId: string): { chatId: number | null; userMessage: string } | { error: string } => {
     const run = agentRuns.get(runId)
     if (!run) return { error: 'Прогон не найден' }
-    const input = getRunInput(db, runId)
-    if (!input || !input.userMessage) {
+    const userMessage = getRecoverableUserRequest(runId)
+    if (!userMessage) {
       return { error: 'Нет сохранённого ввода прогона — переотправка недоступна (старый прогон).' }
     }
-    return { chatId: run.chatId, userMessage: input.userMessage }
+    return { chatId: run.chatId, userMessage }
   })
 
   // Crash-resume: зависшие после краха прогоны проекта для баннера «сессия
@@ -118,10 +133,7 @@ export function registerAgentRunsIpc(
   // деструктива: renderer показывает «Возобновить» только при true.
   ipcMain.handle('ai:list-resumable', (_e, projectPath: string): ResumableRun[] => {
     if (!projectPath) return []
-    const all = agentRuns.findResumable(projectPath, reconciledAt, (runId) => {
-      const input = getRunInput(db, runId)
-      return input?.userMessage || null
-    })
+    const all = agentRuns.findResumable(projectPath, reconciledAt, getRecoverableUserRequest)
     return all.filter(r => !dismissed.has(r.runId))
   })
 

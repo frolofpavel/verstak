@@ -675,7 +675,7 @@ app.whenReady().then(() => {
   registerVerificationsIpc(verifications)
   // Proof Pack — доказательство выполнения прогона (proof.json + proof.html).
   registerProofIpc(proofDeps, proofService)
-  registerHandoffIpc(chats, chatSessions)
+  registerHandoffIpc(chats, chatSessions, agentRuns)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)
   registerRemindersIpc(reminders, reminderService)

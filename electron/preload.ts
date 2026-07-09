@@ -197,8 +197,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   chats: {
     list: (sessionId: number) => ipcRenderer.invoke('chats:list', sessionId),
-    append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) =>
-      ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content),
+    append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) =>
+      ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content, meta),
     maxMessageId: (sessionId: number) => ipcRenderer.invoke('chats:max-message-id', sessionId) as Promise<number>,
     truncateAfter: (sessionId: number, afterMessageId: number) => ipcRenderer.invoke('chats:truncate-after', sessionId, afterMessageId) as Promise<number>,
     updateMessage: (messageId: number, content: string) =>
@@ -263,7 +263,9 @@ contextBridge.exposeInMainWorld('api', {
     runLoaders: (skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) =>
       ipcRenderer.invoke('skills:run-loaders', skillId, opts),
     capture: (input: { title: string; summary?: string; toolsAllow?: string[] }) =>
-      ipcRenderer.invoke('skills:capture', input)
+      ipcRenderer.invoke('skills:capture', input),
+    importPreview: () => ipcRenderer.invoke('skills:import-preview'),
+    importCommit: (input: { token: string; replace?: boolean }) => ipcRenderer.invoke('skills:import-commit', input)
   },
   cliAuth: {
     logout: (providerId: string) => ipcRenderer.invoke('cli-auth:logout', providerId),
@@ -421,6 +423,7 @@ contextBridge.exposeInMainWorld('api', {
   updater: {
     install: () => ipcRenderer.invoke('update:install'),
     ensureDownload: () => ipcRenderer.invoke('update:ensure-download'),
+    cleanupTemp: () => ipcRenderer.invoke('update:cleanup-temp') as Promise<{ ok: boolean; deletedBytes: number; deletedPaths: string[]; reason?: string }>,
     getReleaseNotes: (opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }) =>
       ipcRenderer.invoke('update:get-release-notes', opts ?? {}),
     check: () => ipcRenderer.invoke('update:check'),
@@ -435,6 +438,7 @@ contextBridge.exposeInMainWorld('api', {
       pendingRelease?: boolean
       installedVersion?: string
       remoteVersion?: string
+      updatedAt?: number
     }>,
     onState: (cb: (data: {
       phase: string
@@ -445,6 +449,7 @@ contextBridge.exposeInMainWorld('api', {
       errorCode?: string
       rateLimitMinutes?: number
       pendingRelease?: boolean
+      updatedAt?: number
     }) => void) => {
       const handler = (_e: unknown, data: {
         phase: string
@@ -455,6 +460,7 @@ contextBridge.exposeInMainWorld('api', {
         errorCode?: string
         rateLimitMinutes?: number
         pendingRelease?: boolean
+        updatedAt?: number
       }) => cb(data)
       ipcRenderer.on('update:state', handler)
       return () => { ipcRenderer.off('update:state', handler) }

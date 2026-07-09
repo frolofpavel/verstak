@@ -18,20 +18,6 @@ function tokenize(s: string): string[] {
 /** Порог скоринга: ниже него предложение считается шумом и не показывается. */
 export const SUGGEST_THRESHOLD = 3
 
-type SkillDomain =
-  | 'client-marketing'
-  | 'client-account'
-  | 'wordstat'
-  | 'metrika'
-  | 'direct-search-minusation'
-  | 'direct-rsya-sites-minusation'
-  | 'direct-semantics'
-  | 'direct-cross-minusation'
-  | 'metrika-conversions-audit'
-  | 'direct-campaign-setup'
-  | 'client-weekly-report'
-  | null
-
 /** Предвычисленные токены скилла. Строится один раз на список скиллов (мемо в UI),
  *  чтобы на КАЖДЫЙ keystroke не ре-токенизировать все скиллы (ревью perf). */
 export interface SkillTokenIndex {
@@ -39,12 +25,18 @@ export interface SkillTokenIndex {
   promptTokens: Set<string>
   metaTokens: Set<string>
   autoSuggestable: boolean
-  domain: SkillDomain
+  domain: 'client-marketing' | 'client-account' | 'wordstat' | 'metrika' | 'direct-search-minusation' | 'direct-rsya-sites-minusation' | 'direct-semantics' | 'direct-cross-minusation' | 'metrika-conversions-audit' | 'direct-campaign-setup' | 'client-weekly-report' | null
 }
 
 interface ScoredSkillSuggestion {
   entry: SkillTokenIndex
   score: number
+}
+
+export interface BoundSkillSuggestion {
+  skill: Skill
+  score: number
+  domain: SkillTokenIndex['domain']
 }
 
 const BLOCKED_SKILL_IDS = new Set([
@@ -61,7 +53,7 @@ function isAutoSuggestableSkill(skill: Skill): boolean {
   return true
 }
 
-function skillDomain(skill: Skill): SkillDomain {
+function skillDomain(skill: Skill): SkillTokenIndex['domain'] {
   const id = skill.id.toLowerCase()
   const slash = (skill.slash ?? '').toLowerCase()
   const name = (skill.name ?? '').toLowerCase()
@@ -132,7 +124,7 @@ function metrikaIntentScore(draft: string): number {
   return score
 }
 
-function operationIntentScore(domain: SkillDomain, draft: string): number {
+function operationIntentScore(domain: SkillTokenIndex['domain'], draft: string): number {
   const text = draft.toLowerCase()
   let score = 0
   switch (domain) {
@@ -180,7 +172,7 @@ function operationIntentScore(domain: SkillDomain, draft: string): number {
   return score
 }
 
-function isOperationDomain(domain: SkillDomain): boolean {
+function isOperationDomain(domain: SkillTokenIndex['domain']): boolean {
   return domain === 'direct-search-minusation' ||
     domain === 'direct-rsya-sites-minusation' ||
     domain === 'direct-semantics' ||
@@ -188,26 +180,6 @@ function isOperationDomain(domain: SkillDomain): boolean {
     domain === 'metrika-conversions-audit' ||
     domain === 'direct-campaign-setup' ||
     domain === 'client-weekly-report'
-}
-
-function clientAccountIntentScore(skill: Skill, draft: string): number {
-  const text = draft.toLowerCase()
-  const ids = [skill.id, skill.slash, skill.name]
-    .filter((value): value is string => Boolean(value))
-    .map(value => value.toLowerCase())
-  if (ids.some(value => value && text.includes(value))) return 3
-
-  const description = (skill.description ?? '').toLowerCase()
-  const aliases = new Set<string>()
-  for (const token of tokenize(description)) {
-    if (/^[a-z0-9-]{4,}$/.test(token)) aliases.add(token)
-  }
-  if (description.includes('пабг')) aliases.add('пабг')
-  if (description.includes('стим')) aliases.add('стим')
-  for (const alias of aliases) {
-    if (text.includes(alias)) return 3
-  }
-  return 0
 }
 
 function scoreSkillEntry(
@@ -230,6 +202,26 @@ function scoreSkillEntry(
   if (entry.domain === 'client-marketing' && marketingScore >= 3) score += marketingScore
   if (entry.domain === 'client-account' && marketingScore >= 2) score += clientAccountIntentScore(entry.skill, draft)
   return score
+}
+
+function clientAccountIntentScore(skill: Skill, draft: string): number {
+  const text = draft.toLowerCase()
+  const ids = [skill.id, skill.slash, skill.name]
+    .filter((value): value is string => Boolean(value))
+    .map(value => value.toLowerCase())
+  if (ids.some(value => value && text.includes(value))) return 3
+
+  const description = (skill.description ?? '').toLowerCase()
+  const aliases = new Set<string>()
+  for (const token of tokenize(description)) {
+    if (/^[a-z0-9-]{4,}$/.test(token)) aliases.add(token)
+  }
+  if (description.includes('пабг')) aliases.add('пабг')
+  if (description.includes('стим')) aliases.add('стим')
+  for (const alias of aliases) {
+    if (text.includes(alias)) return 3
+  }
+  return 0
 }
 
 export function buildSkillIndex(skills: Skill[]): SkillTokenIndex[] {
@@ -259,6 +251,17 @@ export function suggestManyFromIndex(
   excludedSkillIds: ReadonlySet<string> = new Set(),
   limit = 4
 ): Skill[] {
+  return suggestScoredFromIndex(draft, index, activeSkillId, excludedSkillIds, limit)
+    .map(item => item.skill)
+}
+
+export function suggestScoredFromIndex(
+  draft: string,
+  index: SkillTokenIndex[],
+  activeSkillId: string | null,
+  excludedSkillIds: ReadonlySet<string> = new Set(),
+  limit = 4
+): BoundSkillSuggestion[] {
   const draftTokens = new Set(tokenize(draft))
   if (draftTokens.size === 0) return []
   const marketingScore = marketingIntentScore(draft, draftTokens)
@@ -278,7 +281,7 @@ export function suggestManyFromIndex(
     .filter(item => !(hasOperationSuggestion && item.entry.domain === 'client-marketing'))
     .sort((a, b) => b.score - a.score || a.entry.skill.id.localeCompare(b.entry.skill.id))
     .slice(0, Math.max(1, limit))
-    .map(item => item.entry.skill)
+    .map(item => ({ skill: item.entry.skill, score: item.score, domain: item.entry.domain }))
 }
 
 /**

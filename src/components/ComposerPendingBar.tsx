@@ -7,6 +7,7 @@ interface ComposerPendingBarProps {
   expanded: boolean
   onToggle: () => void
   onRemoveQueueItem?: (id: string) => void
+  onRemoveSupplement?: (id: string) => void
   onMoveQueueItemToContext?: (id: string) => void
   onEditQueueItem?: (id: string) => void
 }
@@ -21,6 +22,7 @@ export function ComposerPendingBar({
   expanded,
   onToggle,
   onRemoveQueueItem,
+  onRemoveSupplement,
   onMoveQueueItemToContext,
   onEditQueueItem,
 }: ComposerPendingBarProps) {
@@ -69,6 +71,16 @@ export function ComposerPendingBar({
                           : t.chat.pendingBarSupplementDeferred}
                       </span>
                       <time className="gg-composer-pending-item-time">{formatItemTime(item.at)}</time>
+                      {onRemoveSupplement && (
+                        <button
+                          type="button"
+                          className="gg-composer-pending-item-remove"
+                          onClick={() => onRemoveSupplement(item.id)}
+                          title={item.status === 'accepted' ? t.chat.pendingBarHideAcceptedSupplement : t.chat.pendingBarRemoveSupplement}
+                        >
+                          ×
+                        </button>
+                      )}
                     </div>
                     <div className="gg-composer-pending-item-text">{item.text}</div>
                   </li>
@@ -95,9 +107,9 @@ export function ComposerPendingBar({
                               type="button"
                               className="gg-composer-pending-item-action"
                               onClick={() => onMoveQueueItemToContext(item.id)}
-                              title="Добавить как допконтекст"
+                              title={t.chat.pendingBarMoveQueueToSupplementHint}
                             >
-                              Контекст
+                              {t.chat.pendingBarMoveQueueToSupplement}
                             </button>
                           )}
                           {onEditQueueItem && (

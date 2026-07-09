@@ -8,6 +8,7 @@ import { ModePicker } from './ModePicker'
 import { IntensityToggle } from './IntensityToggle'
 import { VoiceInput } from './VoiceInput'
 import { TimelineBar } from './TimelineBar'
+import { AgentProgressPanel } from './AgentProgressPanel'
 import { ReviewPanel } from './ReviewPills'
 import { DevTaskBadge } from './DevTaskBadge'
 import { ResumeBanner } from './ResumeBanner'
@@ -21,12 +22,12 @@ import { MentionPopup } from './MentionPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { extractMentions } from '../lib/mentions'
 import { useSkills as useSkillsStore } from '../store/skillStore'
-import { buildSkillIndex, suggestFromIndex } from '../lib/skill-suggest'
+import { buildSkillIndex, suggestManyFromIndex, suggestScoredFromIndex } from '../lib/skill-suggest'
 import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
 import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
-import type { Attachment, ChatEvent, ChatMessage, Reminder, Suggestion } from '../types/api'
+import type { AppliedSkillRef, Attachment, ChatEvent, ChatMessage, Reminder, Skill, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
 import { notifyResponseReady } from '../lib/response-notify'
@@ -49,9 +50,8 @@ import {
   isSameLocalDay,
 } from '../lib/chat-timestamps'
 import { ComposerPendingBar } from './ComposerPendingBar'
-import { AgentProgressPanel } from './AgentProgressPanel'
-import { activateModelProgress, buildInitialAgentProgress } from '../lib/agent-progress'
 import {
+  CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
   nextComposerItemId,
   parseSupplementMessage,
@@ -64,6 +64,7 @@ import {
   CHAT_FILE_ACCEPT,
   isLegacyDoc,
 } from '../lib/chat-attachments'
+import { activateModelProgress, buildInitialAgentProgress, reduceAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
 
 interface ComposerPendingState {
   queuedMessages: QueuedComposerMessage[]
@@ -122,6 +123,28 @@ function readReminderPinsPrefs(projectPath: string): ReminderPinsPrefs {
 function writeReminderPinsPrefs(projectPath: string, prefs: ReminderPinsPrefs): void {
   try {
     localStorage.setItem(reminderPinsPrefsKey(projectPath), JSON.stringify(prefs))
+  } catch {
+    /* ignore */
+  }
+}
+
+function skillSuggestionsPrefsKey(projectPath: string): string {
+  return `gg.skillSuggestions.enabled.${normalizeProjectPath(projectPath)}`
+}
+
+function readSkillSuggestionsEnabled(projectPath: string | null | undefined): boolean {
+  if (!projectPath) return true
+  try {
+    return localStorage.getItem(skillSuggestionsPrefsKey(projectPath)) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function writeSkillSuggestionsEnabled(projectPath: string | null | undefined, enabled: boolean): void {
+  if (!projectPath) return
+  try {
+    localStorage.setItem(skillSuggestionsPrefsKey(projectPath), enabled ? '1' : '0')
   } catch {
     /* ignore */
   }
@@ -192,12 +215,27 @@ function readAutoScrollPref(): boolean {
   return true
 }
 
+function buildInterruptedAnswerProgress(createdAt: number | undefined, providerLabel: string): AgentProgressEntry[] {
+  const timestamp = createdAt ?? Date.now()
+  return [
+    {
+      id: 'interrupted-answer',
+      phase: 'final',
+      title: 'Ответ прерван',
+      detail: `${providerLabel} начал отвечать, но приложение было закрыто до сохранения видимого ответа. Запуск не удалось восстановить автоматически — если задача ещё актуальна, повтори запрос.`,
+      status: 'error',
+      timestamp
+    }
+  ]
+}
+
 type RightPanel = 'none' | 'terminal' | 'sidechat'
 
 interface ChatProps {
   onOpenSettings: () => void
   rightPanel: RightPanel
   onSelectRightPanel: (panel: RightPanel) => void
+  isSettingsOpen?: boolean
   /** Open the right-docked parallel chat (lazily created by App). */
   onOpenSideChat: () => void
 
@@ -250,7 +288,257 @@ const GOAL_CYCLE_PROMPT = `Запусти цикл self-improvement по это�
 
 Out of scope: общие best practices, рефакторинги ради красоты, изменения без обоснования в журнале.`
 
-export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSideChat }: ChatProps) {
+const SKILL_ANTI_STALL_NUDGE = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
+
+function skillDisplayName(skill: Pick<Skill, 'id' | 'name'> | AppliedSkillRef): string {
+  return skill.name?.trim() || skill.id
+}
+
+function escapePromptAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function toAppliedSkillRef(skill: Skill): AppliedSkillRef {
+  return {
+    id: skill.id,
+    ...(skill.name?.trim() ? { name: skill.name.trim() } : {}),
+    ...(skill.icon?.trim() ? { icon: skill.icon.trim() } : {}),
+    ...(skill.description?.trim() ? { description: skill.description.trim() } : {}),
+  }
+}
+
+function resolveAppliedSkillDetails(applied: AppliedSkillRef[], skills: Skill[]): Skill[] {
+  const byId = new Map(skills.map(skill => [skill.id, skill]))
+  return applied.flatMap(ref => {
+    const skill = byId.get(ref.id)
+    return skill ? [skill] : []
+  })
+}
+
+function uniqueSkills(skills: Array<Skill | null | undefined>): Skill[] {
+  const seen = new Set<string>()
+  const result: Skill[] = []
+  for (const skill of skills) {
+    if (!skill || seen.has(skill.id)) continue
+    seen.add(skill.id)
+    result.push(skill)
+  }
+  return result
+}
+
+function mergeToolAllow(skills: Array<Skill | null | undefined>): string[] | undefined {
+  const merged = new Set<string>()
+  for (const skill of skills) {
+    for (const tool of skill?.tools_allow ?? []) {
+      if (tool.trim()) merged.add(tool.trim())
+    }
+  }
+  return merged.size ? [...merged] : undefined
+}
+
+function firstRecipe(skills: Array<Skill | null | undefined>) {
+  return skills.find(skill => skill?.recipe)?.recipe
+}
+
+function buildAppliedSkillsSystemPrompt(appliedSkills: Skill[], userText: string): string {
+  if (appliedSkills.length === 0) return ''
+  const lines: string[] = [
+    '## Скиллы, применённые к текущему пользовательскому сообщению',
+    '',
+    'Пользователь явно применил эти скиллы к последнему сообщению. Это не отдельные задачи и не глобальный режим чата.',
+    'Используй инструкции скиллов строго для релевантных частей текущего запроса. Остальные части запроса не игнорируй: выполни их обычным способом или подбери подходящий общий подход.',
+    'Если конкретный скилл не подходит к части запроса, коротко объясни почему и продолжай выполнять остальные части.',
+    '',
+    '<current_user_request>',
+    userText.trim(),
+    '</current_user_request>',
+  ]
+
+  appliedSkills.forEach((skill, index) => {
+    lines.push(
+      '',
+      `<applied_skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
+      skill.description ? `Назначение: ${skill.description}` : 'Назначение: пользователь применил этот скилл к текущему сообщению.',
+      'Инструкция: применяй этот регламент к той части пользовательского запроса, которая соответствует назначению скилла.',
+      '<skill_instructions>',
+      skill.systemPrompt.trim(),
+      '</skill_instructions>',
+      '</applied_skill>'
+    )
+  })
+
+  return lines.join('\n')
+}
+
+const AUTO_BOUND_SKILL_MIN_SCORE = 14
+
+function buildAutoBoundSkillsSystemPrompt(autoSkills: Skill[], userText: string): string {
+  if (autoSkills.length === 0) return ''
+  const lines: string[] = [
+    '## Автоматически подобранные скиллы для текущего запроса',
+    '',
+    'Verstak уверенно сопоставил части текущего пользовательского запроса с этими скиллами. Это не справка и не рекомендация: для релевантных частей задачи считай эти скиллы обязательным рабочим протоколом.',
+    'Если пользователь явно задал конкретный параметр (порог, период, список кампаний, формат, исключение), этот параметр пользователя сильнее дефолтного значения из скилла.',
+    'Дефолты скилла используй только там, где пользователь не дал своё значение. Запреты и проверки безопасности из скилла не обходи молча: если пользователь просит нарушить запрет, сначала явно уточни/подтверди.',
+    'Если в запросе несколько операций, сопоставь каждую операцию с подходящим auto-bound skill. Операции без подходящего скилла выполни обычным способом, не игнорируй их.',
+    'Перед финальным ответом проверь: применимые обязательные пункты каждого auto-bound skill выполнены, пользовательские параметры учтены как overrides, пропусков без блокера нет.',
+    '',
+    '<current_user_request>',
+    userText.trim(),
+    '</current_user_request>',
+  ]
+
+  autoSkills.forEach((skill, index) => {
+    lines.push(
+      '',
+      `<auto_bound_skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
+      skill.description ? `Назначение: ${skill.description}` : 'Назначение: Verstak автоматически сопоставил этот скилл с текущим запросом.',
+      'Инструкция: применяй этот регламент к релевантной части пользовательского запроса как обязательный протокол.',
+      '<skill_instructions>',
+      skill.systemPrompt.trim(),
+      '</skill_instructions>',
+      '</auto_bound_skill>'
+    )
+  })
+
+  return lines.join('\n')
+}
+
+function appliedSkillNames(appliedRefs: AppliedSkillRef[], detailedSkills: Skill[]): string {
+  const byId = new Map(detailedSkills.map(skill => [skill.id, skill]))
+  return appliedRefs
+    .map(ref => {
+      const skill = byId.get(ref.id)
+      return skill ? skillDisplayName(skill) : skillDisplayName(ref)
+    })
+    .join(', ')
+}
+
+function buildAppliedSkillsTaskContract(
+  appliedRefs: AppliedSkillRef[],
+  detailedSkills: Skill[],
+  currentMessage: boolean
+): string {
+  if (appliedRefs.length === 0) return ''
+  const byId = new Map(detailedSkills.map(skill => [skill.id, skill]))
+  const names = appliedSkillNames(appliedRefs, detailedSkills)
+  if (!currentMessage) {
+    return [
+      '<historical_task_contract source="verstak_applied_skills">',
+      `К предыдущему пользовательскому сообщению были применены скиллы: ${names}.`,
+      'Это относится только к тому сообщению и помогает понять историю выполнения, но не включает эти скиллы как новый глобальный режим.',
+      '</historical_task_contract>',
+    ].join('\n')
+  }
+
+  const lines: string[] = [
+    '<current_task_contract source="verstak_applied_skills" priority="required">',
+    'ВАЖНО: это не справочный контекст и не внешняя заметка. Это часть текущего пользовательского запроса, созданная интерфейсом Verstak после явного нажатия пользователем "Применить скилл".',
+    `Пользователь применил к текущему сообщению скиллы: ${names}.`,
+    `Считай это эквивалентом прямой фразы пользователя: "Выполни текущую задачу с применением скиллов: ${names}".`,
+    'Если пользователь просит сказать, что ты увидел в сообщении, обязательно назови эти применённые скиллы как часть задания.',
+    'Не отвечай, что скиллы не указаны в сообщении или подключены "только через контекст". Они указаны через UI Verstak и являются обязательным регламентом для релевантных частей текущей задачи.',
+    'Если в одном сообщении несколько операций, сопоставь каждую операцию с подходящим применённым скиллом; операции без подходящего скилла выполни обычным способом.',
+    '<applied_skill_refs>',
+  ]
+  appliedRefs.forEach((ref, index) => {
+    const skill = byId.get(ref.id)
+    const name = skill ? skillDisplayName(skill) : skillDisplayName(ref)
+    const description = skill?.description ?? ref.description ?? ''
+    lines.push(
+      `<skill index="${index + 1}" id="${escapePromptAttr(ref.id)}" name="${escapePromptAttr(name)}">`,
+      description ? `Назначение: ${description}` : 'Назначение: пользователь применил этот скилл к текущему сообщению.',
+      skill
+        ? 'Полная инструкция этого скилла также передана в системном слое <skill_layer>.'
+        : 'Полная инструкция скилла недоступна в текущем renderer-cache; ориентируйся на название и назначение.',
+      '</skill>'
+    )
+  })
+  lines.push('</applied_skill_refs>', '</current_task_contract>')
+  return lines.join('\n')
+}
+
+function buildAutoBoundSkillsTaskContract(autoSkills: Skill[], userText: string): string {
+  if (autoSkills.length === 0) return ''
+  const names = autoSkills.map(skill => skillDisplayName(skill)).join(', ')
+  const lines: string[] = [
+    '<current_task_contract source="verstak_auto_bound_skills" priority="required">',
+    `Verstak автоматически и с высокой уверенностью привязал к текущему запросу скиллы: ${names}.`,
+    'Эти скиллы обязательны для тех частей текущей задачи, к которым они относятся. Не считай их необязательными подсказками.',
+    'Раздели пользовательский запрос на операции и сопоставь каждую релевантную операцию с подходящим скиллом из списка.',
+    'Явные параметры пользователя имеют приоритет над дефолтными параметрами скилла: суммы, периоды, списки, пороги, исключения и формат ответа бери из текущего запроса.',
+    'Если параметр пользователя отличается от дефолта скилла, используй параметр пользователя и считай его override. Не возвращайся к дефолту скилла без причины.',
+    'Обязательные проверки, запреты и критерии завершения из скилла не пропускай. Если выполнить пункт невозможно из-за доступа/данных/инструментов, назови это блокером.',
+    'Перед финальным ответом сделай self-check по применимым пунктам auto-bound skills. Если что-то пропущено, сначала доделай или честно сообщи блокер.',
+    '<current_user_request>',
+    userText.trim(),
+    '</current_user_request>',
+    '<auto_bound_skill_refs>',
+  ]
+  autoSkills.forEach((skill, index) => {
+    lines.push(
+      `<skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
+      skill.description ? `Назначение: ${skill.description}` : 'Назначение: скилл автоматически выбран по смыслу текущего запроса.',
+      'Полная инструкция этого скилла также передана в системном слое <skill_layer>.',
+      '</skill>'
+    )
+  })
+  lines.push('</auto_bound_skill_refs>', '</current_task_contract>')
+  return lines.join('\n')
+}
+
+function buildSkillBindingProgressDetail(manualSkills: Skill[], autoSkills: Skill[]): string | undefined {
+  const manualNames = manualSkills.map(skillDisplayName)
+  const autoNames = autoSkills.map(skillDisplayName)
+  const parts: string[] = []
+  if (manualNames.length) {
+    parts.push(`пользователь применил: ${manualNames.join(', ')}`)
+  }
+  if (autoNames.length) {
+    parts.push(`Verstak подключил автоматически: ${autoNames.join(', ')}`)
+  }
+  if (parts.length === 0) return undefined
+  return `К задаче подключены скиллы — ${parts.join('; ')}. Они будут использованы как рабочий протокол для подходящих частей запроса.`
+}
+
+function withAppliedSkillContextForModel(messages: ChatMessage[], skills: Skill[], autoBoundSkills: Skill[] = []): ChatMessage[] {
+  const lastUserIndex = messages.map(message => message.role).lastIndexOf('user')
+  return messages.map((message, index) => {
+    if (message.role !== 'user') return message
+    if (message.content.includes('<current_task_contract') || message.content.includes('<historical_task_contract')) return message
+    const isCurrent = index === lastUserIndex
+    const payloads: string[] = []
+    if (message.appliedSkills?.length) {
+      const detailedSkills = resolveAppliedSkillDetails(message.appliedSkills, skills)
+      payloads.push(buildAppliedSkillsTaskContract(message.appliedSkills, detailedSkills, isCurrent))
+    }
+    if (isCurrent && autoBoundSkills.length) {
+      payloads.push(buildAutoBoundSkillsTaskContract(autoBoundSkills, message.content))
+    }
+    const payload = payloads.filter(Boolean).join('\n\n')
+    if (!payload) return message
+    return {
+      ...message,
+      content: `${message.content}\n\n---\n\n${payload}`,
+    }
+  })
+}
+
+function composeSkillSystemPrompt(activeSkill: Skill | null, appliedSkills: Skill[], userText: string, autoBoundSkills: Skill[] = []): string | undefined {
+  const parts = [
+    activeSkill ? activeSkill.systemPrompt : '',
+    buildAppliedSkillsSystemPrompt(appliedSkills, userText),
+    buildAutoBoundSkillsSystemPrompt(autoBoundSkills, userText),
+  ].filter(part => part.trim())
+  if (parts.length > 0) parts.push(SKILL_ANTI_STALL_NUDGE)
+  return parts.length ? parts.join('\n\n---\n\n') : undefined
+}
+
+export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSettingsOpen = false, onOpenSideChat }: ChatProps) {
   const t = useT()
   const {
     helpMode, help, helpChatId,
@@ -260,15 +548,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     activity: projectActivity, preflights, subagentRuns,
     agentProgress: projectAgentProgress,
     sessionUsage: projectSessionUsage,
-    path: activePath, chatSessions, activeChatId,
+    path: activePath, chatSessions, activeChatId, resumableRuns,
     addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
-    setHelpStreaming, clearHelpActivity, pushHelpActivity, addHelpUsage,
+    setHelpStreaming, clearHelpActivity, pushHelpActivity, setHelpAgentProgress, addHelpUsage,
     appendHelpLastAssistantThinking,
+    setAgentProgress,
     setComposerDraft,
     clearComposerDraft,
     setActiveView,
   } = useProject()
   const isHelpChat = helpMode
+  const [skillSuggestionsEnabled, setSkillSuggestionsEnabled] = useState(() => readSkillSuggestionsEnabled(activePath))
   const messages = helpMode ? help.messages : projectMessages
   const isStreaming = helpMode ? help.isStreaming : projectIsStreaming
   const streamStartedAt = helpMode ? help.streamStartedAt : projectStreamStartedAt
@@ -282,6 +572,155 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const id = window.setInterval(() => setTickNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [isStreaming, streamStartedAt])
+
+  const assistantAnimationScope = helpMode
+    ? 'help'
+    : activeChatId != null
+      ? `chat:${activeChatId}`
+      : activePath
+        ? `path:${activePath}`
+        : 'chat'
+  const lastAssistantInfo = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.role === 'assistant') {
+        return {
+          index: i,
+          message,
+          key: `${assistantAnimationScope}:${message.dbId ?? 'local'}:${message.createdAt ?? i}`
+        }
+      }
+    }
+    return null
+  }, [messages, assistantAnimationScope])
+  const lastAssistantMessage = lastAssistantInfo?.message ?? null
+  const lastAssistantAnimationKey = lastAssistantInfo?.key ?? null
+  const [animatedAssistantText, setAnimatedAssistantText] = useState<{ key: string; shown: string; target: string } | null>(null)
+  const [chatWindowActive, setChatWindowActive] = useState(() => (
+    typeof document === 'undefined'
+      ? true
+      : document.visibilityState === 'visible' && document.hasFocus()
+  ))
+  const [appearanceMotionOff, setAppearanceMotionOff] = useState(() => (
+    typeof document !== 'undefined'
+      && document.documentElement.getAttribute('data-motion') === 'off'
+  ))
+  const assistantAnimationSeenRef = useRef(false)
+  const assistantAnimationPlayedKeysRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const root = document.documentElement
+    const read = () => setAppearanceMotionOff(root.getAttribute('data-motion') === 'off')
+    read()
+    const observer = new MutationObserver(read)
+    observer.observe(root, { attributes: true, attributeFilter: ['data-motion'] })
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => {
+    function refreshWindowActive() {
+      setChatWindowActive(document.visibilityState === 'visible' && document.hasFocus())
+    }
+    refreshWindowActive()
+    window.addEventListener('focus', refreshWindowActive)
+    window.addEventListener('blur', refreshWindowActive)
+    document.addEventListener('visibilitychange', refreshWindowActive)
+    return () => {
+      window.removeEventListener('focus', refreshWindowActive)
+      window.removeEventListener('blur', refreshWindowActive)
+      document.removeEventListener('visibilitychange', refreshWindowActive)
+    }
+  }, [])
+  useEffect(() => {
+    if (!lastAssistantAnimationKey || !lastAssistantMessage) {
+      setAnimatedAssistantText(null)
+      return
+    }
+    const target = lastAssistantMessage.content ?? ''
+    const isFreshAssistant = typeof lastAssistantMessage.createdAt === 'number'
+      ? Date.now() - lastAssistantMessage.createdAt < 60_000
+      : false
+    setAnimatedAssistantText(prev => {
+      if (prev?.key === lastAssistantAnimationKey) {
+        if (prev.shown && target && !target.startsWith(prev.shown)) {
+          return { key: lastAssistantAnimationKey, shown: target, target }
+        }
+        if (target.length < prev.shown.length) {
+          return { key: lastAssistantAnimationKey, shown: target, target }
+        }
+        return { ...prev, target }
+      }
+      const alreadyPlayed = assistantAnimationPlayedKeysRef.current.has(lastAssistantAnimationKey)
+      const shouldAnimate = !alreadyPlayed
+        && !appearanceMotionOff
+        && chatWindowActive
+        && !isSettingsOpen
+        && isStreaming
+        && isFreshAssistant
+      if (shouldAnimate) assistantAnimationPlayedKeysRef.current.add(lastAssistantAnimationKey)
+      return {
+        key: lastAssistantAnimationKey,
+        shown: shouldAnimate ? '' : target,
+        target
+      }
+    })
+    assistantAnimationSeenRef.current = true
+  }, [lastAssistantAnimationKey, lastAssistantMessage?.content, lastAssistantMessage?.createdAt, isStreaming, chatWindowActive, isSettingsOpen, appearanceMotionOff])
+  const assistantAnimationRafRef = useRef<number | null>(null)
+  const assistantAnimationLastFrameRef = useRef<number | null>(null)
+  const assistantAnimationCarryRef = useRef(0)
+  useEffect(() => {
+    if (appearanceMotionOff || isSettingsOpen || !chatWindowActive) {
+      setAnimatedAssistantText(prev => prev ? { ...prev, shown: prev.target } : prev)
+      return
+    }
+    if (!animatedAssistantText || animatedAssistantText.shown.length >= animatedAssistantText.target.length) return
+    assistantAnimationLastFrameRef.current = null
+    assistantAnimationCarryRef.current = 0
+    let stopped = false
+    const frame = (now: number) => {
+      const lastFrame = assistantAnimationLastFrameRef.current
+      if (lastFrame != null && now - lastFrame < 34) {
+        assistantAnimationRafRef.current = window.requestAnimationFrame(frame)
+        return
+      }
+      let keepGoing = true
+      setAnimatedAssistantText(prev => {
+        if (!prev || prev.shown.length >= prev.target.length) {
+          keepGoing = false
+          return prev
+        }
+        const last = assistantAnimationLastFrameRef.current ?? now
+        const delta = Math.min(80, Math.max(0, now - last))
+        assistantAnimationLastFrameRef.current = now
+        const remaining = prev.target.length - prev.shown.length
+        const charsPerSecond = remaining > 5000 ? 760 : remaining > 1800 ? 560 : remaining > 500 ? 390 : 260
+        assistantAnimationCarryRef.current += (delta / 1000) * charsPerSecond
+        const step = Math.min(18, Math.floor(assistantAnimationCarryRef.current))
+        if (step < 1) return prev
+        assistantAnimationCarryRef.current -= step
+        const shown = prev.target.slice(0, Math.min(prev.target.length, prev.shown.length + step))
+        if (shown.length >= prev.target.length) keepGoing = false
+        return { ...prev, shown }
+      })
+      if (!stopped && keepGoing) {
+        assistantAnimationRafRef.current = window.requestAnimationFrame(frame)
+      }
+    }
+    assistantAnimationRafRef.current = window.requestAnimationFrame(frame)
+    return () => {
+      stopped = true
+      if (assistantAnimationRafRef.current != null) window.cancelAnimationFrame(assistantAnimationRafRef.current)
+      assistantAnimationRafRef.current = null
+    }
+  }, [animatedAssistantText?.key, animatedAssistantText?.target, isSettingsOpen, chatWindowActive, appearanceMotionOff])
+  const agentProgressElapsedMs = isStreaming && streamStartedAt != null
+    ? tickNow - streamStartedAt
+    : null
+  const agentProgressDurationMs = !isStreaming
+    ? lastAssistantMessage?.responseDurationMs ?? null
+    : null
+  const agentProgressFinishedAt = !isStreaming && lastAssistantMessage?.createdAt != null && lastAssistantMessage.responseDurationMs != null
+    ? lastAssistantMessage.createdAt + lastAssistantMessage.responseDurationMs
+    : null
   // #2 per-session stats: персистентный агрегат cost/инструменты/файлы по всем
   // прогонам чата (переживает рестарт). Рефетч при смене чата и по завершении прогона.
   const [sessionStats, setSessionStats] = useState<{ runs: number; costCents: number; toolCount: number; filesCount: number; agentsCount: number; durationMs: number } | null>(null)
@@ -321,34 +760,66 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     } catch { /* своп не критичен — режим уже применён */ }
   }, [setAgentMode, isHelpChat, provider, activeChatId])
   const [input, setInput] = useState('')
+  const [suggestionInput, setSuggestionInput] = useState('')
+  const [appliedSkills, setAppliedSkills] = useState<AppliedSkillRef[]>([])
+  const appliedSkillIds = useMemo(() => new Set(appliedSkills.map(skill => skill.id)), [appliedSkills])
   // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
   const allSkills = useSkillsStore(s => s.skills)
   const activeSkillId = useSkillsStore(s => s.activeSkillId)
-  const [dismissedSuggestId, setDismissedSuggestId] = useState<string | null>(null)
+  const activeSkillForComposer = useMemo(() => {
+    if (!activeSkillId) return null
+    return allSkills.find(skill => skill.id === activeSkillId) ?? null
+  }, [activeSkillId, allSkills])
+  const [dismissedSuggestIds, setDismissedSuggestIds] = useState<Set<string>>(() => new Set())
   // Индекс токенов скиллов — пересобирается только при смене списка скиллов (не на keystroke).
   const skillIndex = useMemo(() => buildSkillIndex(allSkills), [allSkills])
-  const suggestedSkill = useMemo(() => {
-    if (input.trim().startsWith('/')) return null // слэш-команда — пользователь уже выбирает
-    const s = suggestFromIndex(input, skillIndex, activeSkillId)
-    return s && s.id !== dismissedSuggestId ? s : null
-  }, [input, skillIndex, activeSkillId, dismissedSuggestId])
+  const suggestedSkills = useMemo(() => {
+    if (isHelpChat) return []
+    if (!skillSuggestionsEnabled) return []
+    if (suggestionInput.trim().startsWith('/')) return [] // слэш-команда — пользователь уже выбирает
+    const excluded = new Set([...appliedSkillIds, ...dismissedSuggestIds])
+    return suggestManyFromIndex(suggestionInput, skillIndex, activeSkillId, excluded, 4)
+  }, [isHelpChat, skillSuggestionsEnabled, suggestionInput, skillIndex, activeSkillId, appliedSkillIds, dismissedSuggestIds])
   // Этап 4: детерминированное предложение coding-recipe по интенту задачи. Только
   // явный интент (не фоллбэк small-edit), только если такой recipe-скилл есть и не
   // активен. Чисто предложение через chip — без auto-run.
   const [dismissedRecipeId, setDismissedRecipeId] = useState<string | null>(null)
   const suggestedRecipe = useMemo(() => {
-    if (input.trim().startsWith('/')) return null
-    if (!hasExplicitRecipeIntent(input)) return null
-    const id = suggestRecipe(input)
+    if (isHelpChat) return null
+    if (!skillSuggestionsEnabled) return null
+    if (suggestionInput.trim().startsWith('/')) return null
+    if (!hasExplicitRecipeIntent(suggestionInput)) return null
+    const id = suggestRecipe(suggestionInput)
     if (id === activeSkillId || id === dismissedRecipeId) return null
+    if (appliedSkillIds.has(id)) return null
     const skill = allSkills.find(s => s.id === id && s.recipe)
     return skill ?? null
-  }, [input, activeSkillId, dismissedRecipeId, allSkills])
+  }, [isHelpChat, skillSuggestionsEnabled, suggestionInput, activeSkillId, dismissedRecipeId, appliedSkillIds, allSkills])
   // Сброс «скрыть»: композер очищен (после отправки) → следующее сообщение снова может предложить.
-  useEffect(() => { if (!input.trim()) { setDismissedSuggestId(null); setDismissedRecipeId(null) } }, [input])
+  useEffect(() => { if (!input.trim()) { setDismissedSuggestIds(new Set()); setDismissedRecipeId(null) } }, [input])
   const [chatReminderPins, setChatReminderPins] = useState<Reminder[]>([])
   const [reminderPinsPrefs, setReminderPinsPrefs] = useState<ReminderPinsPrefs>(DEFAULT_REMINDER_PINS_PREFS)
+  const [skillSuggestionsToast, setSkillSuggestionsToast] = useState<number | null>(null)
   const visibleReminderPins = isHelpChat || reminderPinsPrefs.collapsed ? [] : chatReminderPins
+  useEffect(() => {
+    setSkillSuggestionsEnabled(readSkillSuggestionsEnabled(activePath))
+  }, [activePath])
+  useEffect(() => {
+    if (skillSuggestionsToast == null) return
+    const timer = window.setTimeout(() => setSkillSuggestionsToast(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [skillSuggestionsToast])
+  function setProjectSkillSuggestionsEnabled(enabled: boolean) {
+    setSkillSuggestionsEnabled(enabled)
+    writeSkillSuggestionsEnabled(activePath, enabled)
+    if (!enabled) {
+      setDismissedRecipeId(null)
+      setDismissedSuggestIds(new Set())
+      setSkillSuggestionsToast(Date.now())
+    } else {
+      setSkillSuggestionsToast(null)
+    }
+  }
   /** Live token-count preview for whatever is in the composer right now. */
   const [previewTokens, setPreviewTokens] = useState<{ tokens: number; exact: boolean } | null>(null)
   /** If the agent loop exhausted its budget on the last send, the user can click "+N turns" to extend. */
@@ -367,15 +838,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const composerDraftKeyRef = useRef<string | null>(null)
   const composerInputRef = useRef(input)
   const composerAttachmentsRef = useRef(attachments)
+  const composerAppliedSkillsRef = useRef(appliedSkills)
+  const composerDraftSaveTimerRef = useRef<number | null>(null)
+  const lastComposerHeightRef = useRef(0)
   reminderPinsPrefsRef.current = reminderPinsPrefs
   composerInputRef.current = input
   composerAttachmentsRef.current = attachments
+  composerAppliedSkillsRef.current = appliedSkills
 
   function resetComposerAfterSend() {
     const key = composerDraftKeyRef.current
     if (key) clearComposerDraft(key)
     setInput('')
+    setSuggestionInput('')
     setAttachments([])
+    setAppliedSkills([])
   }
 
   useEffect(() => {
@@ -390,6 +867,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       setComposerDraft(prevKey, {
         text: composerInputRef.current,
         attachments: composerAttachmentsRef.current,
+        appliedSkills: composerAppliedSkillsRef.current,
       })
     }
 
@@ -398,19 +876,41 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         ? useProject.getState().getComposerDraft(nextKey)
         : EMPTY_COMPOSER_DRAFT
       setInput(loaded.text)
+      setSuggestionInput(loaded.text)
       setAttachments(loaded.attachments)
+      setAppliedSkills(loaded.appliedSkills ?? [])
       composerDraftKeyRef.current = nextKey
     }
   }, [helpMode, activePath, activeChatId, setComposerDraft])
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSuggestionInput(input)
+    }, 140)
+    return () => window.clearTimeout(timer)
+  }, [input])
+
+  useEffect(() => {
     const key = composerDraftKeyRef.current
     if (!key) return
-    setComposerDraft(key, { text: input, attachments })
-  }, [input, attachments, setComposerDraft])
+    if (composerDraftSaveTimerRef.current != null) {
+      window.clearTimeout(composerDraftSaveTimerRef.current)
+    }
+    composerDraftSaveTimerRef.current = window.setTimeout(() => {
+      composerDraftSaveTimerRef.current = null
+      setComposerDraft(key, { text: composerInputRef.current, attachments: composerAttachmentsRef.current, appliedSkills: composerAppliedSkillsRef.current })
+    }, 220)
+    return () => {
+      if (composerDraftSaveTimerRef.current != null) {
+        window.clearTimeout(composerDraftSaveTimerRef.current)
+        composerDraftSaveTimerRef.current = null
+      }
+    }
+  }, [input, attachments, appliedSkills, setComposerDraft])
   const [dragOver, setDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [queueNotice, setQueueNotice] = useState<string | null>(null)
+  const [exportNotice, setExportNotice] = useState<{ title: string; detail: string; ok: boolean } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [contextCompactNotice, setContextCompactNotice] = useState<{ text: string; loading: boolean } | null>(null)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
@@ -427,6 +927,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const screenshotCounter = useRef(0)
   const warningTimer = useRef<number | null>(null)
   const queueNoticeTimer = useRef<number | null>(null)
+  const exportNoticeTimer = useRef<number | null>(null)
   const contextCompactTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
   const persistedAssistantBySendIdRef = useRef(new Map<number, {
@@ -654,6 +1155,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     queueNoticeTimer.current = window.setTimeout(() => setQueueNotice(null), 5000)
   }
 
+  function flashExportNotice(title: string, detail: string, ok = true) {
+    setExportNotice({ title, detail, ok })
+    if (exportNoticeTimer.current) window.clearTimeout(exportNoticeTimer.current)
+    exportNoticeTimer.current = window.setTimeout(() => setExportNotice(null), 7000)
+  }
+
   function flushPersistedAssistant(sendId: number, kind: 'content' | 'thinking' | 'both' = 'both') {
     const tracked = persistedAssistantBySendIdRef.current.get(sendId)
     if (!tracked) return
@@ -716,17 +1223,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     try {
       const result = await window.api.handoff.saveToDownloads(activeChatId)
       if (!result.ok) {
-        flashQueueNotice(`Handoff не сохранён: ${result.error}`)
+        flashExportNotice('Контекст не сохранён', result.error, false)
         return
       }
       try {
         await navigator.clipboard.writeText(result.markdown)
-        flashQueueNotice('Handoff сохранён в Загрузки и скопирован')
+        flashExportNotice('Контекст для передачи готов', `Файл сохранён: ${result.path}. Текст скопирован в буфер обмена.`)
       } catch {
-        flashQueueNotice('Handoff сохранён в Загрузки')
+        flashExportNotice('Контекст для передачи готов', `Файл сохранён: ${result.path}. Буфер обмена недоступен.`)
       }
     } catch (err) {
-      flashQueueNotice(`Handoff не сохранён: ${err instanceof Error ? err.message : String(err)}`)
+      flashExportNotice('Контекст не сохранён', err instanceof Error ? err.message : String(err), false)
     } finally {
       setHandoffBusy(false)
     }
@@ -737,10 +1244,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setHandoffBusy(true)
     try {
       const result = await window.api.handoff.exportTranscript(activeChatId)
-      if (!result.ok) { flashQueueNotice(`Транскрипт не сохранён: ${result.error}`); return }
-      flashQueueNotice('Транскрипт (полный) сохранён в Загрузки')
+      if (!result.ok) { flashExportNotice('Экспорт чата не сохранён', result.error, false); return }
+      flashExportNotice('Экспорт чата готов', `Полная история сохранена: ${result.path}.`)
     } catch (err) {
-      flashQueueNotice(`Транскрипт не сохранён: ${err instanceof Error ? err.message : String(err)}`)
+      flashExportNotice('Экспорт чата не сохранён', err instanceof Error ? err.message : String(err), false)
     } finally {
       setHandoffBusy(false)
     }
@@ -853,6 +1360,39 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         // Игнорируем все остальные event types для ревью (thought / usage /
         // tool-* — ревьюер работает в plain mode, тулзов не должно быть, а
         // thoughts нам в pill не нужны).
+        return
+      }
+      const chatOwnerProjectPath = owner?.kind === 'chat' && !owner.isHelp
+        ? (projectPath || owner.projectPath || null)
+        : null
+      if (
+        owner?.kind === 'chat'
+        && !owner.isHelp
+        && chatOwnerProjectPath
+        && event.type !== 'plan-approval'
+        && (!store.path || normalizeProjectPath(chatOwnerProjectPath) !== normalizeProjectPath(store.path))
+      ) {
+        const routedEvent = {
+          ...(event as unknown as { type: string; [k: string]: unknown }),
+          projectPath: chatOwnerProjectPath,
+          chatId: owner.chatId,
+          persistedByChat: true
+        }
+        store.applyEventToSession(chatOwnerProjectPath, routedEvent)
+        if (event.type === 'done') {
+          notifyAgentFinished(owner, chatOwnerProjectPath)
+        } else if (event.type === 'error') {
+          notifyAgentFinished(owner, chatOwnerProjectPath, true)
+        }
+        if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
+          store.setPendingPlan(null)
+        }
+        if (event.type === 'done' || event.type === 'error') {
+          clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
+          store.forgetSendOwner(id)
+          if (currentSendIdRef.current === id) currentSendIdRef.current = null
+          void flushQueuedForOwner(owner)
+        }
         return
       }
       // Route background-project events to the snapshot store so they don't
@@ -1240,6 +1780,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     pinChatToBottom(behavior)
   }
 
+  function handleAgentProgressToggle() {
+    if (!autoScrollEnabledRef.current) return
+    requestAnimationFrame(() => {
+      pinChatToBottom('smooth')
+      requestAnimationFrame(() => pinChatToBottom('smooth'))
+    })
+  }
+
   function toggleAutoScroll() {
     setAutoScrollEnabled(prev => {
       const next = !prev
@@ -1267,10 +1815,24 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
   useEffect(() => {
     if (!autoScrollEnabled) return
-    if (!stickToBottomRef.current && !pendingPinToBottomRef.current) return
-    pendingPinToBottomRef.current = false
-    pinChatToBottom('auto')
+    if (pendingPinToBottomRef.current || stickToBottomRef.current) {
+      pendingPinToBottomRef.current = false
+      pinChatToBottom('auto')
+    } else {
+      setShowScrollDown(messages.length > 0)
+    }
   }, [messages, autoScrollEnabled])
+
+  const animatedAssistantShownLength = animatedAssistantText?.shown.length ?? 0
+  useEffect(() => {
+    if (!autoScrollEnabled || animatedAssistantShownLength <= 0) return
+    if (pendingPinToBottomRef.current || stickToBottomRef.current) {
+      pendingPinToBottomRef.current = false
+      pinChatToBottom('auto')
+    } else {
+      setShowScrollDown(true)
+    }
+  }, [animatedAssistantShownLength, autoScrollEnabled])
 
   useEffect(() => {
     const el = streamRef.current
@@ -1279,6 +1841,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       if (!el) return
       const atBottom = isNearBottom(el)
       if (pendingPinToBottomRef.current) {
+        if (!atBottom) pendingPinToBottomRef.current = false
         setShowScrollDown(!atBottom && messages.length > 0)
         return
       }
@@ -1343,7 +1906,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const ta = textareaRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'
+    const nextHeight = Math.min(ta.scrollHeight, 220)
+    ta.style.height = `${nextHeight}px`
+    if (nextHeight !== lastComposerHeightRef.current) {
+      lastComposerHeightRef.current = nextHeight
+      if (autoScrollEnabledRef.current) pinChatToBottom('auto')
+    }
   }
   useEffect(autoGrow, [input])
 
@@ -1537,6 +2105,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   useEffect(() => () => {
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
     if (queueNoticeTimer.current) window.clearTimeout(queueNoticeTimer.current)
+    if (exportNoticeTimer.current) window.clearTimeout(exportNoticeTimer.current)
     if (contextCompactTimer.current) window.clearTimeout(contextCompactTimer.current)
     for (const [sendId] of persistedAssistantBySendIdRef.current) {
       finishPersistedAssistant(sendId)
@@ -1700,7 +2269,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
     if (!priorMessages) {
       const history = await window.api.chats.list(chatId)
-      priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
+      priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
       if (sameProject) {
         useProject.getState().seedChatSnapshot(chatId, priorMessages)
       }
@@ -1862,13 +2431,44 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     setQueuedMessagesState(queuedMessagesRef.current.filter(m => m.id !== id))
   }
 
+  async function removePendingSupplement(id: string) {
+    const item = pendingSupplementsRef.current.find(s => s.id === id)
+    if (!item) return
+    const nextSupplements = pendingSupplementsRef.current.filter(s => s.id !== id)
+    setPendingSupplements(nextSupplements)
+    if (queuedMessagesRef.current.length === 0 && nextSupplements.length === 0) {
+      setPendingBarExpanded(false)
+    }
+
+    if (item.messageId) {
+      void window.api.chats.updateMessage(item.messageId, CANCELLED_SUPPLEMENT_CONTENT).catch(() => {})
+      useProject.setState(state => ({
+        messages: state.messages.map(message =>
+          message.dbId === item.messageId
+            ? { ...message, content: CANCELLED_SUPPLEMENT_CONTENT }
+            : message
+        )
+      }))
+    }
+    flashQueueNotice(t.chat.pendingBarSupplementRemoved)
+  }
+
   async function appendTextToCurrentContext(text: string): Promise<boolean> {
     const clean = text.trim()
     if (!clean || !isStreaming) return false
     const sendId = currentSendIdRef.current
     const ctx = await ensureProjectForChat()
     const formatted = formatSupplementForAgent(clean)
-    insertMessageBeforeLast({ role: 'user', content: formatted })
+    let messageId: number | undefined
+    if (ctx?.path && ctx.activeChatId) {
+      try {
+        const row = await window.api.chats.append(ctx.activeChatId, ctx.path, 'user', formatted)
+        messageId = row.id
+      } catch {
+        messageId = undefined
+      }
+    }
+    insertMessageBeforeLast({ role: 'user', content: formatted, ...(messageId ? { dbId: messageId } : {}) })
     armAutoScrollForOutgoing()
 
     let status: PendingSupplementStatus = 'deferred'
@@ -1891,12 +2491,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       text: clean,
       at: Date.now(),
       status,
+      ...(messageId ? { messageId } : {}),
     }])
     setPendingBarExpanded(true)
-
-    if (ctx?.path && ctx.activeChatId) {
-      await window.api.chats.append(ctx.activeChatId, ctx.path, 'user', formatted)
-    }
     return true
   }
 
@@ -1931,6 +2528,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     })
   }
 
+  function applySkillToCurrentMessage(skill: Skill) {
+    setAppliedSkills(prev => (
+      prev.some(item => item.id === skill.id)
+        ? prev
+        : [...prev, toAppliedSkillRef(skill)]
+    ))
+    setDismissedSuggestIds(new Set())
+    setDismissedRecipeId(null)
+    window.requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
+  function removeAppliedSkill(id: string) {
+    setAppliedSkills(prev => prev.filter(skill => skill.id !== id))
+  }
+
   async function send(opts?: { text?: string; modelText?: string; displayText?: string; internalResume?: boolean; fromQueue?: boolean }) {
     const text = (opts?.text ?? input).trim()
     const modelText = (opts?.modelText ?? text).trim()
@@ -1941,6 +2553,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       return
     }
     const store = useProject.getState()
+    const messageAppliedSkills = (!opts?.text && !opts?.internalResume && !opts?.fromQueue)
+      ? appliedSkills
+      : []
+    const skillCatalog = useSkillsStore.getState().skills
+    const messageAppliedSkillDetails = resolveAppliedSkillDetails(messageAppliedSkills, skillCatalog)
+    const activeSkillIdForSend = useSkillsStore.getState().activeSkillId
+    const autoBoundSkillDetails = !opts?.internalResume
+      ? suggestScoredFromIndex(
+          modelText,
+          buildSkillIndex(skillCatalog),
+          activeSkillIdForSend,
+          new Set(messageAppliedSkills.map(skill => skill.id)),
+          4
+        )
+          .filter(item => item.score >= AUTO_BOUND_SKILL_MIN_SCORE)
+          .map(item => item.skill)
+      : []
 
     if (store.helpMode) {
       const helpChatId = store.helpChatId
@@ -1951,7 +2580,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       }
       const userAttachments = attachments
       store.clearHelpActivity()
-      store.setHelpAgentProgress(buildInitialAgentProgress(text || modelText || 'Новый запрос', provider.label))
+      store.setHelpAgentProgress(buildInitialAgentProgress(displayText || text || 'Новый запрос', provider.label))
       setExhausted(null)
       setCrossVerify(null)
       if (!opts?.text) {
@@ -1982,6 +2611,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       const assistantRow = await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'assistant', '')
       addHelpMessage({ role: 'assistant', content: '', dbId: assistantRow.id })
       setHelpStreaming(true)
+      setHelpAgentProgress(activateModelProgress(useProject.getState().help.agentProgress, provider.label))
       const allMessages = [...useProject.getState().help.messages].slice(0, -1)
       const activeSkill = useSkillsStore.getState().activeSkillId
         ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
@@ -2034,7 +2664,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       return
     }
     store.clearActivity()
-    store.setAgentProgress(buildInitialAgentProgress(text || modelText || 'Новый запрос', provider.label))
+    store.setAgentProgress(buildInitialAgentProgress(displayText || text || 'Новый запрос', provider.label))
+    const skillBindingProgressDetail = buildSkillBindingProgressDetail(messageAppliedSkillDetails, autoBoundSkillDetails)
+    if (skillBindingProgressDetail) {
+      setAgentProgress(reduceAgentProgress(useProject.getState().agentProgress, {
+        type: 'agent-progress',
+        id: 'skills-bound',
+        phase: 'context',
+        title: 'Подключаю скиллы',
+        detail: skillBindingProgressDetail,
+        status: 'done'
+      }))
+    }
     setExhausted(null)  // new send wipes any pending continue state
     setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify
     if (!opts?.text || opts?.modelText) {
@@ -2048,14 +2689,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     // отправкой. Это делает скиллы реально мощными — скилл может подгрузить
     // нужные данные (карточку, отчёт, контекст) автоматически.
     let enrichedText = modelText
-    const activeSkillForLoad = useSkillsStore.getState().activeSkillId
-      ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
+    const activeSkillForLoad = activeSkillIdForSend
+      ? useSkillsStore.getState().skills.find(s => s.id === activeSkillIdForSend)
       : null
-    if (activeSkillForLoad?.context_loaders?.length) {
+    const loaderSkill = uniqueSkills([activeSkillForLoad, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
+      .find(skill => skill.context_loaders?.length)
+    if (loaderSkill?.context_loaders?.length) {
       const isFirstUserMsg = !useProject.getState().messages.some(m => m.role === 'user')
       const trigger: 'chat_open' | 'slash_arg' = isFirstUserMsg ? 'chat_open' : 'slash_arg'
       try {
-        const loaded = await window.api.skills.runLoaders(activeSkillForLoad.id, {
+        const loaded = await window.api.skills.runLoaders(loaderSkill.id, {
           trigger,
           projectPath: path,
           arg: text.split(/\s+/)[0]  // первое слово как arg (для /dossier alfa-development)
@@ -2064,7 +2707,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           enrichedText = `${loaded.context}\n\n---\n\n${modelText}`
         }
       } catch (err) {
-        console.warn('[chat] skill loaders failed:', err)
+        console.warn('[chat] skill loaders failed:', loaderSkill.id, err)
       }
     }
     // F6: @-mentions — пользователь явно подмешал файлы (@path). Читаем их (бэкенд:
@@ -2081,13 +2724,24 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const isFirstUserMessage = !store.messages.some(m => m.role === 'user')
     armAutoScrollForOutgoing()
     if (!opts?.internalResume) {
-      addMessage({ role: 'user', content: opts?.modelText ? displayText : enrichedText, attachments: userAttachments })
+      addMessage({
+        role: 'user',
+        content: opts?.modelText ? displayText : enrichedText,
+        attachments: userAttachments,
+        ...(messageAppliedSkills.length ? { appliedSkills: messageAppliedSkills } : {})
+      })
     }
     const activeChatId = ctx.activeChatId
     if (path && activeChatId && !opts?.internalResume) {
       // В БД сохраняем оригинальный text пользователя (без loader-контекста),
       // чтобы при reload UI не показывал жирный системный блок.
-      await window.api.chats.append(activeChatId, path, 'user', summary)
+      await window.api.chats.append(
+        activeChatId,
+        path,
+        'user',
+        summary,
+        messageAppliedSkills.length ? { appliedSkills: messageAppliedSkills } : undefined
+      )
       if (isFirstUserMessage) {
         void store.autoTitleChatSession(activeChatId, text || summary)
       }
@@ -2097,6 +2751,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       : null
     addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
     setStreaming(true)
+    setAgentProgress(activateModelProgress(useProject.getState().agentProgress, provider.label))
     const allMessages = [...useProject.getState().messages].slice(0, -1)
     if (opts?.internalResume) {
       while (allMessages.length > 0 && allMessages[allMessages.length - 1].role === 'assistant') {
@@ -2109,41 +2764,46 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         allMessages[lastUserIndex] = { ...allMessages[lastUserIndex], content: enrichedText }
       }
     }
+    const modelMessages = withAppliedSkillContextForModel(allMessages, skillCatalog, autoBoundSkillDetails)
     const sendAgentMode = await readAgentMode(activeChatId, false)
     // Skill override: если активен скилл — system prompt берётся из его тела.
     // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
     // несовместим с тем что предлагает скилл. Например: скилл говорит 'claude'
     // (API), пользователь выбрал 'claude-cli' (CLI/подписка) — оба = Claude,
     // НЕ переключаем. Это сохраняет выбор пользователя по подписке/API.
-    const activeSkill = useSkillsStore.getState().activeSkillId
-      ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
+    const activeSkill = activeSkillIdForSend
+      ? useSkillsStore.getState().skills.find(s => s.id === activeSkillIdForSend)
       : null
+    const skillSystemPrompt = composeSkillSystemPrompt(activeSkill ?? null, messageAppliedSkillDetails, modelText, autoBoundSkillDetails)
+    const toolsAllow = mergeToolAllow([activeSkill, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
+    const recipe = firstRecipe([activeSkill, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
     let sendId: number
     // Crash-resume Фаза 2: re-send прерванного прогона → прокидываем runId, чтобы
     // ai:send продолжил с накопленным контекстом из чекпойнта. Консьюмим ref однократно.
     const resumeFromRunId = resumeFromRunIdRef.current
     resumeFromRunIdRef.current = null
-    if (activeSkill) {
+    if (activeSkill || skillSystemPrompt) {
       // Узнаём текущий provider пользователя — чтобы решить override или нет
-      const currentProvider = await window.api.settings.getKey('provider')
+      const currentProvider = activeSkill ? await window.api.settings.getKey('provider') : null
       // Provider/model override скилла (B5). Провайдер — только при разном
       // семействе (сохраняем выбор API/CLI). Модель — и при том же семействе.
-      const { providerId: overrideProvider, model: overrideModel } = resolveSkillOverride(activeSkill, currentProvider)
+      const { providerId: overrideProvider, model: overrideModel } = activeSkill
+        ? resolveSkillOverride(activeSkill, currentProvider)
+        : { providerId: undefined, model: undefined }
       // Anti-stall guard: некоторые скиллы — оркестраторы/штабы (los-hq, bos-hq,
       // навигаторы) с протоколом «жди пакет задачи / маршрутизируй / ✋ СТОП».
       // Базовый system-layer теперь НАСЛАИВАЕТСЯ под скилл (ipc/ai.ts передаёт
       // skillPrompt в prepareSystemContext — см. <skill_layer>), так что протокол
       // выполнения восстановлен. Но тело таких скиллов всё равно может сильно
       // давить «жди ТЗ»; nudge — дешёвое подкрепление: ясный запрос = действуй.
-      const antiStallNudge = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
-      sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
-        systemPrompt: activeSkill.systemPrompt + antiStallNudge,
+      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
+        ...(skillSystemPrompt ? { systemPrompt: skillSystemPrompt } : {}),
         ...(overrideProvider ? { providerId: overrideProvider } : {}),
         ...(overrideModel ? { model: overrideModel } : {}),
         // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
-        ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
+        ...(toolsAllow?.length ? { toolsAllow } : {}),
         // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
-        ...(activeSkill.recipe ? { recipe: activeSkill.recipe } : {}),
+        ...(recipe ? { recipe } : {}),
         effortLevel: useProject.getState().effortLevel,
         agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {})
@@ -2151,14 +2811,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     } else if (resumeFromRunId) {
       // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
       const effort = useProject.getState().effortLevel
-      sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
+      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         resumeFromRunId,
         agentMode: sendAgentMode,
         ...(effort !== 'standard' ? { effortLevel: effort } : {})
       })
     } else {
       const effort = useProject.getState().effortLevel
-      sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
+      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
         agentMode: sendAgentMode
       })
@@ -2216,7 +2876,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
           if (!priorMessages) {
             const history = await window.api.chats.list(payload.chatId)
-            priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, createdAt: m.createdAt, dbId: m.id }))
+            priorMessages = history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
             useProject.getState().seedChatSnapshot(payload.chatId, priorMessages)
           }
 
@@ -2359,7 +3019,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         </div>
       ) : projectName ? (
         <div className="gg-chat-project-bar" title={activePath ?? ''}>
-          <span className="gg-chat-project-icon">📁</span>
+          <span className="gg-chat-project-icon gg-folder-icon" aria-hidden="true" />
           <span className="gg-chat-project-name">{projectName}</span>
           {activeChatTitle && (
             <>
@@ -2371,35 +3031,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <div className="gg-chat-project-actions">
               <button
                 type="button"
-                className="gg-terminal-bar-btn"
-                onClick={() => void saveHandoffToDownloads()}
-                disabled={handoffBusy || activeChatId == null}
-                title="Сохранить handoff в Загрузки и скопировать для другого агента"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                <span>{handoffBusy ? 'Сохраняю' : 'Handoff'}</span>
-              </button>
-              <button
-                type="button"
-                className="gg-terminal-bar-btn"
-                onClick={() => void exportTranscript()}
-                disabled={handoffBusy || activeChatId == null}
-                title="Экспортировать полный транскрипт диалога в Markdown (Загрузки)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="8" y1="13" x2="16" y2="13" />
-                  <line x1="8" y1="17" x2="16" y2="17" />
-                </svg>
-                <span>Транскрипт</span>
-              </button>
-              <button
-                type="button"
                 className={`gg-terminal-bar-btn ${rightPanel === 'terminal' ? 'is-open' : ''}`}
                 onClick={() => onSelectRightPanel(rightPanel === 'terminal' ? 'none' : 'terminal')}
                 title={t.chat.dockTerminal}
@@ -2409,6 +3040,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   <line x1="12" y1="19" x2="20" y2="19" />
                 </svg>
                 <span>{t.chat.dockTerminal}</span>
+              </button>
+              <button
+                type="button"
+                className={`gg-terminal-bar-btn gg-terminal-bar-btn-sidechat ${rightPanel === 'sidechat' ? 'is-open' : ''}`}
+                onClick={() => {
+                  if (rightPanel === 'sidechat') onSelectRightPanel('none')
+                  else onOpenSideChat()
+                }}
+                title={t.chat.dockSideChat}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="3" y="4" width="8" height="16" rx="1.5" />
+                  <path d="M13 8h6a2 2 0 0 1 2 2v8l-3-2.5H13a2 2 0 0 1-2-2V8z" />
+                </svg>
+                <span>{t.chat.dockSideChat}</span>
               </button>
             </div>
           )}
@@ -2585,9 +3231,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         {messages.map((m, i) => {
           const isLast = i === messages.length - 1
           const isStreamingAssistant = isLast && m.role === 'assistant' && isStreaming
+          const hasAgentProgress = isLast && m.role === 'assistant' && agentProgress.length > 0
+          const showInlineAgentProgress = hasAgentProgress && !isStreamingAssistant
           // Render activity rows just before the (last) assistant message
           const showActivity = isLast && m.role === 'assistant' && activity.length > 0
-          const showAgentProgress = isLast && m.role === 'assistant' && agentProgress.length > 0
           const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
           const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
@@ -2597,6 +3244,50 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           const showDateDivider = m.createdAt != null
             && (prevMsg?.createdAt == null || !isSameLocalDay(prevMsg.createdAt, m.createdAt))
           const supplement = m.role === 'user' && m.content ? parseSupplementMessage(m.content) : null
+          const hideProgressMeta = m.role === 'assistant' && hasAgentProgress
+          const hideStreamingProgressPlaceholder = isStreamingAssistant
+            && hasAgentProgress
+            && !m.content?.trim()
+            && !m.thinking
+            && !m.attachments?.length
+            && changedFiles.length === 0
+          const isAnimatedAssistant = m.role === 'assistant'
+            && i === lastAssistantInfo?.index
+            && animatedAssistantText?.key === lastAssistantAnimationKey
+          const renderedContent = isAnimatedAssistant
+            ? (animatedAssistantText?.shown ?? m.content)
+            : m.content
+          const isEmptyInterruptedAssistant = m.role === 'assistant'
+            && !isStreamingAssistant
+            && !renderedContent?.trim()
+            && !m.thinking?.trim()
+            && !m.attachments?.length
+            && !showInlineAgentProgress
+            && !showActivity
+            && !showPreflights
+            && !showSubagents
+          if (isEmptyInterruptedAssistant) {
+            if (resumableRuns.length > 0) return null
+            return (
+              <Fragment key={i}>
+                {showDateDivider && (
+                  <div className="gg-chat-date-divider" role="separator" aria-label={formatChatDateDivider(m.createdAt!)}>
+                    <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
+                  </div>
+                )}
+                <div className="gg-msg gg-msg-assistant gg-msg-agent-progress-standalone">
+                  <div className="gg-agent-progress-inline is-standalone">
+                    <AgentProgressPanel
+                      entries={buildInterruptedAnswerProgress(m.createdAt, provider.label)}
+                      isStreaming={false}
+                      finishedAt={m.createdAt ?? null}
+                      onToggleOpen={handleAgentProgressToggle}
+                    />
+                  </div>
+                </div>
+              </Fragment>
+            )
+          }
           return (
             <Fragment key={i}>
             {showDateDivider && (
@@ -2605,13 +3296,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               </div>
             )}
             <div className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}${supplement ? ' is-supplement' : ''}`}>
-              {showAgentProgress && (
-                <AgentProgressPanel
-                  entries={agentProgress}
-                  isStreaming={isStreamingAssistant}
-                  elapsedMs={isStreamingAssistant && streamStartedAt != null ? tickNow - streamStartedAt : null}
-                  durationMs={m.responseDurationMs ?? null}
-                />
+              {showInlineAgentProgress && (
+                <div className="gg-agent-progress-inline">
+                  <AgentProgressPanel
+                    entries={agentProgress}
+                    isStreaming={false}
+                    durationMs={agentProgressDurationMs}
+                    finishedAt={agentProgressFinishedAt}
+                    onToggleOpen={handleAgentProgressToggle}
+                  />
+                </div>
               )}
               {showActivity && (
                 <div className="gg-activity-list">
@@ -2700,7 +3394,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   </div>
                 )
               })}
-              {(m.role === 'assistant' || m.role === 'user') && (
+              {(m.role === 'assistant' || m.role === 'user') && !hideProgressMeta && (
                 <div className="gg-msg-meta">
                   {m.role === 'assistant' && (
                     <span className="gg-msg-author">{provider.label}</span>
@@ -2714,7 +3408,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                       {formatMessageClock(m.createdAt)}
                     </time>
                   )}
-                  {isStreamingAssistant && streamStartedAt != null && (
+                  {isStreamingAssistant && streamStartedAt != null && !hasAgentProgress && (
                     <span className="gg-msg-duration is-live" title={t.chat.responseRunningTitle}>
                       {t.chat.responseRunning.replace('{duration}', formatDuration(tickNow - streamStartedAt))}
                     </span>
@@ -2726,6 +3420,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   )}
                 </div>
               )}
+              {!hideStreamingProgressPlaceholder && (
               <div className="gg-msg-bubble">
                 {m.role === 'assistant' && m.thinking && (() => {
                   // Edge case: модель эмитнула ТОЛЬКО thinking без видимого
@@ -2763,9 +3458,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                     ))}
                   </div>
                 ) : null}
-                {m.content
+                {renderedContent
                   ? (m.role === 'assistant'
-                      ? <Markdown text={m.content} />
+                      ? <Markdown text={renderedContent} />
                       : supplement
                         ? (
                           <>
@@ -2773,14 +3468,30 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                             <span style={{ whiteSpace: 'pre-wrap' }}>{supplement.body}</span>
                           </>
                         )
-                        : <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>)
+                        : <span style={{ whiteSpace: 'pre-wrap' }}>{renderedContent}</span>)
                   : isStreamingAssistant
                     ? <div className="gg-typing"><span /><span /><span /></div>
                     : null
                 }
               </div>
+              )}
               {m.role === 'user' && m.source === 'reminder' && (
                 <div className="gg-msg-source-note">Отправлено автоматически из раздела Напоминания</div>
+              )}
+              {m.role === 'user' && !!m.appliedSkills?.length && (
+                <div className="gg-msg-skill-note" title="Эти скиллы были применены только к этому сообщению">
+                  <span className="gg-msg-skill-note-label">
+                    {m.appliedSkills.length === 1 ? 'Применён скилл' : 'Применены скиллы'}
+                  </span>
+                  <span className="gg-msg-skill-note-list">
+                    {m.appliedSkills.map(skill => (
+                      <span key={skill.id} className="gg-msg-skill-note-pill">
+                        {skill.icon && <span aria-hidden>{skill.icon}</span>}
+                        <span>{skillDisplayName(skill)}</span>
+                      </span>
+                    ))}
+                  </span>
+                </div>
               )}
               {m.content && !isStreamingAssistant && (
                 <MessageActions text={m.content} />
@@ -2835,6 +3546,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
           </div>
         )}
+        {exportNotice && (
+          <div className="gg-chat-export-notice-anchor">
+            <div className={`gg-chat-export-notice ${exportNotice.ok ? 'is-ok' : 'is-error'}`} role="status" aria-live="polite">
+              <div className="gg-chat-export-notice-icon" aria-hidden>{exportNotice.ok ? '✓' : '!'}</div>
+              <div className="gg-chat-export-notice-copy">
+                <div className="gg-chat-export-notice-title">{exportNotice.title}</div>
+                <div className="gg-chat-export-notice-detail">{exportNotice.detail}</div>
+              </div>
+              <button
+                type="button"
+                className="gg-chat-export-notice-close"
+                onClick={() => setExportNotice(null)}
+                aria-label="Закрыть уведомление"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         {(queuedMessages.length > 0 || (isStreaming && pendingSupplements.length > 0)) && (
           <ComposerPendingBar
             queueItems={queuedMessages}
@@ -2842,6 +3572,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             expanded={pendingBarExpanded}
             onToggle={() => setPendingBarExpanded(v => !v)}
             onRemoveQueueItem={removeQueuedMessage}
+            onRemoveSupplement={id => void removePendingSupplement(id)}
             onMoveQueueItemToContext={id => void moveQueuedMessageToContext(id)}
             onEditQueueItem={editQueuedMessage}
           />
@@ -2859,6 +3590,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           onClose={() => { setPipelineWizardOpen(false); setPipelineInitialBrief(undefined); setPipelineWizardMode('agency') }}
           onStarted={onPipelineStarted}
         />
+      )}
+
+      {isStreaming && agentProgress.length > 0 && (
+        <div className="gg-agent-progress-host">
+          <AgentProgressPanel
+            entries={agentProgress}
+            isStreaming={isStreaming}
+            elapsedMs={agentProgressElapsedMs}
+            durationMs={agentProgressDurationMs}
+            finishedAt={agentProgressFinishedAt}
+            onToggleOpen={handleAgentProgressToggle}
+          />
+        </div>
       )}
 
       <div className="gg-composer">
@@ -2902,16 +3646,70 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
           </div>
         )}
+        {appliedSkills.length > 0 && (
+          <div className="gg-applied-skills-draft" aria-label="Скиллы, применённые к текущему сообщению">
+            <span className="gg-applied-skills-draft-label">К сообщению применено</span>
+            <div className="gg-applied-skills-draft-list">
+              {appliedSkills.map(skill => (
+                <span key={skill.id} className="gg-applied-skill-chip">
+                  {skill.icon && <span aria-hidden>{skill.icon}</span>}
+                  <span>{skillDisplayName(skill)}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAppliedSkill(skill.id)}
+                    title={`Убрать скилл ${skillDisplayName(skill)} из этого сообщения`}
+                    aria-label={`Убрать скилл ${skillDisplayName(skill)} из этого сообщения`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {!isHelpChat && activeSkillForComposer && (
+          <div className="gg-active-skill-bar">
+            <div className="gg-active-skill-main">
+              <span className="gg-active-skill-dot" aria-hidden />
+              <span className="gg-active-skill-kicker">Активен скилл</span>
+              <strong>{skillDisplayName(activeSkillForComposer)}</strong>
+              <span className="gg-active-skill-detail">следующее сообщение пойдёт по его инструкции</span>
+            </div>
+            <button
+              type="button"
+              className="gg-active-skill-clear"
+              onClick={() => useSkillsStore.getState().setActiveSkill(null)}
+            >
+              Снять
+            </button>
+          </div>
+        )}
+        {!isHelpChat && skillSuggestionsToast != null && (
+          <div className="gg-skill-suggest-toast" role="status" aria-live="polite">
+            Рекомендации скиллов скрыты. Вернуть их можно в «Инструментах чата».
+          </div>
+        )}
         {suggestedRecipe && (
-          <div className="gg-skill-suggest">
-            <span className="gg-skill-suggest-text">
-              🚦 Похоже, задача под рецепт <strong>{suggestedRecipe.icon ? suggestedRecipe.icon + ' ' : ''}{suggestedRecipe.name ?? suggestedRecipe.id}</strong> (жёсткий workflow)
-            </span>
+          <div className="gg-skill-suggest is-recipe">
+            <div className="gg-skill-suggest-icon" aria-hidden>{suggestedRecipe.icon ?? '◎'}</div>
+            <div className="gg-skill-suggest-main">
+              <div className="gg-skill-suggest-kicker">Рекомендованный workflow</div>
+              <div className="gg-skill-suggest-title">{skillDisplayName(suggestedRecipe)}</div>
+              <div className="gg-skill-suggest-detail">
+                Применится только к этому сообщению и даст модели строгий порядок работы.
+              </div>
+            </div>
             <button
               type="button"
               className="gg-skill-suggest-accept"
-              onClick={() => { useSkillsStore.getState().setActiveSkill(suggestedRecipe.id); setDismissedRecipeId(null) }}
-            >Включить</button>
+              onClick={() => applySkillToCurrentMessage(suggestedRecipe)}
+            >Применить</button>
+            <button
+              type="button"
+              className="gg-skill-suggest-project-off"
+              onClick={() => setProjectSkillSuggestionsEnabled(false)}
+              title="Отключить рекомендации скиллов в этом проекте"
+            >Не показывать</button>
             <button
               type="button"
               className="gg-skill-suggest-dismiss"
@@ -2920,20 +3718,52 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             >×</button>
           </div>
         )}
-        {suggestedSkill && !suggestedRecipe && (
+        {suggestedSkills.length > 0 && !suggestedRecipe && (
           <div className="gg-skill-suggest">
-            <span className="gg-skill-suggest-text">
-              💡 Похоже, подойдёт скилл <strong>{suggestedSkill.icon ? suggestedSkill.icon + ' ' : ''}{suggestedSkill.name ?? suggestedSkill.id}</strong>
-            </span>
+            <div className="gg-skill-suggest-icon" aria-hidden>{suggestedSkills.length === 1 ? (suggestedSkills[0].icon ?? '◎') : '＋'}</div>
+            <div className="gg-skill-suggest-main">
+              <div className="gg-skill-suggest-kicker">
+                {suggestedSkills.length === 1 ? 'Рекомендованный скилл' : 'Рекомендованные скиллы'}
+              </div>
+              <div className="gg-skill-suggest-title">
+                {suggestedSkills.length === 1 ? skillDisplayName(suggestedSkills[0]) : `${suggestedSkills.length} регламента под задачу`}
+              </div>
+              <div className="gg-skill-suggest-detail">
+                Подключаются только к текущему сообщению и передаются модели как прямое указание.
+              </div>
+              <div className="gg-skill-suggest-chips" aria-label="Подходящие скиллы">
+                {suggestedSkills.map(skill => (
+                  <span key={skill.id} className="gg-skill-suggest-chip">
+                    {skill.icon && <span aria-hidden>{skill.icon}</span>}
+                    <span>{skillDisplayName(skill)}</span>
+                    <button
+                      type="button"
+                      onClick={() => applySkillToCurrentMessage(skill)}
+                      title={`Применить ${skillDisplayName(skill)} к текущему сообщению`}
+                    >+</button>
+                  </span>
+                ))}
+              </div>
+            </div>
             <button
               type="button"
               className="gg-skill-suggest-accept"
-              onClick={() => { useSkillsStore.getState().setActiveSkill(suggestedSkill.id); setDismissedSuggestId(null) }}
-            >Активировать</button>
+              onClick={() => suggestedSkills.forEach(skill => applySkillToCurrentMessage(skill))}
+            >{suggestedSkills.length === 1 ? 'Применить' : 'Применить все'}</button>
+            <button
+              type="button"
+              className="gg-skill-suggest-project-off"
+              onClick={() => setProjectSkillSuggestionsEnabled(false)}
+              title="Отключить рекомендации скиллов в этом проекте"
+            >Не показывать</button>
             <button
               type="button"
               className="gg-skill-suggest-dismiss"
-              onClick={() => setDismissedSuggestId(suggestedSkill.id)}
+              onClick={() => setDismissedSuggestIds(prev => {
+                const next = new Set(prev)
+                suggestedSkills.forEach(skill => next.add(skill.id))
+                return next
+              })}
               title="Скрыть предложение"
             >×</button>
           </div>
@@ -3238,7 +4068,28 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                       {!isHelpChat && (
                         <div className="gg-chat-settings-item">
                           <span className="gg-chat-settings-label">Инструменты</span>
-                          <ComposerToolsMenu onInject={injectTemplate} />
+                          <ComposerToolsMenu
+                            onInject={injectTemplate}
+                            onSaveHandoff={saveHandoffToDownloads}
+                            onExportTranscript={exportTranscript}
+                            exportBusy={handoffBusy}
+                          />
+                        </div>
+                      )}
+                      {!isHelpChat && (
+                        <div className="gg-chat-settings-item">
+                          <span className="gg-chat-settings-label">Скиллы</span>
+                          <button
+                            type="button"
+                            className="gg-chat-settings-toggle-control"
+                            onClick={() => setProjectSkillSuggestionsEnabled(!skillSuggestionsEnabled)}
+                            title="Показывать автоматические рекомендации скиллов в этом проекте"
+                          >
+                            <span className="gg-chat-settings-toggle-text">Рекомендации скиллов</span>
+                            <span className={`gg-toggle ${skillSuggestionsEnabled ? 'is-on' : ''}`} aria-hidden>
+                              <span className="gg-toggle-knob" />
+                            </span>
+                          </button>
                         </div>
                       )}
                       {!isHelpChat && !activePipeline && (
@@ -3291,7 +4142,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   ▶ Agency task
                 </button>
               )}
-              {!isHelpChat && <ComposerToolsMenu onInject={injectTemplate} />}
+              {!isHelpChat && (
+                <ComposerToolsMenu
+                  onInject={injectTemplate}
+                  onSaveHandoff={saveHandoffToDownloads}
+                  onExportTranscript={exportTranscript}
+                  exportBusy={handoffBusy}
+                />
+              )}
               <ModePicker
                 mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
                 onChange={applyMode}
@@ -3303,26 +4161,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           </div>
         </div>
       </div>
-
-      {activePath && (
-        <div className="gg-chat-sidechat-dock">
-          <button
-            type="button"
-            className={`gg-chat-sidechat-dock-btn ${rightPanel === 'sidechat' ? 'is-active' : ''}`}
-            onClick={() => {
-              if (rightPanel === 'sidechat') onSelectRightPanel('none')
-              else onOpenSideChat()
-            }}
-            title={t.chat.dockSideChat}
-          >
-            <svg className="gg-chat-sidechat-dock-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="4" width="8" height="16" rx="1.5" />
-              <path d="M13 8h6a2 2 0 0 1 2 2v8l-3-2.5H13a2 2 0 0 1-2-2V8z" />
-            </svg>
-            <span>{t.chat.dockSideChat}</span>
-          </button>
-        </div>
-      )}
     </div>
   )
 }

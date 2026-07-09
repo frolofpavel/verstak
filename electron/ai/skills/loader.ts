@@ -12,7 +12,7 @@
  */
 
 import { readdir, readFile, mkdir } from 'fs/promises'
-import { join } from 'path'
+import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { parseSkillDoc } from './frontmatter'
 import { parseRecipe } from './recipe'
@@ -181,18 +181,23 @@ async function loadFromServer(serverBase: string): Promise<Skill[]> {
   }
 }
 
-function parseSkillFile(
+export function parseSkillFile(
   raw: string,
   sourceRef: string,
   source: Skill['source'],
   folderId?: string
 ): Skill | null {
-  const doc = parseSkillDoc(raw)
+  const normalizedRaw = raw.replace(/^\uFEFF/, '')
+  const fileId = basename(sourceRef.includes('#') ? sourceRef.slice(sourceRef.lastIndexOf('#') + 1) : sourceRef, extname(sourceRef))
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+  const doc = parseSkillDoc(normalizedRaw)
   const fm = doc.frontmatter as Partial<SkillFrontmatter>
   const id =
     (typeof fm.id === 'string' && fm.id) ||
     (typeof fm.name === 'string' && fm.name) ||
-    folderId
+    folderId ||
+    (fileId && fileId.toLowerCase() !== 'skill' ? fileId : undefined)
   if (!id) {
     console.warn(`[skills] ${sourceRef}: missing id/name in frontmatter, skipping`)
     return null
@@ -200,7 +205,8 @@ function parseSkillFile(
   const slash =
     (typeof fm.slash === 'string' && fm.slash) ||
     (typeof fm.name === 'string' && fm.name.replace(/^\//, '')) ||
-    folderId
+    folderId ||
+    id
   return {
     id,
     name: typeof fm.name === 'string' ? fm.name : id,

@@ -58,14 +58,15 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
 
   // Messages
   ipcMain.handle('chats:list', (_e, sessionId: number) => chats.listBySession(sessionId))
-  ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => {
-    const message = chats.appendToSession(sessionId, projectPath, role, content)
+  ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) => {
+    const message = chats.appendToSession(sessionId, projectPath, role, content, meta)
     logRuntime('chat_message.append', {
       sessionId,
       messageId: message.id,
       projectPath,
       role,
-      contentLength: content.length
+      contentLength: content.length,
+      appliedSkillsCount: message.appliedSkills.length
     })
     return message
   })
