@@ -110,4 +110,21 @@ describe('codex-cli stream parsing — chat-response regression', () => {
     // Ровно один done — turn.completed и close не должны дублировать терминал.
     expect(events.filter(e => e.type === 'done')).toHaveLength(1)
   })
+
+  it('проецирует родные tool-item Codex (command_execution/file_change) как tool-call', async () => {
+    const bin = makeFakeCodex(dir, [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thr_t' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'c1', type: 'command_execution', command: 'npm test' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'p1', type: 'file_change', path: 'src/a.ts' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'a1', type: 'agent_message', text: 'Готово.' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 10 } })
+    ])
+    const provider = createCodexCliProvider({ binary: bin, cwd: dir })
+    const events = await drain(provider)
+    const tools = events.filter(e => e.type === 'tool-call') as Array<Extract<ChatEvent, { type: 'tool-call' }>>
+    expect(tools.map(t => t.call.name)).toEqual(['run_command', 'apply_patch'])
+    expect(tools[0].call.args).toEqual({ command: 'npm test' })
+    expect(tools[1].call.args).toEqual({ path: 'src/a.ts' })
+    expect(events.filter(e => e.type === 'text').map(e => (e as { text: string }).text).join('')).toContain('Готово')
+  })
 })

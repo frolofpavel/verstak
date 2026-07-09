@@ -97,7 +97,65 @@
 
 - **1.9.3 фаза 1 (реестр + Claude token):** ✅ в main (`919b699`).
 - **1.9.3 Codex (CODEX_HOME dir):** ✅ в main.
-- Осталось: Kimi/Z.ai (ключи Павла) → smoke; 1.9.4 (детектор лимита + авто-переключение); релиз 1.9.3.
+- **1.9.4 (детектор лимита + авто-переключение аккаунта):** ✅ в main (`aec6cfb`).
+- Осталось: Kimi/Z.ai (ключи Павла) → smoke; релиз 1.9.3; **устранение «укороченности» (ниже, §6)**.
 
 ---
-*2026-07-09. Заземлён в коде + разведка config-dir проверена веб-источниками. Развилка: выбран путь A (пул одного провайдера), сделано на Claude+Codex.*
+
+# §6. Устранение «укороченности» CLI-подписок (план работ, 10.07)
+
+## Проблема (заземлено в коде + разведке Hermes/OpenClaw)
+
+Мы подключаем CLI на **самом слабом из 3 уровней** — one-shot headless (`claude --print`, `codex exec`, `grok -p`). Отсюда ощущение «просто окно ввода текста»:
+1. **Без живой сессии** — спавн заново + пере-сериализация истории на каждое сообщение (`cli-prompt.ts`); нет multi-turn/кэша CLI.
+2. **Подписка второсортна** — `claude --print` НЕ использует Max OAuth (нужен setup-token; `claude-cli.ts:80`).
+3. **Нет родного агентского UX CLI** — CLI отрабатывает одним закрытым выстрелом.
+
+**3 уровня интеграции (разведка конкурентов):**
+
+| Уровень | Механизм | Verstak | Hermes | OpenClaw |
+|---|---|---|---|---|
+| 1. One-shot headless | `--print`/`exec`, спавн на сообщение | ✅ все CLI | Copilot | fallback |
+| 2. Живая сессия + родной runtime | ACP-протокол / `codex app-server` JSON-RPC / `claude --resume --session-id` | ❌ | Codex app-server | ACP (claude/codex/gemini) |
+| 3. Direct-API на подписочном OAuth | OAuth-токен из `~/.claude/.credentials.json` → `api.anthropic.com` Bearer + хедеры `anthropic-beta: oauth-2025-04-20`, `user-agent: claude-cli/<ver>` | ❌ | ✅ | ✅ |
+
+## Путь A — Direct-API на OAuth подписки (РЕКОМЕНДОВАН, малый лифт)
+
+**Идея:** для Claude Max не гонять `--print`, а взять OAuth-токен подписки и звать Anthropic Messages API **напрямую** через НАШ агентский цикл. Подписка first-class, все наши тулзы/undo/checkpoints/review-gate/мультиагент композятся, контроль-DNA сохранён.
+
+**Лифт подтверждён малым:** `claude.ts` строит `new Anthropic({ apiKey })`; SDK ^0.97 поддерживает `authToken` (Bearer) + `defaultHeaders`.
+
+### Фаза A1 — OAuth-транспорт в claude-провайдере (S/M)
+- `electron/ai/claude.ts`: опц. `authToken` → `new Anthropic({ authToken })` + `defaultHeaders` (`anthropic-beta: oauth-2025-04-20`, `user-agent: claude-cli/<ver>`). Приоритет authToken над apiKey.
+- Новый provider-режим (варианты — решить): (a) новый id `claude-max`; ИЛИ (b) когда активен claude-cli аккаунт — роутить на direct-API вместо `--print`. **Рекомендация: (b)** — реестр аккаунтов 1.9.3 уже хранит токен, меньше новых сущностей.
+- **TDD:** claude.ts с authToken ставит Bearer + beta-хедеры (не x-api-key); роутинг выбирает direct при наличии аккаунта.
+- **Done:** прогон Claude под Max-токеном идёт через наш loop (наши тулзы работают), не через `--print`.
+
+### Фаза A2 — токен-менеджмент + рефреш (M)
+- Источник OAuth: из аккаунт-реестра (token-режим) ИЛИ чтение `~/.claude/.credentials.json`.
+- **Рефреш:** Max OAuth-токен протухает (~часы) — нужен refresh-flow (competitors рефрешат из `.credentials.json`). Реализовать авто-рефреш по 401/протуханию.
+- **Done:** долгая сессия не падает на протухшем токене (авто-рефреш).
+
+### Фаза A3 — роутинг + UX (S)
+- Per-chat выбор: Claude Max (OAuth-direct) vs Claude API (ключ). Композит с 1.9.4 авто-свитчем аккаунтов (лимит одного Max-аккаунта → следующий из пула, теперь на direct-API пути).
+- **Done:** юзер видит богатый агентский поток Verstak на Max-подписке, не «окно текста».
+
+## ⚠️ Развилка/риск для решения Павла — ToS Anthropic
+
+Прямое использование Max OAuth-токена вне официального Claude Code может **нарушать ToS Anthropic** (Max рассчитан на официальные интерфейсы). Hermes/OpenClaw это делают на свой риск (маскируются под `user-agent: claude-cli`). **Нужно решение Павла:** идём на этот риск (как конкуренты) или держим Max только через официальный `--print`/setup-token путь. Без этого решения A1 не стартуем.
+
+## Путь B — Живая сессия + родной runtime (отложено, большой лифт)
+
+Codex через `codex app-server` (JSON-RPC сессия, как Hermes: persistent, `thread/start`+`turn/start`, проекция событий), Claude через `claude --resume --session-id`. Даёт буквальный «родной чат CLI». Минусы: большая интеграция (протокол сессии/lifecycle/event-projection) + **уступка контроля циклу CLI** (против нашей ДНК). Отдельная ставка после Пути A, если захотим.
+
+## Порядок работ (предложение)
+
+1. **Решение по ToS-риску** (Павел) — гейт для A1.
+2. Доделка «полых» фич (уведомления-матрица, PTC+smart-approve тумблеры, README-overclaim) — отдельная пачка (обсуждали, делаем «завтра»).
+3. Kimi/Z.ai smoke (ключи Павла).
+4. **Путь A: A1 → A2 → A3** (Claude Max first-class через наш loop).
+5. Релиз 1.9.3 (весь накопленный пласт).
+6. Путь B — по желанию, отдельной большой ставкой.
+
+---
+*2026-07-10. Разведка Hermes/OpenClaw (verstak-competitor-audit) проверена по коду: Hermes codex_app_server_session.py + transports/anthropic.py (OAuth-direct); OpenClaw ACP-harness + cli-shared.ts. Лифт Пути A проверен в claude.ts + SDK. Ждёт решения Павла по ToS-развилке.*

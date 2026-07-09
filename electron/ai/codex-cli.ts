@@ -82,7 +82,7 @@ function findBinary(): string {
 
 interface CliEvent {
   type: string
-  item?: { type?: string; text?: string }
+  item?: { type?: string; text?: string; command?: string; path?: string; changes?: unknown; name?: string; tool?: string; server?: string; id?: string; query?: string }
   error?: string
   /** Codex token counts. Field names track OpenAI completions API:
    *  prompt_tokens (input), completion_tokens (output), cache hits as
@@ -101,6 +101,17 @@ interface CliEvent {
     output_tokens?: number
     cached_input_tokens?: number
   }
+}
+
+// Item-типы Codex, несущие родное tool-исполнение → имя для Timeline-проекции.
+const CODEX_TOOL_ITEMS: Record<string, string> = {
+  command_execution: 'run_command',
+  local_shell_call: 'run_command',
+  file_change: 'apply_patch',
+  patch: 'apply_patch',
+  apply_patch: 'apply_patch',
+  mcp_tool_call: 'mcp_tool',
+  web_search: 'web_search',
 }
 
 export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider {
@@ -204,6 +215,21 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
           // последний; используем как ответ только если финального agent_message
           // так и не пришло (flushReasoningFallback на завершении турна).
           lastReasoning = ev.item.text
+        } else if (ev.type === 'item.completed' && ev.item?.type && CODEX_TOOL_ITEMS[ev.item.type]) {
+          // Проекция родного tool-исполнения Codex в Timeline (раньше выбрасывалось).
+          // Codex УЖЕ выполнил инструмент внутри `exec` — эмитим информационно;
+          // runPlainConversation релеит как завершённую tool-activity (наш executor
+          // это не запускает, без двойного исполнения).
+          const it = ev.item
+          const name = it.tool || it.name || CODEX_TOOL_ITEMS[it.type!]
+          const args: Record<string, unknown> = {}
+          if (it.command) args.command = it.command
+          if (it.path) args.path = it.path
+          if (it.query) args.query = it.query
+          if (it.server) args.server = it.server
+          if (it.changes) args.changes = it.changes
+          queue.push({ type: 'tool-call', call: { id: it.id ?? `codex-${Date.now()}`, name, args } })
+          wake()
         } else if (ev.type === 'turn.completed') {
           // turn.completed carries final token usage in some Codex versions.
           // Field names vary: `usage.{input,output,cached_input}_tokens` OR
