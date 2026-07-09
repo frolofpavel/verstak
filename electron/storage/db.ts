@@ -1067,6 +1067,16 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_subscription_accounts_provider ON subscription_accounts(provider_id, active);
       `)
     }
+  },
+  {
+    version: 45,
+    description: 'subscription_accounts.cooling_until: ETA сброса лимита (1.9.4) — аккаунт «остывает» до этого времени.',
+    run: (db: DB) => {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subscription_accounts'").get()
+      if (!table) return
+      const cols = (db.prepare('PRAGMA table_info(subscription_accounts)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('cooling_until')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN cooling_until INTEGER')
+    }
   }
 ]
 

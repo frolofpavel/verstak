@@ -18,8 +18,10 @@ export interface SubscriptionAccount {
   /** Base URL (для coding-endpoint'ов Kimi/Z.ai). null = дефолт провайдера. */
   baseUrl: string | null
   active: boolean
-  /** Состояние (1.9.4): ready | cooling | exhausted | logged_out. */
+  /** Состояние (1.9.4): ready | cooling. */
   state: string
+  /** Epoch ms до которого аккаунт «остывает» после лимита (null = не остывает). */
+  coolingUntil: number | null
   createdAt: number
   lastUsedAt: number | null
 }
@@ -29,7 +31,7 @@ interface Row extends Omit<SubscriptionAccount, 'active'> { active: number }
 const SELECT = `
   SELECT id, provider_id as providerId, label, cred_ref as credRef,
          config_dir as configDir, base_url as baseUrl, active, state,
-         created_at as createdAt, last_used_at as lastUsedAt
+         cooling_until as coolingUntil, created_at as createdAt, last_used_at as lastUsedAt
   FROM subscription_accounts
 `
 
@@ -99,6 +101,43 @@ export function touchSubscriptionAccount(db: Database, id: number, when = Date.n
 
 export function setAccountState(db: Database, id: number, state: string): void {
   db.prepare('UPDATE subscription_accounts SET state = ? WHERE id = ?').run(state, id)
+}
+
+/** Пометить аккаунт «остывающим» после лимита (до coolingUntil epoch ms). */
+export function markAccountCooling(db: Database, id: number, coolingUntil: number | null): void {
+  db.prepare("UPDATE subscription_accounts SET state = 'cooling', cooling_until = ? WHERE id = ?").run(coolingUntil, id)
+}
+
+/** Вернуть аккаунт в готовое состояние (лимит сброшен / вручную). */
+export function clearCooling(db: Database, id: number): void {
+  db.prepare("UPDATE subscription_accounts SET state = 'ready', cooling_until = NULL WHERE id = ?").run(id)
+}
+
+export interface SwitchResult { switched: boolean; newAccountId?: number }
+
+/**
+ * 1.9.4: активный аккаунт провайдера бьёт лимит → помечаем его cooling(coolingUntil) и
+ * переключаем на другой ГОТОВЫЙ аккаунт того же провайдера (не cooling, либо cooling истёк).
+ * Кандидат активируется и раскулдаунивается. Нет готового кандидата → switched:false
+ * (пул исчерпан целиком — рантайм падёт на обычный provider-fallback).
+ */
+export function switchActiveOnLimit(db: Database, providerId: string, coolingUntil: number | null, now = Date.now()): SwitchResult {
+  const current = getActiveAccount(db, providerId)
+  const tx = db.transaction((): SwitchResult => {
+    if (current) markAccountCooling(db, current.id, coolingUntil)
+    const candidate = db.prepare(
+      `SELECT id FROM subscription_accounts
+       WHERE provider_id = ? AND id != ?
+         AND (state != 'cooling' OR cooling_until IS NULL OR cooling_until <= ?)
+       ORDER BY (last_used_at IS NULL) DESC, last_used_at ASC, created_at DESC
+       LIMIT 1`
+    ).get(providerId, current?.id ?? -1, now) as { id: number } | undefined
+    if (!candidate) return { switched: false }
+    clearCooling(db, candidate.id)
+    setActiveAccount(db, providerId, candidate.id)
+    return { switched: true, newAccountId: candidate.id }
+  })
+  return tx()
 }
 
 /**

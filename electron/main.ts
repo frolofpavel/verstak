@@ -51,7 +51,7 @@ import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
-import { getActiveAccount, touchSubscriptionAccount } from './storage/subscription-accounts'
+import { getActiveAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
@@ -550,6 +550,8 @@ app.whenReady().then(() => {
       touchSubscriptionAccount(db, acct.id)
       return { accountId: acct.id, secret: getSecret(acct.credRef), configDir: acct.configDir, baseUrl: acct.baseUrl }
     },
+    // 1.9.4: лимит активного аккаунта → cooling + переключение на следующий готовый аккаунт пула.
+    switchSubscriptionAccountOnLimit: (providerId, resetEta) => switchActiveOnLimit(db, providerId, resetEta),
     getKnownRoots: knownRoots,
     recordWrite: (projectPath, filePath, before, after) => {
       undoStack.push(projectPath, filePath, before, after)

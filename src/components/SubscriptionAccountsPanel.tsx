@@ -23,6 +23,9 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel, mode = 'tok
   const [error, setError] = useState<string | null>(null)
 
   const secretName = secretLabel ?? 'Токен / ключ'
+  const cooling = (a: SubscriptionAccountDto) => a.state === 'cooling' && !!a.coolingUntil && a.coolingUntil > Date.now()
+  const coolingLabel = (a: SubscriptionAccountDto) =>
+    a.coolingUntil ? new Date(a.coolingUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 
   async function reload() {
     try { setAccounts(await window.api.subscriptionAccounts.list(providerId)) }
@@ -74,8 +77,9 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel, mode = 'tok
         <div className="gg-subacct-list">
           {accounts.map(a => (
             <div key={a.id} className={`gg-subacct-item${a.active ? ' is-active' : ''}`}>
-              <span className={`gg-subacct-dot${a.active ? ' is-active' : ''}`} />
+              <span className={`gg-subacct-dot${a.active ? ' is-active' : ''}${cooling(a) ? ' is-cooling' : ''}`} />
               <span className="gg-subacct-label">{a.label}</span>
+              {cooling(a) && <span className="gg-subacct-cooling">остывает{coolingLabel(a) ? ` до ${coolingLabel(a)}` : ''}</span>}
               {a.active
                 ? <span className="gg-subacct-badge">активен</span>
                 : <button type="button" className="gg-btn gg-btn-ghost gg-subacct-use" onClick={() => void activate(a.id)}>Сделать активным</button>}

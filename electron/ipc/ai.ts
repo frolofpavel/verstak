@@ -39,6 +39,7 @@ import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
 import { shouldFallback, getNextFallback, classifyFallbackReason } from '../ai/smart-fallback'
+import { detectSubscriptionLimit } from '../ai/subscription-limits'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from '../ai/tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
@@ -72,6 +73,9 @@ interface AiDeps {
    *  SafeStorage по cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит
    *  last_used_at. null = нет заведённых аккаунтов (тогда рантайм падает на legacy-секрет). */
   resolveSubscriptionAccount?: (providerId: string) => { accountId: number; secret: string | null; configDir: string | null; baseUrl: string | null } | null
+  /** 1.9.4: активный аккаунт провайдера исчерпал лимит → пометить cooling и переключить на
+   *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback). */
+  switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
   /** Корни зарегистрированных проектов — для валидации projectPath из рендерера. */
   getKnownRoots: () => string[]
   /** Persist a write so the user can ↶ revert it later. */
@@ -1261,6 +1265,14 @@ export function registerAiIpc(deps: AiDeps): void {
       const fallbackKey = fallbackDesc.secretKey ? deps.getSecret(fallbackDesc.secretKey) : null
       if (fallbackDesc.secretKey && !fallbackKey) return null
       const fallbackModel = deps.getProviderModel(fallbackId) ?? fallbackDesc.defaultModel
+      // 1.9.3/1.9.4: при пересоздании CLI-провайдера резолвим активный аккаунт ЗАНОВО —
+      // для account-switch на лимите берётся новый токен/CODEX_HOME переключённого аккаунта.
+      const fbClaudeToken = fallbackId === 'claude-cli'
+        ? (deps.resolveSubscriptionAccount?.('claude-cli')?.secret ?? deps.getSecret('claude_code_oauth_token'))
+        : null
+      const fbCodexHome = fallbackId === 'codex-cli'
+        ? (deps.resolveSubscriptionAccount?.('codex-cli')?.configDir ?? null)
+        : null
       try {
         return createProvider(fallbackId, {
           apiKey: fallbackKey,
@@ -1270,7 +1282,9 @@ export function registerAiIpc(deps: AiDeps): void {
           projectSystemPrompt: projectSystemPromptForProvider,
           skillPrompt: skillPromptForProvider,
           effortLevel: overrides?.effortLevel,
-          agentMode
+          agentMode,
+          claudeOauthToken: fbClaudeToken,
+          codexHome: fbCodexHome
         })
       } catch {
         return null
@@ -1324,7 +1338,7 @@ export function registerAiIpc(deps: AiDeps): void {
         connectors: deps.connectors, agentMode, turnsBudget,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
         providerId, model,
-        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
+        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit } : undefined,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
@@ -1349,7 +1363,7 @@ export function registerAiIpc(deps: AiDeps): void {
         status: 'running'
       })
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
+        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit } : undefined,
         deps.agentRuns,
         runId
       ).finally(cleanup)
@@ -1506,6 +1520,8 @@ interface FallbackOpts {
   configuredProviders: Set<ProviderId>
   /** Уже попробованные провайдеры (мутируется по ходу). */
   triedProviders: Set<ProviderId>
+  /** 1.9.4: переключить активный аккаунт провайдера на лимите (пул подписок). */
+  switchAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
 }
 
 /** Максимальное количество fallback-попыток (original + 2 alternates). */
@@ -2153,6 +2169,25 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
   }
 
+  // 1.9.4: подписочный лимит активного аккаунта → переключаемся на ДРУГОЙ аккаунт пула
+  // того же провайдера (пересоздаём тот же провайдер — он резолвит новый активный аккаунт),
+  // не теряя накопленную историю. Пул исчерпан → null (дальше обычный provider-fallback).
+  const attemptAccountSwitch = (err: unknown): Promise<void> | null => {
+    if (!fallbackOpts || !providerId) return null
+    const hit = detectSubscriptionLimit(err)
+    if (!hit.limited) return null
+    const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
+    if (!sw?.switched) return null
+    const freshProvider = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
+    if (!freshProvider) return null
+    sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
+    handedOff = true
+    const acctTools = createToolsForProject(projectPath, signal, {
+      allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
+    })
+    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: freshProvider, tools: acctTools, initialMessages: currentMessages, providerId, model })
+  }
+
   // Этап 2: эскалация native→JSON tool mode на ТОЙ ЖЕ модели (bounded, 1 раз за прогон).
   // Тот же провайдер/модель перезапускается с forceToolMode='json' → инъекция JSON-
   // инструкции вызова + parseTextToolCalls ловит текстовые вызовы. Не трогает triedProviders
@@ -2468,6 +2503,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         turnHeartbeat.stop('error', 'Провайдер вернул ошибку.')
         const provErr = new Error(String((event as { message?: unknown }).message ?? 'provider error'))
         const reason = classifyFallbackReason(provErr)
+        // 1.9.4: подписочный лимит активного аккаунта → сначала пробуем переключить АККАУНТ
+        // того же провайдера (пул), не теряя историю; только если пул исчерпан → дальше по лестнице.
+        const acctSwitch = attemptAccountSwitch(provErr)
+        if (acctSwitch) return acctSwitch
         // Этап 2, приоритет 4: context_overflow → форс-компакция существующим summary-
         // компактором + один retry той же моделью. Не помогло → понятная ошибка, НЕ
         // бесконечный retry (bounded MAX_CONTEXT_RETRIES).

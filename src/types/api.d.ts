@@ -198,6 +198,7 @@ export interface SubscriptionAccountDto {
   baseUrl: string | null
   active: boolean
   state: string
+  coolingUntil: number | null
   createdAt: number
   lastUsedAt: number | null
   hasSecret: boolean

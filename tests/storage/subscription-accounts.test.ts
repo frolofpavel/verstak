@@ -13,6 +13,7 @@ import {
   renameSubscriptionAccount,
   deleteSubscriptionAccount,
   touchSubscriptionAccount,
+  switchActiveOnLimit,
 } from '../../electron/storage/subscription-accounts'
 
 describe('subscription accounts storage', () => {
@@ -91,6 +92,47 @@ describe('subscription accounts storage', () => {
     const c = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'C', credRef: 'r1' })
     expect(c.active).toBe(true)
     expect(getActiveAccount(db, 'codex-cli')?.id).toBe(a.id)
+  })
+
+  it('switchActiveOnLimit: active hits limit → cooled, next ready account activated (1.9.4)', () => {
+    const now = 5_000_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' }) // active
+    const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    const coolUntil = now + 5 * 60 * 60_000
+
+    const res = switchActiveOnLimit(db, 'claude-cli', coolUntil, now)
+    expect(res.switched).toBe(true)
+    expect(res.newAccountId).toBe(b.id)
+    // A остывает
+    const aAfter = getSubscriptionAccount(db, a.id)!
+    expect(aAfter.state).toBe('cooling')
+    expect(aAfter.coolingUntil).toBe(coolUntil)
+    expect(aAfter.active).toBe(false)
+    // B активен и готов
+    const bAfter = getSubscriptionAccount(db, b.id)!
+    expect(bAfter.active).toBe(true)
+    expect(bAfter.state).toBe('ready')
+  })
+
+  it('switchActiveOnLimit: no other ready account → switched false (пул исчерпан)', () => {
+    const now = 6_000_000_000_000
+    createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'Only', credRef: 'r1' })
+    const res = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now)
+    expect(res.switched).toBe(false)
+  })
+
+  it('switchActiveOnLimit: cooled-but-expired account is eligible again', () => {
+    const now = 7_000_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    // A остывает до now-1 (уже истёк) — переключение на A должно быть возможно
+    switchActiveOnLimit(db, 'claude-cli', now - 1, now) // A→cooling(истёк), B active
+    expect(getActiveAccount(db, 'claude-cli')?.id).toBe(b.id)
+    // теперь B бьёт лимит → кандидат A (cooling истёк) снова годен
+    const res = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now)
+    expect(res.switched).toBe(true)
+    expect(res.newAccountId).toBe(a.id)
+    expect(getSubscriptionAccount(db, a.id)?.state).toBe('ready')
   })
 
   it('delete removes account; if the active one is deleted, another becomes active', () => {

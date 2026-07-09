@@ -14581,3 +14581,11 @@ html[data-theme="light"] .gg-skill-card.is-selected {
   color: var(--text-tertiary);
   line-height: 1.5;
 }
+.gg-subacct-cooling {
+  font-size: 11px;
+  color: var(--warn, #c9962b);
+  white-space: nowrap;
+}
+.gg-subacct-dot.is-cooling {
+  background: var(--warn, #c9962b);
+}
