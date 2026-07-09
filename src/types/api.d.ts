@@ -617,6 +617,7 @@ declare global {
       updater: {
         install(): Promise<{ ok: boolean; reason?: string }>
         ensureDownload(): Promise<{ ok: boolean; reason?: string; phase?: string }>
+        cleanupTemp(): Promise<{ ok: boolean; deletedBytes: number; deletedPaths: string[]; reason?: string }>
         getReleaseNotes(opts?: { sinceVersion?: string; upToVersion?: string; version?: string; all?: boolean }): Promise<Array<{
           version: string
           name: string
@@ -625,8 +626,8 @@ declare global {
           publishedAt?: string
         }>>
         check(): Promise<{ available: boolean; version?: string; installedVersion?: string; error?: string; errorCode?: string; rateLimitMinutes?: number; phase?: string; pendingRelease?: boolean }>
-        getState(): Promise<{ phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string }>
-        onState(cb: (data: { phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean }) => void): () => void
+        getState(): Promise<{ phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; installedVersion?: string; remoteVersion?: string; updatedAt?: number }>
+        onState(cb: (data: { phase: string; version?: string; percent?: number; stagingStep?: 'setup' | 'payload' | 'verify' | 'done'; error?: string; errorCode?: string; rateLimitMinutes?: number; pendingRelease?: boolean; updatedAt?: number }) => void): () => void
         onAvailable(cb: (data: { version: string; pendingRelease?: boolean }) => void): () => void
         onDownloaded(cb: (data: { version: string }) => void): () => void
         onReady(cb: (data: { version: string }) => void): () => void

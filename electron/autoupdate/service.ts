@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -36,6 +36,16 @@ const PERIODIC_CHECK_MS = 4 * 60 * 60 * 1000
 let releaseNotesIpcRegistered = false
 let updaterIpcRegistered = false
 
+const CLEANUP_BLOCKED_STATUSES = new Set<AutoUpdateState['status']>([
+  'downloading',
+  'downloaded',
+  'extracting',
+  'payload_ready',
+  'install_requested',
+  'installing',
+  'installed_pending_restart',
+])
+
 function mapStep(step?: AutoUpdateStep): UiUpdateSnapshot['stagingStep'] {
   if (step === 'extract') return 'payload'
   if (step === 'verify') return 'verify'
@@ -46,12 +56,13 @@ function mapStep(step?: AutoUpdateStep): UiUpdateSnapshot['stagingStep'] {
 export function toUiSnapshot(state: AutoUpdateState | null): UiUpdateSnapshot {
   const s = state ?? { schemaVersion: 1, status: 'idle', updatedAt: Date.now() } as AutoUpdateState
   const version = s.version || s.remoteVersion
-  if (s.status === 'checking') return { phase: 'checking', version, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion }
-  if (s.status === 'update_available') return { phase: 'available', version, pendingRelease: s.pendingRelease, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion }
-  if (s.status === 'downloading' || s.status === 'downloaded') return { phase: 'downloading', version, percent: s.percent, pendingRelease: s.pendingRelease }
-  if (s.status === 'extracting') return { phase: 'staging', version, percent: s.percent, stagingStep: mapStep(s.step), pendingRelease: s.pendingRelease }
-  if (s.status === 'payload_ready') return { phase: 'ready', version, percent: 100, stagingStep: 'done', pendingRelease: false }
-  if (s.status === 'install_requested' || s.status === 'installing' || s.status === 'installed_pending_restart') return { phase: 'installing', version, percent: 100 }
+  const updatedAt = s.updatedAt
+  if (s.status === 'checking') return { phase: 'checking', version, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion, updatedAt }
+  if (s.status === 'update_available') return { phase: 'available', version, pendingRelease: s.pendingRelease, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion, updatedAt }
+  if (s.status === 'downloading' || s.status === 'downloaded') return { phase: 'downloading', version, percent: s.percent, pendingRelease: s.pendingRelease, updatedAt }
+  if (s.status === 'extracting') return { phase: 'staging', version, percent: s.percent, stagingStep: mapStep(s.step), pendingRelease: s.pendingRelease, updatedAt }
+  if (s.status === 'payload_ready') return { phase: 'ready', version, percent: 100, stagingStep: 'done', pendingRelease: false, updatedAt }
+  if (s.status === 'install_requested' || s.status === 'installing' || s.status === 'installed_pending_restart') return { phase: 'installing', version, percent: 100, updatedAt }
   if (s.status === 'failed_recoverable' || s.status === 'failed_final') {
     return {
       phase: 'error',
@@ -59,10 +70,11 @@ export function toUiSnapshot(state: AutoUpdateState | null): UiUpdateSnapshot {
       error: s.error,
       errorCode: s.errorCode === 'github-rate-limit' ? 'github-rate-limit' : s.errorCode === 'network' ? 'network' : undefined,
       rateLimitMinutes: s.rateLimitMinutes,
+      updatedAt,
     }
   }
-  if (s.status === 'complete') return { phase: 'not-available', version, installedVersion: s.installedVersion }
-  return { phase: 'idle', version, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion }
+  if (s.status === 'complete') return { phase: 'not-available', version, installedVersion: s.installedVersion, updatedAt }
+  return { phase: 'idle', version, installedVersion: s.installedVersion, remoteVersion: s.remoteVersion, updatedAt }
 }
 
 function psQuote(value: string): string {
@@ -134,6 +146,26 @@ function startDetachedHelper(nodeExe: string, args: string[]): void {
     logAutoUpdate('install.spawn_error', { nodeExe, args, error: err.message })
   })
   child.unref()
+}
+
+function dirSize(path: string): number {
+  if (!existsSync(path)) return 0
+  try {
+    const stat = statSync(path)
+    if (stat.isFile()) return stat.size
+    if (!stat.isDirectory()) return 0
+    return readdirSync(path, { withFileTypes: true }).reduce((sum, entry) => {
+      return sum + dirSize(join(path, entry.name))
+    }, 0)
+  } catch {
+    return 0
+  }
+}
+
+function removeDir(path: string): boolean {
+  if (!existsSync(path)) return false
+  rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  return true
 }
 
 function readExtractProgress(version: string): { percent?: number; step?: AutoUpdateStep } {
@@ -322,11 +354,49 @@ export class AutoUpdateService {
     ipcMain.handle('update:check', async () => this.check(true))
     ipcMain.handle('update:ensure-download', async () => this.ensureDownload())
     ipcMain.handle('update:install', async () => this.install())
+    ipcMain.handle('update:cleanup-temp', async () => this.cleanupTempFiles())
     ipcMain.handle('update:get-state', async () => ({
       ...toUiSnapshot(readState()),
       installedVersion: app.getVersion(),
       remoteVersion: readState()?.remoteVersion,
     }))
+  }
+
+  private cleanupTempFiles(): { ok: boolean; deletedBytes: number; deletedPaths: string[]; reason?: string } {
+    const state = readState()
+    if (state?.status && CLEANUP_BLOCKED_STATUSES.has(state.status)) {
+      return { ok: false, deletedBytes: 0, deletedPaths: [], reason: 'update-active' }
+    }
+
+    const targets = [
+      join(autoUpdateRoot(), 'downloads'),
+      join(autoUpdateRoot(), 'payloads'),
+      join(autoUpdateRoot(), 'install'),
+      join(autoUpdateRoot(), 'trash'),
+      legacyStagingRoot(),
+      legacyUpdaterRoot(),
+      join(tmpdir(), 'verstak-autoupdate'),
+    ]
+
+    let deletedBytes = 0
+    const deletedPaths: string[] = []
+    for (const target of targets) {
+      try {
+        const size = dirSize(target)
+        if (removeDir(target)) {
+          deletedBytes += size
+          deletedPaths.push(target)
+        }
+      } catch (err) {
+        logAutoUpdate('cleanup_temp.failed_path', { target, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+
+    mkdirSync(autoUpdateRoot(), { recursive: true })
+    resetState()
+    this.setState({ status: 'idle', installedVersion: app.getVersion(), percent: undefined, step: undefined })
+    logAutoUpdate('cleanup_temp.done', { deletedBytes, deletedPaths })
+    return { ok: true, deletedBytes, deletedPaths }
   }
 
   async check(userInitiated: boolean): Promise<{ available: boolean; version?: string; installedVersion?: string; error?: string; errorCode?: string; rateLimitMinutes?: number; phase?: string; pendingRelease?: boolean }> {

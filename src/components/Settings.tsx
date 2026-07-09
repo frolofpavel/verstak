@@ -2,9 +2,20 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useProject } from '../store/projectStore'
 import type { Memory, DetectedCli, AuditEntry, PolicyMatrixDTO, PolicyDecision, AgentModeId } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
+import {
+  MOTION_LEVEL_OPTIONS,
+  PROJECT_STATUS_DISPLAY_OPTIONS,
+  UI_DENSITY_OPTIONS,
+  useAppearance
+} from '../hooks/useAppearance'
 import { useTheme, THEMES } from '../hooks/useTheme'
 import { useUiScale, UI_SCALE_PRESETS, MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT } from '../hooks/useUiScale'
-import { useNotifySettings } from '../hooks/useNotifySettings'
+import {
+  NOTIFY_CHANNEL_OPTIONS,
+  NOTIFY_EVENT_OPTIONS,
+  NOTIFY_MODE_OPTIONS,
+  useNotifySettings
+} from '../hooks/useNotifySettings'
 import { UpdatesSettings } from './UpdatesSettings'
 import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
@@ -20,7 +31,7 @@ import {
 import {
   IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
   IconSSH, IconBitrix, IconYandexDirect, IconYandexDisk,
-  IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
+  IconSkillsServer, IconHTTP, IconGitHub, IconSocialPublish
 } from './ConnectorIcons'
 import { useT } from '../i18n'
 import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
@@ -46,7 +57,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'verstak-gateway',
     name: 'Verstak Gateway',
     transport: 'API',
-    description: 'Рекомендуем. Единый AI-баланс Verstak: рубли, без чужих карт и VPN. Один ключ → понятные пресеты (Эконом / Баланс / Кодинг / Длинный / Быстрый / Приватный). Как подключить: открой agi-iri.ru/gateway → зарегистрируйся → создай ключ → вставь его сюда.',
+    description: 'Единый баланс Verstak для разных моделей. Удобно, если нужен один ключ, оплата в рублях и готовые пресеты под задачи',
     models: ['kimi-k2.7-code', 'deepseek-chat', 'qwen3-coder', 'verstak/economy', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
     defaultModel: 'kimi-k2.7-code',
     secretKey: 'verstak_gateway_api_key',
@@ -58,7 +69,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'gemini-api',
     name: 'Gemini',
     transport: 'API',
-    description: 'Google. Полный агентский режим с tools.',
+    description: 'Модели Google для больших контекстов, анализа документов и быстрых повседневных задач. Хороший универсальный вариант',
     models: ['gemini-3-pro', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
     defaultModel: 'gemini-3.5-flash',
     secretKey: 'gemini_api_key',
@@ -70,7 +81,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'gemini-cli',
     name: 'Gemini CLI',
     transport: 'CLI',
-    description: 'Твоя Gemini Ultra подписка через gemini-cli. Без API ключа.',
+    description: 'Работает через установленный Gemini CLI и подписку Google. API-ключ не нужен, но нужен вход в аккаунт',
     models: ['auto', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
     defaultModel: 'auto',
     secretKey: null,
@@ -81,7 +92,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'claude',
     name: 'Claude',
     transport: 'API',
-    description: 'Anthropic. Полный агентский режим с tools.',
+    description: 'Сильный вариант для аккуратного анализа, текста, планирования и сложных задач с большим количеством условий',
     models: ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101'],
     defaultModel: 'claude-sonnet-4-5-20251101',
     secretKey: 'anthropic_api_key',
@@ -93,7 +104,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'claude-cli',
     name: 'Claude Code',
     transport: 'CLI',
-    description: 'Твоя Claude Pro/Max подписка через claude CLI.',
+    description: 'Работает через Claude Code и подписку Anthropic. Удобен для кода, файлов и агентской работы через CLI',
     models: ['auto', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
     defaultModel: 'auto',
     secretKey: null,
@@ -104,7 +115,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'grok',
     name: 'Grok',
     transport: 'API',
-    description: 'xAI. Полный агентский режим с tools.',
+    description: 'API xAI для быстрых ответов, свежего стиля рассуждений и задач, где нужен Grok без локального CLI',
     models: ['grok-4.3', 'grok-build-0.1'],
     defaultModel: 'grok-4.3',
     secretKey: 'xai_api_key',
@@ -116,7 +127,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'grok-cli',
     name: 'Grok Build',
     transport: 'CLI',
-    description: 'Твоя x.com/SuperGrok подписка через grok CLI.',
+    description: 'Работает через grok CLI и подписку xAI. Подходит для Grok Build и Composer внутри Verstak',
     models: ['grok-composer-2.5-fast', 'grok-build'],
     defaultModel: 'grok-composer-2.5-fast',
     secretKey: null,
@@ -127,7 +138,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'openai',
     name: 'ChatGPT',
     transport: 'API',
-    description: 'OpenAI. Полный агентский режим с tools.',
+    description: 'Модели OpenAI для универсальных задач, кода, текста и аккуратной работы с инструкциями через API',
     models: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
     defaultModel: 'gpt-5',
     secretKey: 'openai_api_key',
@@ -139,7 +150,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'codex-cli',
     name: 'Codex CLI',
     transport: 'CLI',
-    description: 'Твоя ChatGPT Plus/Pro подписка через codex CLI.',
+    description: 'Работает через Codex CLI и аккаунт OpenAI. Заточен под код, файлы, проверки и инженерные задачи',
     models: ['auto', 'gpt-5-codex', 'gpt-5', 'gpt-5-mini', 'o3', 'o3-mini', 'gpt-4o'],
     defaultModel: 'auto',
     secretKey: null,
@@ -153,7 +164,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'openrouter',
     name: 'OpenRouter',
     transport: 'API',
-    description: 'Один ключ → все модели (Claude, GPT, Gemini, Grok, open-source).',
+    description: 'Один ключ для множества моделей: Claude, GPT, Gemini, Grok и open-source. Удобно для экспериментов и запасного маршрута',
     models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4.3', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
     defaultModel: 'anthropic/claude-sonnet-4-6',
     secretKey: 'openrouter_api_key',
@@ -165,7 +176,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'deepseek',
     name: 'DeepSeek',
     transport: 'API',
-    description: 'Китайские модели V4 за копейки. v4-flash / v4-pro (reasoning). Лучший fallback для бюджета.',
+    description: 'Бюджетные модели для кода, рассуждений и массовых задач. Хороший вариант, когда важна стоимость запросов',
     models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
     defaultModel: 'deepseek-v4-flash',
     secretKey: 'deepseek_api_key',
@@ -177,7 +188,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'moonshot',
     name: 'Moonshot Kimi',
     transport: 'API',
-    description: 'Китайский Kimi K2.7 Code / K2.6 — SoTA по агентам и коду. Дёшево, длинный контекст, OpenAI-совместим.',
+    description: 'Kimi хорошо подходит для длинного контекста, кода и агентских задач. OpenAI-совместимый API',
     models: ['kimi-k2.7-code', 'kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
     defaultModel: 'kimi-k2.7-code',
     secretKey: 'moonshot_api_key',
@@ -189,7 +200,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'qwen',
     name: 'Qwen (Alibaba)',
     transport: 'API',
-    description: 'Alibaba Qwen3 через DashScope. qwen3-coder-plus — кодер, qwen3-max — флагман. OpenAI-совместим.',
+    description: 'Модели Alibaba для кода, текста и быстрых задач. Qwen Coder полезен для разработки и правок файлов',
     models: ['qwen3-max', 'qwen3-coder-plus', 'qwen3-coder-flash', 'qwen-max', 'qwen-plus', 'qwen-flash'],
     defaultModel: 'qwen3-coder-plus',
     secretKey: 'qwen_api_key',
@@ -201,7 +212,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'mistral',
     name: 'Mistral',
     transport: 'API',
-    description: 'Европейский провайдер. Без санкционных рисков. Codestral хорош для кода.',
+    description: 'Европейский провайдер с сильными моделями общего назначения. Codestral полезен для задач по коду',
     models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'ministral-8b-latest'],
     defaultModel: 'mistral-large-latest',
     secretKey: 'mistral_api_key',
@@ -213,7 +224,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'groq',
     name: 'Groq',
     transport: 'API',
-    description: 'LPU-инференс: Llama/Mixtral на 500+ tok/s. Для streaming-чатов где важна реакция.',
+    description: 'Очень быстрый inference для Llama и Mixtral. Хорош для коротких ответов и сценариев, где важна скорость',
     models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
     defaultModel: 'llama-3.3-70b-versatile',
     secretKey: 'groq_api_key',
@@ -225,7 +236,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'ollama',
     name: 'Ollama (local)',
     transport: 'API',
-    description: 'Локальный сервер. Запусти `ollama serve`. $0, без интернета, данные не уходят.',
+    description: 'Локальные модели на компьютере. Данные не уходят наружу, но нужно отдельно запустить Ollama и скачать модели',
     models: ['llama3.3', 'qwen2.5-coder', 'deepseek-r1', 'mistral', 'gemma2'],
     defaultModel: 'llama3.3',
     secretKey: null,
@@ -237,7 +248,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'yandex-gpt',
     name: 'YandexGPT',
     transport: 'API',
-    description: '🇷🇺 152-ФЗ совместим. Yandex Cloud Foundation Models.',
+    description: 'Модели Yandex Cloud для русского языка, корпоративных сценариев и проектов с российской инфраструктурой',
     models: ['yandexgpt/latest', 'yandexgpt-lite/latest', 'yandexgpt-32k/latest'],
     defaultModel: 'yandexgpt/latest',
     secretKey: 'yandex_api_key',
@@ -249,7 +260,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'gigachat',
     name: 'GigaChat',
     transport: 'API',
-    description: '🇷🇺 152-ФЗ совместим. Сбер. GigaChat Lite / Plus / Pro / Max.',
+    description: 'Модели Сбера для русского языка и российских бизнес-сценариев. Требует Client ID и Client Secret',
     models: ['GigaChat', 'GigaChat-Plus', 'GigaChat-Pro', 'GigaChat-Max'],
     defaultModel: 'GigaChat',
     secretKey: 'gigachat_client_id',
@@ -261,7 +272,7 @@ const PROVIDERS: ProviderConfig[] = [
     id: 'custom-openai',
     name: 'Свой провайдер (OpenAI-compatible)',
     transport: 'API',
-    description: 'Любой self-hosted endpoint совместимый с OpenAI API: vLLM, LM Studio, корпоративный шлюз.',
+    description: 'Подключение своего OpenAI-compatible endpoint: LM Studio, vLLM, локальный сервер или корпоративный шлюз',
     models: [], // Заполняется юзером через custom-блок в UI
     defaultModel: '',
     secretKey: 'custom_openai_api_key',
@@ -271,8 +282,154 @@ const PROVIDERS: ProviderConfig[] = [
 ]
 
 type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
 
-// TAB_GROUPS is built inside the Settings component to support i18n translations.
+function SettingsNavIcon({ name }: { name: SettingsNavIconName }) {
+  const svgProps = {
+    className: 'gg-settings-nav-svg',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    xmlns: 'http://www.w3.org/2000/svg'
+  }
+  const strokeProps = {
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const
+  }
+
+  switch (name) {
+    case 'appearance':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="5" width="16" height="13" rx="3.2" {...strokeProps} />
+          <path d="M8 9h5.2M8 12h3.6" {...strokeProps} />
+          <circle cx="17" cy="9" r="1.7" {...strokeProps} />
+        </svg>
+      )
+    case 'notifications':
+      return (
+        <svg {...svgProps}>
+          <path d="M7.3 10.4c0-3 1.9-5.1 4.7-5.1s4.7 2.1 4.7 5.1v2.7l1.4 2.2H5.9l1.4-2.2v-2.7Z" {...strokeProps} />
+          <path d="M10.2 17.2c.35.95 1 1.45 1.8 1.45s1.45-.5 1.8-1.45" {...strokeProps} />
+        </svg>
+      )
+    case 'updates':
+      return (
+        <svg {...svgProps}>
+          <path d="M7.1 8.2A6.1 6.1 0 0 1 17.8 8l.75 1.15" {...strokeProps} />
+          <path d="M18.7 5.9v3.35h-3.35" {...strokeProps} />
+          <path d="M16.9 15.8A6.1 6.1 0 0 1 6.2 16l-.75-1.15" {...strokeProps} />
+          <path d="M5.3 18.1v-3.35h3.35" {...strokeProps} />
+        </svg>
+      )
+    case 'profiles':
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="8.2" r="3.1" {...strokeProps} />
+          <path d="M6.4 18.1c.8-3 2.7-4.45 5.6-4.45s4.8 1.45 5.6 4.45" {...strokeProps} />
+        </svg>
+      )
+    case 'providers':
+      return (
+        <svg {...svgProps}>
+          <path d="M9.1 7.1v4.1c0 2 1.45 3.5 3.35 3.5h.3c1.9 0 3.35-1.5 3.35-3.5V7.1" {...strokeProps} />
+          <path d="M10.7 4.9v3M14.5 4.9v3M12.6 14.7v4.4" {...strokeProps} />
+          <path d="M9.1 10.1h7" {...strokeProps} />
+        </svg>
+      )
+    case 'models':
+      return (
+        <svg {...svgProps}>
+          <rect x="6" y="6" width="12" height="12" rx="2.7" {...strokeProps} />
+          <rect x="9.2" y="9.2" width="5.6" height="5.6" rx="1.3" {...strokeProps} />
+          <path d="M9 3.8v2.2M12 3.8v2.2M15 3.8v2.2M9 18v2.2M12 18v2.2M15 18v2.2M3.8 9H6M3.8 12H6M3.8 15H6M18 9h2.2M18 12h2.2M18 15h2.2" {...strokeProps} />
+        </svg>
+      )
+    case 'connectors':
+      return (
+        <svg {...svgProps}>
+          <circle cx="7" cy="8" r="2.5" {...strokeProps} />
+          <circle cx="17" cy="7" r="2.5" {...strokeProps} />
+          <circle cx="14.5" cy="17" r="2.5" {...strokeProps} />
+          <path d="M9.4 7.75h5.2M15.9 9.2l-1.05 5.35M8.8 9.85l3.9 5.1" {...strokeProps} />
+        </svg>
+      )
+    case 'autonomous':
+      return (
+        <svg {...svgProps}>
+          <path d="M16.8 16.9A7 7 0 0 1 8 8.1 6.8 6.8 0 1 0 16.8 16.9Z" {...strokeProps} />
+          <path d="M17.8 5.3l.45 1.15 1.15.45-1.15.45-.45 1.15-.45-1.15-1.15-.45 1.15-.45.45-1.15Z" {...strokeProps} />
+        </svg>
+      )
+    case 'memory':
+      return (
+        <svg {...svgProps}>
+          <ellipse cx="12" cy="6.6" rx="5.7" ry="2.6" {...strokeProps} />
+          <path d="M6.3 6.6v5.4c0 1.45 2.55 2.6 5.7 2.6s5.7-1.15 5.7-2.6V6.6" {...strokeProps} />
+          <path d="M6.3 12v4.1c0 1.45 2.55 2.6 5.7 2.6s5.7-1.15 5.7-2.6V12" {...strokeProps} />
+        </svg>
+      )
+    case 'mcp':
+      return (
+        <svg {...svgProps}>
+          <rect x="4.5" y="5.3" width="15" height="13.4" rx="3" {...strokeProps} />
+          <path d="M8.3 9.2l2.25 2.05-2.25 2.05M12.1 14.2h3.9" {...strokeProps} />
+        </svg>
+      )
+    case 'policy':
+      return (
+        <svg {...svgProps}>
+          <path d="M12 4.6 17.8 7v4.7c0 3.6-2.15 6-5.8 7.7-3.65-1.7-5.8-4.1-5.8-7.7V7L12 4.6Z" {...strokeProps} />
+          <path d="m9.4 12.1 1.7 1.7 3.6-3.75" {...strokeProps} />
+        </svg>
+      )
+    case 'audit':
+      return (
+        <svg {...svgProps}>
+          <path d="M8.1 4.8h6.1l2.9 3v11.4h-9a2.3 2.3 0 0 1-2.3-2.3V7.1a2.3 2.3 0 0 1 2.3-2.3Z" {...strokeProps} />
+          <path d="M13.9 4.9v3.3h3.15M9.2 11.4h5.6M9.2 14.2h4.3M9.2 17h5.1" {...strokeProps} />
+        </svg>
+      )
+    default:
+      return null
+  }
+}
+
+function ProviderSettingsToggleIcon({ open }: { open: boolean }) {
+  const svgProps = {
+    className: 'gg-provider-settings-svg',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    xmlns: 'http://www.w3.org/2000/svg'
+  }
+  const strokeProps = {
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const
+  }
+
+  if (open) {
+    return (
+      <svg {...svgProps}>
+        <rect x="5.2" y="10.1" width="13.6" height="3.8" rx="1.9" className="gg-provider-settings-icon-fill" />
+        <path d="M8.2 12h7.6" {...strokeProps} />
+      </svg>
+    )
+  }
+
+  return (
+    <svg {...svgProps}>
+      <path
+        className="gg-provider-settings-icon-fill"
+        d="M9.7 4.4h4.6l.45 2.1c.45.17.88.42 1.27.73l2.05-.65 2.3 4-1.6 1.43c.04.49.04.98 0 1.47l1.6 1.43-2.3 4-2.05-.65c-.39.31-.82.56-1.27.73l-.45 2.1H9.7l-.45-2.1a6.9 6.9 0 0 1-1.27-.73l-2.05.65-2.3-4 1.6-1.43a8.7 8.7 0 0 1 0-1.47l-1.6-1.43 2.3-4 2.05.65c.39-.31.82-.56 1.27-.73l.45-2.1Z"
+      />
+      <path d="M9.8 5h4.4l.4 1.85c.5.17.98.45 1.4.8l1.82-.58 2.18 3.78-1.43 1.28a6.5 6.5 0 0 1 0 1.74L20 15.15l-2.18 3.78-1.82-.58c-.42.35-.9.63-1.4.8L14.2 21H9.8l-.4-1.85a6.1 6.1 0 0 1-1.4-.8l-1.82.58L4 15.15l1.43-1.28a6.5 6.5 0 0 1 0-1.74L4 10.85l2.18-3.78 1.82.58c.42-.35.9-.63 1.4-.8L9.8 5Z" {...strokeProps} />
+      <circle cx="12" cy="13" r="2.45" {...strokeProps} />
+    </svg>
+  )
+}
 
 function modelKey(providerId: ProviderId, model: string): string {
   return `${providerId}::${model}`
@@ -1044,23 +1201,28 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const activeProjectPath = useProject(s => s.path)
   const [tab, setTab] = useState<Tab>(initialTab ?? 'providers')
 
-  // Группы для левой sidebar — повторяет OpenCode Desktop структуру.
-  const TAB_GROUPS: ReadonlyArray<{ title: string; tabs: ReadonlyArray<{ id: Tab; label: string; icon: React.ReactNode }> }> = [
-    { title: t.settings.application, tabs: [
-      { id: 'appearance', label: t.settings.appearance, icon: '🎨' },
-      { id: 'notifications', label: t.settings.notifications, icon: '🔔' },
-      { id: 'updates', label: t.settings.updates, icon: '⬆️' },
-      { id: 'profiles',   label: t.settings.profiles,   icon: '👤' }
+  const SETTINGS_NAV_GROUPS: ReadonlyArray<{ title: string; tabs: ReadonlyArray<{ id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean }> }> = [
+    { title: 'Приложение', tabs: [
+      { id: 'appearance', label: t.settings.appearance, icon: 'appearance' },
+      { id: 'notifications', label: t.settings.notifications, icon: 'notifications' },
+      { id: 'updates', label: t.settings.updates, icon: 'updates' },
+      { id: 'profiles', label: t.settings.profiles, icon: 'profiles', soon: true }
     ] },
-    { title: t.settings.server, tabs: [
-      { id: 'providers',  label: t.settings.providers,  icon: '🔌' },
-      { id: 'models',     label: t.settings.models,     icon: '✨' },
-      { id: 'connectors', label: t.settings.connectors, icon: <IconPlug size={16} /> },
-      { id: 'mcp',        label: 'MCP',                 icon: '⚡' },
-      { id: 'policy',     label: 'Что разрешено',       icon: '🛡' },
-      { id: 'autonomous', label: t.settings.nightMode,  icon: '🌙' },
-      { id: 'memory',     label: t.settings.memory,     icon: '🧠' },
-      { id: 'audit',      label: 'Audit Log',            icon: '📋' }
+    { title: 'AI', tabs: [
+      { id: 'providers', label: t.settings.providers, icon: 'providers' },
+      { id: 'models', label: t.settings.models, icon: 'models' },
+      { id: 'memory', label: t.settings.memory, icon: 'memory' }
+    ] },
+    { title: 'Интеграции', tabs: [
+      { id: 'connectors', label: t.settings.connectors, icon: 'connectors' },
+      { id: 'mcp', label: 'MCP', icon: 'mcp' }
+    ] },
+    { title: 'Контроль', tabs: [
+      { id: 'policy', label: 'Что разрешено', icon: 'policy' },
+      { id: 'autonomous', label: t.settings.nightMode, icon: 'autonomous' }
+    ] },
+    { title: 'Данные', tabs: [
+      { id: 'audit', label: 'Audit Log', icon: 'audit' }
     ] }
   ]
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
@@ -1152,12 +1314,24 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const { theme, setTheme } = useTheme()
   const { uiScalePercent, setUiScalePercent } = useUiScale()
   const {
+    uiDensity,
+    setUiDensity,
+    motionLevel,
+    setMotionLevel,
+    projectStatusDisplay,
+    setProjectStatusDisplay,
+    resetAppearance
+  } = useAppearance()
+  const {
     notifyPrefs,
-    setNotifySound,
-    setNotifyToast,
-    setNotifyUnfocusedOnly,
+    setNotifyEnabled,
+    setNotifyMode,
+    setNotifyEventChannel,
+    setQuietHoursEnabled,
+    setQuietHoursTime,
     testNotification
   } = useNotifySettings()
+  const [notifyTestMessage, setNotifyTestMessage] = useState('')
   // Audit log
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
   const [auditPath, setAuditPath] = useState<string | null>(null)
@@ -2319,9 +2493,9 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           <button className="gg-modal-close" onClick={onClose}>×</button>
         </div>
 
-        <div className="gg-settings-shell">
+        <div className={`gg-settings-shell ${tab === 'notifications' ? 'is-notifications' : ''}`}>
           <aside className="gg-settings-nav" role="tablist" aria-label="Разделы настроек">
-            {TAB_GROUPS.map(g => (
+            {SETTINGS_NAV_GROUPS.map(g => (
               <div key={g.title} className="gg-settings-nav-group">
                 <div className="gg-settings-nav-title">{g.title}</div>
                 {g.tabs.map(t => (
@@ -2333,15 +2507,18 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                     className={`gg-settings-nav-item ${tab === t.id ? 'is-active' : ''}`}
                     onClick={() => setTab(t.id)}
                   >
-                    <span className="gg-settings-nav-icon" aria-hidden>{t.icon}</span>
+                    <span className="gg-settings-nav-icon" aria-hidden>
+                      <SettingsNavIcon name={t.icon} />
+                    </span>
                     <span>{t.label}</span>
+                    {t.soon && <span className="gg-settings-nav-soon">Скоро</span>}
                   </button>
                 ))}
               </div>
             ))}
           </aside>
 
-          <div className="gg-settings-content">
+          <div className={`gg-settings-content ${tab === 'notifications' ? 'is-notifications' : ''}`}>
 
         {tab === 'providers' && (
         <ProvidersPage
@@ -2604,39 +2781,143 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         {tab === 'updates' && <UpdatesSettings />}
 
         {tab === 'notifications' && (
-        <div className="gg-settings-extra">
-          <div className="gg-settings-section-title">{t.settings.notifications}</div>
-          <div className="gg-settings-hint" style={{ marginBottom: 16 }}>{t.settings.notifyIntro}</div>
-          <div className="gg-notify-settings">
-            <label className="gg-theme-square">
-              <input
-                type="checkbox"
-                checked={notifyPrefs.sound}
-                onChange={(e) => void setNotifySound(e.target.checked)}
-              />
-              <span>{t.settings.notifySound}</span>
-            </label>
-            <label className="gg-theme-square">
-              <input
-                type="checkbox"
-                checked={notifyPrefs.toast}
-                onChange={(e) => void setNotifyToast(e.target.checked)}
-              />
-              <span>{t.settings.notifyToast}</span>
-            </label>
-            <label className="gg-theme-square">
-              <input
-                type="checkbox"
-                checked={notifyPrefs.unfocusedOnly}
-                onChange={(e) => void setNotifyUnfocusedOnly(e.target.checked)}
-              />
-              <span>{t.settings.notifyUnfocusedOnly}</span>
-            </label>
-            <button type="button" className="gg-btn gg-btn-ghost" onClick={() => void testNotification()}>
-              {t.settings.notifyTest}
-            </button>
-            <div className="gg-settings-hint">{t.settings.notifyHint}</div>
-          </div>
+        <div className="gg-settings-extra gg-notify-page">
+          <section className="gg-notify-section">
+            <div className="gg-notify-section-head">
+              <div>
+                <div className="gg-notify-title">Режим уведомлений</div>
+                <p className="gg-notify-desc">Выбери, когда Verstak должен отвлекать от работы</p>
+              </div>
+              <div className="gg-notify-top-actions">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={notifyPrefs.enabled}
+                  className={`gg-notify-switch gg-notify-master ${notifyPrefs.enabled ? 'is-on' : ''}`}
+                  onClick={() => void setNotifyEnabled(!notifyPrefs.enabled)}
+                >
+                  <span className="gg-notify-switch-ui" aria-hidden />
+                  <span className="gg-notify-switch-text">
+                    {notifyPrefs.enabled ? 'Уведомления включены' : 'Уведомления выключены'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="gg-btn gg-btn-ghost gg-notify-test-btn"
+                  onClick={async () => {
+                    const ok = await testNotification()
+                    setNotifyTestMessage(ok
+                      ? 'Проверочная всплывашка отправлена в правый нижний угол'
+                      : 'Не удалось показать проверочную всплывашку'
+                    )
+                    window.setTimeout(() => setNotifyTestMessage(''), 5000)
+                  }}
+                >
+                  Проверить
+                </button>
+              </div>
+            </div>
+            {notifyTestMessage && <div className="gg-notify-test-note">{notifyTestMessage}</div>}
+
+            <div className="gg-notify-mode-grid" role="group" aria-label="Режим уведомлений">
+              {NOTIFY_MODE_OPTIONS.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`gg-notify-mode-card ${notifyPrefs.mode === option.id ? 'is-active' : ''}`}
+                  onClick={() => void setNotifyMode(option.id)}
+                >
+                  <span className="gg-notify-mode-title">{option.title}</span>
+                  <span className="gg-notify-mode-desc">{option.description}</span>
+                  <span className="gg-notify-mode-mark" aria-hidden>{notifyPrefs.mode === option.id ? '✓' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="gg-notify-section">
+            <div className="gg-notify-section-head">
+              <div>
+                <div className="gg-notify-title">События</div>
+                <p className="gg-notify-desc">Настрой, какие сигналы показывать по каждому типу события</p>
+              </div>
+            </div>
+
+            <div className="gg-notify-channel-help" aria-label="Что означают каналы уведомлений">
+              {NOTIFY_CHANNEL_OPTIONS.map(channel => (
+                <div className="gg-notify-channel-help-item" key={channel.id}>
+                  <span>{channel.label}</span>
+                  <p>{channel.description}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="gg-notify-events">
+              {NOTIFY_EVENT_OPTIONS.map(event => (
+                <div className="gg-notify-event" key={event.id}>
+                  <div className="gg-notify-event-meta">
+                    <div className="gg-notify-event-title">{event.title}</div>
+                    <div className="gg-notify-event-desc">{event.description}</div>
+                  </div>
+                  <div className="gg-notify-channel-grid" role="group" aria-label={`Каналы: ${event.title}`}>
+                    {NOTIFY_CHANNEL_OPTIONS.map(channel => (
+                      <button
+                        key={channel.id}
+                        type="button"
+                        className={`gg-notify-channel ${notifyPrefs.events[event.id][channel.id] ? 'is-active' : ''}`}
+                        onClick={() => void setNotifyEventChannel(
+                          event.id,
+                          channel.id,
+                          !notifyPrefs.events[event.id][channel.id]
+                        )}
+                      >
+                        {channel.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="gg-notify-section gg-notify-quiet">
+            <div className="gg-notify-section-head">
+              <div>
+                <div className="gg-notify-title">Тихие часы</div>
+                <p className="gg-notify-desc">Только важные сигналы: ошибки, прерванные ответы и напоминания</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notifyPrefs.quietHours.enabled}
+                className={`gg-notify-switch ${notifyPrefs.quietHours.enabled ? 'is-on' : ''}`}
+                onClick={() => void setQuietHoursEnabled(!notifyPrefs.quietHours.enabled)}
+              >
+                <span className="gg-notify-switch-ui" aria-hidden />
+                <span className="gg-notify-switch-text">{notifyPrefs.quietHours.enabled ? 'Включено' : 'Выключено'}</span>
+              </button>
+            </div>
+            <div className="gg-notify-time-row">
+              <label>
+                <span>С</span>
+                <input
+                  className="gg-input"
+                  type="time"
+                  value={notifyPrefs.quietHours.from}
+                  onChange={(e) => void setQuietHoursTime('from', e.target.value)}
+                />
+              </label>
+              <label>
+                <span>До</span>
+                <input
+                  className="gg-input"
+                  type="time"
+                  value={notifyPrefs.quietHours.to}
+                  onChange={(e) => void setQuietHoursTime('to', e.target.value)}
+                />
+              </label>
+            </div>
+          </section>
         </div>
         )}
 
@@ -2760,71 +3041,160 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         )}
 
         {tab === 'appearance' && (
-        <div className="gg-settings-extra">
-          <div className="gg-settings-section-title">Тема оформления</div>
-          <div className="gg-theme-grid" role="group" style={{ marginBottom: 12 }}>
-            {THEMES.map(meta => (
-              <button
-                key={meta.id}
-                type="button"
-                className={`gg-theme-card ${theme === meta.id ? 'is-active' : ''}`}
-                onClick={() => void setTheme(meta.id)}
-                aria-pressed={theme === meta.id}
-                title={meta.label}
-              >
-                <span className="gg-theme-swatch" aria-hidden style={{ background: meta.swatch[0] }}>
-                  <span style={{ background: meta.swatch[1] }} />
-                  <span style={{ background: meta.swatch[2] }} />
-                </span>
-                <span className="gg-theme-name">{meta.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="gg-settings-section-title" style={{ marginTop: 8 }}>{t.settings.uiScale}</div>
-          <div className="gg-ui-scale-block">
-            <div className="gg-ui-scale-head">
-              <span className="gg-ui-scale-value">{uiScalePercent}%</span>
-              <button
-                type="button"
-                className="gg-btn gg-btn-ghost"
-                onClick={() => void setUiScalePercent(100)}
-              >
-                {t.settings.uiScaleReset}
-              </button>
+        <div className="gg-settings-extra gg-appearance-panel">
+          <section className="gg-appearance-section">
+            <div className="gg-appearance-section-head">
+              <div>
+                <div className="gg-appearance-title">Тема оформления</div>
+                <p className="gg-appearance-desc">Цветовая схема применяется сразу ко всему интерфейсу</p>
+              </div>
             </div>
-            <input
-              type="range"
-              className="gg-ui-scale-slider"
-              min={MIN_UI_SCALE_PERCENT}
-              max={MAX_UI_SCALE_PERCENT}
-              step={5}
-              value={uiScalePercent}
-              onChange={(e) => void setUiScalePercent(Number(e.target.value))}
-              aria-label={t.settings.uiScale}
-            />
-            <div className="gg-ui-scale-presets" role="group" aria-label={t.settings.uiScale}>
-              {UI_SCALE_PRESETS.map(preset => (
+            <div className="gg-theme-grid" role="group" aria-label="Тема оформления">
+              {THEMES.map(meta => (
                 <button
-                  key={preset}
+                  key={meta.id}
                   type="button"
-                  className={`gg-btn gg-btn-ghost ${uiScalePercent === preset ? 'is-active' : ''}`}
-                  onClick={() => void setUiScalePercent(preset)}
+                  className={`gg-theme-card ${theme === meta.id ? 'is-active' : ''}`}
+                  onClick={() => void setTheme(meta.id)}
+                  aria-pressed={theme === meta.id}
+                  title={meta.label}
                 >
-                  {preset}%
+                  <span className="gg-theme-swatch" aria-hidden style={{ background: meta.swatch[0] }}>
+                    <span style={{ background: meta.swatch[1] }} />
+                    <span style={{ background: meta.swatch[2] }} />
+                  </span>
+                  <span className="gg-theme-name">{meta.label}</span>
                 </button>
               ))}
             </div>
-            <div className="gg-settings-hint">{t.settings.uiScaleHint}</div>
-          </div>
+          </section>
 
-          <div className="gg-settings-hint" style={{ marginTop: 12 }}>
-            Тема применяется мгновенно. Ширина боковой панели запоминается автоматически — потяни за её правый край.
-          </div>
-          <div className="gg-settings-row" style={{ marginTop: 16 }}>
-            <label className="gg-settings-label">{t.settings.language}</label>
+          <section className="gg-appearance-section">
+            <div className="gg-appearance-section-head">
+              <div>
+                <div className="gg-appearance-title">Плотность интерфейса</div>
+                <p className="gg-appearance-desc">Меняет отступы и расстояние между основными блоками без изменения размера текста</p>
+              </div>
+            </div>
+            <div className="gg-appearance-choice-grid" role="group" aria-label="Плотность интерфейса">
+              {UI_DENSITY_OPTIONS.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`gg-appearance-choice ${uiDensity === option.id ? 'is-active' : ''}`}
+                  onClick={() => void setUiDensity(option.id)}
+                  aria-pressed={uiDensity === option.id}
+                >
+                  <span className="gg-appearance-choice-main">
+                    <span className="gg-appearance-choice-title">{option.label}</span>
+                    <span className="gg-appearance-choice-desc">{option.description}</span>
+                  </span>
+                  <span className="gg-appearance-choice-mark" aria-hidden>{uiDensity === option.id ? '✓' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="gg-appearance-section">
+            <div className="gg-appearance-section-head">
+              <div>
+                <div className="gg-appearance-title">Анимации</div>
+                <p className="gg-appearance-desc">Позволяет оставить интерфейс живым или сделать его спокойнее</p>
+              </div>
+            </div>
+            <div className="gg-appearance-choice-grid" role="group" aria-label="Анимации">
+              {MOTION_LEVEL_OPTIONS.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`gg-appearance-choice ${motionLevel === option.id ? 'is-active' : ''}`}
+                  onClick={() => void setMotionLevel(option.id)}
+                  aria-pressed={motionLevel === option.id}
+                >
+                  <span className="gg-appearance-choice-main">
+                    <span className="gg-appearance-choice-title">{option.label}</span>
+                    <span className="gg-appearance-choice-desc">{option.description}</span>
+                  </span>
+                  <span className="gg-appearance-choice-mark" aria-hidden>{motionLevel === option.id ? '✓' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="gg-appearance-section">
+            <div className="gg-appearance-section-head">
+              <div>
+                <div className="gg-appearance-title">Статусы проектов</div>
+                <p className="gg-appearance-desc">Выбери, как показывать работу модели, готовый ответ и ошибки в списке проектов</p>
+              </div>
+            </div>
+            <div className="gg-appearance-choice-grid" role="group" aria-label="Статусы проектов">
+              {PROJECT_STATUS_DISPLAY_OPTIONS.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`gg-appearance-choice ${projectStatusDisplay === option.id ? 'is-active' : ''}`}
+                  onClick={() => void setProjectStatusDisplay(option.id)}
+                  aria-pressed={projectStatusDisplay === option.id}
+                >
+                  <span className="gg-appearance-choice-main">
+                    <span className="gg-appearance-choice-title">{option.label}</span>
+                    <span className="gg-appearance-choice-desc">{option.description}</span>
+                  </span>
+                  <span className="gg-appearance-choice-mark" aria-hidden>{projectStatusDisplay === option.id ? '✓' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="gg-appearance-section">
+            <div className="gg-appearance-section-head">
+              <div>
+                <div className="gg-appearance-title">{t.settings.uiScale}</div>
+                <p className="gg-appearance-desc">Увеличивает весь интерфейс — текст, кнопки, панели</p>
+              </div>
+              <span className="gg-ui-scale-value">{uiScalePercent}%</span>
+            </div>
+            <div className="gg-ui-scale-block">
+              <input
+                type="range"
+                className="gg-ui-scale-slider"
+                min={MIN_UI_SCALE_PERCENT}
+                max={MAX_UI_SCALE_PERCENT}
+                step={5}
+                value={uiScalePercent}
+                onChange={(e) => void setUiScalePercent(Number(e.target.value))}
+                aria-label={t.settings.uiScale}
+              />
+              <div className="gg-ui-scale-presets" role="group" aria-label={t.settings.uiScale}>
+                {UI_SCALE_PRESETS.map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`gg-btn gg-btn-ghost ${uiScalePercent === preset ? 'is-active' : ''}`}
+                    onClick={() => void setUiScalePercent(preset)}
+                  >
+                    {preset}%
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="gg-btn gg-btn-ghost"
+                  onClick={() => void setUiScalePercent(100)}
+                >
+                  {t.settings.uiScaleReset}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="gg-appearance-section gg-appearance-section-inline">
+            <div>
+              <div className="gg-appearance-title">{t.settings.language}</div>
+              <p className="gg-appearance-desc">Язык интерфейса применяется после перезапуска окна приложения</p>
+            </div>
             <select
               className="gg-input"
-              style={{ maxWidth: 200 }}
               value={currentLang}
               onChange={async (e) => {
                 const lang = e.target.value
@@ -2836,7 +3206,25 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
               <option value="en">English</option>
               <option value="ru">Русский</option>
             </select>
-          </div>
+          </section>
+
+          <section className="gg-appearance-reset">
+            <div>
+              <div className="gg-appearance-title">Сбросить внешний вид</div>
+              <p className="gg-appearance-desc">Вернёт тёмную тему, стандартную плотность, полные анимации, статусы на аватарке и масштаб 100%</p>
+            </div>
+            <button
+              type="button"
+              className="gg-btn gg-btn-ghost gg-appearance-reset-btn"
+              onClick={() => void Promise.all([
+                setTheme('nord'),
+                resetAppearance(),
+                setUiScalePercent(100)
+              ])}
+            >
+              Сбросить
+            </button>
+          </section>
         </div>
         )}
 
@@ -2969,29 +3357,39 @@ function statusBadge(
   transport: 'API' | 'CLI',
   providerId?: ProviderId,
   secretKey?: string | null,
-  cliState?: { installed: boolean; loggedIn: boolean }
+  cliState?: { installed: boolean; loggedIn: boolean },
+  ready?: boolean
 ): { label: string; tone: 'ready' | 'cli' | 'missing'; title?: string } {
   if (transport === 'CLI') {
-    if (!cliState) return { label: 'Среда', tone: 'cli', title: 'Загружаю статус…' }
-    if (!cliState.installed) return { label: 'Не установлен', tone: 'missing', title: 'Бинарь CLI не найден в PATH' }
-    if (cliState.loggedIn)   return { label: 'Залогинен', tone: 'ready', title: 'OAuth/API key найден локально' }
-    return { label: 'Не залогинен', tone: 'missing', title: 'CLI установлен но credentials не найдены — нажми «Перелогиниться»' }
+    if (!cliState) return { label: 'Проверяется', tone: 'cli', title: 'Verstak проверяет локальную среду' }
+    if (!cliState.installed) return { label: 'CLI не найден', tone: 'missing', title: 'Командная строка провайдера не найдена в PATH' }
+    if (cliState.loggedIn)   return { label: 'Готов', tone: 'ready', title: 'Вход в CLI найден локально' }
+    return { label: 'Нужен вход', tone: 'missing', title: 'CLI установлен, но вход не найден' }
   }
-  if (providerId === 'custom-openai') return { label: 'Custom URL', tone: 'ready' }
-  if (!secretKey) return { label: 'Локально', tone: 'cli' } // Ollama-подобные
-  if (status === 'ready')  return { label: 'API ключ', tone: 'ready' }
-  return { label: 'Нет ключа', tone: 'missing' }
+  if (providerId === 'custom-openai') {
+    return ready
+      ? { label: 'Готов', tone: 'ready' }
+      : { label: 'Нужен URL', tone: 'missing', title: 'Укажи Base URL своего endpoint' }
+  }
+  if (!secretKey) {
+    return ready
+      ? { label: 'Готов', tone: 'ready' }
+      : { label: 'Нужно проверить', tone: 'missing', title: 'Локальный сервер нужно запустить отдельно' }
+  }
+  if (status === 'ready')  return { label: 'Готов', tone: 'ready' }
+  return { label: 'Нужен API-ключ', tone: 'missing' }
 }
 
 type CliId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
 type CliStatusMap = Record<CliId, { installed: boolean; loggedIn: boolean; credPath?: string }>
+type ProviderFilter = 'all' | 'connected' | 'needs' | 'cli' | 'api'
 
 function ProvidersPage(props: ProvidersPageProps) {
-  const t = useT()
   const { providers, keys, setKeys, activeProvider, setActiveProvider,
           customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
           customOpenaiModels, setCustomOpenaiModels } = props
-  const [expanded, setExpanded] = useState<ProviderId | null>(null)
+  const [selectedProviderId, setSelectedProviderId] = useState<ProviderId | null>(null)
+  const [filter, setFilter] = useState<ProviderFilter>('all')
   // toast — короткое сообщение о результате logout/relogin. null = ничего.
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState<ProviderId | null>(null)
@@ -3012,19 +3410,38 @@ function ProvidersPage(props: ProvidersPageProps) {
     void import('../lib/prefetch-cli').then(m => m.getDetectedClisCached().then(setDetectedClis))
   }, [])
 
-  // «Подключён» = доступен для отправки запросов:
-  //  - CLI: всегда (бинарь либо есть либо нет — реальный коннект сделает provider при send)
-  //  - Локальный (без secretKey, НЕ CLI): Ollama и подобное — всегда доступен на localhost
-  //  - custom-openai: главное чтобы baseUrl был задан, ключ опционален
-  //  - Обычные API: должен быть введён secretKey
-  function isConnected(p: ProviderConfig): boolean {
-    if (p.transport === 'CLI') return true
+  function getCliState(p: ProviderConfig) {
+    return (p.transport === 'CLI' && cliStatus) ? cliStatus[p.id as CliId] : undefined
+  }
+
+  function isReady(p: ProviderConfig): boolean {
+    if (p.transport === 'CLI') {
+      const state = getCliState(p)
+      return Boolean(state?.installed && state.loggedIn)
+    }
     if (p.id === 'custom-openai') return customOpenaiBaseUrl.trim().length > 0
-    if (!p.secretKey) return true
+    if (!p.secretKey) return false
     return Boolean(keys[p.secretKey])
   }
-  const connected = providers.filter(p => isConnected(p))
-  const available = providers.filter(p => p.transport === 'API' && !isConnected(p))
+
+  function needsSetup(p: ProviderConfig): boolean {
+    return !isReady(p)
+  }
+
+  const readyProviders = providers.filter(isReady)
+  const needsProviders = providers.filter(needsSetup)
+  const visibleProviders = providers.filter(p => {
+    if (filter === 'connected') return isReady(p)
+    if (filter === 'needs') return needsSetup(p)
+    if (filter === 'cli') return p.transport === 'CLI'
+    if (filter === 'api') return p.transport === 'API'
+    return true
+  }).sort((a, b) => {
+    if (filter !== 'all' && filter !== 'cli' && filter !== 'api') return 0
+    const readyDelta = Number(isReady(b)) - Number(isReady(a))
+    if (readyDelta !== 0) return readyDelta
+    return a.name.localeCompare(b.name, 'ru')
+  })
 
   function showToast(kind: 'ok' | 'err', text: string) {
     setToast({ kind, text })
@@ -3065,7 +3482,7 @@ function ProvidersPage(props: ProvidersPageProps) {
       showToast('ok', `${p.name}: ключ очищен. Не забудь нажать «Сохранить» внизу.`)
     }
     if (activeProvider === p.id) {
-      const fallback = providers.find(x => x.id !== p.id && (x.transport === 'CLI' || (x.secretKey && keys[x.secretKey])))
+      const fallback = providers.find(x => x.id !== p.id && isReady(x))
       if (fallback) setActiveProvider(fallback.id)
     }
   }
@@ -3090,35 +3507,78 @@ function ProvidersPage(props: ProvidersPageProps) {
     }
   }
 
-  // Онбординг-баннер для нового пользователя без API ключей.
-  // Если нет НИ ОДНОГО заданного API ключа среди API-провайдеров — показываем
-  // явный hint что делать. CLI-провайдеры в учёт не идут: они через подписку
-  // и могут быть «среда»/«залогинен», но без API-ключей агент в облачные
-  // модели стрелять не сможет.
-  const hasAnyApiKey = providers.some(p =>
-    p.transport === 'API' && p.secretKey != null && Boolean(keys[p.secretKey])
-  )
-  // Custom-openai считаем «настроенным» если baseUrl задан, даже без ключа.
-  const hasCustomConfigured = customOpenaiBaseUrl.trim().length > 0
-  const showOnboardingHint = !hasAnyApiKey && !hasCustomConfigured
+  const showEmptyState = readyProviders.length === 0
+
+  function checkProvider(p: ProviderConfig) {
+    if (p.transport === 'CLI') {
+      const state = getCliState(p)
+      if (!state) {
+        showToast('err', `${p.name}: статус ещё загружается`)
+      } else if (!state.installed) {
+        showToast('err', `${p.name}: CLI не найден на компьютере`)
+      } else if (!state.loggedIn) {
+        showToast('err', `${p.name}: нужен вход в аккаунт`)
+      } else {
+        showToast('ok', `${p.name}: готов к работе`)
+      }
+      void loadCliStatus()
+      return
+    }
+    if (p.id === 'custom-openai' && !customOpenaiBaseUrl.trim()) {
+      showToast('err', `${p.name}: укажи Base URL`)
+      return
+    }
+    if (p.secretKey && !keys[p.secretKey]) {
+      showToast('err', `${p.name}: нужен API-ключ`)
+      return
+    }
+    if (!p.secretKey) {
+      showToast('err', `${p.name}: локальный сервер нужно запустить и проверить отдельно`)
+      return
+    }
+    showToast('ok', `${p.name}: настройки выглядят готовыми`)
+  }
 
   return (
     <div className="gg-settings-extra gg-providers-page">
-      <h2 className="gg-settings-page-title">Провайдеры</h2>
+      <div className="gg-providers-hero">
+        <div>
+          <h2 className="gg-settings-page-title">Провайдеры</h2>
+          <p className="gg-providers-lead">
+            Подключи доступ к AI-сервисам. Модели, которые будут видны в чате, выбираются во вкладке «Модели»
+          </p>
+        </div>
+      </div>
 
-      {showOnboardingHint && (
-        <div className="gg-prov-onboarding" role="alert">
-          <div className="gg-prov-onboarding-icon" aria-hidden>👋</div>
-          <div className="gg-prov-onboarding-body">
-            <div className="gg-prov-onboarding-title">Добавьте хотя бы один API ключ чтобы начать</div>
-            <div className="gg-prov-onboarding-text">
-              Рекомендуем — <strong>Gemini API</strong> (есть бесплатный tier на
-              {' '}<a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a>)
-              или <strong>Claude API</strong> ({' '}<a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>).
-              Найди карточку ниже → «+ Подключить» → вставь ключ → «Сохранить».
-              CLI-провайдеры (Claude Code, Gemini CLI и т.п.) — на твоей подписке, отдельная история.
-            </div>
-          </div>
+      <div className="gg-providers-summary">
+        <div>
+          <span>Подключено</span>
+          <strong>{readyProviders.length}</strong>
+        </div>
+        <div>
+          <span>Доступно</span>
+          <strong>{needsProviders.length}</strong>
+        </div>
+        <div>
+          <span>CLI доступно</span>
+          <strong>{detectedClis.filter(c => c.status === 'ready' || c.status === 'found').length}</strong>
+        </div>
+      </div>
+
+      <div className="gg-providers-explain">
+        <div>
+          <span>CLI</span>
+          <p>Работает через установленную командную строку и вход в аккаунт</p>
+        </div>
+        <div>
+          <span>API</span>
+          <p>Работает через ключ с сайта провайдера</p>
+        </div>
+      </div>
+
+      {showEmptyState && (
+        <div className="gg-providers-empty" role="status">
+          Подключи хотя бы один провайдер, чтобы модели появились в инструментах чата
         </div>
       )}
 
@@ -3128,127 +3588,115 @@ function ProvidersPage(props: ProvidersPageProps) {
         </div>
       )}
 
-      <div className="gg-settings-section-title" style={{ marginTop: 8 }}>Подключённые провайдеры</div>
+      <div className="gg-providers-filters" role="group" aria-label="Фильтр провайдеров">
+        {[
+          ['all', 'Все'],
+          ['connected', 'Подключено'],
+          ['needs', 'Доступно'],
+          ['cli', 'CLI'],
+          ['api', 'API']
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={filter === id ? 'is-active' : ''}
+            onClick={() => setFilter(id as ProviderFilter)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="gg-prov-list">
-        {connected.length === 0 && (
-          <div className="gg-text-tertiary" style={{ padding: 14, fontSize: 'var(--text-sm)' }}>
-            Пока нет подключённых. Внизу — доступные.
+        {visibleProviders.length === 0 && (
+          <div className="gg-providers-empty">
+            По этому фильтру ничего нет
           </div>
         )}
-        {connected.map(p => {
+        {visibleProviders.map(p => {
           const status = connectionStatus(p.id, p.secretKey, keys)
-          const cliState = (p.transport === 'CLI' && cliStatus)
-            ? cliStatus[p.id as CliId]
-            : undefined
-          const badge = statusBadge(status, p.transport, p.id, p.secretKey, cliState)
+          const cliState = getCliState(p)
+          const ready = isReady(p)
+          const badge = statusBadge(status, p.transport, p.id, p.secretKey, cliState, ready)
+          const selected = selectedProviderId === p.id
           return (
-            <div key={p.id} className="gg-prov-card">
+            <div key={p.id} className={`gg-prov-card ${selected ? 'is-selected' : ''} ${ready ? 'is-ready' : 'is-missing'}`}>
               <div className="gg-prov-card-main">
-                <div className="gg-prov-card-name">
-                  {p.name}
-                  <span
-                    className={`gg-models-caps-badge ${p.transport === 'CLI' ? 'is-cli' : 'is-api'}`}
-                    title={p.transport === 'CLI' ? t.settings.capsCliHint : t.settings.capsFullHint}
-                  >
-                    {p.transport === 'CLI' ? t.settings.capsCli : t.settings.capsFull}
-                  </span>
-                  <span className={`gg-prov-badge is-${badge.tone}`} title={badge.title}>{badge.label}</span>
+                <div className="gg-prov-card-top">
+                  <div className="gg-prov-card-name">{p.name}</div>
+                  <div className="gg-prov-card-tags">
+                    <span className={`gg-prov-type is-${p.transport.toLowerCase()}`}>{p.transport}</span>
+                    <span className={`gg-prov-badge is-${badge.tone}`} title={badge.title}>{badge.label}</span>
+                  </div>
                 </div>
                 <div className="gg-prov-card-desc">{p.description}</div>
+                <div className="gg-prov-card-note">
+                  {p.transport === 'CLI'
+                    ? 'Подключается через установленный CLI и вход в аккаунт'
+                    : p.secretKey
+                      ? 'Нужен API-ключ с сайта провайдера'
+                      : 'Работает локально или через заданный endpoint'}
+                </div>
               </div>
               <div className="gg-prov-card-actions">
-                {p.transport === 'API' && (
-                  <button
-                    type="button"
-                    className="gg-btn gg-btn-ghost"
-                    onClick={() => setExpanded(expanded === p.id ? null : p.id)}
-                  >{expanded === p.id ? 'Скрыть' : 'Изменить ключ'}</button>
-                )}
-                {p.transport === 'CLI' && (
-                  <button
-                    type="button"
-                    className="gg-btn gg-btn-ghost"
-                    onClick={() => void relogin(p)}
-                    disabled={busy === p.id}
-                    title="Открыть терминал и пройти OAuth по новой"
-                  >{busy === p.id ? '…' : 'Перелогиниться'}</button>
-                )}
                 <button
                   type="button"
                   className="gg-btn gg-btn-ghost"
-                  onClick={() => void disconnect(p)}
-                  disabled={busy === p.id}
-                  title={p.transport === 'CLI' ? 'Выйти из подписки: бежим `<cli> logout` + удаляем credentials-файлы' : 'Очистить API ключ из настроек'}
-                >{busy === p.id ? '…' : 'Отключить'}</button>
+                  onClick={() => checkProvider(p)}
+                >
+                  Проверить
+                </button>
+                <button
+                  type="button"
+                  className={`gg-btn gg-btn-ghost gg-provider-settings-toggle ${selected ? 'is-open' : ''}`}
+                  onClick={() => setSelectedProviderId(selected ? null : p.id)}
+                  title={selected ? 'Закрыть настройки' : ready ? 'Открыть настройки' : 'Настроить подключение'}
+                  aria-label={selected ? 'Закрыть настройки' : ready ? 'Открыть настройки' : 'Настроить подключение'}
+                >
+                  <ProviderSettingsToggleIcon open={selected} />
+                </button>
+                {ready && (
+                  <button
+                    type="button"
+                    className="gg-btn gg-btn-ghost"
+                    onClick={() => void disconnect(p)}
+                    disabled={busy === p.id}
+                  >
+                    {busy === p.id ? '...' : 'Отключить'}
+                  </button>
+                )}
               </div>
-              {expanded === p.id && (
-                <ProviderExpandForm
-                  p={p}
-                  keys={keys}
-                  setKeys={setKeys}
-                  customOpenaiBaseUrl={customOpenaiBaseUrl}
-                  setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
-                  customOpenaiModels={customOpenaiModels}
-                  setCustomOpenaiModels={setCustomOpenaiModels}
-                />
+              {selected && (
+                <section className="gg-provider-detail-panel">
+                  <div className="gg-provider-detail-head">
+                    <div>
+                      <span>Настройка</span>
+                      <h3>{p.name}</h3>
+                    </div>
+                    <button type="button" className="gg-btn gg-btn-ghost" onClick={() => setSelectedProviderId(null)}>
+                      Закрыть
+                    </button>
+                  </div>
+                  <ProviderExpandForm
+                    p={p}
+                    keys={keys}
+                    setKeys={setKeys}
+                    customOpenaiBaseUrl={customOpenaiBaseUrl}
+                    setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
+                    customOpenaiModels={customOpenaiModels}
+                    setCustomOpenaiModels={setCustomOpenaiModels}
+                    hint="После изменения нажми «Сохранить» внизу окна настроек"
+                  />
+                </section>
               )}
             </div>
           )
         })}
       </div>
 
-      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Доступные провайдеры</div>
-      <div className="gg-prov-list">
-        {available.length === 0 && (
-          <div className="gg-text-tertiary" style={{ padding: 14, fontSize: 'var(--text-sm)' }}>
-            Все API-провайдеры подключены.
-          </div>
-        )}
-        {available.map(p => (
-          <div key={p.id} className="gg-prov-card">
-            <div className="gg-prov-card-main">
-              <div className="gg-prov-card-name">
-                {p.name}
-                <span
-                  className={`gg-models-caps-badge is-api`}
-                  title={t.settings.capsFullHint}
-                >
-                  {t.settings.capsFull}
-                </span>
-                <span className="gg-prov-badge is-recommended">Рекомендуемый</span>
-              </div>
-              <div className="gg-prov-card-desc">{p.description}</div>
-            </div>
-            <div className="gg-prov-card-actions">
-              <button
-                type="button"
-                className="gg-btn gg-btn-primary"
-                onClick={() => setExpanded(p.id)}
-              >+ Подключить</button>
-            </div>
-            {expanded === p.id && (
-              <ProviderExpandForm
-                p={p}
-                keys={keys}
-                setKeys={setKeys}
-                customOpenaiBaseUrl={customOpenaiBaseUrl}
-                setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
-                customOpenaiModels={customOpenaiModels}
-                setCustomOpenaiModels={setCustomOpenaiModels}
-                hint="Нажми «Сохранить» внизу — провайдер появится в подключённых."
-              />
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="gg-settings-hint" style={{ marginTop: 18 }}>
-        CLI-провайдеры (Gemini CLI / Claude Code / Grok Build / Codex) подключаются установкой соответствующего CLI вне приложения и логином через подписку. После этого они появляются как «Среда».
-      </div>
-
       {detectedClis.length > 0 && (
         <div className="gg-prov-detected">
-          <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Обнаруженные CLI</div>
+          <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Локально найдено</div>
           <div className="gg-prov-detected-list">
             {detectedClis.map(c => (
               <div key={c.id} className="gg-prov-detected-item">
@@ -3302,8 +3750,7 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             autoFocus
           />
           <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Yandex Cloud Console → выбери каталог → ID в адресной строке.
-            Хранится зашифрованно через safeStorage.
+            Yandex Cloud Console → выбери каталог → скопируй ID из адресной строки
           </div>
         </>
       )}
@@ -3328,10 +3775,7 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             <span style={{ fontSize: 'var(--text-sm)' }}>Проверять TLS-сертификат сервера</span>
           </label>
           <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            ⚠ GigaChat использует сертификат Сбера (Russian Trusted Root CA), которого
-            нет в стандартном trust store. По умолчанию соединение зашифровано TLS, но
-            CA не проверяется (защита от MITM выключена). Если ты установил Russian
-            Trusted Root CA в системное хранилище — включи галку выше для полной проверки.
+            Если на компьютере установлен Russian Trusted Root CA, включи проверку сертификата
           </div>
         </>
       )}
@@ -3348,10 +3792,10 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             autoFocus
           />
           <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Любой OpenAI-compatible endpoint: vLLM, LM Studio, Text Generation WebUI, корпоративный шлюз.
+            Подойдёт любой OpenAI-compatible endpoint: LM Studio, vLLM, локальный или корпоративный шлюз
           </div>
 
-          <div className="gg-label">Модели (через запятую)</div>
+          <div className="gg-label">Модели</div>
           <input
             className="gg-input"
             value={customOpenaiModels}
@@ -3361,14 +3805,14 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}
           />
           <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Список ID моделей которые твой endpoint умеет (то что идёт в параметре <code>model</code> запроса).
+            Укажи ID моделей через запятую
           </div>
         </>
       )}
 
       {p.secretKey && (
         <>
-          <div className="gg-label">{isCustom ? 'API ключ (если endpoint требует)' : 'API ключ'}</div>
+          <div className="gg-label">{isCustom ? 'API-ключ' : 'API-ключ'}</div>
           <input
             className="gg-input"
             type="password"
@@ -3378,8 +3822,9 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
             autoFocus={!isCustom}
           />
           {p.keyLink && (
-            <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 6 }}>
-              Получить ключ: <a href={p.keyLink.url} target="_blank" rel="noreferrer">{p.keyLink.label}</a>. Хранится зашифрованно через safeStorage.
+            <div className="gg-provider-key-help">
+              <span>Нужен ключ с сайта провайдера</span>
+              <a href={p.keyLink.url} target="_blank" rel="noreferrer">Где взять ключ</a>
             </div>
           )}
         </>
@@ -3387,7 +3832,7 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
 
       {!p.secretKey && !isCustom && (
         <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
-          Ключ не нужен — это локальный/embedded провайдер. Нажми «Сохранить» внизу чтобы активировать.
+          Ключ не нужен — этот провайдер работает локально
         </div>
       )}
 
@@ -3701,7 +4146,7 @@ function ModelsPage(props: ModelsPageProps) {
               Чтобы включить модели <strong>{authModal.name}</strong>, сначала подключи провайдер.
               {authModal.transport === 'API'
                 ? ' Получи API-ключ на сайте провайдера и вставь его во вкладке «Провайдеры».'
-                : ' Войди в подписку на сайте, затем пройди OAuth в терминале Verstak.'}
+                : ' Проверь, что CLI установлен и авторизация уже выполнена в аккаунте провайдера.'}
             </p>
             <div className="gg-models-auth-actions">
               {providerAuthLink(authModal) && (
@@ -3711,16 +4156,6 @@ function ModelsPage(props: ModelsPageProps) {
                   onClick={() => void openAuthSite(authModal)}
                 >
                   Открыть {providerAuthLink(authModal)!.label}
-                </button>
-              )}
-              {authModal.transport === 'CLI' && (
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-ghost"
-                  disabled={authBusy}
-                  onClick={() => void startCliLogin(authModal)}
-                >
-                  {authBusy ? 'Открываю терминал…' : 'Войти через терминал'}
                 </button>
               )}
               {authModal.transport === 'API' && (

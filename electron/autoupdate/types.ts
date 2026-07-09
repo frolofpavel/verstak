@@ -55,4 +55,5 @@ export type UiUpdateSnapshot = {
   pendingRelease?: boolean
   installedVersion?: string
   remoteVersion?: string
+  updatedAt?: number
 }

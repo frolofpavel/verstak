@@ -1,6 +1,6 @@
 # AI Handoff: chat workflow and project status indicators
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 Source branch: `codex/verstak-1.8.6-ui-model-fixes`
 Included with commit title: `Improve chat workflow and project status indicators`
 
@@ -39,6 +39,27 @@ Bad style:
 - "В Chat.tsx изменена логика appliedSkill metadata injection."
 
 ## What Changed
+
+## Latest Local Batch - 2026-07-09
+
+This batch also includes a settings refresh that must be ported as one user-facing group:
+
+- Appearance settings were reorganized and simplified. Interface density now uses only the practical modes, animation settings are clearer, and compact helper copy avoids noisy final periods.
+- Notifications settings were redesigned around understandable delivery modes, a global notification toggle, quiet hours, and a working test notification flow. The unclear "in interface" notification channel was removed from user controls.
+- Updates settings were improved with restored release-note behavior, safer cleanup for update temp files, clearer update state, and local update diagnostics for support/debugging.
+- Profile settings are intentionally closed with a "Скоро" state until the future account, organization, and team workspace system is implemented.
+- Providers settings were redesigned: connected/ready providers sort to the top in every filter, provider detail panels open inline under the provider card, `CLI` and `API` are explained, custom provider readiness is not shown as ready without a Base URL, and Ollama is shown as needing a check instead of pretending to be ready.
+- Provider card controls changed: settings use a custom Verstak-style gear icon, open settings use a custom minus icon, `Основной` was removed, `Нужно настроить` was replaced with `Доступно`, and the broken CLI terminal login button was removed.
+- CLI detection now includes additional Grok executable locations, including the user's local `.grok/bin/grok.exe` path.
+- Project folder assignment from project settings, project-group folder icons, model/provider menu polish, and chat-side visual fixes from the local UI pass should be preserved with the rest of this batch.
+
+Implementation notes for the next AI/developer:
+
+- Do not restore the removed `Основной` provider concept in the settings UI unless product requirements explicitly reintroduce it. The user switches between multiple providers/models, so calling one of them "primary" is misleading.
+- Do not show a CLI "login" button that opens a terminal and fails. For CLI providers, show connection/readiness and setup guidance only.
+- Keep connected/ready providers above inactive providers in `Все`, `CLI`, and `API`.
+- Keep provider details inline directly under the provider card that was opened, not at the bottom of the whole provider list.
+- Any new settings icon must match the custom folder icon language: thin rounded contour, restrained accent color, dark/light compatibility, and no generic heavy library icon look.
 
 1. Project avatar status indicators were redesigned.
    - Active project: blue ring in the exact avatar contour.
@@ -146,6 +167,7 @@ For Pavel's/main repository: do not force the target release back to Rayner's lo
 6. Visual theme checks
    - Check both dark and light themes.
    - Any visual change in `layout.css` should have matching/compatible behavior in `shell-atelier.css`.
+   - New icons must follow the current Verstak icon language: thin rounded contour, soft accent color, no heavy filled pictograms, and no generic library icon look when a custom icon already sets the style.
 
 ## Do Not Break
 
@@ -153,6 +175,7 @@ For Pavel's/main repository: do not force the target release back to Rayner's lo
 - Do not use a conic-gradient ring for the running AI avatar status; it caused jagged seams and artifacts.
 - Do not translate the product name `Verstak` inside application UI.
 - Do not make mono/kicker labels heavy bold; this font becomes hard to read when bold.
+- Do not add new UI icons in a different visual language. Match the custom project folder icon style: clean outline, restrained accent color, and dark/light theme compatibility.
 - Do not let the work-progress panel replace normal assistant content or hide settings while response text animation is running.
 - Do not include temporary/untracked tooling directories such as `mcps/chrome-devtools/` unless they are intentionally part of a separate change.
 

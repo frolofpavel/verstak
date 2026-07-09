@@ -160,6 +160,13 @@ function ProjectChip({
 }: ProjectChipProps) {
   const [hover, setHover] = useState(false)
   const status = interrupted ? 'interrupted' : streaming ? 'streaming' : unread ? 'unread' : null
+  const statusLabel = interrupted
+    ? 'Ошибка'
+    : streaming
+      ? 'В работе'
+      : unread
+        ? 'Готово'
+        : ''
   const statusTitle = interrupted
     ? 'Работа была прервана - открой проект для восстановления'
     : streaming
@@ -197,6 +204,9 @@ function ProjectChip({
         </span>
         <span className="gg-rail-chip-text" aria-hidden={!contentExpanded}>
           <span className="gg-rail-label">{project.name}</span>
+          {status && (
+            <span className={`gg-rail-status-text is-${status}`}>{statusLabel}</span>
+          )}
         </span>
       </button>
       {hover && (

@@ -546,3 +546,758 @@ html.gg-atelier ::-webkit-scrollbar-thumb {
 html.gg-atelier ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--border-strong) 80%, var(--accent-muted));
 }
+
+/* Appearance settings */
+html.gg-atelier .gg-appearance-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+html.gg-atelier .gg-appearance-section,
+html.gg-atelier .gg-appearance-reset {
+  background: var(--vol-recessed-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--vol-shadow-inset);
+  padding: 14px;
+}
+
+html.gg-atelier .gg-appearance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+html.gg-atelier .gg-appearance-section-inline,
+html.gg-atelier .gg-appearance-reset {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+html.gg-atelier .gg-appearance-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+html.gg-atelier .gg-appearance-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+html.gg-atelier .gg-appearance-desc {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+html.gg-atelier .gg-appearance-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+html.gg-atelier .gg-appearance-choice {
+  min-height: 62px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--vol-glass);
+  color: var(--text-secondary);
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 140ms ease;
+}
+
+html.gg-atelier .gg-appearance-choice:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+  box-shadow: var(--vol-lift);
+}
+
+html.gg-atelier .gg-appearance-choice.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-muted) 72%, var(--vol-glass));
+  color: var(--text-primary);
+  box-shadow: var(--vol-shadow-inset), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+html.gg-atelier .gg-appearance-choice-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+html.gg-atelier .gg-appearance-choice-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+html.gg-atelier .gg-appearance-choice-desc {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+}
+
+html.gg-atelier .gg-appearance-choice-mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+}
+
+html.gg-atelier .gg-appearance-choice.is-active .gg-appearance-choice-mark {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+}
+
+html.gg-atelier .gg-appearance-section-inline .gg-input {
+  width: 190px;
+  max-width: 100%;
+}
+
+html.gg-atelier .gg-appearance-reset {
+  display: flex;
+}
+
+html.gg-atelier .gg-appearance-reset-btn {
+  flex: 0 0 auto;
+}
+
+html.gg-atelier .gg-theme-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+html.gg-atelier .gg-theme-card {
+  min-height: 52px;
+  padding: 10px 12px;
+}
+
+html.gg-atelier .gg-ui-scale-block {
+  max-width: none;
+}
+
+html.gg-atelier .gg-ui-scale-value {
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--vol-glass);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+html[data-theme="light"].gg-atelier .gg-appearance-section,
+html[data-theme="light"].gg-atelier .gg-appearance-reset {
+  background: color-mix(in srgb, var(--bg-elevated) 86%, white);
+}
+
+html[data-theme="light"].gg-atelier .gg-appearance-choice {
+  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
+}
+
+/* Notifications settings */
+html.gg-atelier .gg-notify-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+html.gg-atelier .gg-settings-shell.is-notifications {
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  align-items: stretch;
+}
+
+html.gg-atelier .gg-settings-content.is-notifications {
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+html.gg-atelier .gg-notify-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--vol-recessed-bg);
+  box-shadow: var(--vol-shadow-inset);
+}
+
+html.gg-atelier .gg-notify-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+html.gg-atelier .gg-notify-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+html.gg-atelier .gg-notify-desc {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+html.gg-atelier .gg-notify-test-btn {
+  flex: 0 0 auto;
+}
+
+html.gg-atelier .gg-notify-top-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 240px;
+  flex: 0 0 240px;
+}
+
+html.gg-atelier .gg-notify-top-actions .gg-btn {
+  width: 100%;
+}
+
+html.gg-atelier .gg-notify-test-note {
+  align-self: flex-start;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-muted) 70%, transparent);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+html.gg-atelier .gg-notify-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+html.gg-atelier .gg-notify-mode-card {
+  position: relative;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 42px 11px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--vol-glass);
+  color: var(--text-secondary);
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+html.gg-atelier .gg-notify-mode-card:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+  box-shadow: var(--vol-lift);
+}
+
+html.gg-atelier .gg-notify-mode-card.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-muted) 72%, var(--vol-glass));
+  color: var(--text-primary);
+  box-shadow: var(--vol-shadow-inset), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+html.gg-atelier .gg-notify-mode-title,
+html.gg-atelier .gg-notify-event-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+html.gg-atelier .gg-notify-mode-desc,
+html.gg-atelier .gg-notify-event-desc {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+html.gg-atelier .gg-notify-mode-mark {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+html.gg-atelier .gg-notify-mode-card.is-active .gg-notify-mode-mark {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+}
+
+html.gg-atelier .gg-notify-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+html.gg-atelier .gg-notify-channel-help {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+html.gg-atelier .gg-notify-channel-help-item {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-input) 74%, transparent);
+}
+
+html.gg-atelier .gg-notify-channel-help-item span {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+html.gg-atelier .gg-notify-channel-help-item p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+html.gg-atelier .gg-notify-event {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(0, 1.35fr);
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--vol-glass) 86%, transparent);
+}
+
+html.gg-atelier .gg-notify-event-meta {
+  min-width: 0;
+}
+
+html.gg-atelier .gg-notify-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+html.gg-atelier .gg-notify-channel {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+html.gg-atelier .gg-notify-channel:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+html.gg-atelier .gg-notify-channel.is-active {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--accent-muted) 78%, var(--bg-input));
+  color: var(--accent);
+}
+
+html.gg-atelier .gg-notify-switch {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  height: 32px;
+  min-height: 32px;
+  width: 100%;
+  padding: 0 11px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--vol-glass);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+  text-align: left;
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+}
+
+html.gg-atelier .gg-notify-switch:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-muted), var(--shadow-sm);
+}
+
+html.gg-atelier .gg-notify-switch-ui {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  flex: 0 0 34px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--accent-border) 46%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-input) 70%, var(--vol-glass));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+html.gg-atelier .gg-notify-switch-ui::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 82%, var(--accent));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+html.gg-atelier .gg-notify-switch.is-on .gg-notify-switch-ui {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--accent-muted) 78%, var(--bg-input));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+html.gg-atelier .gg-notify-switch.is-on .gg-notify-switch-ui::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+html.gg-atelier .gg-notify-switch-text {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+html.gg-atelier .gg-notify-master {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+html.gg-atelier .gg-notify-quiet .gg-notify-switch {
+  width: 142px;
+  flex: 0 0 142px;
+}
+
+html.gg-atelier .gg-notify-time-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+html.gg-atelier .gg-notify-time-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+html.gg-atelier .gg-notify-time-row .gg-input {
+  width: 132px;
+}
+
+html[data-theme="light"].gg-atelier .gg-notify-section {
+  background: color-mix(in srgb, var(--bg-elevated) 86%, white);
+}
+
+html[data-theme="light"].gg-atelier .gg-notify-mode-card,
+html[data-theme="light"].gg-atelier .gg-notify-event,
+html[data-theme="light"].gg-atelier .gg-notify-switch,
+html[data-theme="light"].gg-atelier .gg-notify-channel-help-item {
+  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
+}
+
+html[data-theme="light"].gg-atelier .gg-notify-switch-ui {
+  background: color-mix(in srgb, var(--bg-input) 82%, white);
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-notify-page {
+  gap: 18px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-notify-section {
+  padding: 18px;
+  gap: 14px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-notify-mode-grid,
+html[data-ui-density="spacious"].gg-atelier .gg-notify-events,
+html[data-ui-density="spacious"].gg-atelier .gg-notify-channel-help {
+  gap: 12px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-notify-event {
+  padding: 14px;
+}
+
+@media (max-width: 860px) {
+  html.gg-atelier .gg-notify-section-head {
+    flex-direction: column;
+  }
+
+  html.gg-atelier .gg-notify-top-actions {
+    justify-content: flex-start;
+    align-items: stretch;
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  html.gg-atelier .gg-notify-channel-help,
+  html.gg-atelier .gg-notify-event {
+    grid-template-columns: 1fr;
+  }
+
+  html.gg-atelier .gg-notify-channel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Density */
+html[data-ui-density="spacious"].gg-atelier .gg-appearance-panel {
+  gap: 18px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-appearance-section,
+html[data-ui-density="spacious"].gg-atelier .gg-appearance-reset {
+  padding: 18px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-appearance-choice {
+  min-height: 70px;
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-appearance-choice-grid,
+html[data-ui-density="spacious"].gg-atelier .gg-theme-grid {
+  gap: 12px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-settings-extra:not(.gg-appearance-panel) {
+  padding: 18px 26px 8px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-settings-row {
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-settings-section-title {
+  margin-bottom: 13px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-settings-hint {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-app-atelier .gg-msg {
+  margin-bottom: 10px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-app-atelier .gg-rail-chip-btn {
+  min-height: 42px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  padding-left: 49px;
+  padding-right: 7px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-app-atelier .gg-rail-chip.is-expanded .gg-rail-chip-text {
+  max-width: 164px;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-app-atelier .gg-rail-label {
+  line-height: 1.18;
+}
+
+html[data-ui-density="spacious"].gg-atelier .gg-app-atelier .gg-rail-status-text {
+  margin-top: 2px;
+  padding-block: 1px;
+}
+
+/* Motion */
+html[data-motion="full"].gg-atelier {
+  --gg-motion-factor: 1;
+}
+
+html[data-motion="off"].gg-atelier {
+  scroll-behavior: auto !important;
+}
+
+html[data-motion="off"].gg-atelier *,
+html[data-motion="off"].gg-atelier *::before,
+html[data-motion="off"].gg-atelier *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-motion="off"].gg-atelier .gg-rail-status-arc-sweep,
+html[data-motion="off"].gg-atelier .gg-typing span {
+  animation: none !important;
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active .gg-rail-chip-btn {
+  background: var(--vol-recessed-bg);
+  border-color: var(--border-subtle);
+  box-shadow: var(--vol-shadow-inset);
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc,
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-mark {
+  display: none !important;
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::before,
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming::after {
+  content: none !important;
+  display: none !important;
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming::after {
+  content: '' !important;
+  display: block !important;
+  border: 2px solid var(--accent);
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none !important;
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-active .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar {
+  border-color: transparent !important;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Project status display */
+html.gg-atelier .gg-rail-status-text {
+  display: none;
+  width: max-content;
+  margin-top: 4px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--rail-avatar-status, var(--accent)) 45%, var(--border-default));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--rail-avatar-status, var(--accent)) 12%, transparent);
+  color: color-mix(in srgb, var(--rail-avatar-status, var(--accent)) 72%, var(--text-primary));
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-status-text {
+  display: inline-flex;
+}
+
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc,
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-mark,
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-avatar-wrap.is-status-unread .gg-rail-status-mark {
+  display: none !important;
+}
+
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-avatar-wrap.is-status-streaming::after,
+html[data-project-status="text"].gg-atelier .gg-rail-chip.is-expanded .gg-rail-avatar-wrap.is-status-unread::after {
+  border-color: transparent !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc,
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-mark,
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-unread .gg-rail-status-mark {
+  display: none !important;
+}
+
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-streaming::after,
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-unread::after {
+  border-color: transparent !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
+html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar {
+  border-color: var(--border-default) !important;
+}
+
+@media (max-width: 760px) {
+  html.gg-atelier .gg-appearance-section-inline,
+  html.gg-atelier .gg-appearance-reset {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  html.gg-atelier .gg-appearance-section-inline .gg-input,
+  html.gg-atelier .gg-appearance-reset-btn {
+    width: 100%;
+  }
+}

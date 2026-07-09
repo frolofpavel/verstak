@@ -600,8 +600,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       ? true
       : document.visibilityState === 'visible' && document.hasFocus()
   ))
+  const [appearanceMotionOff, setAppearanceMotionOff] = useState(() => (
+    typeof document !== 'undefined'
+      && document.documentElement.getAttribute('data-motion') === 'off'
+  ))
   const assistantAnimationSeenRef = useRef(false)
   const assistantAnimationPlayedKeysRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const root = document.documentElement
+    const read = () => setAppearanceMotionOff(root.getAttribute('data-motion') === 'off')
+    read()
+    const observer = new MutationObserver(read)
+    observer.observe(root, { attributes: true, attributeFilter: ['data-motion'] })
+    return () => observer.disconnect()
+  }, [])
   useEffect(() => {
     function refreshWindowActive() {
       setChatWindowActive(document.visibilityState === 'visible' && document.hasFocus())
@@ -637,6 +649,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       }
       const alreadyPlayed = assistantAnimationPlayedKeysRef.current.has(lastAssistantAnimationKey)
       const shouldAnimate = !alreadyPlayed
+        && !appearanceMotionOff
         && chatWindowActive
         && !isSettingsOpen
         && isStreaming
@@ -649,12 +662,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       }
     })
     assistantAnimationSeenRef.current = true
-  }, [lastAssistantAnimationKey, lastAssistantMessage?.content, lastAssistantMessage?.createdAt, isStreaming, chatWindowActive, isSettingsOpen])
+  }, [lastAssistantAnimationKey, lastAssistantMessage?.content, lastAssistantMessage?.createdAt, isStreaming, chatWindowActive, isSettingsOpen, appearanceMotionOff])
   const assistantAnimationRafRef = useRef<number | null>(null)
   const assistantAnimationLastFrameRef = useRef<number | null>(null)
   const assistantAnimationCarryRef = useRef(0)
   useEffect(() => {
-    if (isSettingsOpen || !chatWindowActive) {
+    if (appearanceMotionOff || isSettingsOpen || !chatWindowActive) {
       setAnimatedAssistantText(prev => prev ? { ...prev, shown: prev.target } : prev)
       return
     }
@@ -697,7 +710,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       if (assistantAnimationRafRef.current != null) window.cancelAnimationFrame(assistantAnimationRafRef.current)
       assistantAnimationRafRef.current = null
     }
-  }, [animatedAssistantText?.key, animatedAssistantText?.target, isSettingsOpen, chatWindowActive])
+  }, [animatedAssistantText?.key, animatedAssistantText?.target, isSettingsOpen, chatWindowActive, appearanceMotionOff])
   const agentProgressElapsedMs = isStreaming && streamStartedAt != null
     ? tickNow - streamStartedAt
     : null

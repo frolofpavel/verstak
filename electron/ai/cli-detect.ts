@@ -50,6 +50,8 @@ const CLI_TOOLS = [
     versionArg: '--version',
     windowsPaths: (env: NodeJS.ProcessEnv) => [
       env.APPDATA ? join(env.APPDATA, 'npm', 'grok.cmd') : '',
+      env.USERPROFILE ? join(env.USERPROFILE, '.grok', 'bin', 'grok.exe') : '',
+      env.USERPROFILE ? join(env.USERPROFILE, '.grok', 'bin', 'grok') : '',
     ].filter(Boolean),
   },
   {
