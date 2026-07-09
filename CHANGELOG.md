@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.5 - 2026-07-10 (в main; публикация GitHub Release ожидает Павла)
+
+Бандл: подписочный реестр аккаунтов (1.9.3) + авто-переключение на лимите (1.9.4) + глубокая интеграция CLI-подписок (ночной автономный спринт, 5 срезов). Закрывает ощущение «подключил CLI — а это просто окно ввода текста, не свой чат как у Hermes/OpenClaw». Clean-by-default: ToS-серый direct-OAuth и Codex-native протокол осознанно НЕ трогали.
+
+### Добавлено
+- **Проекция родного tool-таймлайна CLI.** Claude Code и Codex выполняют инструменты внутри бинаря (`Read`/`Edit`/`Bash` у Claude; `command_execution`/`file_change`/`mcp_tool_call`/`web_search` у Codex) — раньше эти события выбрасывались, в Timeline виднелся только финальный текст. Теперь проецируются как информационные tool-call (Verstak их НЕ переисполняет — CLI уже выполнил). Grok отложен: streaming-shape его tool-событий не подтверждён.
+- **Честные runtime-ярлыки контроля.** Уровень контроля считается из provider+transport (не только transport): API = «Полный контроль», claude/codex CLI = «Наблюдаемый» (таймлайн виден, но исполнение вне Verstak), grok/gemini CLI = «Урезанный». Ни один CLI не выдаётся за full control. Бейджи в ModelPicker и Инспекторе запусков, i18n ru/en.
+- **Control Envelope — git-якорь отката до CLI-прогона.** CLI пишет мимо undo-стека Verstak, поэтому перед каждым CLI-прогоном снимается честная точка отката через git (HEAD + недеструктивный `git stash create` снапшот грязных правок). Событие «🛟 Контрольная точка» в Timeline + journal. Provenance без секретов.
+- **permission-mode + guard секретов для claude-cli.** Режим агента зеркалится в `--permission-mode` (accept-edits→acceptEdits, plan→plan, bypass→bypassPermissions) — headless claude наконец умеет писать под контролем режима. Одновременно закрыты секреты в CLI: `--disallowedTools 'Read(**/.env)'`… для `.env`/`.ssh`/ключей/creds (зеркало isForbiddenPath, раньше guard жил только на API-пути).
+
+### Известные ограничения
+- Bash-эксфильтрация секретов из CLI (`cat .env`) флагами надёжно не режется (inherent-лимит) — сеть безопасности это Control Envelope (git-якорь).
+- Runtime-enforcement claude-guard опирается на документированную deny-семантику Claude Code, не на живой OAuth-прогон (ночью не сматчить) — рекомендуется живой smoke перед публичным релизом.
+- Grok permission-mode и проекция tool-таймлайна отложены до подтверждения флагов/формата на живом grok.
+
+### Проверка
+- `npm run type` — pass (0 ошибок).
+- `npm run test:fast` — pass, 0 failed (полный pre-commit хук на каждом срезе).
+
 ## 1.9.2 - 2026-07-08
 
 ### Исправлено
