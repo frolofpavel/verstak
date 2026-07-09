@@ -33,6 +33,64 @@ export const CLAUDE_CLI_MODELS = [
   'claude-sonnet-4-5'
 ]
 
+/**
+ * Срез 5 — зеркалим codex sandboxArgsForMode для claude через документированный
+ * `--permission-mode`. Без него headless `--print` не даёт агенту писать (режим
+ * не «встаёт» — источник ощущения «CLI = просто окно ввода»). Значения claude:
+ * default / acceptEdits / plan / bypassPermissions.
+ *   ask → default (без авто-правок) · accept-edits/auto → acceptEdits ·
+ *   plan → plan · bypass → bypassPermissions.
+ */
+export function claudePermissionMode(mode: AgentMode | undefined): string {
+  switch (mode) {
+    case 'accept-edits':
+    case 'auto':
+      return 'acceptEdits'
+    case 'bypass':
+      return 'bypassPermissions'
+    case 'plan':
+      return 'plan'
+    case 'ask':
+    default:
+      return 'default'
+  }
+}
+
+// Зеркало isForbiddenPath (secret-scanner) в gitignore-style deny-глобы Claude Code.
+// Раньше guard `.env`/`.ssh`/creds работал ТОЛЬКО на API-пути (path-policy Verstak);
+// CLI писал мимо него. Теперь, включив запись через --permission-mode, обязаны
+// закрыть file-инструменты (Read/Edit/Write) на секрет-путях и в CLI. Bash-
+// эксфильтрация (`cat .env`) флагами надёжно не режется — inherent-лимит CLI,
+// честно оговорён; сеть безопасности — Control Envelope (git-якорь, срез 4).
+const SECRET_GLOBS = [
+  '**/.env', '**/.env.*',
+  '.ssh/**', '**/.ssh/**',
+  '.aws/**', '**/.aws/**',
+  '.gnupg/**', '.azure/**', '.docker/**', '.kube/**', '.config/gcloud/**',
+  '**/*.key', '**/*.pem', '**/*.p12', '**/*.pfx', '**/*.crt', '**/*.cer', '**/*.jks', '**/*.keystore',
+  '**/creds*.json', '**/credentials*.json',
+  '**/.npmrc', '**/.netrc', '**/cookies.json',
+]
+const SECRET_DENY_TOOLS = ['Read', 'Edit', 'Write']
+
+/** Path-scoped deny-специфаеры Claude Code для секрет-путей (все file-инструменты). */
+export function claudeSecretDenySpecifiers(): string[] {
+  const out: string[] = []
+  for (const g of SECRET_GLOBS) {
+    for (const t of SECRET_DENY_TOOLS) out.push(`${t}(${g})`)
+  }
+  return out
+}
+
+/**
+ * Доп-флаги claude: режим прав + guard секретов. `--disallowedTools` ставим
+ * ПОСЛЕДНИМ блоком — промпт claude читает из stdin (не argv), поэтому variadic-
+ * список специфаеров ничего не поглотит.
+ */
+export function claudeGuardArgs(mode: AgentMode | undefined): string[] {
+  return ['--permission-mode', claudePermissionMode(mode), '--disallowedTools', ...claudeSecretDenySpecifiers()]
+}
+
 function findBinary(): string {
   // Claude Code installs to ~/.local/bin/claude by default on Windows/macOS/Linux
   const home = process.env.USERPROFILE || process.env.HOME || ''
@@ -122,6 +180,9 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
       if (opts.model && opts.model !== 'auto') {
         args.push('--model', opts.model)
       }
+      // Срез 5: режим прав (accept-edits/plan/bypass) + guard секретов. Должен
+      // идти ПОСЛЕ --model — --disallowedTools variadic, ставим его последним.
+      args.push(...claudeGuardArgs(opts.agentMode))
       // OAuth token из Settings → env var дочернему процессу. Это решает
       // headless+Max ограничение Claude Code (см. fix(claude-cli): нашёл
       // решение headless+Max в DEVLOG). Сначала env из текущего процесса,
