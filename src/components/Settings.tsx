@@ -3690,6 +3690,8 @@ function ProvidersPage(props: ProvidersPageProps) {
   const [cliStatus, setCliStatus] = useState<CliStatusMap | null>(null)
   // Обнаруженные CLI-инструменты на компьютере пользователя.
   const [detectedClis, setDetectedClis] = useState<DetectedCli[]>([])
+  const [cliDetectBusy, setCliDetectBusy] = useState(false)
+  const [cliDetectMessage, setCliDetectMessage] = useState<string | null>(null)
 
   async function loadCliStatus() {
     try {
@@ -3701,6 +3703,26 @@ function ProvidersPage(props: ProvidersPageProps) {
     void loadCliStatus()
     void import('../lib/prefetch-cli').then(m => m.getDetectedClisCached().then(setDetectedClis))
   }, [])
+
+  // Ручной пере-скан установленных CLI (Claude Code / Gemini / Grok / Codex и совместимых)
+  // на машине. Дополняет авто-статус: полезно после установки CLI без переоткрытия Settings.
+  async function refreshCliDetection() {
+    setCliDetectBusy(true)
+    setCliDetectMessage(null)
+    try {
+      const list = await window.api.cli.detect()
+      setDetectedClis(list)
+      await loadCliStatus()
+      const ready = list.filter(c => c.status === 'ready').length
+      setCliDetectMessage(list.length > 0
+        ? `Найдено CLI: ${list.length}, готово: ${ready}`
+        : 'CLI не найдены в PATH и стандартных папках')
+    } catch (err) {
+      setCliDetectMessage(`Не удалось проверить CLI: ${(err as Error).message}`)
+    } finally {
+      setCliDetectBusy(false)
+    }
+  }
 
   function getCliState(p: ProviderConfig) {
     return (p.transport === 'CLI' && cliStatus) ? cliStatus[p.id as CliId] : undefined
@@ -3986,9 +4008,20 @@ function ProvidersPage(props: ProvidersPageProps) {
         })}
       </div>
 
-      {detectedClis.length > 0 && (
-        <div className="gg-prov-detected">
-          <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Локально найдено</div>
+      <div className="gg-prov-detected">
+        <div style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div className="gg-settings-section-title" style={{ marginTop: 0 }}>Локально найдено</div>
+          <button
+            type="button"
+            className="gg-btn gg-btn-ghost"
+            onClick={() => void refreshCliDetection()}
+            disabled={cliDetectBusy}
+          >
+            {cliDetectBusy ? 'Проверяю…' : 'Найти CLI'}
+          </button>
+        </div>
+        {cliDetectMessage && <div className="gg-prov-cli-message">{cliDetectMessage}</div>}
+        {detectedClis.length > 0 && (
           <div className="gg-prov-detected-list">
             {detectedClis.map(c => (
               <div key={c.id} className="gg-prov-detected-item">
@@ -3998,8 +4031,8 @@ function ProvidersPage(props: ProvidersPageProps) {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
