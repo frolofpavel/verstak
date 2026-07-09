@@ -52,6 +52,7 @@ import {
   shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
+import { captureControlCheckpoint, buildRunProvenance } from '../ai/control-envelope'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
@@ -1570,6 +1571,28 @@ async function runPlainConversation(
     model: model ?? null,
     messageCount: messages.length
   })
+  // Control Envelope (срез 4): перед CLI-прогоном ставим честный git-якорь отката.
+  // CLI пишет файлы ВНУТРИ бинаря, мимо undo-стека Verstak — единственная реальная
+  // точка отката его внешних правок это git (HEAD + недеструктивный stash-снапшот
+  // грязных tracked-правок). Ставится ДАЖЕ на one-shot; событие видно в Timeline,
+  // нота honestly говорит что именно вне контроля. Секретов не несёт.
+  if (providerId && providerId.endsWith('-cli') && projectPath) {
+    try {
+      const checkpoint = captureControlCheckpoint(projectPath, startedAt)
+      const provenance = buildRunProvenance({ providerId, model: model ?? null, transport: 'CLI', checkpoint })
+      emitAgentProgress(sender, sendId, {
+        id: `envelope-${startedAt}`,
+        phase: 'context',
+        title: '🛟 Контрольная точка перед CLI-прогоном',
+        detail: provenance.note,
+        status: 'done'
+      })
+      recordJournal(projectPath, 'note', 'Control Envelope', provenance.note)
+      if (agentRuns && runId) {
+        try { agentRuns.appendEvent(runId, 'checkpoint', { detail: provenance.note }) } catch { /* best-effort */ }
+      }
+    } catch { /* envelope-телеметрия не должна ронять прогон */ }
+  }
   const currentMessages = [...messages]
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
