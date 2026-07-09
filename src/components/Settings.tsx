@@ -4005,6 +4005,9 @@ function ProvidersPage(props: ProvidersPageProps) {
                   {p.id === 'claude-cli' && (
                     <SubscriptionAccountsPanel providerId="claude-cli" secretLabel="OAuth-токен (claude setup-token)" />
                   )}
+                  {p.id === 'codex-cli' && (
+                    <SubscriptionAccountsPanel providerId="codex-cli" mode="dir" />
+                  )}
                 </section>
               )}
             </div>

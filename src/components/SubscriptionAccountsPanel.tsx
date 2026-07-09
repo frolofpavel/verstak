@@ -3,13 +3,17 @@ import type { SubscriptionAccountDto } from '../types/api'
 
 /**
  * Управление аккаунтами подписочного/CLI-провайдера (1.9.3 мультиаккаунт).
- * Пул аккаунтов (напр. несколько Claude Max), один активный — прогон идёт под ним.
- * Секрет вводится один раз и уходит в SafeStorage; наружу не возвращается.
+ * Пул аккаунтов (напр. несколько Claude Max / Codex), один активный — прогон идёт под ним.
+ *
+ * Два режима:
+ *  - `token` (Claude): секрет вводится один раз → SafeStorage. Наружу не возвращается.
+ *  - `dir`   (Codex): аккаунт = изолированная папка стейта (CODEX_HOME); логин отдельно
+ *            в терминале кнопкой «Войти».
  */
-export function SubscriptionAccountsPanel({ providerId, secretLabel }: {
+export function SubscriptionAccountsPanel({ providerId, secretLabel, mode = 'token' }: {
   providerId: string
-  /** Как называть секрет для этого провайдера: «Токен» (Claude) / «API-ключ» (Kimi/Z.ai). */
   secretLabel?: string
+  mode?: 'token' | 'dir'
 }) {
   const [accounts, setAccounts] = useState<SubscriptionAccountDto[]>([])
   const [adding, setAdding] = useState(false)
@@ -26,11 +30,14 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel }: {
   }
   useEffect(() => { void reload() }, [providerId])
 
-  async function add() {
-    if (!label.trim() || !secret.trim()) { setError('Заполни название и ' + secretName.toLowerCase()); return }
+  async function submit() {
+    if (!label.trim()) { setError('Укажи название аккаунта.'); return }
+    if (mode === 'token' && !secret.trim()) { setError('Заполни ' + secretName.toLowerCase()); return }
     setBusy(true); setError(null)
     try {
-      const res = await window.api.subscriptionAccounts.create({ providerId, label: label.trim(), secret: secret.trim() })
+      const res = mode === 'dir'
+        ? await window.api.subscriptionAccounts.createDir({ providerId, label: label.trim() })
+        : await window.api.subscriptionAccounts.create({ providerId, label: label.trim(), secret: secret.trim() })
       if (!res.ok) { setError(res.error); return }
       setLabel(''); setSecret(''); setAdding(false)
       await reload()
@@ -38,8 +45,9 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel }: {
   }
 
   async function activate(id: number) { await window.api.subscriptionAccounts.setActive(providerId, id); await reload() }
+  async function login(id: number) { await window.api.subscriptionAccounts.login(id) }
   async function remove(id: number) {
-    if (!window.confirm('Удалить аккаунт? Сохранённый секрет тоже сотрётся.')) return
+    if (!window.confirm('Удалить аккаунт? Сохранённый секрет / папка стейта тоже сотрутся.')) return
     await window.api.subscriptionAccounts.remove(id); await reload()
   }
   async function rename(id: number, current: string) {
@@ -71,6 +79,9 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel }: {
               {a.active
                 ? <span className="gg-subacct-badge">активен</span>
                 : <button type="button" className="gg-btn gg-btn-ghost gg-subacct-use" onClick={() => void activate(a.id)}>Сделать активным</button>}
+              {mode === 'dir' && (
+                <button type="button" className="gg-btn gg-btn-ghost gg-subacct-use" onClick={() => void login(a.id)}>Войти</button>
+              )}
               <span className="gg-subacct-spacer" />
               <button type="button" className="gg-subacct-action" title="Переименовать" onClick={() => void rename(a.id, a.label)}>✎</button>
               <button type="button" className="gg-subacct-action" title="Удалить" onClick={() => void remove(a.id)}>✕</button>
@@ -82,10 +93,12 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel }: {
       {adding && (
         <div className="gg-subacct-add">
           <input className="gg-input" placeholder="Название (напр. «Личный Max»)" value={label} onChange={e => setLabel(e.target.value)} />
-          <input className="gg-input" type="password" placeholder={secretName} value={secret} onChange={e => setSecret(e.target.value)} />
+          {mode === 'token'
+            ? <input className="gg-input" type="password" placeholder={secretName} value={secret} onChange={e => setSecret(e.target.value)} />
+            : <div className="gg-subacct-hint">После добавления нажми «Войти» — откроется терминал, залогинься в этот аккаунт (креды лягут в его изолированную папку).</div>}
           {error && <div className="gg-subacct-error">{error}</div>}
           <div className="gg-subacct-add-actions">
-            <button type="button" className="gg-btn gg-btn-primary" disabled={busy} onClick={() => void add()}>{busy ? 'Сохраняю…' : 'Добавить'}</button>
+            <button type="button" className="gg-btn gg-btn-primary" disabled={busy} onClick={() => void submit()}>{busy ? 'Сохраняю…' : 'Добавить'}</button>
             <button type="button" className="gg-btn gg-btn-ghost" disabled={busy} onClick={() => { setAdding(false); setError(null); setLabel(''); setSecret('') }}>Отмена</button>
           </div>
         </div>

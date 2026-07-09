@@ -19,6 +19,9 @@ interface CodexCliOptions {
   /** Режим агента Verstak — маппится во флаги песочницы `codex exec`.
    *  Без него Codex стартует в read-only и не может писать/выполнять (auto «не встаёт»). */
   agentMode?: AgentMode
+  /** 1.9.3 мультиаккаунт: изолированный CODEX_HOME активного аккаунта (auth/config/history
+   *  Codex живут относительно него). undefined = дефолт ~/.codex. */
+  codexHome?: string
 }
 
 /**
@@ -136,7 +139,9 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
         cwd,
         shell: binary.endsWith('.cmd') || binary.endsWith('.ps1'),
         windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Мультиаккаунт: изолируем стейт Codex через CODEX_HOME активного аккаунта.
+        env: opts.codexHome ? { ...process.env, CODEX_HOME: opts.codexHome } : process.env
       })
 
       try {

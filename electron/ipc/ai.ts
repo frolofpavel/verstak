@@ -1072,6 +1072,10 @@ export function registerAiIpc(deps: AiDeps): void {
       const claudeOauthToken = providerId === 'claude-cli'
         ? (claudeAccount?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
+      // Codex мультиаккаунт: активный codex-cli аккаунт → изолированный CODEX_HOME (config-dir).
+      const codexHome = providerId === 'codex-cli'
+        ? (deps.resolveSubscriptionAccount?.('codex-cli')?.configDir ?? null)
+        : null
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.
       let customBaseUrl: string | undefined
@@ -1108,6 +1112,7 @@ export function registerAiIpc(deps: AiDeps): void {
         projectSystemPrompt: projectSystemPromptForProvider,
         skillPrompt: skillPromptForProvider,
         claudeOauthToken,
+        codexHome,
         customBaseUrl,
         customModels,
         yandexFolderId,

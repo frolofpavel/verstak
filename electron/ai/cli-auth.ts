@@ -205,12 +205,17 @@ export interface ReloginResult {
  * Не ждём завершения — наше окно не должно блокироваться. Возвращаем
  * как только спавн прошёл.
  */
-export async function reloginCli(providerId: CliProviderId): Promise<ReloginResult> {
+export async function reloginCli(providerId: CliProviderId, envVars: Record<string, string> = {}): Promise<ReloginResult> {
   const d = DESCRIPTORS[providerId]
   const binPath = whichBin(d.bin)
   if (!binPath) {
     return { ok: false, message: `${d.label}: бинарь \`${d.bin}\` не найден в PATH. Установи CLI и попробуй снова.` }
   }
+
+  // 1.9.3 мультиаккаунт: env-переменные (напр. CODEX_HOME=<config-dir аккаунта>) выставляем
+  // в открываемом терминале ПЕРЕД login — чтобы креды легли в изолированную папку аккаунта.
+  const winEnvPrefix = Object.entries(envVars).map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}'; `).join('')
+  const nixEnvPrefix = Object.entries(envVars).map(([k, v]) => `${k}='${v.replace(/'/g, "'\\''")}' `).join('')
 
   if (platform() === 'win32') {
     // Windows консоль по умолчанию использует кодировку cp866 (на ru-RU),
@@ -219,7 +224,7 @@ export async function reloginCli(providerId: CliProviderId): Promise<ReloginResu
     // отображается как «тАйтАйтАйтАй». Префикс делает консоль UTF-8-ready
     // ПЕРЕД запуском CLI и не падает если cmd уже UTF-8.
     const prefix = 'chcp 65001 > $null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
-    const cmdLine = prefix + d.loginCmd
+    const cmdLine = prefix + winEnvPrefix + d.loginCmd
 
     // Пробуем Windows Terminal — у него красивее UX и tabs. wt.exe есть на
     // Win11 по умолчанию и устанавливается на Win10 через Store.
@@ -252,7 +257,7 @@ export async function reloginCli(providerId: CliProviderId): Promise<ReloginResu
 
   // *nix
   try {
-    const child = spawn('x-terminal-emulator', ['-e', `${d.loginCmd}; read -p "Enter to close..."`], {
+    const child = spawn('x-terminal-emulator', ['-e', `${nixEnvPrefix}${d.loginCmd}; read -p "Enter to close..."`], {
       detached: true, stdio: 'ignore'
     })
     child.unref()

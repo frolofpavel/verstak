@@ -81,6 +81,18 @@ describe('subscription accounts storage', () => {
     expect(getSubscriptionAccount(db, a.id)?.lastUsedAt).toBe(12345)
   })
 
+  it('config-dir account (Codex) persists configDir and has no secret', () => {
+    const a = createSubscriptionAccount(db, { providerId: 'codex-cli', label: 'Рабочий', credRef: '', configDir: '/data/cli-accounts/codex-abc' })
+    const got = getSubscriptionAccount(db, a.id)!
+    expect(got.configDir).toBe('/data/cli-accounts/codex-abc')
+    expect(got.credRef).toBe('')
+    expect(got.active).toBe(true) // первый для codex-cli — активен
+    // отдельный пул от claude-cli
+    const c = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'C', credRef: 'r1' })
+    expect(c.active).toBe(true)
+    expect(getActiveAccount(db, 'codex-cli')?.id).toBe(a.id)
+  })
+
   it('delete removes account; if the active one is deleted, another becomes active', () => {
     const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
     const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })

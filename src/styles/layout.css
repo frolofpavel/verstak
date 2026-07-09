@@ -14576,3 +14576,8 @@ html[data-theme="light"] .gg-skill-card.is-selected {
   display: flex;
   gap: 8px;
 }
+.gg-subacct-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}

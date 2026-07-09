@@ -80,8 +80,24 @@
 
 ## 5. Зависимости
 
-- **Kimi/Z.ai smoke блокирован ключами Павла** (память `verstak-subscription-providers-2026-07-09`). Без ключей — фундамент 1.9.3 делаем на Claude/Gemini, Kimi/Z.ai добавляем когда придут ключи.
-- Мультиаккаунт для Gemini/Codex/Grok требует проверки, что CLI уважает `*_CONFIG_DIR`/HOME-override (Claude — точно, через `CLAUDE_CONFIG_DIR`; остальные — verify перед 1.9.3).
+- **Kimi/Z.ai smoke блокирован ключами Павла** (память `verstak-subscription-providers-2026-07-09`). Без ключей — фундамент 1.9.3 делаем на Claude/Codex, Kimi/Z.ai добавляем когда придут ключи.
+
+### Разведка config-dir механизмов CLI (09.07, проверено — не догадка)
+
+| CLI | Механизм мультиаккаунта | Статус |
+|---|---|---|
+| **Claude Code** | `CLAUDE_CODE_OAUTH_TOKEN` (токен) ИЛИ `CLAUDE_CONFIG_DIR` | ✅ сделано (token-режим, 1.9.3) |
+| **Codex CLI** | `CODEX_HOME` — хирургично весь стейт (auth/config/history) | ✅ сделано (dir-режим, 1.9.3) |
+| **Gemini CLI** | config-dir env **НЕ поддерживает** — хардкод `~/.gemini`; открытый FR google-gemini/gemini-cli#2815; только HOME-override (инвазивно) | ❌ заблокировано апстримом |
+| **Grok CLI** | нет config-dir override; `~/.grok` + API-key env (`GROK_CODE_XAI_API_KEY`/`XAI_API_KEY`) — токен-путь для headless, не подписка-OAuth | ⚠️ отложено (можно token-режимом, менее проверено) |
+
+**Вывод:** Claude (token) + Codex (CODEX_HOME) — чистые, сделаны. Gemini ждёт апстрим-FR. Grok — опционально токен-режимом.
+
+## Статус реализации (09.07)
+
+- **1.9.3 фаза 1 (реестр + Claude token):** ✅ в main (`919b699`).
+- **1.9.3 Codex (CODEX_HOME dir):** ✅ в main.
+- Осталось: Kimi/Z.ai (ключи Павла) → smoke; 1.9.4 (детектор лимита + авто-переключение); релиз 1.9.3.
 
 ---
-*Черновик 2026-07-09. Заземлён в коде (cli-auth.ts, claude-cli.ts, registry.ts). Ждёт steer Павла по развилке A/B перед нарезкой задач.*
+*2026-07-09. Заземлён в коде + разведка config-dir проверена веб-источниками. Развилка: выбран путь A (пул одного провайдера), сделано на Claude+Codex.*

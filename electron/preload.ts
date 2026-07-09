@@ -276,6 +276,8 @@ contextBridge.exposeInMainWorld('api', {
     list: (providerId?: string) => ipcRenderer.invoke('subscription-accounts:list', providerId),
     create: (input: { providerId: string; label: string; secret: string; configDir?: string | null; baseUrl?: string | null }) =>
       ipcRenderer.invoke('subscription-accounts:create', input),
+    createDir: (input: { providerId: string; label: string }) => ipcRenderer.invoke('subscription-accounts:create-dir', input),
+    login: (id: number) => ipcRenderer.invoke('subscription-accounts:login', id),
     setActive: (providerId: string, id: number) => ipcRenderer.invoke('subscription-accounts:set-active', providerId, id),
     rename: (id: number, label: string) => ipcRenderer.invoke('subscription-accounts:rename', id, label),
     remove: (id: number) => ipcRenderer.invoke('subscription-accounts:delete', id)

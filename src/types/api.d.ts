@@ -550,6 +550,9 @@ declare global {
         list: (providerId?: string) => Promise<SubscriptionAccountDto[]>
         create: (input: { providerId: string; label: string; secret: string; configDir?: string | null; baseUrl?: string | null }) =>
           Promise<{ ok: true; account: SubscriptionAccountDto } | { ok: false; error: string }>
+        createDir: (input: { providerId: string; label: string }) =>
+          Promise<{ ok: true; account: SubscriptionAccountDto } | { ok: false; error: string }>
+        login: (id: number) => Promise<{ ok: boolean; error?: string }>
         setActive: (providerId: string, id: number) => Promise<{ ok: boolean }>
         rename: (id: number, label: string) => Promise<{ ok: boolean; error?: string }>
         remove: (id: number) => Promise<{ ok: boolean }>

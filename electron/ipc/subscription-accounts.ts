@@ -6,8 +6,11 @@
 
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
+import { mkdirSync, rmSync } from 'fs'
+import { join } from 'path'
 import type { Database } from 'better-sqlite3'
 import type { Settings } from '../storage/settings'
+import { reloginCli, isCliProvider } from '../ai/cli-auth'
 import {
   createSubscriptionAccount,
   listSubscriptionAccounts,
@@ -17,6 +20,11 @@ import {
   deleteSubscriptionAccount,
   type SubscriptionAccount,
 } from '../storage/subscription-accounts'
+
+/** Провайдеры с config-dir изоляцией (аккаунт = отдельная папка стейта) → env-переменная. */
+const CONFIG_DIR_ENV: Record<string, string> = {
+  'codex-cli': 'CODEX_HOME',
+}
 
 /** DTO без секрета: cred_ref не покидает main. */
 export interface SubscriptionAccountDto {
@@ -32,7 +40,7 @@ export interface SubscriptionAccountDto {
   hasSecret: boolean
 }
 
-export function registerSubscriptionAccountsIpc(db: Database, settings: Settings): void {
+export function registerSubscriptionAccountsIpc(db: Database, settings: Settings, accountsBaseDir: string): void {
   const toDto = (a: SubscriptionAccount): SubscriptionAccountDto => {
     const { credRef, ...rest } = a
     return { ...rest, hasSecret: Boolean(settings.getSecret(credRef)) }
@@ -60,6 +68,32 @@ export function registerSubscriptionAccountsIpc(db: Database, settings: Settings
     return { ok: true as const, account: toDto(account) }
   })
 
+  // Config-dir аккаунт (Codex): секрета нет — генерим изолированную папку стейта, логин
+  // потом в терминале с нужной env-переменной. hasSecret=false до первого логина.
+  ipcMain.handle('subscription-accounts:create-dir', (_e, input: { providerId: string; label: string }) => {
+    const providerId = String(input?.providerId ?? '').trim()
+    const label = String(input?.label ?? '').trim()
+    if (!CONFIG_DIR_ENV[providerId]) return { ok: false as const, error: 'Провайдер не поддерживает config-dir аккаунты.' }
+    if (!label) return { ok: false as const, error: 'Укажи название аккаунта.' }
+    const configDir = join(accountsBaseDir, `${providerId}-${randomUUID()}`)
+    try { mkdirSync(configDir, { recursive: true }) } catch (err) {
+      return { ok: false as const, error: `Не удалось создать папку аккаунта: ${(err as Error).message}` }
+    }
+    const account = createSubscriptionAccount(db, { providerId, label, credRef: '', configDir })
+    return { ok: true as const, account: toDto(account) }
+  })
+
+  // Логин в config-dir аккаунт: открываем терминал с env (напр. CODEX_HOME=<папка>) + CLI login.
+  ipcMain.handle('subscription-accounts:login', async (_e, id: number) => {
+    const account = getSubscriptionAccount(db, Number(id))
+    if (!account) return { ok: false as const, error: 'Аккаунт не найден.' }
+    const envKey = CONFIG_DIR_ENV[account.providerId]
+    if (!envKey || !account.configDir) return { ok: false as const, error: 'У аккаунта нет config-dir для логина.' }
+    if (!isCliProvider(account.providerId)) return { ok: false as const, error: 'Не CLI-провайдер.' }
+    const res = await reloginCli(account.providerId, { [envKey]: account.configDir })
+    return res.ok ? { ok: true as const } : { ok: false as const, error: res.message }
+  })
+
   ipcMain.handle('subscription-accounts:set-active', (_e, providerId: string, id: number) => {
     setActiveAccount(db, String(providerId), Number(id))
     return { ok: true as const }
@@ -76,7 +110,11 @@ export function registerSubscriptionAccountsIpc(db: Database, settings: Settings
     const account = getSubscriptionAccount(db, Number(id))
     if (account) {
       // Стираем секрет из SafeStorage вместе с записью — не оставляем висячий cred.
-      try { settings.setSecret(account.credRef, '') } catch { /* best-effort */ }
+      if (account.credRef) { try { settings.setSecret(account.credRef, '') } catch { /* best-effort */ } }
+      // Для config-dir аккаунта чистим изолированную папку стейта (там креды логина).
+      if (account.configDir && account.configDir.includes('cli-accounts')) {
+        try { rmSync(account.configDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+      }
     }
     const removed = deleteSubscriptionAccount(db, Number(id))
     return { ok: removed }

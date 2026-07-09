@@ -490,7 +490,7 @@ app.whenReady().then(() => {
   registerSettingsIpc(settings)
   registerConnectorsIpc(connectorRegistry, settings)
   registerCliAuthIpc(settings)
-  registerSubscriptionAccountsIpc(db, settings)
+  registerSubscriptionAccountsIpc(db, settings, join(app.getPath('userData'), 'cli-accounts'))
   registerUserProfilesIpc(userProfiles)
   registerProjectIpc(projects, projectGroups, db)
   registerProjectMapIpc(knownRoots)

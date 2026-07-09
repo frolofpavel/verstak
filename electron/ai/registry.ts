@@ -213,6 +213,8 @@ export interface CreateOptions {
   /** OAuth token для Claude Code (из `claude setup-token`). Передаётся как
    *  env var CLAUDE_CODE_OAUTH_TOKEN — решает headless+Max ограничение. */
   claudeOauthToken?: string | null
+  /** 1.9.3 мультиаккаунт: изолированный CODEX_HOME активного codex-cli аккаунта. */
+  codexHome?: string | null
   /** Для custom-openai: переопределённый baseUrl из settings. */
   customBaseUrl?: string
   /** Для custom-openai: список моделей из settings (comma-separated parsed). */
@@ -269,7 +271,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'codex-cli':
-      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
+      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, codexHome: opts.codexHome ?? undefined })
     case 'yandex-gpt': {
       if (!opts.apiKey) throw new Error('YandexGPT: API ключ не задан')
       if (!opts.yandexFolderId) throw new Error('YandexGPT: Folder ID не задан (Settings → Провайдеры → YandexGPT)')
