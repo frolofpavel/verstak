@@ -52,7 +52,7 @@ interface CliEvent {
   type: string
   subtype?: string
   message?: {
-    content?: Array<{ type: string; text?: string }>
+    content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string }>
     /** Some Claude CLI versions embed token counts inside message.usage on
      *  the assistant event. */
     usage?: {
@@ -191,6 +191,22 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
 
         if (ev.type === 'assistant' && ev.message?.content) {
           for (const block of ev.message.content) {
+            // Проекция родного tool-use CLI в Timeline. Claude УЖЕ выполнил инструмент
+            // внутри `--print` — эмитим информационно (наш executor это не исполняет,
+            // runPlainConversation релеит как tool-activity). Раньше эти блоки молча
+            // выбрасывались — «мы не видим, что делает CLI» было недоделкой парсера.
+            if (block.type === 'tool_use' && block.name) {
+              queue.push({
+                type: 'tool-call',
+                call: {
+                  id: block.id ?? `cli-${Date.now()}`,
+                  name: block.name,
+                  args: (block.input && typeof block.input === 'object') ? block.input as Record<string, unknown> : {}
+                }
+              })
+              wake()
+              continue
+            }
             if (block.type === 'text' && block.text) {
               const id = ev.message ? JSON.stringify(ev.message).slice(0, 32) : 'x'
               const prev = lastText[id] ?? ''

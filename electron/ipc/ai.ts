@@ -1655,6 +1655,15 @@ async function runPlainConversation(
               status: 'running'
             })
           }
+        } else if (event.type === 'tool-call') {
+          // Проекция родного tool-use CLI (claude/codex/grok): инструмент УЖЕ выполнен
+          // внутри CLI-провайдера — показываем завершённой активностью в Timeline. Наш
+          // executor его НЕ запускает (plain-путь без tool-loop) → без двойного исполнения.
+          const detail = compactProgressText(JSON.stringify(event.call.args ?? {}), 120) ?? ''
+          sender.send('ai:event', {
+            id: sendId,
+            event: { type: 'tool-activity', callId: event.call.id, name: event.call.name, label: `${event.call.name} · CLI`, detail, status: 'ok' }
+          })
         } else if (event.type === 'usage' && event.usage) {
           sessionUsage.inputTokens += event.usage.inputTokens ?? 0
           sessionUsage.outputTokens += event.usage.outputTokens ?? 0
