@@ -13,8 +13,8 @@ import type { ChatProvider, ChatEvent, ChatMessage } from '../../electron/ai/typ
  */
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, app: { getPath: () => tmpdir() } }))
 
-const { runApiConversation } = await import('../../electron/ipc/ai')
-// Распил 1.9.8: supplements вынесены в runner-supplements.
+// Распил 1.9.8: API-путь/ядро вынесено в runner-api, supplements — в runner-supplements.
+const { runApiConversation } = await import('../../electron/ai/runner-api')
 const { pushConversationSupplement } = await import('../../electron/ai/runner-supplements')
 const { createFileTools } = await import('../../electron/ai/tools')
 const { createCostGuard } = await import('../../electron/ai/cost-guard')

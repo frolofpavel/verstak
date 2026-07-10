@@ -30,3 +30,28 @@ export const MAX_FALLBACK_ATTEMPTS = 2
 /** Потолок account-switch за прогон: страховка от вечного цикла при resetEta=null
  *  (лимит без парсируемого ETA → аккаунт не остывает → бесконечная ротация). */
 export const MAX_ACCOUNT_SWITCHES = 4
+
+// Лимиты ходов agent-loop — общие для dispatch (ipc/ai.ts) и runner-api.
+export const DEFAULT_AGENT_TURNS = 8
+export const MAX_BUDGET_TURNS = 40  // hard ceiling even with continues — prevents infinite-budget abuse
+
+// ─── Реестр pending-подтверждений (общий: ipc-хендлеры ai.ts ↔ runner-api) ───
+// Keyed by `${sendId}::${callId}` — параллельные ai:send не резолвят чужие
+// подтверждения. Синглтоны: ai:resolve-write/command/plan (в ai.ts) и построение
+// ToolContext (в runner-api) делят ОДНИ И ТЕ ЖЕ Map'ы через ES-модуль.
+export interface PendingWrite { sendId: number; resolve: (accept: boolean) => void }
+export const pendingWrites = new Map<string, PendingWrite>()
+
+export interface PendingCommand { sendId: number; resolve: (accept: boolean) => void }
+export const pendingCommands = new Map<string, PendingCommand>()
+
+export interface PendingPlan { sendId: number; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }
+export const pendingPlans = new Map<string, PendingPlan>()
+
+// #4 suspend: sendId'ы, прерванные как ПРИОСТАНОВКА (не Stop) — finally помечает
+// прогон 'suspended' для ↻ Продолжить. Общий для ai:suspend (ai.ts) и finally (runner).
+export const suspendedSends = new Set<number>()
+
+export function scopedKey(sendId: number, callId: string): string {
+  return `${sendId}::${callId}`
+}
