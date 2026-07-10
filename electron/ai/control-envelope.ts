@@ -167,7 +167,10 @@ export function previewControlRestore(repoRoot: string | null, cp: Anchor): Rest
   const changedFiles = diff.split('\n').map(s => s.trim()).filter(Boolean)
   const untracked = git(repoRoot, ['ls-files', '--others', '--exclude-standard']) ?? ''
   const untrackedFiles = untracked.split('\n').map(s => s.trim()).filter(Boolean)
-  return { ok: true, currentHead, gitHead: cp.gitHead, hasStash: !!cp.stashRef, changedFiles, untrackedFiles }
+  // hasStash — только если snapshot реально жив (не выгреблен gc), чтобы UI не
+  // обещал возврат грязных правок из недостижимого объекта (1.9.7 #2).
+  const hasStash = !!cp.stashRef && isStashAlive(repoRoot, cp.stashRef)
+  return { ok: true, currentHead, gitHead: cp.gitHead, hasStash, changedFiles, untrackedFiles }
 }
 
 export interface RestoreResult {
@@ -197,11 +200,60 @@ export function applyControlRestore(repoRoot: string | null, cp: Anchor): Restor
   const co = git(root, ['checkout', cp.gitHead as string, '--', '.'])
   if (co === null) return { ok: false, reason: 'error' }
   let stashApplied = false
-  if (cp.stashRef) {
-    // Вернуть грязные pre-run правки. Конфликт/ошибка не валит откат tracked —
-    // stash best-effort (правки уже восстановлены к чистому якорю).
+  // Возвращаем грязные pre-run правки, только если snapshot ЖИВ (не выгреблен gc).
+  if (cp.stashRef && isStashAlive(root, cp.stashRef)) {
+    // Конфликт/ошибка не валит откат tracked — stash best-effort (правки уже
+    // восстановлены к чистому якорю).
     const ap = git(root, ['stash', 'apply', cp.stashRef])
     stashApplied = ap !== null
   }
   return { ok: true, restoredFiles: changed, stashApplied, untrackedKept: pre.untrackedFiles ?? [] }
+}
+
+// ─── Удержание stash-снапшота против git gc (1.9.7 #2) ──────────────────────
+// `git stash create` даёт ВИСЯЧИЙ commit (не в refs/stash) → git gc за длинную
+// сессию может его выгрести, и откат #1 останется без грязных pre-run правок.
+// Закрепляем его лёгким ref'ом refs/verstak/envelopes/<runId>, проверяем живость
+// перед применением и чистим по TTL.
+
+const ENVELOPE_REF_PREFIX = 'refs/verstak/envelopes/'
+
+// runId → ref-safe сегмент (git запрещает пробелы, ~^:?*[\, .. и т.п.).
+function refSafe(runId: string): string {
+  return runId.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
+/** Закрепить stash-commit ref'ом, чтобы gc его не выгреб. false при ошибке/не-git. */
+export function anchorStash(repoRoot: string | null, runId: string, stashRef: string): boolean {
+  if (!repoRoot || !runId || !stashRef) return false
+  const out = git(repoRoot, ['update-ref', ENVELOPE_REF_PREFIX + refSafe(runId), stashRef])
+  return out !== null
+}
+
+/** Жив ли stash-commit (объект достижим). git cat-file -t <sha> → 'commit'. */
+export function isStashAlive(repoRoot: string | null, stashRef: string): boolean {
+  if (!repoRoot || !stashRef) return false
+  const t = git(repoRoot, ['cat-file', '-t', stashRef])
+  return !!t && t.trim() === 'commit'
+}
+
+/**
+ * TTL-чистка закреплённых snapshot'ов: удалить envelope-ref'ы, чей commit старше
+ * ttlMs. Вызывать оппортунистически при снятии нового якоря. Возвращает число
+ * удалённых. Всё graceful.
+ */
+export function pruneEnvelopeStashes(repoRoot: string | null, ttlMs: number, now: number): number {
+  if (!repoRoot) return 0
+  const out = git(repoRoot, ['for-each-ref', '--format=%(refname) %(committerdate:unix)', ENVELOPE_REF_PREFIX])
+  if (!out) return 0
+  let pruned = 0
+  const cutoff = Math.floor((now - ttlMs) / 1000)
+  for (const line of out.split('\n')) {
+    const [ref, ts] = line.trim().split(/\s+/)
+    if (!ref || !ts) continue
+    if (Number(ts) < cutoff) {
+      if (git(repoRoot, ['update-ref', '-d', ref]) !== null) pruned++
+    }
+  }
+  return pruned
 }

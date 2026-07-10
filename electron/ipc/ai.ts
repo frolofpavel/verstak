@@ -52,7 +52,7 @@ import {
   shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
-import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope } from '../ai/control-envelope'
+import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope, anchorStash, pruneEnvelopeStashes } from '../ai/control-envelope'
 import { secretProtectionLevel } from '../ai/cli-security-capabilities'
 import { decideCheckpointSave, type CheckpointThrottleState } from '../ai/checkpoint-throttle'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
@@ -1600,6 +1600,14 @@ export async function runPlainConversation(
   if (providerId && providerId.endsWith('-cli') && projectPath) {
     try {
       const checkpoint = captureControlCheckpoint(projectPath, startedAt)
+      // 1.9.7 #2: закрепить stash-снапшот ref'ом (git gc иначе выгребет висячий
+      // commit) + оппортунистическая TTL-чистка старых (7 дней). Best-effort.
+      if (checkpoint.stashRef && runId) {
+        try {
+          anchorStash(projectPath, runId, checkpoint.stashRef)
+          pruneEnvelopeStashes(projectPath, 7 * 24 * 3600 * 1000, startedAt)
+        } catch { /* удержание snapshot не критично */ }
+      }
       const provenance = buildRunProvenance({ providerId, model: model ?? null, transport: 'CLI', checkpoint })
       // Bash-exfiltration truth (1.9.6 #3): если чтение секретов у этого CLI не
       // закрыто полностью — честно предупреждаем ПРЯМО в ноте, не имитируя защиту.
