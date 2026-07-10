@@ -372,6 +372,16 @@ export const en = {
     limitedHint: 'Tools, timeline, verification and undo run inside the CLI and are not visible to Verstak. For full control and proof of work, use an API provider.',
   },
 
+  // Honest secret-protection labels per CLI (1.9.6 #2). No CLI looks safer than it is.
+  secretProtection: {
+    fullLabel: 'Secrets: protected',
+    fullHint: 'Reading of .env/.ssh/keys is blocked, including via shell, and confirmed by a live run.',
+    partialLabel: 'Secrets: partial',
+    partialHint: 'Path-read of .env/.ssh/keys is blocked, but reading via shell (cat .env) is not, and it is not yet confirmed by a live run. Fallback: rollback via Control Envelope.',
+    noneLabel: 'Secrets: no CLI guard',
+    noneHint: 'This CLI can read .env/.ssh/keys — Verstak does not gate it. Only cover is rolling back edits (Control Envelope). For secret safety use an API provider.',
+  },
+
   modelRequired: {
     title: 'Choose a model',
     body: 'To use Verstak you need at least one connected AI model. Open Models settings, connect a provider, and enable the models you want in the picker.',

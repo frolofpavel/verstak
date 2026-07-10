@@ -58,3 +58,27 @@ export function runtimeCapability(providerId: string, transport: RuntimeTranspor
     tier: observed ? 'observed' : 'limited',
   }
 }
+
+// ─── Защита секретов (1.9.6 #2): честный ярлык по CLI ────────────────────────
+// Зеркало electron/ai/cli-security-capabilities.ts secretProtectionLevel
+// (renderer и main не делят модуль). Держать синхронно — тест
+// cli-security-capabilities.test.ts сверяет уровни по каждому провайдеру.
+export type SecretProtectionLevel = 'full' | 'partial' | 'none'
+
+const CLI_SECRET_LEVEL: Record<string, SecretProtectionLevel> = {
+  'claude-cli': 'partial', // путь-чтение закрыто, Bash-обход открыт, не подтверждён живьём
+  'codex-cli': 'none',     // sandbox только записи, чтение .env разрешено
+  'grok-cli': 'none',
+  'gemini-cli': 'none',
+}
+
+export function secretProtectionLevel(providerId: string): SecretProtectionLevel {
+  return CLI_SECRET_LEVEL[providerId] ?? 'none'
+}
+
+// Тон бейджа по уровню (подписи — в i18n secretProtection.*).
+export const SECRET_PROTECTION_UI: Record<SecretProtectionLevel, { tone: 'ok' | 'warn' | 'danger' }> = {
+  full: { tone: 'ok' },
+  partial: { tone: 'warn' },
+  none: { tone: 'danger' },
+}

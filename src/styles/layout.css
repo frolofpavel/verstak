@@ -4573,6 +4573,22 @@ body.gg-rail-toggling .gg-msg-actions {
   border-color: color-mix(in srgb, #e78a8a 30%, transparent);
   background: color-mix(in srgb, #e78a8a 8%, transparent);
 }
+/* Бейдж защиты секретов (1.9.6 #2): ok/warn/danger. */
+.gg-mp-badge-secret.is-sec-ok {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.gg-mp-badge-secret.is-sec-warn {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 34%, transparent);
+  background: color-mix(in srgb, #d8a657 9%, transparent);
+}
+.gg-mp-badge-secret.is-sec-danger {
+  color: color-mix(in srgb, #e05252 90%, var(--text-tertiary));
+  border-color: color-mix(in srgb, #e05252 34%, transparent);
+  background: color-mix(in srgb, #e05252 9%, transparent);
+}
 .gg-mp-badge-transport {
   flex-shrink: 0;
 }
@@ -8563,6 +8579,17 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   color: color-mix(in srgb, #e78a8a 88%, var(--text-tertiary));
   border-color: color-mix(in srgb, #e78a8a 30%, transparent);
   background: color-mix(in srgb, #e78a8a 8%, transparent);
+}
+/* Бейдж защиты секретов прогона (1.9.6 #2). */
+.gg-run-tier.is-sec-warn {
+  color: #d8a657;
+  border-color: color-mix(in srgb, #d8a657 34%, transparent);
+  background: color-mix(in srgb, #d8a657 9%, transparent);
+}
+.gg-run-tier.is-sec-danger {
+  color: color-mix(in srgb, #e05252 90%, var(--text-tertiary));
+  border-color: color-mix(in srgb, #e05252 34%, transparent);
+  background: color-mix(in srgb, #e05252 9%, transparent);
 }
 /* Control Envelope Restore (1.9.6 #1): панель отката CLI-прогона. */
 .gg-envelope-restore {

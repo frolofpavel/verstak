@@ -4,7 +4,7 @@ import { useT } from '../i18n'
 import type { AuditEntry, DebugPacket, EnvelopeRestorePreview, EnvelopeRestoreResult } from '../types/api'
 import { computeContextBudget } from '../lib/context-budget'
 import { diffSections, diffLines, sectionMap, type SectionDiff, type SectionDiffStatus } from '../lib/context-diff'
-import { runtimeCapability } from '../lib/runtime-capability'
+import { runtimeCapability, secretProtectionLevel } from '../lib/runtime-capability'
 
 /**
  * Agent Run Inspector — flagship transparency screen.
@@ -259,6 +259,13 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
     : cap.tier === 'limited'
       ? { label: t.runtime.limitedLabel, hint: t.runtime.limitedHint }
       : null
+  // Честная защита секретов прогона (1.9.6 #2) — только для CLI, кроме full.
+  const secLevel = isCli ? secretProtectionLevel(run.providerId ?? '') : 'full'
+  const secBadge = secLevel === 'partial'
+    ? { label: t.secretProtection.partialLabel, hint: t.secretProtection.partialHint, tone: 'warn' }
+    : secLevel === 'none'
+      ? { label: t.secretProtection.noneLabel, hint: t.secretProtection.noneHint, tone: 'danger' }
+      : null
   return (
     <div className={`gg-run-card ${hasError ? 'has-error' : ''}`}>
       <div className="gg-run-head-row">
@@ -267,6 +274,7 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           <span className="gg-run-provider">{run.providerId ?? 'неизвестно'}</span>
           {run.model && <span className="gg-run-model">{run.model}</span>}
           {tierBadge && <span className={`gg-run-tier is-${cap.tier}`} title={tierBadge.hint}>{tierBadge.label}</span>}
+          {secBadge && <span className={`gg-run-tier is-sec-${secBadge.tone}`} title={secBadge.hint}>{secBadge.label}</span>}
           <span className="gg-run-time">{formatTime(run.start)}</span>
           <span className="gg-run-summary">{summarize(run.entries)}</span>
           <span className="gg-run-count">{run.entries.length} · {formatDuration(run.end - run.start)}</span>

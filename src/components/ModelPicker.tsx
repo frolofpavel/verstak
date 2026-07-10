@@ -9,7 +9,7 @@ import {
   type CliAuthId,
   type CliAuthStatus,
 } from '../lib/model-catalog'
-import { runtimeCapability, type RuntimeTier } from '../lib/runtime-capability'
+import { runtimeCapability, secretProtectionLevel, SECRET_PROTECTION_UI, type RuntimeTier, type SecretProtectionLevel } from '../lib/runtime-capability'
 
 // Ревью F1 + срез 3: честная degraded-индикация уровня контроля. Считаем tier
 // из provider+transport (runtime-capability), а не из одного transport — после
@@ -19,6 +19,14 @@ function tierBadge(t: Translations, tier: RuntimeTier): { label: string; hint: s
   if (tier === 'observed') return { label: t.runtime.observedLabel, hint: t.runtime.observedHint, tone: 'observed' }
   if (tier === 'limited') return { label: t.runtime.limitedLabel, hint: t.runtime.limitedHint, tone: 'limited' }
   return null // full — контроль полный, бейдж не нужен (чистый дефолт).
+}
+
+// Честный бейдж защиты секретов (1.9.6 #2). full не показываем — чистый дефолт.
+function secretBadge(t: Translations, level: SecretProtectionLevel): { label: string; hint: string; tone: 'ok' | 'warn' | 'danger' } | null {
+  const tone = SECRET_PROTECTION_UI[level].tone
+  if (level === 'partial') return { label: t.secretProtection.partialLabel, hint: t.secretProtection.partialHint, tone }
+  if (level === 'none') return { label: t.secretProtection.noneLabel, hint: t.secretProtection.noneHint, tone }
+  return null
 }
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
@@ -362,6 +370,7 @@ function PickerRow({
   const isCli = isCliProvider(entry.providerId)
   const cap = runtimeCapability(entry.providerId, entry.transport)
   const badge = tierBadge(t, cap.tier)
+  const secBadge = isCli ? secretBadge(t, secretProtectionLevel(entry.providerId)) : null
   const policy = modelPolicyHint(entry.model)
   const showHiddenBadge = !entry.enabled && entry.authorized && !entry.isCurrent
   let title: string | undefined
@@ -402,10 +411,13 @@ function PickerRow({
           {entry.isCurrent ? '✓' : ''}
         </span>
       </span>
-      {(badge || (policy && !isCli)) && (
+      {(badge || secBadge || (policy && !isCli)) && (
         <span className="gg-mp-row-badges">
           {badge && (
             <span className={`gg-mp-badge is-muted is-${badge.tone}`} title={badge.hint}>{badge.label}</span>
+          )}
+          {secBadge && (
+            <span className={`gg-mp-badge gg-mp-badge-secret is-sec-${secBadge.tone}`} title={secBadge.hint}>{secBadge.label}</span>
           )}
           {policy && !isCli && (
             <span className={`gg-mp-badge gg-mp-row-policy is-${policy.tone}`} title={policy.title}>{policy.label}</span>
