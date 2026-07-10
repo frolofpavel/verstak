@@ -33,6 +33,15 @@ describe('claudeSecretDenySpecifiers — guard секретов зеркалит
     expect(specs).toContain('Read(**/credentials*.json)')
   })
 
+  it('НЕ имитирует Bash-guard: deny только Read/Edit/Write, ни одного Bash(...) (1.9.6 #3)', () => {
+    // Bash-чтение секрета (cat/less/python/xxd/base64/$(<file)) принципиально
+    // обходимо — фейковый Bash-deny давал бы ложное доверие. Честно НЕ добавляем.
+    for (const s of specs) {
+      expect(s.startsWith('Bash('), s).toBe(false)
+      expect(s.startsWith('Read(') || s.startsWith('Edit(') || s.startsWith('Write('), s).toBe(true)
+    }
+  })
+
   it('каждый секрет-глоб покрыт всеми тремя file-инструментами', () => {
     // Инвариант: для любого специфаера есть Read/Edit/Write вариант того же глоба.
     const globs = new Set(specs.map(s => s.replace(/^(Read|Edit|Write)\(/, '').replace(/\)$/, '')))

@@ -53,6 +53,7 @@ import {
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope } from '../ai/control-envelope'
+import { secretProtectionLevel } from '../ai/cli-security-capabilities'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
@@ -1580,18 +1581,28 @@ async function runPlainConversation(
     try {
       const checkpoint = captureControlCheckpoint(projectPath, startedAt)
       const provenance = buildRunProvenance({ providerId, model: model ?? null, transport: 'CLI', checkpoint })
+      // Bash-exfiltration truth (1.9.6 #3): если чтение секретов у этого CLI не
+      // закрыто полностью — честно предупреждаем ПРЯМО в ноте, не имитируя защиту.
+      // Bash-чтение (cat/less/python/xxd/base64/$(<file)) принципиально обходимо,
+      // поэтому Bash-deny НЕ добавляем (был бы театр). Envelope = recovery (откат
+      // записей), НЕ prevention (не мешает чтению) — говорим это прямым текстом.
+      const secLevel = secretProtectionLevel(providerId)
+      const shellWarn = secLevel !== 'full'
+        ? ' ⚠️ CLI может прочитать секреты через shell — Verstak это не гейтит; якорь откатывает записи, но не предотвращает чтение.'
+        : ''
+      const envelopeNote = provenance.note + shellWarn
       emitAgentProgress(sender, sendId, {
         id: `envelope-${startedAt}`,
         phase: 'context',
         title: '🛟 Контрольная точка перед CLI-прогоном',
-        detail: provenance.note,
+        detail: envelopeNote,
         status: 'done'
       })
-      recordJournal(projectPath, 'note', 'Control Envelope', provenance.note)
+      recordJournal(projectPath, 'note', 'Control Envelope', envelopeNote)
       if (agentRuns && runId) {
         // ref = сериализованный якорь (полный gitHead+stashRef) для queryable-
         // отката из UI (1.9.6 #1). detail — человекочитаемая нота. Секретов нет.
-        try { agentRuns.appendEvent(runId, 'checkpoint', { detail: provenance.note, ref: serializeEnvelope(checkpoint) }) } catch { /* best-effort */ }
+        try { agentRuns.appendEvent(runId, 'checkpoint', { detail: envelopeNote, ref: serializeEnvelope(checkpoint) }) } catch { /* best-effort */ }
       }
     } catch { /* envelope-телеметрия не должна ронять прогон */ }
   }
