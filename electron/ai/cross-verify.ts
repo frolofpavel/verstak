@@ -30,7 +30,12 @@ const REVIEW_PRIORITY: ProviderId[] = ['claude', 'gemini-api', 'openai', 'grok']
  */
 export function pickReviewProvider(current: ProviderId, configuredProviders: ProviderId[]): ProviderId | null {
   const candidates = REVIEW_PRIORITY.filter(p => p !== current && configuredProviders.includes(p))
-  return candidates[0] ?? null
+  if (candidates[0]) return candidates[0]
+  // Fallback (найдено при добавлении тестов): если ни одного из priority-4
+  // (claude/gemini/openai/grok) не сконфигурировано, берём ЛЮБОЙ другой
+  // сконфигурированный API-провайдер — иначе cross-verify молча мёртв для
+  // сетапов вроде «только DeepSeek/Qwen/Mistral» (все API, но не в priority).
+  return configuredProviders.find(p => p !== current) ?? null
 }
 
 /**
