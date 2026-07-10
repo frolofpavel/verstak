@@ -1673,6 +1673,7 @@ export async function runPlainConversation(
       drainSupplements()
       let roundText = ''
       let roundHadError = false
+      let roundErrorMessage: string | null = null // 1.9.7 #6: для account-switch по лимиту
       let roundSawText = false
       let roundSawThought = false
       const providerLabel = modelProgressLabel(providerId, model)
@@ -1760,6 +1761,7 @@ export async function runPlainConversation(
         } else if (event.type === 'error') {
           exitReason = 'error'
           roundHadError = true
+          roundErrorMessage = String((event as { message?: unknown }).message ?? '')
           waitHeartbeat.stop('error', 'Провайдер вернул ошибку.')
         }
         if (event.type !== 'done') {
@@ -1777,6 +1779,24 @@ export async function runPlainConversation(
         return
       }
       if (roundHadError) {
+        // 1.9.7 #6: подписочный лимит активного аккаунта → переключаем АККАУНТ
+        // того же провайдера (пул), не теряя запрос. Раньше CLI-путь тут просто
+        // сдавался (done+return) — авто-свитч (1.9.4) был мёртв для CLI-подписок,
+        // хотя аккаунты именно у CLI-провайдеров. Зеркалит attemptAccountSwitch API-пути.
+        if (fallbackOpts && providerId && roundErrorMessage) {
+          const hit = detectSubscriptionLimit(roundErrorMessage)
+          if (hit.limited) {
+            const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
+            if (sw?.switched) {
+              const fresh = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
+              if (fresh) {
+                sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
+                handedOff = true
+                return runPlainConversation(sender, sendId, fresh, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
+              }
+            }
+          }
+        }
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }

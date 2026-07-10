@@ -41,11 +41,11 @@ function sentEvents(sender: Sender): SentEvent[] {
 
 // Позиционный вызов runPlainConversation (sender, sendId, provider, projectPath,
 // messages, signal, recordJournal, costGuard?, providerId?, model?, fallbackOpts?, agentRuns?, runId?).
-function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string } = {}) {
+function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown } = {}) {
   return runPlainConversation(
     sender as never, 1, p, dir, [{ role: 'user', content: 'сделай' }],
     opts.signal ?? new AbortController().signal, vi.fn(),
-    undefined, 'claude-cli', 'auto', undefined, opts.agentRuns as never, opts.runId
+    undefined, 'claude-cli', 'auto', opts.fallbackOpts as never, opts.agentRuns as never, opts.runId
   )
 }
 
@@ -93,6 +93,52 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     const cp = appendEvent.mock.calls.find(c => c[1] === 'checkpoint')
     expect(cp).toBeTruthy()
     expect(cp![2].ref).toMatch(/[0-9a-f]{40}/) // полный gitHead в ref для отката
+  })
+
+  it('SECURITY/RESILIENCE: подписочный лимит → account-switch → re-run на свежем аккаунте (1.9.7 #6)', async () => {
+    // Раньше CLI-путь на yielded-error просто сдавался (done+return) — авто-свитч
+    // 1.9.4 был мёртв для CLI-подписок (свой главный кейс). Теперь склейка
+    // detect→switch→getNextProvider→re-run прогоняется на CLI-пути.
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' } },
+    }
+    const freshAccount = provider([{ type: 'text', text: 'Готово на свежем аккаунте.' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn((_providerId: string, _resetEta: number | null) => ({ switched: true }))
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => freshAccount,
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+    }
+    const sender = makeSender()
+    await run(dir, limited, sender, { fallbackOpts })
+    // Свитч вызван с providerId + распарсенным ETA сброса (не null).
+    expect(switchAccountOnLimit).toHaveBeenCalledTimes(1)
+    expect(switchAccountOnLimit.mock.calls[0][0]).toBe('claude-cli')
+    expect(switchAccountOnLimit.mock.calls[0][1]).toBeGreaterThan(0) // resetEta распарсен
+    const evs = sentEvents(sender)
+    expect(evs.some(e => e.type === 'info' && (e as { text?: string }).text?.includes('другой аккаунт'))).toBe(true)
+    // Свежий аккаунт реально отработал (его текст дошёл).
+    expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('свежем аккаунте'))).toBe(true)
+  })
+
+  it('лимит БЕЗ переключаемого аккаунта (пул исчерпан) → честно сдаётся, без зацикливания', async () => {
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'usage limit reached' } },
+    }
+    const switchAccountOnLimit = vi.fn((_providerId: string, _resetEta: number | null) => ({ switched: false })) // пул исчерпан
+    const fallbackOpts = {
+      getNextProvider: () => null, getProviderModel: () => 'auto',
+      configuredProviders: new Set(['claude-cli']), triedProviders: new Set(['claude-cli']), switchAccountOnLimit,
+    }
+    const sender = makeSender()
+    await run(dir, limited, sender, { fallbackOpts })
+    expect(switchAccountOnLimit).toHaveBeenCalledTimes(1)
+    // Не зациклился — терминальный done есть.
+    expect(sentEvents(sender).some(e => e.type === 'done')).toBe(true)
   })
 
   it('прерванный сигнал → терминальный done, провайдер не зовётся', async () => {
