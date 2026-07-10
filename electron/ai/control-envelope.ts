@@ -151,6 +151,15 @@ function isInsideRepo(repoRoot: string): boolean {
   return !!inside && inside.trim() === 'true'
 }
 
+// Ревью-фикс: топ-левел git-репо. Проект в Verstak может быть ПОДДИРЕКТОРИЕЙ репо
+// (монорепо), тогда `git diff --name-only` даёт repo-wide пути, а `git checkout
+// <sha> -- .` из субдира откатывает только cwd → неполный откат, но помечался
+// восстановленным. Гоняем ВСЕ restore-команды с топ-левела → консистентно repo-wide.
+function repoTop(repoRoot: string): string | null {
+  const t = git(repoRoot, ['rev-parse', '--show-toplevel'])
+  return t ? t.trim() : null
+}
+
 /**
  * Недеструктивный анализ: можно ли откатиться и что изменится. Только чтение git.
  * Отказ moved-on, если HEAD сдвинулся с момента якоря (пользователь закоммитил
@@ -159,13 +168,15 @@ function isInsideRepo(repoRoot: string): boolean {
 export function previewControlRestore(repoRoot: string | null, cp: Anchor): RestorePreview {
   if (!repoRoot || !isInsideRepo(repoRoot)) return { ok: false, reason: 'not-git' }
   if (!cp.gitHead) return { ok: false, reason: 'no-anchor' }
-  const head = git(repoRoot, ['rev-parse', 'HEAD'])
+  const root = repoTop(repoRoot)
+  if (!root) return { ok: false, reason: 'error' }
+  const head = git(root, ['rev-parse', 'HEAD'])
   const currentHead = head ? head.trim() : null
   if (!currentHead) return { ok: false, reason: 'error' }
   if (currentHead !== cp.gitHead) return { ok: false, reason: 'moved-on', currentHead, gitHead: cp.gitHead }
-  const diff = git(repoRoot, ['diff', '--name-only', cp.gitHead]) ?? ''
+  const diff = git(root, ['diff', '--name-only', cp.gitHead]) ?? ''
   const changedFiles = diff.split('\n').map(s => s.trim()).filter(Boolean)
-  const untracked = git(repoRoot, ['ls-files', '--others', '--exclude-standard']) ?? ''
+  const untracked = git(root, ['ls-files', '--others', '--exclude-standard']) ?? ''
   const untrackedFiles = untracked.split('\n').map(s => s.trim()).filter(Boolean)
   // hasStash — только если snapshot реально жив (не выгреблен gc), чтобы UI не
   // обещал возврат грязных правок из недостижимого объекта (1.9.7 #2).
@@ -193,7 +204,10 @@ export interface RestoreResult {
 export function applyControlRestore(repoRoot: string | null, cp: Anchor): RestoreResult {
   const pre = previewControlRestore(repoRoot, cp)
   if (!pre.ok) return { ok: false, reason: pre.reason }
-  const root = repoRoot as string
+  // Ревью-фикс: checkout с ТОП-ЛЕВЕЛА (не cwd) — иначе из субдира откатывается
+  // только часть, а changedFiles репо-wide → ложный «restored». Топ-левел уже
+  // валиден (previewControlRestore прошёл isInsideRepo + repoTop).
+  const root = repoTop(repoRoot as string) as string
   const changed = pre.changedFiles ?? []
   // Откат отслеживаемых файлов к якорю. `-- .` восстанавливает всё рабочее дерево
   // из дерева якоря; HEAD не двигается (мы уже проверили currentHead === gitHead).

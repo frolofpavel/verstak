@@ -29,7 +29,13 @@ export interface ThrottleOpts {
   maxBytes?: number
 }
 
-const DEFAULTS: Required<ThrottleOpts> = { everyNAfter: 12, everyN: 3, maxBytes: 4 * 1024 * 1024 }
+// maxBytes — САНИТАРНЫЙ backstop против абсурдного runaway, НЕ регулятор частоты
+// (её держит every-N). Ревью-фикс: 4МБ был слишком мал — сессия на 1M-context
+// модели (Gemini/DeepSeek) копит несжатую историю ~4-8МБ JSON ДО срабатывания
+// auto-compact, и чекпойнт пропускался → resume терял контекст (регрессия vs
+// безусловного save). Именно такие Long Sessions — цель релиза. 32МБ выше любой
+// легитимной 1M-истории, но ловит настоящую патологию.
+const DEFAULTS: Required<ThrottleOpts> = { everyNAfter: 12, everyN: 3, maxBytes: 32 * 1024 * 1024 }
 
 // Быстрый некриптографический хеш (djb2) для dedup идентичных снапшотов.
 export function cheapHash(s: string): string {

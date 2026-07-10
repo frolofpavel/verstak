@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { captureControlCheckpoint, buildRunProvenance, CLI_WITH_TIMELINE, serializeEnvelope, parseEnvelope, previewControlRestore, applyControlRestore, anchorStash, isStashAlive, pruneEnvelopeStashes } from '../../electron/ai/control-envelope'
@@ -196,6 +196,23 @@ describe('previewControlRestore / applyControlRestore — откат CLI-про�
       expect(previewControlRestore(plain, { gitHead: 'x', stashRef: null }).reason).toBe('not-git')
       expect(previewControlRestore(repo, { gitHead: null, stashRef: null }).reason).toBe('no-anchor')
     } finally { rmSync(plain, { recursive: true, force: true }) }
+  })
+
+  it('РЕВЬЮ: откат из проекта-СУБДИРЕКТОРИИ откатывает весь репо (root+sub), не только cwd', () => {
+    // Проект открыт как поддиректория монорепо. CLI правит файл ВНЕ неё.
+    mkdirSync(join(repo, 'sub'))
+    writeFileSync(join(repo, 'root.txt'), 'root-clean\n')
+    writeFileSync(join(repo, 'sub', 's.txt'), 'sub-clean\n')
+    gitRun(repo, ['add', '-A']); gitRun(repo, ['commit', '-m', 'base2'])
+    const subHead = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: CLEAN_ENV }).trim()
+    const subDir = join(repo, 'sub')
+    writeFileSync(join(repo, 'root.txt'), 'root-CLI\n')       // правка ВНЕ субдира
+    writeFileSync(join(repo, 'sub', 's.txt'), 'sub-CLI\n')    // правка в субдире
+    const res = applyControlRestore(subDir, { gitHead: subHead, stashRef: null })
+    expect(res.ok).toBe(true)
+    // ОБА файла откачены — раньше root.txt молча оставался (checkout был cwd-scoped).
+    expect(readFileSync(join(repo, 'root.txt'), 'utf8')).not.toContain('root-CLI')
+    expect(readFileSync(join(repo, 'sub', 's.txt'), 'utf8')).not.toContain('sub-CLI')
   })
 
   it('stash закреплён ref → переживает git gc --prune=now (1.9.7 #2)', () => {

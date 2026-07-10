@@ -2101,6 +2101,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, isStreaming, agentMode])
 
+  // Автоотправка после resume (ревью-фикс): resumeAutoSendRef взводится в onResume
+  // (gg-resume-send из ResumeBanner/AgentRunsPanel), но раньше НИКЕМ не читался —
+  // input заполнялся, а send не срабатывал (юзер жал Enter сам). Читаем флаг:
+  // как только input появился и не стримим — шлём через send() (он подхватит
+  // resumeFromRunIdRef). Флаг гасим сразу, чтобы обычный ввод не уезжал в авто-send.
+  useEffect(() => {
+    if (resumeAutoSendRef.current && input.trim() && !isStreaming) {
+      resumeAutoSendRef.current = false
+      void send()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, isStreaming])
+
   // Cleanup warning / queue notice timers on unmount
   useEffect(() => () => {
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
