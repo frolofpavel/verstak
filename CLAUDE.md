@@ -50,6 +50,12 @@ electron/                  ← main process (Node.js)
 │   ├── gemini.ts, claude.ts, grok.ts, openai.ts  ← API-провайдеры
 │   ├── *-cli.ts             ← CLI-провайдеры (Claude Code и т.п.)
 │   ├── cli-prompt.ts        ← общий serializer истории для CLI
+│   ├── runner-api.ts        ← ЯДРО agent-loop API-пути: runApiConversation (вынесено из ai.ts, 1.9.8 #1)
+│   ├── runner-plain.ts      ← ядро CLI/one-shot пути: runPlainConversation
+│   ├── runner-shared.ts     ← общий синглтон-стейт runner↔ai.ts: pending-registry + turn-константы (разрыв circular-dep)
+│   ├── runner-progress.ts   ← эмиссия прогресса agent-loop в UI
+│   ├── runner-supplements.ts← ai:append-context во время прогона (conversationSupplements)
+│   ├── runner-util.ts       ← чистые хелперы runner'ов (selectAllowedToolDefs, retriableErrorEvent)
 │   ├── compose-system.ts    ← единый сборщик system prompt
 │   ├── system-layer.ts      ← неизменяемый протокол агента
 │   ├── user-layer.ts        ← поиск AGENTS/CLAUDE/GEMINI.md/RULES
@@ -63,7 +69,7 @@ electron/                  ← main process (Node.js)
 │   ├── review-prompt.ts     ← REVIEWER_SYSTEM_PROMPT
 │   └── child-kill.ts        ← treeKill через taskkill /F /T на Windows
 ├── ipc/                   ← IPC handlers
-│   ├── ai.ts                ← главный: ai:send / ai:stop / ai:event
+│   ├── ai.ts                ← IPC-shell: registerAiIpc + resolve/stop/suspend + scheduled headless (ядро loop'а вынесено в ai/runner-*.ts, 1.9.8 #1)
 │   ├── tool-handlers.ts     ← dispatch регистратор для тулзов
 │   ├── chats.ts             ← chat sessions + messages
 │   ├── undo.ts              ← undo stack + checkpoint API
@@ -161,7 +167,7 @@ npm run dist:win     # NSIS + portable .exe
 
 > Актуализировано 2026-07-10 (сверка с кодом в рамках плана усиления 1.9.6–1.9.9).
 
-1. **ГЛАВНЫЙ монолит — `electron/ipc/ai.ts` (~3360 строк)**, а НЕ projectStore. `runApiConversation` ~1300 строк одной функцией, `registerAiIpc` ~970. Активно меняется, риск регрессий соседнего кода. Распил (1.9.8): вынести `runners/` — api-runner / plain-runner / checkpoint / fallback / finish; сам `ipc/ai.ts` оставить IPC-shell. Делать инкрементально, каждый slice зелёным (харнесы `tests/ipc/agent-loop.test.ts` + `tests/ipc/plain-loop.test.ts` покрывают оба runner'а). Риск высок — предпочтительно при внимании/ревью, не вслепую.
+1. **~~ГЛАВНЫЙ монолит — `electron/ipc/ai.ts`~~ РАСПИЛЕН (1.9.8 #1, 11.07):** было ~3360 строк, стало **~1250** (−63%). Оба гиганта вынесены в `ai/runner-*.ts`: `runApiConversation` (~1300) → `runner-api.ts`, `runPlainConversation` (~419) → `runner-plain.ts`; circular-dep разорван через `runner-shared.ts` (pending-registry + turn-константы), `AiDeps` type-only. Каждый переезд верифицирован харнесами `tests/ipc/agent-loop.test.ts`(18)+`plain-loop.test.ts`(8) — поведение идентично; 2 адверсариальных ревьюера подтвердили (identity разделяемого состояния + семантика байт-в-байт). `ai.ts` = IPC-shell (registerAiIpc ~700 + resolve/stop/suspend + scheduled headless). **Остаток:** registerAiIpc можно дробить дальше, но это уже НЕ гигант-функция — низкий приоритет. При правках runner'ов держать харнесы зелёными.
    - Второй монолит: `src/store/projectStore.ts` (~1130 строк). PerChatState частично вынесен (`session-snapshot.ts`/`review-slice.ts`/`pipeline-slice.ts`); `ChatSessionLifecycle` (enterChat/leaveChat) НЕ сделан — `chatSnapshots`-копирование при switch/new остаётся race-классом.
    - Дубли renderer↔main (нет shared-модуля из-за context-изоляции): `CLI_WITH_TIMELINE`, `secretProtectionLevel`, `GATEWAY_PRESET_LABELS`, `ProviderId`, `PRICES` — держать синхронно, часть покрыта анти-дрейф-тестами.
 
@@ -228,4 +234,4 @@ npm run dist:win     # NSIS + portable .exe
 
 ---
 
-Последнее обновление: 2026-07-10 (§5 актуализирован под реальность: главный монолит = ai.ts, crash-resume и мультиагент построены). Если архитектура изменилась — обнови этот файл.
+Последнее обновление: 2026-07-11 (§2 карта: добавлены ai/runner-*.ts, ai.ts = IPC-shell; §5 #1: монолит ai.ts распилен 3360→1250). Если архитектура изменилась — обнови этот файл.
