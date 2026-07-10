@@ -1547,7 +1547,10 @@ function retriableErrorEvent(ev: { type?: string; message?: unknown }): Error | 
  * lifecycle: collect text/usage during the stream, write a session journal in
  * try/finally regardless of how the stream ended.
  */
-async function runPlainConversation(
+// Экспортирован для тест-харнеса (1.9.6 #5): CLI-путь (весь релиз 1.9.5) был
+// непокрыт — Control Envelope wiring, projected tool events, fallback правились
+// вслепую. tests/ipc/plain-loop.test.ts гоняет реальный loop с мок-провайдером.
+export async function runPlainConversation(
   sender: TaggedSender,
   sendId: number,
   provider: ChatProvider,
@@ -1572,6 +1575,14 @@ async function runPlainConversation(
     model: model ?? null,
     messageCount: messages.length
   })
+  // Пре-прерванный сигнал: закрываем стрим сразу (renderer ждёт терминальный
+  // done), без envelope-работы и вызова провайдера. Харнес 1.9.6 #5 выявил, что
+  // при уже-aborted сигнале while-цикл не выполнялся и done не эмитился → зависший
+  // стрим. В проде сигнал свежий, но гарантия «done на любом выходе» важна.
+  if (signal.aborted) {
+    sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+    return
+  }
   // Control Envelope (срез 4): перед CLI-прогоном ставим честный git-якорь отката.
   // CLI пишет файлы ВНУТРИ бинаря, мимо undo-стека Verstak — единственная реальная
   // точка отката его внешних правок это git (HEAD + недеструктивный stash-снапшот
