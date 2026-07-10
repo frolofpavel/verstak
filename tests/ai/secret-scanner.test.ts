@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isForbiddenPath, scanText, redactUrlSecrets } from '../../electron/ai/secret-scanner'
+import { isForbiddenPath, scanText, redactUrlSecrets, redactForDisplay } from '../../electron/ai/secret-scanner'
 
 describe('redactUrlSecrets', () => {
   it('редактирует значения чувствительных параметров по имени', () => {
@@ -161,5 +161,38 @@ describe('scanText', () => {
       expect(redacted).toBe(code)
       expect(hits).toEqual([])
     })
+  })
+})
+
+describe('redactForDisplay — редакция projected CLI tool args для UI (1.9.6 #4)', () => {
+  it('гасит Authorization: Bearer в аргументе curl', () => {
+    const arg = JSON.stringify({ command: 'curl -H "Authorization: Bearer sk-ant-abc123def456ghi789jkl012mno345" https://api' })
+    const out = redactForDisplay(arg)
+    expect(out).not.toContain('sk-ant-abc123def456ghi789jkl012mno345')
+    expect(out).toContain('REDACTED')
+  })
+
+  it('гасит basic-auth в git remote URL', () => {
+    const arg = JSON.stringify({ command: 'git remote add o https://user:supersecretpass@github.com/x/y' })
+    const out = redactForDisplay(arg)
+    expect(out).not.toContain('supersecretpass')
+  })
+
+  it('гасит token в query URL (?token=…), который scanText по ключам не ловит', () => {
+    const arg = JSON.stringify({ url: 'https://api.x.com/v1/data?token=abc123opaquesecret&q=public' })
+    const out = redactForDisplay(arg)
+    expect(out).not.toContain('abc123opaquesecret')
+    expect(out).toContain('q=public') // не-секретное сохранено
+  })
+
+  it('гасит openai-ключ в env-подобном аргументе', () => {
+    const arg = JSON.stringify({ command: 'OPENAI_API_KEY=sk-proj-abcdefghij1234567890 node run.js' })
+    const out = redactForDisplay(arg)
+    expect(out).not.toContain('sk-proj-abcdefghij1234567890')
+  })
+
+  it('чистый аргумент без секретов не трогает', () => {
+    const arg = JSON.stringify({ path: 'src/a.ts', command: 'npm test' })
+    expect(redactForDisplay(arg)).toBe(arg)
   })
 })

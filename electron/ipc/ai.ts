@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent, shouldSendAutoProofReport } from '../ai/run-notify'
-import { scanText } from '../ai/secret-scanner'
+import { scanText, redactForDisplay } from '../ai/secret-scanner'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from '../ai/process-registry'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
@@ -1684,7 +1684,9 @@ async function runPlainConversation(
           // Проекция родного tool-use CLI (claude/codex/grok): инструмент УЖЕ выполнен
           // внутри CLI-провайдера — показываем завершённой активностью в Timeline. Наш
           // executor его НЕ запускает (plain-путь без tool-loop) → без двойного исполнения.
-          const detail = compactProgressText(JSON.stringify(event.call.args ?? {}), 120) ?? ''
+          // redactForDisplay ОБЯЗАТЕЛЕН (1.9.6 #4): args могут нести inline-креды
+          // (curl -H "Authorization: Bearer …", git remote https://user:pass@, ?token=).
+          const detail = compactProgressText(redactForDisplay(JSON.stringify(event.call.args ?? {})), 120) ?? ''
           sender.send('ai:event', {
             id: sendId,
             event: { type: 'tool-activity', callId: event.call.id, name: event.call.name, label: `${event.call.name} · CLI`, detail, status: 'ok' }

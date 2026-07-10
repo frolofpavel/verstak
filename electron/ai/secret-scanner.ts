@@ -198,3 +198,19 @@ export function scanText(input: string): ScanResult {
   }
   return { redacted: out, hits: [...hitSet] }
 }
+
+// URL внутри произвольного текста (для редакции query-токенов, которые scanText
+// по паттернам ключей не ловит — их гасит redactUrlSecrets по имени параметра).
+const EMBEDDED_URL_RE = /https?:\/\/[^\s"'<>)\]]+/g
+
+/**
+ * Полная редакция строки ДЛЯ ПОКАЗА (UI/Timeline/лог): scanText (ключи, Bearer,
+ * basic-auth) + редакция секрет-параметров во встроенных URL (?token=…). Нужна
+ * для projected CLI tool args (1.9.6 #4): аргументы CLI-инструментов (command/
+ * patch/URL) могут нести inline-креды, а в UI они шли сырыми.
+ */
+export function redactForDisplay(input: string): string {
+  if (!input) return input
+  const scanned = scanText(input).redacted
+  return scanned.replace(EMBEDDED_URL_RE, (u) => redactUrlSecrets(u))
+}
