@@ -159,18 +159,19 @@ npm run dist:win     # NSIS + portable .exe
 
 ## 5. Известные слабые места (приоритеты на доработку)
 
-1. **`src/store/projectStore.ts` разрастается** (~800 строк). После Phase A (SendRegistry) часть классов race-багов закрыта, но при добавлении новых фич (фоновые агенты, debate mode) надо вынести:
-   - `ChatSessionLifecycle` (enterChat/leaveChat вместо setProject + switchChatSession + newChatSession)
-   - `PerChatState` (map chatId → ChatStateBundle вместо top-level полей + chatSnapshots копирования)
-   - План в комментариях того же файла.
+> Актуализировано 2026-07-10 (сверка с кодом в рамках плана усиления 1.9.6–1.9.9).
 
-2. **CLI parity ~9/10.** Паритет промпта закрыт в `cli-prompt.ts`: attachments помечаются текстовым хинтом (`describeAttachments` — binary в stream-json не передать, это inherent-лимит CLI), verify-hint инжектится по факту прошлых write'ов (авто-детект `historyHadWrites` + явный флаг `appendVerifyHint`), skill_layer/context_pack/история — как в API-пути. Покрыто `tests/ai/cli-prompt.test.ts`. Остаточное — inherent: CLI one-shot (нет multi-turn сессии), бинарные вложения только описываются.
+1. **ГЛАВНЫЙ монолит — `electron/ipc/ai.ts` (~3360 строк)**, а НЕ projectStore. `runApiConversation` ~1300 строк одной функцией, `registerAiIpc` ~970. Активно меняется, риск регрессий соседнего кода. Распил (1.9.8): вынести `runners/` — api-runner / plain-runner / checkpoint / fallback / finish; сам `ipc/ai.ts` оставить IPC-shell. Делать инкрементально, каждый slice зелёным (харнесы `tests/ipc/agent-loop.test.ts` + `tests/ipc/plain-loop.test.ts` покрывают оба runner'а). Риск высок — предпочтительно при внимании/ревью, не вслепую.
+   - Второй монолит: `src/store/projectStore.ts` (~1130 строк). PerChatState частично вынесен (`session-snapshot.ts`/`review-slice.ts`/`pipeline-slice.ts`); `ChatSessionLifecycle` (enterChat/leaveChat) НЕ сделан — `chatSnapshots`-копирование при switch/new остаётся race-классом.
+   - Дубли renderer↔main (нет shared-модуля из-за context-изоляции): `CLI_WITH_TIMELINE`, `secretProtectionLevel`, `GATEWAY_PRESET_LABELS`, `ProviderId`, `PRICES` — держать синхронно, часть покрыта анти-дрейф-тестами.
 
-3. **Тестовое покрытие критичных путей слабое.** Сильно покрыто: compact-history (6), with-retry (14), pricing (12), apply-patch. Слабо: ipc handlers, agent loop, review flow, multi-chat routing.
+2. **CLI-путь: session-continuity (Mode C) НЕ построена.** Проекция tool-таймлайна, честные runtime-ярлыки, Control Envelope (git-якорь + откат из UI), permission-mode/guard секретов claude-cli, account-switch на лимите — ВСЁ есть (1.9.5–1.9.7). Остаётся: каждый ход CLI сериализует всю историю в one-shot `--print` (нет нативной сессии `--continue`/session-id). Требует верификации на живом claude ПЕРЕД кодом.
 
-4. **Long-running session resilience.** Есть exitReason + journal на любой exit. Нет: checkpoint-resume агентного цикла после crash.
+3. **Тест-покрытие критичных путей — выросло, но есть дыры.** Хорошо: agent-loop API (`agent-loop.test.ts` 18+), CLI-путь (`plain-loop.test.ts`), multi-chat routing (`project-store-routing.test.ts`), compact-history/with-retry/pricing/apply-patch. Слабо: review flow, часть ipc handlers, `cross-verify.ts` (0 тестов).
 
-5. **Multi-agent (debate / delegate_task) не построена.** Phase A очистила дорогу через SendRegistry. Для делегирования нужно: новый SendOwner kind, отдельная команда tool в реестре, UI индикация какой агент сейчас.
+4. **Long-running resilience — checkpoint-resume ПОСТРОЕН** (Crash-resume Фаза 1/2: per-turn snapshot `agent_run_checkpoints` с троттлингом, reconcileStale на старте, findResumable + ResumeBanner с гардом деструктива, provider-guard возобновления). Остаётся: Mode C session-continuity (см. п.2).
+
+5. **Multi-agent ПОСТРОЕН (delegate/parallel/orchestrate/swarm)** — `electron/ipc/tool-handlers/delegation.ts` (~1220 строк, свой распил + тест декомпозиции нужны). Реальный пробел — только адверсариальный iterative **debate** (тезис↔критика↔синтез) поверх swarm-арбитра (1.9.9). Плюс PTC (`execute_code`) построен, но по умолчанию инертен (ждёт live-валидации петли).
 
 ---
 
@@ -227,4 +228,4 @@ npm run dist:win     # NSIS + portable .exe
 
 ---
 
-Последнее обновление: 2026-06-16. Если архитектура изменилась — обнови этот файл.
+Последнее обновление: 2026-07-10 (§5 актуализирован под реальность: главный монолит = ai.ts, crash-resume и мультиагент построены). Если архитектура изменилась — обнови этот файл.
