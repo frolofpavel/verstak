@@ -493,7 +493,12 @@ function fireCrossVerify(
 // проходят только читающие op'ы (Ozon/WB/Метрика-данные), пишущие/выполняющие (ssh
 // run_remote, telegram send, вебхуки) блокируются. БЕЗ write_file/apply_patch/run_command/
 // browser/delegate. Так live-аудиты внешних данных безопасны без надзора.
-const SCHEDULED_READONLY_TOOLS = [
+// Набор инструментов для unattended NL-cron прогона (runScheduledHeadless).
+// ТОЛЬКО read-only: фоновый прогон без надзора не должен писать файлы / выполнять
+// команды / мутировать внешние системы. Экспортирован для security-guard теста
+// (1.9.7 #8): регрессия, добавившая сюда write_file/run_command/…, обязана падать.
+// connector_query оставлен намеренно — это ЧТЕНИЕ коннектора (не запись).
+export const SCHEDULED_READONLY_TOOLS = [
   'read_file', 'list_directory', 'search_project', 'find_files', 'get_project_map', 'impact_analysis',
   'read_journal', 'conversation_search', 'memory_search', 'read_spreadsheet', 'read_document', 'convert_file',
   'find_definition', 'find_references', 'list_connectors', 'connector_query',
