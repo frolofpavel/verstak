@@ -2,6 +2,7 @@ import { AgentProgressPanel } from './AgentProgressPanel'
 import type { AgentProgressEntry } from '../lib/agent-progress'
 import { useProject } from '../store/projectStore'
 import type { ResumableRun } from '../types/api'
+import { resumeBannerActions } from '../lib/resume-actions'
 
 function trimRequest(text: string, limit = 120): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -15,7 +16,7 @@ function buildInterruptedRunProgress(run: ResumableRun): AgentProgressEntry[] {
   const toolNote = run.lastToolName ? ` Последний инструмент: ${run.lastToolName}.` : ''
   const detail = run.autoResumable
     ? `Verstak нашёл задачу, которая оборвалась при закрытии приложения. Можно повторить последний запрос: "${request}".${toolNote}`
-    : `Модель начала работу, но приложение было закрыто до безопасного завершения. Последнее действие могло менять файлы или систему, поэтому автоматическое продолжение отключено. Запрос: "${request}".${toolNote}`
+    : `Модель начала работу, но приложение было закрыто до безопасного завершения. Авто-продолжение с контекстом отключено (последнее действие могло менять файлы/систему), но можно запустить запрос заново — правки прерванного прогона при необходимости откати кнопкой в Инспекторе. Запрос: "${request}".${toolNote}`
 
   return [
     {
@@ -37,7 +38,9 @@ export function ResumeBanner() {
 
   if (resumableRuns.length === 0) return null
 
-  async function resume(run: ResumableRun) {
+  // replayContext=true → реплей истории через resumeFromRunId (только autoResumable).
+  // false → свежий прогон запроса без реплея (CLI/деструктив, user-initiated).
+  async function resume(run: ResumableRun, replayContext: boolean) {
     try {
       if (run.chatId != null) await switchChatSession(run.chatId)
     } catch {
@@ -46,7 +49,9 @@ export function ResumeBanner() {
     setActiveView('chat')
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('gg-resume-send', {
-        detail: { text: run.lastUserRequest, resumeFromRunId: run.runId }
+        detail: replayContext
+          ? { text: run.lastUserRequest, resumeFromRunId: run.runId }
+          : { text: run.lastUserRequest }
       }))
     }, 0)
     dismissResumableRun(run.runId)
@@ -67,25 +72,29 @@ export function ResumeBanner() {
             finishedAt={Date.now()}
           />
           <div className="gg-resume-progress-actions">
-            {run.autoResumable ? (
-              <button
-                type="button"
-                className="gg-btn gg-btn-primary"
-                onClick={() => resume(run)}
-                title="Повторить последний запрос в нужном чате"
-              >
-                Повторить запрос
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="gg-btn"
-                onClick={() => showWhatWasDone(run)}
-                title="Открыть вкладку задач и посмотреть, на чём остановилась работа"
-              >
-                Показать что было
-              </button>
-            )}
+            {resumeBannerActions(run).map(action => {
+              if (action === 'resume-with-context') return (
+                <button key={action} type="button" className="gg-btn gg-btn-primary"
+                  onClick={() => resume(run, true)}
+                  title="Повторить последний запрос с восстановленным контекстом">
+                  Повторить запрос
+                </button>
+              )
+              if (action === 'resend-fresh') return (
+                <button key={action} type="button" className="gg-btn gg-btn-primary"
+                  onClick={() => resume(run, false)}
+                  title="Запустить последний запрос заново (без реплея прерванной работы)">
+                  Повторить запрос заново
+                </button>
+              )
+              return (
+                <button key={action} type="button" className="gg-btn"
+                  onClick={() => showWhatWasDone(run)}
+                  title="Открыть вкладку задач и посмотреть, на чём остановилась работа">
+                  Показать что было
+                </button>
+              )
+            })}
             <button
               type="button"
               className="gg-btn"
