@@ -34,8 +34,9 @@ import { loadPermissionRules } from '../ai/permission-rules'
 import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
-// Распил ai.ts (1.9.8 #1, срез 1): эмиссия прогресса вынесена в runner-progress.
+// Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
+import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
 import { captureToolObservation } from '../ai/memory-hooks'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
@@ -159,36 +160,6 @@ const autoProofReportsSent = new Set<string>()
 // 1.9.7 #7: троттлинг crash-resume чекпойнтов — последний записанный hash/turn
 // на прогон (skip-if-unchanged + every-N). Чистится на clearCheckpoint/finish.
 const checkpointThrottle = new Map<string, CheckpointThrottleState>()
-
-/** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
-const conversationSupplements = new Map<number, (text: string) => void>()
-
-function registerConversationSupplements(sendId: number, push: (text: string) => void): void {
-  conversationSupplements.set(sendId, push)
-}
-
-function unregisterConversationSupplements(sendId: number): void {
-  conversationSupplements.delete(sendId)
-}
-
-/** Инъекция догруженного контекста (supplement) в активный прогон по sendId.
- *  false — если для sendId нет активного слушателя. Используется ai:append-context. */
-export function pushConversationSupplement(sendId: number, text: string): 'deferred' | false {
-  const push = conversationSupplements.get(sendId)
-  if (!push) return false
-  push(text)
-  return 'deferred'
-}
-
-function formatConversationSupplement(text: string): string {
-  return [
-    '[Дополнение к текущей задаче]',
-    'Это не новая задача и не элемент очереди. Обязательно учти это дополнение в текущем прогоне перед следующим действием, следующим вызовом инструментов или финальным ответом.',
-    'Если уже был составлен план, скорректируй его. Не завершай старый вариант работы так, будто этого дополнения нет.',
-    '',
-    text.trim(),
-  ].join('\n')
-}
 
 function formatProcessCompletionNote(completion: ProcessCompletion): string {
   const runtimeMs = Math.max(0, completion.exitedAt - completion.startedAt)
