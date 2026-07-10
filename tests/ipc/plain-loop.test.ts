@@ -124,6 +124,27 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('свежем аккаунте'))).toBe(true)
   })
 
+  it('РЕВЬЮ-ФИКС: resetEta=null + пул все в лимите → НЕ зацикливается (bounded switches)', async () => {
+    // Оба аккаунта в лимите, сообщение без парсируемого ETA (resetEta=null) →
+    // switchAccountOnLimit всегда switched:true, свежий аккаунт снова лимит. Без
+    // потолка это вечная рекурсия A→B→A→… (HIGH из ревью). Проверяем bound.
+    const alwaysLimited = (): ChatProvider => ({
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'usage limit reached' } }, // resetEta=null
+    })
+    const switchAccountOnLimit = vi.fn((_p: string, _e: number | null) => ({ switched: true }))
+    const fallbackOpts = {
+      getNextProvider: () => alwaysLimited(), getProviderModel: () => 'auto',
+      configuredProviders: new Set(['claude-cli']), triedProviders: new Set(['claude-cli']), switchAccountOnLimit,
+      accountSwitchCount: 0,
+    }
+    const sender = makeSender()
+    await run(dir, alwaysLimited(), sender, { fallbackOpts })
+    // Bounded: свитчей не больше потолка (4), не бесконечно.
+    expect(switchAccountOnLimit.mock.calls.length).toBeLessThanOrEqual(4)
+    expect(sentEvents(sender).some(e => e.type === 'done')).toBe(true)
+  }, 10000)
+
   it('лимит БЕЗ переключаемого аккаунта (пул исчерпан) → честно сдаётся, без зацикливания', async () => {
     const limited: ChatProvider = {
       id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],

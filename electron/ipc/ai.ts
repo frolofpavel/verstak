@@ -1533,10 +1533,17 @@ interface FallbackOpts {
   triedProviders: Set<ProviderId>
   /** 1.9.4: переключить активный аккаунт провайдера на лимите (пул подписок). */
   switchAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
+  /** 1.9.7 ревью-фикс: счётчик выполненных account-switch за прогон (мутируется).
+   *  Bounded MAX_ACCOUNT_SWITCHES — иначе при resetEta=null пул из ≥2 аккаунтов
+   *  зацикливается навсегда (A→B→A→…), т.к. triedProviders на свитче не растёт. */
+  accountSwitchCount?: number
 }
 
 /** Максимальное количество fallback-попыток (original + 2 alternates). */
 const MAX_FALLBACK_ATTEMPTS = 2
+/** Потолок account-switch за прогон: страховка от вечного цикла при resetEta=null
+ *  (лимит без парсируемого ETA → аккаунт не остывает → бесконечная ротация). */
+const MAX_ACCOUNT_SWITCHES = 4
 
 /** Ревью HIGH: провайдер yield'ит транзиентную ошибку как событие {type:'error'} вместо
  *  throw → backoff/retry в withInitialRetry был мёртв. Предикат превращает первое такое
@@ -1783,11 +1790,12 @@ export async function runPlainConversation(
         // того же провайдера (пул), не теряя запрос. Раньше CLI-путь тут просто
         // сдавался (done+return) — авто-свитч (1.9.4) был мёртв для CLI-подписок,
         // хотя аккаунты именно у CLI-провайдеров. Зеркалит attemptAccountSwitch API-пути.
-        if (fallbackOpts && providerId && roundErrorMessage) {
+        if (fallbackOpts && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
           const hit = detectSubscriptionLimit(roundErrorMessage)
           if (hit.limited) {
             const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
             if (sw?.switched) {
+              fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
               const fresh = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
               if (fresh) {
                 sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
@@ -2269,10 +2277,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // не теряя накопленную историю. Пул исчерпан → null (дальше обычный provider-fallback).
   const attemptAccountSwitch = (err: unknown): Promise<void> | null => {
     if (!fallbackOpts || !providerId) return null
+    // Ревью-фикс: bounded — иначе resetEta=null + пул ≥2 зацикливается навсегда.
+    if ((fallbackOpts.accountSwitchCount ?? 0) >= MAX_ACCOUNT_SWITCHES) return null
     const hit = detectSubscriptionLimit(err)
     if (!hit.limited) return null
     const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
     if (!sw?.switched) return null
+    fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
     const freshProvider = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
     if (!freshProvider) return null
     sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
