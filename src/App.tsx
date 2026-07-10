@@ -13,7 +13,6 @@ import { ScheduledTasksView } from './components/ScheduledTasksView'
 import { RemindersView } from './components/RemindersView'
 import { PlanView } from './components/PlanView'
 import { FeedbackView } from './components/FeedbackView'
-import { StubView } from './components/StubView'
 import { AgentsPanel } from './components/AgentsPanel'
 import { AgentRunsPanel } from './components/AgentRunsPanel'
 import { DevTaskPanel } from './components/DevTaskPanel'
@@ -479,7 +478,6 @@ export function App() {
             </Suspense>
           </div>
         )}
-        {activeView === 'calendar' && <StubView title="Calendar" description="Здесь будут события и дедлайны проекта. В работе." />}
         {activeView === 'feedback' && <FeedbackView />}
         {activeView === 'browser' && (
           <Suspense fallback={<ViewFallback />}><BrowserView /></Suspense>
@@ -501,17 +499,6 @@ export function App() {
           <Suspense fallback={<ViewFallback />}>
             <DesignView onGoToChat={() => setActiveView('chat')} />
           </Suspense>
-        )}
-        {activeView === 'video' && (
-          <div className="gg-view-placeholder">
-            <div className="gg-view-placeholder-icon">🎬</div>
-            <h2>{t.views.videoTitle}</h2>
-            <p>{t.views.videoDesc}</p>
-            <p className="gg-view-placeholder-hint">{t.views.videoHint}</p>
-            <div className="gg-view-placeholder-actions">
-              <button onClick={() => setActiveView('chat')}>{t.views.videoCreate}</button>
-            </div>
-          </div>
         )}
       </main>
       {showSettings && (
