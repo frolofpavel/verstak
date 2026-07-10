@@ -11,7 +11,6 @@ import { basename } from 'path'
 import { notifyRunEvent, shouldSendAutoProofReport } from './run-notify'
 import { scanText } from './secret-scanner'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from './process-registry'
-import { clearRunUntilGreenForSend, clearSmartApproveForSend } from '../ipc/tool-handlers/command'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from './tools'
 import { isWithinKnownRoots } from './path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from './registry'
@@ -116,12 +115,15 @@ function fireCrossVerify(
 ): void {
   if (!changes.length) return
   if (!currentProviderId) return
+  // Проверяем настройку cross_verify (по умолчанию включена)
   if (getSecret('cross_verify') === 'false') return
+
+  // Асинхронно, не блокируем
   void (async () => {
     try {
       const configured = getConfiguredApiProviders(getSecret)
       const reviewProviderId = pickReviewProvider(currentProviderId, configured)
-      if (!reviewProviderId) return
+      if (!reviewProviderId) return  // только 1 провайдер — пропускаем
       const prompt = buildCrossVerifyPrompt(changes)
       const cvResult = await runCrossVerify(reviewProviderId, prompt, getSecret)
       sender.send('ai:event', {
