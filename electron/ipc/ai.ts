@@ -54,6 +54,7 @@ import {
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope } from '../ai/control-envelope'
 import { secretProtectionLevel } from '../ai/cli-security-capabilities'
+import { decideCheckpointSave, type CheckpointThrottleState } from '../ai/checkpoint-throttle'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
@@ -153,6 +154,9 @@ interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 const autoProofReportsSent = new Set<string>()
+// 1.9.7 #7: троттлинг crash-resume чекпойнтов — последний записанный hash/turn
+// на прогон (skip-if-unchanged + every-N). Чистится на clearCheckpoint/finish.
+const checkpointThrottle = new Map<string, CheckpointThrottleState>()
 
 /** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
 const conversationSupplements = new Map<number, (text: string) => void>()
@@ -3009,8 +3013,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // содержит результаты этого turn'а + следующий user-msg). На возобновлении
       // прерванной сессии грузим его и продолжаем с накопленным контекстом, а не
       // с turn 0. UPSERT — одна строка на прогон. Best-effort.
+      // 1.9.7 #7: троттлинг против write-amplification — не пишем идентичный
+      // снапшот, на длинных прогонах не чаще every-N, size-cap как backstop.
       try {
-        agentRuns.saveCheckpoint(runId, turn + 1, JSON.stringify(currentMessages))
+        const messagesJson = JSON.stringify(currentMessages)
+        const dec = decideCheckpointSave(turn + 1, messagesJson, checkpointThrottle.get(runId))
+        if (dec.save) {
+          agentRuns.saveCheckpoint(runId, turn + 1, messagesJson)
+          checkpointThrottle.set(runId, { lastHash: dec.hash, lastSavedTurn: turn + 1 })
+        }
       } catch { /* снапшот не критичен — resume просто не предложит контекст */ }
     }
 
@@ -3296,6 +3307,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         if (exitReason === 'completed') {
           agentRuns.clearCheckpoint(runId)
         }
+        // 1.9.7 #7: прогон терминален (не handedOff) — чистим in-memory throttle-
+        // стейт, чтобы Map не рос по завершённым прогонам.
+        checkpointThrottle.delete(runId)
       } catch (err) {
         console.warn('[agent-runs] finish (api) failed:', err instanceof Error ? err.message : err)
       }
