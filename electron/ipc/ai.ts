@@ -37,6 +37,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
+import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
 import { captureToolObservation } from '../ai/memory-hooks'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
@@ -1368,10 +1369,6 @@ const MAX_ACCOUNT_SWITCHES = 4
 /** Ревью HIGH: провайдер yield'ит транзиентную ошибку как событие {type:'error'} вместо
  *  throw → backoff/retry в withInitialRetry был мёртв. Предикат превращает первое такое
  *  событие в Error, чтобы withInitialRetry сделал backoff+повтор (для ВСЕХ провайдеров). */
-function retriableErrorEvent(ev: { type?: string; message?: unknown }): Error | null {
-  return ev && ev.type === 'error' ? new Error(String(ev.message ?? '')) : null
-}
-
 /**
  * Plain streaming conversation — no tools, no multi-turn. Used for providers
  * that don't support function calling yet (Claude/Grok/OpenAI/Gemini CLI).
@@ -1768,32 +1765,6 @@ const DEFAULT_AGENT_TURNS = 8
 const MAX_BUDGET_TURNS = 40  // hard ceiling even with continues — prevents infinite-budget abuse
 const FOCUS_REINJECT_EVERY = 8  // ось 3 C: каждые N ходов реинъект незакрытого todo-листа (анти-дрейф)
 
-/**
- * Аудит M4: отбирает инструменты, которые увидит модель, по tools_allow скилла.
- * - toolsAllow пуст/не задан → без ограничений (стандартные + MCP).
- * - задан → пересечение по имени и для стандартных, и для MCP-инструментов.
- * - все имена — опечатки (пересечение по стандартным пусто) → НЕ оставляем
- *   модель без инструментов: полный набор + warn (broken-скилл ≠ дыра).
- * Экспортируется для unit-теста — lock на поведение безопасности скиллов.
- */
-export function selectAllowedToolDefs<T extends { name: string }>(
-  baseDefs: readonly T[],
-  mcpDefs: readonly T[],
-  toolsAllow?: string[] | null
-): T[] {
-  const allowSet = Array.isArray(toolsAllow) && toolsAllow.length > 0 ? new Set(toolsAllow) : null
-  if (!allowSet) return mcpDefs.length > 0 ? [...baseDefs, ...mcpDefs] : [...baseDefs]
-  const base = baseDefs.filter(t => allowSet.has(t.name))
-  const mcp = mcpDefs.filter(t => allowSet.has(t.name))
-  // Ни одно имя не совпало (скилл целиком в опечатках) → fail-open + warn, чтобы
-  // broken-скилл не стал молчаливым кирпичом. Если же совпали ТОЛЬКО mcp (скилл
-  // хочет mcp-only) — это валидное ограничение, base не восстанавливаем.
-  if (base.length === 0 && mcp.length === 0) {
-    console.warn(`[agent] tools_allow=[${toolsAllow!.join(', ')}] не совпал ни с одним инструментом — ограничение пропущено (проверь имена в скилле)`)
-    return mcpDefs.length > 0 ? [...baseDefs, ...mcpDefs] : [...baseDefs]
-  }
-  return mcp.length > 0 ? [...base, ...mcp] : [...base]
-}
 
 /**
  * Контекст одного агентного прогона. Заменил 34 позиционных параметра

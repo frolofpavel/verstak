@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { selectAllowedToolDefs } from '../../electron/ipc/ai'
+// Распил 1.9.8: selectAllowedToolDefs вынесен в runner-util.
+import { selectAllowedToolDefs } from '../../electron/ai/runner-util'
 
 /**
  * Аудит M4: tools_allow скилла должен реально ограничивать инструменты модели —
