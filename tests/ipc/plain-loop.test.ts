@@ -15,7 +15,8 @@ import type { ChatProvider, ChatEvent } from '../../electron/ai/types'
  */
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, app: { getPath: () => tmpdir() } }))
 
-const { runPlainConversation } = await import('../../electron/ipc/ai')
+// Распил 1.9.8: CLI-путь вынесен в runner-plain.
+const { runPlainConversation } = await import('../../electron/ai/runner-plain')
 
 const CLEAN_ENV = (() => {
   const e: NodeJS.ProcessEnv = { ...process.env }
