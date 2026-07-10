@@ -108,3 +108,100 @@ export function buildRunProvenance(input: {
     : `Правки сделаны внутри CLI — per-file undo Verstak их не покрывает. ${anchor} Untracked-файлы в снапшот не входят.`
   return { providerId, model, transport, observed, checkpoint, note }
 }
+
+// ─── Восстановление по контрольной точке (1.9.6 задача #1) ──────────────────
+// Ночью (срез 4) якорь только СНИМАЛСЯ; откатить его было нечем. Здесь —
+// недеструктивный preview + явный apply, чтобы CLI-прогон можно было откатить
+// одной кнопкой, а не руками в терминале.
+
+/** Сериализовать якорь для queryable-хранения (agent_run_events.ref). Без секретов. */
+export function serializeEnvelope(cp: ControlCheckpoint): string {
+  return JSON.stringify({ gitHead: cp.gitHead, stashRef: cp.stashRef, isGit: cp.isGit })
+}
+
+/** Разобрать сохранённый якорь. null при битом/пустом JSON. */
+export function parseEnvelope(raw: string | null | undefined): { gitHead: string | null; stashRef: string | null } | null {
+  if (!raw) return null
+  try {
+    const o = JSON.parse(raw)
+    if (o && typeof o === 'object' && ('gitHead' in o)) {
+      return { gitHead: typeof o.gitHead === 'string' ? o.gitHead : null, stashRef: typeof o.stashRef === 'string' ? o.stashRef : null }
+    }
+  } catch { /* битый */ }
+  return null
+}
+
+export interface RestorePreview {
+  ok: boolean
+  /** Причина отказа: не-git / нет якоря / репозиторий ушёл вперёд / ошибка git. */
+  reason?: 'not-git' | 'no-anchor' | 'moved-on' | 'error'
+  currentHead?: string | null
+  gitHead?: string | null
+  hasStash?: boolean
+  /** Отслеживаемые файлы, которые изменятся при откате (git diff vs якорь). */
+  changedFiles?: string[]
+  /** Новые untracked-файлы после якоря — откат их НЕ удаляет (честный лимит). */
+  untrackedFiles?: string[]
+}
+
+type Anchor = { gitHead: string | null; stashRef: string | null }
+
+function isInsideRepo(repoRoot: string): boolean {
+  const inside = git(repoRoot, ['rev-parse', '--is-inside-work-tree'])
+  return !!inside && inside.trim() === 'true'
+}
+
+/**
+ * Недеструктивный анализ: можно ли откатиться и что изменится. Только чтение git.
+ * Отказ moved-on, если HEAD сдвинулся с момента якоря (пользователь закоммитил
+ * поверх) — не трогаем ушедшую вперёд историю без явного решения.
+ */
+export function previewControlRestore(repoRoot: string | null, cp: Anchor): RestorePreview {
+  if (!repoRoot || !isInsideRepo(repoRoot)) return { ok: false, reason: 'not-git' }
+  if (!cp.gitHead) return { ok: false, reason: 'no-anchor' }
+  const head = git(repoRoot, ['rev-parse', 'HEAD'])
+  const currentHead = head ? head.trim() : null
+  if (!currentHead) return { ok: false, reason: 'error' }
+  if (currentHead !== cp.gitHead) return { ok: false, reason: 'moved-on', currentHead, gitHead: cp.gitHead }
+  const diff = git(repoRoot, ['diff', '--name-only', cp.gitHead]) ?? ''
+  const changedFiles = diff.split('\n').map(s => s.trim()).filter(Boolean)
+  const untracked = git(repoRoot, ['ls-files', '--others', '--exclude-standard']) ?? ''
+  const untrackedFiles = untracked.split('\n').map(s => s.trim()).filter(Boolean)
+  return { ok: true, currentHead, gitHead: cp.gitHead, hasStash: !!cp.stashRef, changedFiles, untrackedFiles }
+}
+
+export interface RestoreResult {
+  ok: boolean
+  reason?: 'not-git' | 'no-anchor' | 'moved-on' | 'error'
+  /** Отслеживаемые файлы, возвращённые к состоянию якоря. */
+  restoredFiles?: string[]
+  /** Применён ли snapshot грязных pre-run правок (git stash apply). */
+  stashApplied?: boolean
+  /** Новые untracked-файлы, которые откат НЕ удалил (пользователь чистит сам). */
+  untrackedKept?: string[]
+}
+
+/**
+ * Выполнить откат: отслеживаемые файлы → состояние якоря (`git checkout <sha> -- .`),
+ * затем, если был snapshot грязных pre-run правок — применить его. Деструктивно
+ * к правкам ПОСЛЕ якоря (это и есть цель отката CLI-прогона), но НЕ трогает
+ * untracked-файлы (git clean не зовём) и НЕ двигает HEAD (moved-on → отказ).
+ */
+export function applyControlRestore(repoRoot: string | null, cp: Anchor): RestoreResult {
+  const pre = previewControlRestore(repoRoot, cp)
+  if (!pre.ok) return { ok: false, reason: pre.reason }
+  const root = repoRoot as string
+  const changed = pre.changedFiles ?? []
+  // Откат отслеживаемых файлов к якорю. `-- .` восстанавливает всё рабочее дерево
+  // из дерева якоря; HEAD не двигается (мы уже проверили currentHead === gitHead).
+  const co = git(root, ['checkout', cp.gitHead as string, '--', '.'])
+  if (co === null) return { ok: false, reason: 'error' }
+  let stashApplied = false
+  if (cp.stashRef) {
+    // Вернуть грязные pre-run правки. Конфликт/ошибка не валит откат tracked —
+    // stash best-effort (правки уже восстановлены к чистому якорю).
+    const ap = git(root, ['stash', 'apply', cp.stashRef])
+    stashApplied = ap !== null
+  }
+  return { ok: true, restoredFiles: changed, stashApplied, untrackedKept: pre.untrackedFiles ?? [] }
+}

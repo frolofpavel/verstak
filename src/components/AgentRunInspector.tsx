@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
-import type { AuditEntry, DebugPacket } from '../types/api'
+import type { AuditEntry, DebugPacket, EnvelopeRestorePreview, EnvelopeRestoreResult } from '../types/api'
 import { computeContextBudget } from '../lib/context-budget'
 import { diffSections, diffLines, sectionMap, type SectionDiff, type SectionDiffStatus } from '../lib/context-diff'
 import { runtimeCapability } from '../lib/runtime-capability'
@@ -184,10 +184,73 @@ function formatDetail(detail: string): string {
   return trimmed
 }
 
+// Честные подписи отказов отката.
+const RESTORE_REASON_RU: Record<string, string> = {
+  'not-git': 'Проект вне git — откатить нечем.',
+  'no-anchor': 'Якорь отката не сохранён (старый прогон или не-git).',
+  'moved-on': 'Репозиторий ушёл вперёд (есть коммит поверх якоря) — авто-откат отменён, чтобы не тронуть новую историю.',
+  'error': 'Ошибка git.',
+}
+
+// Control Envelope Restore (1.9.6 #1): недеструктивный preview → подтверждение → результат.
+function EnvelopeRestorePanel({ state, onConfirm, onClose }: {
+  runId: string
+  state: { phase: 'idle' | 'preview' | 'busy' | 'done'; preview?: EnvelopeRestorePreview; result?: EnvelopeRestoreResult }
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const { phase, preview, result } = state
+  return (
+    <div className="gg-envelope-restore">
+      {phase === 'busy' && <div className="gg-envelope-restore-row">Обрабатываю…</div>}
+
+      {phase === 'preview' && preview && !preview.ok && (
+        <div className="gg-envelope-restore-row is-warn">
+          <span>⚠️ {RESTORE_REASON_RU[preview.reason ?? 'error']}</span>
+          <button className="gg-btn gg-btn-ghost" onClick={onClose}>Закрыть</button>
+        </div>
+      )}
+
+      {phase === 'preview' && preview && preview.ok && (
+        <div className="gg-envelope-restore-body">
+          <div className="gg-envelope-restore-title">
+            Откат к якорю <code>{(preview.gitHead ?? '').slice(0, 7)}</code>
+            {preview.hasStash && ' + возврат грязных pre-run правок'}
+          </div>
+          <div className="gg-envelope-restore-note">
+            Отслеживаемых файлов изменится: <b>{preview.changedFiles?.length ?? 0}</b>.
+            {(preview.untrackedFiles?.length ?? 0) > 0 && ` Новых untracked-файлов (${preview.untrackedFiles!.length}) откат НЕ удалит — их убираешь сам.`}
+          </div>
+          {(preview.changedFiles?.length ?? 0) > 0 && (
+            <pre className="gg-envelope-restore-files">{preview.changedFiles!.slice(0, 30).join('\n')}{(preview.changedFiles!.length > 30) ? `\n…ещё ${preview.changedFiles!.length - 30}` : ''}</pre>
+          )}
+          <div className="gg-envelope-restore-actions">
+            <button className="gg-btn gg-btn-danger" onClick={onConfirm}>Откатить правки CLI</button>
+            <button className="gg-btn gg-btn-ghost" onClick={onClose}>Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'done' && result && (
+        <div className={`gg-envelope-restore-row ${result.ok ? 'is-ok' : 'is-warn'}`}>
+          <span>
+            {result.ok
+              ? `✓ Откачено: ${result.restoredFiles?.length ?? 0} файлов${result.stashApplied ? ' + снапшот грязных правок' : ''}.${(result.untrackedKept?.length ?? 0) > 0 ? ` Untracked (${result.untrackedKept!.length}) оставлены.` : ''}`
+              : `⚠️ ${RESTORE_REASON_RU[result.reason ?? 'error']}`}
+          </span>
+          <button className="gg-btn gg-btn-ghost" onClick={onClose}>Закрыть</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string) => void }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const hasError = run.entries.some(e => e.action === 'error')
+  // Control Envelope Restore (1.9.6 #1): откат CLI-прогона к git-якорю.
+  const [restore, setRestore] = useState<{ phase: 'idle' | 'preview' | 'busy' | 'done'; preview?: EnvelopeRestorePreview; result?: EnvelopeRestoreResult }>({ phase: 'idle' })
   // Честный уровень контроля этого прогона: CLI-прогон НЕ был «полным контролем».
   const isCli = (run.providerId ?? '').endsWith('-cli')
   const cap = runtimeCapability(run.providerId ?? '', isCli ? 'CLI' : 'API')
@@ -208,6 +271,19 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           <span className="gg-run-summary">{summarize(run.entries)}</span>
           <span className="gg-run-count">{run.entries.length} · {formatDuration(run.end - run.start)}</span>
         </button>
+        {run.runId && isCli && (
+          <button
+            className="gg-run-packet-btn"
+            title="Откатить правки этого CLI-прогона к git-якорю (контрольная точка перед прогоном)"
+            onClick={async () => {
+              setRestore({ phase: 'busy' })
+              try {
+                const p = await window.api.agentRuns.envelopePreview(run.runId!)
+                setRestore({ phase: 'preview', preview: p })
+              } catch { setRestore({ phase: 'idle' }) }
+            }}
+          >↩︎ Откатить</button>
+        )}
         {run.runId && (
           <button
             className="gg-run-packet-btn"
@@ -216,6 +292,20 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           >🐛 Пакет</button>
         )}
       </div>
+      {restore.phase !== 'idle' && (
+        <EnvelopeRestorePanel
+          runId={run.runId!}
+          state={restore}
+          onConfirm={async () => {
+            setRestore(s => ({ ...s, phase: 'busy' }))
+            try {
+              const r = await window.api.agentRuns.envelopeRestore(run.runId!)
+              setRestore(s => ({ phase: 'done', preview: s.preview, result: r }))
+            } catch { setRestore(s => ({ ...s, phase: 'preview' })) }
+          }}
+          onClose={() => setRestore({ phase: 'idle' })}
+        />
+      )}
       {open && (
         <div className="gg-run-steps">
           {run.entries.map(e => (

@@ -743,6 +743,10 @@ declare global {
         listResumable(projectPath: string): Promise<ResumableRun[]>
         /** Crash-resume: отклонить баннер для прогона (не показывать в этом сеансе app). */
         dismissResumable(runId: string): Promise<boolean>
+        /** Control Envelope (1.9.6 #1): недеструктивный preview отката CLI-прогона (что изменится). */
+        envelopePreview(runId: string): Promise<EnvelopeRestorePreview>
+        /** Control Envelope: выполнить откат CLI-прогона к git-якорю (renderer подтверждает ПЕРЕД вызовом). */
+        envelopeRestore(runId: string): Promise<EnvelopeRestoreResult>
       }
       // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
       worktree: {
@@ -1032,6 +1036,28 @@ export interface ResumableRun {
   /** Можно ли предлагать авто-возобновление (read-only последний tool + безопасный режим).
    *  false → деструктив/auto/bypass: только «показать что было» + ручной ре-промпт. */
   autoResumable: boolean
+}
+
+/** Control Envelope (1.9.6 #1): недеструктивный анализ отката CLI-прогона. Зеркало RestorePreview. */
+export interface EnvelopeRestorePreview {
+  ok: boolean
+  reason?: 'not-git' | 'no-anchor' | 'moved-on' | 'error'
+  currentHead?: string | null
+  gitHead?: string | null
+  hasStash?: boolean
+  /** Отслеживаемые файлы, которые изменятся при откате. */
+  changedFiles?: string[]
+  /** Новые untracked-файлы после якоря — откат их НЕ удаляет. */
+  untrackedFiles?: string[]
+}
+
+/** Control Envelope (1.9.6 #1): результат отката. Зеркало RestoreResult. */
+export interface EnvelopeRestoreResult {
+  ok: boolean
+  reason?: 'not-git' | 'no-anchor' | 'moved-on' | 'error'
+  restoredFiles?: string[]
+  stashApplied?: boolean
+  untrackedKept?: string[]
 }
 
 /**

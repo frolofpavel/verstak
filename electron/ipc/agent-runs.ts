@@ -5,6 +5,7 @@ import type { SubSessions } from '../storage/sub-sessions'
 import type { SessionTodos } from '../storage/session-todos'
 import { getRunInput } from '../storage/run-inputs'
 import { waitForRun, type RunWaitOptions } from '../ai/run-lifecycle'
+import { parseEnvelope, previewControlRestore, applyControlRestore, type RestorePreview, type RestoreResult } from '../ai/control-envelope'
 
 /**
  * IPC для вкладки «Задачи» (Multi-agent Manager).
@@ -143,5 +144,46 @@ export function registerAgentRunsIpc(
     if (!runId) return false
     dismissed.add(runId)
     return true
+  })
+
+  // ─── Control Envelope Restore (1.9.6 #1): откат CLI-прогона по git-якорю ───
+  // Ночью (срез 4) якорь только снимался; здесь даём откат из UI. Якорь лежит в
+  // ref последнего события kind='checkpoint' прогона (полный gitHead+stashRef).
+  function anchorForRun(runId: string): { projectPath: string; anchor: { gitHead: string | null; stashRef: string | null } } | null {
+    const run = agentRuns.get(runId)
+    if (!run) return null
+    const events = agentRuns.getEvents(runId)
+    // Последнее checkpoint-событие с распарсиваемым ref-якорем.
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].kind === 'checkpoint') {
+        const anchor = parseEnvelope(events[i].ref)
+        if (anchor) return { projectPath: run.projectPath, anchor }
+      }
+    }
+    return null
+  }
+
+  // Недеструктивный preview: что изменится при откате (только чтение git).
+  ipcMain.handle('control-envelope:preview', (_e, runId: string): RestorePreview => {
+    const found = anchorForRun(runId)
+    if (!found) return { ok: false, reason: 'no-anchor' }
+    return previewControlRestore(found.projectPath, found.anchor)
+  })
+
+  // Явный откат (деструктивен к правкам CLI после якоря — это цель). Renderer
+  // обязан подтвердить у пользователя ПЕРЕД вызовом. Пишем audit-событие.
+  ipcMain.handle('control-envelope:restore', (_e, runId: string): RestoreResult => {
+    const found = anchorForRun(runId)
+    if (!found) return { ok: false, reason: 'no-anchor' }
+    const res = applyControlRestore(found.projectPath, found.anchor)
+    try {
+      agentRuns.appendEvent(runId, 'envelope-restore', {
+        detail: res.ok
+          ? `Откат к якорю: ${res.restoredFiles?.length ?? 0} файлов${res.stashApplied ? ' + снапшот грязных правок' : ''}`
+          : `Откат отклонён: ${res.reason}`,
+        status: res.ok ? 'ok' : 'error',
+      })
+    } catch { /* audit best-effort */ }
+    return res
   })
 }

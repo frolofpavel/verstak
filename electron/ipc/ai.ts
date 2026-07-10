@@ -52,7 +52,7 @@ import {
   shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
-import { captureControlCheckpoint, buildRunProvenance } from '../ai/control-envelope'
+import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope } from '../ai/control-envelope'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from '../ai/diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from '../ai/lang-servers'
@@ -1589,7 +1589,9 @@ async function runPlainConversation(
       })
       recordJournal(projectPath, 'note', 'Control Envelope', provenance.note)
       if (agentRuns && runId) {
-        try { agentRuns.appendEvent(runId, 'checkpoint', { detail: provenance.note }) } catch { /* best-effort */ }
+        // ref = сериализованный якорь (полный gitHead+stashRef) для queryable-
+        // отката из UI (1.9.6 #1). detail — человекочитаемая нота. Секретов нет.
+        try { agentRuns.appendEvent(runId, 'checkpoint', { detail: provenance.note, ref: serializeEnvelope(checkpoint) }) } catch { /* best-effort */ }
       }
     } catch { /* envelope-телеметрия не должна ронять прогон */ }
   }

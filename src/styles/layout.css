@@ -8564,6 +8564,45 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   border-color: color-mix(in srgb, #e78a8a 30%, transparent);
   background: color-mix(in srgb, #e78a8a 8%, transparent);
 }
+/* Control Envelope Restore (1.9.6 #1): панель отката CLI-прогона. */
+.gg-envelope-restore {
+  border-top: 1px solid var(--border-subtle, rgba(128,128,128,.18));
+  padding: 8px 12px;
+  font-size: var(--text-xs);
+}
+.gg-envelope-restore-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gg-envelope-restore-row.is-warn { color: #d8a657; }
+.gg-envelope-restore-row.is-ok { color: var(--accent); }
+.gg-envelope-restore-title { margin-bottom: 4px; }
+.gg-envelope-restore-title code {
+  font-family: var(--font-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.gg-envelope-restore-note { color: var(--text-tertiary); margin-bottom: 6px; }
+.gg-envelope-restore-files {
+  max-height: 140px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0 0 8px;
+}
+.gg-envelope-restore-actions { display: flex; gap: 8px; }
+.gg-btn-danger {
+  color: #fff;
+  background: color-mix(in srgb, #e05252 88%, transparent);
+  border: 1px solid color-mix(in srgb, #e05252 60%, transparent);
+}
+.gg-btn-danger:hover { background: #e05252; }
 .gg-run-time {
   font-family: var(--font-mono);
   font-size: var(--text-xs);

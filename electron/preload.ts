@@ -535,7 +535,10 @@ contextBridge.exposeInMainWorld('api', {
     resume: (runId: string) => ipcRenderer.invoke('agent-runs:resume', runId),
     // Crash-resume: зависшие после краха прогоны для баннера «сессия прервана».
     listResumable: (projectPath: string) => ipcRenderer.invoke('ai:list-resumable', projectPath),
-    dismissResumable: (runId: string) => ipcRenderer.invoke('ai:dismiss-resumable', runId)
+    dismissResumable: (runId: string) => ipcRenderer.invoke('ai:dismiss-resumable', runId),
+    // Control Envelope Restore (1.9.6 #1): preview (что изменится) + откат CLI-прогона.
+    envelopePreview: (runId: string) => ipcRenderer.invoke('control-envelope:preview', runId),
+    envelopeRestore: (runId: string) => ipcRenderer.invoke('control-envelope:restore', runId)
   },
   // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
   worktree: {

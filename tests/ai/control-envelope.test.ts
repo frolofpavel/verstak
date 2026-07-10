@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { captureControlCheckpoint, buildRunProvenance, CLI_WITH_TIMELINE } from '../../electron/ai/control-envelope'
+import { captureControlCheckpoint, buildRunProvenance, CLI_WITH_TIMELINE, serializeEnvelope, parseEnvelope, previewControlRestore, applyControlRestore } from '../../electron/ai/control-envelope'
 
 // Реальные git-субпроцессы под параллельной нагрузкой suite — щедрый таймаут.
 vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
@@ -109,5 +109,92 @@ describe('buildRunProvenance — provenance без секретов', () => {
 
   it('CLI_WITH_TIMELINE синхронен с renderer-набором (claude/codex)', () => {
     expect([...CLI_WITH_TIMELINE].sort()).toEqual(['claude-cli', 'codex-cli'])
+  })
+})
+
+describe('serializeEnvelope / parseEnvelope — queryable-персист якоря', () => {
+  it('roundtrip сохраняет gitHead/stashRef без секретов', () => {
+    const raw = serializeEnvelope({ isGit: true, gitHead: 'a'.repeat(40), stashRef: 'b'.repeat(40), capturedAt: 1 })
+    const back = parseEnvelope(raw)
+    expect(back).toEqual({ gitHead: 'a'.repeat(40), stashRef: 'b'.repeat(40) })
+    for (const bad of ['token', 'authorization', 'secret', 'password']) expect(raw.toLowerCase()).not.toContain(bad)
+  })
+  it('битый/пустой JSON → null', () => {
+    expect(parseEnvelope('не json')).toBeNull()
+    expect(parseEnvelope('')).toBeNull()
+    expect(parseEnvelope(null)).toBeNull()
+    expect(parseEnvelope('{"foo":1}')).toBeNull()
+  })
+})
+
+describe('previewControlRestore / applyControlRestore — откат CLI-прогона по git-якорю', () => {
+  let repo: string
+  let headSha: string
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'gg-restore-'))
+    gitInit(repo)
+    writeFileSync(join(repo, 'a.txt'), 'hello\n')
+    gitRun(repo, ['add', '-A'])
+    gitRun(repo, ['commit', '-m', 'init'])
+    headSha = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: CLEAN_ENV }).trim()
+  })
+  afterEach(() => { try { rmSync(repo, { recursive: true, force: true }) } catch { /* win lock */ } })
+
+  it('preview: показывает изменённые CLI файлы, откат недеструктивен (только чтение)', () => {
+    // Симулируем правку CLI после якоря.
+    writeFileSync(join(repo, 'a.txt'), 'hello\nCLI-НАПИСАЛ\n')
+    writeFileSync(join(repo, 'new.txt'), 'создан CLI\n')
+    const pre = previewControlRestore(repo, { gitHead: headSha, stashRef: null })
+    expect(pre.ok).toBe(true)
+    expect(pre.changedFiles).toContain('a.txt')
+    expect(pre.untrackedFiles).toContain('new.txt')
+    // Недеструктивно: файлы на месте после preview.
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toContain('CLI-НАПИСАЛ')
+  })
+
+  it('apply: откатывает отслеживаемый файл к состоянию якоря', () => {
+    writeFileSync(join(repo, 'a.txt'), 'hello\nCLI-НАПИСАЛ\n')
+    const res = applyControlRestore(repo, { gitHead: headSha, stashRef: null })
+    expect(res.ok).toBe(true)
+    expect(res.restoredFiles).toContain('a.txt')
+    // Вернулось к якорю (CRLF-толерантно — git на Windows может нормализовать \n→\r\n).
+    const restored = readFileSync(join(repo, 'a.txt'), 'utf8')
+    expect(restored.replace(/\r/g, '')).toBe('hello\n')
+    expect(restored).not.toContain('CLI-НАПИСАЛ')
+  })
+
+  it('apply со stash: возвращает грязные pre-run правки поверх якоря', () => {
+    // Грязная pre-run правка → снапшот якоря.
+    writeFileSync(join(repo, 'a.txt'), 'hello\nМОЁ-ДО-ПРОГОНА\n')
+    const cp = captureControlCheckpoint(repo, 1)
+    expect(cp.stashRef).toBeTruthy()
+    // CLI переписал файл иначе.
+    writeFileSync(join(repo, 'a.txt'), 'hello\nCLI-ЗАТЁР\n')
+    const res = applyControlRestore(repo, { gitHead: cp.gitHead, stashRef: cp.stashRef })
+    expect(res.ok).toBe(true)
+    expect(res.stashApplied).toBe(true)
+    // Вернулась именно МОЯ pre-run правка, не CLI-затирание.
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toContain('МОЁ-ДО-ПРОГОНА')
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).not.toContain('CLI-ЗАТЁР')
+  })
+
+  it('отказ moved-on: HEAD сдвинулся с момента якоря — не трогаем ушедшую историю', () => {
+    // Пользователь закоммитил поверх — HEAD != gitHead якоря.
+    writeFileSync(join(repo, 'a.txt'), 'hello\nновый коммит\n')
+    gitRun(repo, ['commit', '-am', 'moved on'])
+    const pre = previewControlRestore(repo, { gitHead: headSha, stashRef: null })
+    expect(pre.ok).toBe(false)
+    expect(pre.reason).toBe('moved-on')
+    const res = applyControlRestore(repo, { gitHead: headSha, stashRef: null })
+    expect(res.ok).toBe(false)
+    expect(res.reason).toBe('moved-on')
+  })
+
+  it('не-git и нет-якоря → честный отказ, не кидает', () => {
+    const plain = mkdtempSync(join(tmpdir(), 'gg-restore-plain-'))
+    try {
+      expect(previewControlRestore(plain, { gitHead: 'x', stashRef: null }).reason).toBe('not-git')
+      expect(previewControlRestore(repo, { gitHead: null, stashRef: null }).reason).toBe('no-anchor')
+    } finally { rmSync(plain, { recursive: true, force: true }) }
   })
 })
