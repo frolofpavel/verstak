@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { redactForDisplay } from './ai/secret-scanner'
 
 const MAX_LOG_BYTES = 10 * 1024 * 1024
 const RETENTION_DAYS = 14
@@ -25,18 +26,23 @@ function logFile(level: LogLevel): string {
   return join(baseDir(), level === 'error' ? 'errors.jsonl' : 'runtime.jsonl')
 }
 
-function sanitize(value: unknown, depth = 0): unknown {
+// export для security-теста (1.9.8 #6): редакция значений, не только по имени ключа.
+export function sanitize(value: unknown, depth = 0): unknown {
   if (depth > 5) return '[MaxDepth]'
   if (value == null) return value
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: value.message,
-      stack: typeof value.stack === 'string' ? value.stack.slice(0, 4000) : undefined
+      // 1.9.8 #6: message/stack могут нести токены (напр. в тексте ошибки API) → редактируем.
+      message: redactForDisplay(value.message),
+      stack: typeof value.stack === 'string' ? redactForDisplay(value.stack.slice(0, 4000)) : undefined
     }
   }
   if (typeof value === 'string') {
-    return value.length > 2000 ? `${value.slice(0, 2000)}...[truncated ${value.length}]` : value
+    // 1.9.8 #6: раньше строковые значения только обрезались — секрет под НЕ-секрет
+    // ключом (grok stderr под 'stderr', сообщения) утекал сырым. Теперь redactForDisplay.
+    const truncated = value.length > 2000 ? `${value.slice(0, 2000)}...[truncated ${value.length}]` : value
+    return redactForDisplay(truncated)
   }
   if (typeof value === 'number' || typeof value === 'boolean') return value
   if (Array.isArray(value)) return value.slice(0, 50).map(v => sanitize(v, depth + 1))

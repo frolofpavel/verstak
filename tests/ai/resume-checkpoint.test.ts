@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseResumeCheckpoint } from '../../electron/ai/resume-checkpoint'
+import { parseResumeCheckpoint, canReplayCheckpoint } from '../../electron/ai/resume-checkpoint'
 
 /**
  * parseResumeCheckpoint — рубеж безопасности возобновления: снапшот мог записаться
@@ -45,5 +45,21 @@ describe('parseResumeCheckpoint', () => {
     expect(parseResumeCheckpoint(null)).toBeNull()
     expect(parseResumeCheckpoint(undefined)).toBeNull()
     expect(parseResumeCheckpoint('')).toBeNull()
+  })
+})
+
+describe('canReplayCheckpoint — гард совместимости возобновления (1.9.8 #4)', () => {
+  it('тот же провайдер → реплей разрешён', () => {
+    expect(canReplayCheckpoint({ providerId: 'claude' }, 'claude')).toBe(true)
+  })
+  it('другой провайдер → НЕ реплеим (формат tool_use несовместим)', () => {
+    expect(canReplayCheckpoint({ providerId: 'claude' }, 'gemini-api')).toBe(false)
+    // CLI↔API того же вендора — тоже разные форматы истории.
+    expect(canReplayCheckpoint({ providerId: 'claude-cli' }, 'claude')).toBe(false)
+  })
+  it('нет чекпойнт-прогона / null providerId → не реплеим', () => {
+    expect(canReplayCheckpoint(null, 'claude')).toBe(false)
+    expect(canReplayCheckpoint(undefined, 'claude')).toBe(false)
+    expect(canReplayCheckpoint({ providerId: null }, 'claude')).toBe(false)
   })
 })

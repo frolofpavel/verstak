@@ -24,3 +24,20 @@ export function parseResumeCheckpoint(messagesJson: string | null | undefined): 
   if (!allValid) return null
   return parsed as ChatMessage[]
 }
+
+/**
+ * Гард совместимости возобновления (1.9.8 #4). Формат истории (tool_use-блоки,
+ * структура сообщений) привязан к ПРОВАЙДЕРУ: CLI↔API и Claude↔Gemini↔OpenAI
+ * несовместимы — реплей истории одного в формат другого даёт битые tool_use /
+ * ошибку API. Реплеим сохранённый контекст ТОЛЬКО когда провайдер текущего
+ * запроса совпадает с провайдером чекпойнта; иначе — свежий старт (запрос
+ * перезапускается с нуля, что безопасно). Модель внутри одного провайдера не
+ * гейтим — формат сообщений тот же.
+ */
+export function canReplayCheckpoint(
+  checkpointRun: { providerId: string | null } | null | undefined,
+  currentProviderId: string
+): boolean {
+  if (!checkpointRun) return false
+  return checkpointRun.providerId === currentProviderId
+}

@@ -51,7 +51,7 @@ import {
   resolveAgentRunTimeoutPolicy,
   shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
-import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
+import { parseResumeCheckpoint, canReplayCheckpoint } from '../ai/resume-checkpoint'
 import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope, anchorStash, pruneEnvelopeStashes } from '../ai/control-envelope'
 import { secretProtectionLevel } from '../ai/cli-security-capabilities'
 import { decideCheckpointSave, type CheckpointThrottleState } from '../ai/checkpoint-throttle'
@@ -628,6 +628,10 @@ export function registerAiIpc(deps: AiDeps): void {
     const resumedMessages = overrides?.resumeFromRunId
       ? parseResumeCheckpoint(deps.agentRuns?.latestCheckpoint(overrides.resumeFromRunId)?.messagesJson ?? null)
       : null
+    // 1.9.8 #4: прогон чекпойнта — для гарда совместимости провайдера (ниже).
+    const checkpointRun = overrides?.resumeFromRunId
+      ? (deps.agentRuns?.get(overrides.resumeFromRunId) ?? null)
+      : null
     // Ось интенсивности (Простой/Турбо). Простой = сегодняшнее поведение (standard
     // effort, без наслоения). Турбо = deep effort + подсказка «вся машинерия на
     // задачу». Явный overrides.effortLevel (из UI) имеет приоритет над пресетом.
@@ -842,10 +846,12 @@ export function registerAiIpc(deps: AiDeps): void {
     // независимый разбор. Давать ему system-layer + user-layer = заставить
     // вести себя как сам агент, а не как критик → теряется смысл кросс-ревью.
     // Поэтому reviewer-промпт остаётся единственной системной инструкцией.
-    if (resumedMessages) {
+    if (resumedMessages && canReplayCheckpoint(checkpointRun, providerId)) {
       // Crash-resume Фаза 2: чекпойнт уже содержит system + полную историю прогона
       // — подаём как есть, минуя пере-сборку контекста. composedSystem остаётся
       // null (Debug-снапшот системы для возобновления не делаем — это продолжение).
+      // 1.9.8 #4: только если провайдер совпадает — иначе tool_use-история одного
+      // провайдера не ляжет в формат другого (свежий старт по messages безопаснее).
       messagesWithSystem = resumedMessages
     } else if (overrides?.useReviewerPrompt) {
       messagesWithSystem = [{ role: 'system', content: REVIEWER_SYSTEM_PROMPT }, ...messages]
