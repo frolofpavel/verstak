@@ -124,8 +124,14 @@ const PATTERNS: SecretPattern[] = [
   // отражают auth-параметр в теле/ошибке). Distinctive-prefix токены:
   { name: 'vk-token', re: /\bvk1\.a\.[A-Za-z0-9_-]{30,}/g },
   { name: 'yandex-oauth', re: /\by0_[A-Za-z0-9_-]{20,}\b/g },
+  // xAI/Grok API-ключ (ревью-фикс 1.9.6#4): distinctive-prefix xai-.
+  { name: 'xai-key', re: /\bxai-[A-Za-z0-9_-]{16,}\b/g },
   // Telegram bot token: <digits>:<35 base64url> — формат отличимый, риск ложных мал.
   { name: 'telegram-bot-token', re: /\b\d{6,12}:[A-Za-z0-9_-]{35}\b/g },
+  // Секрет через ПРОБЕЛ-флаг CLI (ревью-фикс 1.9.6#4): `--token VALUE`, `--password X`,
+  // `--api-key xai-…`. auth-keyword-value требует [:=], поэтому space-форму пропускал,
+  // а token/password вообще не в его словаре. Гасим сам value (спец-обработка в scanText).
+  { name: 'cli-secret-flag', re: /(--?(?:token|password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token|bearer))[=\s]+["']?([A-Za-z0-9._\-+/]{10,})/gi },
   // Generic auth keyword → value. Ловит DaData (X-Secret/Token), Контур.Фокус
   // (api_key=<uuid>), GigaChat/OAuth (client_secret), Bearer-токены. Только при
   // явном auth-ключевом слове рядом — иначе UUID/хеши из легитимных ответов не
@@ -191,6 +197,8 @@ export function scanText(input: string): ScanResult {
         // auth-keyword-value: оставляем ключевое слово/разделитель, гасим только
         // сам секрет (он в конце совпадения после auth-ключа).
         if (name === 'auth-keyword-value') return m.replace(/([A-Za-z0-9._\-+/]{16,})$/, '[REDACTED:auth-value]')
+        // cli-secret-flag: оставляем флаг+разделитель, гасим value в конце совпадения.
+        if (name === 'cli-secret-flag') return m.replace(/([A-Za-z0-9._\-+/]{10,})$/, '[REDACTED:cli-secret]')
         return `[REDACTED:${name}]`
       })
     }
@@ -201,7 +209,11 @@ export function scanText(input: string): ScanResult {
 
 // URL внутри произвольного текста (для редакции query-токенов, которые scanText
 // по паттернам ключей не ловит — их гасит redactUrlSecrets по имени параметра).
-const EMBEDDED_URL_RE = /https?:\/\/[^\s"'<>)\]]+/g
+// Ревью-фикс 1.9.6#4: раньше исключали `)`/`]` из класса → URL обрезался ПЕРЕД
+// query у IPv6-хоста (https://[2001:db8::1]:8443/…?token=) и путей со скобками
+// (…/Foo_(v2)?token=) → секрет query утекал. Исключаем только пробелы/кавычки/
+// угловые. Возможный хвостовой `)` из прозы попадёт в URL безвредно (лишь редакция).
+const EMBEDDED_URL_RE = /https?:\/\/[^\s"'<>]+/g
 
 /**
  * Полная редакция строки ДЛЯ ПОКАЗА (UI/Timeline/лог): scanText (ключи, Bearer,

@@ -195,4 +195,26 @@ describe('redactForDisplay — редакция projected CLI tool args для U
     const arg = JSON.stringify({ path: 'src/a.ts', command: 'npm test' })
     expect(redactForDisplay(arg)).toBe(arg)
   })
+
+  // Ревью-фиксы 1.9.6 #4.
+  it('РЕВЬЮ: URL со скобкой в пути перед query — token не утекает', () => {
+    const out = redactForDisplay('open https://site/Foo_(v2)?token=SECRETTOKENVALUE12345 now')
+    expect(out).not.toContain('SECRETTOKENVALUE12345')
+  })
+  it('РЕВЬЮ: IPv6-хост в URL перед query — token не утекает', () => {
+    const out = redactForDisplay('curl https://[2001:db8::1]:8443/api?token=SECRETTOKENVALUE12345')
+    expect(out).not.toContain('SECRETTOKENVALUE12345')
+  })
+  it('РЕВЬЮ: секрет через пробел-флаг CLI (--token/--password/--api-key VALUE)', () => {
+    expect(redactForDisplay('mytool --token SECRETTOKENVALUE1234')).not.toContain('SECRETTOKENVALUE1234')
+    expect(redactForDisplay('psql --password SuperSecretPass123')).not.toContain('SuperSecretPass123')
+    expect(redactForDisplay('grok --api-key xai-abcDEF1234567890XYZ99')).not.toContain('xai-abcDEF1234567890XYZ99')
+  })
+  it('РЕВЬЮ: bare xai- ключ гасится', () => {
+    expect(redactForDisplay('key is xai-abcDEF1234567890XYZ99 done')).not.toContain('xai-abcDEF1234567890XYZ99')
+  })
+  it('пробел-флаг с коротким не-секретным значением НЕ трогает (--token json)', () => {
+    // 10+ порог: короткие безопасные значения не редактируем.
+    expect(redactForDisplay('--token json')).toContain('json')
+  })
 })
