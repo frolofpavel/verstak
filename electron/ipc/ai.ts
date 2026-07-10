@@ -38,6 +38,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
+import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from '../ai/runner-shared'
 import { captureToolObservation } from '../ai/memory-hooks'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
@@ -1342,30 +1343,6 @@ export function registerAiIpc(deps: AiDeps): void {
  * пользователь может «↻ Переотправить» (Resume V1). Ошибкой это не считаем.
  */
 /** Опции smart fallback — пробрасываются из ai:send в conversation runners. */
-interface FallbackOpts {
-  /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
-  getNextProvider: (id: ProviderId) => ChatProvider | null
-  /** Модель fallback-кандидата — чтобы cost-guard/журнал прогона считались по
-   *  РЕАЛЬНОЙ модели fallback'а, а не по модели упавшего провайдера (#7). */
-  getProviderModel: (id: ProviderId) => string | null
-  /** Провайдеры с настроенными ключами. */
-  configuredProviders: Set<ProviderId>
-  /** Уже попробованные провайдеры (мутируется по ходу). */
-  triedProviders: Set<ProviderId>
-  /** 1.9.4: переключить активный аккаунт провайдера на лимите (пул подписок). */
-  switchAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
-  /** 1.9.7 ревью-фикс: счётчик выполненных account-switch за прогон (мутируется).
-   *  Bounded MAX_ACCOUNT_SWITCHES — иначе при resetEta=null пул из ≥2 аккаунтов
-   *  зацикливается навсегда (A→B→A→…), т.к. triedProviders на свитче не растёт. */
-  accountSwitchCount?: number
-}
-
-/** Максимальное количество fallback-попыток (original + 2 alternates). */
-const MAX_FALLBACK_ATTEMPTS = 2
-/** Потолок account-switch за прогон: страховка от вечного цикла при resetEta=null
- *  (лимит без парсируемого ETA → аккаунт не остывает → бесконечная ротация). */
-const MAX_ACCOUNT_SWITCHES = 4
-
 /** Ревью HIGH: провайдер yield'ит транзиентную ошибку как событие {type:'error'} вместо
  *  throw → backoff/retry в withInitialRetry был мёртв. Предикат превращает первое такое
  *  событие в Error, чтобы withInitialRetry сделал backoff+повтор (для ВСЕХ провайдеров). */
