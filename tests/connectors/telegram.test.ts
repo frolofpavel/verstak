@@ -59,24 +59,30 @@ describe('Telegram connector', () => {
     fetchSpy.mockRestore()
   })
 
-  it('пустой whitelist (null) — пропускает (dev mode)', async () => {
-    // С пустым whitelist - НЕ должно вернуть not-whitelisted (попытается
-    // отправить и упадёт уже на fetch). Здесь мы тестируем именно whitelist
-    // логику, а не успешность отправки. fetch замокан, чтобы тест был
-    // детерминированным и быстрым (без реального сетевого вызова к Telegram —
-    // он давал flaky timeout 5s). Глобальный afterEach (tests/setup.ts) снимет стаб.
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: false, status: 401,
-      text: async () => '{"ok":false,"error_code":401}',
-      json: async () => ({ ok: false, error_code: 401 })
-    })))
+  // 2.0.0 security (аудит M5): пустой whitelist раньше был fail-OPEN (слал в любой
+  // chat_id). Теперь fail-CLOSED — блок, если только это не настроенный notify-чат.
+  it('пустой whitelist + нет notify → блок (fail-closed), НЕ уходит в fetch', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
     const conn = createTelegramConnector()
     const res = await conn.query(
       { op: 'send_message', chat_id: '999', text: 'hi' },
       withToken()
     ) as { error?: string }
-    // Должна быть какая-то ошибка, но НЕ not-whitelisted (потому что списка нет)
-    expect(res.error).not.toBe('not-whitelisted')
+    expect(res.error).toBe('whitelist-unset')
+    expect(fetchMock).not.toHaveBeenCalled()  // заблокировано ДО сети
+  })
+
+  it('пустой whitelist, но chat_id == telegram_notify_chat_id → пропускает (свой чат)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      text: async () => '{"ok":true,"result":{}}',
+      json: async () => ({ ok: true, result: {} })
+    })))
+    const conn = createTelegramConnector()
+    const ctx = { getSecret: (k: string) => (k === 'telegram_bot_token' ? '123:abc' : k === 'telegram_notify_chat_id' ? '555' : null), signal: new AbortController().signal }
+    const res = await conn.query({ op: 'send_message', chat_id: '555', text: 'hi' }, ctx) as { error?: string }
+    expect(res.error).toBeFalsy()  // notify-чат разрешён без whitelist
   })
 
   it('send_document can upload a local document_path as multipart form data', async () => {

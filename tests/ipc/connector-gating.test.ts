@@ -136,4 +136,13 @@ describe('connector_query gating + Я.Диск guard', () => {
     expect(h.queries.length).toBe(1)
     expect(String(h.queries[0].args.document_path)).toContain('report.html')
   })
+
+  // 2.0.0 security (аудит M2): вывод коннектора недоверен → обрамлён маркером
+  // против prompt-injection (симметрия с web_fetch).
+  it('результат коннектора обрамлён маркером недоверенного контента', async () => {
+    const h = harness(dir, 'auto', () => ({ rows: [{ msg: 'привет' }] }))
+    const res = await connectorQueryHandler.handle(call({ id: 'http' }), h.ctx)
+    expect(res.result).toContain('НЕДОВЕРЕННЫЕ данные из внешнего коннектора')
+    expect(res.result).toContain('привет')
+  })
 })

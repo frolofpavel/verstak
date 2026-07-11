@@ -215,9 +215,19 @@ async function callBotForm(token: string, method: string, form: FormData, ctx: C
 function checkWhitelist(chatId: string, ctx: ConnectorContext): { error: string; message: string } | null {
   const raw = ctx.getSecret('telegram_chat_whitelist')
   if (!raw) {
-    // Развитие: в production обязательно whitelist. В dev/первом запуске
-    // разрешаем — иначе ни одна операция не получится без manual config.
-    return null
+    // 2.0.0 security (аудит M5): пустой whitelist раньше был fail-OPEN — агент мог
+    // слать в ЛЮБОЙ chat_id (канал эксфильтрации после prompt-injection). Fail-CLOSED
+    // с прагматичным фолбэком: разрешаем ТОЛЬКО уже настроенный notify-чат (свой чат
+    // пользователя), иначе блок с просьбой задать whitelist. Легитимный основной кейс
+    // (слать себе) работает, произвольные chat_id — нет.
+    const notify = ctx.getSecret('telegram_notify_chat_id')
+    if (notify && String(notify) === chatId) return null
+    return {
+      error: 'whitelist-unset',
+      message: notify
+        ? `chat_id «${chatId}» не разрешён. Без telegram_chat_whitelist отправка возможна только в настроенный telegram_notify_chat_id («${notify}»). Добавь chat_id в settings → telegram_chat_whitelist.`
+        : `Отправка в Telegram заблокирована: не задан ни telegram_chat_whitelist, ни telegram_notify_chat_id. Настрой разрешённые chat_id в settings.`
+    }
   }
   // Аудит M5: whitelist ЗАДАН — значит пользователь выразил намерение ограничить.
   // Если он битый/не-массив, fail-OPEN (слать в любой chat_id) противоречит этому
