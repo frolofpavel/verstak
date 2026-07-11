@@ -19,6 +19,8 @@
 
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
 import { readBodyWithLimit } from './types'
+import { isBlockedHost, assertHostAllowed } from './ip-guard'
+import { redactUrlSecrets } from '../ai/secret-scanner'
 
 const KEY_BASE = 'onec_base_url'
 const KEY_USER = 'onec_username'
@@ -76,26 +78,58 @@ export function createOneCConnector(): Connector {
       }
 
       const auth = 'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')
+      const headers: Record<string, string> = { 'Authorization': auth, 'Accept': metadata ? 'application/xml' : 'application/json' }
 
+      // 2.0.0 security (аудит): раньше raw fetch с default-redirect без ip-guard —
+      // вредоносный/скомпрометированный 1С-endpoint мог редиректом увести на
+      // metadata/внутренний адрес и утащить Basic-auth. Зеркалим http.ts: hop0 (своя
+      // база) — internal разрешён; редирект-хопы — assertHostAllowed (anti-rebinding);
+      // Authorization срезается при смене хоста; manual redirect + лимит.
+      const MAX_REDIRECTS = 5
+      const baseHost = new URL(url).host
+      let currentUrl = url
       try {
-        const res = await fetch(url, {
-          method: 'GET',
-          headers: { 'Authorization': auth, 'Accept': metadata ? 'application/xml' : 'application/json' },
-          signal: ctx.signal
-        })
-        const body = await readBodyWithLimit(res)
-        return {
-          status: res.status,
-          ok: res.ok,
-          url,
-          contentType: res.headers.get('content-type') ?? '',
-          body
+        for (let hop = 0; ; hop++) {
+          const hopHost = new URL(currentUrl).hostname
+          if (hop === 0) {
+            if (isBlockedHost(hopHost, { allowLocalAndPrivate: true })) {
+              return { error: 'ssrf-blocked', message: `Запрещено: ${hopHost} — служебный/внутренний адрес.`, url: redactUrlSecrets(currentUrl) }
+            }
+          } else {
+            const blockReason = await assertHostAllowed(hopHost, { allowLocalAndPrivate: false })
+            if (blockReason) {
+              return { error: 'ssrf-blocked', message: `Запрещено: ${blockReason} (через редирект).`, url: redactUrlSecrets(currentUrl) }
+            }
+          }
+          const res = await fetch(currentUrl, { method: 'GET', headers, signal: ctx.signal, redirect: 'manual' })
+          const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+          if (loc) {
+            if (hop >= MAX_REDIRECTS) {
+              return { error: 'fetch-failed', message: 'Слишком много редиректов.', url: redactUrlSecrets(currentUrl) }
+            }
+            const next = new URL(loc, currentUrl)
+            if (next.host !== baseHost) {
+              for (const k of Object.keys(headers)) {
+                if (/^(authorization|cookie|proxy-authorization)$/i.test(k)) delete headers[k]
+              }
+            }
+            currentUrl = next.toString()
+            continue
+          }
+          const body = await readBodyWithLimit(res)
+          return {
+            status: res.status,
+            ok: res.ok,
+            url: redactUrlSecrets(currentUrl),
+            contentType: res.headers.get('content-type') ?? '',
+            body
+          }
         }
       } catch (err) {
         return {
           error: 'fetch-failed',
           message: err instanceof Error ? err.message : String(err),
-          url
+          url: redactUrlSecrets(url)
         }
       }
     }
