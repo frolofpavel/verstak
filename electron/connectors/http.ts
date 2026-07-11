@@ -110,7 +110,7 @@ export function createHttpConnector(): Connector {
         }
       }
 
-      const method = (typeof args.method === 'string' ? args.method.toUpperCase() : 'GET')
+      let method = (typeof args.method === 'string' ? args.method.toUpperCase() : 'GET')
       if (!ALLOWED_METHODS.has(method)) {
         return { error: 'bad-args', message: `Недопустимый method: ${method}. Разрешены: ${[...ALLOWED_METHODS].join(', ')}` }
       }
@@ -225,6 +225,13 @@ export function createHttpConnector(): Connector {
               for (const k of Object.keys(headers)) {
                 if (/^(authorization|cookie|proxy-authorization)$/i.test(k)) delete headers[k]
               }
+            }
+            // 2.0.1 bug: ручной redirect сохранял метод+тело для 301/302/303, тогда как
+            // fetch/browser-семантика понижает не-GET/HEAD → GET и сбрасывает тело.
+            if ((res.status === 301 || res.status === 302 || res.status === 303) && method !== 'GET' && method !== 'HEAD') {
+              method = 'GET'
+              body = undefined
+              delete headers['Content-Type']; delete headers['content-type']
             }
             currentUrl = next.toString()
             continue

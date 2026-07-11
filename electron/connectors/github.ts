@@ -358,7 +358,10 @@ async function getFile(token: string, args: Record<string, unknown>, signal?: Ab
   const path = requireString(args, 'path')  // путь к файлу в репо
   const ref = optString(args, 'ref', '')    // branch/tag/sha; пусто = default_branch
 
-  let apiPath = `/repos/${repo}/contents/${path.replace(/^\//, '')}`
+  // 2.0.1 bug: сегменты пути не кодировались → файлы с пробелом/'?'/'#' в имени
+  // ломали запрос (404/обрезание по query). Кодируем каждый сегмент (не '/').
+  const encodedPath = path.replace(/^\//, '').split('/').map(encodeURIComponent).join('/')
+  let apiPath = `/repos/${repo}/contents/${encodedPath}`
   if (ref) apiPath += `?ref=${encodeURIComponent(ref)}`
 
   const { data, rateRemaining } = await githubApi(token, 'GET', apiPath, undefined, signal)

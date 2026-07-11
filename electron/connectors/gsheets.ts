@@ -126,7 +126,16 @@ async function readAsRecords(sa: ServiceAccount, args: Record<string, unknown>, 
   const res = await fetchJson(url, { method: 'GET', headers: authHeader(token) }, ctx) as { values?: string[][] }
   const values = res.values ?? []
   if (values.length < headersRow) return { records: [], headers: [] }
-  const headers = (values[headersRow - 1] ?? []).map(h => (h ?? '').trim())
+  const rawHeaders = (values[headersRow - 1] ?? []).map(h => (h ?? '').trim())
+  // 2.0.1 bug: одноимённые колонки молча затирали друг друга (последняя побеждала,
+  // потеря данных). Делаем ключи уникальными: дубль → «имя_2», «имя_3».
+  const seen = new Map<string, number>()
+  const headers = rawHeaders.map(h => {
+    if (!h) return h
+    const n = (seen.get(h) ?? 0) + 1
+    seen.set(h, n)
+    return n === 1 ? h : `${h}_${n}`
+  })
   const records = values.slice(headersRow).map(row => {
     const rec: Record<string, string> = {}
     for (let i = 0; i < headers.length; i++) {
@@ -162,6 +171,11 @@ async function appendRows(sa: ServiceAccount, args: Record<string, unknown>, ctx
   // Получаем headers из первой строки таблицы чтобы знать колонки
   const meta = await readAsRecords(sa, { ...args, headers_row: 1 }, ctx) as { headers: string[] }
   const headers = meta.headers
+  // 2.0.1 bug: без строки-заголовков rowsToValues2d писал пустые ячейки и рапортовал
+  // успех (тихая потеря данных). Отказываемся — без заголовков колонки не смапить.
+  if (!headers.some(h => h && h.trim())) {
+    return { error: 'no-headers', message: `Лист «${sheet_name}» без строки-заголовков в первой строке — append_rows не может смапить {column:value}. Добавь заголовки колонок.` }
+  }
   const values2d = rowsToValues2d(rows, headers)
   const token = await getAccessToken(sa, ctx)
   const url = `${SHEETS_BASE}/${encodeURIComponent(spreadsheet_id)}/values/${encodeURIComponent(sheet_name)}:append`

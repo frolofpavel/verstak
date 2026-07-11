@@ -193,6 +193,12 @@ async function callBot(token: string, method: string, body: Record<string, unkno
     body: JSON.stringify(body),
     signal: ctx.signal
   })
+  // 2.0.1 bug: res.json() без проверки res.ok — не-JSON HTTP-ошибка (502/HTML от прокси,
+  // 429) роняла парсинг непрозрачным исключением. Читаем текст и бросаем понятно.
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Telegram ${method}: HTTP ${res.status} ${text.slice(0, 200)}`)
+  }
   const payload = await res.json() as { ok: boolean; result?: unknown; description?: string; error_code?: number }
   if (!payload.ok) {
     throw new Error(`Telegram ${method} failed: ${payload.error_code} ${payload.description}`)
