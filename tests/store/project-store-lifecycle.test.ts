@@ -17,7 +17,8 @@ const windowStub = {
   api: {
     chats: { list: listSpy, append: vi.fn(async () => {}) },
     settings: { setKey: setKeySpy, getKey: getKeySpy },
-    chatSessions: { listReviews: listReviewsSpy, create: createSpy, list: sessionsListSpy, setModel: setModelSpy },
+    chatSessions: { listReviews: listReviewsSpy, create: createSpy, list: sessionsListSpy, setModel: setModelSpy, getOrCreateHelp: vi.fn(async () => ({ id: 999 })) },
+    skills: { recordUse: vi.fn(async () => {}) },
   },
 }
 vi.stubGlobal('window', windowStub)
@@ -65,6 +66,11 @@ function resetStore() {
     checkpointId: null,
     artifacts: [],
     openedReviewId: null,
+    // Изоляция: sendOwners/chatLaneGenerations/helpMode не сбрасывались и текли
+    // между тестами (leaked laneGeneration ломал hasInflightChatSend в порядке файла).
+    sendOwners: {},
+    chatLaneGenerations: {},
+    helpMode: false,
   }, false)
 }
 
@@ -337,6 +343,43 @@ describe('switchChatSession — provider/model preservation (#3)', () => {
     const snap = useProject.getState().chatSnapshots[1]
     expect(snap.isStreaming).toBe(false)
     expect(snap.streamStartedAt).toBeNull()
+  })
+})
+
+// Ревью #3 нашло пред-существующий разрыв: openHelpChat снапшотил активный чат
+// через captureBundle БЕЗ keepStreamingOnlyWhenInflight (в отличие от switch/new) →
+// фантомный стрим-флаг уносился в снапшот и держал залипший индикатор фонового
+// чата в списке, пока пользователь в справке. Приведено к паритету.
+describe('openHelpChat — реконсиляция стрим-флага (паритет со switch/new, ревью #3)', () => {
+  it('фантомный стрим (send НЕ in-flight) не уносится в снапшот активного чата', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
+      isStreaming: true, streamStartedAt: 1000,
+      sendOwners: {},  // не in-flight → фантом
+    }, false)
+
+    await useProject.getState().openHelpChat()
+
+    const snap = useProject.getState().chatSnapshots[1]
+    expect(snap).toBeDefined()
+    expect(snap.isStreaming).toBe(false)
+    expect(snap.streamStartedAt).toBeNull()
+  })
+
+  it('живой стрим (in-flight) сохраняется в снапшоте при уходе в справку', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
+      isStreaming: true, streamStartedAt: 1000,
+      sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },  // in-flight
+    }, false)
+
+    await useProject.getState().openHelpChat()
+
+    const snap = useProject.getState().chatSnapshots[1]
+    expect(snap.isStreaming).toBe(true)
+    expect(snap.streamStartedAt).toBe(1000)
   })
 })
 

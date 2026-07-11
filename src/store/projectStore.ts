@@ -1003,7 +1003,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const nextSnapshots = { ...s.chatSnapshots }
       // captureBundle вместо рукописного литерала — единый источник формы снапшота
       // (вкл. checkpointId/preflights/subagentRuns), чтобы не забыть поле (#8/#17).
-      nextSnapshots[s.activeChatId] = captureBundle(s)
+      // keepStreamingOnlyWhenInflight — паритет со switch/new (ревью #3): иначе
+      // фантомный стрим-флаг (isStreaming=true при завершённом send) уносится в
+      // снапшот и держит залипший индикатор фонового чата в списке, пока в справке.
+      nextSnapshots[s.activeChatId] = keepStreamingOnlyWhenInflight(
+        captureBundle(s),
+        hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
+      )
       // Стрим проекта уходит в chatSnapshots; в корне сбрасываем — иначе после
       // выхода из справки send блокируется, пока фоновый прогон не завершится.
       set({
