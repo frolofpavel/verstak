@@ -24,14 +24,18 @@ export interface CoreMemoryBlocks {
   user: string     // содержимое USER.md
 }
 
-/** Прочитать оба блока core memory для проекта. Возвращает пустые строки если файлы не существуют. */
+/** Прочитать оба блока core memory для проекта. Возвращает пустые строки если файлы не существуют.
+ *  Ре-ревью 2.0.0: редакция и на ЧТЕНИИ — core-memory инжектится в system prompt каждый turn,
+ *  а файлы .verstak/MEMORY.md|USER.md можно писать в обход saveCoreMemoryBlock (write_file:
+ *  isForbiddenPath на .md = false). Read-side scanText закрывает этот путь: что бы ни лежало
+ *  на диске, в промпт (и в возвращаемый content) уходит редактированное. */
 export function loadCoreMemory(projectPath: string): CoreMemoryBlocks {
   const dir = join(projectPath, '.verstak')
   const memoryPath = join(dir, MEMORY_FILE)
   const userPath = join(dir, USER_FILE)
   return {
-    memory: existsSync(memoryPath) ? readFileSync(memoryPath, 'utf-8') : '',
-    user: existsSync(userPath) ? readFileSync(userPath, 'utf-8') : ''
+    memory: existsSync(memoryPath) ? scanText(readFileSync(memoryPath, 'utf-8')).redacted : '',
+    user: existsSync(userPath) ? scanText(readFileSync(userPath, 'utf-8')).redacted : ''
   }
 }
 
@@ -65,7 +69,9 @@ export function replaceCoreMemory(
   if (!current.includes(oldText)) return { success: false, content: current }
   const updated = current.replace(oldText, newText)
   saveCoreMemoryBlock(projectPath, block, updated)
-  return { success: true, content: updated.slice(0, block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS) }
+  // Ре-ревью 2.0.0: возвращаемый content уходит в tool_result → провайдеру и в БД.
+  // Редактируем (newText сырой) — иначе секрет утекал провайдеру мимо disk-редакции.
+  return { success: true, content: scanText(updated.slice(0, block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS)).redacted }
 }
 
 /**
@@ -91,7 +97,8 @@ export function appendCoreMemory(
   const joined = current.length > 0 ? current + '\n' + text : text
   if (joined.length <= max) {
     saveCoreMemoryBlock(projectPath, block, joined)
-    return { success: true, content: joined, overflow: false }
+    // Ре-ревью 2.0.0: возвращаемый content уходит в tool_result провайдеру + БД — редактируем.
+    return { success: true, content: scanText(joined).redacted, overflow: false }
   }
   // Переполнение: режем по строкам, отрезаем старейшие (голову) пока хвост не влезет.
   const lines = joined.split('\n')
@@ -106,14 +113,16 @@ export function appendCoreMemory(
     evacuated.push(tail.slice(max))
     tail = tail.slice(0, max)
   }
-  const evacuatedText = evacuated.join('\n').trim()
+  // Ре-ревью 2.0.0: эвакуированное идёт в архивную память (ctx.saveMemory storage —
+  // БЕЗ scanText) и всплывает в recall других чатов → редактируем ЗДЕСЬ, у источника.
+  const evacuatedText = scanText(evacuated.join('\n').trim()).redacted
   // АРХИВ-ПЕРВЫМ (ревью HIGH): сохраняем эвакуированное ДО обрезки core-файла. Если
   // onEvacuate кинул (напр. SQLITE_BUSY) — бросаем ДО saveCoreMemoryBlock, core-файл
   // остаётся ЦЕЛ (голова не потеряна). Раньше обрезали первым → падение saveMemory =
   // безвозвратная потеря вытесненного. Порядок критичен: не менять местами.
   if (evacuatedText && onEvacuate) onEvacuate(evacuatedText)
   saveCoreMemoryBlock(projectPath, block, tail)
-  return { success: true, content: tail, overflow: true, evacuated: evacuatedText || undefined }
+  return { success: true, content: scanText(tail).redacted, overflow: true, evacuated: evacuatedText || undefined }
 }
 
 /**

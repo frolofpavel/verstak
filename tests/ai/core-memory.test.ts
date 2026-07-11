@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { appendCoreMemory, loadCoreMemory, saveCoreMemoryBlock, replaceCoreMemory } from '../../electron/ai/core-memory'
@@ -94,5 +94,30 @@ describe('core-memory — редакция секретов при записи 
     saveCoreMemoryBlock(dir, 'memory', 'старое')
     replaceCoreMemory(dir, 'memory', 'старое', 'новое api_key=ABCDEFGHIJ0123456789KLMN')
     expect(loadCoreMemory(dir).memory).not.toContain('ABCDEFGHIJ0123456789KLMN')
+  })
+
+  // Ре-ревью: редакция только на диске оставляла дыры — возвращаемый content (tool_result
+  // провайдеру + БД), эвакуация в архив, и write_file в обход saveCoreMemoryBlock.
+  it('возвращаемый content (tool_result) редактирован, не только диск', () => {
+    const secret = 'ghp_' + 'a'.repeat(36)
+    const r = appendCoreMemory(dir, 'memory', 'деплой token ' + secret)
+    expect(r.content).not.toContain(secret)  // уходит провайдеру → должен быть чист
+  })
+
+  it('эвакуированное в архив редактировано (не всплывёт в recall сырым)', () => {
+    const secret = 'ghp_' + 'b'.repeat(36)
+    // забиваем блок, потом крупный append с секретом в голове → переполнение → эвакуация
+    for (let i = 0; i < 40; i++) appendCoreMemory(dir, 'memory', `факт_${i} ${'x'.repeat(20)}`)
+    const evac: string[] = []
+    appendCoreMemory(dir, 'memory', `секрет ${secret} ` + 'z'.repeat(200), e => evac.push(e))
+    expect(evac.join('')).not.toContain(secret)
+  })
+
+  it('loadCoreMemory редактирует read-side (write_file в MEMORY.md в обход save)', () => {
+    const secret = 'sk-ant-' + 'c'.repeat(40)
+    // симулируем write_file прямо в файл, минуя saveCoreMemoryBlock
+    mkdirSync(join(dir, '.verstak'), { recursive: true })
+    writeFileSync(join(dir, '.verstak', 'MEMORY.md'), `ключ ${secret}`, 'utf-8')
+    expect(loadCoreMemory(dir).memory).not.toContain(secret)  // read-side scanText
   })
 })
