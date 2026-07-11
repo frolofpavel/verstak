@@ -104,11 +104,20 @@ async function getSourceReport(webhook: string, args: Record<string, unknown>, c
   // Простейшая агрегация: list deals за период + groupBy SOURCE_ID на клиенте.
   const since = args.period ? parsePeriod(String(args.period)) : undefined
   const filter: Record<string, unknown> = since ? { '>=DATE_CREATE': since } : {}
-  const deals = await callMethod(webhook, 'crm.deal.list', {
-    filter, select: ['ID', 'SOURCE_ID', 'OPPORTUNITY', 'STAGE_ID']
-  }, ctx) as { result?: Array<{ SOURCE_ID?: string; OPPORTUNITY?: string; STAGE_ID?: string }> }
+  // 2.0.1 bug: Bitrix REST list отдаёт max 50 записей; раньше брали только первую
+  // страницу → отчёт молча считался по 50 сделкам. Пагинируем через start/next (кап 40
+  // стр = 2000 сделок).
+  const allDeals: Array<{ SOURCE_ID?: string; OPPORTUNITY?: string; STAGE_ID?: string }> = []
+  let start: number | undefined = 0
+  for (let page = 0; page < 40 && start !== undefined; page++) {
+    const resp = await callMethod(webhook, 'crm.deal.list', {
+      filter, select: ['ID', 'SOURCE_ID', 'OPPORTUNITY', 'STAGE_ID'], start
+    }, ctx) as { result?: Array<{ SOURCE_ID?: string; OPPORTUNITY?: string; STAGE_ID?: string }>; next?: number }
+    allDeals.push(...(resp.result ?? []))
+    start = typeof resp.next === 'number' ? resp.next : undefined
+  }
   const bySource: Record<string, { count: number; total: number; won: number }> = {}
-  for (const d of deals.result ?? []) {
+  for (const d of allDeals) {
     const src = d.SOURCE_ID ?? 'UNKNOWN'
     const opp = parseFloat(d.OPPORTUNITY ?? '0') || 0
     if (!bySource[src]) bySource[src] = { count: 0, total: 0, won: 0 }
@@ -116,7 +125,7 @@ async function getSourceReport(webhook: string, args: Record<string, unknown>, c
     bySource[src].total += opp
     if (d.STAGE_ID && /WON|SUCCESS/i.test(d.STAGE_ID)) bySource[src].won++
   }
-  return { period: args.period, sources: bySource, total_deals: deals.result?.length ?? 0 }
+  return { period: args.period, sources: bySource, total_deals: allDeals.length }
 }
 
 async function rawCall(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {

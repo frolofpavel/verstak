@@ -108,16 +108,26 @@ async function getTransactions(clientId: string, apiKey: string, args: Record<st
   if (!dateFrom || !dateTo) {
     return { error: 'bad-args', message: 'get_transactions требует date_from и date_to (YYYY-MM-DD).' }
   }
-  const json = await postJson(`${BASE}/v3/finance/transaction/list`, clientId, apiKey, {
-    filter: {
-      date: { from: `${dateFrom}T00:00:00.000Z`, to: `${dateTo}T23:59:59.999Z` },
-      transaction_type: 'all'
-    },
-    page: 1,
-    page_size: 100
-  }, ctx) as { result?: { operations?: Array<Record<string, any>> } }
-  const operations = (json.result?.operations ?? []).map(formatTransaction)
-  return { count: operations.length, operations }
+  // 2.0.1 bug: раньше брали только page:1 (100 операций) — при сверке финансов
+  // хвост молча терялся. Пагинируем по page_count (кап 50 стр = 5000 операций).
+  const filter = {
+    date: { from: `${dateFrom}T00:00:00.000Z`, to: `${dateTo}T23:59:59.999Z` },
+    transaction_type: 'all'
+  }
+  const MAX_PAGES = 50
+  const operations: Array<ReturnType<typeof formatTransaction>> = []
+  let truncated = false
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const json = await postJson(`${BASE}/v3/finance/transaction/list`, clientId, apiKey, {
+      filter, page, page_size: 100
+    }, ctx) as { result?: { operations?: Array<Record<string, any>>; page_count?: number } }
+    const ops = json.result?.operations ?? []
+    operations.push(...ops.map(formatTransaction))
+    const pageCount = json.result?.page_count ?? 1
+    if (page >= pageCount) break
+    if (page === MAX_PAGES) truncated = true
+  }
+  return { count: operations.length, operations, ...(truncated ? { truncated: true, note: `Показаны первые ${MAX_PAGES}×100 операций — сузь период для полноты.` } : {}) }
 }
 
 // ----------------------------------------------------------------- helpers
