@@ -216,3 +216,35 @@ export function backgroundActiveChat(
   }
   return next
 }
+
+/** Привести стрим-флаг снапшота к реальности: сохранить isStreaming только пока
+ *  send реально in-flight; иначе снять «отвечает…»-фантом (залипал баннер после
+ *  завершения фонового прогона). Чистая — inflight считает caller. */
+export function keepStreamingOnlyWhenInflight(snap: SessionSnapshot, inflight: boolean): SessionSnapshot {
+  if (inflight && snap.isStreaming) return snap
+  if (!snap.isStreaming && snap.streamStartedAt == null) return snap
+  return {
+    ...snap,
+    isStreaming: false,
+    streamStartedAt: null
+  }
+}
+
+/** «leaveChat» одним шагом: снять активный чат в фон (captureBundle) И привести его
+ *  стрим-флаг к реальности (keepStreamingOnlyWhenInflight). Раньше этот двухшаг был
+ *  рукописно продублирован в switchChatSession + newChatSession — правка в одной
+ *  копии, забытая в другой, и есть race-класс #3 (1.9.8). Единый путь ухода.
+ *  inflight — есть ли живой ai:send у уходящего чата (caller: hasInflightChatSend). */
+export function leaveChat(
+  snapshots: Record<number, SessionSnapshot>,
+  activeChatId: number | null,
+  movingToId: number | null,
+  active: ChatStateBundle,
+  inflight: boolean
+): Record<number, SessionSnapshot> {
+  const next = backgroundActiveChat(snapshots, activeChatId, movingToId, active)
+  if (activeChatId != null && activeChatId !== movingToId && next[activeChatId]) {
+    next[activeChatId] = keepStreamingOnlyWhenInflight(next[activeChatId], inflight)
+  }
+  return next
+}

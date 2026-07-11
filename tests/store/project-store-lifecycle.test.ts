@@ -8,12 +8,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const listSpy = vi.fn(async () => [] as Array<{ role: string; content: string; createdAt?: number }>)
 const setKeySpy = vi.fn(async () => {})
+const getKeySpy = vi.fn(async (_k: string) => null as string | null)
 const listReviewsSpy = vi.fn(async () => [] as Array<{ id: number }>)
+const createSpy = vi.fn(async (_path: string, opts: { title?: string; providerId?: string | null; model?: string | null }) => ({ id: 100, title: opts.title ?? 'new', providerId: opts.providerId ?? null, model: opts.model ?? null }))
+const sessionsListSpy = vi.fn(async () => [] as Array<{ id: number }>)
+const setModelSpy = vi.fn(async () => {})
 const windowStub = {
   api: {
     chats: { list: listSpy, append: vi.fn(async () => {}) },
-    settings: { setKey: setKeySpy },
-    chatSessions: { listReviews: listReviewsSpy },
+    settings: { setKey: setKeySpy, getKey: getKeySpy },
+    chatSessions: { listReviews: listReviewsSpy, create: createSpy, list: sessionsListSpy, setModel: setModelSpy },
   },
 }
 vi.stubGlobal('window', windowStub)
@@ -69,7 +73,11 @@ beforeEach(() => {
   resetStore()
   listSpy.mockClear()
   setKeySpy.mockClear()
+  getKeySpy.mockClear()
   listReviewsSpy.mockClear()
+  createSpy.mockClear()
+  sessionsListSpy.mockClear()
+  setModelSpy.mockClear()
 })
 
 describe('switchChatSession — snapshot уходящего чата', () => {
@@ -252,6 +260,83 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.checkpointId).toBe(111)
     expect(st.preflights).toBe(a.preflights)
     expect(st.subagentRuns).toBe(a.subagentRuns)
+  })
+})
+
+// #3 (1.9.8): newChatSession дублирует leave-двухшаг switchChatSession
+// (backgroundActiveChat + keepStreamingOnlyWhenInflight). Раньше 0 тестов — drift
+// между двумя копиями и есть race-класс. Локируем поведение перед выносом leaveChat.
+describe('newChatSession — snapshot уходящего чата (leave-паритет со switch)', () => {
+  it('снапшотит уходящий активный чат; стрим сохраняется когда send in-flight', async () => {
+    const active = distinctiveBundle('N')  // isStreaming: true
+    useProject.setState({
+      activeChatId: 1,
+      messages: active.messages, isStreaming: true, streamStartedAt: 1000,
+      pendingWrites: active.pendingWrites, pendingCommand: active.pendingCommand,
+      activity: active.activity, agentProgress: active.agentProgress,
+      sessionUsage: active.sessionUsage, runningPlanStep: active.runningPlanStep,
+      checkpointId: active.checkpointId, preflights: active.preflights, subagentRuns: active.subagentRuns,
+      sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },  // in-flight
+    }, false)
+
+    await useProject.getState().newChatSession('new one')
+
+    const st = useProject.getState()
+    expect(st.activeChatId).toBe(100)  // created.id из createSpy
+    const snap = st.chatSnapshots[1]
+    expect(snap).toBeDefined()
+    expect(snap.messages).toBe(active.messages)
+    expect(snap.isStreaming).toBe(true)   // in-flight → живой стрим уходящего чата сохранён
+    expect(snap.pendingCommand).toBe(active.pendingCommand)
+    // те же per-chat bundle-поля, что и у switch (drift-guard):
+    expect(snap.checkpointId).toBe(active.checkpointId)
+    expect(snap.preflights).toBe(active.preflights)
+    expect(snap.subagentRuns).toBe(active.subagentRuns)
+  })
+
+  it('гасит isStreaming уходящего чата когда send НЕ in-flight (анти-фантом стрима)', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
+      isStreaming: true, streamStartedAt: 1000,
+      sendOwners: {},  // нет активного send → не in-flight
+    }, false)
+
+    await useProject.getState().newChatSession()
+
+    const snap = useProject.getState().chatSnapshots[1]
+    expect(snap).toBeDefined()
+    expect(snap.isStreaming).toBe(false)      // висячий флаг снят
+    expect(snap.streamStartedAt).toBeNull()
+  })
+})
+
+describe('switchChatSession — provider/model preservation (#3)', () => {
+  it('пишет provider входящего чата в настройки (не сбрасывается на дефолт)', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      chatSessions: [{ id: 2, providerId: 'claude', model: null }],
+    } as never, false)
+
+    await useProject.getState().switchChatSession(2)
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+
+    expect(setKeySpy).toHaveBeenCalledWith('provider', 'claude')
+  })
+
+  it('не-inflight стрим гасится и при switch (паритет с newChatSession)', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
+      isStreaming: true, streamStartedAt: 1000,
+      sendOwners: {},  // не in-flight
+    }, false)
+
+    await useProject.getState().switchChatSession(2)
+
+    const snap = useProject.getState().chatSnapshots[1]
+    expect(snap.isStreaming).toBe(false)
+    expect(snap.streamStartedAt).toBeNull()
   })
 })
 

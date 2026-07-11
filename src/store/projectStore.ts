@@ -8,7 +8,8 @@ import {
   freshSnapshot,
   captureBundle,
   restoreBundle,
-  backgroundActiveChat,
+  keepStreamingOnlyWhenInflight,
+  leaveChat,
   TOUCH_PRIORITY,
   type PendingWrite,
   type PendingCommand,
@@ -280,16 +281,6 @@ function hasInflightProjectSend(
   return Object.values(sendOwners).some(
     o => o.kind === 'chat' && !o.isHelp && o.projectPath === projectPath
   )
-}
-
-function keepStreamingOnlyWhenInflight(snap: SessionSnapshot, inflight: boolean): SessionSnapshot {
-  if (inflight && snap.isStreaming) return snap
-  if (!snap.isStreaming && snap.streamStartedAt == null) return snap
-  return {
-    ...snap,
-    isStreaming: false,
-    streamStartedAt: null
-  }
 }
 
 export const useProject = create<ProjectState>((set, get, store) => ({
@@ -660,16 +651,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const s = get()
     if (!s.path) return
     get().leaveHelpMode()
-    let nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, id, s)
-    if (s.activeChatId != null && s.activeChatId !== id && nextSnapshots[s.activeChatId]) {
-      nextSnapshots = {
-        ...nextSnapshots,
-        [s.activeChatId]: keepStreamingOnlyWhenInflight(
-          nextSnapshots[s.activeChatId],
-          hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
-        )
-      }
-    }
+    // Единый leaveChat: снять уходящий чат в фон + привести стрим-флаг к реальности
+    // (drift-класс #3 — раньше двухшаг был продублирован здесь и в newChatSession).
+    const nextSnapshots = leaveChat(
+      s.chatSnapshots, s.activeChatId, id, s,
+      s.activeChatId != null && hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
+    )
     const restored = nextSnapshots[id]
     const session = s.chatSessions.find(c => c.id === id)
 
@@ -858,19 +845,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       model: currentModel ?? null
     })
     const list = await window.api.chatSessions.list(s.path)
-    // Снапшотим уходящий активный чат — как switchChatSession. Иначе при создании
-    // нового чата во время стрима частичный ответ старого чата теряется, а его
-    // фоновые события (включая финальный done) уходят в пустой freshSnapshot (#8).
-    let nextSnapshots = backgroundActiveChat(s.chatSnapshots, s.activeChatId, created.id, s)
-    if (s.activeChatId != null && nextSnapshots[s.activeChatId]) {
-      nextSnapshots = {
-        ...nextSnapshots,
-        [s.activeChatId]: keepStreamingOnlyWhenInflight(
-          nextSnapshots[s.activeChatId],
-          hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
-        )
-      }
-    }
+    // Снапшотим уходящий активный чат тем же leaveChat, что и switchChatSession.
+    // Иначе при создании нового чата во время стрима частичный ответ старого чата
+    // теряется, а его фоновые события (включая финальный done) уходят в пустой
+    // freshSnapshot (#8). Единый путь ухода — без дрейфа между switch и new (#3).
+    const nextSnapshots = leaveChat(
+      s.chatSnapshots, s.activeChatId, created.id, s,
+      s.activeChatId != null && hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
+    )
     set({
       chatSessions: list,
       activeChatId: created.id,
