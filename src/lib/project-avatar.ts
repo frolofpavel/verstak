@@ -14,18 +14,6 @@ export type AvatarLetterStyle = 'original' | 'variant1' | 'unified'
 /** Активный стиль отрисовки буквенных аватарок. */
 export const AVATAR_LETTER_STYLE: AvatarLetterStyle = 'unified'
 
-/** original — кислотная палитра (до 19.06.2026). */
-export const ORIGINAL_PROJECT_AVATAR_PALETTE = [
-  '#5b8dff',
-  '#4ec9b0',
-  '#c668ff',
-  '#f0a500',
-  '#f47174',
-  '#7aa3ff',
-  '#b04fc3',
-  '#4ec986'
-] as const
-
 /** variant1 — Nord-палитра для per-path оттенка (19.06.2026). */
 export const VARIANT1_PROJECT_AVATAR_PALETTE = [
   '#5e81ac',

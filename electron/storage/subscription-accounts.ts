@@ -99,10 +99,6 @@ export function touchSubscriptionAccount(db: Database, id: number, when = Date.n
   db.prepare('UPDATE subscription_accounts SET last_used_at = ? WHERE id = ?').run(when, id)
 }
 
-export function setAccountState(db: Database, id: number, state: string): void {
-  db.prepare('UPDATE subscription_accounts SET state = ? WHERE id = ?').run(state, id)
-}
-
 /** Пометить аккаунт «остывающим» после лимита (до coolingUntil epoch ms). */
 export function markAccountCooling(db: Database, id: number, coolingUntil: number | null): void {
   db.prepare("UPDATE subscription_accounts SET state = 'cooling', cooling_until = ? WHERE id = ?").run(coolingUntil, id)

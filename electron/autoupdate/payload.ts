@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync, statSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, openSync, readSync, statSync } from 'fs'
 import { join } from 'path'
 import { logAutoUpdate } from './log'
 
@@ -122,22 +122,3 @@ export function verifyPayloadRoot(payloadRoot: string, expectedVersion?: string)
   return { ok: true, version, appAsarSize, exeSize }
 }
 
-export function writePayloadMetadata(version: string, payloadRoot: string): PayloadVerification {
-  const verification = verifyPayloadRoot(payloadRoot, version)
-  if (!verification.ok) return verification
-  writeFileSync(join(payloadRoot, '..', 'payload.json'), JSON.stringify({
-    version,
-    payloadRoot,
-    appAsarSize: verification.appAsarSize,
-    exeSize: verification.exeSize,
-    createdAt: Date.now(),
-  }, null, 2), 'utf8')
-  writeFileSync(join(payloadRoot, '..', 'verified.json'), JSON.stringify({
-    version,
-    payloadRoot,
-    appAsarSize: verification.appAsarSize,
-    exeSize: verification.exeSize,
-    verifiedAt: Date.now(),
-  }, null, 2), 'utf8')
-  return verification
-}

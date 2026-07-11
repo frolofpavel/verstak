@@ -32,7 +32,3 @@ export function takeProofFrames(sendId: number): Buffer[] {
   buffers.delete(sendId)
   return arr
 }
-
-export function proofFrameCount(sendId: number): number {
-  return buffers.get(sendId)?.length ?? 0
-}

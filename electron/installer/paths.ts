@@ -45,11 +45,3 @@ export function installedExePath(installDir: string): string {
 export function uninstallScriptName(): string {
   return 'Uninstall Verstak.ps1'
 }
-
-export function registryUninstallKey(): string {
-  return 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ru.verstak.ide'
-}
-
-export function isInstallerApp(): boolean {
-  return process.env.VERSTAK_INSTALLER === '1'
-}

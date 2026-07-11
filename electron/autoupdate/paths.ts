@@ -33,13 +33,6 @@ export function payloadRoot(version: string): string {
   return join(payloadVersionDir(version), 'payload')
 }
 
-export function installVersionDir(version: string): string {
-  return join(autoUpdateRoot(), 'install', version)
-}
-
-export function trashDir(): string {
-  return join(autoUpdateRoot(), 'trash')
-}
 
 export function currentInstallDir(): string {
   return dirname(process.execPath)

@@ -88,10 +88,6 @@ export function modelRegistryEntry(providerId: string, model: string): ModelRegi
   return MODEL_REGISTRY.find(entry => entry.providerId === providerId && entry.model === model)
 }
 
-export function modelRegistryModels(providerId: string): string[] {
-  return modelRegistryForProvider(providerId).map(entry => entry.model)
-}
-
 export function getRegisteredContextLimit(model: string): number | undefined {
   return MODEL_REGISTRY.find(entry => entry.model === model)?.contextLimit
 }

@@ -32,8 +32,6 @@ interface AgentModelPolicyData {
 
 const DATA = policyData as AgentModelPolicyData
 
-export const AGENT_MODEL_POLICY_VERSION = DATA.version
-export const DEFAULT_AGENT_PROVIDER = DATA.defaults.provider
 export const DEFAULT_AGENT_CODING_MODEL = DATA.defaults.coding
 export const DEFAULT_AGENT_FALLBACK_MODEL = DATA.defaults.fallback
 export const DEFAULT_AGENT_REVIEWER_MODEL = DATA.defaults.reviewer
