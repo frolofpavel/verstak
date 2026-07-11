@@ -28,6 +28,10 @@ export function purgeProjectAppData(db: Database, projectPath: string): void {
     db.prepare('DELETE FROM memories WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM audit_log WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM run_inputs WHERE project_path = ?').run(projectPath)
+    // 2.0.1 bug: раньше не чистились → фоновый планировщик вечно исполнял cron-прогоны
+    // и слал напоминания против УДАЛЁННОГО проекта (осиротевшая автоматизация).
+    db.prepare('DELETE FROM scheduled_tasks WHERE project_path = ?').run(projectPath)
+    db.prepare('DELETE FROM reminders WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM settings WHERE key = ?').run(`system_prompt_${projectPath}`)
   })
   tx()

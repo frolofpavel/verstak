@@ -300,6 +300,16 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
     expect(snap.subagentRuns).toBe(active.subagentRuns)
   })
 
+  // 2.0.1 bug: switchChatSession сбрасывал openedReviewId/previewArtifactId, а
+  // newChatSession — нет → состояние прошлого чата протекало в новый.
+  it('новый чат сбрасывает openedReviewId и previewArtifactId (не тащит из прошлого)', async () => {
+    useProject.setState({ activeChatId: 1, openedReviewId: 42, previewArtifactId: 'art-old' }, false)
+    await useProject.getState().newChatSession('new one')
+    const st = useProject.getState()
+    expect(st.openedReviewId).toBeNull()
+    expect(st.previewArtifactId).toBeNull()
+  })
+
   it('гасит isStreaming уходящего чата когда send НЕ in-flight (анти-фантом стрима)', async () => {
     useProject.setState({
       activeChatId: 1,
