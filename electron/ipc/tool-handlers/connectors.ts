@@ -86,6 +86,24 @@ export const connectorQueryHandler: ToolHandler = {
         }
         rest.local_path = safe
       }
+      // 2.0.0 security (аудит HIGH): telegram send_document с document_path читал ЛЮБОЙ
+      // локальный файл и выгружал в Telegram (эксфильтрация .env/.ssh/creds мимо
+      // path-policy). Тот же guard, что Я.Диск: границы проекта + isForbiddenPath.
+      if (cid === 'telegram' && rest.document_path != null) {
+        if (!ctx.projectPath) {
+          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document запрещён без открытого проекта' }
+        }
+        const dp = String(rest.document_path)
+        const relCheck = relative(ctx.projectPath, resolve(ctx.projectPath, dp))
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
+          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: путь вне проекта запрещён' }
+        }
+        const safe = await safeRealJoin(ctx.projectPath, dp)  // бросит при symlink-escape
+        if (isForbiddenPath(relative(ctx.projectPath, safe))) {
+          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: секретные файлы (.env/.key/creds) запрещены' }
+        }
+        rest.document_path = safe
+      }
       // Аудит B4: у коннекторов нет собственного таймаута — зависший хост
       // (медленный 1С / упавший OAuth-endpoint) повесил бы весь agent-loop до
       // ручного Stop. Комбинируем ctx.signal (ручной Stop / отмена роя) с

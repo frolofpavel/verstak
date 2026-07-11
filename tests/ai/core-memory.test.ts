@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { appendCoreMemory, loadCoreMemory } from '../../electron/ai/core-memory'
+import { appendCoreMemory, loadCoreMemory, saveCoreMemoryBlock, replaceCoreMemory } from '../../electron/ai/core-memory'
 
 describe('core-memory — appendCoreMemory overflow (эвакуация, не потеря)', () => {
   let dir: string
@@ -70,5 +70,29 @@ describe('core-memory — appendCoreMemory overflow (эвакуация, не п
     // отрезанный хвост НЕ потерян — ушёл в архив
     expect(evac.length).toBeGreaterThan(0)
     expect(evac.join('').length).toBeGreaterThan(400)
+  })
+})
+
+// 2.0.0 security (аудит HIGH): core-memory инжектится в system prompt КАЖДЫЙ turn.
+// Секрет, записанный агентом в MEMORY.md/USER.md, утекал бы во все будущие сессии
+// проекта и всем провайдерам. Единая точка записи saveCoreMemoryBlock обязана редактировать.
+describe('core-memory — редакция секретов при записи (2.0.0 HIGH)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-core-sec-')) })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('saveCoreMemoryBlock редактирует секрет в content', () => {
+    saveCoreMemoryBlock(dir, 'memory', 'деплой: export API_KEY=sk-proj-abcdefghij1234567890 в окружении')
+    const saved = loadCoreMemory(dir).memory
+    expect(saved).not.toContain('sk-proj-abcdefghij1234567890')
+    expect(saved).toContain('деплой')  // осмысленный текст сохранён
+  })
+
+  it('append/replace-путь тоже редактирует (идут через saveCoreMemoryBlock)', () => {
+    appendCoreMemory(dir, 'user', 'токен пользователя Authorization: Bearer sk-ant-abcdefghij0123456789klmno')
+    expect(loadCoreMemory(dir).user).not.toContain('sk-ant-abcdefghij0123456789klmno')
+    saveCoreMemoryBlock(dir, 'memory', 'старое')
+    replaceCoreMemory(dir, 'memory', 'старое', 'новое api_key=ABCDEFGHIJ0123456789KLMN')
+    expect(loadCoreMemory(dir).memory).not.toContain('ABCDEFGHIJ0123456789KLMN')
   })
 })

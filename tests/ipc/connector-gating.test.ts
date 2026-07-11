@@ -110,4 +110,30 @@ describe('connector_query gating + Я.Диск guard', () => {
     expect(h.queries.length).toBe(1)
     expect(String(h.queries[0].args.local_path)).toContain('report.html')
   })
+
+  // 2.0.0 security (аудит HIGH): telegram send_document с document_path читал ЛЮБОЙ
+  // локальный файл и выгружал в Telegram — тот же класс эксфильтрации, что Я.Диск.
+  it('Telegram: document_path вне проекта → запрещён', async () => {
+    const h = harness(dir, 'auto')
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '../../secret.txt' }), h.ctx)
+    expect(res.error).toContain('вне проекта')
+    expect(h.queries.length).toBe(0)
+  })
+
+  it('Telegram: секретный файл (.env) → запрещён', async () => {
+    writeFileSync(join(dir, '.env'), 'SECRET=1')
+    const h = harness(dir, 'auto')
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '.env' }), h.ctx)
+    expect(res.error).toContain('секретные файлы')
+    expect(h.queries.length).toBe(0)
+  })
+
+  it('Telegram: обычный файл внутри проекта → проходит, путь нормализован', async () => {
+    writeFileSync(join(dir, 'report.html'), '<h1>ok</h1>')
+    const h = harness(dir, 'auto')
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: 'report.html' }), h.ctx)
+    expect(res.error).toBeFalsy()
+    expect(h.queries.length).toBe(1)
+    expect(String(h.queries[0].args.document_path)).toContain('report.html')
+  })
 })

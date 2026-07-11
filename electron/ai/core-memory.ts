@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { scanText } from './secret-scanner'
 
 const MEMORY_FILE = 'MEMORY.md'
 const USER_FILE = 'USER.md'
@@ -34,13 +35,18 @@ export function loadCoreMemory(projectPath: string): CoreMemoryBlocks {
   }
 }
 
-/** Перезаписать один блок целиком (с ограничением по длине). */
+/** Перезаписать один блок целиком (с ограничением по длине).
+ *  2.0.0 security: core-memory инжектится в system prompt КАЖДЫЙ turn — секрет,
+ *  записанный сюда агентом, утёк бы во все будущие сессии проекта и всем провайдерам.
+ *  Единая точка записи (append/replace/remove идут через неё) редактирует секреты.
+ *  Редакция идемпотентна ([REDACTED:*] не матчит паттерны повторно). */
 export function saveCoreMemoryBlock(projectPath: string, block: 'memory' | 'user', content: string): void {
   const dir = join(projectPath, '.verstak')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const file = block === 'memory' ? MEMORY_FILE : USER_FILE
   const max = block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS
-  writeFileSync(join(dir, file), content.slice(0, max), 'utf-8')
+  const safe = scanText(content).redacted
+  writeFileSync(join(dir, file), safe.slice(0, max), 'utf-8')
 }
 
 /**
