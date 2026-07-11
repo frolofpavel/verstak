@@ -43,7 +43,7 @@ import type { AgentMode } from './ModePicker'
 interface ProviderConfig {
   id: ProviderId
   name: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   description: string
   models: string[]
   defaultModel: string
@@ -3647,7 +3647,7 @@ interface ProvidersPageProps {
 
 function statusBadge(
   status: ConnectionStatus,
-  transport: 'API' | 'CLI',
+  transport: 'API' | 'CLI' | 'Tunnel',
   providerId?: ProviderId,
   secretKey?: string | null,
   cliState?: { installed: boolean; loggedIn: boolean },

@@ -776,7 +776,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // recentWrites, projectSystemPrompt/skillPrompt/memories пробрасываются),
     // чтобы сохранённый промпт совпадал с реально отправленным. Лишний вызов —
     // приемлемая цена ради отладочной фичи; никогда не блокирует run (try/catch).
-    if (descriptor.transport === 'CLI' && deps.saveRunInput) {
+    if (descriptor.transport !== 'API' && deps.saveRunInput) {  // CLI + Tunnel (2.0.4)
       const lastUser = [...messages].reverse().find(m => m.role === 'user')
       try {
         const cliPayload = await buildCliPrompt({
@@ -865,7 +865,7 @@ export function registerAiIpc(deps: AiDeps): void {
         yandexFolderId,
         gigachatClientSecret,
         gigachatTlsVerify,
-        memories: descriptor.transport === 'CLI' ? memories : undefined,
+        memories: descriptor.transport !== 'API' ? memories : undefined,  // CLI + Tunnel (2.0.4)
         effortLevel: resolvedEffort,
         agentMode
       })

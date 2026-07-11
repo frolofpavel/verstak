@@ -35,7 +35,7 @@ interface PickerEntry {
   providerId: ProviderId
   providerLabel: string
   model: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   authorized: boolean
   enabled: boolean
   isCurrent: boolean
@@ -396,7 +396,7 @@ function PickerRow({
           <span className="gg-mp-row-provider">{entry.providerLabel}</span>
           <span className="gg-mp-row-title">
             <span className="gg-mp-row-model">{shortModel(entry.model)}</span>
-            <span className={`gg-mp-badge gg-mp-badge-transport ${entry.transport === 'CLI' ? 'is-cli' : 'is-api'}`}>{entry.transport}</span>
+            <span className={`gg-mp-badge gg-mp-badge-transport ${entry.transport === 'API' ? 'is-api' : entry.transport === 'Tunnel' ? 'is-tunnel' : 'is-cli'}`}>{entry.transport === 'Tunnel' ? 'Туннель' : entry.transport}</span>
           </span>
         </span>
         <span className="gg-mp-row-state">

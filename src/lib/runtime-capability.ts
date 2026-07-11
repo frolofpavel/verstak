@@ -9,7 +9,7 @@
 // ВНУТРИ бинаря и не под контролем Verstak. Считаем capability из
 // provider+transport, а не из одного transport, и не приукрашиваем.
 
-export type RuntimeTransport = 'API' | 'CLI'
+export type RuntimeTransport = 'API' | 'CLI' | 'Tunnel'
 
 export type RuntimeTier = 'full' | 'observed' | 'limited'
 

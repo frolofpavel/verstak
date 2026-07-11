@@ -4556,6 +4556,12 @@ body.gg-rail-toggling .gg-msg-actions {
   border-color: color-mix(in srgb, var(--accent) 34%, transparent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+/* 2.0.4: режим «Туннель» (Claude Code) — фиолетовый, отличаем от CLI/API */
+.gg-mp-badge.is-tunnel {
+  color: #c586c0;
+  border-color: color-mix(in srgb, #c586c0 38%, transparent);
+  background: color-mix(in srgb, #c586c0 10%, transparent);
+}
 .gg-mp-badge.is-warning {
   color: #d8a657;
 }

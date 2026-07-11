@@ -13,7 +13,7 @@ import type { ProviderId } from '../hooks/useProvider'
 export interface ProviderLite {
   id: ProviderId
   name: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   supportsTools: boolean
   models: string[]
   defaultModel: string
@@ -25,7 +25,7 @@ export interface ModelEntry {
   providerId: ProviderId
   providerName: string
   model: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   /** Tools (file edits, run_command, connector_query) поддерживаются у провайдера. */
   supportsTools: boolean
   /** $ per 1M input tokens. null если CLI (подписка) или цена неизвестна. */

@@ -44,7 +44,7 @@ export interface VisionProviderLite {
   shortLabel?: string
   models: string[]
   defaultModel: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
 }
 
 export interface VisionAlternative {

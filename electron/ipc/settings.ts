@@ -17,7 +17,7 @@ import { dangerousCommandLabels } from '../ai/command-policy'
 export interface ProviderDescriptorDTO {
   id: string
   name: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   secretKey: string | null
   models: string[]
   defaultModel: string

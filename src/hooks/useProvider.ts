@@ -18,7 +18,7 @@ export interface ProviderInfo {
   /** Currently selected model id for this provider */
   model: string
   /** "API" or "CLI" */
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   /** All available models user can switch to */
   models: string[]
   /** Whether this provider has function calling in our app right now */
@@ -29,7 +29,7 @@ export interface ProviderInfo {
 
 interface ProviderMeta {
   label: string
-  transport: 'API' | 'CLI'
+  transport: 'API' | 'CLI' | 'Tunnel'
   models: string[]
   supportsTools: boolean
   defaultModel: string

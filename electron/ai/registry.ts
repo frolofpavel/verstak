@@ -23,8 +23,11 @@ export type ProviderId =
 export interface ProviderDescriptor {
   id: ProviderId
   name: string
-  /** Short transport tag shown to the user: "API" / "CLI" / "—" */
-  transport: 'API' | 'CLI'
+  /** Режим провайдера (2.0.4): API (наш loop, ключ/OAuth) · CLI (subprocess-обёртка,
+   *  движок — CLI) · Tunnel (внешний официальный агент владеет loop'ом, мы супервайзим —
+   *  Claude Code). Tunnel≈CLI по рантайму (оба runPlainConversation), различие — честный
+   *  UX/позиционирование: в Tunnel цикл НЕ наш. */
+  transport: 'API' | 'CLI' | 'Tunnel'
   /** Settings key for the API key (null if not key-based, e.g. CLI). */
   secretKey: string | null
   /** Available model ids; "auto" for CLI where the binary picks. */
@@ -79,6 +82,12 @@ export function providerCapabilities(d: Pick<ProviderDescriptor, 'transport' | '
   }
 }
 
+/** 2.0.4: CLI и Tunnel идентичны по рантайму — оба subprocess-обёртки (runPlainConversation,
+ *  движок вне нашего loop'а). Отличаются только UX-режимом. Хелпер для веток «не-API». */
+export function isSubprocessTransport(t: 'API' | 'CLI' | 'Tunnel'): boolean {
+  return t === 'CLI' || t === 'Tunnel'
+}
+
 export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
   'gemini-api': {
     id: 'gemini-api',
@@ -113,7 +122,9 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
   'claude-cli': {
     id: 'claude-cli',
     name: 'Claude Code',
-    transport: 'CLI',
+    // 2.0.4: Claude Code — режим «Туннель» (его loop внутри `claude --print`, мы супервайзим).
+    // direct-OAuth для Anthropic НЕ делаем — Anthropic отключил сторонний OAuth (apr 2026).
+    transport: 'Tunnel',
     secretKey: null,
     models: CLAUDE_CLI_MODELS,
     defaultModel: 'auto',

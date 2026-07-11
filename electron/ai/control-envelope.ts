@@ -40,7 +40,7 @@ function git(cwd: string, args: string[]): string | null {
   }
 }
 
-export type RuntimeTransport = 'API' | 'CLI'
+export type RuntimeTransport = 'API' | 'CLI' | 'Tunnel'
 
 // Зеркало src/lib/runtime-capability.ts CLI_WITH_TIMELINE (renderer и main не
 // делят модуль — контекст-изоляция). Держать синхронно; тест сверяет набор.
@@ -101,7 +101,7 @@ export function buildRunProvenance(input: {
   checkpoint: ControlCheckpoint
 }): RunProvenance {
   const { providerId, model, transport, checkpoint } = input
-  const observed = transport === 'CLI' && CLI_WITH_TIMELINE.has(providerId)
+  const observed = transport !== 'API' && CLI_WITH_TIMELINE.has(providerId)  // CLI + Tunnel (2.0.4)
   const anchor = anchorNote(checkpoint)
   const note = transport === 'API'
     ? `Полный контроль: правки идут через инструменты Verstak (per-file undo). ${anchor}`
