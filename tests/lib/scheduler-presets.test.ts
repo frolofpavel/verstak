@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SCHEDULER_PRESETS, findSchedulerPreset } from '../../src/lib/scheduler-presets'
+import { SCHEDULER_PRESETS, findSchedulerPreset, buildScheduledFixPrompt } from '../../src/lib/scheduler-presets'
 
 /**
  * Хиро-пресеты «AI-дежурного» (1.9.9). Тест лочит их как РЕАЛЬНЫЙ curated-набор,
@@ -40,5 +40,32 @@ describe('scheduler-presets', () => {
   it('findSchedulerPreset: находит по id, null для неизвестного', () => {
     expect(findSchedulerPreset(SCHEDULER_PRESETS[0].id)?.id).toBe(SCHEDULER_PRESETS[0].id)
     expect(findSchedulerPreset('нет-такого')).toBeNull()
+  })
+})
+
+describe('buildScheduledFixPrompt — мост дозор→контролируемый фикс', () => {
+  const base = { prompt: 'Дозор интеграций Ozon', human: 'каждое утро в 9', cron: '0 9 * * *' }
+
+  it('включает находку прогона и задачу дозора', () => {
+    const out = buildScheduledFixPrompt({ ...base, last_result: 'Ozon: 401 при запросе заказов' })
+    expect(out).toContain('Ozon: 401 при запросе заказов')
+    expect(out).toContain('Дозор интеграций Ozon')
+    expect(out).toContain('каждое утро в 9')
+  })
+
+  it('требует контроль: сначала план, не писать/выполнять сразу', () => {
+    const out = buildScheduledFixPrompt({ ...base, last_result: 'что-то' })
+    expect(out.toLowerCase()).toContain('сначала покажи план')
+    expect(out).toMatch(/НЕ пиши файлы и не выполняй/i)
+  })
+
+  it('пустой/нулевой результат не роняет промпт', () => {
+    expect(buildScheduledFixPrompt({ ...base, last_result: null })).toContain('результат прогона пуст')
+    expect(buildScheduledFixPrompt({ ...base, last_result: '   ' })).toContain('результат прогона пуст')
+  })
+
+  it('фоллбэк на cron когда human пуст', () => {
+    const out = buildScheduledFixPrompt({ prompt: 'x', human: null, cron: '0 8 * * 1-5', last_result: 'y' })
+    expect(out).toContain('0 8 * * 1-5')
   })
 })

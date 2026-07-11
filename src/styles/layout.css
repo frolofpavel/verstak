@@ -7483,6 +7483,23 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   background: color-mix(in srgb, var(--warning, #f2b84b) 12%, transparent);
 }
 .gg-scheduler-error { color: var(--error); font-size: var(--text-sm); }
+/* AI-дежурный: находка прогона + мост «Починить в чате» (1.9.9 срез 2) */
+.gg-scheduler-finding {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning, #f2b84b) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning, #f2b84b) 8%, transparent);
+}
+.gg-scheduler-finding-text {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.gg-scheduler-fix { width: fit-content; }
 .gg-scheduler-list { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
 .gg-scheduler-item {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;

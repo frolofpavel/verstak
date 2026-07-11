@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ScheduledTask, SchedulerHealth } from '../types/api'
-import { SCHEDULER_PRESETS } from '../lib/scheduler-presets'
+import { SCHEDULER_PRESETS, buildScheduledFixPrompt } from '../lib/scheduler-presets'
 
 function formatAge(ms: number | null): string {
   if (ms == null) return 'нет heartbeat'
@@ -20,6 +20,7 @@ function formatAge(ms: number | null): string {
  */
 export function ScheduledTasksView() {
   const projectPath = useProject(s => s.path)
+  const setActiveView = useProject(s => s.setActiveView)
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [nl, setNl] = useState('')
   const [prompt, setPrompt] = useState('')
@@ -48,6 +49,13 @@ export function ScheduledTasksView() {
       if (res.error) { setError(res.error); return }
       setNl(''); setPrompt(''); await load()
     } finally { setBusy(false) }
+  }
+
+  // Мост «дозор → контролируемый фикс» (1.9.9 срез 2): находка read-only прогона →
+  // засев в композер основного чата + переключение на chat. Фикс идёт под контролем.
+  function fixInChat(task: ScheduledTask) {
+    window.dispatchEvent(new CustomEvent('gg-inject-prompt', { detail: buildScheduledFixPrompt(task) }))
+    setActiveView('chat')
   }
 
   if (!projectPath) {
@@ -116,6 +124,19 @@ export function ScheduledTasksView() {
               {t.last_run_at && (
                 <div className="gg-scheduler-last">
                   {t.last_status === 'error' ? '⚠ ошибка' : '✓'} последний запуск: {new Date(t.last_run_at).toLocaleString('ru-RU')}
+                </div>
+              )}
+              {t.last_result && t.last_result.trim() && (
+                <div className="gg-scheduler-finding">
+                  <div className="gg-scheduler-finding-text">{t.last_result.trim()}</div>
+                  <button
+                    type="button"
+                    className="gg-btn gg-btn-primary gg-btn-sm gg-scheduler-fix"
+                    title="Разобрать находку в чате — под вашим контролем, с подтверждением правок"
+                    onClick={() => fixInChat(t)}
+                  >
+                    🩹 Починить в чате
+                  </button>
                 </div>
               )}
               {t.next_run_at && (

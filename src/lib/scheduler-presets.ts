@@ -62,3 +62,34 @@ export const SCHEDULER_PRESETS: SchedulerPreset[] = [
 export function findSchedulerPreset(id: string): SchedulerPreset | null {
   return SCHEDULER_PRESETS.find(p => p.id === id) ?? null
 }
+
+/**
+ * Мост «дозор → контролируемый фикс» (1.9.9 срез 2): из находки read-only прогона
+ * строит промпт для ОБЫЧНОГО контролируемого чата. Ключ ценности «AI-дежурного»:
+ * фон только наблюдает, а фактический фикс (правки/команды) идёт под подтверждением
+ * пользователя — поэтому промпт ЯВНО требует «сначала план, не пиши сразу» (как
+ * TerminalErrorToast). Засевается в композер через gg-inject-prompt + switch на chat.
+ */
+export function buildScheduledFixPrompt(task: {
+  prompt: string
+  human?: string | null
+  cron?: string | null
+  last_result: string | null
+}): string {
+  const when = (task.human || task.cron || 'по расписанию').trim()
+  const finding = (task.last_result ?? '').trim() || '(результат прогона пуст)'
+  return [
+    `Плановый дозор «AI-дежурного» (${when}) обнаружил следующее.`,
+    '',
+    `Что проверял дозор: ${task.prompt}`,
+    '',
+    'Результат прогона (read-only наблюдение):',
+    '```',
+    finding,
+    '```',
+    '',
+    'Разберись под моим контролем: найди первопричину, покажи источник (файл:строка ' +
+    'или коннектор/метрика) и предложи план исправления. НЕ пиши файлы и не выполняй ' +
+    'команды сразу — сначала покажи план, я подтвержу.',
+  ].join('\n')
+}
