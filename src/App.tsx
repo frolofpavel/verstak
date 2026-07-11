@@ -113,6 +113,17 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [lang, setLang] = useState<Lang>('ru')
 
+  useEffect(() => window.api.mobile.onRunRequest(async payload => {
+    try {
+      const stored = await window.api.chats.list(payload.chatId)
+      const messages = stored.map(message => ({ role: message.role, content: message.content }))
+      const sendId = await window.api.ai.send(messages, payload.projectPath, String(payload.chatId))
+      await window.api.mobile.completeRunRequest(payload.requestId, sendId)
+    } catch (error) {
+      await window.api.mobile.completeRunRequest(payload.requestId, 0, error instanceof Error ? error.message : 'Не удалось запустить задачу')
+    }
+  }), [])
+
   useEffect(() => {
     window.api.settings.getKey('app_language').then(v => {
       if (v === 'ru' || v === 'en') setLang(v)

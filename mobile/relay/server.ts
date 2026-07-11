@@ -7,6 +7,10 @@ export function createRelayServer(options: { token: string; port?: number }) {
   const router = createRelayRouter()
   const streams = new WeakMap<ServerResponse, () => void>()
   const server = createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', process.env.VERSTAK_MOBILE_ALLOWED_ORIGIN || '*')
+    res.setHeader('Access-Control-Allow-Headers', 'authorization,content-type')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    if (req.method === 'OPTIONS') { res.writeHead(204).end(); return }
     if (req.url === '/health') { res.writeHead(200).end('ok'); return }
     if (!verifyBearer(req.headers.authorization, options.token)) { res.writeHead(401).end('unauthorized'); return }
     const url = new URL(req.url ?? '/', 'http://relay.local')
@@ -42,7 +46,7 @@ export function createRelayServer(options: { token: string; port?: number }) {
   return { router, server, listen: () => new Promise<void>(resolve => server.listen(options.port ?? 8787, resolve)), close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
 }
 
-if (process.argv[1]?.endsWith('server.ts')) {
+if (process.argv[1] && /server\.(?:ts|mjs|js)$/.test(process.argv[1])) {
   const token = process.env.VERSTAK_MOBILE_RELAY_TOKEN
   if (!token) throw new Error('VERSTAK_MOBILE_RELAY_TOKEN is required')
   void createRelayServer({ token, port: Number(process.env.PORT ?? 8787) }).listen()

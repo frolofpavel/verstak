@@ -107,6 +107,8 @@ import { bindReminderToastActions, initNotificationWindow, registerNotificationW
 import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
+import { registerMobileRunProxy } from './mobile-bridge/run-proxy'
+import { startMobileBridge } from './mobile-bridge/bootstrap'
 import { bindUiScaleToWindow } from './ui-scale'
 import {
   mainWindowConstructorOptions,
@@ -691,6 +693,24 @@ app.whenReady().then(() => {
     }
   }
   registerAiIpc(aiDeps)
+  const mobileRelayUrl = process.env.VERSTAK_MOBILE_RELAY_URL?.trim()
+  const mobileRelayToken = process.env.VERSTAK_MOBILE_RELAY_TOKEN?.trim()
+  if (mobileRelayUrl && mobileRelayToken) {
+    const startRun = registerMobileRunProxy(mainWindow)
+    startMobileBridge({
+      config: {
+        relayUrl: mobileRelayUrl,
+        token: mobileRelayToken,
+        accountId: process.env.VERSTAK_MOBILE_ACCOUNT_ID?.trim() || 'local',
+        deviceId: process.env.VERSTAK_MOBILE_DEVICE_ID?.trim() || 'desktop',
+      },
+      projects,
+      sessions: chatSessions,
+      chats,
+      startRun,
+      stopRun: async runId => abortSend(Number(runId)),
+    })
+  }
   // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
   registerSchedulerIpc(db, {
     getSecret,

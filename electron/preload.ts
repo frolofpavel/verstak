@@ -206,6 +206,14 @@ contextBridge.exposeInMainWorld('api', {
     updateThinking: (messageId: number, thinking: string) =>
       ipcRenderer.invoke('chats:update-thinking', messageId, thinking)
   },
+  mobile: {
+    onRunRequest: (cb: (payload: { requestId: string; chatId: number; projectPath: string; text: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: { requestId: string; chatId: number; projectPath: string; text: string }) => cb(payload)
+      ipcRenderer.on('mobile:run-request', handler)
+      return () => ipcRenderer.off('mobile:run-request', handler)
+    },
+    completeRunRequest: (requestId: string, sendId: number, error?: string) => ipcRenderer.invoke('mobile:run-started', requestId, sendId, error),
+  },
   handoff: {
     generate: (sessionId: number, parentId?: string | null) =>
       ipcRenderer.invoke('handoff:generate', sessionId, parentId) as Promise<string>,
