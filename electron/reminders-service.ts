@@ -115,6 +115,9 @@ export function createReminderService(opts: {
         deliverChat(reminder)
       } else {
         showReminder(reminder)
+        // 2.0.1 bug: notification-напоминание не помечалось delivered → due() (status=pending)
+        // возвращал его КАЖДЫЙ тик → дубли-тосты. Помечаем сразу после показа.
+        opts.reminders.markDelivered(reminder.id)
       }
     }
     schedule()
