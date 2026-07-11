@@ -67,11 +67,10 @@ export function replaceCoreMemory(
   const blocks = loadCoreMemory(projectPath)
   const current = block === 'memory' ? blocks.memory : blocks.user
   if (!current.includes(oldText)) return { success: false, content: current }
-  const updated = current.replace(oldText, newText)
+  // Ре-ревью 2: редактируем newText до записи — консистентная длина disk/return.
+  const updated = current.replace(oldText, scanText(newText).redacted)
   saveCoreMemoryBlock(projectPath, block, updated)
-  // Ре-ревью 2.0.0: возвращаемый content уходит в tool_result → провайдеру и в БД.
-  // Редактируем (newText сырой) — иначе секрет утекал провайдеру мимо disk-редакции.
-  return { success: true, content: scanText(updated.slice(0, block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS)).redacted }
+  return { success: true, content: updated.slice(0, block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS) }
 }
 
 /**
@@ -88,17 +87,21 @@ export function replaceCoreMemory(
 export function appendCoreMemory(
   projectPath: string,
   block: 'memory' | 'user',
-  text: string,
+  rawText: string,
   onEvacuate?: (evacuated: string) => void
 ): { success: boolean; content: string; overflow: boolean; evacuated?: string } {
   const blocks = loadCoreMemory(projectPath)
   const current = block === 'memory' ? blocks.memory : blocks.user
   const max = block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS
+  // Ре-ревью 2: редактируем ВХОД до всех расчётов длины. Иначе overflow решался по
+  // сырой длине, а на диск шло scanText(joined) (редакция УДЛИНЯЕТ: --token X→[REDACTED:
+  // cli-secret], +11) → slice(max) молча срезал хвост нового факта МИМО эвакуации
+  // (реинтродукция потери данных). Теперь длина стабильна: current(редакт)+red — идемпотентно.
+  const text = scanText(rawText).redacted
   const joined = current.length > 0 ? current + '\n' + text : text
   if (joined.length <= max) {
     saveCoreMemoryBlock(projectPath, block, joined)
-    // Ре-ревью 2.0.0: возвращаемый content уходит в tool_result провайдеру + БД — редактируем.
-    return { success: true, content: scanText(joined).redacted, overflow: false }
+    return { success: true, content: joined, overflow: false }
   }
   // Переполнение: режем по строкам, отрезаем старейшие (голову) пока хвост не влезет.
   const lines = joined.split('\n')
@@ -139,5 +142,7 @@ export function removeCoreMemory(
   if (!current.includes(text)) return { success: false, content: current }
   const updated = current.replace(text, '').replace(/\n{3,}/g, '\n\n').trim()
   saveCoreMemoryBlock(projectPath, block, updated)
-  return { success: true, content: updated }
+  // Ре-ревью 2: удаление разделителя между фрагментами склеивает соседей — может
+  // СОЗДАТЬ секрет, которого не было в целых частях. Редактируем return (единая политика).
+  return { success: true, content: scanText(updated).redacted }
 }

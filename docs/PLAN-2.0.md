@@ -38,4 +38,14 @@
 - **Unattended-execution с write в worktree** — продуктовое решение (против «контроль»-позиционирования), нужен явный opt-in Павла.
 - **Семантический embedding-индекс** — против стратегии «без векторов» (осознанно не берём).
 
-_Источник находок: `discovery wf_611cdad2` (11.07). Обновляется по мере реализации._
+## Прогресс реализации (11.07)
+
+**2.0.0 Security — ГОТОВО (все HIGH+MED + re-review).** 2 HIGH (core-memory редакция write+read+return+эвакуация; telegram send_document → только .verstak/artifacts по realpath) + 4 MED (connector untrusted-нонс-маркер; 1C SSRF redirect-guard; telegram fail-closed whitelist; skills https+запрет override built-in/user) + webview hardening. **Адверсариальное ре-ревью нашло 20 находок в моих же фиксах** (2 регрессии: onec uncaught TypeError, webview ломал попапы браузера; неполные HIGH: core-memory tool_result отдавал сырой секрет, telegram грузил сырые байты + symlink-обход, purge пропускал ~13 таблиц) — ВСЕ закрыты вторым раундом.
+
+**2.0.1 Bugs — частично.** Сделано: newChatSession state-leak (openedReviewId/previewArtifactId/sessionUsage), project-purge ~17 таблиц (осиротевшая автоматизация + воскрешение brain), reminders notification-дубли, OAuth token-cache по client_id (ozon-perf/sendpulse). Осталось: compact-history counter, loop-детектор, plain-path retry, connector-пагинация (bitrix/ozon), gsheets header-guard, часть store/connector LOW.
+
+**2.0.2 Dead Code — ГОТОВО.** 11 мёртвых экспортов + 4 мёртвых компонента удалены.
+
+**2.0.3-2.0.5** — не начаты (reliability parity / debate / polish).
+
+_Источник находок: `discovery wf_611cdad2` + `re-review wf_f89e4ea3` (11.07). Обновляется по мере реализации._

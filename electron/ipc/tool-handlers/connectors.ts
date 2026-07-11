@@ -113,8 +113,12 @@ export const connectorQueryHandler: ToolHandler = {
         const safe = await safeRealJoin(ctx.projectPath, String(rest.document_path))  // бросит при symlink-escape из проекта
         let real: string
         try { real = await realpath(safe) } catch { return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: файл не найден' } }
+        // Ре-ревью 2: artRoot тоже разыменовываем — иначе realpath(файл) и текстовый
+        // artRoot расходятся, когда путь проекта идёт через symlink/junction (macOS
+        // /var→/private/var, Windows junction) → легитимный артефакт ложно отклонялся.
         const artRoot = join(ctx.projectPath, '.verstak', 'artifacts')
-        const relToArt = relative(artRoot, real)
+        const realArt = await realpath(artRoot).catch(() => artRoot)  // нет папки → файла под ней тоже нет, reject корректен
+        const relToArt = relative(realArt, real)
         if (relToArt.startsWith('..') || isAbsolute(relToArt)) {
           return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: разрешены только файлы из .verstak/artifacts (агент-сгенерированные). Произвольные файлы проекта слать нельзя — помести файл в артефакты.' }
         }

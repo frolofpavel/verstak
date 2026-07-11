@@ -46,12 +46,18 @@ describe('project-purge', () => {
     // project_brain — активный вред: оставшись, воскрешал старый «мозг» при повторном
     // добавлении проекта по тому же пути (UNIQUE project_path + ON CONFLICT DO NOTHING).
     db.prepare('INSERT INTO project_brain (project_path, version, created_at, updated_at) VALUES (?, 1, 1, 1)').run(path)
+    // agent_run_checkpoints — сирота по run_id (нет project_path), хранит messages_json
+    // (полную историю диалога прерванного прогона). Ре-ревью 2.
+    db.prepare('INSERT INTO agent_runs (run_id, project_path, title, started_at) VALUES (?, ?, ?, 1)').run('r-1', path, 'run')
+    db.prepare('INSERT INTO agent_run_checkpoints (run_id, turn_index, messages_json, created_at) VALUES (?, 1, ?, 1)').run('r-1', '[{"role":"user","content":"секретная переписка"}]')
 
     purgeProjectAppData(db, path)
 
     expect((db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
     expect((db.prepare('SELECT COUNT(*) as c FROM reminders WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
     expect((db.prepare('SELECT COUNT(*) as c FROM project_brain WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
+    expect((db.prepare('SELECT COUNT(*) as c FROM agent_runs WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
+    expect((db.prepare("SELECT COUNT(*) as c FROM agent_run_checkpoints WHERE run_id = 'r-1'").get() as { c: number }).c).toBe(0)
   })
 
   it('deleteProjectDirectory removes folder', async () => {

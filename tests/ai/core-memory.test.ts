@@ -113,6 +113,15 @@ describe('core-memory — редакция секретов при записи 
     expect(evac.join('')).not.toContain(secret)
   })
 
+  it('append секрета: возвращённый content == диск (редакция входа, нет тихого среза)', () => {
+    // Ре-ревью 2: редакция УДЛИНЯЛА текст → slice(max) на диске срезал хвост нового
+    // факта, а return отдавал полный → расхождение диск/return + потеря данных.
+    for (let i = 0; i < 60; i++) appendCoreMemory(dir, 'user', `строка_${i} ${'y'.repeat(15)}`)
+    const r = appendCoreMemory(dir, 'user', 'важное --token 1234567890 конец')
+    expect(loadCoreMemory(dir).user).toBe(r.content)  // инвариант: диск == return
+    expect(r.content).not.toContain('--token 1234567890')  // секрет отредактирован
+  })
+
   it('loadCoreMemory редактирует read-side (write_file в MEMORY.md в обход save)', () => {
     const secret = 'sk-ant-' + 'c'.repeat(40)
     // симулируем write_file прямо в файл, минуя saveCoreMemoryBlock

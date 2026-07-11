@@ -38,6 +38,9 @@ export function purgeProjectAppData(db: Database, projectPath: string): void {
     db.prepare('DELETE FROM dev_task_runs WHERE dev_task_id IN (SELECT id FROM dev_tasks WHERE project_path = ?)').run(projectPath)
     db.prepare('DELETE FROM dev_task_checks WHERE dev_task_id IN (SELECT id FROM dev_tasks WHERE project_path = ?)').run(projectPath)
     db.prepare('DELETE FROM agent_run_events WHERE run_id IN (SELECT run_id FROM agent_runs WHERE project_path = ?)').run(projectPath)
+    // Ре-ревью 2: agent_run_checkpoints (run_id PK, БЕЗ project_path) хранит messages_json —
+    // полную историю диалога прерванных прогонов. Без чистки — контент-сирота навсегда.
+    db.prepare('DELETE FROM agent_run_checkpoints WHERE run_id IN (SELECT run_id FROM agent_runs WHERE project_path = ?)').run(projectPath)
     for (const t of [
       'scheduled_tasks', 'reminders', 'session_todos', 'agent_runs',
       'verifications', 'dev_tasks', 'pipeline_runs', 'project_brain', 'file_summary',
