@@ -3,7 +3,8 @@ import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText, isForbiddenPath } from '../../ai/secret-scanner'
 import { safeRealJoin } from '../../ai/path-policy'
-import { relative, resolve, isAbsolute } from 'path'
+import { relative, resolve, isAbsolute, join } from 'path'
+import { realpath } from 'fs/promises'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { isReadOnlyConnectorOp } from '../../ai/connector-readonly'
@@ -91,23 +92,25 @@ export const connectorQueryHandler: ToolHandler = {
         }
         rest.local_path = safe
       }
-      // 2.0.0 security (аудит HIGH): telegram send_document с document_path читал ЛЮБОЙ
-      // локальный файл и выгружал в Telegram (эксфильтрация .env/.ssh/creds мимо
-      // path-policy). Тот же guard, что Я.Диск: границы проекта + isForbiddenPath.
+      // Telegram send_document с document_path читал ЛЮБОЙ локальный файл и выгружал
+      // сырые байты в Telegram (эксфильтрация мимо контент-сканера). Ре-ревью 2.0.0:
+      // isForbiddenPath покрывал не всё (.git/config, *.tfstate, appsettings.json…), а symlink
+      // с безобидным именем обходил проверку имени. Жёсткий фикс: разрешаем ТОЛЬКО файлы из
+      // .verstak/artifacts (агент-сгенерированные деливераблы), проверяем по РЕАЛЬНОМУ пути
+      // (realpath разыменовывает симлинк). Произвольные файлы проекта слать нельзя.
       if (cid === 'telegram' && rest.document_path != null) {
         if (!ctx.projectPath) {
           return { id: call.id, name: call.name, result: '', error: 'Telegram send_document запрещён без открытого проекта' }
         }
-        const dp = String(rest.document_path)
-        const relCheck = relative(ctx.projectPath, resolve(ctx.projectPath, dp))
-        if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
-          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: путь вне проекта запрещён' }
+        const safe = await safeRealJoin(ctx.projectPath, String(rest.document_path))  // бросит при symlink-escape из проекта
+        let real: string
+        try { real = await realpath(safe) } catch { return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: файл не найден' } }
+        const artRoot = join(ctx.projectPath, '.verstak', 'artifacts')
+        const relToArt = relative(artRoot, real)
+        if (relToArt.startsWith('..') || isAbsolute(relToArt)) {
+          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: разрешены только файлы из .verstak/artifacts (агент-сгенерированные). Произвольные файлы проекта слать нельзя — помести файл в артефакты.' }
         }
-        const safe = await safeRealJoin(ctx.projectPath, dp)  // бросит при symlink-escape
-        if (isForbiddenPath(relative(ctx.projectPath, safe))) {
-          return { id: call.id, name: call.name, result: '', error: 'Telegram send_document: секретные файлы (.env/.key/creds) запрещены' }
-        }
-        rest.document_path = safe
+        rest.document_path = real
       }
       // Аудит B4: у коннекторов нет собственного таймаута — зависший хост
       // (медленный 1С / упавший OAuth-endpoint) повесил бы весь agent-loop до

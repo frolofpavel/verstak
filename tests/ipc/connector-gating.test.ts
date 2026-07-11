@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { connectorQueryHandler } from '../../electron/ipc/tool-handlers/connectors'
@@ -111,30 +111,49 @@ describe('connector_query gating + Я.Диск guard', () => {
     expect(String(h.queries[0].args.local_path)).toContain('report.html')
   })
 
-  // 2.0.0 security (аудит HIGH): telegram send_document с document_path читал ЛЮБОЙ
-  // локальный файл и выгружал в Telegram — тот же класс эксфильтрации, что Я.Диск.
-  it('Telegram: document_path вне проекта → запрещён', async () => {
+  // 2.0.0 + ре-ревью: telegram send_document разрешён ТОЛЬКО из .verstak/artifacts
+  // (агент-сгенерированные деливераблы), по РЕАЛЬНОМУ пути (realpath). Произвольные
+  // файлы проекта (вкл. секреты вне enum'а isForbiddenPath и symlink) — эксфильтрация.
+  it('Telegram: файл из .verstak/artifacts → проходит, путь = realpath', async () => {
+    const art = join(dir, '.verstak', 'artifacts', '2026-07-11')
+    mkdirSync(art, { recursive: true })
+    writeFileSync(join(art, 'report.pdf'), '%PDF-ok')
     const h = harness(dir, 'auto')
-    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '../../secret.txt' }), h.ctx)
-    expect(res.error).toContain('вне проекта')
-    expect(h.queries.length).toBe(0)
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '.verstak/artifacts/2026-07-11/report.pdf' }), h.ctx)
+    expect(res.error).toBeFalsy()
+    expect(h.queries.length).toBe(1)
+    expect(String(h.queries[0].args.document_path)).toContain('report.pdf')
   })
 
-  it('Telegram: секретный файл (.env) → запрещён', async () => {
-    writeFileSync(join(dir, '.env'), 'SECRET=1')
-    const h = harness(dir, 'auto')
-    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '.env' }), h.ctx)
-    expect(res.error).toContain('секретные файлы')
-    expect(h.queries.length).toBe(0)
-  })
-
-  it('Telegram: обычный файл внутри проекта → проходит, путь нормализован', async () => {
+  it('Telegram: обычный файл проекта ВНЕ артефактов → запрещён (не эксфильтрация)', async () => {
     writeFileSync(join(dir, 'report.html'), '<h1>ok</h1>')
     const h = harness(dir, 'auto')
     const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: 'report.html' }), h.ctx)
-    expect(res.error).toBeFalsy()
-    expect(h.queries.length).toBe(1)
-    expect(String(h.queries[0].args.document_path)).toContain('report.html')
+    expect(res.error).toContain('artifacts')
+    expect(h.queries.length).toBe(0)
+  })
+
+  it('Telegram: .env → запрещён (вне артефактов)', async () => {
+    writeFileSync(join(dir, '.env'), 'SECRET=1')
+    const h = harness(dir, 'auto')
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '.env' }), h.ctx)
+    expect(res.error).toContain('artifacts')
+    expect(h.queries.length).toBe(0)
+  })
+
+  it('Telegram: symlink на .env под безобидным именем в артефактах → запрещён (realpath)', async () => {
+    const art = join(dir, '.verstak', 'artifacts')
+    mkdirSync(art, { recursive: true })
+    writeFileSync(join(dir, '.env'), 'SECRET=leak')
+    try {
+      symlinkSync(join(dir, '.env'), join(art, 'report.pdf'))
+    } catch {
+      return  // нет прав на симлинк (Windows без dev-mode) — пропускаем
+    }
+    const h = harness(dir, 'auto')
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', action: 'send_document', document_path: '.verstak/artifacts/report.pdf' }), h.ctx)
+    expect(res.error).toContain('artifacts')  // realpath = .env вне артефактов
+    expect(h.queries.length).toBe(0)
   })
 
   // 2.0.0 security (аудит M2): вывод коннектора недоверен → обрамлён маркером

@@ -8,10 +8,12 @@
  *   telegram_bot_token         — токен от @BotFather
  *   telegram_chat_whitelist    — JSON array chat_ids которым разрешена
  *                                отправка. Пустой массив = «никому».
- *                                null/missing = «всем» (только для dev).
+ *                                null/missing = fail-closed: разрешён ТОЛЬКО
+ *                                telegram_notify_chat_id (свой чат), остальное — блок
+ *                                (2.0.0 M5 — раньше было fail-open «всем»).
  *
  * Безопасность:
- *   - Whitelist chat_ids: без него можно отправить незнакомому чату.
+ *   - Whitelist chat_ids: без него отправка только в notify-чат (fail-closed).
  *   - Rate limit: max 20 send в минуту на тот же chat_id (предотвращает
  *     accidental flood и Telegram lockout).
  *   - Все text проходят secret-scanner перед отправкой (если случайно
