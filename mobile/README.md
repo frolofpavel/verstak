@@ -19,8 +19,11 @@
    $env:VERSTAK_MOBILE_RELAY_TOKEN='<local-dev-token>'
    $env:VERSTAK_MOBILE_ACCOUNT_ID='local'
    $env:VERSTAK_MOBILE_DEVICE_ID='desktop'
+   $env:VERSTAK_DEV_USER_DATA_DIR="$env:TEMP\verstak-mobile-smoke-profile"
    npm run dev
    ```
+
+   `VERSTAK_DEV_USER_DATA_DIR` нужен для параллельного smoke, если установленный Verstak уже открыт. Он создаёт отдельную временную SQLite и не трогает рабочий профиль.
 
 3. В третьем PowerShell запустите PWA:
 

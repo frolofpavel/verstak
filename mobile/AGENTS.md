@@ -94,7 +94,10 @@
 - `npm run mobile:build` проходит;
 - `npm run mobile:relay:build` проходит;
 - локальный relay отвечает на `/health`;
+- 2026-07-12 выполнен сквозной transport-smoke: `roots.list` прошёл через relay в живой desktop bridge и вернулся как `command.result` с совпавшим request ID;
 - `git diff --check` чистый.
+
+Во время smoke 2026-07-12 исправлено зависание SSE до первого события: после `writeHead()` relay теперь вызывает `flushHeaders()`. Добавлен интеграционный тест `tests/mobile/relay-server.test.ts`. Для параллельного запуска с установленным Verstak добавлен dev-only `VERSTAK_DEV_USER_DATA_DIR`; production-поведение single-instance lock не менялось.
 
 Особенность тестовой инфраструктуры: запуск общего pre-commit внутри linked worktree ранее передал git-контекст в `dev-task.test.ts`, из-за чего тест временно увидел feature-ветку вместо `null`. Это не регрессия mobile-кода. Не использовать этот факт как основание пропускать тесты: запускать основной набор и `dev-task.test.ts` отдельно.
 
@@ -104,7 +107,7 @@
 
 Обязательные следующие блоки:
 
-1. Реальный smoke на телефоне и компьютере по `mobile/README.md`.
+1. Завершить реальный smoke на телефоне: транспорт desktop уже подтверждён, осталось зарегистрировать тестовый проект в изолированном dev-профиле и пройти UI-сценарий по `mobile/README.md`.
 2. Исправления по результатам smoke: сеть, reconnect, UX и синхронизация истории.
 3. Живой push `ai:event` на телефон вместо polling истории.
 4. Мобильные approval cards для write/command/plan confirmations.

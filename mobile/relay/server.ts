@@ -20,6 +20,7 @@ export function createRelayServer(options: { token: string; port?: number }) {
     if (!accountId || !deviceId || !['desktop', 'mobile'].includes(role)) { res.writeHead(400).end('invalid identity'); return }
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
+      res.flushHeaders()
       const identity: RelayIdentity = { accountId, deviceId, role }
       const unregister = router.registerConnection(identity, envelope => res.write(`data:${JSON.stringify(envelope)}\n\n`))
       streams.set(res, unregister)

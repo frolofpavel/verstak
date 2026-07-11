@@ -262,6 +262,9 @@ installGlobalQuitHandlers()
 // память/whisper-модель осели в dev-папке) и создавало пустую. setName ДО whenReady и
 // первого getPath('userData'). Держать до любого обращения к путям приложения.
 app.setName('verstak')
+if (!app.isPackaged && process.env.VERSTAK_DEV_USER_DATA_DIR?.trim()) {
+  app.setPath('userData', process.env.VERSTAK_DEV_USER_DATA_DIR.trim())
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
