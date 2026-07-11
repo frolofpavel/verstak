@@ -31,11 +31,13 @@ const API = 'https://api-performance.ozon.ru'
 
 export function createOzonPerformanceConnector(): Connector {
   // Кэш токена живёт в замыкании коннектора (один на процесс).
-  let cachedToken: { value: string; expiresAt: number } | null = null
+  // 2.0.1 bug: кэш привязан к client_id — иначе после ротации креда в settings
+  // возвращался токен СТАРОГО аккаунта до истечения (до 30 мин).
+  let cachedToken: { value: string; expiresAt: number; forId: string } | null = null
 
   async function getToken(id: string, secret: string, ctx: ConnectorContext): Promise<string> {
     const now = Date.now()
-    if (cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.value
+    if (cachedToken && cachedToken.forId === id && cachedToken.expiresAt > now + 30_000) return cachedToken.value
     const res = await fetch(`${API}/api/client/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -47,7 +49,7 @@ export function createOzonPerformanceConnector(): Connector {
     let json: { access_token?: string; expires_in?: number }
     try { json = JSON.parse(text) } catch { throw new Error('Ozon Performance вернул не-JSON на /token') }
     if (!json.access_token) throw new Error('Ozon Performance не вернул access_token')
-    cachedToken = { value: json.access_token, expiresAt: now + (json.expires_in ?? 1800) * 1000 }
+    cachedToken = { value: json.access_token, expiresAt: now + (json.expires_in ?? 1800) * 1000, forId: id }
     return cachedToken.value
   }
 

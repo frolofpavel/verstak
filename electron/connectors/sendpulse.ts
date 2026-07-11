@@ -31,11 +31,13 @@ const API = 'https://api.sendpulse.com'
 
 export function createSendPulseConnector(): Connector {
   // Кэш токена живёт в замыкании коннектора (один на процесс).
-  let cachedToken: { value: string; expiresAt: number } | null = null
+  // 2.0.1 bug: кэш привязан к client_id — иначе после ротации креда возвращался
+  // токен старого аккаунта до истечения.
+  let cachedToken: { value: string; expiresAt: number; forId: string } | null = null
 
   async function getToken(id: string, secret: string, ctx: ConnectorContext): Promise<string> {
     const now = Date.now()
-    if (cachedToken && cachedToken.expiresAt > now + 30_000) return cachedToken.value
+    if (cachedToken && cachedToken.forId === id && cachedToken.expiresAt > now + 30_000) return cachedToken.value
     const res = await fetch(`${API}/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -47,7 +49,7 @@ export function createSendPulseConnector(): Connector {
     let json: { access_token?: string; expires_in?: number }
     try { json = JSON.parse(text) } catch { throw new Error('SendPulse auth вернул не-JSON ответ') }
     if (!json.access_token) throw new Error('SendPulse не вернул access_token')
-    cachedToken = { value: json.access_token, expiresAt: now + (json.expires_in ?? 3600) * 1000 }
+    cachedToken = { value: json.access_token, expiresAt: now + (json.expires_in ?? 3600) * 1000, forId: id }
     return cachedToken.value
   }
 
