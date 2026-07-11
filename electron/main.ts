@@ -290,6 +290,22 @@ app.whenReady().then(() => {
   logRuntime('app.ready', { userData: app.getPath('userData') })
   if (!gotSingleInstanceLock) return // вторая копия — ранний выход до операций с БД
   Menu.setApplicationMenu(null)
+  // 2.0.0 security (аудит): webviewTag включён для in-app браузера. Форсим безопасные
+  // webPreferences на КАЖДОМ <webview> (renderer-заданные атрибуты не должны их ослабить)
+  // и контролируем попапы — иначе недоверенная страница могла бы поднять окно с
+  // nodeIntegration/preload. Снимаем preload, гасим nodeIntegration, держим contextIsolation.
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('will-attach-webview', (_ev, webPreferences, _params) => {
+      delete webPreferences.preload
+      webPreferences.nodeIntegration = false
+      webPreferences.contextIsolation = true
+    })
+    // Попапы гасим ТОЛЬКО у webview (недоверенный in-app браузер), не у главного окна
+    // (у него легитимные внешние ссылки/OAuth идут своим путём).
+    if (contents.getType() === 'webview') {
+      contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    }
+  })
   registerWindowIpc()
   registerNotificationWindowIpc()
   registerRuntimeLogIpc()

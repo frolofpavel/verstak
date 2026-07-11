@@ -95,7 +95,15 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
   if (config.serverBase) {
     try {
       const serverSkills = await loadFromServer(config.serverBase)
+      // 2.0.0 security (аудит): server-скиллы НЕ перебивают зарезервированные built-in id
+      // (code-review/git-summary/explain-code) — скомпрометированный сервер иначе подменил бы
+      // доверенный baseline агента. User-скиллы (своя машина) built-in перебивать могут.
+      const builtInIds = new Set(BUILT_IN_SKILLS.map(s => s.id))
       for (const s of serverSkills) {
+        if (builtInIds.has(s.id)) {
+          failed.push(`server skill «${s.id}» отклонён: нельзя перебить built-in id`)
+          continue
+        }
         byId.set(s.id, s)
         serverCount++
       }
@@ -154,6 +162,13 @@ async function loadFromDir(dir: string): Promise<Skill[]> {
 }
 
 async function loadFromServer(serverBase: string): Promise<Skill[]> {
+  // 2.0.0 security (аудит): server-скиллы становятся system prompt + tools_allow агента.
+  // По http:// их подменяет MITM. Требуем https (кроме localhost для dev).
+  const u = new URL(serverBase)
+  const isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
+  if (u.protocol !== 'https:' && !isLocal) {
+    throw new Error(`skills serverBase должен быть https:// (получено ${u.protocol}//). MITM по http подменяет system prompt агента.`)
+  }
   const url = `${serverBase.replace(/\/+$/, '')}/api/skills`
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS)
