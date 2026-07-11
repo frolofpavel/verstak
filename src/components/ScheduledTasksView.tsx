@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ScheduledTask, SchedulerHealth } from '../types/api'
+import { SCHEDULER_PRESETS } from '../lib/scheduler-presets'
 
 function formatAge(ms: number | null): string {
   if (ms == null) return 'нет heartbeat'
@@ -67,6 +68,23 @@ export function ScheduledTasksView() {
           <span>{formatAge(health.heartbeatAgeMs)}</span>
         </div>
       )}
+
+      <div className="gg-scheduler-presets">
+        <div className="gg-scheduler-presets-label">AI-дежурный — готовые сценарии:</div>
+        <div className="gg-scheduler-presets-chips">
+          {SCHEDULER_PRESETS.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              className="gg-scheduler-preset-chip"
+              title={p.hint}
+              onClick={() => { setNl(p.nl); setPrompt(p.prompt); setError(null) }}
+            >
+              <span className="gg-scheduler-preset-icon">{p.icon}</span> {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="gg-scheduler-form">
         <input
