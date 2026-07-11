@@ -302,12 +302,16 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
 
   // 2.0.1 bug: switchChatSession сбрасывал openedReviewId/previewArtifactId, а
   // newChatSession — нет → состояние прошлого чата протекало в новый.
-  it('новый чат сбрасывает openedReviewId и previewArtifactId (не тащит из прошлого)', async () => {
-    useProject.setState({ activeChatId: 1, openedReviewId: 42, previewArtifactId: 'art-old' }, false)
+  it('новый чат сбрасывает openedReviewId/previewArtifactId/sessionUsage (не тащит из прошлого)', async () => {
+    useProject.setState({
+      activeChatId: 1, openedReviewId: 42, previewArtifactId: 'art-old',
+      sessionUsage: { inputTokens: 500000, outputTokens: 200000, cachedInputTokens: 0 },
+    }, false)
     await useProject.getState().newChatSession('new one')
     const st = useProject.getState()
     expect(st.openedReviewId).toBeNull()
     expect(st.previewArtifactId).toBeNull()
+    expect(st.sessionUsage).toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 })
   })
 
   it('гасит isStreaming уходящего чата когда send НЕ in-flight (анти-фантом стрима)', async () => {

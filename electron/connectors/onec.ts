@@ -86,9 +86,12 @@ export function createOneCConnector(): Connector {
       // база) — internal разрешён; редирект-хопы — assertHostAllowed (anti-rebinding);
       // Authorization срезается при смене хоста; manual redirect + лимит.
       const MAX_REDIRECTS = 5
-      const baseHost = new URL(url).host
       let currentUrl = url
       try {
+        // Ре-ревью 2.0.0: new URL(url) ВНУТРИ try — бессхемный/битый onec_base_url
+        // (частая ошибка «192.168.1.5/odata» без http://) иначе бросал uncaught
+        // TypeError мимо catch (регрессия против прежнего graceful fetch-failed).
+        const baseHost = new URL(url).host
         for (let hop = 0; ; hop++) {
           const hopHost = new URL(currentUrl).hostname
           if (hop === 0) {

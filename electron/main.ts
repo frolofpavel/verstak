@@ -300,10 +300,15 @@ app.whenReady().then(() => {
       webPreferences.nodeIntegration = false
       webPreferences.contextIsolation = true
     })
-    // Попапы гасим ТОЛЬКО у webview (недоверенный in-app браузер), не у главного окна
-    // (у него легитимные внешние ссылки/OAuth идут своим путём).
+    // У webview (недоверенный in-app браузер) не создаём неконтролируемое child-окно,
+    // но и не роняем навигацию: ре-ревью 2.0.0 — глухой deny ломал target=_blank/
+    // window.open (BrowserView ставит allowpopups). Редиректим http(s)-попап в тот же
+    // webview; всё остальное деним. Главное окно не трогаем (свои внешние ссылки/OAuth).
     if (contents.getType() === 'webview') {
-      contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      contents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url)) { void contents.loadURL(url) }
+        return { action: 'deny' }
+      })
     }
   })
   registerWindowIpc()

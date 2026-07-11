@@ -868,10 +868,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       touchedFiles: {},
       checkpointId: null, checkpointMessageId: null,
       artifacts: [],
-      // 2.0.1 bug: switchChatSession сбрасывает openedReviewId/previewArtifactId, а
-      // newChatSession — нет → ревью/превью-артефакт прошлого чата протекали в новый.
+      // 2.0.1 bug (+ ре-ревью): switchChatSession сбрасывает openedReviewId/
+      // previewArtifactId/sessionUsage, а newChatSession — нет → ревью/превью и
+      // счётчик стоимости прошлого чата протекали в новый (компаундинг cost).
       openedReviewId: null,
       previewArtifactId: null,
+      sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
       // Эфемерные карточки активности уходящего чата — не тащим в новый (finding 3).
       preflights: [],
       subagentRuns: []
