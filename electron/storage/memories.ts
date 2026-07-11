@@ -73,7 +73,12 @@ export function saveMemory(
  */
 export function buildFtsMatch(raw: string): string {
   const tokens = (raw.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).slice(0, 12)
-  return tokens.length ? tokens.map(t => `"${t}"`).join(' OR ') : ''
+  // 2.0.3 (competitive): RU-морфология без стеммера/эмбеддингов. Раньше квотили точный
+  // токен → падежи/склонения молча не матчились («задачу» не находил «задача»). Длинные
+  // токены (≥6) ищем префиксом по стему (минус 1 хвостовой символ флексии): «задача» →
+  // "задач"* → матчит задача/задачу/задачи/задачей/задачами. Короткие (термины/коды) —
+  // точно, чтобы не переовер-матчить. FTS5-префикс: "стем"*.
+  return tokens.length ? tokens.map(t => t.length >= 6 ? `"${t.slice(0, -1)}"*` : `"${t}"`).join(' OR ') : ''
 }
 
 export function searchMemories(

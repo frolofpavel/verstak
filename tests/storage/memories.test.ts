@@ -122,6 +122,15 @@ describe('memories storage', () => {
       expect(results).toHaveLength(0)
     })
 
+    // 2.0.3 (competitive): RU-морфология — падеж/склонение матчатся (раньше точный
+    // токен: «задачу» не находил факт про «задача»).
+    it('RU-морфология: запрос в другом падеже находит факт', () => {
+      saveMemory(db, PROJECT, 'fact', 'клиент оплатил задача по договору', ['crm'])
+      // запрос «задачу»/«задачи» — другой падеж, префикс-стем «задач»* матчит
+      expect(searchMemories(db, PROJECT, 'что там по задачу', 5).some(r => r.content.includes('задача'))).toBe(true)
+      expect(searchMemories(db, PROJECT, 'статус задачи', 5).some(r => r.content.includes('задача'))).toBe(true)
+    })
+
     // #1 релевантный recall: сырое NL-сообщение со спецсимволами FTS5 раньше ломало
     // парсер → []. Теперь санитайзится и находит релевантное.
     it('NL-запрос со спецсимволами FTS5 не падает + находит релевантное', () => {
@@ -177,7 +186,8 @@ describe('memories storage', () => {
   // #1 релевантный recall — санитайзер NL→FTS5 (чистая функция).
   describe('buildFtsMatch', () => {
     it('токены ≥3 в кавычках через OR; <3 и спецсимволы дропаются; пусто→пусто', () => {
-      expect(buildFtsMatch('почини баг с FTS5')).toBe('"почини" OR "баг" OR "fts5"')
+      // 2.0.3: длинные токены (≥6) → префикс-стем для RU-морфологии, короткие — точно.
+      expect(buildFtsMatch('почини баг с FTS5')).toBe('"почин"* OR "баг" OR "fts5"')
       expect(buildFtsMatch('a "b" (c)')).toBe('') // все токены <3 → пусто
       expect(buildFtsMatch('   ')).toBe('')
     })
