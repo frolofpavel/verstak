@@ -95,13 +95,14 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
   if (config.serverBase) {
     try {
       const serverSkills = await loadFromServer(config.serverBase)
-      // 2.0.0 security (аудит): server-скиллы НЕ перебивают зарезервированные built-in id
-      // (code-review/git-summary/explain-code) — скомпрометированный сервер иначе подменил бы
-      // доверенный baseline агента. User-скиллы (своя машина) built-in перебивать могут.
-      const builtInIds = new Set(BUILT_IN_SKILLS.map(s => s.id))
+      // 2.0.0 + ре-ревью: server-скилл НЕ перебивает НИ built-in, НИ уже загруженный
+      // user-скилл (своя машина). Скомпрометированный сервер иначе подменил бы и
+      // доверенный baseline, и личный /deploy c tools_allow:[run_command]. byId к этому
+      // моменту содержит built-in + user (server грузится последним) → блокируем override
+      // любого существующего id, добавляем только НОВЫЕ server-скиллы.
       for (const s of serverSkills) {
-        if (builtInIds.has(s.id)) {
-          failed.push(`server skill «${s.id}» отклонён: нельзя перебить built-in id`)
+        if (byId.has(s.id)) {
+          failed.push(`server skill «${s.id}» отклонён: нельзя перебить существующий (built-in/user) id`)
           continue
         }
         byId.set(s.id, s)
@@ -165,7 +166,8 @@ async function loadFromServer(serverBase: string): Promise<Skill[]> {
   // 2.0.0 security (аудит): server-скиллы становятся system prompt + tools_allow агента.
   // По http:// их подменяет MITM. Требуем https (кроме localhost для dev).
   const u = new URL(serverBase)
-  const isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
+  // WHATWG URL сохраняет скобки IPv6: hostname('http://[::1]') === '[::1]' (не '::1').
+  const isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]'
   if (u.protocol !== 'https:' && !isLocal) {
     throw new Error(`skills serverBase должен быть https:// (получено ${u.protocol}//). MITM по http подменяет system prompt агента.`)
   }
@@ -173,7 +175,9 @@ async function loadFromServer(serverBase: string): Promise<Skill[]> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS)
   try {
-    const res = await fetch(url, { signal: controller.signal })
+    // redirect:'error' — https-энфорс валидировал только первый URL; дефолтный follow
+    // тихо пошёл бы за downgrade-редиректом на http. Скилл-endpoint редиректить не должен.
+    const res = await fetch(url, { signal: controller.signal, redirect: 'error' })
     if (!res.ok) throw new Error(`HTTP ${res.status} from /api/skills`)
     const payload = await res.json() as { skills?: Array<{ id: string; raw: string; sourceRef?: string }> }
     if (!Array.isArray(payload.skills)) {

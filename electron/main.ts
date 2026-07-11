@@ -299,6 +299,9 @@ app.whenReady().then(() => {
       delete webPreferences.preload
       webPreferences.nodeIntegration = false
       webPreferences.contextIsolation = true
+      // Ре-ревью LOW (defense-in-depth): не дать скомпрометированному рендереру/скиллу
+      // ослабить webview через <webview webpreferences="webSecurity=no">.
+      webPreferences.webSecurity = true
     })
     // У webview (недоверенный in-app браузер) не создаём неконтролируемое child-окно,
     // но и не роняем навигацию: ре-ревью 2.0.0 — глухой deny ломал target=_blank/
