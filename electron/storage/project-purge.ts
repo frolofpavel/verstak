@@ -28,10 +28,24 @@ export function purgeProjectAppData(db: Database, projectPath: string): void {
     db.prepare('DELETE FROM memories WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM audit_log WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM run_inputs WHERE project_path = ?').run(projectPath)
-    // 2.0.1 bug: раньше не чистились → фоновый планировщик вечно исполнял cron-прогоны
-    // и слал напоминания против УДАЛЁННОГО проекта (осиротевшая автоматизация).
-    db.prepare('DELETE FROM scheduled_tasks WHERE project_path = ?').run(projectPath)
-    db.prepare('DELETE FROM reminders WHERE project_path = ?').run(projectPath)
+    // 2.0.1 + ре-ревью: «удалить данные проекта» оставляло данные в ~15 таблицах с
+    // project_path. Осиротевшая автоматизация (scheduled_tasks/reminders вечно
+    // исполнялись), утечка приватности (project_brain/file_summary/context_pack/
+    // decision_record — контент-несущие), и активный вред: оставшийся project_brain
+    // (UNIQUE project_path, INSERT ON CONFLICT DO NOTHING) ВОСКРЕШАЛ старый «мозг»
+    // при повторном добавлении проекта по тому же пути. Чистим всё в одной tx.
+    // Дети без своего project_path — по FK родителя ДО удаления родителя.
+    db.prepare('DELETE FROM dev_task_runs WHERE dev_task_id IN (SELECT id FROM dev_tasks WHERE project_path = ?)').run(projectPath)
+    db.prepare('DELETE FROM dev_task_checks WHERE dev_task_id IN (SELECT id FROM dev_tasks WHERE project_path = ?)').run(projectPath)
+    db.prepare('DELETE FROM agent_run_events WHERE run_id IN (SELECT run_id FROM agent_runs WHERE project_path = ?)').run(projectPath)
+    for (const t of [
+      'scheduled_tasks', 'reminders', 'session_todos', 'agent_runs',
+      'verifications', 'dev_tasks', 'pipeline_runs', 'project_brain', 'file_summary',
+      'context_pack', 'decision_record', 'model_scoreboard', 'undo_floors', 'worktree_sessions',
+    ]) {
+      db.prepare(`DELETE FROM ${t} WHERE project_path = ?`).run(projectPath)  // имена таблиц — литералы, не user-input
+    }
+    db.prepare('DELETE FROM agency_hive_mind WHERE source_project_path = ?').run(projectPath)
     db.prepare('DELETE FROM settings WHERE key = ?').run(`system_prompt_${projectPath}`)
   })
   tx()

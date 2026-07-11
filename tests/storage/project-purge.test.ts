@@ -43,11 +43,15 @@ describe('project-purge', () => {
       .run(path, '0 9 * * *', 'проверь заказы')
     db.prepare('INSERT INTO reminders (project_path, title, body, due_at, target, status, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, 1, 1)')
       .run(path, 'напоминание', 'текст', 'notification', 'pending')
+    // project_brain — активный вред: оставшись, воскрешал старый «мозг» при повторном
+    // добавлении проекта по тому же пути (UNIQUE project_path + ON CONFLICT DO NOTHING).
+    db.prepare('INSERT INTO project_brain (project_path, version, created_at, updated_at) VALUES (?, 1, 1, 1)').run(path)
 
     purgeProjectAppData(db, path)
 
     expect((db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
     expect((db.prepare('SELECT COUNT(*) as c FROM reminders WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
+    expect((db.prepare('SELECT COUNT(*) as c FROM project_brain WHERE project_path = ?').get(path) as { c: number }).c).toBe(0)
   })
 
   it('deleteProjectDirectory removes folder', async () => {
