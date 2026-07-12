@@ -393,7 +393,11 @@ declare global {
       }
       connectors: {
         /** Проверка токена/доступа коннектора (Settings card id). */
-        test: (uiId: string) => Promise<{ ok: boolean; message: string }>
+        test: (uiId: string) => Promise<{
+          ok: boolean
+          message: string
+          capabilities?: Array<{ id: string; label: string; ok: boolean; message?: string }>
+        }>
       }
       router: {
         /** Рекомендует тир+провайдера+модель под текст задачи. null = нет подходящего. */
@@ -402,6 +406,8 @@ declare global {
       projectRules: {
         status: (projectPath: string | null) => Promise<UserLayerStatus>
         ensure: (projectPath: string) => Promise<{ created: boolean; path: string | null }>
+        read: (projectPath: string | null, sourceId: string) => Promise<{ ok: boolean; content: string; error: string | null }>
+        save: (projectPath: string | null, sourceId: string, content: string) => Promise<{ ok: boolean; error: string | null }>
         open: (projectPath: string | null, sourceId: string) => Promise<{ ok: boolean; error: string | null }>
         reveal: (projectPath: string | null, sourceId: string) => Promise<{ ok: boolean; error: string | null }>
       }

@@ -123,15 +123,25 @@ export interface CostGuard {
   current(): number
 }
 
+interface CostGuardOptions {
+  initialCents?: number
+  onDailyCentsChange?: (cents: number) => void
+  periodLabel?: string
+}
+
 /**
  * @param capUsd максимум $ за сессию. Null/0 = guard disabled (поведение прежнее).
  */
-export function createCostGuard(capUsd: number | null): CostGuard {
+export function createCostGuard(capUsd: number | null, options: CostGuardOptions = {}): CostGuard {
   const capCents = capUsd && capUsd > 0 ? Math.round(capUsd * 100) : null
   // Аккумулируем ДРОБНЫЕ центы как float — иначе дешёвые ходы роёв (когда
   // total*100 < 1) округлялись бы в 0 на каждом событии, и cap не взводился
   // бы никогда. Округляем только при выдаче наружу (current() / cents).
+  const initialCents = Math.max(0, options.initialCents ?? 0)
   let cumulativeCents = 0
+  const periodLabel = options.periodLabel ?? 'сессию'
+  const totalCents = () => initialCents + cumulativeCents
+  const reportDailyCents = () => options.onDailyCentsChange?.(Math.round(totalCents()))
 
   return {
     recordAndCheck(providerId, model, input, output, cached) {
@@ -160,15 +170,16 @@ export function createCostGuard(capUsd: number | null): CostGuard {
       const outputCost = (output / 1_000_000) * price.output
       const total = inputCost + cachedCost + outputCost
       cumulativeCents += total * 100
+      reportDailyCents()
 
-      if (capCents != null && cumulativeCents >= capCents) {
-        const shownCents = Math.round(cumulativeCents)
+      if (capCents != null && totalCents() >= capCents) {
+        const shownCents = Math.round(totalCents())
         return {
           exceeded: true,
           cents: shownCents,
           capCents,
-          message: `Сессия израсходовала $${(cumulativeCents / 100).toFixed(2)} (лимит $${(capCents / 100).toFixed(2)}). ` +
-                   `Остановлена hard cost cap'ом из Settings. Подними лимит или начни новую сессию.`
+          message: `За ${periodLabel} израсходовано $${(totalCents() / 100).toFixed(2)} (лимит $${(capCents / 100).toFixed(2)}). ` +
+                   `Verstak остановил выполнение по лимиту расходов. Подними лимит или продолжи после сброса счётчика.`
         }
       }
       return { exceeded: false, cents: Math.round(cumulativeCents), capCents }

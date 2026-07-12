@@ -540,6 +540,7 @@ app.whenReady().then(() => {
   const proofService = createProofService(proofDeps)
   const aiDeps: Parameters<typeof registerAiIpc>[0] = {
     getSecret,
+    setSecret: (key, value) => settings.setSecret(key, value),
     getProviderId,
     getProviderModel,
     // 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера → секрет из SafeStorage

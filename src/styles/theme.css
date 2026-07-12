@@ -286,7 +286,14 @@ a:hover { text-decoration: underline; }
 }
 .gg-input:hover { border-color: var(--border-strong); }
 .gg-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-muted); }
-.gg-input::placeholder { color: var(--text-tertiary); }
+.gg-input::placeholder {
+  color: var(--text-tertiary);
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.gg-input:focus::placeholder {
+  color: transparent;
+  opacity: 0;
+}
 
 .gg-label {
   display: block;

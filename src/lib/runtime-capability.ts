@@ -13,6 +13,16 @@ export type RuntimeTransport = 'API' | 'CLI'
 
 export type RuntimeTier = 'full' | 'observed' | 'limited'
 
+export type ModeControlLevel = 'verstak' | 'cli-native' | 'cli-instruction'
+
+export interface ModeControlInfo {
+  level: ModeControlLevel
+  tone: RuntimeTier
+  label: string
+  shortLabel: string
+  hint: string
+}
+
 export interface RuntimeCapability {
   /** Verstak ВИДИТ, что делает агент (tool-таймлайн в Timeline). */
   toolVisibility: boolean
@@ -32,6 +42,41 @@ export interface RuntimeCapability {
 // тестами (срез 1 — claude-cli, срез 2 — codex-cli). Набор намеренно узкий:
 // не добавлять сюда провайдер, пока проекция не подтверждена на потоке.
 export const CLI_WITH_TIMELINE: ReadonlySet<string> = new Set(['claude-cli', 'codex-cli'])
+
+// CLI, где режимы передаются в сам внешний агент нативными флагами или близким к ним механизмом.
+// Это всё равно не такой же контроль, как у API-пути, но пользователь должен видеть разницу
+// между Claude/Codex CLI и Grok/Gemini CLI, где режим остаётся в основном инструкцией в промпте.
+export const CLI_WITH_NATIVE_MODE_CONTROL: ReadonlySet<string> = new Set(['claude-cli', 'codex-cli'])
+
+export function modeControlInfo(providerId: string, transport: RuntimeTransport): ModeControlInfo {
+  if (transport === 'API') {
+    return {
+      level: 'verstak',
+      tone: 'full',
+      label: 'Контролируется Verstak',
+      shortLabel: 'Контроль Verstak',
+      hint: 'Verstak сам выполняет действия модели: режим планирования блокирует правки, а опасные операции требуют подтверждения',
+    }
+  }
+
+  if (CLI_WITH_NATIVE_MODE_CONTROL.has(providerId)) {
+    return {
+      level: 'cli-native',
+      tone: 'observed',
+      label: 'Контроль через CLI',
+      shortLabel: 'Через CLI',
+      hint: 'Verstak передаёт режим внешней программе и показывает ход работы, но часть решений принимает сама модель',
+    }
+  }
+
+  return {
+    level: 'cli-instruction',
+    tone: 'limited',
+    label: 'Частичный контроль',
+    shortLabel: 'Частично',
+    hint: 'Verstak передаёт режим как инструкцию внешней программе. Полностью запретить правки или команды внутри неё технически нельзя',
+  }
+}
 
 export function runtimeCapability(providerId: string, transport: RuntimeTransport): RuntimeCapability {
   if (transport === 'API') {

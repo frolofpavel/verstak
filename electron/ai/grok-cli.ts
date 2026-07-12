@@ -116,11 +116,11 @@ interface GrokCliOptions {
 }
 
 export const GROK_CLI_MODELS = [
-  'grok-4.5',
   'grok-composer-2.5-fast',
+  'grok-build',
 ]
 
-export const DEFAULT_GROK_CLI_MODEL = 'grok-4.5'
+export const DEFAULT_GROK_CLI_MODEL = 'grok-composer-2.5-fast'
 
 const GROK_COMPOSER_MODEL = 'grok-composer-2.5-fast'
 const NO_VISIBLE_ANSWER_MESSAGE =

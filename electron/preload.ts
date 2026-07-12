@@ -128,7 +128,11 @@ contextBridge.exposeInMainWorld('api', {
     run: () => ipcRenderer.invoke('doctor:run')
   },
   connectors: {
-    test: (uiId: string) => ipcRenderer.invoke('connectors:test', uiId) as Promise<{ ok: boolean; message: string }>
+    test: (uiId: string) => ipcRenderer.invoke('connectors:test', uiId) as Promise<{
+      ok: boolean
+      message: string
+      capabilities?: Array<{ id: string; label: string; ok: boolean; message?: string }>
+    }>
   },
   router: {
     recommend: (taskText: string) => ipcRenderer.invoke('router:recommend', taskText)
@@ -136,6 +140,8 @@ contextBridge.exposeInMainWorld('api', {
   projectRules: {
     status: (projectPath: string | null) => ipcRenderer.invoke('project-rules:status', projectPath),
     ensure: (projectPath: string) => ipcRenderer.invoke('project-rules:ensure', projectPath),
+    read: (projectPath: string | null, sourceId: string) => ipcRenderer.invoke('project-rules:read', projectPath, sourceId),
+    save: (projectPath: string | null, sourceId: string, content: string) => ipcRenderer.invoke('project-rules:save', projectPath, sourceId, content),
     open: (projectPath: string | null, sourceId: string) => ipcRenderer.invoke('project-rules:open', projectPath, sourceId),
     reveal: (projectPath: string | null, sourceId: string) => ipcRenderer.invoke('project-rules:reveal', projectPath, sourceId)
   },

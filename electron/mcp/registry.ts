@@ -83,35 +83,28 @@ export const POPULAR_MCP_SERVERS: Array<{
   description: string
 }> = [
   {
-    name: 'Brave Search',
+    name: 'Файлы проекта',
     command: 'npx',
-    args: ['-y', '@anthropic-ai/mcp-server-brave-search'],
-    envHint: 'BRAVE_API_KEY',
-    description: 'Поиск в интернете через Brave Search API'
-  },
-  {
-    name: 'Filesystem',
-    command: 'npx',
-    args: ['-y', '@anthropic-ai/mcp-server-filesystem', '.'],
-    description: 'Доступ к файловой системе'
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
+    description: 'Даёт агенту доступ к файлам в выбранной рабочей папке'
   },
   {
     name: 'GitHub',
     command: 'npx',
-    args: ['-y', '@anthropic-ai/mcp-server-github'],
-    envHint: 'GITHUB_TOKEN',
-    description: 'GitHub: репозитории, issues, PR'
+    args: ['-y', '@modelcontextprotocol/server-github'],
+    envHint: 'GITHUB_PERSONAL_ACCESS_TOKEN',
+    description: 'Работа с репозиториями, issues и pull request через GitHub API'
   },
   {
     name: 'PostgreSQL',
     command: 'npx',
-    args: ['-y', '@anthropic-ai/mcp-server-postgres', 'postgresql://localhost/mydb'],
-    description: 'Запросы к PostgreSQL базе данных'
+    args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/mydb'],
+    description: 'Чтение данных из PostgreSQL по строке подключения'
   },
   {
-    name: 'Puppeteer',
+    name: 'Браузер',
     command: 'npx',
-    args: ['-y', '@anthropic-ai/mcp-server-puppeteer'],
-    description: 'Управление браузером: навигация, скриншоты'
+    args: ['-y', '@modelcontextprotocol/server-puppeteer'],
+    description: 'Открытие страниц, скриншоты и простые проверки в браузере'
   }
 ]

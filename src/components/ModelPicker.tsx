@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProvider, type ProviderId } from '../hooks/useProvider'
 import { useProject } from '../store/projectStore'
-import { useT, type Translations } from '../i18n'
+import { useT } from '../i18n'
 import type { ProviderDescriptorDTO } from '../types/api'
 import {
   isProviderAuthorized,
@@ -9,17 +9,7 @@ import {
   type CliAuthId,
   type CliAuthStatus,
 } from '../lib/model-catalog'
-import { runtimeCapability, type RuntimeTier } from '../lib/runtime-capability'
-
-// Ревью F1 + срез 3: честная degraded-индикация уровня контроля. Считаем tier
-// из provider+transport (runtime-capability), а не из одного transport — после
-// проекции tool-таймлайна (срезы 1-2) claude/codex CLI стали «наблюдаемыми»,
-// прочие CLI остаются «урезанными». Ни один CLI не показывается как full control.
-function tierBadge(t: Translations, tier: RuntimeTier): { label: string; hint: string; tone: 'observed' | 'limited' } | null {
-  if (tier === 'observed') return { label: t.runtime.observedLabel, hint: t.runtime.observedHint, tone: 'observed' }
-  if (tier === 'limited') return { label: t.runtime.limitedLabel, hint: t.runtime.limitedHint, tone: 'limited' }
-  return null // full — контроль полный, бейдж не нужен (чистый дефолт).
-}
+import { modeControlInfo } from '../lib/runtime-capability'
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
@@ -168,10 +158,11 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
         if (cancelled) return
         setProviders(list)
 
-        const [rawEnabled, rawCustomUrl, cliStatus, ...rest] = await Promise.all([
+        const [rawEnabled, rawCustomUrl, cliStatus, localModels, ...rest] = await Promise.all([
           window.api.settings.getKey('enabled_models'),
           window.api.settings.getKey('custom_openai_baseurl'),
           window.api.cliAuth.statusAll().catch(() => null as CliStatusMap | null),
+          window.api.localModels.scan().catch(() => []),
           ...list.map(async p => {
             const keyVal = p.secretKey ? await window.api.settings.getKey(p.secretKey) : null
             const modelVal = await window.api.settings.getKey(`model_${p.id}`)
@@ -200,6 +191,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
           setEnabledModels(new Set(Array.isArray(arr) ? arr : []))
         }
 
+        const localServerIds = new Set((Array.isArray(localModels) ? localModels : []).filter(s => s.running).map(s => s.id))
         const authorized = new Set<ProviderId>()
         for (const p of list) {
           const lite = {
@@ -211,7 +203,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
             defaultModel: p.defaultModel,
             secretKey: p.secretKey,
           }
-          if (isProviderAuthorized(lite, keys, cliStatus, { customOpenaiBaseUrl: rawCustomUrl ?? '' })) {
+          if (isProviderAuthorized(lite, keys, cliStatus, { customOpenaiBaseUrl: rawCustomUrl ?? '', localServerIds })) {
             authorized.add(p.id as ProviderId)
           }
         }
@@ -348,7 +340,6 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
     </div>
   )
 }
-
 function PickerRow({
   entry,
   locked,
@@ -360,8 +351,12 @@ function PickerRow({
 }) {
   const t = useT()
   const isCli = isCliProvider(entry.providerId)
-  const cap = runtimeCapability(entry.providerId, entry.transport)
-  const badge = tierBadge(t, cap.tier)
+  const control = modeControlInfo(entry.providerId, entry.transport)
+  const badge = control.level === 'verstak' ? null : {
+    label: control.shortLabel,
+    hint: control.hint,
+    tone: control.tone === 'limited' ? 'limited' as const : 'observed' as const,
+  }
   const policy = modelPolicyHint(entry.model)
   const showHiddenBadge = !entry.enabled && entry.authorized && !entry.isCurrent
   let title: string | undefined

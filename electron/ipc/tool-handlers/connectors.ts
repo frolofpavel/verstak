@@ -24,7 +24,12 @@ export const connectorQueryHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
-      const cid = String(call.args.id ?? '')
+      let cid = String(call.args.id ?? '')
+      const connectorAliases: Record<string, string> = {
+        ywordstat: 'yandex_wordstat',
+        yandex_wordstat_api: 'yandex_wordstat'
+      }
+      cid = connectorAliases[cid] ?? cid
       if (!cid) {
         return { id: call.id, name: call.name, result: '', error: 'connector_query: id обязателен' }
       }

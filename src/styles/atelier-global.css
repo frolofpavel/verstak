@@ -138,7 +138,6 @@ html.gg-atelier .gg-settings-tabs .gg-settings-tab.is-active {
 }
 
 html.gg-atelier .gg-theme-card,
-html.gg-atelier .gg-prov-card,
 html.gg-atelier .gg-provider-card-row,
 html.gg-atelier .gg-create-client-choice {
   background: var(--vol-glass);
@@ -148,37 +147,83 @@ html.gg-atelier .gg-create-client-choice {
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 160ms ease;
 }
 
-html.gg-atelier .gg-models-card {
-  background: var(--vol-glass);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+html.gg-atelier .gg-models-service-card {
+  background: var(--models-card);
+  backdrop-filter: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
   box-shadow: var(--shadow-sm);
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
-html.gg-atelier .gg-models-card.is-current {
-  border-left: 4px solid var(--accent);
-  box-shadow: var(--shadow-sm), inset 4px 0 0 var(--accent);
+html.gg-atelier .gg-prov-card {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  transition: none;
 }
 
-html.gg-atelier .gg-models-row.is-current .gg-models-row-main {
-  border-left: 4px solid var(--accent);
-  box-shadow: inset 4px 0 0 var(--accent);
+html.gg-atelier .gg-prov-card-shell {
+  background: var(--providers-card);
+  backdrop-filter: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+html.gg-atelier .gg-models-card.is-current .gg-models-service-card,
+html.gg-atelier .gg-models-card.is-open .gg-models-service-card {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  box-shadow: var(--shadow-sm);
+}
+
+html.gg-atelier .gg-models-card.is-open .gg-models-service-card {
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-theme-card:hover,
-html.gg-atelier .gg-prov-card:hover,
-html.gg-atelier .gg-models-card:not(.is-current):hover,
 html.gg-atelier .gg-create-client-choice:hover {
   border-color: var(--accent-border);
   box-shadow: var(--vol-lift);
+}
+
+html.gg-atelier .gg-prov-card:hover .gg-prov-card-shell,
+html.gg-atelier .gg-prov-card.is-selected .gg-prov-card-shell {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+html.gg-atelier .gg-prov-card.is-selected .gg-prov-card-shell {
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+html.gg-atelier .gg-models-service-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+html.gg-atelier .gg-models-card.is-open .gg-models-service-card:hover {
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-theme-card.is-active,
 html.gg-atelier .gg-prov-card.is-connected {
   border-color: var(--accent);
   box-shadow: var(--vol-shadow-inset), 0 0 0 1px var(--accent-muted);
+}
+
+html.gg-atelier .gg-prov-card.is-connected {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-project-settings,
@@ -549,18 +594,47 @@ html.gg-atelier ::-webkit-scrollbar-thumb:hover {
 
 /* Appearance settings */
 html.gg-atelier .gg-appearance-panel {
+  --appearance-card: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 96%, var(--bg-base) 4%);
+  --appearance-panel: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 92%, var(--bg-base) 8%);
+  --appearance-block: color-mix(in srgb, var(--vol-recessed-bg) 82%, var(--bg-base) 18%);
+  --appearance-field: color-mix(in srgb, var(--bg-input) 84%, var(--bg-base) 16%);
+  --appearance-line: color-mix(in srgb, var(--border-subtle) 88%, transparent);
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding: 20px 24px;
+}
+
+html[data-theme="light"].gg-atelier .gg-appearance-panel {
+  --appearance-card: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 95%, var(--bg-base) 5%);
+  --appearance-panel: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 90%, var(--bg-base) 10%);
+  --appearance-block: color-mix(in srgb, var(--vol-recessed-bg) 88%, var(--bg-base) 12%);
+  --appearance-field: color-mix(in srgb, var(--bg-input) 88%, var(--bg-base) 12%);
+  --appearance-line: color-mix(in srgb, var(--border-subtle) 92%, transparent);
 }
 
 html.gg-atelier .gg-appearance-section,
 html.gg-atelier .gg-appearance-reset {
-  background: var(--vol-recessed-bg);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--vol-shadow-inset);
+  position: relative;
+  background: var(--appearance-card);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--appearance-line));
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
   padding: 14px;
+  overflow: hidden;
+}
+
+html.gg-atelier .gg-appearance-section::before,
+html.gg-atelier .gg-appearance-reset::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 36%, transparent), transparent 58%);
+  opacity: 0.56;
+  pointer-events: none;
 }
 
 html.gg-atelier .gg-appearance-section {
@@ -578,6 +652,7 @@ html.gg-atelier .gg-appearance-reset {
 }
 
 html.gg-atelier .gg-appearance-section-head {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -599,38 +674,41 @@ html.gg-atelier .gg-appearance-desc {
 }
 
 html.gg-atelier .gg-appearance-choice-grid {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
 }
 
 html.gg-atelier .gg-appearance-choice {
-  min-height: 62px;
+  min-height: 58px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 9px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--vol-glass);
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  border-radius: 12px;
+  background: var(--appearance-block);
   color: var(--text-secondary);
   text-align: left;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 140ms ease;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
 }
 
 html.gg-atelier .gg-appearance-choice:hover {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: var(--appearance-block);
   color: var(--text-primary);
-  box-shadow: var(--vol-lift);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-appearance-choice.is-active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent-muted) 72%, var(--vol-glass));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  background: color-mix(in srgb, var(--appearance-block) 86%, var(--accent-muted) 14%);
   color: var(--text-primary);
-  box-shadow: var(--vol-shadow-inset), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-appearance-choice-main {
@@ -642,7 +720,7 @@ html.gg-atelier .gg-appearance-choice-main {
 
 html.gg-atelier .gg-appearance-choice-title {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
 }
 
@@ -653,28 +731,31 @@ html.gg-atelier .gg-appearance-choice-desc {
 }
 
 html.gg-atelier .gg-appearance-choice-mark {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border-default));
   color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--appearance-field);
 }
 
 html.gg-atelier .gg-appearance-choice.is-active .gg-appearance-choice-mark {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-subtle));
   background: var(--accent-muted);
 }
 
 html.gg-atelier .gg-appearance-section-inline .gg-input {
   width: 190px;
   max-width: 100%;
+  border-color: color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  background: var(--appearance-field);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-appearance-reset {
@@ -686,44 +767,88 @@ html.gg-atelier .gg-appearance-reset-btn {
 }
 
 html.gg-atelier .gg-theme-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  position: relative;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 html.gg-atelier .gg-theme-card {
-  min-height: 52px;
+  min-height: 66px;
   padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  border-radius: 12px;
+  background: var(--appearance-block);
+  color: var(--text-secondary);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+html.gg-atelier .gg-theme-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: var(--appearance-block);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+html.gg-atelier .gg-theme-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  background: color-mix(in srgb, var(--appearance-block) 86%, var(--accent-muted) 14%);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+html.gg-atelier .gg-theme-swatch {
+  width: 44px;
+  height: 30px;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-default));
+  border-radius: 10px;
+  box-shadow: var(--vol-shadow-inset);
+}
+
+html.gg-atelier .gg-theme-name {
+  font-weight: 500;
 }
 
 html.gg-atelier .gg-ui-scale-block {
+  position: relative;
   max-width: none;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--appearance-line));
+  border-radius: 12px;
+  background: var(--appearance-block);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-ui-scale-value {
   padding: 4px 10px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
   border-radius: var(--radius-pill);
-  background: var(--vol-glass);
+  background: var(--appearance-field);
   color: var(--accent);
   font-size: var(--text-sm);
   font-weight: 600;
 }
 
-html[data-theme="light"].gg-atelier .gg-appearance-section,
-html[data-theme="light"].gg-atelier .gg-appearance-reset {
-  background: color-mix(in srgb, var(--bg-elevated) 86%, white);
-}
-
-html[data-theme="light"].gg-atelier .gg-appearance-choice {
-  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
-}
-
 /* Notifications settings */
 html.gg-atelier .gg-notify-page {
+  --notify-card: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 96%, var(--bg-base) 4%);
+  --notify-panel: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 92%, var(--bg-base) 8%);
+  --notify-block: color-mix(in srgb, var(--vol-recessed-bg) 82%, var(--bg-base) 18%);
+  --notify-field: color-mix(in srgb, var(--bg-input) 84%, var(--bg-base) 16%);
+  --notify-line: color-mix(in srgb, var(--border-subtle) 88%, transparent);
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-height: 0;
-  padding-bottom: 0;
+  padding: 20px 24px 0;
+}
+
+html[data-theme="light"].gg-atelier .gg-notify-page {
+  --notify-card: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 95%, var(--bg-base) 5%);
+  --notify-panel: color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 90%, var(--bg-base) 10%);
+  --notify-block: color-mix(in srgb, var(--vol-recessed-bg) 88%, var(--bg-base) 12%);
+  --notify-field: color-mix(in srgb, var(--bg-input) 88%, var(--bg-base) 12%);
+  --notify-line: color-mix(in srgb, var(--border-subtle) 92%, transparent);
 }
 
 html.gg-atelier .gg-settings-shell.is-notifications {
@@ -740,17 +865,32 @@ html.gg-atelier .gg-settings-content.is-notifications {
 }
 
 html.gg-atelier .gg-notify-section {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--vol-recessed-bg);
-  box-shadow: var(--vol-shadow-inset);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--notify-line));
+  border-radius: 18px;
+  background: var(--notify-card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+html.gg-atelier .gg-notify-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 36%, transparent), transparent 58%);
+  opacity: 0.56;
+  pointer-events: none;
 }
 
 html.gg-atelier .gg-notify-section-head {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -776,6 +916,7 @@ html.gg-atelier .gg-notify-test-btn {
 }
 
 html.gg-atelier .gg-notify-top-actions {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -790,10 +931,11 @@ html.gg-atelier .gg-notify-top-actions .gg-btn {
 }
 
 html.gg-atelier .gg-notify-test-note {
+  position: relative;
   align-self: flex-start;
   padding: 7px 10px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+  border-radius: 10px;
   background: color-mix(in srgb, var(--accent-muted) 70%, transparent);
   color: var(--accent);
   font-size: var(--text-xs);
@@ -801,6 +943,7 @@ html.gg-atelier .gg-notify-test-note {
 }
 
 html.gg-atelier .gg-notify-mode-grid {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
@@ -808,38 +951,40 @@ html.gg-atelier .gg-notify-mode-grid {
 
 html.gg-atelier .gg-notify-mode-card {
   position: relative;
-  min-height: 76px;
+  min-height: 70px;
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 11px 42px 11px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--vol-glass);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  border-radius: 12px;
+  background: var(--notify-block);
   color: var(--text-secondary);
   text-align: left;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, color 160ms ease;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
 }
 
 html.gg-atelier .gg-notify-mode-card:hover {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: var(--notify-block);
   color: var(--text-primary);
-  box-shadow: var(--vol-lift);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-notify-mode-card.is-active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent-muted) 72%, var(--vol-glass));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  background: color-mix(in srgb, var(--notify-block) 86%, var(--accent-muted) 14%);
   color: var(--text-primary);
-  box-shadow: var(--vol-shadow-inset), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-notify-mode-title,
 html.gg-atelier .gg-notify-event-title {
   color: var(--text-primary);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -854,31 +999,33 @@ html.gg-atelier .gg-notify-mode-mark {
   position: absolute;
   top: 11px;
   right: 12px;
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border-default));
   border-radius: var(--radius-pill);
   color: var(--accent);
-  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
-  font-size: 13px;
-  font-weight: 600;
+  background: var(--notify-field);
+  font-size: 10px;
+  font-weight: 500;
 }
 
 html.gg-atelier .gg-notify-mode-card.is-active .gg-notify-mode-mark {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-subtle));
   background: var(--accent-muted);
 }
 
 html.gg-atelier .gg-notify-events {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 html.gg-atelier .gg-notify-channel-help {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -887,16 +1034,16 @@ html.gg-atelier .gg-notify-channel-help {
 html.gg-atelier .gg-notify-channel-help-item {
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-input) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--notify-line));
+  border-radius: 12px;
+  background: var(--notify-block);
 }
 
 html.gg-atelier .gg-notify-channel-help-item span {
   display: block;
   color: var(--text-primary);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
 }
 
@@ -913,9 +1060,10 @@ html.gg-atelier .gg-notify-event {
   gap: 12px;
   align-items: center;
   padding: 11px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--vol-glass) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--notify-line));
+  border-radius: 12px;
+  background: var(--notify-block);
+  box-shadow: none;
 }
 
 html.gg-atelier .gg-notify-event-meta {
@@ -935,12 +1083,12 @@ html.gg-atelier .gg-notify-channel {
   box-sizing: border-box;
   min-height: 32px;
   padding: 7px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  border-radius: 10px;
+  background: var(--notify-field);
   color: var(--text-muted);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -950,13 +1098,14 @@ html.gg-atelier .gg-notify-channel {
 }
 
 html.gg-atelier .gg-notify-channel:hover {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: var(--notify-field);
   color: var(--text-primary);
 }
 
 html.gg-atelier .gg-notify-channel.is-active {
-  border-color: var(--accent-border);
-  background: color-mix(in srgb, var(--accent-muted) 78%, var(--bg-input));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  background: color-mix(in srgb, var(--notify-field) 82%, var(--accent-muted) 18%);
   color: var(--accent);
 }
 
@@ -970,9 +1119,9 @@ html.gg-atelier .gg-notify-switch {
   min-height: 32px;
   width: 100%;
   padding: 0 11px;
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-default));
   border-radius: var(--radius-pill);
-  background: var(--vol-glass);
+  background: var(--notify-field);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -985,8 +1134,8 @@ html.gg-atelier .gg-notify-switch {
 
 html.gg-atelier .gg-notify-switch:focus-visible {
   outline: none;
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 2px var(--accent-muted), var(--shadow-sm);
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 html.gg-atelier .gg-notify-switch-ui {
@@ -995,8 +1144,8 @@ html.gg-atelier .gg-notify-switch-ui {
   height: 18px;
   flex: 0 0 34px;
   border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--accent-border) 46%, var(--border-default));
-  background: color-mix(in srgb, var(--bg-input) 70%, var(--vol-glass));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-default));
+  background: color-mix(in srgb, var(--notify-field) 70%, var(--bg-base));
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px color-mix(in srgb, var(--border-subtle) 80%, transparent);
   transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
@@ -1015,8 +1164,8 @@ html.gg-atelier .gg-notify-switch-ui::after {
 }
 
 html.gg-atelier .gg-notify-switch.is-on .gg-notify-switch-ui {
-  border-color: var(--accent-border);
-  background: color-mix(in srgb, var(--accent-muted) 78%, var(--bg-input));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-muted) 78%, var(--notify-field));
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
@@ -1031,7 +1180,7 @@ html.gg-atelier .gg-notify-switch-text {
 }
 
 html.gg-atelier .gg-notify-master {
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
   color: var(--text-primary);
 }
 
@@ -1041,9 +1190,14 @@ html.gg-atelier .gg-notify-quiet .gg-notify-switch {
 }
 
 html.gg-atelier .gg-notify-time-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--notify-line));
+  border-radius: 12px;
+  background: var(--notify-block);
 }
 
 html.gg-atelier .gg-notify-time-row label {
@@ -1057,21 +1211,9 @@ html.gg-atelier .gg-notify-time-row label {
 
 html.gg-atelier .gg-notify-time-row .gg-input {
   width: 132px;
-}
-
-html[data-theme="light"].gg-atelier .gg-notify-section {
-  background: color-mix(in srgb, var(--bg-elevated) 86%, white);
-}
-
-html[data-theme="light"].gg-atelier .gg-notify-mode-card,
-html[data-theme="light"].gg-atelier .gg-notify-event,
-html[data-theme="light"].gg-atelier .gg-notify-switch,
-html[data-theme="light"].gg-atelier .gg-notify-channel-help-item {
-  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
-}
-
-html[data-theme="light"].gg-atelier .gg-notify-switch-ui {
-  background: color-mix(in srgb, var(--bg-input) 82%, white);
+  border-color: color-mix(in srgb, var(--accent) 12%, var(--border-default));
+  background: var(--notify-field);
+  box-shadow: none;
 }
 
 html[data-ui-density="spacious"].gg-atelier .gg-notify-page {
@@ -1094,6 +1236,10 @@ html[data-ui-density="spacious"].gg-atelier .gg-notify-event {
 }
 
 @media (max-width: 860px) {
+  html.gg-atelier .gg-theme-grid {
+    grid-template-columns: 1fr;
+  }
+
   html.gg-atelier .gg-notify-section-head {
     flex-direction: column;
   }

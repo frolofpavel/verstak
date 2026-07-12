@@ -3148,7 +3148,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 <span><b>2</b> ✏ Принимать правки — файлы авто, команды спрашивает</span>
                 <span><b>3</b> 📋 План — только чтение и план, без правок</span>
                 <span><b>4</b> ⚡ Авто — всё авто-принимается</span>
-                <span><b>5</b> 🚀 Без подтверждений — для CI / опытных</span>
+                <span><b>5</b> 🚀 Без подтверждения — для CI / опытных</span>
               </div>
               <div className="gg-chat-empty-modes-tip">
                 <b>Shift+Esc</b> — экстренный стоп всех сессий. Кнопка <b>📍 Чекпоинт</b> внизу — запомнить состояние файлов и откатить одним кликом.

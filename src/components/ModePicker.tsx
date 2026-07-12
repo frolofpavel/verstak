@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { modeControlInfo } from '../lib/runtime-capability'
+import { useProvider } from '../hooks/useProvider'
 
 /**
  * Agent mode picker — visible toggle для пяти режимов работы агента.
@@ -24,7 +26,7 @@ const MODES: ModeOption[] = [
   { id: 'accept-edits', icon: '✏', label: 'Принимать правки',   description: 'Файлы авто, команды через подтверждение.',              shortcut: '2' },
   { id: 'plan',         icon: '📋', label: 'Режим планирования', description: 'Только чтение и планирование. Без изменений.',          shortcut: '3' },
   { id: 'auto',         icon: '⚡', label: 'Авто-режим',         description: 'Всё авто-принимается. Осторожно.',                       shortcut: '4' },
-  { id: 'bypass',       icon: '🚀', label: 'Без подтверждений',  description: 'Никаких диалогов. Для опытных и CI.',                    shortcut: '5' }
+  { id: 'bypass',       icon: '🚀', label: 'Без подтверждения',  description: 'Никаких диалогов. Для опытных и CI.',                    shortcut: '5' }
 ]
 
 function shortLabel(mode: AgentMode): string {
@@ -47,6 +49,9 @@ interface Props {
 export function ModePicker({ mode, onChange, locked = false }: Props) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const provider = useProvider()
+  const control = modeControlInfo(provider.id, provider.transport)
+  const showControlNote = control.level !== 'verstak'
 
   useEffect(() => {
     if (!open) return
@@ -86,12 +91,17 @@ export function ModePicker({ mode, onChange, locked = false }: Props) {
       >
         <span className="gg-mode-icon">{shortIcon(mode)}</span>
         <span className="gg-mode-label">{shortLabel(mode)}</span>
+        {showControlNote && <span className={`gg-mode-control-badge is-${control.tone}`}>{control.shortLabel}</span>}
       </button>
 
       {open && !locked && (
         <div className="gg-mp-popover gg-mp-popover-opaque">
           <div className="gg-mp-section">
             <div className="gg-mp-section-title">Режим работы агента</div>
+            <div className={`gg-mode-control-note is-${control.tone}`}>
+              <span>{control.label}</span>
+              <small>{control.hint}</small>
+            </div>
             {MODES.map(m => (
               <button
                 key={m.id}

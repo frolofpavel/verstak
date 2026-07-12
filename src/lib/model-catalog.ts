@@ -254,9 +254,9 @@ export function isProviderAuthorized(
   provider: ProviderLite & { id: ProviderId; secretKey?: string | null },
   keys: Record<string, string>,
   cliStatus: Partial<Record<CliAuthId, CliAuthStatus>> | null,
-  opts?: { customOpenaiBaseUrl?: string }
+  opts?: { customOpenaiBaseUrl?: string; localServerIds?: Set<string> }
 ): boolean {
-  if (provider.id === 'ollama') return true
+  if (provider.id === 'ollama') return opts?.localServerIds?.has('ollama') ?? false
   if (provider.id === 'custom-openai') return Boolean(opts?.customOpenaiBaseUrl?.trim())
   const status = connectionStatus(provider.id, provider.secretKey ?? null, keys)
   if (status === 'ready') return true
@@ -265,6 +265,28 @@ export function isProviderAuthorized(
     return Boolean(cli?.loggedIn)
   }
   return false
+}
+
+function modelSearchAliases(e: ModelEntry): string {
+  const parts: string[] = []
+  const model = e.model.toLowerCase()
+  const provider = e.providerName.toLowerCase()
+  if (model.includes('grok') || provider.includes('grok')) parts.push('xai x.ai икс грок grok билд build composer композер')
+  if (model.includes('claude') || provider.includes('claude')) parts.push('anthropic антропик клауд соннет sonnet opus')
+  if (model.includes('gemini') || provider.includes('gemini')) parts.push('google гугл гемини flash флеш pro')
+  if (model.includes('codex') || provider.includes('codex')) parts.push('openai chatgpt кодекс код')
+  if (model.includes('ollama') || provider.includes('ollama') || model.includes('llama')) parts.push('local локальная локально llama оллама')
+  if (/fast|flash|mini|haiku|economy/i.test(model)) parts.push('fast быстро быстрый легкая дешево эконом')
+  if (/code|coder|build|composer/i.test(model)) parts.push('code код разработка агент build composer')
+  if (/reason|thinking/i.test(model)) parts.push('reasoning размышления думает сложные')
+  if (e.transport === 'CLI') parts.push('cli консоль подписка внешний агент')
+  if (e.transport === 'API') parts.push('api ключ апи')
+  if (e.supportsTools) parts.push('tools инструменты файлы команды')
+  return parts.join(' ')
+}
+
+export function modelSearchText(e: ModelEntry): string {
+  return `${e.model} ${e.providerName} ${e.tags.join(' ')} ${modelSearchAliases(e)}`.toLowerCase()
 }
 
 /**

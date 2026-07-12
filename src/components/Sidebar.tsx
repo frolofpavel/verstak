@@ -462,6 +462,13 @@ const SkillsIcon = (
     <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
   </svg>
 )
+const ProjectRulesIcon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="5" y="4" width="14" height="16" rx="2.5" />
+    <path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" />
+    <path d="M16.5 18.5l2-2 1.5 1.5-2 2h-1.5v-1.5Z" />
+  </svg>
+)
 const DesignIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 19l7-7 3 3-7 7-3-3z" />
@@ -546,8 +553,10 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'scheduler', label: 'Расписание', icon: CalendarIcon, soon: true, soonReason: 'Расписание пока экспериментальное: нужно довести создание, запуск и статусы задач.' },
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
     { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
+    { id: 'project-rules', label: t.sidebar.projectRules, icon: ProjectRulesIcon },
+    { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
-    { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon, soon: true, soonReason: 'Инспектор сейчас техническая отладочная панель, не готовая для обычной работы.' },
+    { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon, soon: true, soonReason: 'Агенты пока служебная панель мультиагентов и очередей.' },
     { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока читают внутреннюю память и требуют нормального пользовательского сценария.' },
   ]
@@ -555,7 +564,6 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   const PROJECT_NAV: NavItem[] = [
     { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon, soon: true, soonReason: 'Карта проекта полезна для кодовых проектов, но для клиентских проектов пока требует доработки.' },
     { id: 'brain', label: t.sidebar.brain, icon: BrainIcon, soon: true, soonReason: 'Мозг проекта пока техническая диагностика памяти.' },
-    { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon, soon: true, soonReason: 'Память пока требует безопасного пользовательского управления и понятных правил.' },
     { id: 'files', label: t.sidebar.files, icon: FilesIcon },
   ]
 

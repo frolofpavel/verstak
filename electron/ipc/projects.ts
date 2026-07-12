@@ -1,5 +1,6 @@
 import { app, dialog, ipcMain, BrowserWindow, shell } from 'electron'
 import { mkdirSync, existsSync } from 'fs'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
@@ -146,6 +147,39 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
     }
     const err = await shell.openPath(source.absPath)
     return { ok: err === '', error: err || null }
+  })
+
+  ipcMain.handle('project-rules:read', async (_e, projectPath: string | null, sourceId: string) => {
+    const safeProjectPath = isKnownProjectPath(projectPath) ? projectPath : null
+    const status = await inspectUserLayer(safeProjectPath)
+    const sources = [status.global, ...status.project]
+    const source = sources.find(s => s.id === sourceId)
+    if (!source || !source.exists) return { ok: false, content: '', error: 'Файл инструкций не найден' }
+    if (source.scope === 'project' && !PROJECT_RULE_CANDIDATES.includes(source.path as typeof PROJECT_RULE_CANDIDATES[number])) {
+      return { ok: false, content: '', error: 'Недопустимый файл инструкций' }
+    }
+    try {
+      const content = await readFile(source.absPath, 'utf8')
+      return { ok: true, content, error: null }
+    } catch (err) {
+      return { ok: false, content: '', error: err instanceof Error ? err.message : 'Не удалось прочитать файл инструкций' }
+    }
+  })
+
+  ipcMain.handle('project-rules:save', async (_e, projectPath: string | null, sourceId: string, content: string) => {
+    const safeProjectPath = isKnownProjectPath(projectPath) ? projectPath : null
+    if (!safeProjectPath) return { ok: false, error: 'Открой проект, чтобы сохранить инструкции' }
+    if (!PROJECT_RULE_CANDIDATES.includes(sourceId as typeof PROJECT_RULE_CANDIDATES[number])) {
+      return { ok: false, error: 'Недопустимый файл инструкций' }
+    }
+    const absPath = join(safeProjectPath, sourceId)
+    try {
+      await mkdir(dirname(absPath), { recursive: true })
+      await writeFile(absPath, String(content ?? ''), 'utf8')
+      return { ok: true, error: null }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Не удалось сохранить инструкции' }
+    }
   })
 
   ipcMain.handle('project-rules:reveal', async (_e, projectPath: string | null, sourceId: string) => {

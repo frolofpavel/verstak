@@ -23,19 +23,19 @@ const STORAGE_KEYS = {
 } as const
 
 export const UI_DENSITY_OPTIONS: Array<{ id: UiDensity; label: string; description: string }> = [
-  { id: 'standard', label: 'Стандартно', description: 'Стандартный интерфейс.' },
-  { id: 'spacious', label: 'Просторно', description: 'Больше пространства между блоками.' }
+  { id: 'standard', label: 'Стандартно', description: 'Стандартный интерфейс' },
+  { id: 'spacious', label: 'Просторно', description: 'Больше пространства между блоками' }
 ]
 
 export const MOTION_LEVEL_OPTIONS: Array<{ id: MotionLevel; label: string; description: string }> = [
-  { id: 'full', label: 'Полные', description: 'Плавные переходы и живые статусы.' },
-  { id: 'off', label: 'Выключены', description: 'Без декоративных анимаций.' }
+  { id: 'full', label: 'Полные', description: 'Плавные переходы и живые статусы' },
+  { id: 'off', label: 'Выключены', description: 'Без декоративных анимаций' }
 ]
 
 export const PROJECT_STATUS_DISPLAY_OPTIONS: Array<{ id: ProjectStatusDisplay; label: string; description: string }> = [
-  { id: 'avatar', label: 'На аватарке', description: 'Кольца на проектах.' },
-  { id: 'text', label: 'Текстом в списке', description: 'Подписи рядом с названием.' },
-  { id: 'errors', label: 'Только ошибки', description: 'Показываются только ошибки.' }
+  { id: 'avatar', label: 'На аватарке', description: 'Кольца на проектах' },
+  { id: 'text', label: 'Текстом в списке', description: 'Подписи рядом с названием' },
+  { id: 'errors', label: 'Только ошибки', description: 'Показываются только ошибки' }
 ]
 
 function normalizeUiDensity(raw: unknown): UiDensity {

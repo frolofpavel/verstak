@@ -28,8 +28,8 @@ const ACTION_ICON: Record<string, string> = {
   error: '⚠️',
   provider_switch: '🔀',
   memory_save: '🧠',
-  session_start: '▪️',
-  session_end: '▪️'
+  session_start: '▶',
+  session_end: '✓'
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -40,8 +40,8 @@ const ACTION_LABEL: Record<string, string> = {
   error: 'ошибка',
   provider_switch: 'смена провайдера',
   memory_save: 'память',
-  session_start: 'старт сессии',
-  session_end: 'конец сессии'
+  session_start: 'запуск AI',
+  session_end: 'ответ завершён'
 }
 
 interface Run {
@@ -138,6 +138,8 @@ function summarize(entries: AuditEntry[]): string {
   if (counts.provider_switch) parts.push(`${counts.provider_switch} ${plural(counts.provider_switch, 'переключение', 'переключения', 'переключений')}`)
   if (counts.memory_save) parts.push(`${counts.memory_save} в память`)
   if (counts.error) parts.push(`${counts.error} ${plural(counts.error, 'ошибка', 'ошибки', 'ошибок')}`)
+  if (counts.session_end && parts.length === 0) parts.push('ответ получен')
+  if (counts.session_start && parts.length === 0) parts.push('запуск начат')
   return parts.length ? parts.join(', ') : `${entries.length} событий`
 }
 
@@ -172,8 +174,28 @@ function formatDuration(ms: number): string {
 }
 
 // Pretty-print JSON-ish detail; otherwise truncate.
-function formatDetail(detail: string): string {
+function formatDetail(detail: string, action?: string): string {
   const trimmed = detail.trim()
+  if ((action === 'session_start' || action === 'session_end') && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    try {
+      const data = JSON.parse(trimmed) as Record<string, unknown>
+      if (action === 'session_start') {
+        const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : 'без текста запроса'
+        const model = typeof data.model === 'string' && data.model.trim() ? ` · ${data.model.trim()}` : ''
+        return `Запрос: ${title}${model}`
+      }
+      const status = typeof data.status === 'string' && data.status.trim() ? data.status.trim() : 'завершено'
+      const chars = typeof data.assistantChars === 'number' ? data.assistantChars : null
+      const duration = typeof data.durationMs === 'number' ? formatDuration(data.durationMs) : null
+      return [
+        `Статус: ${status}`,
+        duration ? `время ${duration}` : null,
+        chars !== null ? `ответ ${chars} ${plural(chars, 'символ', 'символа', 'символов')}` : null
+      ].filter(Boolean).join(' · ')
+    } catch {
+      // fall through to raw
+    }
+  }
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       return JSON.stringify(JSON.parse(trimmed), null, 2)
@@ -223,7 +245,7 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
               <span className="gg-run-step-icon" aria-hidden>{ACTION_ICON[e.action] ?? '·'}</span>
               <span className="gg-run-step-clock">{formatClock(e.timestamp)}</span>
               <span className="gg-run-step-action">{ACTION_LABEL[e.action] ?? e.action}</span>
-              {e.detail && <pre className="gg-run-step-detail">{formatDetail(e.detail)}</pre>}
+              {e.detail && <pre className="gg-run-step-detail">{formatDetail(e.detail, e.action)}</pre>}
             </div>
           ))}
         </div>
@@ -443,7 +465,7 @@ export function AgentRunInspector() {
   if (!path) {
     return (
       <div className="gg-panel">
-        <div className="gg-panel-empty" style={{ marginTop: 80 }}>Открой проект чтобы видеть запуски агента</div>
+        <div className="gg-panel-empty" style={{ marginTop: 80 }}>Открой проект, чтобы видеть историю работы AI</div>
       </div>
     )
   }
@@ -468,13 +490,15 @@ export function AgentRunInspector() {
   return (
     <div className="gg-panel">
       <div className="gg-panel-header">
-        <h2 className="gg-panel-title">Инспектор запусков</h2>
-        <div className="gg-panel-meta">{runs.length} запусков · {entries.length} событий</div>
+        <h2 className="gg-panel-title">История работы AI</h2>
+        <div className="gg-panel-meta">
+          Запуски модели в текущем проекте: ответы, инструменты, ошибки и диагностические события · {runs.length} запусков · {entries.length} событий
+        </div>
       </div>
 
       <div className="gg-inspector-toolbar">
         <button className="gg-btn gg-btn-ghost" onClick={() => void refresh()} disabled={loading}>
-          {loading ? 'Загрузка…' : '↻ Обновить'}
+          {loading ? 'Загрузка…' : 'Обновить'}
         </button>
         <button className="gg-btn gg-btn-ghost" onClick={() => void exportCsv()} disabled={entries.length === 0}>
           Экспорт CSV
@@ -484,7 +508,7 @@ export function AgentRunInspector() {
       <div className="gg-panel-body">
         {entries.length === 0 && (
           <div className="gg-panel-empty">
-            Пока нет записей о запусках агента — поработай с агентом, и здесь появится прозрачная история.
+            Пока нет записей. Отправь сообщение модели в этом проекте — после ответа здесь появится запуск AI
           </div>
         )}
 
@@ -512,7 +536,7 @@ export function AgentRunInspector() {
         <div className="gg-inspector-csv-overlay" onClick={() => setPacket(null)}>
           <div className="gg-debug-modal" onClick={e => e.stopPropagation()}>
             <div className="gg-inspector-csv-head">
-              <span>🐛 Debug Packet{packet.input ? ` — ${packet.input.providerId ?? '?'} · ${packet.input.model ?? '?'}` : ''}</span>
+              <span>Диагностический пакет{packet.input ? ` — ${packet.input.providerId ?? '?'} · ${packet.input.model ?? '?'}` : ''}</span>
               <div className="gg-inspector-csv-actions">
                 <button className="gg-btn gg-btn-ghost" onClick={() => void navigator.clipboard.writeText(JSON.stringify(packet, null, 2))}>Скопировать JSON</button>
                 <button className="gg-btn gg-btn-ghost" onClick={() => setPacket(null)}>Закрыть</button>

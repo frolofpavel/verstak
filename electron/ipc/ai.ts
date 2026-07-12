@@ -68,6 +68,7 @@ export type { ProviderId } from '../ai/registry'
 
 interface AiDeps {
   getSecret: (key: string) => string | null
+  setSecret?: (key: string, value: string) => void
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
   /** 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера. Резолвит секрет из
@@ -152,6 +153,51 @@ interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 const autoProofReportsSent = new Set<string>()
+const COST_CAP_USD_PER_DAY_KEY = 'cost_cap_usd_per_day'
+const COST_CAP_LEGACY_SESSION_KEY = 'cost_cap_usd_per_session'
+const COST_CAP_DAY_KEY = 'cost_cap_daily_date'
+const COST_CAP_DAILY_CENTS_KEY = 'cost_cap_daily_cents'
+
+function localDayKey(date = new Date()): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function parsePositiveFloat(raw: string | null): number | null {
+  if (!raw) return null
+  const value = Number.parseFloat(raw.replace(',', '.'))
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function parseStoredCents(raw: string | null): number {
+  if (!raw) return 0
+  const value = Number.parseInt(raw, 10)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function createDailyCostGuard(deps: AiDeps): ReturnType<typeof createCostGuard> {
+  const capUsd = parsePositiveFloat(deps.getSecret(COST_CAP_USD_PER_DAY_KEY) ?? deps.getSecret(COST_CAP_LEGACY_SESSION_KEY))
+  const today = localDayKey()
+  const storedDay = deps.getSecret(COST_CAP_DAY_KEY)
+  const shouldReset = storedDay !== today
+  const initialCents = shouldReset ? 0 : parseStoredCents(deps.getSecret(COST_CAP_DAILY_CENTS_KEY))
+
+  if (shouldReset) {
+    deps.setSecret?.(COST_CAP_DAY_KEY, today)
+    deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, '0')
+  }
+
+  return createCostGuard(capUsd, {
+    initialCents,
+    periodLabel: 'сутки',
+    onDailyCentsChange: cents => {
+      deps.setSecret?.(COST_CAP_DAY_KEY, today)
+      deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, String(Math.max(0, cents)))
+    }
+  })
+}
 
 /** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
 const conversationSupplements = new Map<number, (text: string) => void>()
@@ -1155,9 +1201,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // Cost guard для всей сессии (turns of API loop). Если settings задан
     // cost_cap_usd_per_session — guard.recordAndCheck остановит цикл при
     // превышении. CLI = подписка = $0 (guard эффективно отключен).
-    const capRaw = deps.getSecret('cost_cap_usd_per_session')
-    const capUsd = capRaw ? parseFloat(capRaw) : null
-    const costGuard = createCostGuard(capUsd && capUsd > 0 ? capUsd : null)
+    const costGuard = createDailyCostGuard(deps)
 
     // Multi-agent Manager (Фаза 2): один ai:send = одна строка agent_runs.
     // Owner определяется по реально доступному в main сигналу: Explicit Review
@@ -1292,6 +1336,23 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
 
+    const auditFn = deps.appendAudit && projectPath
+      ? (action: string, detail: string) => {
+          try {
+            deps.appendAudit!(projectPath, chatId ? Number(chatId) : null, action, detail, providerId, model ?? null, runId)
+          } catch { /* audit not critical */ }
+        }
+      : undefined
+    if (auditFn) {
+      auditFn('session_start', JSON.stringify({
+        runId,
+        sendId,
+        title: runTitle,
+        providerId,
+        model: model ?? null
+      }))
+    }
+
     if (useToolsPath) {
       // projectPath здесь уже = worktree для изолированного чата (реассайн выше),
       // так что и tools, и весь контекст/undo работают на изолированном дереве.
@@ -1302,17 +1363,9 @@ export function registerAiIpc(deps: AiDeps): void {
         allowedWriteRoots: parseAllowedWriteRoots(deps.getSecret(ALLOWED_WRITE_ROOTS_KEY))
       })
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
-      const auditFn = deps.appendAudit
-        ? (action: string, detail: string) => {
-            try {
-              deps.appendAudit!(projectPath, chatId ? Number(chatId) : null, action, detail, providerId, model ?? null, runId)
-            } catch { /* audit not critical */ }
-          }
-        : undefined
       // Run-start маркер: одна audit-запись на старте run'а с самим runId.
       // Инспектор группирует по runId; этот маркер также даёт точку отсчёта run'а
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
-      if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
       logRuntime('ai.runner.start', {
         sendId,
         runId,
@@ -1366,7 +1419,8 @@ export function registerAiIpc(deps: AiDeps): void {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
         smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit } : undefined,
         deps.agentRuns,
-        runId
+        runId,
+        auditFn
       ).finally(cleanup)
     }
     return sendId
@@ -1559,7 +1613,8 @@ async function runPlainConversation(
   model?: string,
   fallbackOpts?: FallbackOpts,
   agentRuns?: AgentRuns,
-  runId?: string
+  runId?: string,
+  appendAuditFn?: (action: string, detail: string) => void
 ): Promise<void> {
   const startedAt = Date.now()
   logRuntime('ai.runner.loop_start', {
@@ -1799,7 +1854,7 @@ async function runPlainConversation(
             fromModel: model ?? null,
             toModel: nextModel ?? null
           }, 'warn')
-          return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, nextModel, fallbackOpts, agentRuns, runId)
+          return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, nextModel, fallbackOpts, agentRuns, runId, appendAuditFn)
         }
       }
     }
@@ -1848,6 +1903,15 @@ async function runPlainConversation(
     // их внутри, наружу не видно), стоимость из costGuard. agentRuns/runId не
     // (внешний finally, либо рекурсивный fallback-фрейм при handedOff — #15).
     // Review-прогоны (owner='review') финишируются здесь же.
+    if (!handedOff && appendAuditFn) {
+      appendAuditFn('session_end', JSON.stringify({
+        runId: runId ?? null,
+        sendId,
+        status: exitReason,
+        durationMs: Date.now() - startedAt,
+        assistantChars: lastAssistantText.length
+      }))
+    }
     if (!handedOff && agentRuns && runId) {
       try {
         // Timeline: финальный ответ агента — итог CLI-прогона (на CLI-пути нет
@@ -3256,6 +3320,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         }
         // #4 suspend: приостановленный прогон помечаем 'suspended' (не 'stopped').
         // delete — в общем cleanup (для обоих путей); здесь только читаем.
+        if (appendAuditFn) {
+          appendAuditFn('session_end', JSON.stringify({
+            runId: runId ?? null,
+            sendId,
+            status: exitReason,
+            durationMs: Date.now() - startedAt,
+            assistantChars: lastAssistantText.length,
+            toolCount: toolCallCount,
+            filesCount: filesTouched.size
+          }))
+        }
         const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToAgentRunStatus(exitReason)
         agentRuns.finish(runId, finishStatus, {
           costCents: costGuard?.current() ?? 0,

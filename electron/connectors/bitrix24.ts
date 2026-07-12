@@ -30,7 +30,8 @@ const DENIED_METHODS = new Set([
   'user.delete'
 ])
 
-const ALLOWED_PREFIXES = ['crm.', 'tasks.', 'task.', 'user.', 'profile.']
+const ALLOWED_PREFIXES = ['crm.', 'tasks.', 'task.', 'user.']
+const ALLOWED_EXACT_METHODS = new Set(['profile'])
 
 export function createBitrix24Connector(): Connector {
   return {
@@ -54,6 +55,11 @@ export function createBitrix24Connector(): Connector {
                    'Где взять: в Битрикс24 → Разработчикам → Другое → Входящий вебхук → копируй полный URL.'
         }
       }
+      const webhookError = validateBitrixWebhookUrl(webhook)
+      if (webhookError) {
+        return { error: 'invalid-webhook-url', message: webhookError }
+      }
+
       try {
         switch (op) {
           case 'list_deals':         return await listDeals(webhook, args, ctx)
@@ -122,7 +128,7 @@ async function getSourceReport(webhook: string, args: Record<string, unknown>, c
 async function rawCall(webhook: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const method = String(args.method ?? '')
   if (!method) return { error: 'bad-args', message: 'call требует method (например crm.deal.list)' }
-  const isAllowed = ALLOWED_PREFIXES.some(p => method.startsWith(p))
+  const isAllowed = ALLOWED_EXACT_METHODS.has(method) || ALLOWED_PREFIXES.some(p => method.startsWith(p))
   if (!isAllowed) return { error: 'blocked', message: `Метод «${method}» не в allowed prefixes (${ALLOWED_PREFIXES.join(', ')}).` }
   if (DENIED_METHODS.has(method)) return { error: 'blocked', message: `Метод «${method}» в denylist.` }
   // Аудит B5: read-only — write-глаголы блокируем чисто (а не через throw в callMethod).
@@ -147,6 +153,27 @@ const WRITE_VERBS = new Set([
   'close', 'cancel', 'archive', 'restore', 'merge', 'transfer', 'expose',
   'startwatch', 'stopwatch', 'mute', 'unmute', 'pin', 'unpin',
 ])
+
+function validateBitrixWebhookUrl(webhook: string): string | null {
+  let url: URL
+  try {
+    url = new URL(webhook)
+  } catch {
+    if (/^(y0__|AQVN)/i.test(webhook)) {
+      return '\u0412 \u043f\u043e\u043b\u0435 \u0411\u0438\u0442\u0440\u0438\u043a\u044124 \u0432\u0441\u0442\u0430\u0432\u043b\u0435\u043d \u0442\u043e\u043a\u0435\u043d \u042f\u043d\u0434\u0435\u043a\u0441\u0430, \u0430 \u043d\u0443\u0436\u0435\u043d \u043f\u043e\u043b\u043d\u044b\u0439 URL \u0432\u0445\u043e\u0434\u044f\u0449\u0435\u0433\u043e webhook \u0438\u0437 \u0411\u0438\u0442\u0440\u0438\u043a\u044124 \u0432\u0438\u0434\u0430 https://...bitrix24.ru/rest/USER_ID/TOKEN/'
+    }
+    return '\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 Bitrix24 webhook URL. \u041d\u0443\u0436\u0435\u043d \u043f\u043e\u043b\u043d\u044b\u0439 URL \u0432\u0438\u0434\u0430 https://...bitrix24.ru/rest/USER_ID/TOKEN/'
+  }
+  if (!/^https?:$/.test(url.protocol)) {
+    return '\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 Bitrix24 webhook URL. \u0410\u0434\u0440\u0435\u0441 \u0434\u043e\u043b\u0436\u0435\u043d \u043d\u0430\u0447\u0438\u043d\u0430\u0442\u044c\u0441\u044f \u0441 https://'
+  }
+  const parts = url.pathname.split('/').filter(Boolean)
+  const restIndex = parts.findIndex(part => part.toLowerCase() === 'rest')
+  if (restIndex < 0 || parts.length < restIndex + 3) {
+    return '\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 Bitrix24 webhook URL. \u0421\u043a\u043e\u043f\u0438\u0440\u0443\u0439 \u043f\u043e\u043b\u043d\u044b\u0439 \u0432\u0445\u043e\u0434\u044f\u0449\u0438\u0439 webhook, \u0432 \u043d\u0451\u043c \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u043f\u0443\u0442\u044c /rest/USER_ID/TOKEN/'
+  }
+  return null
+}
 
 async function callMethod(webhook: string, method: string, params: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   if (DENIED_METHODS.has(method)) {
