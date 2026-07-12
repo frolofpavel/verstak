@@ -39,7 +39,7 @@ import { stampDurationOnStreamEnd } from '../lib/response-duration'
 // т.к. теперь входят в per-chat bundle. Re-export для существующих импортов (Chat.tsx).
 export type { PreflightCard, SubagentRunCard } from './session-snapshot'
 
-export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'workflow' | 'feedback' | 'browser' | 'skills' | 'design' | 'inspector' | 'memory-gov' | 'agents' | 'tasks-manager' | 'project-map' | 'task' | 'files' | 'decisions' | 'brain' | 'scheduler'
+export type ViewId = 'chat' | 'tasks' | 'journal' | 'reminders' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser' | 'skills' | 'design' | 'video' | 'inspector' | 'project-rules' | 'memory-gov' | 'agents' | 'tasks-manager' | 'project-map' | 'task' | 'files' | 'decisions' | 'brain' | 'scheduler'
 
 /**
  * Owner для in-flight sendId. Заменил собой 2 параллельных мапа

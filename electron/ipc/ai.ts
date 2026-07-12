@@ -57,6 +57,9 @@ export type { ProviderId } from '../ai/registry'
 // на AiDeps['...']-индексы. Type-only импорт в runner-api → без рантайм-цикла.
 export interface AiDeps {
   getSecret: (key: string) => string | null
+  /** Персист дневного cost-cap (дата + накопленные центы) между рестартами. Опционально —
+   *  в тестах/делегатах не передаётся, тогда guard работает как in-memory. */
+  setSecret?: (key: string, value: string) => void
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
   /** 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера. Резолвит секрет из
@@ -141,6 +144,55 @@ export interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 const autoProofReportsSent = new Set<string>()
+
+// Cost-cap на СУТКИ (Илья): лимит переносится через рестарт — дата+накопленные центы
+// в settings. Новый день → сброс. UI пишет cost_cap_usd_per_day; legacy per_session
+// читаем как fallback для старых конфигов.
+const COST_CAP_USD_PER_DAY_KEY = 'cost_cap_usd_per_day'
+const COST_CAP_LEGACY_SESSION_KEY = 'cost_cap_usd_per_session'
+const COST_CAP_DAY_KEY = 'cost_cap_daily_date'
+const COST_CAP_DAILY_CENTS_KEY = 'cost_cap_daily_cents'
+
+function localDayKey(date = new Date()): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function parsePositiveFloat(raw: string | null): number | null {
+  if (!raw) return null
+  const value = Number.parseFloat(raw.replace(',', '.'))
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function parseStoredCents(raw: string | null): number {
+  if (!raw) return 0
+  const value = Number.parseInt(raw, 10)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function createDailyCostGuard(deps: AiDeps): ReturnType<typeof createCostGuard> {
+  const capUsd = parsePositiveFloat(deps.getSecret(COST_CAP_USD_PER_DAY_KEY) ?? deps.getSecret(COST_CAP_LEGACY_SESSION_KEY))
+  const today = localDayKey()
+  const storedDay = deps.getSecret(COST_CAP_DAY_KEY)
+  const shouldReset = storedDay !== today
+  const initialCents = shouldReset ? 0 : parseStoredCents(deps.getSecret(COST_CAP_DAILY_CENTS_KEY))
+
+  if (shouldReset) {
+    deps.setSecret?.(COST_CAP_DAY_KEY, today)
+    deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, '0')
+  }
+
+  return createCostGuard(capUsd, {
+    initialCents,
+    periodLabel: 'сутки',
+    onDailyCentsChange: cents => {
+      deps.setSecret?.(COST_CAP_DAY_KEY, today)
+      deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, String(Math.max(0, cents)))
+    }
+  })
+}
 
 // Track which chats have already received memory injection in this process
 // lifetime. Replaces the old isFirstTurn check so memory is injected on the
@@ -894,12 +946,10 @@ export function registerAiIpc(deps: AiDeps): void {
       return 0
     }
 
-    // Cost guard для всей сессии (turns of API loop). Если settings задан
-    // cost_cap_usd_per_session — guard.recordAndCheck остановит цикл при
-    // превышении. CLI = подписка = $0 (guard эффективно отключен).
-    const capRaw = deps.getSecret('cost_cap_usd_per_session')
-    const capUsd = capRaw ? parseFloat(capRaw) : null
-    const costGuard = createCostGuard(capUsd && capUsd > 0 ? capUsd : null)
+    // Cost guard на СУТКИ (turns of API loop). Лимит cost_cap_usd_per_day + накопленные
+    // за день центы переживают рестарт (персист в settings). guard.recordAndCheck
+    // остановит цикл при превышении. CLI = подписка = $0 (guard эффективно отключен).
+    const costGuard = createDailyCostGuard(deps)
 
     // Multi-agent Manager (Фаза 2): один ai:send = одна строка agent_runs.
     // Owner определяется по реально доступному в main сигналу: Explicit Review

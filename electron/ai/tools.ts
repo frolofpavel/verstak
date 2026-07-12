@@ -295,11 +295,16 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'connector_query',
-    description: 'Выполнить запрос к внешнему коннектору. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
+    description: 'Выполнить запрос к внешнему коннектору. Сначала вызови list_connectors и используй id из списка. Для Wordstat: id="yandex_wordstat", op="get_top_requests", phrase + optional regions/num_phrases или op="get_wordstat", phrases[]. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
     parameters: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'ID коннектора: "onec" | "http".' },
+        id: { type: 'string', description: 'ID коннектора из list_connectors, например "yandex_wordstat", "yandex_direct", "bitrix24", "onec", "http".' },
+        op: { type: 'string', description: 'Операция коннектора. Для yandex_wordstat: get_top_requests, get_wordstat, get_dynamics, get_regions.' },
+        phrase: { type: 'string', description: '[yandex_wordstat] Ключевая фраза для get_top_requests/get_dynamics/get_regions.' },
+        phrases: { type: 'array', items: { type: 'string' }, description: '[yandex_wordstat] Список фраз для get_wordstat.' },
+        regions: { type: 'array', items: { type: 'string' }, description: '[yandex_wordstat] ID регионов, например ["213"].' },
+        num_phrases: { type: 'number', description: '[yandex_wordstat] Сколько фраз вернуть, 1..2000.' },
         // 1С OData params
         entity: { type: 'string', description: '[onec] Имя OData-сущности, например "Catalog_Контрагенты".' },
         filter: { type: 'string', description: '[onec] OData $filter.' },

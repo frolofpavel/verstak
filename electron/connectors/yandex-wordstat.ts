@@ -1,39 +1,36 @@
 /**
- * Яндекс.Wordstat connector — новый Wordstat API (2025+).
+ * Yandex Wordstat connector via AI Studio Search API.
  *
- * Официальный хост: https://api.wordstat.yandex.net
- * Auth: Authorization: Bearer {OAuth token}
+ * Docs:
+ *   https://aistudio.yandex.ru/docs/ru/search-api/operations/wordstat-gettop.html
  *
- * Сертификат выдан на wordstat.yandex.ru, поэтому запросы идут с SNI
- * wordstat.yandex.ru (иначе Node/Electron падает на TLS hostname mismatch).
- *
- * Credentials (settings keys):
- *   yandex_wordstat_token — OAuth token приложения с доступом к Wordstat API
- *                         (oauth.yandex.ru + заявка на доступ по ClientID).
- *
- * Операции (args.op):
- *   get_wordstat      — совместимость: phrases[] → topRequests по каждой фразе.
- *   get_top_requests  — топ запросов с фразой (phrase, regions?, devices?, num_phrases?).
- *   get_dynamics      — динамика спроса (phrase, period, from, to, regions?, devices?).
- *   get_regions       — разбивка по регионам (phrase, region_type?, regions?, devices?).
- *   get_regions_tree  — дерево регионов (без расхода дневной квоты).
+ * Credentials:
+ *   yandex_wordstat_token     - API key or IAM token with yc.search-api.execute
+ *   yandex_wordstat_auth_type - api-key | iam
+ *   yandex_wordstat_folder_id - Yandex Cloud folder id
  */
 
 import https from 'node:https'
-import tls from 'node:tls'
 import type { Connector, ConnectorInfo, ConnectorContext } from './types'
+import { logRuntime } from '../runtime-log'
 
-export const WORDSTAT_API_HOST = 'api.wordstat.yandex.net'
-export const WORDSTAT_TLS_SERVERNAME = 'wordstat.yandex.ru'
-const API_PREFIX = '/v1'
+export const WORDSTAT_API_HOST = 'searchapi.api.cloud.yandex.net'
+const API_PREFIX = '/v2/wordstat'
 
-type WordstatDevice = 'all' | 'desktop' | 'phone' | 'tablet'
+type WordstatAuthType = 'api-key' | 'iam'
+type WordstatDevice = 'DEVICE_ALL' | 'DEVICE_DESKTOP' | 'DEVICE_PHONE' | 'DEVICE_TABLET'
 type WordstatPeriod = 'weekly' | 'monthly'
 type WordstatRegionType = 'all' | 'cities' | 'regions'
 
 interface PhraseCount {
   phrase: string
   count: number
+}
+
+interface WordstatCredentials {
+  token: string
+  authType: WordstatAuthType
+  folderId: string
 }
 
 export function createYandexWordstatConnector(): Connector {
@@ -44,36 +41,45 @@ export function createYandexWordstatConnector(): Connector {
         label: 'Яндекс.Wordstat',
         kind: 'yandex_wordstat',
         status: 'ready',
-        detail: 'Частотность ключевых слов. OAuth token в settings (yandex_wordstat_token), Wordstat API.'
+        detail: 'Частотность ключевых слов через Yandex Search API. Нужны API-ключ Yandex AI Studio или IAM-токен и идентификатор каталога. Операции: get_top_requests { phrase, regions?, num_phrases? }, get_wordstat { phrases[], regions? }.'
       }
     },
 
     async query(args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
       const op = String(args.op ?? '')
-      const token = ctx.getSecret('yandex_wordstat_token')
-      if (!token) {
+      const credentials = readCredentials(ctx)
+      if (!credentials.token) {
         return {
           error: 'no-token',
-          message: 'Wordstat token не настроен. Settings → Яндекс.Wordstat. ' +
-                   'Создайте OAuth-приложение на oauth.yandex.ru и подайте заявку на доступ к API Вордстата (ClientID).'
+          message: 'Wordstat не настроен. Укажите API-ключ Yandex AI Studio или IAM-токен'
         }
       }
+      if (!credentials.folderId) {
+        return {
+          error: 'no-folder-id',
+          message: 'Wordstat не настроен. Укажите идентификатор каталога Yandex Cloud'
+        }
+      }
+
       try {
         switch (op) {
           case 'get_wordstat':
-            return await getWordstatBatch(token, args, ctx)
+            return await getWordstatBatch(credentials, args, ctx)
           case 'get_top_requests':
-            return await getTopRequests(token, args, ctx)
+            return await getTopRequests(credentials, args, ctx)
           case 'get_dynamics':
-            return await getDynamics(token, args, ctx)
+            return await getDynamics(credentials, args, ctx)
           case 'get_regions':
-            return await getRegions(token, args, ctx)
+            return await getRegions(credentials, args, ctx)
           case 'get_regions_tree':
-            return await getRegionsTree(token, ctx)
+            return {
+              error: 'unsupported-op',
+              message: 'Yandex Search API Wordstat не предоставляет дерево регионов в этом методе. Используйте список регионов поиска Yandex Search API'
+            }
           default:
             return {
               error: 'unknown-op',
-              message: `Неизвестная op «${op}». Доступно: get_wordstat, get_top_requests, get_dynamics, get_regions, get_regions_tree.`
+              message: `Неизвестная op "${op}". Доступно: get_wordstat, get_top_requests, get_dynamics, get_regions.`
             }
         }
       } catch (err) {
@@ -85,13 +91,19 @@ export function createYandexWordstatConnector(): Connector {
 
 // ----------------------------------------------------------------- ops
 
-async function getWordstatBatch(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
-  // phrases переданный строкой/числом раньше ронял .filter (?. не спасает от не-массива) —
-  // приводим к массиву, не-массив → пустой → понятный bad-args ниже (C5).
+function readCredentials(ctx: ConnectorContext): WordstatCredentials {
+  const token = (ctx.getSecret('yandex_wordstat_token') ?? '').trim()
+  const rawAuthType = (ctx.getSecret('yandex_wordstat_auth_type') ?? '').trim().toLowerCase()
+  const authType: WordstatAuthType = rawAuthType === 'iam' ? 'iam' : 'api-key'
+  const folderId = (ctx.getSecret('yandex_wordstat_folder_id') ?? '').trim()
+  return { token, authType, folderId }
+}
+
+async function getWordstatBatch(credentials: WordstatCredentials, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const phrases = (Array.isArray(args.phrases) ? args.phrases : [])
     .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
   if (phrases.length === 0) {
-    return { error: 'bad-args', message: 'get_wordstat требует phrases: string[] (ключевые фразы).' }
+    return { error: 'bad-args', message: 'get_wordstat требует phrases: string[]' }
   }
   const regions = readRegions(args)
   const devices = readDevices(args)
@@ -99,7 +111,7 @@ async function getWordstatBatch(token: string, args: Record<string, unknown>, ct
   const results = []
   for (let i = 0; i < Math.min(phrases.length, 10); i++) {
     const phrase = phrases[i].trim()
-    const raw = await getTopRequests(token, {
+    const raw = await getTopRequests(credentials, {
       phrase,
       regions,
       geo_id: regions,
@@ -113,31 +125,32 @@ async function getWordstatBatch(token: string, args: Record<string, unknown>, ct
   return { count: results.length, results }
 }
 
-async function getTopRequests(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
+async function getTopRequests(credentials: WordstatCredentials, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const phrase = String(args.phrase ?? '').trim()
-  if (!phrase) return { error: 'bad-args', message: 'get_top_requests требует phrase: string.' }
+  if (!phrase) return { error: 'bad-args', message: 'get_top_requests требует phrase: string' }
 
   const body: Record<string, unknown> = {
     phrase,
     devices: readDevices(args),
-    numPhrases: readNumPhrases(args)
+    numPhrases: readNumPhrases(args),
+    folderId: credentials.folderId
   }
   const regions = readRegions(args)
   if (regions.length > 0) body.regions = regions
 
-  const data = await wordstatApiPost('/topRequests', token, body, ctx) as Record<string, unknown>
+  const data = await wordstatApiPost('/topRequests', credentials, body, ctx) as Record<string, unknown>
   return normalizeTopRequests(phrase, data)
 }
 
-async function getDynamics(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
+async function getDynamics(credentials: WordstatCredentials, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const phrase = String(args.phrase ?? '').trim()
   const period = String(args.period ?? 'monthly').toLowerCase() as WordstatPeriod
   const from = String(args.from ?? args.date_from ?? '').trim()
   const to = String(args.to ?? args.date_to ?? '').trim()
-  if (!phrase) return { error: 'bad-args', message: 'get_dynamics требует phrase: string.' }
-  if (!from || !to) return { error: 'bad-args', message: 'get_dynamics требует from и to (YYYY-MM-DD).' }
+  if (!phrase) return { error: 'bad-args', message: 'get_dynamics требует phrase: string' }
+  if (!from || !to) return { error: 'bad-args', message: 'get_dynamics требует from и to в формате YYYY-MM-DD' }
   if (period !== 'weekly' && period !== 'monthly') {
-    return { error: 'bad-args', message: 'period должен быть weekly или monthly.' }
+    return { error: 'bad-args', message: 'period должен быть weekly или monthly' }
   }
 
   const body: Record<string, unknown> = {
@@ -145,52 +158,52 @@ async function getDynamics(token: string, args: Record<string, unknown>, ctx: Co
     period,
     from,
     to,
-    devices: readDevices(args)
+    devices: readDevices(args),
+    folderId: credentials.folderId
   }
   const regions = readRegions(args)
   if (regions.length > 0) body.regions = regions
 
-  const data = await wordstatApiPost('/dynamics', token, body, ctx)
+  const data = await wordstatApiPost('/getDynamics', credentials, body, ctx)
   return { phrase, period, from, to, ...flattenDynamics(data) }
 }
 
-async function getRegions(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
+async function getRegions(credentials: WordstatCredentials, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const phrase = String(args.phrase ?? '').trim()
-  if (!phrase) return { error: 'bad-args', message: 'get_regions требует phrase: string.' }
+  if (!phrase) return { error: 'bad-args', message: 'get_regions требует phrase: string' }
 
   const regionType = String(args.region_type ?? args.regionType ?? 'all').toLowerCase() as WordstatRegionType
   if (!['all', 'cities', 'regions'].includes(regionType)) {
-    return { error: 'bad-args', message: 'region_type должен быть all, cities или regions.' }
+    return { error: 'bad-args', message: 'region_type должен быть all, cities или regions' }
   }
 
   const body: Record<string, unknown> = {
     phrase,
     regionType,
-    devices: readDevices(args)
+    devices: readDevices(args),
+    folderId: credentials.folderId
   }
   const regions = readRegions(args)
   if (regions.length > 0) body.regions = regions
 
-  const data = await wordstatApiPost('/regions', token, body, ctx)
+  const data = await wordstatApiPost('/getRegionsDistribution', credentials, body, ctx)
   return { phrase, region_type: regionType, ...flattenRegions(data) }
-}
-
-async function getRegionsTree(token: string, ctx: ConnectorContext): Promise<unknown> {
-  const data = await wordstatApiPost('/getRegionsTree', token, {}, ctx)
-  return { tree: data }
 }
 
 // ----------------------------------------------------------------- HTTP
 
 export async function wordstatApiPost(
   pathSuffix: string,
-  token: string,
+  credentials: WordstatCredentials | string,
   body: Record<string, unknown>,
   ctx: ConnectorContext
 ): Promise<unknown> {
+  const normalizedCredentials = typeof credentials === 'string'
+    ? { token: credentials, authType: 'iam' as const, folderId: String(body.folderId ?? '') }
+    : credentials
   const path = `${API_PREFIX}${pathSuffix.startsWith('/') ? pathSuffix : `/${pathSuffix}`}`
   const payload = JSON.stringify(body ?? {})
-  const text = await wordstatHttpsText(path, token, payload, ctx.signal)
+  const text = await wordstatHttpsText(path, normalizedCredentials, payload, ctx.signal)
   let json: Record<string, unknown>
   try {
     json = JSON.parse(text) as Record<string, unknown>
@@ -208,18 +221,14 @@ export async function wordstatApiPost(
   return json
 }
 
-function wordstatHttpsText(path: string, token: string, payload: string, signal: AbortSignal): Promise<string> {
+function wordstatHttpsText(path: string, credentials: WordstatCredentials, payload: string, signal: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: WORDSTAT_API_HOST,
-      servername: WORDSTAT_TLS_SERVERNAME,
       path,
       method: 'POST',
-      checkServerIdentity(_host, cert) {
-        return tls.checkServerIdentity(WORDSTAT_TLS_SERVERNAME, cert)
-      },
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: credentials.authType === 'iam' ? `Bearer ${credentials.token}` : `Api-key ${credentials.token}`,
         'Accept-Language': 'ru',
         'Content-Type': 'application/json; charset=utf-8',
         'Content-Length': Buffer.byteLength(payload)
@@ -230,7 +239,15 @@ function wordstatHttpsText(path: string, token: string, payload: string, signal:
       res.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf8')
         if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(formatWordstatHttpError(res.statusCode, text)))
+          logRuntime('connector.wordstat.http_error', {
+            status: res.statusCode,
+            path,
+            authType: credentials.authType,
+            folderId: maskId(credentials.folderId),
+            responseEmpty: text.length === 0,
+            responsePreview: text ? text.slice(0, 240) : ''
+          }, 'warn')
+          reject(new Error(formatWordstatHttpError(res.statusCode, text, credentials.authType, path)))
           return
         }
         resolve(text)
@@ -255,37 +272,39 @@ function wordstatHttpsText(path: string, token: string, payload: string, signal:
   })
 }
 
-function formatWordstatHttpError(status: number, text: string): string {
+function formatWordstatHttpError(status: number, text: string, authType: WordstatAuthType, path = ''): string {
   let detail = text.slice(0, 300)
   try {
     const json = JSON.parse(text) as Record<string, unknown>
-    detail = String(json.message ?? json.error ?? json.error_str ?? detail)
+    detail = String(json.message ?? json.error ?? json.error_str ?? json.error_description ?? detail)
   } catch { /* raw text */ }
 
+  const authHint = authType === 'iam'
+    ? 'Проверьте IAM-токен, роль search-api.webSearch.user и идентификатор каталога'
+    : 'Проверьте API-ключ Yandex AI Studio с областью yc.search-api.execute, роль search-api.webSearch.user и идентификатор каталога'
+
   if (status === 401 || status === 403) {
-    return `Wordstat HTTP ${status}: неверный или просроченный OAuth-токен. ${detail}`
+    return `Wordstat HTTP ${status}: доступ к Yandex Search API не принят. ${authHint}. ${detail}`.trim()
   }
   if (status === 404) {
-    return `Wordstat HTTP 404: метод не найден или ClientID не одобрен для Wordstat API. ${detail}`
+    const methodHint = path ? ` Метод ${path} не найден.` : ''
+    return `Wordstat HTTP 404:${methodHint} Проверьте актуальность endpoint Yandex Search API. ${detail}`.trim()
   }
   if (status === 429) {
-    return `Wordstat HTTP 429: превышена квота (10 req/s, 1000/сутки). ${detail}`
+    return `Wordstat HTTP 429: превышена квота Yandex Search API. ${detail}`.trim()
   }
-  return `Wordstat HTTP ${status}: ${detail}`
+  return `Wordstat HTTP ${status}: ${detail}`.trim()
 }
 
 function formatWordstatApiError(code: number, message: string, detail: string): string {
   const suffix = detail ? ` (${detail})` : ''
-  if (code === 53) {
-    return `Wordstat error ${code}: недействительный OAuth-токен или нет доступа к API${suffix}`
-  }
   return `Wordstat error ${code}: ${message}${suffix}`.trim()
 }
 
 // ----------------------------------------------------------------- parsing
 
 function normalizeTopRequests(fallbackPhrase: string, data: Record<string, unknown>) {
-  const top = mapPhraseCounts(data.topRequests ?? data.top_requests)
+  const top = mapPhraseCounts(data.results ?? data.topRequests ?? data.top_requests)
   const assoc = mapPhraseCounts(data.associations ?? data.searchedAlso ?? data.searched_also)
   const phrase = String(data.requestPhrase ?? data.phrase ?? fallbackPhrase)
   const totalCount = Number(data.totalCount ?? data.total_count ?? top[0]?.count ?? 0)
@@ -295,7 +314,6 @@ function normalizeTopRequests(fallbackPhrase: string, data: Record<string, unkno
     total_count: totalCount,
     top_requests: top,
     associations: assoc,
-    // Алиасы под старый формат коннектора / агентские промпты.
     searched_with: top.map(item => ({ phrase: item.phrase, shows: item.count })),
     searched_also: assoc.map(item => ({ phrase: item.phrase, shows: item.count }))
   }
@@ -311,7 +329,7 @@ function flattenDynamics(data: unknown): Record<string, unknown> {
 function flattenRegions(data: unknown): Record<string, unknown> {
   if (!data || typeof data !== 'object') return { regions: [] }
   const obj = data as Record<string, unknown>
-  const rows = obj.regions ?? obj.regionStats ?? obj.data ?? obj
+  const rows = obj.regions ?? obj.regionStats ?? obj.results ?? obj.data ?? obj
   return { regions: rows }
 }
 
@@ -329,26 +347,44 @@ function mapPhraseCounts(raw: unknown): PhraseCount[] {
     .filter((x): x is PhraseCount => x != null)
 }
 
-function readRegions(args: Record<string, unknown>): number[] {
+function readRegions(args: Record<string, unknown>): string[] {
   const raw = (args.regions ?? args.geo_id ?? args.geoId) as unknown
   if (!Array.isArray(raw)) return []
-  return raw.map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0)
+  return raw
+    .map(n => String(n).trim())
+    .filter(n => /^\d+$/.test(n))
 }
 
 function readDevices(args: Record<string, unknown>): WordstatDevice[] {
   const raw = args.devices
-  if (!Array.isArray(raw) || raw.length === 0) return ['all']
-  const allowed = new Set<WordstatDevice>(['all', 'desktop', 'phone', 'tablet'])
+  if (!Array.isArray(raw) || raw.length === 0) return ['DEVICE_ALL']
+  const aliases: Record<string, WordstatDevice> = {
+    all: 'DEVICE_ALL',
+    device_all: 'DEVICE_ALL',
+    desktop: 'DEVICE_DESKTOP',
+    device_desktop: 'DEVICE_DESKTOP',
+    phone: 'DEVICE_PHONE',
+    device_phone: 'DEVICE_PHONE',
+    tablet: 'DEVICE_TABLET',
+    device_tablet: 'DEVICE_TABLET'
+  }
   const out = raw
-    .map(v => String(v).toLowerCase() as WordstatDevice)
-    .filter(v => allowed.has(v))
-  return out.length > 0 ? out : ['all']
+    .map(v => aliases[String(v).trim().toLowerCase()])
+    .filter((v): v is WordstatDevice => Boolean(v))
+  return out.length > 0 ? out : ['DEVICE_ALL']
 }
 
 function readNumPhrases(args: Record<string, unknown>): number {
   const n = Number(args.num_phrases ?? args.numPhrases ?? 50)
   if (!Number.isFinite(n) || n <= 0) return 50
   return Math.min(Math.floor(n), 2000)
+}
+
+function maskId(value = ''): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= 10) return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`
 }
 
 function sleep(ms: number): Promise<void> {

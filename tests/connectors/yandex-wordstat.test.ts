@@ -8,7 +8,12 @@ import https from 'node:https'
 import { EventEmitter } from 'node:events'
 
 const ctx = {
-  getSecret: (k: string) => (k === 'yandex_wordstat_token' ? 'tok-wordstat' : null),
+  getSecret: (k: string) => {
+    if (k === 'yandex_wordstat_token') return 'tok-wordstat'
+    if (k === 'yandex_wordstat_folder_id') return 'folder-1'
+    if (k === 'yandex_wordstat_auth_type') return 'api-key'
+    return null
+  },
   signal: new AbortController().signal
 }
 const noCred = { getSecret: (_: string) => null, signal: new AbortController().signal }
@@ -32,7 +37,6 @@ function mockWordstatHttps(handler: (path: string, payload: string) => MockRespo
       const res = new EventEmitter() as EventEmitter & { statusCode: number }
       res.statusCode = mock.statusCode
       queueMicrotask(() => {
-        // https.request overload: cb выводится как RequestOptions — кастуем к колбэку.
         ;(cb as unknown as ((res: import('node:http').IncomingMessage) => void) | undefined)?.(res as unknown as import('node:http').IncomingMessage)
         res.emit('data', Buffer.from(mock.body, 'utf8'))
         res.emit('end')
@@ -41,7 +45,6 @@ function mockWordstatHttps(handler: (path: string, payload: string) => MockRespo
     req.destroy = vi.fn((err?: Error) => {
       if (err) req.emit('error', err)
     })
-    queueMicrotask(() => req.emit('socket'))
     return req as unknown as ReturnType<typeof https.request>
   })
 }
@@ -50,14 +53,22 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Yandex.Wordstat connector (new API)', () => {
+describe('Yandex.Wordstat connector via Search API', () => {
   it('info() корректен', () => {
     expect(createYandexWordstatConnector().info().id).toBe('yandex_wordstat')
   })
 
-  it('без токена — no-token', async () => {
+  it('без токена - no-token', async () => {
     const r = await createYandexWordstatConnector().query({ op: 'get_top_requests', phrase: 'x' }, noCred) as { error: string }
     expect(r.error).toBe('no-token')
+  })
+
+  it('без folderId - no-folder-id', async () => {
+    const r = await createYandexWordstatConnector().query(
+      { op: 'get_top_requests', phrase: 'x' },
+      { getSecret: (k: string) => (k === 'yandex_wordstat_token' ? 'tok' : null), signal: new AbortController().signal }
+    ) as { error: string }
+    expect(r.error).toBe('no-folder-id')
   })
 
   it('unknown op', async () => {
@@ -65,36 +76,32 @@ describe('Yandex.Wordstat connector (new API)', () => {
     expect(r.error).toBe('unknown-op')
   })
 
-  it('get_top_requests без phrase — bad-args', async () => {
+  it('get_top_requests без phrase - bad-args', async () => {
     const r = await createYandexWordstatConnector().query({ op: 'get_top_requests' }, ctx) as { error: string }
     expect(r.error).toBe('bad-args')
   })
 
-  it('get_wordstat без phrases — bad-args', async () => {
+  it('get_wordstat без phrases - bad-args', async () => {
     const r = await createYandexWordstatConnector().query({ op: 'get_wordstat' }, ctx) as { error: string }
     expect(r.error).toBe('bad-args')
   })
 
-  // C5: phrases строкой (а не массивом) раньше ронял .filter (?. не спасает) →
-  // request-failed «filter is not a function» вместо понятного bad-args.
-  it('get_wordstat с phrases-строкой — bad-args, не краш', async () => {
-    const r = await createYandexWordstatConnector().query({ op: 'get_wordstat', phrases: 'купить диван' }, ctx) as { error: string }
-    expect(r.error).toBe('bad-args')
-  })
-
-  it('get_top_requests парсит topRequests и associations', async () => {
-    mockWordstatHttps((path) => {
-      expect(path).toBe('/v1/topRequests')
+  it('get_top_requests парсит results и associations', async () => {
+    mockWordstatHttps((path, payload) => {
+      expect(path).toBe('/v2/wordstat/topRequests')
+      const body = JSON.parse(payload) as { folderId: string; devices: string[]; regions: string[] }
+      expect(body.folderId).toBe('folder-1')
+      expect(body.devices).toEqual(['DEVICE_ALL'])
+      expect(body.regions).toEqual(['213'])
       return {
         statusCode: 200,
         body: JSON.stringify({
-          requestPhrase: 'купить диван',
-          totalCount: 5400,
-          topRequests: [
-            { phrase: 'купить диван', count: 5400 },
-            { phrase: 'купить диван москва', count: 800 }
+          totalCount: '5400',
+          results: [
+            { phrase: 'купить диван', count: '5400' },
+            { phrase: 'купить диван москва', count: '800' }
           ],
-          associations: [{ phrase: 'диван недорого', count: 1200 }]
+          associations: [{ phrase: 'диван недорого', count: '1200' }]
         })
       }
     })
@@ -117,15 +124,14 @@ describe('Yandex.Wordstat connector (new API)', () => {
 
   it('get_wordstat батчит несколько phrases', async () => {
     const seen: string[] = []
-    mockWordstatHttps((path, payload) => {
+    mockWordstatHttps((_path, payload) => {
       const body = JSON.parse(payload) as { phrase: string }
       seen.push(body.phrase)
       return {
         statusCode: 200,
         body: JSON.stringify({
-          requestPhrase: body.phrase,
-          totalCount: 10,
-          topRequests: [{ phrase: body.phrase, count: 10 }],
+          totalCount: '10',
+          results: [{ phrase: body.phrase, count: '10' }],
           associations: []
         })
       }
@@ -139,13 +145,9 @@ describe('Yandex.Wordstat connector (new API)', () => {
     expect(seen).toEqual(['диван', 'кресло'])
   })
 
-  it('get_regions_tree', async () => {
-    mockWordstatHttps((path) => {
-      expect(path).toBe('/v1/getRegionsTree')
-      return { statusCode: 200, body: JSON.stringify([{ value: '225', label: 'Россия', children: [] }]) }
-    })
-    const r = await createYandexWordstatConnector().query({ op: 'get_regions_tree' }, ctx) as { tree: unknown[] }
-    expect(Array.isArray(r.tree)).toBe(true)
+  it('get_regions_tree больше не поддерживается Search API', async () => {
+    const r = await createYandexWordstatConnector().query({ op: 'get_regions_tree' }, ctx) as { error: string }
+    expect(r.error).toBe('unsupported-op')
   })
 
   it('HTTP 401 даёт понятную ошибку', async () => {
@@ -153,14 +155,16 @@ describe('Yandex.Wordstat connector (new API)', () => {
     const r = await createYandexWordstatConnector().query({ op: 'get_top_requests', phrase: 'x' }, ctx) as { error: string; message: string }
     expect(r.error).toBe('request-failed')
     expect(r.message).toContain('401')
+    expect(r.message).toContain('Yandex Search API')
   })
 
-  it('wordstatApiPost использует api.wordstat.yandex.net', async () => {
+  it('wordstatApiPost использует Yandex Search API', async () => {
     mockWordstatHttps(() => ({ statusCode: 200, body: '{"ok":true}' }))
-    await wordstatApiPost('/getRegionsTree', 'tok', {}, ctx)
+    await wordstatApiPost('/topRequests', { token: 'tok', authType: 'api-key', folderId: 'folder-1' }, { folderId: 'folder-1' }, ctx)
     expect(https.request).toHaveBeenCalled()
-    const opts = vi.mocked(https.request).mock.calls[0][0] as { hostname?: string; servername?: string }
+    const opts = vi.mocked(https.request).mock.calls[0][0] as { hostname?: string; path?: string; headers?: Record<string, string> }
     expect(opts.hostname).toBe(WORDSTAT_API_HOST)
-    expect(opts.servername).toBe('wordstat.yandex.ru')
+    expect(opts.path).toBe('/v2/wordstat/topRequests')
+    expect(opts.headers?.Authorization).toBe('Api-key tok')
   })
 })

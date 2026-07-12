@@ -32,6 +32,7 @@ import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
 import { WindowShell } from './components/TitleBar'
 import { ArtifactPreviewContainer } from './components/ArtifactPreview'
 import { TerminalErrorToast } from './components/TerminalErrorToast'
+import { GlobalTooltipHost } from './components/GlobalTooltipHost'
 import { useProject } from './store/projectStore'
 import { useSkills as useSkillsStore } from './store/skillStore'
 import { readAgentMode, writeAgentMode } from './hooks/useAgentMode'
@@ -46,6 +47,7 @@ const BrowserView = lazy(() => import('./components/BrowserView').then(m => ({ d
 const DesignView = lazy(() => import('./components/DesignView').then(m => ({ default: m.DesignView })))
 const SkillsView = lazy(() => import('./components/SkillsView').then(m => ({ default: m.SkillsView })))
 const AgentRunInspector = lazy(() => import('./components/AgentRunInspector').then(m => ({ default: m.AgentRunInspector })))
+const ProjectRulesView = lazy(() => import('./components/ProjectRulesView').then(m => ({ default: m.ProjectRulesView })))
 const MemoryGovernance = lazy(() => import('./components/MemoryGovernance').then(m => ({ default: m.MemoryGovernance })))
 const WorkflowView = lazy(() => import('./components/WorkflowView').then(m => ({ default: m.WorkflowView })))
 const WorkflowsPanel = lazy(() => import('./components/WorkflowsPanel').then(m => ({ default: m.WorkflowsPanel })))
@@ -458,6 +460,9 @@ export function App() {
         {activeView === 'inspector' && (
           <Suspense fallback={<ViewFallback />}><AgentRunInspector /></Suspense>
         )}
+        {activeView === 'project-rules' && (
+          <Suspense fallback={<ViewFallback />}><ProjectRulesView /></Suspense>
+        )}
         {activeView === 'agents' && <AgentsPanel />}
         {activeView === 'tasks-manager' && <AgentRunsPanel />}
         {activeView === 'task' && <DevTaskPanel />}
@@ -536,6 +541,7 @@ export function App() {
       <InboxApprovals />
       <UpdateReadyToast />
       <WhatsNewModal />
+      <GlobalTooltipHost />
 
     </div>
     </WindowShell>

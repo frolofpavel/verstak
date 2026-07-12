@@ -233,8 +233,9 @@ interface ProjectGroupBlockProps {
   isProjectInterrupted: (projectPath: string) => boolean
   shellExpanded: boolean
   contentExpanded: boolean
+  collapsedOpen: boolean
   onToggleCollapsed: (group: ProjectGroup) => void
-  onExpandRail: () => void
+  onToggleCollapsedOpen: (groupId: number) => void
   onEdit: (group: ProjectGroup) => void
   onSelectProject: (path: string) => void
   onProjectSettings: (project: ProjectMeta) => void
@@ -249,8 +250,9 @@ function ProjectGroupBlock({
   isProjectInterrupted,
   shellExpanded,
   contentExpanded,
+  collapsedOpen,
   onToggleCollapsed,
-  onExpandRail,
+  onToggleCollapsedOpen,
   onEdit,
   onSelectProject,
   onProjectSettings
@@ -259,11 +261,12 @@ function ProjectGroupBlock({
   const [hover, setHover] = useState(false)
   /** Свёрнутая панель → группы визуально закрыты; состояние в БД не трогаем. */
   const expanded = contentExpanded && !group.collapsed
+  const bodyOpen = expanded || collapsedOpen
   const hasActive = projects.some(p => p.path === activePath)
 
   function handleGroupToggle() {
     if (!contentExpanded) {
-      onExpandRail()
+      onToggleCollapsedOpen(group.id)
       return
     }
     onToggleCollapsed(group)
@@ -271,7 +274,7 @@ function ProjectGroupBlock({
 
   return (
     <div
-      className={`gg-rail-group ${expanded ? 'is-open' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${hasActive ? 'has-active' : ''}`}
+      className={`gg-rail-group ${expanded ? 'is-open' : ''} ${collapsedOpen ? 'is-collapsed-open' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${hasActive ? 'has-active' : ''}`}
     >
       <div
         className="gg-rail-group-head"
@@ -285,10 +288,10 @@ function ProjectGroupBlock({
           title={contentExpanded
             ? (expanded ? t.rail.groupCollapse : t.rail.groupExpand)
             : `${group.name} (${projects.length})`}
-          aria-expanded={expanded}
+          aria-expanded={bodyOpen}
         >
           <svg
-            className={`gg-rail-group-chevron ${expanded ? 'is-open' : ''}`}
+            className={`gg-rail-group-chevron ${bodyOpen ? 'is-open' : ''}`}
             width="12"
             height="12"
             viewBox="0 0 24 24"
@@ -325,7 +328,7 @@ function ProjectGroupBlock({
           </button>
         )}
       </div>
-      {expanded && (
+      {bodyOpen && (
         <div className="gg-rail-group-body">
           {projects.map(p => {
             const session = sessions[p.path]
@@ -391,6 +394,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
   const [contentExpanded, setContentExpanded] = useState(initialRailExpanded)
   const [projectQuery, setProjectQuery] = useState('')
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
+  const [collapsedOpenGroupId, setCollapsedOpenGroupId] = useState<number | null>(null)
   const [showCreateClient, setShowCreateClient] = useState(false)
   const [groupModal, setGroupModal] = useState<{ mode: 'create' } | { mode: 'edit'; group: ProjectGroup } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -412,6 +416,16 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
   const showSearchTool = !contentExpanded && showSearch
   const toolbarToolCount = 2 + (showSearchTool ? 1 : 0)
   const listEmpty = railView.visibleCount === 0
+
+  useEffect(() => {
+    if (contentExpanded) setCollapsedOpenGroupId(null)
+  }, [contentExpanded])
+
+  useEffect(() => {
+    if (!collapsedOpenGroupId) return
+    const exists = railView.groups.some(({ group }) => group.id === collapsedOpenGroupId)
+    if (!exists) setCollapsedOpenGroupId(null)
+  }, [collapsedOpenGroupId, railView.groups])
 
   useEffect(() => {
     const projectPaths = projectList.map(p => p.path)
@@ -537,6 +551,10 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
   async function handleToggleGroupCollapsed(group: ProjectGroup) {
     const result = await window.api.projects.updateGroup(group.id, { collapsed: !group.collapsed })
     if (result.ok) await refreshGroups()
+  }
+
+  function handleToggleCollapsedGroupOpen(groupId: number) {
+    setCollapsedOpenGroupId(current => current === groupId ? null : groupId)
   }
 
   return (
@@ -665,8 +683,9 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
             isProjectInterrupted={isProjectInterrupted}
             shellExpanded={shellExpanded}
             contentExpanded={contentExpanded}
+            collapsedOpen={!contentExpanded && collapsedOpenGroupId === group.id}
             onToggleCollapsed={g => void handleToggleGroupCollapsed(g)}
-            onExpandRail={() => setRailExpanded(true)}
+            onToggleCollapsedOpen={handleToggleCollapsedGroupOpen}
             onEdit={g => setGroupModal({ mode: 'edit', group: g })}
             onSelectProject={p => { if (helpMode || path !== p) void setProject(p) }}
             onProjectSettings={onOpenProjectSettings}

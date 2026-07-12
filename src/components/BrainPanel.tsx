@@ -95,7 +95,7 @@ export function BrainPanel() {
               <div className="gg-brain-block"><div className="gg-brain-label">Архитектура</div><div className="gg-brain-text">{brain.architectureSummary}</div></div>
             )}
             {brain.projectRules && (
-              <div className="gg-brain-block"><div className="gg-brain-label">Правила</div><div className="gg-brain-text">{brain.projectRules}</div></div>
+              <div className="gg-brain-block"><div className="gg-brain-label">Инструкции</div><div className="gg-brain-text">{brain.projectRules}</div></div>
             )}
             {brain.importantFiles.length > 0 && (
               <div className="gg-brain-block">

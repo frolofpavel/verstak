@@ -13,7 +13,7 @@ export const AGENT_MODES: Array<{ id: AgentMode; label: string; description: str
   { id: 'accept-edits', label: 'Принимать правки',    description: 'File edits авто-принимаются. Команды всё ещё через подтверждение.', icon: '✏' },
   { id: 'plan',         label: 'Режим планирования',  description: 'Только чтение и планирование. Никаких изменений файлов и команд.', icon: '📋' },
   { id: 'auto',         label: 'Авто-режим',          description: 'Всё авто-принимается. Команды и правки без подтверждения. Осторожно.', icon: '⚡' },
-  { id: 'bypass',       label: 'Без подтверждений',   description: 'Никаких диалогов. Для опытных пользователей или CI.', icon: '🚀' }
+  { id: 'bypass',       label: 'Без подтверждения',   description: 'Никаких диалогов. Для опытных пользователей или CI.', icon: '🚀' }
 ]
 
 /** Decision for a single tool call given the active mode. */

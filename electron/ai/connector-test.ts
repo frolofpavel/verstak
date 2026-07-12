@@ -7,9 +7,17 @@ import { createSign } from 'crypto'
 import type { ConnectorRegistry } from '../connectors/registry'
 import type { ConnectorContext } from '../connectors/types'
 
+export interface ConnectorCapabilityResult {
+  id: string
+  label: string
+  ok: boolean
+  message?: string
+}
+
 export interface ConnectorTestResult {
   ok: boolean
   message: string
+  capabilities?: ConnectorCapabilityResult[]
 }
 
 /** Id карточки в Settings → id в registry (null = особая проверка без registry). */
@@ -64,7 +72,7 @@ const REGISTRY_TEST_OPS: Record<string, Record<string, unknown>> = {
   yandex_metrika: { op: 'list_counters' },
   avito: { op: 'get_balance' },
   yandex_webmaster: { op: 'list_hosts' },
-  yandex_wordstat: { op: 'get_regions_tree' },
+  yandex_wordstat: { op: 'get_top_requests', phrase: 'проверка', num_phrases: 1 },
   ozon: { op: 'list_products' },
   wildberries: { op: 'get_stocks' },
   yookassa: { op: 'list_payments', limit: 1 },
@@ -150,22 +158,49 @@ async function testSkillsServer(
 }
 
 async function testBitrix24(registry: ConnectorRegistry, ctx: ConnectorContext): Promise<ConnectorTestResult> {
-  const profile = parseConnectorResult(await registry.query('bitrix24', { op: 'call', method: 'profile' }, ctx))
-  if (!profile.ok) return profile
+  const check = async (id: string, label: string, args: Record<string, unknown>): Promise<ConnectorCapabilityResult> => {
+    const raw = await registry.query('bitrix24', args, ctx)
+    const parsed = parseConnectorResult(raw)
+    return { id, label, ok: parsed.ok, message: parsed.message }
+  }
 
-  const crmFields = await registry.query('bitrix24', { op: 'call', method: 'crm.deal.fields' }, ctx)
-  const crm = parseConnectorResult(crmFields)
-  if (crm.ok) return { ok: true, message: 'Webhook работает, CRM-доступ есть' }
+  const profile = await check('profile', 'Webhook', { op: 'call', method: 'profile' })
+  if (!profile.ok) {
+    return { ok: false, message: profile.message ?? 'Webhook недоступен', capabilities: [profile] }
+  }
 
-  const raw = crmFields && typeof crmFields === 'object' ? crmFields as Record<string, unknown> : {}
-  const details = typeof raw.message === 'string' ? raw.message : crm.message
+  const crm = await check('crm', 'CRM', { op: 'call', method: 'crm.deal.fields' })
+  const tasks = await check('tasks', 'Задачи', {
+    op: 'call',
+    method: 'tasks.task.list',
+    params: { order: { ID: 'desc' }, filter: {}, select: ['ID', 'TITLE'], limit: 1 }
+  })
+
+  const capabilities = [
+    { ...profile, message: profile.ok ? 'Webhook отвечает' : profile.message },
+    { ...crm, message: crm.ok ? 'CRM доступна' : crm.message },
+    { ...tasks, message: tasks.ok ? 'Задачи доступны' : tasks.message }
+  ]
+  const workingFeatures = capabilities.filter(item => item.id !== 'profile' && item.ok)
+
+  if (workingFeatures.length > 0) {
+    const available = workingFeatures.map(item => item.label.toLowerCase())
+    return { ok: true, message: `Webhook работает. Доступно: ${available.join(', ')}`, capabilities }
+  }
+
+  const details = capabilities
+    .filter(item => !item.ok)
+    .map(item => `${item.label}: ${item.message ?? 'нет доступа'}`)
+    .join('\n')
+
   if (/insufficient_scope/i.test(details)) {
     return {
       ok: false,
-      message: 'Webhook живой, но без прав CRM. В Битрикс24 пересоздайте входящий вебхук и включите CRM.'
+      message: 'Webhook живой, но CRM и задачи недоступны. В Битрикс24 проверь права webhook на CRM/Tasks.',
+      capabilities
     }
   }
-  return { ok: false, message: `Webhook живой, но CRM недоступна: ${crm.message}` }
+  return { ok: false, message: `Webhook живой, но рабочих разделов не найдено:\n${details}`, capabilities }
 }
 
 async function runRegistryTest(
