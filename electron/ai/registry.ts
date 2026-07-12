@@ -6,17 +6,21 @@ import { createGrokProvider, GROK_MODELS } from './grok'
 import { createGrokCliProvider, DEFAULT_GROK_CLI_MODEL, GROK_CLI_MODELS } from './grok-cli'
 import { createOpenAiProvider, OPENAI_MODELS } from './openai'
 import { createCodexCliProvider, CODEX_CLI_MODELS } from './codex-cli'
+import { createCodexOAuthProvider } from './codex-oauth/provider'
 import { createExtraProvider, EXTRA_PROVIDERS, type ExtraProviderSpec } from './extra-providers'
 import { createYandexGptProvider, YANDEX_GPT_MODELS } from './yandex-gpt'
 import { createGigaChatProvider, GIGACHAT_MODELS } from './gigachat'
 import type { ChatProvider } from './types'
 import type { AgentMode } from './mode-policy'
 
+/** Версия для User-Agent codex-oauth (телеметрия клиента, честный originator=verstak). */
+const APP_VERSION = '2.0.0'
+
 export type ProviderId =
   | 'gemini-api' | 'gemini-cli'
   | 'claude' | 'claude-cli'
   | 'grok' | 'grok-cli'
-  | 'openai' | 'codex-cli'
+  | 'openai' | 'codex-cli' | 'openai-codex-oauth'
   | 'yandex-gpt' | 'gigachat'
   | ExtraProviderSpec['id']
 
@@ -171,6 +175,20 @@ export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
     supportsTools: false,
     shortLabel: 'Codex'
   },
+  // 2.0.4 direct-OAuth: НАШ agent-loop на подписке ChatGPT/Codex (endpoint codex/responses).
+  // Режим API (loop наш, не CLI). Experimental — OpenAI это разрешает (в отличие от Anthropic),
+  // но policy-risk ненулевой → gate secretKey 'codex_oauth_risk_accepted' (opt-in «понимаю риск»):
+  // провайдер «configured» только после согласия. Модели — известные slug'и, dynamic catalog далее.
+  'openai-codex-oauth': {
+    id: 'openai-codex-oauth',
+    name: 'OpenAI Codex OAuth (Experimental)',
+    transport: 'API',
+    secretKey: 'codex_oauth_risk_accepted',
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+    defaultModel: 'gpt-5.6-sol',
+    supportsTools: true,
+    shortLabel: 'Codex OAuth'
+  },
   // 🇷🇺 Российские провайдеры (152-ФЗ). secretKey = primary key для enabled_models;
   // дополнительные поля (yandex_folder_id, gigachat_client_secret) читаются
   // в ipc/ai.ts из settings и пробрасываются через CreateOptions.
@@ -283,6 +301,9 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
     }
     case 'codex-cli':
       return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, codexHome: opts.codexHome ?? undefined })
+    case 'openai-codex-oauth':
+      // direct-OAuth: наш loop на подписке. codexHome (мультиаккаунт) пробрасываем.
+      return createCodexOAuthProvider({ model: opts.model ?? 'gpt-5.6-sol', appVersion: APP_VERSION, codexHome: opts.codexHome ?? null })
     case 'yandex-gpt': {
       if (!opts.apiKey) throw new Error('YandexGPT: API ключ не задан')
       if (!opts.yandexFolderId) throw new Error('YandexGPT: Folder ID не задан (Settings → Провайдеры → YandexGPT)')
