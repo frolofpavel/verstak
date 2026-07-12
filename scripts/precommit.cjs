@@ -18,6 +18,19 @@ function run(cmd, args) {
   return spawnSync(cmd, args, { cwd: process.cwd(), shell: process.platform === 'win32', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
 
+// 0) lint:changed — гейт по изменённым .ts/.tsx (Фаза 1). Падает только на
+//    ESLint-errors (реальные LLM-дефекты из плана §1.2), warnings — ratchet.
+//    Быстрый (только staged-файлы), поэтому идёт первым.
+process.stdout.write('[pre-commit] lint (изменённые файлы)… ')
+const lint = run('npm', ['run', 'lint:changed'])
+if (lint.status !== 0) {
+  console.error('✖\n[pre-commit] lint провален на изменённых файлах — коммит заблокирован.')
+  console.error((lint.stdout || '') + (lint.stderr || ''))
+  console.error('[pre-commit] Почини lint-errors, либо обойди осознанно: git commit --no-verify')
+  process.exit(1)
+}
+console.log('✓')
+
 // 1) type-check — ЖЁСТКИЙ гейт.
 process.stdout.write('[pre-commit] type-check… ')
 const type = run('npm', ['run', 'type'])

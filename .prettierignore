@@ -1,0 +1,9 @@
+node_modules
+out
+release
+dist
+coverage
+.worktrees
+resources
+package-lock.json
+*.min.js
