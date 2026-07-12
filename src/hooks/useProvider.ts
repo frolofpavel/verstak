@@ -7,7 +7,7 @@ export type ProviderId =
   | 'gemini-api' | 'gemini-cli'
   | 'claude' | 'claude-cli'
   | 'grok' | 'grok-cli'
-  | 'openai' | 'codex-cli'
+  | 'openai' | 'codex-cli' | 'openai-codex-oauth'
   | 'yandex-gpt' | 'gigachat'
   | 'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'
 

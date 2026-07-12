@@ -4556,7 +4556,28 @@ body.gg-rail-toggling .gg-msg-actions {
   border-color: color-mix(in srgb, var(--accent) 34%, transparent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
-/* 2.0.4: режим «Туннель» (Claude Code) — фиолетовый, отличаем от CLI/API */
+/* 2.0.4: opt-in блок Experimental-провайдера (Codex OAuth) — предупреждение + чекбокс */
+.gg-codex-optin {
+  border: 1px solid color-mix(in srgb, var(--warning, #f2b84b) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning, #f2b84b) 8%, transparent);
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.gg-codex-optin-warning {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.gg-codex-optin-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
 .gg-mp-badge.is-tunnel {
   color: #c586c0;
   border-color: color-mix(in srgb, #c586c0 38%, transparent);

@@ -51,6 +51,9 @@ interface ProviderConfig {
   keyHint: string
   keyLink?: { url: string; label: string }
   supportsTools: boolean
+  /** 2.0.4: провайдер за opt-in чекбоксом (Experimental) вместо key-инпута.
+   *  secretKey хранит '1' при согласии — чекбокс, а не текстовое поле. */
+  optIn?: { warning: string; label: string }
 }
 
 const PROVIDERS: ProviderConfig[] = [
@@ -158,6 +161,24 @@ const PROVIDERS: ProviderConfig[] = [
     secretKey: null,
     keyHint: '',
     supportsTools: false
+  },
+  {
+    // 2.0.4 direct-OAuth: НАШ agent-loop на подписке ChatGPT/Codex (не окно над CLI).
+    // Experimental — включается тумблером с opt-in «понимаю риск». Токен берётся из
+    // codex login (~/.codex/auth.json), отдельный ключ не нужен.
+    id: 'openai-codex-oauth',
+    name: 'OpenAI Codex OAuth (Experimental)',
+    transport: 'API',
+    description: 'Полный agent-loop Verstak на вашей подписке ChatGPT/Codex (модели gpt-5.6/5.5/5.4). Токен — из «codex login», отдельный ключ не нужен.',
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+    defaultModel: 'gpt-5.6-sol',
+    secretKey: 'codex_oauth_risk_accepted',
+    keyHint: '',
+    supportsTools: true,
+    optIn: {
+      warning: 'Экспериментально. Использует OAuth-токен вашей подписки напрямую против API OpenAI (как Hermes/OpenClaw). OpenAI это разрешает и не банит автоматически (в отличие от Anthropic), НО официальной гарантии нет — policy-risk ненулевой. Включайте осознанно. Сначала выполните «codex login».',
+      label: 'Понимаю риск — включить Codex OAuth'
+    }
   },
   // OpenAI-compatible extra-провайдеры (zеркало EXTRA_PROVIDERS из electron/ai/extra-providers.ts).
   // При обновлении расширений — обновляй ОБА файла; renderer не имеет доступа к main.
@@ -4142,7 +4163,21 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
         </>
       )}
 
-      {p.secretKey && (
+      {p.optIn && p.secretKey && (
+        <div className="gg-codex-optin">
+          <div className="gg-codex-optin-warning">⚠ {p.optIn.warning}</div>
+          <label className="gg-codex-optin-label">
+            <input
+              type="checkbox"
+              checked={keys[p.secretKey] === '1'}
+              onChange={e => setKeys(k => ({ ...k, [p.secretKey!]: e.target.checked ? '1' : '' }))}
+            />
+            {p.optIn.label}
+          </label>
+        </div>
+      )}
+
+      {p.secretKey && !p.optIn && (
         <>
           <div className="gg-label">{isCustom ? 'API-ключ' : 'API-ключ'}</div>
           <input
