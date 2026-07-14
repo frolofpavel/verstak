@@ -12,17 +12,29 @@ import { createYandexGptProvider, YANDEX_GPT_MODELS } from './yandex-gpt'
 import { createGigaChatProvider, GIGACHAT_MODELS } from './gigachat'
 import type { ChatProvider } from './types'
 import type { AgentMode } from './mode-policy'
+import {
+  capabilitiesFor,
+  type ProviderId,
+  type ProviderTransport,
+  type ProviderCapabilities,
+} from '../../shared/contracts/provider'
 
 /** Версия для User-Agent codex-oauth (телеметрия клиента, честный originator=verstak). */
 const APP_VERSION = '2.0.0'
 
-export type ProviderId =
-  | 'gemini-api' | 'gemini-cli'
-  | 'claude' | 'claude-cli'
-  | 'grok' | 'grok-cli'
-  | 'openai' | 'codex-cli' | 'openai-codex-oauth'
-  | 'yandex-gpt' | 'gigachat'
-  | ExtraProviderSpec['id']
+/**
+ * 2.0.7-C: ID, transport и матрица возможностей переехали в `shared/contracts/provider.ts` —
+ * единственный источник правды для main и renderer. Реэкспорт сохранён: 12 модулей уже
+ * импортируют эти имена отсюда, ломать их незачем.
+ * Правда, которая осталась ЗДЕСЬ (и не должна утекать в renderer): фабрики провайдеров
+ * и списки моделей — это runtime-данные main-процесса.
+ */
+export type {
+  ProviderId,
+  ProviderTransport,
+  ProviderCapabilities,
+} from '../../shared/contracts/provider'
+export { isSubprocessTransport } from '../../shared/contracts/provider'
 
 export interface ProviderDescriptor {
   id: ProviderId
@@ -31,7 +43,7 @@ export interface ProviderDescriptor {
    *  движок — CLI) · Tunnel (внешний официальный агент владеет loop'ом, мы супервайзим —
    *  Claude Code). Tunnel≈CLI по рантайму (оба runPlainConversation), различие — честный
    *  UX/позиционирование: в Tunnel цикл НЕ наш. */
-  transport: 'API' | 'CLI' | 'Tunnel'
+  transport: ProviderTransport
   /** Settings key for the API key (null if not key-based, e.g. CLI). */
   secretKey: string | null
   /** Available model ids; "auto" for CLI where the binary picks. */
@@ -44,52 +56,16 @@ export interface ProviderDescriptor {
 }
 
 /**
- * Ревью F3: формальная матрица возможностей провайдера. Раньше контроль был
- * только в двух полях (transport/supportsTools), а остальное (verification,
- * tick, resume, mcp, delegation, attachments) подразумевалось разрозненно — и
- * пользователь не видел, что на CLI moat «контроль» деградирует.
- */
-export interface ProviderCapabilities {
-  /** Агентный tool-loop ПОД контролем Verstak (read/write/run_command/apply_patch). */
-  tools: boolean
-  /** attest_verification artifact + DoD-доказательство выполнения. */
-  verification: boolean
-  /** Живой таймлайн прогресса (tick) в Tasks / AgentRuns. */
-  liveTimeline: boolean
-  /** Crash-resume безопасен (авто-доигрывание не повторит деструктив). */
-  resumeSafe: boolean
-  /** MCP-инструменты внешних серверов. */
-  mcp: boolean
-  /** Делегирование подзадач (delegate / orchestrate / swarm). */
-  delegation: boolean
-  /** Вложения (картинки/файлы); иначе деградируют в текстовый хинт. */
-  attachments: boolean
-}
-
-/**
  * Единый источник правды о возможностях провайдера. Выводится из transport +
  * supportsTools — реальных детерминантов в коде (не хардкод-таблица на 18 строк,
  * которая бы дрейфовала). На CLI инструменты и проверка идут ВНУТРИ бинаря, и
  * Verstak их не видит: runPlainConversation физически не зовёт tools/verification/
  * tick (см. ipc/ai.ts), а CLI-прогоны не auto-resumable (agent-runs.ts).
+ * Матрица считается ТОЛЬКО здесь, в main (через shared-хелпер capabilitiesFor), и уходит
+ * в renderer готовой в providers:list DTO — второго вывода в UI нет (ср. ipc/settings.ts).
  */
 export function providerCapabilities(d: Pick<ProviderDescriptor, 'transport' | 'supportsTools'>): ProviderCapabilities {
-  const full = d.transport === 'API' && d.supportsTools
-  return {
-    tools: full,
-    verification: full,
-    liveTimeline: full,
-    resumeSafe: d.transport === 'API',
-    mcp: full,
-    delegation: full,
-    attachments: d.transport === 'API'
-  }
-}
-
-/** 2.0.4: CLI и Tunnel идентичны по рантайму — оба subprocess-обёртки (runPlainConversation,
- *  движок вне нашего loop'а). Отличаются только UX-режимом. Хелпер для веток «не-API». */
-export function isSubprocessTransport(t: 'API' | 'CLI' | 'Tunnel'): boolean {
-  return t === 'CLI' || t === 'Tunnel'
+  return capabilitiesFor(d.transport, d.supportsTools)
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {

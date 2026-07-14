@@ -1,15 +1,17 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { ProviderDescriptorDTO } from '../types/api'
+import {
+  DEFAULT_PROVIDER_ID,
+  resolveStoredProviderId,
+  type ProviderId,
+  type ProviderTransport,
+} from '../../shared/contracts/provider'
 
-// Renderer-side зеркало ProviderId из electron/ai/registry.ts. Держим в синхроне
-// при добавлении новых провайдеров (electron/ai/extra-providers.ts).
-export type ProviderId =
-  | 'gemini-api' | 'gemini-cli'
-  | 'claude' | 'claude-cli'
-  | 'grok' | 'grok-cli'
-  | 'openai' | 'codex-cli' | 'openai-codex-oauth'
-  | 'yandex-gpt' | 'gigachat'
-  | 'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'
+// 2.0.7-C: renderer БОЛЬШЕ не держит свою копию ProviderId и свой allowlist KNOWN_IDS —
+// это был второй и третий источник правды, и они разъезжались с реестром main
+// (так пропал openai-codex-oauth: он был в реестре, но не в KNOWN_IDS → выбор
+// пользователя молча схлопывался в gemini-api). Теперь один контракт на оба процесса.
+export type { ProviderId } from '../../shared/contracts/provider'
 
 export interface ProviderInfo {
   id: ProviderId
@@ -18,18 +20,23 @@ export interface ProviderInfo {
   /** Currently selected model id for this provider */
   model: string
   /** "API" or "CLI" */
-  transport: 'API' | 'CLI' | 'Tunnel'
+  transport: ProviderTransport
   /** All available models user can switch to */
   models: string[]
   /** Whether this provider has function calling in our app right now */
   supportsTools: boolean
+  /**
+   * Сохранённый провайдер не опознан (сборка его не знает) → показан дефолт, но факт
+   * подмены НЕ прячем: раньше он терялся молча. UI-баннер поверх этого — срез 2.0.7-D.
+   */
+  unavailableProviderId: string | null
 }
 
 // --- Кеш провайдеров: грузим один раз из main process через IPC ---
 
 export interface ProviderMeta {
   label: string
-  transport: 'API' | 'CLI' | 'Tunnel'
+  transport: ProviderTransport
   models: string[]
   supportsTools: boolean
   defaultModel: string
@@ -103,21 +110,14 @@ export function isModelValidForProvider(providerId: string, model: string): bool
   return meta.models.includes(model)
 }
 
-// ВНИМАНИЕ (срез 5): это runtime-allowlist провайдеров renderer'а. Если id есть в
-// main-реестре (electron/ai/registry.ts), но НЕТ здесь — parseProviderId молча
-// схлопнет выбор пользователя в 'gemini-api' (провайдер «не выбирается»). Именно так
-// был потерян openai-codex-oauth. Анти-дрейф-тест provider-model-drift.test.ts
-// держит этот список в синхроне с реестром.
-const KNOWN_IDS: ProviderId[] = [
-  'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli', 'openai-codex-oauth',
-  'yandex-gpt', 'gigachat',
-  'openrouter', 'deepseek', 'moonshot', 'kimi-coding', 'qwen', 'mistral', 'groq', 'ollama', 'custom-openai', 'verstak-gateway', 'zai-coding'
-]
-
-/** Резолв сохранённого provider-id. Неизвестный id → безопасный дефолт (gemini-api). */
+/**
+ * Резолв сохранённого provider-id. Список известных ID — из shared-контракта, второго
+ * allowlist'а в renderer больше нет (см. комментарий вверху файла).
+ * Неизвестный id по-прежнему приводит к дефолту (иначе приложение не запустится), но
+ * ФАКТ подмены доступен через `resolveStoredProviderId` и попадает в `useProvider`.
+ */
 export function parseProviderId(v: string | null | undefined): ProviderId {
-  if (v && (KNOWN_IDS as string[]).includes(v)) return v as ProviderId
-  return 'gemini-api'
+  return resolveStoredProviderId(v).id
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -132,16 +132,18 @@ interface UseProviderResult extends ProviderInfo {
 }
 
 export function useProvider(): UseProviderResult {
-  const [id, setId] = useState<ProviderId>('gemini-api')
+  const [id, setId] = useState<ProviderId>(DEFAULT_PROVIDER_ID)
   const [model, setModelState] = useState<string>('')
+  const [unavailableProviderId, setUnavailable] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     await ensureProvidersLoaded()
     const rawId = await window.api.settings.getKey('provider')
-    const pid = parseProviderId(rawId)
-    setId(pid)
-    const rawModel = await window.api.settings.getKey(`model_${pid}`)
-    setModelState(normalizeStoredModel(_providerCache?.[pid], rawModel))
+    const resolved = resolveStoredProviderId(rawId)
+    setId(resolved.id)
+    setUnavailable(resolved.unavailable ? resolved.requested : null)
+    const rawModel = await window.api.settings.getKey(`model_${resolved.id}`)
+    setModelState(normalizeStoredModel(_providerCache?.[resolved.id], rawModel))
   }, [])
 
   useEffect(() => {
@@ -164,10 +166,11 @@ export function useProvider(): UseProviderResult {
   const setProviderId = useCallback(async (next: ProviderId) => {
     await window.api.settings.setKey('provider', next)
     setId(next)
+    setUnavailable(null)
     const stored = await window.api.settings.getKey(`model_${next}`)
     setModelState(normalizeStoredModel(_providerCache?.[next], stored))
   }, [])
 
   const meta = getMeta(id)
-  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, supportsTools: meta.supportsTools, setModel, setProviderModel, setProviderId }
+  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, supportsTools: meta.supportsTools, unavailableProviderId, setModel, setProviderModel, setProviderId }
 }

@@ -13,5 +13,5 @@
     "paths": { "@/*": ["src/*"] },
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src", "electron", "tests"]
+  "include": ["src", "electron", "tests", "shared"]
 }

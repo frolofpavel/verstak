@@ -17,10 +17,16 @@
 import { createOpenAiCompatProvider } from './openai-compat'
 import type { ChatProvider } from './types'
 import { DEFAULT_AGENT_CODING_MODEL, DEFAULT_AGENT_FALLBACK_MODEL } from './agent-model-policy'
+import type { ProviderId } from '../../shared/contracts/provider'
 
 export interface ExtraProviderSpec {
-  /** ID для use в registry. */
-  id: 'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'
+  /**
+   * ID для use в registry. 2.0.7-C: это НЕ самостоятельный union, а подмножество
+   * контракта — `Extract` сверяет каждый id с `PROVIDER_IDS`. Переименуют провайдера
+   * в контракте → здесь упадёт компиляция, а не «молча исчезнет провайдер».
+   */
+  id: Extract<ProviderId,
+    'openrouter' | 'deepseek' | 'moonshot' | 'kimi-coding' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai' | 'verstak-gateway' | 'zai-coding'>
   /** Человекочитаемое имя. */
   name: string
   /** Описание для UI карточки. */

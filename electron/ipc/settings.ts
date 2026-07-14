@@ -8,24 +8,25 @@ import {
 import { detectInstalledClis } from '../ai/cli-detect'
 import { scanLocalModelServers } from '../ai/local-models'
 import { PROVIDERS, providerCapabilities, type ProviderCapabilities } from '../ai/registry'
+import {
+  authKindFor,
+  executionModeFor,
+  EXPERIMENTAL_PROVIDER_IDS,
+  type ProviderDescriptorDTO,
+} from '../../shared/contracts/provider'
 import { runDoctor } from '../ai/doctor'
 import { recommendTier, type TierRecommendation } from '../ai/tier-router'
 import { AGENT_MODES, decide, type AgentMode, type ToolDecision } from '../ai/mode-policy'
 import { dangerousCommandLabels } from '../ai/command-policy'
 
-/** Сериализуемый дескриптор провайдера для renderer (без фабричных функций). */
-export interface ProviderDescriptorDTO {
-  id: string
-  name: string
-  transport: 'API' | 'CLI' | 'Tunnel'
-  secretKey: string | null
-  models: string[]
-  defaultModel: string
-  supportsTools: boolean
-  shortLabel: string
-  /** Ревью F3: формальная матрица возможностей — драйвит degraded-индикацию в UI. */
-  capabilities: ProviderCapabilities
-}
+/**
+ * Сериализуемый дескриптор провайдера для renderer (без фабричных функций).
+ * 2.0.7-C, ревью: здесь ЖИЛА ПЯТАЯ КОПИЯ этого типа (id: string, без honesty-полей).
+ * Producer был типизирован ею, consumer — shared-контрактом, и связи между ними не было:
+ * убери поле из литерала ниже — `npm run type` остался бы зелёным, а renderer получил бы
+ * undefined там, где тип обещает значение. Теперь тип ровно один — из shared.
+ */
+export type { ProviderDescriptorDTO } from '../../shared/contracts/provider'
 
 /** Категория действия агента — для матрицы Policy Center. */
 export type PolicyCategory = 'read' | 'edit' | 'command' | 'connector'
@@ -105,10 +106,18 @@ export function registerSettingsIpc(settings: Settings): void {
   // Единый источник истины для списка провайдеров и моделей — electron/ai/registry.ts.
   // Renderer получает данные через этот канал, а не хардкодит копию.
   ipcMain.handle('providers:list', (): ProviderDescriptorDTO[] => {
-    return Object.values(PROVIDERS).map(p => ({
+    // Аннотация НА КОЛЛБЭКЕ обязательна: без неё TS выводит тип литерала и проверяет
+    // лишь совместимость массива — пропущенное поле контракта прошло бы молча.
+    return Object.values(PROVIDERS).map((p): ProviderDescriptorDTO => ({
       id: p.id,
       name: p.name,
       transport: p.transport,
+      // 2.0.7-C: honesty-поля считаются ЗДЕСЬ, из shared-контракта, а не угадываются в UI.
+      executionMode: executionModeFor(p.transport),
+      authKind: authKindFor(p.id, p.transport, p.secretKey),
+      experimental: EXPERIMENTAL_PROVIDER_IDS.includes(p.id),
+      // Списки моделей пока статические (зашиты в реестр); live-discovery — срез 2.0.7-E.
+      catalogSource: 'static' as const,
       secretKey: p.secretKey,
       models: [...p.models],
       defaultModel: p.defaultModel,

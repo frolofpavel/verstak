@@ -1279,30 +1279,22 @@ export interface DevTaskPackage {
   risks: string[]
 }
 
-/** Дескриптор провайдера — единый источник из main process (electron/ai/registry.ts). */
-export interface ProviderDescriptorDTO {
-  id: string
-  name: string
-  transport: 'API' | 'CLI' | 'Tunnel'
-  secretKey: string | null
-  models: string[]
-  defaultModel: string
-  supportsTools: boolean
-  shortLabel: string
-  /** Ревью F3: матрица возможностей — degraded-индикация на CLI. */
-  capabilities?: ProviderCapabilitiesDTO
-}
-
-/** Ревью F3: что провайдер реально умеет под контролем Verstak. */
-export interface ProviderCapabilitiesDTO {
-  tools: boolean
-  verification: boolean
-  liveTimeline: boolean
-  resumeSafe: boolean
-  mcp: boolean
-  delegation: boolean
-  attachments: boolean
-}
+/**
+ * Дескриптор провайдера. 2.0.7-C: тип больше НЕ объявляется здесь — это была четвёртая
+ * копия правды (после registry.ts, useProvider.ts и KNOWN_IDS), и копии разъезжались.
+ * Единственный источник — `shared/contracts/provider.ts`, его же импортирует main.
+ * Здесь только реэкспорт, чтобы существующие `import { ProviderDescriptorDTO } from '../types/api'`
+ * продолжали работать.
+ */
+export type {
+  ProviderId,
+  ProviderTransport,
+  ProviderExecutionMode,
+  ProviderAuthKind,
+  ProviderCatalogSource,
+  ProviderDescriptorDTO,
+  ProviderCapabilities as ProviderCapabilitiesDTO,
+} from '../../shared/contracts/provider'
 
 /** Doctor — health-check провайдеров и коннекторов (см. electron/ai/doctor.ts). */
 export type DoctorStatus = 'ok' | 'no-key' | 'n-a'

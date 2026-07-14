@@ -10,9 +10,12 @@ import { providerCapabilities, PROVIDERS } from '../../electron/ai/registry'
 describe('providerCapabilities (F3)', () => {
   it('API + supportsTools → полный контроль', () => {
     const caps = providerCapabilities({ transport: 'API', supportsTools: true })
+    // 2.0.7-C: возможностей стало 8 — добавлен perFileUndo (наш undo-стек ведёт только
+    // наш loop). Литерал намеренно полный: новая возможность обязана быть осознанной.
     expect(caps).toEqual({
       tools: true, verification: true, liveTimeline: true,
-      resumeSafe: true, mcp: true, delegation: true, attachments: true
+      resumeSafe: true, mcp: true, delegation: true, attachments: true,
+      perFileUndo: true
     })
   })
 
@@ -25,6 +28,19 @@ describe('providerCapabilities (F3)', () => {
     expect(caps.mcp).toBe(false)
     expect(caps.delegation).toBe(false)
     expect(caps.attachments).toBe(false)  // → текстовый хинт
+    expect(caps.perFileUndo).toBe(false)  // CLI пишет мимо undo-стека → git-якорь
+  })
+
+  // Ревью 2.0.7-C: perFileUndo считался как `transport === 'API'` — то есть обещал откат
+  // даже провайдеру БЕЗ тулзов, который физически не пишет файлы (undo-стек наполняют
+  // write_file/apply_patch). Поле, которое врёт о поведении, хуже отсутствующего поля.
+  it('API без тулзов → per-file undo НЕ обещаем (писать файлы нечем)', () => {
+    const caps = providerCapabilities({ transport: 'API', supportsTools: false })
+    expect(caps.perFileUndo).toBe(false)
+    expect(caps.tools).toBe(false)
+    // attachments/resumeSafe от тулзов не зависят — это свойства нашего пути, а не тулзов.
+    expect(caps.attachments).toBe(true)
+    expect(caps.resumeSafe).toBe(true)
   })
 
   it('реальные дескрипторы: claude=полный, claude-cli=урезанный', () => {
