@@ -22,8 +22,15 @@ export interface CodexCreds {
 /** Свежий auth, который НЕ удалось записать на диск. Источник истины, пока запись не пройдёт. */
 interface Unpersisted {
   auth: CodexAuthFile
-  /** refresh_token, который мы ИЗРАСХОДОВАЛИ (он же лежит в мёртвом файле на диске). */
-  consumedRefresh: string
+  /**
+   * refresh_token, который РЕАЛЬНО ЛЕЖИТ НА ДИСКЕ (мёртвый, израсходованный первым
+   * неудачным персистом). Ре-ревью #1 (HIGH): раньше здесь хранился «последний
+   * израсходованный» токен — при ВТОРОМ подряд сбое записи он уезжал вперёд, а диск
+   * стоял на месте, и currentAuth() ошибочно принимал нетронутый диск за «новый логин»,
+   * выбрасывал единственную живую копию токенов и брал мёртвый → лок-аут на 3-м ходу.
+   * Ориентир обязан быть привязан к ДИСКУ и не двигаться при повторных сбоях.
+   */
+  diskRefresh: string
 }
 
 // Состояние по пути к auth.json — переживает пересоздание store.
@@ -46,7 +53,9 @@ function readAuth(path: string): CodexAuthFile {
  * Atomic write: временный файл рядом + rename (не рвём auth.json при краше).
  * КРИТИЧНО: во временном файле лежит ЖИВОЙ токен. Если упал любой из двух шагов
  * (особенно rename — на Windows частый транзиент от антивируса/индексатора), tmp
- * обязан быть удалён, иначе секрет навсегда осиротеет рядом с auth.json.
+ * обязан исчезнуть, иначе секрет навсегда осиротеет рядом с auth.json.
+ * Уборка двухступенчатая: удалить; если удалить не дают (файл держат) — хотя бы
+ * ЗАТЕРЕТЬ содержимое, чтобы токен не остался читаемым на диске (ре-ревью #5).
  */
 function writeAuthAtomic(path: string, auth: CodexAuthFile): void {
   const tmp = `${path}.verstak-tmp`
@@ -54,7 +63,11 @@ function writeAuthAtomic(path: string, auth: CodexAuthFile): void {
     writeFileSync(tmp, JSON.stringify(auth, null, 2), { encoding: 'utf8', mode: 0o600 })
     renameSync(tmp, path)
   } catch (e) {
-    try { if (existsSync(tmp)) unlinkSync(tmp) } catch { /* best-effort: удаление tmp не должно маскировать исходную ошибку */ }
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp)
+    } catch {
+      try { writeFileSync(tmp, '', { encoding: 'utf8', mode: 0o600 }) } catch { /* последний рубеж: больше сделать нечего */ }
+    }
     throw e
   }
 }
@@ -79,23 +92,32 @@ export function createCodexCredentialStore(codexHome?: string | null) {
   const path = authFilePath(codexHome)
 
   /**
-   * Актуальный auth: если прошлый refresh не удалось персистнуть, на диске лежит
-   * МЁРТВЫЙ (израсходованный) refresh_token — источник истины тогда в памяти.
-   * Но если файл на диске с тех пор ИЗМЕНИЛСЯ (юзер сделал `codex login` заново или
-   * refresh сделал сам codex CLI), диск снова главный, а память сбрасывается.
+   * Актуальный auth. Если прошлый refresh не удалось персистнуть, на диске лежит
+   * МЁРТВЫЙ (израсходованный) refresh_token — источник истины тогда в памяти. Память
+   * сбрасывается в двух случаях: файл на диске изменился со стороны (re-login или
+   * refresh самим codex CLI) либо файла нет вовсе (logout).
    */
   function currentAuth(): CodexAuthFile {
     const pending = unpersistedByPath.get(path)
+
     if (!existsSync(path)) {
-      if (pending) return pending.auth
+      // Ре-ревью #2: файла нет = пользователь вышел (`codex logout`). Продолжать на
+      // токенах СТАРОГО аккаунта из памяти нельзя — это чужая сессия. Забываем и честно
+      // просим залогиниться. (Atomic write идёт через rename, файл не «мигает», поэтому
+      // отсутствие — это именно logout, а не гонка записи.)
+      unpersistedByPath.delete(path)
+      persistWarningByPath.delete(path)
       throw new Error(`codex auth.json не найден (${path}) — залогинься: codex login`)
     }
+
     const onDisk = readAuth(path)
     if (!pending) return onDisk
-    if (onDisk.tokens.refresh_token === pending.consumedRefresh) {
-      return pending.auth // диск всё ещё содержит мёртвый токен → живём из памяти
+
+    if (onDisk.tokens.refresh_token === pending.diskRefresh) {
+      return pending.auth // на диске всё тот же мёртвый токен → живём из памяти
     }
-    // Диск обновился со стороны (re-login) — он новее нашей памяти.
+
+    // Диск обновился со стороны — он новее памяти.
     unpersistedByPath.delete(path)
     persistWarningByPath.delete(path)
     return onDisk
@@ -105,42 +127,50 @@ export function createCodexCredentialStore(codexHome?: string | null) {
     const existing = inFlightByPath.get(path)
     if (existing) return existing // single-flight МЕЖДУ store'ами (= между чатами)
 
-    const p = (async () => {
-      try {
-        const consumedRefresh = auth.tokens.refresh_token
-        const { url, body } = buildRefreshRequest(consumedRefresh)
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        if (!res.ok) {
-          const t = await res.text().catch(() => '')
-          throw new Error(`codex refresh HTTP ${res.status}: ${t.slice(0, 200)}`)
-        }
-        const resp = await res.json() as { id_token?: string; access_token?: string; refresh_token?: string }
-        const next = applyRefreshResponse(auth, resp, new Date().toISOString())
-        try {
-          await persistWithRetry(path, next)
-          unpersistedByPath.delete(path)
-          persistWarningByPath.delete(path)
-        } catch (e) {
-          // Refresh на сервере УЖЕ произошёл: consumedRefresh ротирован и мёртв, а на
-          // диске лежит именно он. Уронить операцию = лок-аут. Поэтому новый auth
-          // становится источником истины В ПАМЯТИ (переживает пересоздание store на
-          // следующий ход), файл на диске не тронут, а предупреждение забирает провайдер
-          // и показывает в UI. В сообщение попадает только путь и fs-ошибка — токены никогда.
-          const msg = e instanceof Error ? e.message : String(e)
-          unpersistedByPath.set(path, { auth: next, consumedRefresh })
-          persistWarningByPath.set(path, `Не удалось сохранить обновлённый Codex-токен (${path}): ${msg}. ` +
-            'Сессия продолжает работать, но после перезапуска приложения может потребоваться повторный «codex login».')
-        }
-        return next
-      } finally {
-        inFlightByPath.delete(path)
+    const p = (async (): Promise<CodexAuthFile> => {
+      const consumedRefresh = auth.tokens.refresh_token
+      const { url, body } = buildRefreshRequest(consumedRefresh)
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        throw new Error(`codex refresh HTTP ${res.status}: ${t.slice(0, 200)}`)
       }
+      const resp = await res.json() as { id_token?: string; access_token?: string; refresh_token?: string }
+      const next = applyRefreshResponse(auth, resp, new Date().toISOString())
+
+      try {
+        await persistWithRetry(path, next)
+        unpersistedByPath.delete(path)
+        persistWarningByPath.delete(path)
+      } catch (e) {
+        // Refresh на сервере УЖЕ произошёл: consumedRefresh ротирован и мёртв, а на диске
+        // лежит именно он. Уронить операцию = лок-аут. Поэтому новый auth становится
+        // источником истины В ПАМЯТИ (переживает пересоздание store на следующий ход),
+        // файл на диске не тронут, а предупреждение забирает провайдер и показывает в UI.
+        // В сообщение попадает только путь и fs-ошибка — содержимое токенов никогда.
+        const msg = e instanceof Error ? e.message : String(e)
+        // Ориентир — то, что ЛЕЖИТ НА ДИСКЕ, и он НЕ двигается при повторных сбоях
+        // (иначе currentAuth примет нетронутый диск за re-login → лок-аут, ре-ревью #1).
+        const prev = unpersistedByPath.get(path)
+        unpersistedByPath.set(path, { auth: next, diskRefresh: prev?.diskRefresh ?? consumedRefresh })
+        persistWarningByPath.set(path, `Не удалось сохранить обновлённый Codex-токен (${path}): ${msg}. ` +
+          'Сессия продолжает работать, но после перезапуска приложения может потребоваться повторный «codex login».')
+      }
+      return next
     })()
+
     inFlightByPath.set(path, p)
+    // Ре-ревью #4: снимать in-flight ВНУТРИ (finally) нельзя — если fetch бросит
+    // СИНХРОННО, finally отработает ДО set(), и в кэш ляжет уже отклонённый промис,
+    // «отравляющий» все последующие refresh'и до перезапуска. Чистим строго ПОСЛЕ set,
+    // микротаском. Оба обработчика возвращают undefined → производный промис резолвится
+    // и не даёт unhandled rejection (исходный p обрабатывает вызывающий).
+    const clear = (): void => { inFlightByPath.delete(path) }
+    void p.then(clear, clear)
     return p
   }
 
