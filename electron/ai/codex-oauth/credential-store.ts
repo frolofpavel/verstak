@@ -60,7 +60,20 @@ export function createCodexCredentialStore(codexHome?: string | null) {
         }
         const resp = await res.json() as { id_token?: string; access_token?: string; refresh_token?: string }
         const next = applyRefreshResponse(auth, resp, new Date().toISOString())
-        writeAuthAtomic(path, next)
+        try {
+          writeAuthAtomic(path, next)
+        } catch (e) {
+          // Срез 6 (§2.3): refresh на сервере УЖЕ произошёл — старый refresh_token
+          // ротирован и мёртв. Уронить здесь всю операцию = лок-аут: следующий старт
+          // перечитает с диска мёртвый токен и refresh больше не пройдёт. Поэтому
+          // сессия продолжается на новых токенах В ПАМЯТИ, старый файл на диске не
+          // трогаем (atomic write не успел заменить его), а сбой персиста сообщаем
+          // громко — после перезапуска может потребоваться повторный `codex login`.
+          // В сообщение попадает только путь и fs-ошибка, содержимое токенов — никогда.
+          const msg = e instanceof Error ? e.message : String(e)
+          console.warn(`[codex-oauth] не удалось сохранить обновлённый auth-state (${path}): ${msg}. ` +
+            'Сессия продолжается на токенах в памяти; после перезапуска может потребоваться повторный `codex login`.')
+        }
         return next
       } finally {
         inFlight = null
