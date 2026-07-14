@@ -63,11 +63,27 @@ const cmpSemver = (a, b) => {
   return 0
 }
 let published = null
-try {
-  const res = spawnSync('curl', ['-sS', 'https://api.github.com/repos/frolofpavel/verstak/releases/latest'], { encoding: 'utf8' })
-  const d = JSON.parse(res.stdout || '{}')
-  published = typeof d.tag_name === 'string' ? d.tag_name : null
-} catch { /* сеть недоступна — обработаем ниже */ }
+{
+  // Запрос АВТОРИЗОВАННЫЙ: анонимный лимит GitHub — 60/час на IP, и гейт (который
+  // гоняется многократно) на нём падал бы «GitHub API недоступен» на ровном месте.
+  // С токеном лимит 5000/час. Токен берём из Git Credential Manager и НЕ печатаем.
+  const cred = spawnSync('git', ['credential', 'fill'], { cwd: ROOT, input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8' })
+  const token = /^password=(.+)$/m.exec(cred.stdout || '')?.[1]
+  const headers = { 'User-Agent': 'verstak-release-gate', 'X-GitHub-Api-Version': '2022-11-28' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  // Ретраи: сетевой блип не должен блокировать релиз (fail-closed только по сути, не по связи).
+  for (let attempt = 1; attempt <= 3 && !published; attempt++) {
+    try {
+      const res = await fetch('https://api.github.com/repos/frolofpavel/verstak/releases/latest', {
+        headers, signal: AbortSignal.timeout(20_000)
+      })
+      const d = await res.json()
+      if (typeof d.tag_name === 'string') published = d.tag_name
+      else if (typeof d.message === 'string') notes.push(`GitHub API: ${d.message.slice(0, 60)}`)
+    } catch { /* следующая попытка */ }
+    if (!published && attempt < 3) await new Promise(r => setTimeout(r, 3000))
+  }
+}
 if (check('узнали последний опубликованный релиз', !!published, published ?? 'GitHub API недоступен')) {
   check(`версия НОВЕЕ опубликованной (${published})`, cmpSemver(version, published) > 0, `${version} > ${published.replace(/^v/, '')}`)
 }
@@ -113,17 +129,16 @@ const run = (label, cmd, args) => {
 const type = run('type', 'npm', ['run', 'type'])
 check('проверка типов без ошибок', type.ok)
 
-// Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН.
-// Гейт обязан быть детерминированным → держим порт сам, флейк уходит в skip.
-let holder = null
-try {
-  const { createServer } = await import('node:http')
-  holder = createServer((_q, s) => s.end('busy'))
-  await new Promise((res) => { holder.once('error', () => res(null)); holder.listen(11434, '127.0.0.1', () => res(null)) })
-} catch { /* порт уже занят — тоже годится */ }
+// Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
+// (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
+// бесполезен → держим порт ОТДЕЛЬНЫМ процессом (в самом гейте spawnSync блокирует
+// event loop, поэтому внутрипроцессный держатель ненадёжен), и тест уходит в skip.
+const { spawn } = await import('node:child_process')
+const holderProc = spawn('node', ['-e', 'require("http").createServer((q,r)=>r.end("busy")).listen(11434,"127.0.0.1")'], { detached: false, stdio: 'ignore' })
+await new Promise(r => setTimeout(r, 800)) // дать порту забиндиться (или упасть на EADDRINUSE — тоже ок)
 
 const tests = run('tests', 'npm', ['run', 'test:fast'])
-holder?.close()
+try { holderProc.kill() } catch { /* уже мёртв */ }
 const failedLine = /Tests\s+(\d+)\s+failed/.exec(tests.out)
 const passedLine = /Tests\s+.*?(\d+)\s+passed/.exec(tests.out)
 const zeroFailed = !failedLine

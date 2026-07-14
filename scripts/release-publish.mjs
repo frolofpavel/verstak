@@ -7,9 +7,10 @@
 //
 // Токен берётся из Git Credential Manager и НИКОГДА не печатается.
 // Запуск: node scripts/release-publish.mjs
-import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const ROOT = process.cwd()
 const REPO = 'frolofpavel/verstak'
@@ -48,7 +49,13 @@ if (!releaseId) {
   const notesPath = join(ROOT, 'docs', `RELEASE-${tag}.md`)
   const body = existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : `Verstak ${version}`
   const payload = JSON.stringify({ tag_name: tag, name: `Verstak ${version}`, body, draft: false, prerelease: false })
-  const created = json(curl(['-X', 'POST', `${API}/releases`, '-H', 'Content-Type: application/json', '-d', payload]).out)
+  // Тело релиза (переносы строк, эмодзи, кириллица) НЕЛЬЗЯ передавать аргументом
+  // командной строки: Windows-argv его калечит → GitHub отвечает «Problems parsing JSON».
+  // Кладём JSON во временный файл и скармливаем curl'у как @file.
+  const tmpBody = join(tmpdir(), `verstak-release-${version}.json`)
+  writeFileSync(tmpBody, payload, 'utf8')
+  const created = json(curl(['-X', 'POST', `${API}/releases`, '-H', 'Content-Type: application/json', '--data-binary', `@${tmpBody}`]).out)
+  try { unlinkSync(tmpBody) } catch { /* best-effort */ }
   releaseId = created.id
   if (!releaseId) { console.error('✗ не удалось создать релиз:', JSON.stringify(created).slice(0, 300)); process.exit(1) }
   console.log(`\n[создан релиз ${tag}, id=${releaseId}]`)
@@ -97,7 +104,10 @@ console.log(`  ${okVersion ? '✓' : '✗'} публичный latest.yml отд
 
 const head = spawnSync('curl', ['-sSIL', `${dl}/Verstak-Setup-${version}-x64.exe`], { encoding: 'utf8' }).stdout || ''
 const code200 = /HTTP\/[\d.]+ 200/.test(head)
-const len = Number(/[Cc]ontent-[Ll]ength:\s*(\d+)/g && [...head.matchAll(/[Cc]ontent-[Ll]ength:\s*(\d+)/g)].pop()?.[1] ?? 0)
+// Берём ПОСЛЕДНИЙ Content-Length: у GitHub первый ответ — 302-редирект (длина 0),
+// реальный размер приходит с финального 200 от CDN.
+const lenMatch = [...head.matchAll(/[Cc]ontent-[Ll]ength:\s*(\d+)/g)].pop()
+const len = Number(lenMatch?.[1] ?? 0)
 const realSize = statSync(setup).size
 const okSetup = code200 && len === realSize
 console.log(`  ${okSetup ? '✓' : '✗'} Setup.exe качается (200, ${len} байт == ${realSize})`)
