@@ -714,6 +714,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       void (async () => {
         try {
           await window.api.settings.setKey('provider', session.providerId!)
+          // Гонка (срез 4): к моменту резолва пользователь мог переключиться на другой
+          // чат — тогда дописывать модель ЭТОГО (уже устаревшего) чата нельзя, иначе
+          // model_<provider>/setModel затрёт настройку нового активного чата. Зеркалим
+          // token-guard history-загрузки выше. Сам provider-write выше безопасен по
+          // порядку (issued синхронно в порядке switch), guard'им только пост-await часть.
+          if (myToken !== switchChatSessionToken) return
           if (session.model && isModelValidForProvider(session.providerId!, session.model)) {
             await window.api.settings.setKey(`model_${session.providerId}`, session.model)
           } else if (session.model) {
