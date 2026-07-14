@@ -108,6 +108,13 @@ export function createCodexOAuthProvider(opts: { model: string; appVersion?: str
         yield { type: 'error', message: `Codex OAuth: ${e instanceof Error ? e.message : String(e)}` }
         return
       }
+      // Срез 6: если refresh прошёл, но записать обновлённый auth.json не удалось —
+      // сессия живёт на токенах в памяти, но пользователь ДОЛЖЕН узнать (в упакованном
+      // .exe консоли нет, console.warn был бы немым). Показываем в Timeline.
+      const persistWarning = store.takePersistWarning()
+      if (persistWarning) {
+        yield { type: 'agent-progress', phase: 'model', status: 'error', title: 'Codex: токен не сохранён', detail: persistWarning }
+      }
       if (!res.ok || !res.body) {
         const t = res.ok ? '(нет тела)' : await res.text().catch(() => '')
         yield { type: 'error', message: `Codex OAuth HTTP ${res.status}: ${t.slice(0, 300)}` }
