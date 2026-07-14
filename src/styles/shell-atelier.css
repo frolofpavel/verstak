@@ -375,21 +375,30 @@ html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-interrup
 .gg-app-atelier .gg-nav-item {
   border-radius: var(--radius-md);
   border: 1px solid transparent;
-  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
 }
 
 .gg-app-atelier .gg-nav-item:hover {
   background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
   border-color: var(--border-subtle);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
+}
+
+.gg-app-atelier .gg-nav-item:not(.is-disabled):hover .gg-nav-icon {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .gg-app-atelier .gg-nav-item.is-active {
-  background: var(--accent-muted);
-  border-color: var(--accent-border);
-  box-shadow:
-    inset 2px 0 0 var(--accent),
-    0 4px 12px color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--vol-recessed-bg);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+  box-shadow: var(--vol-shadow-inset);
+}
+
+.gg-app-atelier .gg-nav-item.is-active .gg-nav-icon {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .gg-app-atelier .gg-chat-nav-item.is-active {

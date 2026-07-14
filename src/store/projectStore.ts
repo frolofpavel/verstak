@@ -121,9 +121,10 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   setProject: (path: string) => Promise<void>
   closeProject: () => void
   refreshProjectList: () => Promise<void>
-  updateProjectMeta: (path: string, patch: { name?: string; iconPath?: string | null; hidden?: boolean }) => Promise<ProjectMeta | null>
+  updateProjectMeta: (path: string, patch: Partial<Pick<ProjectMeta, 'name' | 'iconPath' | 'hidden' | 'notes' | 'accentColor' | 'notificationsMuted' | 'status'>>) => Promise<ProjectMeta | null>
   removeProject: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
   setActiveView: (v: ViewId) => void
+  refreshFileTree: (path?: string | null) => Promise<void>
   addMessage: (msg: ChatMessage) => void
   /** Вставить сообщение перед последним (обычно — перед стримящим assistant). */
   insertMessageBeforeLast: (msg: ChatMessage) => void
@@ -390,17 +391,47 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     void window.api.projects.setCurrent(path)
     void window.api.settings.setKey(LAST_PROJECT_PATH_KEY, path)
 
-    const [projectList, chatSessionsRaw] = await Promise.all([
-      window.api.projects.list(),
-      window.api.chatSessions.list(path),
-    ])
-    if (myToken !== setProjectToken) return
+    const optimisticChatId = target.chatId ?? null
+    const optimisticMessages = existing ? target.messages : []
+    set({
+      path,
+      tree: [],
+      messages: optimisticMessages,
+      isStreaming: target.isStreaming,
+      streamStartedAt: target.streamStartedAt,
+      pendingWrites: target.pendingWrites,
+      pendingCommand: target.pendingCommand,
+      activity: target.activity,
+      agentProgress: target.agentProgress ?? [],
+      sessionUsage: target.sessionUsage,
+      runningPlanStep: target.runningPlanStep,
+      checkpointId: target.checkpointId, checkpointMessageId: target.checkpointMessageId,
+      preflights: target.preflights,
+      subagentRuns: target.subagentRuns,
+      activeView: 'chat',
+      chatSessions: [],
+      activeChatId: optimisticChatId,
+      sessions: nextSessions,
+      touchedFiles: {},
+      activeDevTaskId: null,
+      devTask: null,
+      chatSnapshots: {},
+      reviews: {},
+      openedReviewId: null,
+      artifacts: [],
+      resumableRuns: [],
+      activePipeline: null,
+      helpMode: false,
+    })
 
-    void window.api.files.tree(path).then(tree => {
+    void window.api.projects.list().then(projectList => {
       if (myToken !== setProjectToken) return
       if (get().path !== path) return
-      set({ tree })
-    }).catch(() => { /* files panel fills in later */ })
+      set({ projectList })
+    }).catch(() => { /* project list stays cached */ })
+
+    const chatSessionsRaw = await window.api.chatSessions.list(path)
+    if (myToken !== setProjectToken) return
 
     let chatSessions = chatSessionsRaw
     if (chatSessions.length === 0) {
@@ -437,7 +468,6 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       preflights: target.preflights,
       subagentRuns: target.subagentRuns,
       activeView: 'chat',
-      projectList,
       chatSessions,
       activeChatId,
       sessions: nextSessions,
@@ -543,7 +573,21 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
     return result
   },
-  setActiveView: (v) => set({ activeView: v }),
+  setActiveView: (v) => {
+    set({ activeView: v })
+    if (v === 'files') void get().refreshFileTree()
+  },
+  refreshFileTree: async (projectPath) => {
+    const path = projectPath ?? get().path
+    if (!path) return
+    try {
+      const tree = await window.api.files.tree(path)
+      if (get().path !== path) return
+      set({ tree })
+    } catch {
+      // The files panel will keep its empty state if the tree cannot be loaded.
+    }
+  },
   addMessage: (msg) => set(s => ({
     messages: [...s.messages, { ...msg, createdAt: msg.createdAt ?? Date.now() }],
   })),
@@ -1011,28 +1055,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { help: next }
   }),
   openHelpChat: async () => {
-    const s = get()
-    if (s.helpMode) {
+    const initial = get()
+    if (initial.helpMode) {
       get().leaveHelpMode()
       return
     }
     const helpSession = await window.api.chatSessions.getOrCreateHelp()
-    if (s.path && s.activeChatId != null) {
-      const nextSnapshots = { ...s.chatSnapshots }
-      // captureBundle вместо рукописного литерала — единый источник формы снапшота
-      // (вкл. checkpointId/preflights/subagentRuns), чтобы не забыть поле (#8/#17).
-      nextSnapshots[s.activeChatId] = captureBundle(s)
-      // Стрим проекта уходит в chatSnapshots; в корне сбрасываем — иначе после
-      // выхода из справки send блокируется, пока фоновый прогон не завершится.
-      set({
-        chatSnapshots: nextSnapshots,
-        isStreaming: false,
-        streamStartedAt: null,
-        pendingWrites: [],
-        pendingCommand: null,
-      })
-    }
-    let helpState = s.help
+    let helpState = get().help
     if (helpState.messages.length === 0) {
       const history = await window.api.chats.list(helpSession.id)
       helpState = {
@@ -1040,12 +1069,36 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
       }
     }
-    set({
+    const current = get()
+    if (current.helpMode) return
+
+    const patch: Partial<ProjectState> = {
       helpChatId: helpSession.id,
       helpMode: true,
       help: { ...helpState, hasUnread: false },
       activeView: 'chat'
-    })
+    }
+
+    if (current.path && current.activeChatId != null) {
+      const activeProjectSnapshot = captureBundle(current)
+      patch.chatSnapshots = {
+        ...current.chatSnapshots,
+        [current.activeChatId]: activeProjectSnapshot
+      }
+      patch.sessions = {
+        ...current.sessions,
+        [current.path]: {
+          ...activeProjectSnapshot,
+          hasUnread: false
+        }
+      }
+      patch.isStreaming = false
+      patch.streamStartedAt = null
+      patch.pendingWrites = []
+      patch.pendingCommand = null
+    }
+
+    set(patch)
     useSkills.getState().setActiveSkill('verstak-guide')
   },
   recordArtifact: (a) => set(s => ({

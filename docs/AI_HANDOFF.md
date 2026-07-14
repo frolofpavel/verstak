@@ -1,229 +1,214 @@
-# AI Handoff: settings, connectors, project instructions
+# AI Handoff: Verstak local updates
 
-Last updated: 2026-07-12
+Last updated: 2026-07-15
 Source branch: `codex/reapply-1.9.5`
 Target use: pull these changes from Rayner's fork into Pavel's main Verstak repository
+Local version alignment: `2.0.5`
 
 ## Read This First
 
-Start here before reading the raw diff. This branch contains a broad UI/settings refresh plus connector and project-instruction work. The changes are connected: do not cherry-pick only CSS without the matching React, IPC, connector, type, and test changes.
+This push contains several connected changes from Rayner's local build. Do not cherry-pick only CSS or only React components without the matching IPC, preload, storage, type, and style changes.
 
-Also read `docs/UI_DESIGN_GUIDE.md`. It is now the visual baseline for future Verstak UI work. The connector-card style is the reference for cards, buttons, expandable panels, internal blocks, inputs, lamps, hover states, and compact helper text.
+Keep Pavel's release version unless the release owner explicitly bumps it. Rayner's local `package.json` and lockfile are aligned to installed Verstak `2.0.5`.
 
-## What To Transfer
+Do not include the untracked `mcps/chrome-devtools/` folder unless Pavel explicitly wants that local tooling copied into the main repo.
 
-Transfer the functional/UI changes below into the main repo while keeping the target repo's own release version unless Pavel explicitly wants a version bump.
+## What Changed
 
-### 1. Settings Redesign
-
-Main files:
-
-- `src/components/Settings.tsx`
-- `src/styles/layout.css`
-- `src/styles/theme.css`
-- `src/hooks/useAppearance.ts`
-- `src/i18n/ru.ts`
-- `src/i18n/en.ts`
-
-Important points:
-
-- The settings UI was rebuilt around the new connector-card visual language.
-- The first settings tab should open by default instead of jumping into providers.
-- The old `Контроль`, `Ночной режим`, `Память`, `Правила`, and `Audit Log` placement was changed:
-  - `Права модели` moved into the AI area
-  - project memory/rules/history belong in the project-side Control section
-  - profile is intentionally a `Скоро` page until account/organization features exist
-- Appearance, notifications, updates, providers, models, connectors, external tools, model rights, and model work modes were all refreshed.
-- Keep both dark and light theme compatibility.
-
-Do not reintroduce:
-
-- random card styles per settings tab
-- old heavy hover shadows
-- nested card-in-card layouts for simple settings
-- unclear final-period helper copy in compact UI labels
-
-### 2. Models And Providers
+### 1. Project Settings
 
 Main files:
 
-- `src/components/ModelPicker.tsx`
-- `src/components/ModePicker.tsx`
-- `src/components/Settings.tsx`
-- `src/lib/model-catalog.ts`
-- `src/lib/runtime-capability.ts`
-- `electron/ai/mode-policy.ts`
-- `electron/ai/grok-cli.ts`
-- `electron/ai/cost-guard.ts`
-
-Important points:
-
-- Models and providers now use cleaner cards with inline expanded settings.
-- Connected/ready items sort higher.
-- "Current", "primary", and duplicated control badges were removed or reduced where they misled users.
-- Provider/model cards should show useful user-facing descriptions, not internal phrases like "tools".
-- Runtime capability/control copy should warn users when external CLI models cannot be fully controlled by Verstak.
-- Daily spending limit language replaced per-session wording and should reset by local user day.
-
-Verify:
-
-- Connected Grok Build still appears correctly.
-- Unconnected providers are not shown as ready.
-- `Где взять ключ`/connection buttons are outline buttons, not heavy filled pills.
-- Tooltips use the new global Verstak style.
-
-### 3. Connectors
-
-Main files:
-
-- `src/components/ConnectorIcons.tsx`
-- `src/components/Settings.tsx`
-- `electron/ai/connector-test.ts`
-- `electron/connectors/bitrix24.ts`
-- `electron/connectors/yandex-wordstat.ts`
-- `electron/ipc/tool-handlers/connectors.ts`
-- `src/types/api.d.ts`
-- `tests/connectors/yandex-wordstat.test.ts`
-- `tests/ai/connector-test-bitrix.test.ts`
-- `tests/connectors/bitrix24-profile.test.ts`
-
-Important points:
-
-- Connector cards were redesigned and became the UI baseline.
-- Connected and disconnected connectors are separated.
-- Status is shown by small lamps; avoid big status pills in closed cards.
-- Expanded connector settings are part of the connector card, not a detached duplicated panel.
-- Bitrix24 validation now treats a webhook as connected when at least one supported area works. Show per-area capability status instead of failing the whole connector when CRM/task/user permissions differ.
-- Wordstat now uses Yandex Search API wording:
-  - `Идентификатор каталога`
-  - API key from Yandex AI Studio/Search API
-  - clear text about Search API permissions and service account setup
-- Token checks must actually call the selected connector test; do not mark a connector as ready only because a value was saved.
-
-Verify:
-
-- Bitrix24 shows available areas such as webhook/tasks/CRM correctly.
-- Wordstat test fails clearly when the Search API key/folder/roles are wrong.
-- Saving a wrong key does not make the connector look connected.
-- Connector icons follow the custom Verstak line-icon style.
-
-### 4. Project Control: AI Instructions And History
-
-Main files:
-
-- `src/components/ProjectRulesView.tsx`
-- `src/components/Sidebar.tsx`
-- `src/components/BrainPanel.tsx`
+- `src/components/ProjectSettings.tsx`
 - `electron/ipc/projects.ts`
-- `src/store/projectStore.ts`
+- `electron/storage/db.ts`
+- `electron/storage/projects.ts`
+- `src/components/ProjectAvatar.tsx`
+- `src/components/ProjectRail.tsx`
 - `src/styles/layout.css`
+- `src/types/api.d.ts`
 
-Important points:
+Important behavior:
 
-- Project rules/memory were moved out of global settings and into the project Control area.
-- The section should be understandable for a first-time user:
-  - quick-start templates explain what they add and whether they are safe
-  - working instructions have one clean helper panel, not nested frames
-  - the editable textarea is the only recessed writing surface
-- The product is universal, not Yandex Direct-only. Keep templates cross-domain: marketing, development, operations, support, reporting, and general project behavior.
-- Quick-start template cards are informational blocks with internal action buttons. The whole block should not animate like a button.
+- Project settings were rebuilt into a cleaner modal with notes, labels, group, project folder, status, project color, notifications, project data, archive, and project-management actions.
+- Project labels are stored as shared label entities but applied per project.
+- Project status supports active, paused, and done.
+- Project accent color is shown on the avatar ring only when no stronger state is active. Streaming, unread/completed, interrupted/error, and active-project states must override the custom color.
+- Duplicate project creates a copy named `Копия <project name>` and should preserve project settings.
+- Project cleanup removes temporary/cache data only, not project files, chats, tasks, or logs.
+- The modal uses the same action bar pattern as global settings: changed-state text plus close/save actions.
 
 Verify:
 
-- Opening the project Control section shows the new AI instruction page.
-- Adding template blocks inserts text into the editor.
-- Saving updates the project instructions.
-- The page scrolls correctly and does not trap the settings/project panel.
+- Open project settings from a project gear.
+- Change notes, labels, group, status, color, mute notifications, and save.
+- Confirm changes apply only after save where applicable.
+- Confirm accent color appears on the avatar ring when the project is idle and inactive.
+- Confirm active/streaming/unread/error states override the custom color.
+- Confirm duplicate project copies settings.
 
-### 5. Project Rail And Visual System
+### 2. Project Rail And Project Sidebar
 
 Main files:
 
 - `src/components/ProjectRail.tsx`
 - `src/components/Sidebar.tsx`
-- `src/App.tsx`
 - `src/styles/layout.css`
 - `src/styles/atelier-global.css`
-- `docs/UI_DESIGN_GUIDE.md`
 
-Important points:
+Important behavior:
 
-- The design guide is now mandatory for future UI work.
-- Collapsed project folders can expand/collapse from the rail.
-- Avatar/project status visuals, folder icons, lamps, card borders, and hover language should stay consistent.
-- Do not bring back mixed one-off colors, thick side bars, random glows, or heavy mono labels.
-
-### 6. External Tools And Model Rights
-
-Main files:
-
-- `electron/mcp/registry.ts`
-- `src/components/Settings.tsx`
-- `electron/ai/tools.ts`
-- `electron/ipc/ai.ts`
-- `electron/main.ts`
-- `electron/preload.ts`
-
-Important points:
-
-- `MCP` is renamed/presented as `Внешние инструменты` / `Продвинутые подключения` for users.
-- Ready-made server descriptions were rewritten for normal users.
-- `Права модели` replaces the vague `Что разрешено` naming.
-- The permissions table was redesigned as a compact matrix with lamps.
-- Include the disclaimer that some external models cannot be technically controlled by Verstak.
+- "Projects" and the project-side panel were visually aligned.
+- The project rail can be resized between the old width and a wider maximum.
+- In collapsed mode, clicking a group folder expands/collapses its projects.
+- Project chips keep stable selected background while project status is shown through avatar rings and thin borders.
+- The project rail has filters for default, active, paused, done, and archive views.
+- Project hover should not show folder paths as native browser tooltips.
 
 Verify:
 
-- The external tools tab is understandable without knowing the MCP acronym.
-- The model-rights table fits horizontally and uses the same lamp style as the rest of the app.
-- Expandable blocks use connector-style hover and no frame-in-frame look.
+- Resize the project rail and restart app.
+- Collapse rail and expand/collapse folders.
+- Switch projects quickly and ensure no white ring flashes before the active ring.
+- Start/finish/error a project task and confirm state colors behave as described.
+
+### 3. File Preview From Chat
+
+Main files:
+
+- `src/App.tsx`
+- `src/components/Chat.tsx`
+- `src/components/Markdown.tsx`
+- `src/components/FilePreviewPanel.tsx`
+- `electron/ipc/files.ts`
+- `electron/preload.ts`
+- `src/types/api.d.ts`
+- `src/styles/markdown.css`
+- `src/styles/layout.css`
+
+Important behavior:
+
+- Paths in assistant messages can open in a right-side file preview panel.
+- The preview can read project files, known project roots, and skill folders.
+- `SKILL.md` paths from skill names should resolve correctly.
+- Text/Markdown/code files show readable content.
+- `.docx` converts to HTML using the existing document conversion path.
+- `.xlsx` converts to readable Markdown using the existing office reader.
+- Unsupported or missing files show a clear user-facing error instead of raw IPC/ENOENT output.
+- The right-side preview shares sizing behavior with the parallel chat panel.
+
+Verify:
+
+- Click a Markdown inline code path like `direct-search-minusation/SKILL.md`.
+- Click a project file path, an `.xlsx`, and a `.docx`.
+- Confirm missing files show a clear explanation and the "show in explorer" action handles allowed paths.
+
+### 4. Copyable Text Blocks In Chat
+
+Main files:
+
+- `src/components/Markdown.tsx`
+- `src/styles/markdown.css`
+
+Important behavior:
+
+- Code blocks marked as `copy`, `text`, `plain`, or `plaintext` render as a separate copyable text panel.
+- The user can copy the whole text with one button, including numbered lists.
+- Existing code blocks with real language highlighting still render as code.
+
+Verify:
+
+- Send a Markdown block with ```copy and numbered lines.
+- Confirm the copy button copies the exact text, including numbering.
+
+### 5. Performance Optimizations
+
+Main files:
+
+- `src/components/Chat.tsx`
+- `src/store/projectStore.ts`
+- `electron/storage/projects.ts`
+
+Important behavior:
+
+- Composer token preview is now a cheap local estimate and no longer sends the full message history through IPC while typing.
+- Project file tree is loaded lazily when the Files tab opens, not every time a project is selected.
+- `projects.list()` avoids per-project N+1 queries for labels and last assistant timestamp.
+
+Verify:
+
+- Type in a long chat and delete text quickly.
+- Switch between projects with large histories.
+- Open Files tab and confirm the tree still loads.
+
+### 6. Long Agent Runs And Windows Shortcuts
+
+Main files:
+
+- `electron/ai/run-lifecycle.ts`
+- `scripts/sync-windows-shortcuts.cjs`
+- `package.json`
+- `package-lock.json`
+
+Important behavior:
+
+- Default agent run timeout is now 90 minutes.
+- Local deploy syncs Start Menu, Desktop, and pinned Taskbar shortcuts to the installed `Verstak.exe`.
+- Shortcut repair is part of deploy because Rayner's Start/taskbar shortcuts previously pointed to stale backup paths.
+
+Verify:
+
+- Check `DEFAULT_AGENT_RUN_TIMEOUT_MS` is 90 minutes.
+- Run local deploy and confirm Start Menu/Desktop/Taskbar shortcuts point to `C:\Users\RAYNER\AppData\Local\Programs\Verstak\Verstak.exe`.
+
+### 7. Visual Guardrails
+
+Main files:
+
+- `docs/UI_DESIGN_GUIDE.md`
+- `src/styles/layout.css`
+- `src/styles/atelier-global.css`
+- `src/styles/shell-atelier.css`
+- `src/styles/theme.css`
+
+Important behavior:
+
+- Preserve the Verstak card/button style: thin accent borders, subtle depth, no random heavy hover shadows, no nested frame-in-frame panels for simple content, no oversized badges.
+- Project settings typography must not fall back to the old heavy mono/uppercase label style.
+- Compact UI helper text should avoid final periods unless it is a full paragraph.
 
 ## Files To Inspect First
 
-Recommended review order:
-
-1. `docs/UI_DESIGN_GUIDE.md`
-2. `docs/PATCHNOTES_DRAFT.md`
-3. `src/components/Settings.tsx`
-4. `src/styles/layout.css`
-5. `src/components/ProjectRulesView.tsx`
-6. `src/components/ConnectorIcons.tsx`
-7. `electron/ai/connector-test.ts`
-8. `electron/connectors/yandex-wordstat.ts`
-9. `electron/connectors/bitrix24.ts`
-
-## Do Not Include
-
-Do not include `mcps/chrome-devtools/` from this working tree unless Pavel explicitly wants it. It is an untracked local tooling folder and is not wired into the current MCP registry.
+1. `docs/PATCHNOTES_DRAFT.md`
+2. `src/components/ProjectSettings.tsx`
+3. `src/components/ProjectRail.tsx`
+4. `src/components/FilePreviewPanel.tsx`
+5. `src/components/Markdown.tsx`
+6. `electron/ipc/files.ts`
+7. `electron/storage/projects.ts`
+8. `src/store/projectStore.ts`
+9. `src/styles/layout.css`
+10. `scripts/sync-windows-shortcuts.cjs`
 
 ## Verification Checklist
 
-Run at minimum:
+Run:
 
 - `npm.cmd run type`
 - `npm.cmd run build`
 
-Recommended targeted checks:
+Manual checks:
 
-- connector tests for Bitrix24 and Wordstat
-- open settings and inspect dark/light themes
-- check `Внешний вид`, `Уведомления`, `Обновления`, `Провайдеры`, `Модели`, `Коннекторы`, `Внешние инструменты`, `Права модели`
-- open a project and check Control -> AI instructions / history/rules sections
-- verify collapsed project folder behavior in the rail
+- Project settings save flow
+- Project color/status rail states
+- File preview for project files and skill files
+- Copyable chat text block
+- Typing in a long chat
+- Switching large projects
+- Start Menu/Desktop/Taskbar shortcut launch
 
 ## Patch Note Rule For Release
 
 Use `docs/PATCHNOTES_DRAFT.md` as the public release-note base.
 
-Patch notes must be written for normal users:
-
-- concrete visible changes
-- grouped by app section
-- no file paths
-- no CSS/React/internal implementation names
-- no tiny spacing-only fixes
-- no long "because..." explanations
-
-## Version Note
-
-Rayner's local branch was built/deployed against installed Verstak `1.9.5`. When merging into Pavel's main release branch, keep Pavel's current release version unless the release owner explicitly asks to publish this as a version bump.
+Patch notes must be human-readable and concrete. Do not include file paths, CSS/React names, internal implementation notes, or tiny visual fixes.

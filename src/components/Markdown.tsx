@@ -49,6 +49,10 @@ interface CodeBlockProps {
   code: string
 }
 
+function isCopyableTextLanguage(language: string): boolean {
+  return ['copy', 'text', 'plain', 'plaintext'].includes(language.toLowerCase())
+}
+
 function highlightForBlock(language: string, code: string): { html: string | null; label: string } {
   if (language && hljs.getLanguage(language)) {
     try {
@@ -77,7 +81,7 @@ function CodeBlock({ language, code }: CodeBlockProps) {
     <div className="gg-code-block">
       <div className="gg-code-header">
         <span>{label}</span>
-        <button type="button" className="gg-code-copy" onClick={copy}>{copied ? 'скопировано' : 'копировать'}</button>
+        <button type="button" className="gg-code-copy" onClick={copy}>{copied ? 'Скопировано' : 'Копировать'}</button>
       </div>
       <pre><code className={html ? 'hljs' : undefined}>{html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : code}</code></pre>
     </div>
@@ -86,11 +90,49 @@ function CodeBlock({ language, code }: CodeBlockProps) {
 
 const CodeBlockMemo = memo(CodeBlock)
 
-interface MarkdownProps {
-  text: string
+function CopyableTextBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard denied */ }
+  }
+
+  return (
+    <div className="gg-copy-block">
+      <div className="gg-copy-block-header">
+        <span>Текст для копирования</span>
+        <button type="button" className="gg-copy-block-btn" onClick={copy}>
+          {copied ? 'Скопировано' : 'Копировать'}
+        </button>
+      </div>
+      <pre className="gg-copy-block-body">{code}</pre>
+    </div>
+  )
 }
 
-export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
+const CopyableTextBlockMemo = memo(CopyableTextBlock)
+
+interface MarkdownProps {
+  text: string
+  onOpenFile?: (path: string) => void
+}
+
+const FILE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\wа-яА-ЯёЁ@.-]+[\\/])[\wа-яА-ЯёЁ @./\\()[\]{}+~#%&=,:;-]+\.(?:js|jsx|ts|tsx|json|md|txt|csv|xlsx|docx|html?|css|scss|yml|yaml|xml|sql|py|sh|ps1|log)$/i
+
+function isFilePathLike(value: string): boolean {
+  const text = value.trim().replace(/^["'`]+|["'`.,;:!?]+$/g, '')
+  return FILE_PATH_RE.test(text)
+}
+
+function cleanFilePath(value: string): string {
+  return value.trim().replace(/^["'`]+|["'`.,;:!?]+$/g, '')
+}
+
+export const Markdown = memo(function Markdown({ text, onOpenFile }: MarkdownProps) {
   return (
     <div className="gg-md">
       <ReactMarkdown
@@ -100,9 +142,26 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
             const { className, children } = props
             const code = String(children).replace(/\n$/, '')
             if (!isMarkdownCodeBlock(className, code)) {
+              if (onOpenFile && isFilePathLike(code)) {
+                const filePath = cleanFilePath(code)
+                return (
+                  <button
+                    type="button"
+                    className="gg-md-file-link"
+                    onClick={() => onOpenFile(filePath)}
+                    title="Открыть файл в панели просмотра"
+                  >
+                    {children}
+                  </button>
+                )
+              }
               return <code className={className}>{children}</code>
             }
-            return <CodeBlockMemo language={markdownCodeLanguage(className)} code={code} />
+            const language = markdownCodeLanguage(className)
+            if (isCopyableTextLanguage(language)) {
+              return <CopyableTextBlockMemo code={code} />
+            }
+            return <CodeBlockMemo language={language} code={code} />
           },
           pre({ children }) {
             return <>{children}</>
@@ -111,6 +170,18 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
           // приложения (Electron-footgun). Бэкенд app:open-external пускает
           // только http/https.
           a({ href, children }) {
+            if (href && onOpenFile && isFilePathLike(href)) {
+              const filePath = cleanFilePath(href)
+              return (
+                <a
+                  href={href}
+                  onClick={e => {
+                    e.preventDefault()
+                    onOpenFile(filePath)
+                  }}
+                >{children}</a>
+              )
+            }
             return (
               <a
                 href={href}

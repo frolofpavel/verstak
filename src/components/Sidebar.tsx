@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject, type ViewId } from '../store/projectStore'
 import { ModelPicker } from './ModelPicker'
 import { CreateClientModal } from './CreateClientModal'
 import { useT } from '../i18n'
+import { ProjectAvatar } from './ProjectAvatar'
 
 
 type ChatContextMenuState = { x: number; y: number; id: number; title: string }
@@ -345,10 +346,11 @@ function SidebarNavSection({
   children: ReactNode
 }) {
   const [open, setOpen] = useState(() => readSectionOpen(sectionId))
+  const isActiveSection = viewIds.has(activeView)
 
   useEffect(() => {
-    if (viewIds.has(activeView)) setOpen(true)
-  }, [activeView, viewIds])
+    if (isActiveSection) setOpen(true)
+  }, [isActiveSection])
 
   function toggle() {
     setOpen(v => {
@@ -362,14 +364,18 @@ function SidebarNavSection({
     <>
       <button
         type="button"
-        className="gg-sidebar-section-collapsible"
+        className={`gg-sidebar-section-collapsible ${isActiveSection ? 'has-active' : ''}`}
         onClick={toggle}
         aria-expanded={open}
       >
         <span className="gg-sidebar-section-caret">{open ? '▾' : '▸'}</span>
         <span className="gg-sidebar-section-title">{title}</span>
       </button>
-      {open && children}
+      {open && (
+        <div className="gg-sidebar-section-body" data-section-id={sectionId}>
+          {children}
+        </div>
+      )}
     </>
   )
 }
@@ -400,9 +406,9 @@ function NavButtons({ items, activeView, onSelect }: {
   )
 }
 
-const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'skills', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'tasks-manager', 'inspector', 'agents', 'decisions'])
-const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'memory-gov', 'files', 'brain'])
+const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'tasks-manager', 'workflow'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'skills', 'project-rules', 'memory-gov', 'inspector', 'agents', 'decisions'])
+const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
 const ChatIcon = (
@@ -538,33 +544,33 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarProps) {
-  const { path, setProject, activeView, setActiveView, refreshProjectList } = useProject()
+  const { path, projectList, setProject, activeView, setActiveView, refreshProjectList } = useProject()
   const t = useT()
   const [showCreateClient, setShowCreateClient] = useState(false)
 
   const WORK_NAV: NavItem[] = [
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
-    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon, soon: true, soonReason: 'Пайплайн пока только визуализирует планы и требует нормальной пользовательской логики.' },
+    { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
+    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon, soon: true, soonReason: 'Пайплайны пока дорабатываются: нужен понятный сценарий создания, запуска и статусов задач' },
   ]
 
   const CONTROL_NAV: NavItem[] = [
-    { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
-    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon, soon: true, soonReason: 'Расписание пока экспериментальное: нужно довести создание, запуск и статусы задач.' },
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
     { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'project-rules', label: t.sidebar.projectRules, icon: ProjectRulesIcon },
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
-    { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
-    { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon, soon: true, soonReason: 'Агенты пока служебная панель мультиагентов и очередей.' },
-    { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока читают внутреннюю память и требуют нормального пользовательского сценария.' },
+    { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
+    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon, soon: true, soonReason: 'Расписание пока дорабатывается: нужно довести создание, запуск и статусы задач' },
+    { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon, soon: true, soonReason: 'Агенты пока служебная панель мультиагентов и очередей' },
+    { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока требуют понятного пользовательского сценария' },
   ]
 
   const PROJECT_NAV: NavItem[] = [
-    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon, soon: true, soonReason: 'Карта проекта полезна для кодовых проектов, но для клиентских проектов пока требует доработки.' },
-    { id: 'brain', label: t.sidebar.brain, icon: BrainIcon, soon: true, soonReason: 'Мозг проекта пока техническая диагностика памяти.' },
     { id: 'files', label: t.sidebar.files, icon: FilesIcon },
+    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon, soon: true, soonReason: 'Карта проекта пока требует доработки для разных типов проектов' },
+    { id: 'brain', label: t.sidebar.brain, icon: BrainIcon, soon: true, soonReason: 'Мозг проекта пока техническая диагностика памяти' },
   ]
 
   const TOOLS_NAV: NavItem[] = [
@@ -579,6 +585,10 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   }
 
   const shortPath = path ? path.replace(/^.*[\\/]/, '') : null
+  const activeProjectMeta = path ? projectList.find(project => project.path === path) ?? null : null
+  const projectButtonStyle = activeProjectMeta?.accentColor
+    ? { '--project-accent': activeProjectMeta.accentColor } as CSSProperties
+    : undefined
 
   return (
     <aside className="gg-sidebar" aria-hidden={ariaHidden}>
@@ -587,17 +597,31 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
           <div className="gg-sidebar-section-title">{t.sidebar.project}</div>
         </div>
         <button
-          className={`gg-project-button ${path ? 'has-project' : ''}`}
+          className={`gg-project-button ${path ? 'has-project' : ''} ${activeProjectMeta ? 'is-project-chip' : ''}`}
+          style={projectButtonStyle}
           onClick={() => setShowCreateClient(true)}
         >
-          {path
-            ? <span className="gg-project-button-icon gg-folder-icon" aria-hidden="true" />
-            : <span className="gg-project-button-icon gg-plus-icon" aria-hidden="true">＋</span>}
-          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {shortPath ?? t.rail.createClient}
-          </span>
+          {activeProjectMeta ? (
+            <>
+              <span className="gg-project-button-avatar-wrap">
+                <ProjectAvatar project={activeProjectMeta} className="gg-project-button-avatar" size={32} />
+              </span>
+              <span className="gg-project-button-text">
+                <span className="gg-project-button-name">{activeProjectMeta.name}</span>
+              </span>
+            </>
+          ) : (
+            <>
+              {path
+                ? <span className="gg-project-button-icon gg-folder-icon" aria-hidden="true" />
+                : <span className="gg-project-button-icon gg-plus-icon" aria-hidden="true">+</span>}
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {shortPath ?? t.rail.createClient}
+              </span>
+            </>
+          )}
         </button>
-        {path && <div className="gg-project-path" title={path}>{path}</div>}
+        {path && <div className="gg-project-path">{path}</div>}
 
         {path && (
           <>
@@ -622,7 +646,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
 
             <SidebarNavSection
               sectionId="project"
-              title={t.sidebar.projectSection}
+              title="Материалы"
               activeView={activeView}
               viewIds={PROJECT_VIEW_IDS}
             >
