@@ -67,7 +67,7 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Verstak Gateway',
     transport: 'API',
     description: 'Единый баланс Verstak: один ключ, оплата в рублях и готовые наборы моделей',
-    models: ['kimi-k2.7-code', 'deepseek-chat', 'qwen3-coder', 'verstak/economy', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
+    models: ['kimi-k2.7-code', 'deepseek-chat', 'qwen3-coder', 'verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
     defaultModel: 'kimi-k2.7-code',
     secretKey: 'verstak_gateway_api_key',
     keyHint: 'vsk_live_...',
@@ -102,8 +102,8 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Claude',
     transport: 'API',
     description: 'Сильные модели для анализа, текста, планирования и задач с большим количеством условий',
-    models: ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101'],
-    defaultModel: 'claude-sonnet-4-5-20251101',
+    models: ['claude-sonnet-4-6', 'claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+    defaultModel: 'claude-sonnet-4-6',
     secretKey: 'anthropic_api_key',
     keyHint: 'sk-ant-…',
     keyLink: { url: 'https://platform.claude.com/settings/keys', label: 'Claude API keys' },
@@ -192,7 +192,7 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'OpenRouter',
     transport: 'API',
     description: 'Один ключ для моделей разных провайдеров: Claude, GPT, Gemini, Grok и open-source',
-    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4.5', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
+    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4.5', 'moonshotai/kimi-k2.7-code', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
     defaultModel: 'anthropic/claude-sonnet-4-6',
     secretKey: 'openrouter_api_key',
     keyHint: 'sk-or-...',
@@ -4015,13 +4015,15 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                 <button
                   type="button"
                   className="gg-btn gg-btn-ghost gg-notify-test-btn"
-                  onClick={async () => {
-                    const ok = await testNotification()
-                    setNotifyTestMessage(ok
-                      ? 'Проверочная всплывашка отправлена в правый нижний угол'
-                      : 'Не удалось показать проверочную всплывашку'
-                    )
-                    window.setTimeout(() => setNotifyTestMessage(''), 5000)
+                  onClick={() => {
+                    void (async () => {
+                      const ok = await testNotification()
+                      setNotifyTestMessage(ok
+                        ? 'Проверочная всплывашка отправлена в правый нижний угол'
+                        : 'Не удалось показать проверочную всплывашку'
+                      )
+                      window.setTimeout(() => setNotifyTestMessage(''), 5000)
+                    })()
                   }}
                 >
                   Проверить
@@ -4283,11 +4285,13 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             <select
               className="gg-input"
               value={currentLang}
-              onChange={async (e) => {
+              onChange={e => {
                 const lang = e.target.value
                 setCurrentLang(lang)
-                await window.api.settings.setKey('app_language', lang)
-                window.location.reload()
+                void (async () => {
+                  await window.api.settings.setKey('app_language', lang)
+                  window.location.reload()
+                })()
               }}
             >
               <option value="en">English</option>
@@ -4323,7 +4327,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             {saving ? 'Сохраняю…' : saved ? 'Сохранено' : settingsDirty ? 'Есть несохранённые изменения' : 'Изменений нет'}
           </div>
           <button className="gg-btn gg-btn-ghost" onClick={onClose}>{t.common.close}</button>
-          <button className="gg-btn gg-btn-primary" onClick={save} disabled={saving || !settingsLoaded}>
+          <button className="gg-btn gg-btn-primary" onClick={() => { void save() }} disabled={saving || !settingsLoaded}>
             {saving ? 'Сохраняю…' : saved ? t.settings.saved : t.settings.save}
           </button>
         </div>

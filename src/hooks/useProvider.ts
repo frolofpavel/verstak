@@ -27,7 +27,7 @@ export interface ProviderInfo {
 
 // --- Кеш провайдеров: грузим один раз из main process через IPC ---
 
-interface ProviderMeta {
+export interface ProviderMeta {
   label: string
   transport: 'API' | 'CLI' | 'Tunnel'
   models: string[]
@@ -74,8 +74,20 @@ function getDefaultModel(id: string): string {
   return ''
 }
 
-function normalizeStoredModel(providerId: string, model: string | null): string {
-  const meta = _providerCache?.[providerId]
+/**
+ * Repair-путь сохранённой модели (срез 5, §2.2): сохранённая model ID может стать
+ * невалидной (провайдер убрал модель, дрейф списков, старый конфиг). Тогда вместо
+ * длинного прогона с финальной ошибкой «unknown model id» откатываемся на дефолт
+ * провайдера. Чистая функция — meta передаётся явно, чтобы путь был проверяем тестом.
+ *
+ * Контракт:
+ *  - нет meta (дескрипторы ещё не загружены / IPC упал) → отдаём как есть, не гадаем;
+ *  - модель пустая → дефолт провайдера;
+ *  - у провайдера пустой список моделей (custom-openai/ollama — задаёт пользователь)
+ *    → любая непустая модель валидна, отдаём как есть;
+ *  - модель вне списка → REPAIR: дефолт провайдера.
+ */
+export function normalizeStoredModel(meta: ProviderMeta | undefined, model: string | null): string {
   if (!meta) return model ?? ''
   if (!model) return meta.defaultModel
   if (meta.models.length === 0) return model
@@ -91,13 +103,19 @@ export function isModelValidForProvider(providerId: string, model: string): bool
   return meta.models.includes(model)
 }
 
+// ВНИМАНИЕ (срез 5): это runtime-allowlist провайдеров renderer'а. Если id есть в
+// main-реестре (electron/ai/registry.ts), но НЕТ здесь — parseProviderId молча
+// схлопнет выбор пользователя в 'gemini-api' (провайдер «не выбирается»). Именно так
+// был потерян openai-codex-oauth. Анти-дрейф-тест provider-model-drift.test.ts
+// держит этот список в синхроне с реестром.
 const KNOWN_IDS: ProviderId[] = [
-  'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli',
+  'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli', 'openai-codex-oauth',
   'yandex-gpt', 'gigachat',
   'openrouter', 'deepseek', 'moonshot', 'kimi-coding', 'qwen', 'mistral', 'groq', 'ollama', 'custom-openai', 'verstak-gateway', 'zai-coding'
 ]
 
-function parseProviderId(v: string | null | undefined): ProviderId {
+/** Резолв сохранённого provider-id. Неизвестный id → безопасный дефолт (gemini-api). */
+export function parseProviderId(v: string | null | undefined): ProviderId {
   if (v && (KNOWN_IDS as string[]).includes(v)) return v as ProviderId
   return 'gemini-api'
 }
@@ -123,13 +141,13 @@ export function useProvider(): UseProviderResult {
     const pid = parseProviderId(rawId)
     setId(pid)
     const rawModel = await window.api.settings.getKey(`model_${pid}`)
-    setModelState(normalizeStoredModel(pid, rawModel))
+    setModelState(normalizeStoredModel(_providerCache?.[pid], rawModel))
   }, [])
 
   useEffect(() => {
     let cancelled = false
     void (async () => { if (!cancelled) await refresh() })()
-    const t = window.setInterval(refresh, POLL_INTERVAL_MS)
+    const t = window.setInterval(() => { void refresh() }, POLL_INTERVAL_MS)
     return () => { cancelled = true; window.clearInterval(t) }
   }, [refresh])
 
@@ -147,7 +165,7 @@ export function useProvider(): UseProviderResult {
     await window.api.settings.setKey('provider', next)
     setId(next)
     const stored = await window.api.settings.getKey(`model_${next}`)
-    setModelState(normalizeStoredModel(next, stored))
+    setModelState(normalizeStoredModel(_providerCache?.[next], stored))
   }, [])
 
   const meta = getMeta(id)
