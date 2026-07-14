@@ -1077,6 +1077,43 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       const cols = (db.prepare('PRAGMA table_info(subscription_accounts)').all() as Array<{ name: string }>).map(c => c.name)
       if (!cols.includes('cooling_until')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN cooling_until INTEGER')
     }
+  },
+  {
+    version: 46,
+    description: 'Project settings: notes, labels, accent color, notifications, status.',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('notes')) db.exec("ALTER TABLE projects ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+      if (!cols.includes('accent_color')) db.exec('ALTER TABLE projects ADD COLUMN accent_color TEXT')
+      if (!cols.includes('notifications_muted')) db.exec('ALTER TABLE projects ADD COLUMN notifications_muted INTEGER NOT NULL DEFAULT 0')
+      if (!cols.includes('status')) db.exec("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_labels (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          color TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_label_members (
+          project_path TEXT NOT NULL,
+          label_id INTEGER NOT NULL,
+          PRIMARY KEY (project_path, label_id),
+          FOREIGN KEY (label_id) REFERENCES project_labels(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_label_members_project ON project_label_members(project_path);
+      `)
+    }
+  },
+  {
+    version: 47,
+    description: 'projects.created_at: дата создания проекта для сведений в параметрах проекта.',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('created_at')) {
+        db.exec('ALTER TABLE projects ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0')
+        db.exec('UPDATE projects SET created_at = COALESCE(NULLIF(last_opened_at, 0), strftime(\'%s\', \'now\') * 1000) WHERE created_at = 0')
+      }
+    }
   }
 ]
 

@@ -83,15 +83,31 @@ export type RemoteSource =
   | { kind: 'git'; cloneUrl: string; name: string }
   | { kind: 'ssh'; user: string | null; host: string; remotePath: string; name: string }
 
+export type ProjectStatus = 'active' | 'paused' | 'done'
+
+export interface ProjectLabel {
+  id: number
+  name: string
+  color: string
+  createdAt: number
+}
+
 export interface ProjectMeta {
   path: string
   name: string
   color: string
   iconPath: string | null
+  createdAt: number
+  lastAssistantAt: number | null
   lastOpenedAt: number
   hidden: boolean
   kind: ProjectKind
   remote: RemoteSource | null
+  notes: string
+  labels: ProjectLabel[]
+  accentColor: string | null
+  notificationsMuted: boolean
+  status: ProjectStatus
 }
 
 export type RemoteDoctorStatus = 'pass' | 'warn' | 'fail'
@@ -306,7 +322,22 @@ declare global {
         setCurrent: (path: string | null) => Promise<void>
         list: () => Promise<ProjectMeta[]>
         rename: (path: string, name: string) => Promise<void>
-        updateMeta: (path: string, patch: { name?: string; hidden?: boolean }) => Promise<ProjectMeta | null>
+        updateMeta: (path: string, patch: {
+          name?: string
+          hidden?: boolean
+          notes?: string
+          accentColor?: string | null
+          notificationsMuted?: boolean
+          status?: ProjectStatus
+        }) => Promise<ProjectMeta | null>
+        listLabels: () => Promise<ProjectLabel[]>
+        createLabel: (name: string, color?: string | null) => Promise<
+          { ok: true; label: ProjectLabel } | { ok: false; error: string }
+        >
+        setLabels: (path: string, labelIds: number[]) => Promise<ProjectMeta | null>
+        backup: (path: string) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
+        duplicate: (path: string) => Promise<{ ok: true; path: string; meta: ProjectMeta } | { ok: false; error: string }>
+        cleanupCache: (path: string) => Promise<{ ok: true; removed: number } | { ok: false; error: string }>
         pickIcon: (path: string) => Promise<ProjectMeta | null>
         clearIcon: (path: string) => Promise<ProjectMeta | null>
         remove: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
@@ -362,6 +393,10 @@ declare global {
       }
       files: {
         tree: (root: string) => Promise<FileNode[]>
+        resolvePreviewPath: (path: string) => Promise<
+          | { ok: true; path: string; displayPath: string; source: 'project' | 'skill' | 'known-root' | 'absolute' }
+          | { ok: false; error: string; requestedPath: string; searched: string[] }
+        >
         read: (path: string) => Promise<string>
         /** F6: прочитать @-упомянутые файлы → контекст-блок (path-policy + redaction). */
         resolveMentions: (projectPath: string, paths: string[]) => Promise<string>
@@ -369,6 +404,7 @@ declare global {
         revealInExplorer: (path: string) => Promise<{ ok: boolean; error: string | null }>
         /** Конвертация DOCX → HTML body через mammoth.js (для embedded preview). */
         docxToHtml: (path: string) => Promise<{ ok: true; html: string; warnings: string[] } | { ok: false; error: string }>
+        xlsxToMarkdown: (path: string) => Promise<{ ok: true; markdown: string } | { ok: false; error: string }>
       }
       projectMap: {
         /** Фоновый прогрев карты+графа (non-blocking). Возвращает сразу. */

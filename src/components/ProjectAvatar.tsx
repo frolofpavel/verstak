@@ -12,16 +12,17 @@ export function ProjectAvatar({
   className = 'gg-rail-square',
   size
 }: {
-  project: Pick<ProjectMeta, 'name' | 'color' | 'iconPath'>
+  project: Pick<ProjectMeta, 'name' | 'color' | 'iconPath'> & { accentColor?: string | null }
   className?: string
   size?: number
 }) {
   const iconSrc = projectIconSrc(project.iconPath)
+  const color = project.accentColor || project.color
   const style = iconSrc
     ? size
       ? { width: size, height: size }
       : undefined
-    : projectAvatarLetterStyle(project.color, size)
+    : projectAvatarLetterStyle(color, size)
 
   if (iconSrc) {
     return (

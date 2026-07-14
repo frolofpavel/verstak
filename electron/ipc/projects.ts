@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, BrowserWindow, shell } from 'electron'
 import { mkdirSync, existsSync } from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
-import { dirname, join } from 'path'
+import { readFile, writeFile, mkdir, cp, rm, stat } from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
 import { parseRemoteSource, isRemoteSource, remoteProjectPath } from '../projects/remote-source'
@@ -271,12 +271,99 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
     return { ok: true as const }
   })
   ipcMain.handle('projects:rename', (_e, path: string, name: string) => projects.rename(path, name))
-  ipcMain.handle('projects:update-meta', (_e, path: string, patch: { name?: string; hidden?: boolean }) => {
-    // Принимаем name и hidden. iconPath из renderer игнорируем — иконка ставится
-    // строго через pick-icon/clear-icon (там путь генерит main внутри
-    // project-icons). Иначе renderer мог бы записать произвольный путь как
-    // iconPath и через protocol-хендлер прочитать любой файл.
-    return projects.updateMeta(path, { name: patch?.name, hidden: patch?.hidden })
+  ipcMain.handle('projects:update-meta', (_e, path: string, patch: {
+    name?: string
+    hidden?: boolean
+    notes?: string
+    accentColor?: string | null
+    notificationsMuted?: boolean
+    status?: 'active' | 'paused' | 'done'
+  }) => {
+    // Renderer may update safe project metadata here. iconPath is still ignored:
+    // icons are written only through pick-icon/clear-icon, where main generates
+    // the stored path. Otherwise renderer could save an arbitrary file path and
+    // make the protocol handler expose it.
+    return projects.updateMeta(path, {
+      name: patch?.name,
+      hidden: patch?.hidden,
+      notes: patch?.notes,
+      accentColor: patch?.accentColor,
+      notificationsMuted: patch?.notificationsMuted,
+      status: patch?.status
+    })
+  })
+  ipcMain.handle('projects:list-labels', () => projects.listLabels())
+  ipcMain.handle('projects:create-label', (_e, name: string, color?: string | null) => {
+    try {
+      return { ok: true as const, label: projects.createLabel(name, color) }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : 'Не удалось создать ярлык' }
+    }
+  })
+  ipcMain.handle('projects:set-labels', (_e, path: string, labelIds: number[]) => projects.setProjectLabels(path, labelIds ?? []))
+  ipcMain.handle('projects:backup', async (_e, path: string) => {
+    try {
+      const info = await stat(path)
+      if (!info.isDirectory()) return { ok: false as const, error: 'Папка проекта не найдена' }
+      const root = join(app.getPath('documents'), 'ВЕРСТАК', 'backups')
+      await mkdir(root, { recursive: true })
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const target = join(root, `${basename(path) || 'project'}-${stamp}`)
+      await cp(path, target, { recursive: true, force: false, errorOnExist: true })
+      return { ok: true as const, path: target }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : 'Не удалось создать резервную копию' }
+    }
+  })
+  ipcMain.handle('projects:duplicate', async (_e, path: string) => {
+    try {
+      const info = await stat(path)
+      if (!info.isDirectory()) return { ok: false as const, error: 'Папка проекта не найдена' }
+      const parent = dirname(path)
+      const base = basename(path) || 'project'
+      let target = join(parent, `${base}-copy`)
+      let i = 2
+      while (existsSync(target)) {
+        target = join(parent, `${base}-copy-${i}`)
+        i += 1
+      }
+      await cp(path, target, { recursive: true, force: false, errorOnExist: true })
+      const sourceMeta = projects.list().find(p => p.path === path)
+      const meta = projects.upsert(target)
+      const copied = projects.updateMeta(target, {
+        name: `Копия ${sourceMeta?.name ?? meta.name}`,
+        hidden: sourceMeta?.hidden ?? meta.hidden,
+        notes: sourceMeta?.notes ?? meta.notes,
+        accentColor: sourceMeta?.accentColor ?? meta.accentColor,
+        notificationsMuted: sourceMeta?.notificationsMuted ?? meta.notificationsMuted,
+        status: sourceMeta?.status ?? meta.status
+      }) ?? meta
+      const withLabels = sourceMeta?.labels?.length
+        ? projects.setProjectLabels(target, sourceMeta.labels.map(label => label.id)) ?? copied
+        : copied
+      return { ok: true as const, path: target, meta: withLabels }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : 'Не удалось создать копию проекта' }
+    }
+  })
+  ipcMain.handle('projects:cleanup-cache', async (_e, path: string) => {
+    try {
+      const targets = [
+        join(path, '.verstak', 'tmp'),
+        join(path, '.verstak', 'cache'),
+        join(path, '.verstack', 'tmp'),
+        join(path, '.verstack', 'cache')
+      ]
+      let removed = 0
+      for (const target of targets) {
+        if (!existsSync(target)) continue
+        await rm(target, { recursive: true, force: true })
+        removed += 1
+      }
+      return { ok: true as const, removed }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : 'Не удалось очистить временные файлы' }
+    }
   })
   ipcMain.handle('projects:pick-icon', async (_e, projectPath: string) => {
     const win = BrowserWindow.getFocusedWindow()

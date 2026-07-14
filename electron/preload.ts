@@ -13,8 +13,23 @@ contextBridge.exposeInMainWorld('api', {
     setCurrent: (path: string | null) => ipcRenderer.invoke('projects:set-current', path),
     list: () => ipcRenderer.invoke('projects:list'),
     rename: (path: string, name: string) => ipcRenderer.invoke('projects:rename', path, name),
-    updateMeta: (path: string, patch: { name?: string; hidden?: boolean }) =>
+    updateMeta: (path: string, patch: {
+      name?: string
+      hidden?: boolean
+      notes?: string
+      accentColor?: string | null
+      notificationsMuted?: boolean
+      status?: 'active' | 'paused' | 'done'
+    }) =>
       ipcRenderer.invoke('projects:update-meta', path, patch),
+    listLabels: () => ipcRenderer.invoke('projects:list-labels'),
+    createLabel: (name: string, color?: string | null) =>
+      ipcRenderer.invoke('projects:create-label', name, color),
+    setLabels: (path: string, labelIds: number[]) =>
+      ipcRenderer.invoke('projects:set-labels', path, labelIds),
+    backup: (path: string) => ipcRenderer.invoke('projects:backup', path),
+    duplicate: (path: string) => ipcRenderer.invoke('projects:duplicate', path),
+    cleanupCache: (path: string) => ipcRenderer.invoke('projects:cleanup-cache', path),
     pickIcon: (path: string) => ipcRenderer.invoke('projects:pick-icon', path),
     clearIcon: (path: string) => ipcRenderer.invoke('projects:clear-icon', path),
     remove: (path: string, options?: { deleteData?: boolean }) =>
@@ -100,10 +115,12 @@ contextBridge.exposeInMainWorld('api', {
   },
   files: {
     tree: (root: string) => ipcRenderer.invoke('files:tree', root),
+    resolvePreviewPath: (path: string) => ipcRenderer.invoke('files:resolve-preview-path', path),
     read: (path: string) => ipcRenderer.invoke('files:read', path),
     resolveMentions: (projectPath: string, paths: string[]) => ipcRenderer.invoke('files:resolveMentions', projectPath, paths),
     revealInExplorer: (path: string) => ipcRenderer.invoke('files:reveal', path),
-    docxToHtml: (path: string) => ipcRenderer.invoke('files:docx-to-html', path)
+    docxToHtml: (path: string) => ipcRenderer.invoke('files:docx-to-html', path),
+    xlsxToMarkdown: (path: string) => ipcRenderer.invoke('files:xlsx-to-markdown', path)
   },
   projectMap: {
     warm: (root: string) => ipcRenderer.invoke('project-map:warm', root),

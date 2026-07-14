@@ -210,6 +210,15 @@ Small helper buttons such as `Где взять ключ` are outline buttons:
 
 If the action is not literally an API key, use the real action text (`Как подключить`, `Скачать`, `Открыть инструкцию`) instead of forcing `Где взять ключ`.
 
+Canonical square icon button:
+
+- use the shared `gg-provider-settings-toggle` visual class for settings, collapse, expand, and compact icon-only actions that match the provider gear button
+- use a real `button` element with `gg-btn gg-btn-ghost gg-provider-settings-toggle gg-provider-action-icon` when the control is clickable
+- do not recreate the same button with section-specific classes such as a separate model-only background
+- the button must stay 32x32px, 10px radius, `var(--providers-field)` background, 1px accent-mixed border, no one-off colors
+- hover and open states must use the same shared selector, not local copies
+- if a section needs a semantic wrapper class, add it alongside the shared class without overriding background, border, shadow, color, size, or radius
+
 ## Status Indicators
 
 Prefer small lamps over large status pills when the status is obvious from context.

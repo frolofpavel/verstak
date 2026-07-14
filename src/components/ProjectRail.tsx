@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
-import type { ProjectGroup, ProjectMeta } from '../types/api'
+import type { ProjectGroup, ProjectMeta, ProjectStatus } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
 import { UpdateNotification } from './UpdateNotification'
@@ -10,10 +11,19 @@ import { useT } from '../i18n'
 
 const RAIL_EXPANDED_KEY = 'gg-rail-expanded'
 const RAIL_WIDTH_COLLAPSED = '76px'
-const RAIL_WIDTH_EXPANDED = '248px'
+const RAIL_WIDTH_EXPANDED = 248
+const RAIL_WIDTH_MAX = 372
+const RAIL_WIDTH_KEY = 'gg-rail-width'
 const RAIL_TOGGLE_MS = 380
 const RAIL_COLLAPSE_DELAY_MS = 120
 const RAIL_EXPAND_CONTENT_DELAY_MS = 55
+const RAIL_PINNED_KEY = 'gg-rail-pinned-projects'
+const PROJECT_MENU_W = 190
+const PROJECT_MENU_H = 220
+
+type ProjectMenuState = { x: number; y: number; project: ProjectMeta }
+type CreateMenuState = { x: number; y: number } | null
+type ProjectRailFilter = 'default' | ProjectStatus | 'archive'
 
 /**
  * ═══ КОНТРАКТ АНИМАЦИИ RAIL — ЗАМОРОЖЕН 17.06.2026 (RAYNER: «тупо топ») ═══
@@ -44,6 +54,19 @@ function readRailExpanded(): boolean {
   }
 }
 
+function clampRailWidth(width: number): number {
+  if (!Number.isFinite(width)) return RAIL_WIDTH_EXPANDED
+  return Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_EXPANDED, Math.round(width)))
+}
+
+function readRailWidth(): number {
+  try {
+    return clampRailWidth(parseInt(localStorage.getItem(RAIL_WIDTH_KEY) || '', 10))
+  } catch {
+    return RAIL_WIDTH_EXPANDED
+  }
+}
+
 interface RailView {
   groups: Array<{ group: ProjectGroup; projects: ProjectMeta[] }>
   ungrouped: ProjectMeta[]
@@ -54,9 +77,10 @@ function buildRailView(
   groups: ProjectGroup[],
   projects: ProjectMeta[],
   query: string,
-  activePath: string | null
+  activePath: string | null,
+  includeHidden = false
 ): RailView {
-  const visibleProjects = projects.filter(p => !p.hidden)
+  const visibleProjects = includeHidden ? projects : projects.filter(p => !p.hidden)
   const byPath = new Map(visibleProjects.map(p => [p.path, p]))
   const inGroup = new Set<string>()
   for (const g of groups) {
@@ -133,6 +157,23 @@ function countVisible(
   return ungrouped.length + groups.reduce((sum, g) => sum + g.projects.length, 0)
 }
 
+function readPinnedProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(RAIL_PINNED_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function clampProjectMenuPos(x: number, y: number): { left: number; top: number } {
+  const pad = 8
+  const maxX = Math.max(pad, window.innerWidth - PROJECT_MENU_W - pad)
+  const maxY = Math.max(pad, window.innerHeight - PROJECT_MENU_H - pad)
+  return { left: Math.min(Math.max(pad, x), maxX), top: Math.min(Math.max(pad, y), maxY) }
+}
+
 interface ProjectChipProps {
   project: ProjectMeta
   active: boolean
@@ -142,8 +183,12 @@ interface ProjectChipProps {
   shellExpanded: boolean
   contentExpanded: boolean
   nested?: boolean
+  pinned?: boolean
+  draggable?: boolean
   onClick: () => void
   onSettings: () => void
+  onContextMenu: (e: MouseEvent) => void
+  onDragStart?: (e: DragEvent, projectPath: string) => void
 }
 
 function ProjectChip({
@@ -155,18 +200,15 @@ function ProjectChip({
   shellExpanded,
   contentExpanded,
   nested,
+  pinned,
+  draggable,
   onClick,
-  onSettings
+  onSettings,
+  onContextMenu,
+  onDragStart
 }: ProjectChipProps) {
   const [hover, setHover] = useState(false)
   const status = interrupted ? 'interrupted' : streaming ? 'streaming' : unread ? 'unread' : null
-  const statusLabel = interrupted
-    ? 'Ошибка'
-    : streaming
-      ? 'В работе'
-      : unread
-        ? 'Готово'
-        : ''
   const statusTitle = interrupted
     ? 'Работа была прервана - открой проект для восстановления'
     : streaming
@@ -177,10 +219,15 @@ function ProjectChip({
 
   return (
     <div
-      className={`gg-rail-chip ${active ? 'is-active' : ''} ${status ? `is-status-${status}` : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${nested ? 'is-nested' : ''}`}
+      className={`gg-rail-chip ${active ? 'is-active' : ''} ${status ? `is-status-${status}` : ''} ${project.accentColor ? 'has-project-accent' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${nested ? 'is-nested' : ''} ${pinned ? 'is-pinned' : ''}`}
+      style={project.accentColor ? { '--project-accent': project.accentColor } as CSSProperties : undefined}
+      data-project-status={status ?? 'idle'}
+      data-project-active={active ? 'true' : 'false'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={contentExpanded ? project.path : `${project.name}\n${project.path}`}
+      onContextMenu={onContextMenu}
+      draggable={draggable}
+      onDragStart={e => onDragStart?.(e, project.path)}
     >
       <button
         type="button"
@@ -204,9 +251,6 @@ function ProjectChip({
         </span>
         <span className="gg-rail-chip-text" aria-hidden={!contentExpanded}>
           <span className="gg-rail-label">{project.name}</span>
-          {status && (
-            <span className={`gg-rail-status-text is-${status}`}>{statusLabel}</span>
-          )}
         </span>
       </button>
       {hover && (
@@ -239,6 +283,9 @@ interface ProjectGroupBlockProps {
   onEdit: (group: ProjectGroup) => void
   onSelectProject: (path: string) => void
   onProjectSettings: (project: ProjectMeta) => void
+  onProjectContextMenu: (e: MouseEvent, project: ProjectMeta) => void
+  onProjectDragStart: (e: DragEvent, projectPath: string) => void
+  onDropProjectToGroup: (projectPath: string, groupId: number) => void
 }
 
 function ProjectGroupBlock({
@@ -255,7 +302,10 @@ function ProjectGroupBlock({
   onToggleCollapsedOpen,
   onEdit,
   onSelectProject,
-  onProjectSettings
+  onProjectSettings,
+  onProjectContextMenu,
+  onProjectDragStart,
+  onDropProjectToGroup
 }: ProjectGroupBlockProps) {
   const t = useT()
   const [hover, setHover] = useState(false)
@@ -275,6 +325,17 @@ function ProjectGroupBlock({
   return (
     <div
       className={`gg-rail-group ${expanded ? 'is-open' : ''} ${collapsedOpen ? 'is-collapsed-open' : ''} ${shellExpanded ? 'is-shell-expanded' : ''} ${contentExpanded ? 'is-expanded' : ''} ${hasActive ? 'has-active' : ''}`}
+      onDragOver={e => {
+        if (!e.dataTransfer.types.includes('text/project-path')) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={e => {
+        const projectPath = e.dataTransfer.getData('text/project-path')
+        if (!projectPath) return
+        e.preventDefault()
+        onDropProjectToGroup(projectPath, group.id)
+      }}
     >
       <div
         className="gg-rail-group-head"
@@ -344,8 +405,11 @@ function ProjectGroupBlock({
                 shellExpanded={shellExpanded}
                 contentExpanded={contentExpanded}
                 nested
+                draggable
                 onClick={() => onSelectProject(p.path)}
                 onSettings={() => onProjectSettings(p)}
+                onContextMenu={e => onProjectContextMenu(e, p)}
+                onDragStart={onProjectDragStart}
               />
             )
           })}
@@ -390,18 +454,31 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
   const [bootstrapped, setBootstrapped] = useState(false)
   const initialRailExpanded = readRailExpanded()
   const [railExpanded, setRailExpanded] = useState(initialRailExpanded)
+  const [railWidth, setRailWidth] = useState(() => readRailWidth())
   const [shellExpanded, setShellExpanded] = useState(initialRailExpanded)
   const [contentExpanded, setContentExpanded] = useState(initialRailExpanded)
   const [projectQuery, setProjectQuery] = useState('')
+  const [projectFilter, setProjectFilter] = useState<ProjectRailFilter>('default')
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
   const [collapsedOpenGroupId, setCollapsedOpenGroupId] = useState<number | null>(null)
   const [showCreateClient, setShowCreateClient] = useState(false)
   const [groupModal, setGroupModal] = useState<{ mode: 'create' } | { mode: 'edit'; group: ProjectGroup } | null>(null)
+  const [createMenu, setCreateMenu] = useState<CreateMenuState>(null)
+  const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  const [pinnedPaths, setPinnedPaths] = useState<string[]>(() => readPinnedProjects())
+  const createMenuRef = useRef<HTMLDivElement | null>(null)
+  const projectMenuRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  const filteredProjectList = useMemo(() => {
+    if (projectFilter === 'archive') return projectList.filter(p => p.hidden)
+    if (projectFilter === 'default') return projectList
+    return projectList.filter(p => !p.hidden && (p.status ?? 'active') === projectFilter)
+  }, [projectFilter, projectList])
+
   const railView = useMemo(
-    () => buildRailView(projectGroups, projectList, projectQuery, path),
-    [projectGroups, projectList, projectQuery, path]
+    () => buildRailView(projectGroups, filteredProjectList, projectQuery, path, projectFilter === 'archive'),
+    [projectGroups, filteredProjectList, projectQuery, path, projectFilter]
   )
   const hiddenProjects = useMemo(
     () => projectList.filter(p => p.hidden),
@@ -416,6 +493,15 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
   const showSearchTool = !contentExpanded && showSearch
   const toolbarToolCount = 2 + (showSearchTool ? 1 : 0)
   const listEmpty = railView.visibleCount === 0
+  const pinnedProjects = useMemo(() => {
+    const byPath = new Map(filteredProjectList.filter(p => !p.hidden).map(p => [p.path, p]))
+    const q = projectQuery.trim().toLowerCase()
+    return pinnedPaths
+      .map(projectPath => byPath.get(projectPath))
+      .filter((p): p is ProjectMeta => !!p)
+      .filter(p => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q))
+  }, [pinnedPaths, filteredProjectList, projectQuery])
+  const pinnedSet = useMemo(() => new Set(pinnedProjects.map(p => p.path)), [pinnedProjects])
 
   useEffect(() => {
     if (contentExpanded) setCollapsedOpenGroupId(null)
@@ -426,6 +512,36 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     const exists = railView.groups.some(({ group }) => group.id === collapsedOpenGroupId)
     if (!exists) setCollapsedOpenGroupId(null)
   }, [collapsedOpenGroupId, railView.groups])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIL_PINNED_KEY, JSON.stringify(pinnedPaths))
+    } catch { /* ignore */ }
+  }, [pinnedPaths])
+
+  useEffect(() => {
+    if (!createMenu && !projectMenu) return
+    const close = () => {
+      setCreateMenu(null)
+      setProjectMenu(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (createMenuRef.current?.contains(target)) return
+      if (projectMenuRef.current?.contains(target)) return
+      close()
+    }
+    const timer = window.setTimeout(() => {
+      window.addEventListener('pointerdown', onPointerDown, true)
+    }, 0)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [createMenu, projectMenu])
 
   useEffect(() => {
     const projectPaths = projectList.map(p => p.path)
@@ -491,7 +607,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     timers.push(finishTimer)
 
     if (railExpanded) {
-      document.documentElement.style.setProperty('--gg-rail-w', RAIL_WIDTH_EXPANDED)
+      document.documentElement.style.setProperty('--gg-rail-w', `${railWidth}px`)
       setShellExpanded(true)
       const contentTimer = window.setTimeout(() => {
         setContentExpanded(true)
@@ -548,6 +664,63 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     await refreshGroups()
   }
 
+  function openCreateMenu(e: MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCreateMenu({ x: rect.left, y: rect.bottom + 8 })
+  }
+
+  function openProjectMenu(e: MouseEvent, project: ProjectMeta) {
+    e.preventDefault()
+    e.stopPropagation()
+    setProjectMenu({ x: e.clientX, y: e.clientY, project })
+  }
+
+  function togglePinned(projectPath: string) {
+    setPinnedPaths(current => current.includes(projectPath)
+      ? current.filter(path => path !== projectPath)
+      : [projectPath, ...current].slice(0, 8)
+    )
+  }
+
+  async function setProjectArchived(project: ProjectMeta, archived: boolean) {
+    setProjectMenu(null)
+    const updated = await useProject.getState().updateProjectMeta(project.path, { hidden: archived })
+    if (updated) {
+      await refreshProjectList()
+      if (archived) setPinnedPaths(current => current.filter(path => path !== project.path))
+    }
+  }
+
+  function handleProjectDragStart(e: DragEvent, projectPath: string) {
+    e.dataTransfer.setData('text/project-path', projectPath)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  async function moveProjectToGroup(projectPath: string, targetGroupId: number | null) {
+    const latestGroups = await window.api.projects.listGroups()
+    const currentGroup = latestGroups.find(group => group.projectPaths.includes(projectPath)) ?? null
+    const targetGroup = targetGroupId === null ? null : latestGroups.find(group => group.id === targetGroupId) ?? null
+    if (targetGroupId !== null && !targetGroup) return
+    if ((currentGroup?.id ?? null) === (targetGroup?.id ?? null)) return
+
+    if (currentGroup) {
+      const result = await window.api.projects.updateGroup(currentGroup.id, {
+        projectPaths: currentGroup.projectPaths.filter(path => path !== projectPath)
+      })
+      if (!result.ok) return
+    }
+    if (targetGroup) {
+      const result = await window.api.projects.updateGroup(targetGroup.id, {
+        projectPaths: targetGroup.projectPaths.includes(projectPath)
+          ? targetGroup.projectPaths
+          : [...targetGroup.projectPaths, projectPath]
+      })
+      if (!result.ok) return
+    }
+    await refreshGroups()
+    window.dispatchEvent(new CustomEvent('gg-project-groups-changed'))
+  }
+
   async function handleToggleGroupCollapsed(group: ProjectGroup) {
     const result = await window.api.projects.updateGroup(group.id, { collapsed: !group.collapsed })
     if (result.ok) await refreshGroups()
@@ -555,6 +728,35 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
 
   function handleToggleCollapsedGroupOpen(groupId: number) {
     setCollapsedOpenGroupId(current => current === groupId ? null : groupId)
+  }
+
+  function handleRailResizeStart(e: MouseEvent<HTMLDivElement>) {
+    if (!railExpanded) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = railWidth
+    document.body.classList.add('gg-rail-resizing')
+
+    const onMove = (event: globalThis.MouseEvent) => {
+      const next = clampRailWidth(startWidth + event.clientX - startX)
+      setRailWidth(next)
+      document.documentElement.style.setProperty('--gg-rail-w', `${next}px`)
+    }
+    const onUp = () => {
+      document.body.classList.remove('gg-rail-resizing')
+      try {
+        localStorage.setItem(RAIL_WIDTH_KEY, String(readRailWidthFromStyle()))
+      } catch { /* ignore */ }
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    const readRailWidthFromStyle = () => {
+      const raw = document.documentElement.style.getPropertyValue('--gg-rail-w')
+      return clampRailWidth(parseInt(raw || String(railWidth), 10))
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 
   return (
@@ -623,16 +825,12 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
               <button
                 type="button"
                 className="gg-rail-section-btn"
-                onClick={() => setGroupModal({ mode: 'create' })}
-                title={t.rail.createGroup}
-                aria-label={t.rail.createGroup}
+                onClick={openCreateMenu}
+                title="Создать"
+                aria-label="Создать проект или папку"
                 tabIndex={contentExpanded ? 0 : -1}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  <line x1="12" y1="11" x2="12" y2="17" />
-                  <line x1="9" y1="14" x2="15" y2="14" />
-                </svg>
+                +
               </button>
               <span className="gg-rail-section-count">{railView.visibleCount}</span>
             </div>
@@ -665,6 +863,25 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
               )}
             </div>
           )}
+          <div className="gg-rail-filter-tabs" aria-label="Фильтр проектов">
+            {[
+              ['default', 'Все'],
+              ['active', 'Активные'],
+              ['paused', 'Пауза'],
+              ['done', 'Завершённые'],
+              ['archive', 'Архив']
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={projectFilter === value ? 'is-active' : ''}
+                onClick={() => setProjectFilter(value as ProjectRailFilter)}
+                tabIndex={contentExpanded ? 0 : -1}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -672,11 +889,41 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
         {listEmpty && hasActiveFilter && (
           <div className="gg-rail-empty">{t.rail.noResults}</div>
         )}
-        {railView.groups.map(({ group, projects }) => (
+        {pinnedProjects.length > 0 && (
+          <div className={`gg-rail-pinned ${contentExpanded ? 'is-expanded' : ''}`}>
+            <div className="gg-rail-pinned-title" aria-hidden={!contentExpanded}>Закреплённые</div>
+            {pinnedProjects.map(p => {
+              const session = sessions[p.path]
+              const streaming = !helpMode && path === p.path ? isStreaming || !!session?.isStreaming : !!session?.isStreaming
+              return (
+                <ProjectChip
+                  key={`pinned-${p.path}`}
+                  project={p}
+                  active={!helpMode && path === p.path}
+                  unread={!!session?.hasUnread}
+                  streaming={streaming}
+                  interrupted={isProjectInterrupted(p.path)}
+                  shellExpanded={shellExpanded}
+                  contentExpanded={contentExpanded}
+                  pinned
+                  draggable
+                  onClick={() => { if (helpMode || path !== p.path) void setProject(p.path) }}
+                  onSettings={() => onOpenProjectSettings(p)}
+                  onContextMenu={e => openProjectMenu(e, p)}
+                  onDragStart={handleProjectDragStart}
+                />
+              )
+            })}
+          </div>
+        )}
+        {railView.groups.map(({ group, projects }) => {
+          const visibleProjects = projects.filter(project => !pinnedSet.has(project.path))
+          if (visibleProjects.length === 0) return null
+          return (
           <ProjectGroupBlock
             key={group.id}
             group={group}
-            projects={projects}
+            projects={visibleProjects}
             activePath={helpMode ? null : path}
             activeStreaming={!helpMode && isStreaming}
             sessions={sessions}
@@ -689,9 +936,27 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
             onEdit={g => setGroupModal({ mode: 'edit', group: g })}
             onSelectProject={p => { if (helpMode || path !== p) void setProject(p) }}
             onProjectSettings={onOpenProjectSettings}
+            onProjectContextMenu={openProjectMenu}
+            onProjectDragStart={handleProjectDragStart}
+            onDropProjectToGroup={(projectPath, groupId) => void moveProjectToGroup(projectPath, groupId)}
           />
-        ))}
-        {railView.ungrouped.map(p => {
+          )
+        })}
+        <div
+          className="gg-rail-ungrouped-drop"
+          onDragOver={e => {
+            if (!e.dataTransfer.types.includes('text/project-path')) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }}
+          onDrop={e => {
+            const projectPath = e.dataTransfer.getData('text/project-path')
+            if (!projectPath) return
+            e.preventDefault()
+            void moveProjectToGroup(projectPath, null)
+          }}
+        >
+        {railView.ungrouped.filter(project => !pinnedSet.has(project.path)).map(p => {
           const session = sessions[p.path]
           const streaming = !helpMode && path === p.path ? isStreaming || !!session?.isStreaming : !!session?.isStreaming
           return (
@@ -704,12 +969,16 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
               interrupted={isProjectInterrupted(p.path)}
               shellExpanded={shellExpanded}
               contentExpanded={contentExpanded}
+              draggable
               onClick={() => { if (helpMode || path !== p.path) void setProject(p.path) }}
               onSettings={() => onOpenProjectSettings(p)}
+              onContextMenu={e => openProjectMenu(e, p)}
+              onDragStart={handleProjectDragStart}
             />
           )
         })}
-        {hiddenProjects.length > 0 && (() => {
+        </div>
+        {projectFilter === 'default' && hiddenProjects.length > 0 && (() => {
           const hiddenExpanded = contentExpanded && hiddenOpen
           return (
           <div className={`gg-rail-hidden ${hiddenExpanded ? 'is-open' : ''} ${contentExpanded ? 'is-expanded' : ''}`}>
@@ -746,8 +1015,11 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
                   shellExpanded={shellExpanded}
                   contentExpanded={contentExpanded}
                   nested
+                  draggable
                   onClick={() => { if (helpMode || path !== p.path) void setProject(p.path) }}
                   onSettings={() => onOpenProjectSettings(p)}
+                  onContextMenu={e => openProjectMenu(e, p)}
+                  onDragStart={handleProjectDragStart}
                 />
               )
             })}
@@ -757,7 +1029,7 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
         <button
           type="button"
           className="gg-rail-add"
-          onClick={() => setShowCreateClient(true)}
+          onClick={openCreateMenu}
           title={t.rail.createClient}
         >
           <span className="gg-rail-add-icon" aria-hidden>+</span>
@@ -792,6 +1064,15 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
           </button>
         </div>
       </div>
+      {shellExpanded && (
+        <div
+          className="gg-rail-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Изменить ширину панели проектов"
+          onMouseDown={handleRailResizeStart}
+        />
+      )}
     </div>
     {showCreateClient && (
       <CreateClientModal
@@ -807,6 +1088,45 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
         onClose={() => setGroupModal(null)}
         onSaved={() => void handleGroupSaved()}
       />
+    )}
+    {createMenu && typeof document !== 'undefined' && createPortal(
+      <div
+        ref={createMenuRef}
+        className="gg-rail-menu gg-rail-create-menu"
+        style={clampProjectMenuPos(createMenu.x, createMenu.y)}
+        role="menu"
+      >
+        <button type="button" role="menuitem" onClick={() => { setCreateMenu(null); setShowCreateClient(true) }}>
+          Новый проект
+        </button>
+        <button type="button" role="menuitem" onClick={() => { setCreateMenu(null); setShowCreateClient(true) }}>
+          Открыть папку
+        </button>
+        <button type="button" role="menuitem" onClick={() => { setCreateMenu(null); setGroupModal({ mode: 'create' }) }}>
+          Новая папка
+        </button>
+      </div>,
+      document.body
+    )}
+    {projectMenu && typeof document !== 'undefined' && createPortal(
+      <div
+        ref={projectMenuRef}
+        className="gg-rail-menu gg-rail-project-menu"
+        style={clampProjectMenuPos(projectMenu.x, projectMenu.y)}
+        role="menu"
+        onContextMenu={e => e.preventDefault()}
+      >
+        <button type="button" role="menuitem" onClick={() => { const project = projectMenu.project; setProjectMenu(null); onOpenProjectSettings(project) }}>
+          Настройки
+        </button>
+        <button type="button" role="menuitem" onClick={() => { togglePinned(projectMenu.project.path); setProjectMenu(null) }}>
+          {pinnedPaths.includes(projectMenu.project.path) ? 'Открепить' : 'Закрепить'}
+        </button>
+        <button type="button" role="menuitem" onClick={() => void setProjectArchived(projectMenu.project, !projectMenu.project.hidden)}>
+          {projectMenu.project.hidden ? 'Вернуть из архива' : 'В архив'}
+        </button>
+      </div>,
+      document.body
     )}
     </>
   )

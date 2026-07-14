@@ -21,6 +21,8 @@ function isNoise(line: string): boolean {
   if (t.startsWith('✅')) return true
   if (/нет ошибок/i.test(t)) return true
   if (/^\s*(PASS|✓|√)\b/.test(t)) return true
+  if (/\b(fail|failed|error|errors|exception)s?\s*0\b/i.test(t)) return true
+  if (/\b0\s*(fail|failed|error|errors|exception)s?\b/i.test(t)) return true
   return false
 }
 

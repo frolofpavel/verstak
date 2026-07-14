@@ -27,6 +27,7 @@ import { InboxApprovals } from './components/InboxApprovals'
 import { UpdateReadyToast } from './components/UpdateReadyToast'
 import { WhatsNewModal } from './components/WhatsNewModal'
 import { SideChat } from './components/SideChat'
+import { FilePreviewPanel } from './components/FilePreviewPanel'
 import { prefetchDetectedClis } from './lib/prefetch-cli'
 import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
 import { WindowShell } from './components/TitleBar'
@@ -105,8 +106,9 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'models' | undefined>()
   const [modelPromptRecheck, setModelPromptRecheck] = useState(0)
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectMeta | null>(null)
-  // Right docked panel: terminal or parallel side-chat.
-  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat'>('none')
+  // Right docked panel: terminal, file preview or parallel side-chat.
+  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat' | 'file-preview'>('none')
+  const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
   // Side-chat session id — created on first sent message, not on panel open.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
   const [sideChatWidth, setSideChatWidth] = useState<number>(readSideChatWidth)
@@ -240,7 +242,8 @@ export function App() {
   useEffect(() => {
     if (!path) {
       setSideChatId(null)
-      setRightPanel(p => (p === 'sidechat' ? 'none' : p))
+      setPreviewFilePath(null)
+      setRightPanel(p => (p === 'sidechat' || p === 'file-preview' ? 'none' : p))
       return
     }
     const saved = sideChatByProjectRef.current[path] ?? null
@@ -254,6 +257,12 @@ export function App() {
       setSideChatId(saved)
     }
     setRightPanel('sidechat')
+  }
+
+  function openFilePreview(filePath: string) {
+    if (!path) return
+    setPreviewFilePath(filePath)
+    setRightPanel('file-preview')
   }
 
   function startSideChatResize(e: ReactMouseEvent<HTMLDivElement>) {
@@ -424,6 +433,7 @@ export function App() {
               onSelectRightPanel={setRightPanel}
               isSettingsOpen={showSettings}
               onOpenSideChat={() => void openSideChat()}
+              onOpenFilePreview={openFilePreview}
             />
             {effectiveRightPanel === 'terminal' && (
               <div className="gg-terminal-wrap">
@@ -450,6 +460,14 @@ export function App() {
                 onResizeStart={startSideChatResize}
                 onSessionCreated={rememberSideChatId}
                 onSessionSelected={rememberSideChatId}
+                onClose={() => setRightPanel('none')}
+              />
+            )}
+            {effectiveRightPanel === 'file-preview' && (
+              <FilePreviewPanel
+                path={previewFilePath}
+                width={sideChatWidth}
+                onResizeStart={startSideChatResize}
                 onClose={() => setRightPanel('none')}
               />
             )}

@@ -335,7 +335,7 @@ const PROVIDERS: ProviderConfig[] = [
 
 type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
 type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
-type SettingsNavTab = { id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean; keywords?: string }
+type SettingsNavTab = { id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean; disabled?: boolean; keywords?: string }
 type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
 function SettingsNavIcon({ name }: { name: SettingsNavIconName }) {
@@ -1660,20 +1660,20 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   // Смысловые блоки левой панели: не техническая свалка, а маршрут пользователя.
   const TAB_GROUPS: ReadonlyArray<SettingsNavGroup> = [
     { title: 'Приложение', tabs: [
-      { id: 'appearance', label: t.settings.appearance, icon: 'appearance', keywords: 'theme ui вид масштаб оформление' },
-      { id: 'notifications', label: t.settings.notifications, icon: 'notifications', keywords: 'toast push telegram уведомления' },
-      { id: 'updates', label: t.settings.updates, icon: 'updates', keywords: 'release installer автообновление версия' },
-      { id: 'profiles', label: t.settings.profiles, icon: 'profiles', soon: true, keywords: 'user profile роль пользователь' }
+      { id: 'appearance', label: t.settings.appearance, icon: 'appearance', keywords: 'theme ui вид внешний вид тема светлая темная тёмная ночь день масштаб размер интерфейс плотность компактно просторно анимации полный выключены оформление шрифт панель' },
+      { id: 'notifications', label: t.settings.notifications, icon: 'notifications', keywords: 'toast push telegram уведомления всплывающее всплывающие звук проект тихие часы режим всегда вне фокуса окно проверка сигналы ошибки напоминания ответы' },
+      { id: 'updates', label: t.settings.updates, icon: 'updates', keywords: 'release installer автообновление версия обновление обновить патчноут патч ноут список изменений загрузка установка временные файлы очистка кэш кеш диагностика' },
+      { id: 'profiles', label: t.settings.profiles, icon: 'profiles', soon: true, disabled: true, keywords: 'user profile профиль аккаунт пользователь организация команда компания роль доступ участники приглашение почта регистрация' }
     ] },
     { title: 'AI', tabs: [
-      { id: 'providers', label: t.settings.providers, icon: 'providers', keywords: 'api key gateway cli ключи deepseek kimi qwen openrouter' },
-      { id: 'models', label: t.settings.models, icon: 'models', keywords: 'default fallback reviewer planner picker пресеты' },
-      { id: 'modelModes', label: 'Режимы работы моделей', icon: 'modelModes', keywords: 'режимы модели планирование авто правки привязка' },
-      { id: 'policy', label: 'Права модели', icon: 'policy', keywords: 'allowlist permissions bash команды политика права модели доступ' },
+      { id: 'providers', label: t.settings.providers, icon: 'providers', keywords: 'api key gateway cli ключи провайдеры подключение авторизация токен где взять ключ grok grok build composer chatgpt openai claude codex gemini deepseek kimi qwen openrouter ollama lm studio' },
+      { id: 'models', label: t.settings.models, icon: 'models', keywords: 'default fallback reviewer planner picker пресеты модели выбор модель показывать подключенные подключённые рабочий набор текущая чат лимит расходы сутки рубли доллары бюджет стоимость' },
+      { id: 'modelModes', label: 'Режимы работы моделей', icon: 'modelModes', keywords: 'режимы модели планирование авто правки привязка стандарт турбо простой поведение подтверждение без подтверждений разрешения задачи' },
+      { id: 'policy', label: 'Права модели', icon: 'policy', keywords: 'allowlist permissions bash команды политика права модели доступ что разрешено разрешения запреты запрет доверенные действия папки файлы команды коннекторы подтверждение' },
     ] },
     { title: 'Интеграции', tabs: [
-      { id: 'connectors', label: t.settings.connectors, icon: 'connectors', keywords: 'telegram bitrix sheets github yandex http ssh' },
-      { id: 'mcp', label: 'Внешние инструменты', icon: 'mcp', keywords: 'mcp model context protocol servers tools внешние инструменты' }
+      { id: 'connectors', label: t.settings.connectors, icon: 'connectors', keywords: 'telegram bitrix bitrix24 битрикс б24 sheets таблицы google github yandex яндекс direct директ metrika метрика wordstat вордстат диск drive http ssh api webhook вебхук токен ключ crm сделки задачи контакты реклама семантика' },
+      { id: 'mcp', label: 'Внешние инструменты', icon: 'mcp', keywords: 'mcp model context protocol servers tools внешние инструменты продвинутые подключения серверы инструменты браузер поиск файлы интеграции' }
     ] }
   ]
   const navQuery = navSearch.trim().toLowerCase()
@@ -1687,6 +1687,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       return { ...g, tabs }
     })
     .filter(g => g.tabs.length > 0)
+  const activeNavGroup = TAB_GROUPS.find(g => g.tabs.some(x => x.id === tab))
+  const activeNavTab = activeNavGroup?.tabs.find(x => x.id === tab)
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
@@ -3773,23 +3775,42 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
   return (
     <div className="gg-modal-backdrop" onClick={onClose}>
-      <div className="gg-modal gg-modal-large" onClick={e => e.stopPropagation()}>
-        <div className="gg-modal-header">
-          <div className="gg-modal-title">{t.settings.title}</div>
-          <button className="gg-modal-close" onClick={onClose}>×</button>
+      <div className="gg-modal gg-modal-large gg-settings-modal" onClick={e => e.stopPropagation()}>
+        <div className="gg-settings-window-head">
+          <div className="gg-settings-window-copy">
+            <div className="gg-settings-window-kicker">Параметры Verstak</div>
+            <div className="gg-settings-window-title">{t.settings.title}</div>
+          </div>
+          <div className="gg-settings-window-tools">
+            <button className="gg-modal-close gg-settings-window-close" onClick={onClose} aria-label="Закрыть">×</button>
+          </div>
+        </div>
+
+        <div className="gg-settings-search-row">
+          <div className="gg-settings-search-label">Поиск по настройкам</div>
+          <div className="gg-settings-search-box">
+            <input
+              className="gg-input gg-settings-window-search"
+              value={navSearch}
+              onChange={e => setNavSearch(e.target.value)}
+              placeholder="Поиск настроек..."
+              spellCheck={false}
+            />
+            {navSearch && (
+              <button
+                type="button"
+                className="gg-settings-search-clear"
+                onClick={() => setNavSearch('')}
+                aria-label="Очистить поиск"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
 
         <div className={`gg-settings-shell ${tab === 'notifications' ? 'is-notifications' : ''}`}>
           <aside className="gg-settings-nav" role="tablist" aria-label="Разделы настроек">
-            <div className="gg-settings-nav-search-wrap">
-              <input
-                className="gg-input gg-settings-nav-search"
-                value={navSearch}
-                onChange={e => setNavSearch(e.target.value)}
-                placeholder="Поиск настроек..."
-                spellCheck={false}
-              />
-            </div>
             {visibleTabGroups.map(g => (
               <div key={g.title} className="gg-settings-nav-group">
                 <div className="gg-settings-nav-title">{g.title}</div>
@@ -3799,8 +3820,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
                     type="button"
                     role="tab"
                     aria-selected={tab === t.id}
-                    className={`gg-settings-nav-item ${tab === t.id ? 'is-active' : ''}`}
-                    onClick={() => setTab(t.id)}
+                    aria-disabled={t.disabled}
+                    disabled={t.disabled}
+                    className={`gg-settings-nav-item ${tab === t.id ? 'is-active' : ''} ${t.disabled ? 'is-disabled' : ''}`}
+                    onClick={() => {
+                      if (!t.disabled) setTab(t.id)
+                    }}
                   >
                     <span className="gg-settings-nav-icon" aria-hidden>
                       <SettingsNavIcon name={t.icon} />
@@ -3817,6 +3842,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           </aside>
 
           <div className={`gg-settings-content ${tab === 'notifications' ? 'is-notifications' : ''}`}>
+            <div className="gg-settings-section-bar">
+              <div>
+                <h2>{activeNavTab?.label ?? t.settings.title}</h2>
+              </div>
+              {settingsDirty && <span className="gg-settings-section-state">Есть изменения</span>}
+            </div>
 
         {tab === 'providers' && (
         <ProvidersPage
@@ -4322,7 +4353,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           </div>
         </div>
 
-        <div className="gg-modal-footer">
+        <div className="gg-settings-actionbar">
           <div className={`gg-settings-save-status ${settingsDirty ? 'is-dirty' : saved ? 'is-saved' : ''}`}>
             {saving ? 'Сохраняю…' : saved ? 'Сохранено' : settingsDirty ? 'Есть несохранённые изменения' : 'Изменений нет'}
           </div>
@@ -5284,10 +5315,18 @@ function ModelsPage(props: ModelsPageProps) {
                 <div className="gg-models-section-title is-locked">Требуется подключение</div>
               )}
               <div className={`gg-models-card ${isActiveProvider ? 'is-current' : ''} ${isDetail ? 'is-open' : ''}`}>
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   className="gg-models-service-card"
                   onClick={() => toggleDetail(p.id)}
+                  onKeyDown={event => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      toggleDetail(p.id)
+                    }
+                  }}
                   aria-expanded={isDetail}
                 >
                   <span className="gg-models-provider-icon" aria-hidden>{providerGlyph(p)}</span>
@@ -5308,10 +5347,16 @@ function ModelsPage(props: ModelsPageProps) {
                       </span>
                     </span>
                   </span>
-                  <span className={`gg-models-card-chevron ${isDetail ? 'is-open' : ''}`} aria-hidden>
+                  <button
+                    type="button"
+                    className={`gg-btn gg-btn-ghost gg-provider-settings-toggle gg-provider-action-icon gg-models-card-chevron ${isDetail ? 'is-open' : ''}`}
+                    onClick={event => { event.stopPropagation(); toggleDetail(p.id) }}
+                    title={isDetail ? 'Закрыть настройки' : 'Открыть настройки'}
+                    aria-label={isDetail ? 'Закрыть настройки' : 'Открыть настройки'}
+                  >
                     <ProviderSettingsToggleIcon open={isDetail} />
-                  </span>
-                </button>
+                  </button>
+                </div>
 
                 {isDetail && (
                   <div className="gg-models-card-panel">

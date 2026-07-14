@@ -229,7 +229,7 @@ function buildInterruptedAnswerProgress(createdAt: number | undefined, providerL
   ]
 }
 
-type RightPanel = 'none' | 'terminal' | 'sidechat'
+type RightPanel = 'none' | 'terminal' | 'sidechat' | 'file-preview'
 
 interface ChatProps {
   onOpenSettings: () => void
@@ -238,6 +238,7 @@ interface ChatProps {
   isSettingsOpen?: boolean
   /** Open the right-docked parallel chat (lazily created by App). */
   onOpenSideChat: () => void
+  onOpenFilePreview: (path: string) => void
 
 }
 
@@ -538,7 +539,7 @@ function composeSkillSystemPrompt(activeSkill: Skill | null, appliedSkills: Skil
   return parts.length ? parts.join('\n\n---\n\n') : undefined
 }
 
-export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSettingsOpen = false, onOpenSideChat }: ChatProps) {
+export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSettingsOpen = false, onOpenSideChat, onOpenFilePreview }: ChatProps) {
   const t = useT()
   const {
     helpMode, help, helpChatId,
@@ -1437,8 +1438,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         && !owner.isHelp
         && (store.helpMode || owner.chatId !== store.activeChatId || (projectPath && projectPath !== store.path))
       ) {
-        store.applyEventToChat(owner.chatId, event as unknown as { type: string; [k: string]: unknown })
-        const chatProject = projectPath || store.path
+        const chatProject = projectPath || owner.projectPath || store.path
+        const routedEvent = {
+          ...(event as unknown as { type: string; [k: string]: unknown }),
+          ...(chatProject ? { projectPath: chatProject } : {}),
+          chatId: owner.chatId,
+          persistedByChat: true
+        }
+        store.applyEventToChat(owner.chatId, routedEvent)
+        if (store.helpMode && chatProject) {
+          store.applyEventToSession(chatProject, routedEvent)
+        }
         if (event.type === 'done') {
           notifyAgentFinished(owner, chatProject)
         } else if (event.type === 'error') {
@@ -1910,7 +1920,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     ta.style.height = `${nextHeight}px`
     if (nextHeight !== lastComposerHeightRef.current) {
       lastComposerHeightRef.current = nextHeight
-      if (autoScrollEnabledRef.current) pinChatToBottom('auto')
     }
   }
   useEffect(autoGrow, [input])
@@ -1966,7 +1975,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       const ev = e as CustomEvent<{ text: string; mode: 'plan' | 'accept-edits' }>
       const d = ev.detail
       if (d && typeof d.text === 'string' && d.text.trim()) {
-        setAgentMode(d.mode)
+        void setAgentMode(d.mode)
         setInput(d.text)
         pipelineSendModeRef.current = d.mode
       }
@@ -2125,19 +2134,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }
   }, [])
 
-  // Live token preview: debounce text changes (400ms) and ask the main process
-  // to count tokens for the current draft. Gemini API gives an exact count;
-  // CLI / other providers get a rough 4-chars-per-token estimate.
+  // Keep the live preview cheap while typing. Exact provider-side token counts
+  // can touch project context and message history, so they do not belong in the
+  // composer hot path.
   useEffect(() => {
     const text = input.trim()
     if (!text) { setPreviewTokens(null); return }
-    const timer = window.setTimeout(async () => {
-      try {
-        const state = useProject.getState()
-        const res = await window.api.ai.countTokens(text, state.path, state.messages)
-        setPreviewTokens({ tokens: res.tokens, exact: res.exact })
-      } catch { /* silent: it's only a preview */ }
-    }, 400)
+    const timer = window.setTimeout(() => {
+      setPreviewTokens({ tokens: Math.max(1, Math.ceil(text.length / 4)), exact: false })
+    }, 120)
     return () => window.clearTimeout(timer)
   }, [input])
 
@@ -3451,7 +3456,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                         <span className="gg-thinking-len">{m.thinking.length} симв.</span>
                       </summary>
                       <div className="gg-thinking-body">
-                        <Markdown text={m.thinking} />
+                        <Markdown text={m.thinking} onOpenFile={onOpenFilePreview} />
                       </div>
                     </details>
                   )
@@ -3473,7 +3478,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 ) : null}
                 {renderedContent
                   ? (m.role === 'assistant'
-                      ? <Markdown text={renderedContent} />
+                      ? <Markdown text={renderedContent} onOpenFile={onOpenFilePreview} />
                       : supplement
                         ? (
                           <>
@@ -3594,7 +3599,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
 
       <TimelineBar />
       <ReviewPanel />
-      <PipelineBanner onPrimary={onPipelinePrimary} />
+      <PipelineBanner onPrimary={step => { void onPipelinePrimary(step) }} />
       {pipelineWizardOpen && (
         <PipelineWizard
           mode={pipelineWizardMode}
@@ -4074,7 +4079,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                         <span className="gg-chat-settings-label">Режим</span>
                         <ModePicker
                           mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                          onChange={applyMode}
+                          onChange={m => { void applyMode(m) }}
                           locked={isHelpChat}
                         />
                       </div>
@@ -4130,7 +4135,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               <button
                 type="button"
                 className={`gg-chat-turbo-btn ${agentMode === 'auto' || agentMode === 'bypass' ? 'is-turbo' : 'is-simple'}`}
-                onClick={() => setAgentMode(agentMode === 'auto' || agentMode === 'bypass' ? 'ask' : 'auto')}
+                onClick={() => { void setAgentMode(agentMode === 'auto' || agentMode === 'bypass' ? 'ask' : 'auto') }}
                 disabled={isHelpChat}
                 title={
                   isHelpChat
@@ -4165,7 +4170,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               )}
               <ModePicker
                 mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                onChange={applyMode}
+                onChange={m => { void applyMode(m) }}
                 locked={isHelpChat}
               />
               {!isHelpChat && <IntensityToggle />}

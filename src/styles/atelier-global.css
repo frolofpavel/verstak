@@ -1350,9 +1350,17 @@ html[data-motion="off"].gg-atelier .gg-typing span {
 }
 
 html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active .gg-rail-chip-btn {
-  background: var(--vol-recessed-bg);
-  border-color: var(--border-subtle);
-  box-shadow: var(--vol-shadow-inset);
+  background: var(--rail-chip-active-bg, color-mix(in srgb, var(--bg-hover) 78%, transparent));
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-subtle));
+  box-shadow: none;
+}
+
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-streaming .gg-rail-chip-btn,
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-unread .gg-rail-chip-btn,
+html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-interrupted .gg-rail-chip-btn {
+  background: var(--rail-chip-active-bg, color-mix(in srgb, var(--bg-hover) 78%, transparent));
+  border-color: color-mix(in srgb, var(--rail-avatar-status) 46%, var(--border-subtle));
+  box-shadow: none;
 }
 
 html[data-motion="off"].gg-atelier .gg-app-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-status-arc,
@@ -1433,6 +1441,21 @@ html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-unr
 html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-streaming .gg-rail-avatar,
 html[data-project-status="errors"].gg-atelier .gg-rail-avatar-wrap.is-status-unread .gg-rail-avatar {
   border-color: var(--border-default) !important;
+}
+
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active .gg-rail-chip-btn,
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active.is-status-streaming .gg-rail-chip-btn,
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active.is-status-unread .gg-rail-chip-btn,
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-active.is-status-interrupted .gg-rail-chip-btn {
+  background: var(--rail-chip-active-bg, color-mix(in srgb, var(--bg-hover) 82%, transparent));
+}
+
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-streaming:not(.is-active) .gg-rail-chip-btn,
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-unread:not(.is-active) .gg-rail-chip-btn,
+html.gg-atelier .gg-app-atelier .gg-rail-chip.is-shell-expanded.is-status-interrupted:not(.is-active) .gg-rail-chip-btn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 @media (max-width: 760px) {
