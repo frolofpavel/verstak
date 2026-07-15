@@ -22,6 +22,7 @@ import { logRuntime, logRuntimeError } from '../runtime-log'
 import { isAgentRunTimeoutAbort, exitReasonToAgentRunStatus } from './run-lifecycle'
 import { classifyProviderError } from './provider-error'
 import { shouldFallback, getNextFallback } from './smart-fallback'
+import { classifyRouteReason, routeChangedText } from './route-policy'
 
 export async function runPlainConversation(
   sender: TaggedSender,
@@ -132,6 +133,29 @@ export async function runPlainConversation(
   let exitReason: ExitReason = 'completed'
   const signalExitReason = (): ExitReason => isAgentRunTimeoutAbort(signal) ? 'timeout' : 'aborted'
   let handedOff = false // #15: при fallback финализирует рекурсивный фрейм
+
+  // 2.0.8-D: структурное событие смены маршрута (инвариант 8) + запись в agent_run_events.
+  // Зеркалит runner-api emitRouteChanged (CLI-путь тоже объясним по Timeline).
+  const emitRouteChanged = (
+    action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
+    err: unknown,
+    actual: { providerId: string; model: string },
+    attempt: number,
+  ): void => {
+    const reason = classifyRouteReason(err)
+    const requested = { providerId: providerId ?? '', model: model ?? '' }
+    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual } })
+    sender.send('ai:event', { id: sendId, event: { type: 'info', text: routeChangedText(action, requested, actual) } })
+    if (agentRuns && runId) {
+      try {
+        agentRuns.appendEvent(runId, 'route', {
+          label: action,
+          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}`,
+          status: 'ok',
+        })
+      } catch { /* best-effort */ }
+    }
+  }
   try {
     while (!signal.aborted) {
       drainSupplements()
@@ -255,7 +279,7 @@ export async function runPlainConversation(
               fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
               const fresh = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
               if (fresh) {
-                sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
+                emitRouteChanged('rotate-account', roundErrorMessage, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount)
                 handedOff = true
                 return runPlainConversation(sender, sendId, fresh, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
               }
@@ -309,13 +333,10 @@ export async function runPlainConversation(
         const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
         if (nextProvider && nextId) {
           console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-          sender.send('ai:event', {
-            id: sendId,
-            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
-          })
           fallbackOpts.triedProviders.add(nextId)
           // #7: модель fallback-провайдера, а не упавшего — для верного cost/журнала.
           const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
+          emitRouteChanged('model-fallback', err, { providerId: nextId, model: nextModel ?? '' }, fallbackOpts.triedProviders.size)
           // #15: fallback-фрейм владеет финализацией (agentRuns/runId переданы).
           handedOff = true
           logRuntime('ai.fallback.handoff', {

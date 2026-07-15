@@ -300,6 +300,8 @@ export type ChatEvent =
   | { type: 'context-compact'; phase: 'cancel'; reason: 'context-window' }
   | { type: 'info'; text: string }
   | { type: 'cross-verify'; result: string; provider: string; ok: boolean }
+  /** 2.0.8-D: автоматическая смена маршрута прогона. Зеркало electron/ai/types.ts (§5 анти-дрейф). */
+  | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string } }
   | { type: 'done' }
   | { type: 'error'; message: string }
 

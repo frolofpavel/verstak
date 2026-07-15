@@ -50,6 +50,7 @@ import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain
 import { trackToolForPatterns, type ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
 import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart-fallback'
+import { classifyRouteReason, routeChangedText } from './route-policy'
 import { detectSubscriptionLimit } from './subscription-limits'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from './tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from './smart-router'
@@ -416,6 +417,32 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // `force` (Этап 2): пропустить shouldFallback-гейт, когда причина смены — доказанный
   // поведенческий сбой tool-calling (модель игнорит tools / повторно битый JSON), а не
   // сетевой транзиент. Такие ошибки не матчат сетевые паттерны, но смена модели оправдана.
+  // 2.0.8-D: структурное событие смены маршрута (инвариант 8) — пользователь по Timeline
+  // объясняет КАЖДУЮ автоматическую смену. reason — код classifyRouteReason (единый со
+  // спекой route-policy). Плюс запись в agent_run_events (kind='route') без миграции.
+  const emitRouteChanged = (
+    action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
+    err: unknown,
+    actual: { providerId: string; model: string },
+    attempt: number,
+  ): void => {
+    const reason = classifyRouteReason(err)
+    const requested = { providerId: providerId ?? '', model: model ?? '' }
+    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual } })
+    // Человекочитаемая пилюля для текущего UI. Диспетчер route-changed в Chat.tsx (рендер
+    // структурной пилюли в TimelineBar) — пост-Ilya UI-проводка (Chat.tsx вне allowlist D-core).
+    sender.send('ai:event', { id: sendId, event: { type: 'info', text: routeChangedText(action, requested, actual) } })
+    if (agentRuns && runId) {
+      try {
+        agentRuns.appendEvent(runId, 'route', {
+          label: action,
+          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}`,
+          status: 'ok',
+        })
+      } catch { /* best-effort */ }
+    }
+  }
+
   const attemptProviderFallback = (err: unknown, force = false): Promise<void> | null => {
     if (!(fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS)) return null
     fallbackOpts.triedProviders.add(providerId)
@@ -424,8 +451,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
     if (!nextProvider || !nextId) return null
     console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-    sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` } })
     fallbackOpts.triedProviders.add(nextId)
+    // attempt считаем ПОСЛЕ add(nextId) — паритет с runner-plain (ревью #4): size включает
+    // новый провайдер → порядковый номер маршрута совпадает по транспортам API↔CLI.
+    const nextModelForEvent = fallbackOpts.getProviderModel(nextId) ?? model ?? ''
+    emitRouteChanged('model-fallback', err, { providerId: nextId, model: nextModelForEvent }, fallbackOpts.triedProviders.size)
     const fallbackTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
     })
@@ -454,7 +484,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
     const freshProvider = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
     if (!freshProvider) return null
-    sender.send('ai:event', { id: sendId, event: { type: 'info', text: `⚡ Лимит аккаунта — переключился на другой аккаунт (${providerId})` } })
+    // Ротация аккаунта: провайдер/модель те же, меняется аккаунт (accountId в событие не отдаём).
+    emitRouteChanged('rotate-account', err, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount)
     handedOff = true
     const acctTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))

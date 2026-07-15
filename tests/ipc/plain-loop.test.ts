@@ -120,7 +120,8 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(switchAccountOnLimit.mock.calls[0][0]).toBe('claude-cli')
     expect(switchAccountOnLimit.mock.calls[0][1]).toBeGreaterThan(0) // resetEta распарсен
     const evs = sentEvents(sender)
-    expect(evs.some(e => e.type === 'info' && (e as { text?: string }).text?.includes('другой аккаунт'))).toBe(true)
+    // 2.0.8-D: смена аккаунта теперь структурное route-changed (было эфемерное info).
+    expect(evs.some(e => e.type === 'route-changed' && (e as { action?: string }).action === 'rotate-account')).toBe(true)
     // Свежий аккаунт реально отработал (его текст дошёл).
     expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('свежем аккаунте'))).toBe(true)
   })
