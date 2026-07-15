@@ -26,6 +26,25 @@ export const readHandler: ToolHandler = {
   }
 }
 
+/**
+ * Хендлер НЕИЗВЕСТНОГО инструмента (2.0.7-G). Раньше lookupHandler отдавал generic
+ * readHandler ЛЮБОМУ незарегистрированному имени. Главная опасность была НЕ в
+ * «галлюцинированном» имени (для него ctx.tools.execute и так кидает ошибку), а в тулзе,
+ * чья реализация в execute СУЩЕСТВУЕТ, но которая выпала из HANDLER_REGISTRY: напр.
+ * write_file/apply_patch реально пишут файл, и generic readHandler молча понижал их до
+ * parallel-read, ОБХОДЯ mode-policy/confirm write-хендлеров. Теперь такой (и любой
+ * неизвестный) вызов ОТКЛОНЯЕТСЯ со структурной ошибкой, ничего не исполняя. mode
+ * parallel-read — чтобы отказ не тянул confirm-модалку; сам handle не читает и не пишет.
+ */
+export const unknownToolHandler: ToolHandler = {
+  mode: 'parallel-read',
+  async handle(call, ctx) {
+    const msg = `Неизвестный инструмент «${call.name}»: не зарегистрирован и не входит в audited read-allowlist — вызов отклонён.`
+    emitActivity(ctx, call, 'error', call.name, msg)
+    return { id: call.id, name: call.name, result: '', error: msg }
+  }
+}
+
 // ============================================================================
 // File ops: write_file, apply_patch, propose_edits
 // ============================================================================

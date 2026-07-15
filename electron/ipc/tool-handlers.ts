@@ -29,7 +29,7 @@ export { dedupeTaskIds, parseDecomposition, decomposeGoal, buildSwarmRoster } fr
 import { runCommandHandler, runUntilGreenHandler } from './tool-handlers/command'
 import { spawnProcessHandler, processStatusHandler, readProcessHandler, stopProcessHandler } from './tool-handlers/process'
 import { browserHandler } from './tool-handlers/browser'
-import { readHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
+import { readHandler, unknownToolHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
 import { readJournalHandler } from './tool-handlers/journal'
 import { executeCodeHandler } from './tool-handlers/execute-code'
@@ -52,6 +52,9 @@ import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler }
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
 
+// Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
+// write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
+// read. Страж проверяет это через lookupHandler (не читая сам объект). Не мутировать в рантайме.
 const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Confirm-write — go through the diff modal
   'write_file': writeFileHandler,
@@ -124,13 +127,26 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
 }
 
 /**
- * Look up the handler for a tool call. Falls back to the generic parallel-read
- * handler (which calls into ctx.tools.execute) for anything not explicitly
- * registered — that's the safe default for new pure-info tools.
+ * Audited generic-read allowlist (2.0.7-G): ЕДИНСТВЕННЫЕ незарегистрированные имена,
+ * которым разрешён generic readHandler (mode parallel-read через ctx.tools.execute).
+ * Это чистые навигационно-читающие тулзы. Всё, чего нет ни в HANDLER_REGISTRY, ни здесь,
+ * ни среди MCP-тулзов — считается неизвестным и отклоняется (см. lookupHandler).
+ * Держится в синхроне с TOOL_DEFS контракт-стражем tests/contracts/tool-contract.test.ts.
+ */
+export const GENERIC_READ_ALLOWLIST: ReadonlySet<string> = new Set([
+  'read_file', 'list_directory', 'search_project', 'find_files', 'get_project_map', 'refresh_project_map',
+])
+
+/**
+ * Look up the handler for a tool call.
  *
- * MCP tools: если имя не найдено в registry и передан ctx.mcpClient —
- * роутим к mcpToolHandler. Так как lookupHandler не имеет ctx, проверка
- * происходит в mcpToolHandler.handle через поиск в mcpClient.getAllTools().
+ * Порядок: явный handler → MCP-тул → audited generic-read → ОТКЛОНИТЬ как неизвестный.
+ * 2.0.7-G: раньше последним шагом был generic readHandler для ЛЮБОГО имени — необъявленный
+ * или галлюцинированный tool молча получал read. Теперь такой вызов идёт в unknownToolHandler
+ * (структурная ошибка, без исполнения). Все объявленные TOOL_DEFS покрыты registry+allowlist
+ * (страж это гарантирует), поэтому легитимный вызов сюда не попадает.
+ *
+ * MCP tools: если имя не в registry и передан ctx.mcpClient — роутим к mcpToolHandler.
  */
 export function lookupHandler(name: string, ctx?: { mcpClient?: import('../mcp/client').McpClient }): ToolHandler {
   const registered = HANDLER_REGISTRY[name]
@@ -142,5 +158,6 @@ export function lookupHandler(name: string, ctx?: { mcpClient?: import('../mcp/c
       return mcpToolHandler
     }
   }
-  return readHandler
+  if (GENERIC_READ_ALLOWLIST.has(name)) return readHandler
+  return unknownToolHandler
 }
