@@ -69,6 +69,17 @@ export function providerCapabilities(d: Pick<ProviderDescriptor, 'transport' | '
   return capabilitiesFor(d.transport, d.supportsTools)
 }
 
+/**
+ * 2.0.8-C: провайдеры, чья авторизация живёт в `<CODEX_HOME>/auth.json` (общий `codex login`).
+ * И subprocess `codex-cli`, и нативный API-loop `openai-codex-oauth` делят один Codex-аккаунт,
+ * поэтому оба получают изолированный CODEX_HOME активного аккаунта (см. resolveCodexHome в ipc/ai.ts).
+ * Держим предикат ЗДЕСЬ (definition-файл реестра), чтобы ipc/ai.ts не спеллил лишние provider-id
+ * литералы (иначе copy-страж provider-model-drift примет per-provider ветвление за копию реестра).
+ */
+export function isCodexAuthProvider(id: string): boolean {
+  return id === 'codex-cli' || id === 'openai-codex-oauth'
+}
+
 export const PROVIDERS: Record<ProviderId, ProviderDescriptor> = {
   'gemini-api': {
     id: 'gemini-api',

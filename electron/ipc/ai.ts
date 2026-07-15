@@ -6,7 +6,7 @@ import { scanText } from '../ai/secret-scanner'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
-import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
+import { createProvider, PROVIDERS, isCodexAuthProvider, type ProviderId } from '../ai/registry'
 import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
 import { isKnownProviderId, type PromptRouteOverride } from '../../shared/contracts/provider'
 import type { McpClient } from '../mcp/client'
@@ -310,7 +310,11 @@ export async function runScheduledHeadless(
   const model = opts.model ?? descriptor.defaultModel
 
   try {
-    const provider = createProvider(opts.providerId, { apiKey, model, cwd: opts.projectPath, signal: opts.signal })
+    // 2.0.8-C: scheduled/NL-cron прогон на openai-codex-oauth тоже обязан идти в изолированный
+    // CODEX_HOME активного аккаунта (третий createProvider-сайт; ревью F1). Без этого unattended
+    // прогон читал/рефрешил дефолтный ~/.codex/auth.json чужого аккаунта — дыра изоляции.
+    const codexHome = resolveCodexHome(opts.providerId, deps.resolveSubscriptionAccount)
+    const provider = createProvider(opts.providerId, { apiKey, model, cwd: opts.projectPath, signal: opts.signal, codexHome })
     const userMsg: ChatMessage = { role: 'user', content: opts.prompt }
     const composed = await prepareSystemContext({
       projectPath: opts.projectPath,
@@ -346,6 +350,27 @@ export async function runScheduledHeadless(
   } catch (err) {
     return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * 2.0.8-C: изолированный CODEX_HOME для Codex-провайдеров. `codex-cli` и нативный
+ * `openai-codex-oauth` аутентифицируются ОДИНАКОВО — `codex login` пишет
+ * `<CODEX_HOME>/auth.json` — поэтому ОБА резолвят один активный Codex-аккаунт (реестр
+ * `codex-cli`) и получают его config-dir (свой auth.json → свой credential-store-стейт по
+ * пути). Раньше codexHome резолвился ТОЛЬКО для `codex-cli` → openai-codex-oauth всегда шёл
+ * в дефолтный `~/.codex/auth.json`, и переключение аккаунтов на нём не действовало (2.0.4).
+ *
+ * Никакой мутации `process.env.CODEX_HOME` (глобал всего Electron, гонка между чатами) —
+ * codexHome течёт аргументом в конкретный provider instance. `|| null` (не `??`): пустая
+ * строка configDir нормализуется в null, иначе '' утёк бы downstream и authFilePath('')
+ * свалился бы на process.env/~/.codex, сломав изоляцию (ревью F2). null → дефолтный путь.
+ */
+export function resolveCodexHome(
+  providerId: string,
+  resolve: ((p: string) => { configDir: string | null } | null) | undefined,
+): string | null {
+  if (!isCodexAuthProvider(providerId)) return null
+  return resolve?.('codex-cli')?.configDir || null
 }
 
 export function registerAiIpc(deps: AiDeps): void {
@@ -892,10 +917,9 @@ export function registerAiIpc(deps: AiDeps): void {
       const claudeOauthToken = providerId === 'claude-cli'
         ? (claudeAccount?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
-      // Codex мультиаккаунт: активный codex-cli аккаунт → изолированный CODEX_HOME (config-dir).
-      const codexHome = providerId === 'codex-cli'
-        ? (deps.resolveSubscriptionAccount?.('codex-cli')?.configDir ?? null)
-        : null
+      // Codex мультиаккаунт (2.0.8-C): активный Codex-аккаунт → изолированный CODEX_HOME
+      // для codex-cli И нативного openai-codex-oauth (единый резолвер, без мутации env).
+      const codexHome = resolveCodexHome(providerId, deps.resolveSubscriptionAccount)
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.
       let customBaseUrl: string | undefined
@@ -1100,9 +1124,7 @@ export function registerAiIpc(deps: AiDeps): void {
       const fbClaudeToken = fallbackId === 'claude-cli'
         ? (deps.resolveSubscriptionAccount?.('claude-cli')?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
-      const fbCodexHome = fallbackId === 'codex-cli'
-        ? (deps.resolveSubscriptionAccount?.('codex-cli')?.configDir ?? null)
-        : null
+      const fbCodexHome = resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount)
       try {
         return createProvider(fallbackId, {
           apiKey: fallbackKey,
