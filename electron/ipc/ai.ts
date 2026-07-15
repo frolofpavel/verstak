@@ -55,6 +55,13 @@ import { logRuntime, logRuntimeError } from '../runtime-log'
 
 export type { ProviderId } from '../ai/registry'
 
+/** 2.0.8-D2: результат резолва подписочного аккаунта с учётом per-chat pin.
+ *  success — аккаунт (pinned: закреплён за чатом → не ротировать авто);
+ *  unavailable — pin на удалённый аккаунт → стоп-с-вопросом (без тихой ротации). */
+export type ResolvedSubscription =
+  | { accountId: number; secret: string | null; configDir: string | null; baseUrl: string | null; pinned: boolean }
+  | { unavailable: true }
+
 // Экспортирован для runner-api.ts (распил #1, срез 4c): AgentRunContext ссылается
 // на AiDeps['...']-индексы. Type-only импорт в runner-api → без рантайм-цикла.
 export interface AiDeps {
@@ -64,10 +71,13 @@ export interface AiDeps {
   setSecret?: (key: string, value: string) => void
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
-  /** 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера. Резолвит секрет из
-   *  SafeStorage по cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит
-   *  last_used_at. null = нет заведённых аккаунтов (тогда рантайм падает на legacy-секрет). */
-  resolveSubscriptionAccount?: (providerId: string) => { accountId: number; secret: string | null; configDir: string | null; baseUrl: string | null } | null
+  /** 1.9.3 мультиаккаунт: аккаунт подписки провайдера. Резолвит секрет из SafeStorage по
+   *  cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит last_used_at.
+   *  null = нет заведённых аккаунтов (падаем на legacy-секрет).
+   *  2.0.8-D2: chatId учитывает per-chat pin (2.0.8-B binding). pinned=true — аккаунт закреплён
+   *  за чатом (рантайм НЕ ротирует его авто, инвариант 1). `{ unavailable: true }` — чат закреплён
+   *  на УДАЛЁННЫЙ аккаунт: НЕ тихая ротация — прогон обязан остановиться с вопросом (карточка B). */
+  resolveSubscriptionAccount?: (providerId: string, chatId?: number) => ResolvedSubscription | null
   /** 1.9.4: активный аккаунт провайдера исчерпал лимит → пометить cooling и переключить на
    *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback). */
   switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
@@ -367,10 +377,16 @@ export async function runScheduledHeadless(
  */
 export function resolveCodexHome(
   providerId: string,
-  resolve: ((p: string) => { configDir: string | null } | null) | undefined,
+  // Структурный тип: берём только configDir. Явный union принимает и ResolvedSubscription
+  // (success с configDir | { unavailable }), и упрощённый resolve в тестах ({ configDir }).
+  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | null) | undefined,
+  chatId?: number,
 ): string | null {
   if (!isCodexAuthProvider(providerId)) return null
-  return resolve?.('codex-cli')?.configDir || null
+  // 2.0.8-D2: chatId → pinned Codex-аккаунт чата. unavailable-вариант configDir не несёт →
+  // null (дефолтный путь); реальный стоп по unavailable делает send-хендлер ДО этого вызова.
+  const r = resolve?.('codex-cli', chatId)
+  return (r && 'configDir' in r ? r.configDir : null) || null
 }
 
 export function registerAiIpc(deps: AiDeps): void {
@@ -429,6 +445,14 @@ export function registerAiIpc(deps: AiDeps): void {
     // Security-чек выше — на исходном main-пути; worktree создан нами (tmp). НЕ реассайним
     // projectPath (это сломало бы TS-narrowing из-за захвата в замыканиях) — отдельный const.
     const isolatedRoot = chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null
+    // 2.0.8-D2: числовой chatId для резолва per-chat pin аккаунта (2.0.8-B binding).
+    const chatIdNum = chatId ? Number(chatId) : undefined
+    // Резолв аккаунта с учётом pin, суженный до success|null: unavailable отсекается ранним
+    // чеком unavailablePin ниже (стоп-с-вопросом), сюда прийти не должен → трактуем как null.
+    const resolveAcct = (pid: string): Exclude<ResolvedSubscription, { unavailable: true }> | null => {
+      const r = deps.resolveSubscriptionAccount?.(pid, chatIdNum)
+      return r && !('unavailable' in r) ? r : null
+    }
     const messages = await expandOfficeAttachments(incomingMessages)
     // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
     // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
@@ -476,6 +500,22 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
     const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
+    // 2.0.8-D2: чат закреплён на УДАЛЁННЫЙ аккаунт → стоп-с-вопросом (карточка B: НЕ тихая
+    // ротация на глобально-активный). Проверяем ДО создания run/провайдера — чистый выход.
+    // chatPinned (аккаунт закреплён и жив) → ниже подавляет авто-свитч/fallback (инвариант 1).
+    const pinResolution = deps.resolveSubscriptionAccount?.(providerId, chatIdNum)
+    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && pinResolution.pinned)
+    if (pinResolution && 'unavailable' in pinResolution) {
+      // Зеркалим синхронный early-fail provider-create (ai.ts ниже): рендерер детектит сбой по
+      // `return 0` (sendId<=0 → показывает ошибку + гасит спиннер). Голый `return` дал бы undefined
+      // → `undefined <= 0` === false → спиннер висел бы ВЕЧНО (ревью Finding A, HIGH). id:0 как в
+      // прецеденте. Спец-текст «переоткрепите» рендерер на sendId<=0 пока не показывает (общий
+      // «провайдер недоступен»; Chat.tsx вне allowlist) — доставка спец-сообщения = follow-up.
+      taggedSender.send('ai:event', { id: 0, event: { type: 'error', message: 'Аккаунт, закреплённый за этим чатом, был удалён. Выберите аккаунт заново или снимите закрепление.' } })
+      activeAborts.delete(sendId)
+      clearRunTimeout()
+      return 0
+    }
     const lastUserText = compactProgressText([...messages].reverse().find(m => m.role === 'user')?.content, 260)
     emitAgentProgress(taggedSender, sendId, {
       id: 'run-accepted',
@@ -911,15 +951,13 @@ export function registerAiIpc(deps: AiDeps): void {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
       // 1.9.3 мультиаккаунт: если заведён активный claude-cli аккаунт — берём его токен
       // (пул Claude Max, ротация лимита); иначе падаем на legacy-одиночный токен settings.
-      const claudeAccount = providerId === 'claude-cli'
-        ? (deps.resolveSubscriptionAccount?.('claude-cli') ?? null)
-        : null
+      const claudeAccount = providerId === 'claude-cli' ? resolveAcct('claude-cli') : null
       const claudeOauthToken = providerId === 'claude-cli'
         ? (claudeAccount?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
       // Codex мультиаккаунт (2.0.8-C): активный Codex-аккаунт → изолированный CODEX_HOME
       // для codex-cli И нативного openai-codex-oauth (единый резолвер, без мутации env).
-      const codexHome = resolveCodexHome(providerId, deps.resolveSubscriptionAccount)
+      const codexHome = resolveCodexHome(providerId, deps.resolveSubscriptionAccount, chatIdNum)
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.
       let customBaseUrl: string | undefined
@@ -1122,9 +1160,9 @@ export function registerAiIpc(deps: AiDeps): void {
       // 1.9.3/1.9.4: при пересоздании CLI-провайдера резолвим активный аккаунт ЗАНОВО —
       // для account-switch на лимите берётся новый токен/CODEX_HOME переключённого аккаунта.
       const fbClaudeToken = fallbackId === 'claude-cli'
-        ? (deps.resolveSubscriptionAccount?.('claude-cli')?.secret ?? deps.getSecret('claude_code_oauth_token'))
+        ? (resolveAcct('claude-cli')?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
-      const fbCodexHome = resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount)
+      const fbCodexHome = resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount, chatIdNum)
       try {
         return createProvider(fallbackId, {
           apiKey: fallbackKey,
@@ -1190,7 +1228,7 @@ export function registerAiIpc(deps: AiDeps): void {
         connectors: deps.connectors, agentMode, turnsBudget,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
         providerId, model,
-        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit } : undefined,
+        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit, pinnedAccount: chatPinned } : undefined,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
@@ -1215,7 +1253,7 @@ export function registerAiIpc(deps: AiDeps): void {
         status: 'running'
       })
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit } : undefined,
+        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit, pinnedAccount: chatPinned } : undefined,
         deps.agentRuns,
         runId
       ).finally(cleanup)

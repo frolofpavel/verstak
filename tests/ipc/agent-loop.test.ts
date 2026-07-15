@@ -193,6 +193,29 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(recordSpy).toHaveBeenCalledWith('claude', 'claude-opus-4-5', 1000, 1000, 0)
   }, 15000)
 
+  // 2.0.8-D2 инвариант 1 (координатор #2): pinned-чат API-путь НЕ ротирует аккаунт и НЕ
+  // фолбэчит провайдера на лимите — авто-смена маршрута запрещена, ошибка честно surface'ится.
+  it('D2: pinned-чат API-путь на лимите НЕ ротирует аккаунт и НЕ фолбэчит', async () => {
+    const runs = mockRuns()
+    const limited = provider('claude-cli', () => [{ type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' }])
+    const switchAccountOnLimit = vi.fn(() => ({ switched: true }))
+    const getNextProvider = vi.fn((_id: string) => provider('claude-cli', () => [{ type: 'text', text: 'НЕ ДОЛЖНО' }, { type: 'done' }]))
+    const fallbackOpts = {
+      getNextProvider,
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+      pinnedAccount: true, // ← закреплённый аккаунт
+    }
+    await runApiConversation(...(args(dir, {
+      provider: limited, providerId: 'claude-cli', model: 'claude-cli',
+      agentRuns: runs, runId: 'r1', fallbackOpts,
+    }) as Parameters<typeof runApiConversation>))
+    expect(switchAccountOnLimit).not.toHaveBeenCalled() // ротации аккаунта нет
+    expect(getNextProvider).not.toHaveBeenCalled()      // provider-fallback'а нет
+  }, 15000)
+
   // 6.2 (ревью + конкурентный разбор): fallback ПОСЛЕ накопленной работы должен
   // получить currentMessages (с проделанными tool-результатами), а не initialMessages.
   // Иначе downstream-провайдер начинает с нуля → переделывает = повторно пишет файлы.

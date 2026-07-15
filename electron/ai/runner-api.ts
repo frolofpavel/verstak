@@ -444,6 +444,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   }
 
   const attemptProviderFallback = (err: unknown, force = false): Promise<void> | null => {
+    // 2.0.8-D2: pinned-чат — авто-смена провайдера запрещена (увела бы с закреплённого аккаунта).
+    if (fallbackOpts?.pinnedAccount) return null
     if (!(fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS)) return null
     fallbackOpts.triedProviders.add(providerId)
     if (!force && !shouldFallback(err)) return null
@@ -474,7 +476,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // того же провайдера (пересоздаём тот же провайдер — он резолвит новый активный аккаунт),
   // не теряя накопленную историю. Пул исчерпан → null (дальше обычный provider-fallback).
   const attemptAccountSwitch = (err: unknown): Promise<void> | null => {
-    if (!fallbackOpts || !providerId) return null
+    // 2.0.8-D2: pinned-чат — ротация аккаунта на лимите запрещена (инвариант 1).
+    if (!fallbackOpts || !providerId || fallbackOpts.pinnedAccount) return null
     // Ревью-фикс: bounded — иначе resetEta=null + пул ≥2 зацикливается навсегда.
     if ((fallbackOpts.accountSwitchCount ?? 0) >= MAX_ACCOUNT_SWITCHES) return null
     const hit = detectSubscriptionLimit(err)

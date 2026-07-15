@@ -23,6 +23,10 @@ export interface FallbackOpts {
    *  Bounded MAX_ACCOUNT_SWITCHES — иначе при resetEta=null пул из ≥2 аккаунтов
    *  зацикливается навсегда (A→B→A→…), т.к. triedProviders на свитче не растёт. */
   accountSwitchCount?: number
+  /** 2.0.8-D2: чат закреплён (pinned) за конкретным аккаунтом → авто-смена маршрута ЗАПРЕЩЕНА
+   *  (инвариант 1): ни ротация аккаунта на лимите, ни provider-fallback — оба увели бы с
+   *  закреплённого аккаунта. Прогон честно падает с ошибкой, не переключается молча. */
+  pinnedAccount?: boolean
 }
 
 /** Максимальное количество fallback-попыток (original + 2 alternates). */

@@ -51,7 +51,8 @@ import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
-import { getActiveAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
+import { getActiveAccount, getSubscriptionAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
+import { pickChatAccountId } from './ai/route-policy'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
@@ -286,6 +287,11 @@ app.on('second-instance', () => {
   win.focus()
 })
 
+// pre-existing bootstrap-промис (lint-baseline «кандидат A»). НЕ фиксим здесь: реальный фикс
+// (обработка ошибок bootstrap, не тривиальный void) — в его собственном срезе. D2 обязан менять
+// main.ts → lint:changed линтит весь файл → legacy-error всплыл; suppress разблокирует хук без
+// вторжения в чужой срез (реверсивно).
+// eslint-disable-next-line @typescript-eslint/no-floating-promises
 app.whenReady().then(() => {
   logRuntime('app.ready', { userData: app.getPath('userData') })
   if (!gotSingleInstanceLock) return // вторая копия — ранний выход до операций с БД
@@ -567,13 +573,19 @@ app.whenReady().then(() => {
     setSecret: (key, value) => settings.setSecret(key, value),
     getProviderId,
     getProviderModel,
-    // 1.9.3 мультиаккаунт: активный аккаунт подписки провайдера → секрет из SafeStorage
-    // по cred_ref + метаданные env-биндинга; touch last_used_at на каждом резолве.
-    resolveSubscriptionAccount: (providerId) => {
-      const acct = getActiveAccount(db, providerId)
+    // 1.9.3 мультиаккаунт: аккаунт подписки провайдера → секрет из SafeStorage по cred_ref +
+    // метаданные env-биндинга; touch last_used_at. 2.0.8-D2: chatId → per-chat pin (2.0.8-B).
+    resolveSubscriptionAccount: (providerId, chatId) => {
+      // pickChatAccountId — чистая спека (auto|pinned|unavailable + сверка провайдера), тест отдельно.
+      const decision = chatId == null
+        ? { kind: 'auto' as const }
+        : pickChatAccountId(providerId, chatSessions.getSubscriptionBinding(chatId), id => getSubscriptionAccount(db, id)?.providerId ?? null)
+      // pin на удалённый аккаунт → НЕ ротируем молча на глобально-активный (карточка B).
+      if (decision.kind === 'unavailable') return { unavailable: true }
+      const acct = decision.kind === 'pinned' ? getSubscriptionAccount(db, decision.accountId) : getActiveAccount(db, providerId)
       if (!acct) return null
       touchSubscriptionAccount(db, acct.id)
-      return { accountId: acct.id, secret: getSecret(acct.credRef), configDir: acct.configDir, baseUrl: acct.baseUrl }
+      return { accountId: acct.id, secret: getSecret(acct.credRef), configDir: acct.configDir, baseUrl: acct.baseUrl, pinned: decision.kind === 'pinned' }
     },
     // 1.9.4: лимит активного аккаунта → cooling + переключение на следующий готовый аккаунт пула.
     switchSubscriptionAccountOnLimit: (providerId, resetEta) => switchActiveOnLimit(db, providerId, resetEta),

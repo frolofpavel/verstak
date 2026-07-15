@@ -64,6 +64,29 @@ export function resolveChatAccount(
     : { status: 'unavailable', accountId: binding.accountId }
 }
 
+/**
+ * D2: итоговое решение, КАКОЙ аккаунт брать для прогона чата (чистая функция поверх
+ * resolveChatAccount + сверка провайдера). `lookupProvider(id)` → providerId аккаунта либо null
+ * (удалён). Развязывает main.ts от DB — тестируется отдельно.
+ *   unavailable — pin на удалённый аккаунт → стоп-с-вопросом (карточка B);
+ *   pinned      — pin на живой аккаунт ЭТОГО провайдера → его id;
+ *   auto        — нет pin / pin на аккаунт ДРУГОГО провайдера (нерелевантен) → глобально-активный.
+ */
+export function pickChatAccountId(
+  providerId: string,
+  binding: { mode: 'auto' | 'pinned'; accountId: number | null } | null,
+  lookupProvider: (id: number) => string | null,
+): { kind: 'unavailable' } | { kind: 'pinned'; accountId: number } | { kind: 'auto' } {
+  const res = resolveChatAccount(binding, id => lookupProvider(id) != null)
+  if (res.status === 'unavailable') return { kind: 'unavailable' }
+  if (res.status === 'pinned') {
+    return lookupProvider(res.accountId) === providerId
+      ? { kind: 'pinned', accountId: res.accountId }
+      : { kind: 'auto' } // pin для другого провайдера — нерелевантен этому прогону
+  }
+  return { kind: 'auto' }
+}
+
 /** Человекочитаемый текст смены маршрута для UI-пилюли (единый для обоих runner'ов). */
 export function routeChangedText(
   action: 'rotate-account' | 'model-fallback' | 'refresh-auth',

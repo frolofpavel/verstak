@@ -3,7 +3,7 @@
 // истёкший cooldown; network retry без бана аккаунта; loop guard; два параллельных чата.
 import { describe, it, expect } from 'vitest'
 import {
-  decideRoute, classifyRouteReason, attemptKey, routeChangedText, resolveChatAccount,
+  decideRoute, classifyRouteReason, attemptKey, routeChangedText, resolveChatAccount, pickChatAccountId,
   type RouteDecisionInput, type RouteAttempt, type RoutePolicy, type RouteReason,
 } from '../../electron/ai/route-policy'
 import { MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from '../../electron/ai/runner-shared'
@@ -47,6 +47,25 @@ describe('resolveChatAccount — per-chat binding (D2, инвариант уда
   // ГЛАВНЫЙ инвариант (координатор #3): удалили pinned-аккаунт → unavailable, НЕ тихая ротация.
   it('pinned на УДАЛЁННЫЙ аккаунт → unavailable (без тихой ротации на глобально-активный)', () => {
     expect(resolveChatAccount({ mode: 'pinned', accountId: 7 }, exists([8, 9]))).toEqual({ status: 'unavailable', accountId: 7 })
+  })
+})
+
+describe('pickChatAccountId — решение аккаунта для прогона (main.ts glue, D2)', () => {
+  // lookupProvider: id → providerId аккаунта, либо null (удалён).
+  const accounts = (m: Record<number, string>) => (id: number) => m[id] ?? null
+
+  it('нет binding → auto (глобально-активный)', () => {
+    expect(pickChatAccountId('claude-cli', null, accounts({ 1: 'claude-cli' }))).toEqual({ kind: 'auto' })
+  })
+  it('pin на живой аккаунт ЭТОГО провайдера → pinned с id', () => {
+    expect(pickChatAccountId('claude-cli', { mode: 'pinned', accountId: 7 }, accounts({ 7: 'claude-cli' }))).toEqual({ kind: 'pinned', accountId: 7 })
+  })
+  it('pin на аккаунт ДРУГОГО провайдера → auto (binding нерелевантен этому прогону)', () => {
+    expect(pickChatAccountId('gemini-cli', { mode: 'pinned', accountId: 7 }, accounts({ 7: 'claude-cli' }))).toEqual({ kind: 'auto' })
+  })
+  // Инвариант удаления (координатор #3) на уровне main.ts-решения.
+  it('pin на УДАЛЁННЫЙ аккаунт → unavailable (стоп-с-вопросом, НЕ тихая ротация)', () => {
+    expect(pickChatAccountId('claude-cli', { mode: 'pinned', accountId: 7 }, accounts({ 8: 'claude-cli' }))).toEqual({ kind: 'unavailable' })
   })
 })
 

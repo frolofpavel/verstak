@@ -126,6 +126,29 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('свежем аккаунте'))).toBe(true)
   })
 
+  // 2.0.8-D2 инвариант 1 (координатор #2): pinned-чат НЕ ротирует аккаунт на лимите.
+  it('D2: pinned-чат на лимите НЕ переключает аккаунт (switchAccountOnLimit не зван)', async () => {
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' } },
+    }
+    const switchAccountOnLimit = vi.fn(() => ({ switched: true }))
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => provider([{ type: 'text', text: 'НЕ ДОЛЖНО' }, { type: 'done' }]),
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+      pinnedAccount: true, // ← закреплённый аккаунт: авто-ротация запрещена
+    }
+    const sender = makeSender()
+    await run(dir, limited, sender, { fallbackOpts })
+    expect(switchAccountOnLimit).not.toHaveBeenCalled()          // ротации нет
+    const evs = sentEvents(sender)
+    expect(evs.some(e => e.type === 'route-changed')).toBe(false) // маршрут не менялся
+    expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('НЕ ДОЛЖНО'))).toBe(false)
+  })
+
   it('РЕВЬЮ-ФИКС: resetEta=null + пул все в лимите → НЕ зацикливается (bounded switches)', async () => {
     // Оба аккаунта в лимите, сообщение без парсируемого ETA (resetEta=null) →
     // switchAccountOnLimit всегда switched:true, свежий аккаунт снова лимит. Без

@@ -271,7 +271,8 @@ export async function runPlainConversation(
         // того же провайдера (пул), не теряя запрос. Раньше CLI-путь тут просто
         // сдавался (done+return) — авто-свитч (1.9.4) был мёртв для CLI-подписок,
         // хотя аккаунты именно у CLI-провайдеров. Зеркалит attemptAccountSwitch API-пути.
-        if (fallbackOpts && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
+        // 2.0.8-D2: pinned-чат — ротация аккаунта запрещена (инвариант 1). Зеркалит runner-api.
+        if (fallbackOpts && !fallbackOpts.pinnedAccount && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
           const hit = detectSubscriptionLimit(roundErrorMessage)
           if (hit.limited) {
             const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
@@ -326,7 +327,7 @@ export async function runPlainConversation(
       model: model ?? null
     })
     // Smart fallback: если ошибка retriable и есть ещё кандидаты — пробуем.
-    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
+    if (fallbackOpts && !fallbackOpts.pinnedAccount && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
       fallbackOpts.triedProviders.add(providerId)
       if (shouldFallback(err)) {
         const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
