@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { FileNode, ChatMessage, ProjectMeta, ChatSession, DevTask, ResumableRun } from '../types/api'
 import { sortProjectsByName } from '../lib/project-sort'
 import { isModelValidForProvider } from '../hooks/useProvider'
+import type { PromptRouteOverride } from '../../shared/contracts/provider'
 import { isGenericChatTitle, titleFromFirstMessage } from '../lib/chat-session-title'
 import { useSkills } from './skillStore'
 import {
@@ -91,6 +92,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   chatSessions: ChatSession[]
   /** Currently active chat session id within the project. */
   activeChatId: number | null
+  /** 2.0.7-F: маршрут модели на ОДНУ следующую отправку (не меняет дефолт чата).
+   *  Сбрасывается после отправки (one-shot) и при switchChatSession (не течёт между чатами). */
+  promptRouteOverride: PromptRouteOverride | null
   /** Глобальный чат справки (kind=help) — отдельно от проектов. */
   helpChatId: number | null
   /** Пользователь смотрит экран справки, а не рабочий чат проекта. */
@@ -195,6 +199,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pushUserToChatSnapshot: (chatId: number, content: string, meta?: Partial<ChatMessage>, assistantDbId?: number) => void
   /** Switch to a different chat session within the active project. */
   switchChatSession: (id: number) => Promise<void>
+  /** 2.0.7-F: задать/снять one-shot маршрут модели для следующей отправки. */
+  setPromptRouteOverride: (route: PromptRouteOverride | null) => void
   /** Refresh the chat sessions list (after create/rename/delete). */
   refreshChatSessions: () => Promise<void>
   /** Optimistically update a chat-session row without refetching the list.
@@ -307,6 +313,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   projectList: [],
   chatSessions: [],
   activeChatId: null,
+  promptRouteOverride: null,
   helpChatId: null,
   helpMode: false,
   help: freshSnapshot(),
@@ -690,10 +697,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     if (!existing) return {}
     return { sessions: { ...s.sessions, [projectPath]: { ...existing, hasUnread: false } } }
   }),
+  setPromptRouteOverride: (route) => set({ promptRouteOverride: route }),
   switchChatSession: async (id) => {
     const myToken = ++switchChatSessionToken
     const s = get()
     if (!s.path) return
+    // 2.0.7-F: one-shot маршрут не течёт между чатами — сбрасываем при переключении.
+    if (s.promptRouteOverride) set({ promptRouteOverride: null })
     get().leaveHelpMode()
     // Единый leaveChat: снять уходящий чат в фон + привести стрим-флаг к реальности
     // (drift-класс #3 — раньше двухшаг был продублирован здесь и в newChatSession).

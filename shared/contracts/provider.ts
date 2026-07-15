@@ -179,6 +179,59 @@ export function capabilitiesFor(transport: ProviderTransport, supportsTools: boo
   }
 }
 
+// ─── Срез 2.0.7-F: маршрут модели на один prompt ─────────────────────────────
+
+/** Откуда взялся маршрут отправки. Для честного UI/agent-run (requested vs actual). */
+export type SelectionSource = 'chat-default' | 'prompt-explicit' | 'automatic'
+
+/**
+ * Override маршрута на ОДНУ отправку (не меняет default чата). fallbackPolicy:
+ *  · 'strict' — при сбое выбранного провайдера НЕ переезжать молча на другого (дефолт
+ *    для explicit-выбора: пользователь выбрал модель осознанно);
+ *  · 'allow'  — fallback разрешён, но обязан породить видимое structured route-событие.
+ */
+export interface PromptRouteOverride {
+  providerId: ProviderId
+  model: string
+  fallbackPolicy: 'strict' | 'allow'
+}
+
+export interface ResolvedRoute {
+  providerId: ProviderId
+  model: string
+  source: SelectionSource
+  /** Разрешён ли smart-fallback на другого провайдера для этой отправки. */
+  fallbackAllowed: boolean
+}
+
+/**
+ * Резолв requested-маршрута ДО отправки. Override (если есть) побеждает default чата,
+ * но НЕ мутирует его (one-shot). Renderer-facing контракт: тестируемое определение
+ * семантики маршрута (source + fallbackAllowed) для показа requested route в UI.
+ * Main (ipc/ai.ts) гейтит fallback ЭКВИВАЛЕНТНОЙ инлайн-логикой (`!route || policy==='allow'`) —
+ * там резолв провайдера/модели богаче (getProviderId/getProviderModel + resume-route), поэтому
+ * не через этот хелпер; при правках держать fallbackAllowed-семантику синхронной.
+ */
+export function resolvePromptRoute(
+  chatDefault: { providerId: ProviderId; model: string },
+  override: PromptRouteOverride | null | undefined,
+): ResolvedRoute {
+  if (override) {
+    return {
+      providerId: override.providerId,
+      model: override.model,
+      source: 'prompt-explicit',
+      fallbackAllowed: override.fallbackPolicy === 'allow',
+    }
+  }
+  return {
+    providerId: chatDefault.providerId,
+    model: chatDefault.model,
+    source: 'chat-default',
+    fallbackAllowed: true,
+  }
+}
+
 /** Известен ли сохранённый ID. Неизвестный НЕ схлопывается молча — см. resolveStoredProviderId. */
 export function isKnownProviderId(v: unknown): v is ProviderId {
   return typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v)

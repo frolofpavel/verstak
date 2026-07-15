@@ -430,6 +430,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
     })
     const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
+    // 2.0.7-F: actual провайдер/модель прогона теперь = запасной (requested_* остаётся
+    // исходным). Иначе agent_run.provider_id показывал бы упавшего провайдера, а «actual
+    // vs requested» врал бы именно в сценарии fallback.
+    if (agentRuns && runId) {
+      try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
+    }
     handedOff = true
     return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
   }

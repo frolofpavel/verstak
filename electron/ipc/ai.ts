@@ -8,6 +8,7 @@ import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
+import { isKnownProviderId, type PromptRouteOverride } from '../../shared/contracts/provider'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
@@ -384,6 +385,10 @@ export function registerAiIpc(deps: AiDeps): void {
      *  наслаивается на skill-промпт (renderRecipeProtocol). Renderer форвардит
      *  структуру, рендер живёт в main. Нет recipe → обычный skill как раньше. */
     recipe?: RecipeSpec
+    /** 2.0.7-F: маршрут модели на ОДНУ отправку (провайдер/модель + fallbackPolicy).
+     *  Когда задан — побеждает дефолт чата, requested пишется в agent_run, а strict
+     *  отключает smart-fallback (не переезжать молча на другого провайдера). */
+    promptRoute?: PromptRouteOverride
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -416,7 +421,19 @@ export function registerAiIpc(deps: AiDeps): void {
     // задачу». Явный overrides.effortLevel (из UI) имеет приоритет над пресетом.
     const intCfg = intensityConfig(parseIntensity(deps.getSecret('intensity')))
     const resolvedEffort = overrides?.effortLevel ?? intCfg.effortLevel
-    const providerId = overrides?.providerId ?? deps.getProviderId()
+    // 2.0.7-F: promptRoute (модель на один prompt) побеждает дефолт чата, но НЕ меняет
+    // его (one-shot — renderer шлёт его только с этой отправкой). requestedRoute пишется
+    // в agent_run отдельно от actual; fallbackAllowed гейтит smart-fallback ниже.
+    const promptRoute = overrides?.promptRoute ?? null
+    // 2.0.7-F (карточка шаг 2): retry/resume берёт СОХРАНЁННЫЙ route из agent_run
+    // (requested_*), а не из уже очищенного one-shot UI-стейта. Явный promptRoute этой
+    // отправки важнее сохранённого. Сохраняется provider+model (политика fallback на
+    // resume — обычная; отдельную колонку под неё не заводим).
+    // Ревью F1: сохранённый id валидируем — провайдер мог быть удалён между прогоном и
+    // resume, тогда PROVIDERS[providerId]=undefined → descriptor.transport упал бы. Гардим.
+    const resumedProvider: ProviderId | null =
+      isKnownProviderId(checkpointRun?.requestedProviderId) ? checkpointRun!.requestedProviderId : null
+    const providerId = promptRoute?.providerId ?? overrides?.providerId ?? resumedProvider ?? deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
     const agentMode: AgentMode = overrides?.agentMode ?? deps.getAgentMode()
@@ -725,7 +742,10 @@ export function registerAiIpc(deps: AiDeps): void {
       return 0
     }
 
-    let model = (overrides?.model ?? deps.getProviderModel(providerId)) ?? descriptor.defaultModel
+    // 2.0.7-F: сохранённая requested-модель прогона применяется при resume того же
+    // провайдера (иначе взяли бы дефолт чата — потеря route). Только если провайдер совпал.
+    const resumedModel = (resumedProvider && resumedProvider === providerId && checkpointRun?.requestedModel) || null
+    let model = (promptRoute?.model ?? overrides?.model ?? resumedModel ?? deps.getProviderModel(providerId)) ?? descriptor.defaultModel
     logRuntime('ai.send.start', {
       sendId,
       runId,
@@ -978,6 +998,11 @@ export function registerAiIpc(deps: AiDeps): void {
         title: runTitle,
         providerId,
         model: model ?? null,
+        // 2.0.7-F: requested (что выбрал пользователь через promptRoute) отдельно от
+        // provider_id/model = actual (что реально отработало после fallback). null =
+        // запрошенное совпадает с дефолтом чата. DoD: after-send сверить actual vs requested.
+        requestedProviderId: promptRoute?.providerId ?? null,
+        requestedModel: promptRoute?.model ?? null,
         sendId,
         // Crash-resume: режим прогона — гард деструктива в баннере возобновления
         // (auto/bypass → авто-resume запрещён).
@@ -1054,9 +1079,14 @@ export function registerAiIpc(deps: AiDeps): void {
     // Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера.
     // Только если smart_fallback не отключён явно, только для API-провайдеров,
     // только без reviewer override (ревьюер работает в изоляции).
+    // 2.0.7-F: explicit prompt-route по умолчанию strict — при сбое выбранного провайдера
+    // НЕ переезжать молча на другого (пользователь выбрал модель осознанно). 'allow'
+    // возвращает прежнее поведение smart-fallback. Нет promptRoute → fallback как раньше.
+    const routeFallbackAllowed = !promptRoute || promptRoute.fallbackPolicy === 'allow'
     const smartFallbackEnabled = deps.getSecret('smart_fallback') !== 'false'
       && descriptor.transport === 'API'
       && !overrides?.providerId  // не задействуем fallback в Explicit Review
+      && routeFallbackAllowed    // strict prompt-route отключает fallback
 
     /** Создаёт провайдера для fallback-кандидата с теми же опциями. */
     function makeFallbackProvider(fallbackId: ProviderId): ChatProvider | null {

@@ -54,6 +54,56 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
+  it('2.0.7-F: requested (route override) пишется ОТДЕЛЬНО от actual (provider_id/model)', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    // Пользователь запросил grok на один prompt, но fallback увёл на claude (actual).
+    runs.create({
+      runId: 'rq', projectPath: '/p', title: 'route',
+      providerId: 'claude', model: 'claude-sonnet-4-6',           // actual (после fallback)
+      requestedProviderId: 'grok', requestedModel: 'grok-4.5',    // requested (override)
+    })
+    const row = runs.get('rq')!
+    // DoD: after-send можно сверить actual vs requested.
+    expect(row.providerId).toBe('claude')
+    expect(row.model).toBe('claude-sonnet-4-6')
+    expect(row.requestedProviderId).toBe('grok')
+    expect(row.requestedModel).toBe('grok-4.5')
+    db.close()
+  })
+
+  it('2.0.7-F: updateActual после fallback меняет actual, requested остаётся (честный vs)', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({
+      runId: 'rf', projectPath: '/p', title: 'fb',
+      providerId: 'grok', model: 'grok-4.5',            // actual = запрошенный (до fallback)
+      requestedProviderId: 'grok', requestedModel: 'grok-4.5',
+    })
+    // Fallback увёл на claude — actual обновился, requested НЕ трогаем.
+    runs.updateActual('rf', 'claude', 'claude-sonnet-4-6')
+    const row = runs.get('rf')!
+    expect(row.providerId).toBe('claude')             // actual = кто реально отработал
+    expect(row.model).toBe('claude-sonnet-4-6')
+    expect(row.requestedProviderId).toBe('grok')      // requested неизменен
+    expect(row.requestedModel).toBe('grok-4.5')
+    // Завершённый прогон updateActual НЕ трогает.
+    runs.finish('rf', 'done')
+    runs.updateActual('rf', 'openai', 'gpt-5')
+    expect(runs.get('rf')!.providerId).toBe('claude')
+    db.close()
+  })
+
+  it('2.0.7-F: без override requested = null (запрошенное == дефолт чата)', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'rn', projectPath: '/p', title: 't', providerId: 'claude', model: 'claude-sonnet-4-6' })
+    const row = runs.get('rn')!
+    expect(row.requestedProviderId).toBeNull()
+    expect(row.requestedModel).toBeNull()
+    db.close()
+  })
+
   it('get несуществующего прогона → null', () => {
     const db = openDb(join(dir, 'test.db'))
     expect(createAgentRuns(db).get('nope')).toBeNull()

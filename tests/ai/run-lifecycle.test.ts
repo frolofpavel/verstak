@@ -26,6 +26,8 @@ function run(status: AgentRunStatus, endedAt: number | null = null): AgentRun {
     status,
     providerId: 'test',
     model: 'test-model',
+    requestedProviderId: null,
+    requestedModel: null,
     sendId: 1,
     generation: 0,
     agentsCount: 0,

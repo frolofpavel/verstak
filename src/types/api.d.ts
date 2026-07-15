@@ -456,12 +456,12 @@ declare global {
         matrix: () => Promise<PolicyMatrixDTO>
       }
       ai: {
-        send: (messages: ChatMessage[], projectPath: string | null, chatId?: string) => Promise<number>
-        sendWithBudget: (messages: ChatMessage[], projectPath: string | null, budget: number, chatId?: string) => Promise<number>
+        send: (messages: ChatMessage[], projectPath: string | null, chatId?: string, route?: PromptRouteOverride) => Promise<number>
+        sendWithBudget: (messages: ChatMessage[], projectPath: string | null, budget: number, chatId?: string, route?: PromptRouteOverride) => Promise<number>
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec },
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
@@ -1026,6 +1026,9 @@ export interface AgentRun {
   status: AgentRunStatus
   providerId: string | null
   model: string | null
+  /** 2.0.7-F: что пользователь ЗАПРОСИЛ (route override) vs provider_id/model = actual. */
+  requestedProviderId: string | null
+  requestedModel: string | null
   sendId: number | null
   generation: number
   agentsCount: number
@@ -1298,6 +1301,9 @@ export type {
   ProviderCatalogSource,
   ProviderDescriptorDTO,
   ProviderCapabilities as ProviderCapabilitiesDTO,
+  SelectionSource,
+  PromptRouteOverride,
+  ResolvedRoute,
 } from '../../shared/contracts/provider'
 
 /**

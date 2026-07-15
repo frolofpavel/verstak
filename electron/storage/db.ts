@@ -1114,6 +1114,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec('UPDATE projects SET created_at = COALESCE(NULLIF(last_opened_at, 0), strftime(\'%s\', \'now\') * 1000) WHERE created_at = 0')
       }
     }
+  },
+  {
+    version: 48,
+    description: '2.0.7-F модель-на-prompt: agent_runs.requested_provider_id / requested_model — что пользователь ЗАПРОСИЛ (route override), отдельно от provider_id/model = что РЕАЛЬНО отработало после fallback. DoD: after-send можно сверить actual vs requested.',
+    run: (db: DB) => {
+      // agent_runs создаётся более ранней миграцией. В repair-сценарии (частичная БД с
+      // высоким schema_version, но без таблицы) ALTER упал бы — гардим существование.
+      const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_runs'").get()
+      if (!hasTable) return
+      const cols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('requested_provider_id')) db.exec('ALTER TABLE agent_runs ADD COLUMN requested_provider_id TEXT')
+      if (!cols.includes('requested_model')) db.exec('ALTER TABLE agent_runs ADD COLUMN requested_model TEXT')
+    }
   }
 ]
 

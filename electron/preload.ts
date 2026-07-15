@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { RecipeSpec } from './ai/skills/types'
+import type { PromptRouteOverride } from '../shared/contracts/provider'
 
 contextBridge.exposeInMainWorld('api', {
   projects: {
@@ -168,16 +169,18 @@ contextBridge.exposeInMainWorld('api', {
     matrix: () => ipcRenderer.invoke('policy:matrix')
   },
   ai: {
-    send: (messages: unknown[], projectPath: string | null, chatId?: string) =>
-      ipcRenderer.invoke('ai:send', messages, projectPath, undefined, undefined, chatId),
-    sendWithBudget: (messages: unknown[], projectPath: string | null, budget: number, chatId?: string) =>
-      ipcRenderer.invoke('ai:send', messages, projectPath, budget, undefined, chatId),
+    // 2.0.7-F: route — маршрут модели на ОДНУ отправку (провайдер/модель + fallbackPolicy).
+    // Форвардится как overrides.promptRoute; без route поведение прежнее.
+    send: (messages: unknown[], projectPath: string | null, chatId?: string, route?: PromptRouteOverride) =>
+      ipcRenderer.invoke('ai:send', messages, projectPath, undefined, route ? { promptRoute: route } : undefined, chatId),
+    sendWithBudget: (messages: unknown[], projectPath: string | null, budget: number, chatId?: string, route?: PromptRouteOverride) =>
+      ipcRenderer.invoke('ai:send', messages, projectPath, budget, route ? { promptRoute: route } : undefined, chatId),
     /** Send with provider/model/systemPrompt override. Used by Explicit Review:
      *  routes through ai:send with overrides so reviewer ≠ chat provider. */
     sendWithOverrides: (
       messages: unknown[],
       projectPath: string | null,
-      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec },
+      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec; resumeFromRunId?: string; promptRoute?: PromptRouteOverride },
       chatId?: string
     ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>

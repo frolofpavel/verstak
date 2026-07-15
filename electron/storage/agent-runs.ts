@@ -29,6 +29,10 @@ export interface AgentRun {
   status: AgentRunStatus
   providerId: string | null
   model: string | null
+  /** 2.0.7-F: что пользователь ЗАПРОСИЛ (route override), отдельно от provider_id/model =
+   *  что РЕАЛЬНО отработало после fallback. null = запрошенное == дефолт чата (не override). */
+  requestedProviderId: string | null
+  requestedModel: string | null
   sendId: number | null
   generation: number
   agentsCount: number
@@ -179,6 +183,9 @@ export interface AgentRuns {
     title: string
     providerId?: string | null
     model?: string | null
+    /** 2.0.7-F: запрошенный route (override). Отдельно от provider_id/model = actual. */
+    requestedProviderId?: string | null
+    requestedModel?: string | null
     sendId?: number | null
     generation?: number
     /** Crash-resume: режим прогона (ask/accept-edits/plan/auto/bypass). */
@@ -218,6 +225,10 @@ export interface AgentRuns {
   }) => void
   /** Атомарно увеличить счётчик (field = field + by). */
   incr: (runId: string, field: AgentRunCounterField, by?: number) => void
+  /** 2.0.7-F: обновить ACTUAL провайдера/модель прогона после smart-fallback (handoff
+   *  на другого провайдера). requested_* остаётся исходным — так «actual vs requested»
+   *  честно показывает, что запрос ушёл к запасному. Пишет только для ЖИВЫХ прогонов. */
+  updateActual: (runId: string, providerId: string, model: string) => void
   /** Прогоны проекта, новейшие первыми. Фильтры status/owner опциональны. */
   list: (projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }) => AgentRun[]
   get: (runId: string) => AgentRun | null
@@ -269,7 +280,9 @@ export interface RunCheckpoint {
 
 const SELECT_RUN = `
   SELECT run_id as runId, project_path as projectPath, chat_id as chatId,
-         owner, title, status, provider_id as providerId, model, send_id as sendId,
+         owner, title, status, provider_id as providerId, model,
+         requested_provider_id as requestedProviderId, requested_model as requestedModel,
+         send_id as sendId,
          generation,
          agents_count as agentsCount, tool_count as toolCount,
          files_count as filesCount, cost_cents as costCents,
@@ -304,8 +317,8 @@ export function createAgentRuns(db: Database): AgentRuns {
       db.prepare(
         `INSERT INTO agent_runs
           (run_id, project_path, chat_id, owner, title, status,
-           provider_id, model, send_id, generation, agent_mode, turn_index, updated_at, started_at)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?)`
+           provider_id, model, requested_provider_id, requested_model, send_id, generation, agent_mode, turn_index, updated_at, started_at)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
       ).run(
         opts.runId,
         opts.projectPath,
@@ -314,6 +327,8 @@ export function createAgentRuns(db: Database): AgentRuns {
         opts.title,
         opts.providerId ?? null,
         opts.model ?? null,
+        opts.requestedProviderId ?? null,
+        opts.requestedModel ?? null,
         opts.sendId ?? null,
         generation,
         opts.agentMode ?? null,
@@ -377,6 +392,11 @@ export function createAgentRuns(db: Database): AgentRuns {
       // field — из фиксированного enum AgentRunCounterField, не пользовательский
       // ввод, поэтому интерполяция имени колонки в SQL безопасна.
       db.prepare(`UPDATE agent_runs SET ${field} = ${field} + ? WHERE run_id = ?`).run(by, runId)
+    },
+    updateActual(runId, providerId, model) {
+      // Только ЖИВОЙ прогон (ended_at IS NULL) — завершённый не переписываем.
+      db.prepare('UPDATE agent_runs SET provider_id = ?, model = ? WHERE run_id = ? AND ended_at IS NULL')
+        .run(providerId, model, runId)
     },
     list(projectPath, opts) {
       const where: string[] = ['project_path = ?']

@@ -4,6 +4,7 @@ import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
+import { PromptRouteControl } from './chat/PromptRouteControl'
 import { ModePicker } from './ModePicker'
 import { IntensityToggle } from './IntensityToggle'
 import { VoiceInput } from './VoiceInput'
@@ -2800,6 +2801,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // ai:send продолжил с накопленным контекстом из чекпойнта. Консьюмим ref однократно.
     const resumeFromRunId = resumeFromRunIdRef.current
     resumeFromRunIdRef.current = null
+    // 2.0.7-F: маршрут модели на ОДИН prompt. Берём из store, наслаиваем на overrides всех
+    // веток (побеждает дефолт чата и skill-override — самый явный выбор пользователя), и
+    // СРАЗУ снимаем после отправки (one-shot). requested пишется в agent_run (main).
+    const oneShotRoute = useProject.getState().promptRouteOverride
+    const routeOverride = oneShotRoute ? { promptRoute: oneShotRoute } : {}
     if (activeSkill || skillSystemPrompt) {
       // Узнаём текущий provider пользователя — чтобы решить override или нет
       const currentProvider = activeSkill ? await window.api.settings.getKey('provider') : null
@@ -2824,7 +2830,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         ...(recipe ? { recipe } : {}),
         effortLevel: useProject.getState().effortLevel,
         agentMode: sendAgentMode,
-        ...(resumeFromRunId ? { resumeFromRunId } : {})
+        ...(resumeFromRunId ? { resumeFromRunId } : {}),
+        ...routeOverride
       })
     } else if (resumeFromRunId) {
       // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
@@ -2832,15 +2839,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         resumeFromRunId,
         agentMode: sendAgentMode,
-        ...(effort !== 'standard' ? { effortLevel: effort } : {})
+        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+        ...routeOverride
       })
     } else {
       const effort = useProject.getState().effortLevel
       sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
-        agentMode: sendAgentMode
+        agentMode: sendAgentMode,
+        ...routeOverride
       })
     }
+    // one-shot: маршрут действовал только на эту отправку — снимаем.
+    if (oneShotRoute) useProject.getState().setPromptRouteOverride(null)
     currentSendIdRef.current = sendId
     if (sendId <= 0) {
       const errorText = '\n\n[Ошибка: провайдер недоступен]'
@@ -4175,6 +4186,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               />
               {!isHelpChat && <IntensityToggle />}
               <ModelPicker onOpenSettings={onOpenSettings} />
+              {!isHelpChat && <PromptRouteControl />}
             </div>
           </div>
         </div>
