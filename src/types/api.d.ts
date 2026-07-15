@@ -205,20 +205,19 @@ export interface SkillArchiveMove {
   reason?: string
 }
 
-/** Аккаунт подписочного/CLI-провайдера (1.9.3 мультиаккаунт). Без секрета — только метаданные. */
-export interface SubscriptionAccountDto {
-  id: number
-  providerId: string
-  label: string
-  configDir: string | null
-  baseUrl: string | null
-  active: boolean
-  state: string
-  coolingUntil: number | null
-  createdAt: number
-  lastUsedAt: number | null
-  hasSecret: boolean
-}
+/**
+ * Аккаунт подписочного/CLI-провайдера. 2.0.8-B: тип переехал в shared/contracts/subscription.ts
+ * (renderer-safe: НЕТ configDir/baseUrl/credRef). Реэкспорт — чтобы существующие импорты
+ * `SubscriptionAccountDto` продолжали работать; старое имя = новый безопасный тип.
+ */
+export type {
+  SubscriptionAccountDTO,
+  SubscriptionAccountDTO as SubscriptionAccountDto,
+  ChatSubscriptionBindingDTO,
+  SubscriptionCooldownDTO,
+  SubscriptionAuthMode,
+  SubscriptionState,
+} from '../../shared/contracts/subscription'
 
 export interface SkillImportComparison {
   currentRuleCount: number
@@ -497,6 +496,8 @@ declare global {
         list: (sessionId: number) => Promise<StoredChatMessage[]>
         append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => Promise<StoredChatMessage>
         maxMessageId: (sessionId: number) => Promise<number>
+        getSubscriptionBinding: (chatId: number) => Promise<ChatSubscriptionBindingDTO | null>
+        setSubscriptionBinding: (binding: ChatSubscriptionBindingDTO) => Promise<{ ok: boolean; error?: string }>
         truncateAfter: (sessionId: number, afterMessageId: number) => Promise<number>
         updateMessage: (messageId: number, content: string) => Promise<boolean>
         updateThinking: (messageId: number, thinking: string) => Promise<boolean>

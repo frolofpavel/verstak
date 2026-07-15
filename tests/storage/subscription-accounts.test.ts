@@ -14,7 +14,9 @@ import {
   deleteSubscriptionAccount,
   touchSubscriptionAccount,
   switchActiveOnLimit,
+  markAccountCooling,
 } from '../../electron/storage/subscription-accounts'
+import { createChatSessions } from '../../electron/storage/chat-sessions'
 
 describe('subscription accounts storage', () => {
   let dir: string
@@ -143,5 +145,46 @@ describe('subscription accounts storage', () => {
     expect(getSubscriptionAccount(db, a.id)).toBeNull()
     // оставшийся аккаунт становится активным (не осиротить провайдера без активного)
     expect(getActiveAccount(db, 'claude-cli')?.id).toBe(b.id)
+  })
+
+  it('2.0.8-B scoped cooldown: markAccountCooling пишет scope/reason/model', () => {
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    markAccountCooling(db, a.id, 2_000_000_000_000, { scope: 'model', reason: 'quota', model: 'claude-sonnet-4-6' })
+    const got = getSubscriptionAccount(db, a.id)!
+    expect(got.state).toBe('cooling')
+    expect(got.cooldownScope).toBe('model')
+    expect(got.cooldownReason).toBe('quota')
+    expect(got.cooldownModel).toBe('claude-sonnet-4-6')
+  })
+
+  it('2.0.8-B binding: setSubscriptionBinding pinned + fork НАСЛЕДУЕТ (карточка шаг 6/7)', () => {
+    const sessions = createChatSessions(db)
+    const acc = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    const chat = sessions.create('/p', { providerId: 'claude-cli', model: 'claude-sonnet-4-6' })
+    sessions.setSubscriptionBinding(chat.id, 'pinned', acc.id)
+    expect(sessions.getSubscriptionBinding(chat.id)).toEqual({ accountId: acc.id, mode: 'pinned' })
+    // fork наследует binding
+    const branch = sessions.fork(chat.id)!
+    expect(sessions.getSubscriptionBinding(branch.id)).toEqual({ accountId: acc.id, mode: 'pinned' })
+  })
+
+  it('2.0.8-B binding: pinned без accountId нормализуется в auto (не висячий pin)', () => {
+    const sessions = createChatSessions(db)
+    const chat = sessions.create('/p', { providerId: 'claude-cli' })
+    sessions.setSubscriptionBinding(chat.id, 'pinned', null)
+    expect(sessions.getSubscriptionBinding(chat.id)).toEqual({ accountId: null, mode: 'auto' })
+  })
+
+  it('2.0.8-B binding: удаление аккаунта → pinned-binding STALE, БЕЗ тихой ротации (шаг 6)', () => {
+    const sessions = createChatSessions(db)
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    const chat = sessions.create('/p', { providerId: 'claude-cli' })
+    sessions.setSubscriptionBinding(chat.id, 'pinned', a.id)
+    deleteSubscriptionAccount(db, a.id)
+    // binding НЕ ротирован молча — accountId всё ещё указывает на (удалённый) a.id
+    expect(sessions.getSubscriptionBinding(chat.id)).toEqual({ accountId: a.id, mode: 'pinned' })
+    // но сам аккаунт исчез → резолвер (2.0.8-D) детектит unavailable + требует решения юзера
+    expect(getSubscriptionAccount(db, a.id)).toBeNull()
   })
 })

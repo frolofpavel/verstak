@@ -23,9 +23,10 @@ export function SubscriptionAccountsPanel({ providerId, secretLabel, mode = 'tok
   const [error, setError] = useState<string | null>(null)
 
   const secretName = secretLabel ?? 'Токен / ключ'
-  const cooling = (a: SubscriptionAccountDto) => a.state === 'cooling' && !!a.coolingUntil && a.coolingUntil > Date.now()
+  // 2.0.8-B: coolingUntil переехал в cooldown.until (scoped cooldown DTO).
+  const cooling = (a: SubscriptionAccountDto) => a.state === 'cooling'
   const coolingLabel = (a: SubscriptionAccountDto) =>
-    a.coolingUntil ? new Date(a.coolingUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+    a.cooldown?.until ? new Date(a.cooldown.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 
   async function reload() {
     try { setAccounts(await window.api.subscriptionAccounts.list(providerId)) }

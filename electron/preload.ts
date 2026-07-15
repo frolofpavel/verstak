@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { RecipeSpec } from './ai/skills/types'
 import type { PromptRouteOverride } from '../shared/contracts/provider'
+import type { ChatSubscriptionBindingDTO } from '../shared/contracts/subscription'
 
 contextBridge.exposeInMainWorld('api', {
   projects: {
@@ -228,6 +229,8 @@ contextBridge.exposeInMainWorld('api', {
     append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) =>
       ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content, meta),
     maxMessageId: (sessionId: number) => ipcRenderer.invoke('chats:max-message-id', sessionId) as Promise<number>,
+    getSubscriptionBinding: (chatId: number) => ipcRenderer.invoke('chats:get-subscription-binding', chatId),
+    setSubscriptionBinding: (binding: ChatSubscriptionBindingDTO) => ipcRenderer.invoke('chats:set-subscription-binding', binding),
     truncateAfter: (sessionId: number, afterMessageId: number) => ipcRenderer.invoke('chats:truncate-after', sessionId, afterMessageId) as Promise<number>,
     updateMessage: (messageId: number, content: string) =>
       ipcRenderer.invoke('chats:update-message', messageId, content),

@@ -22,6 +22,10 @@ export interface ChatSession {
   lastMessageAt: number
   kind: ChatKind
   parentChatId: number | null
+  /** 2.0.8-B: привязка к подписочному аккаунту. accountId=null + mode='auto' →
+   *  автовыбор активного; 'pinned' → жёстко закреплён (per-chat, не глобальный флаг). */
+  subscriptionAccountId: number | null
+  subscriptionMode: 'auto' | 'pinned'
 }
 
 export interface ChatSessions {
@@ -47,6 +51,10 @@ export interface ChatSessions {
    *  uptoMessageId (включительно; без него — вся история). parentChatId = источник
    *  → дерево веток. Исследовать альтернативный путь из точки, не теряя оригинал. */
   fork: (sourceId: number, opts?: { uptoMessageId?: number; title?: string }) => ChatSession | null
+  /** 2.0.8-B: привязка чата к подписочному аккаунту (get). null — чат не найден. */
+  getSubscriptionBinding: (id: number) => { accountId: number | null; mode: 'auto' | 'pinned' } | null
+  /** 2.0.8-B: задать привязку. pinned без accountId нормализуется в auto. */
+  setSubscriptionBinding: (id: number, mode: 'auto' | 'pinned', accountId: number | null) => void
 }
 
 interface Row {
@@ -59,12 +67,15 @@ interface Row {
   lastMessageAt: number
   kind: ChatKind
   parentChatId: number | null
+  subscriptionAccountId: number | null
+  subscriptionMode: 'auto' | 'pinned'
 }
 
 const SELECT = `
   SELECT id, project_path as projectPath, title, provider_id as providerId, model,
          created_at as createdAt, last_message_at as lastMessageAt,
-         kind, parent_chat_id as parentChatId
+         kind, parent_chat_id as parentChatId,
+         subscription_account_id as subscriptionAccountId, subscription_mode as subscriptionMode
   FROM chat_sessions
 `
 
@@ -109,7 +120,9 @@ export function createChatSessions(db: Database): ChatSessions {
         providerId: opts.providerId ?? null,
         model: opts.model ?? null,
         createdAt: now, lastMessageAt: now,
-        kind, parentChatId
+        kind, parentChatId,
+        subscriptionAccountId: null,
+        subscriptionMode: 'auto',
       }
     },
     rename(id, title) {
@@ -153,10 +166,11 @@ export function createChatSessions(db: Database): ChatSessions {
       // копирования осталась бы пустая осиротевшая сессия (инвариант как у remove).
       let branchId = 0
       const tx = db.transaction(() => {
+        // 2.0.8-B: ветка НАСЛЕДУЕТ subscription-binding источника (карточка шаг 6).
         const info = db.prepare(
-          `INSERT INTO chat_sessions (project_path, title, provider_id, model, created_at, last_message_at, kind, parent_chat_id)
-           VALUES (?, ?, ?, ?, ?, ?, 'main', ?)`
-        ).run(source.projectPath, title, source.providerId, source.model, now, now, sourceId)
+          `INSERT INTO chat_sessions (project_path, title, provider_id, model, created_at, last_message_at, kind, parent_chat_id, subscription_account_id, subscription_mode)
+           VALUES (?, ?, ?, ?, ?, ?, 'main', ?, ?, ?)`
+        ).run(source.projectPath, title, source.providerId, source.model, now, now, sourceId, source.subscriptionAccountId, source.subscriptionMode)
         branchId = Number(info.lastInsertRowid)
         const rows = (upto != null
           ? db.prepare('SELECT role, content, created_at FROM chats WHERE session_id = ? AND id <= ? ORDER BY id ASC').all(sourceId, upto)
@@ -174,8 +188,24 @@ export function createChatSessions(db: Database): ChatSessions {
         model: source.model,
         createdAt: now, lastMessageAt: now,
         kind: 'main', parentChatId: sourceId,
+        subscriptionAccountId: source.subscriptionAccountId,
+        subscriptionMode: source.subscriptionMode,
       }
-    }
+    },
+    getSubscriptionBinding(id) {
+      const row = db.prepare(
+        'SELECT subscription_account_id as accountId, subscription_mode as mode FROM chat_sessions WHERE id = ?'
+      ).get(id) as { accountId: number | null; mode: 'auto' | 'pinned' } | undefined
+      if (!row) return null
+      return { accountId: row.accountId, mode: row.mode }
+    },
+    setSubscriptionBinding(id, mode, accountId) {
+      // pinned без accountId бессмыслен → нормализуем в auto (не оставляем висячий pin).
+      const effectiveMode = mode === 'pinned' && accountId != null ? 'pinned' : 'auto'
+      const effectiveAccount = effectiveMode === 'pinned' ? accountId : null
+      db.prepare('UPDATE chat_sessions SET subscription_account_id = ?, subscription_mode = ? WHERE id = ?')
+        .run(effectiveAccount, effectiveMode, id)
+    },
   }
   return sessions
 }

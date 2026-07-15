@@ -20,32 +20,21 @@ import {
   deleteSubscriptionAccount,
   type SubscriptionAccount,
 } from '../storage/subscription-accounts'
+import { toSubscriptionAccountDTO, type SubscriptionAccountDTO } from '../../shared/contracts/subscription'
 
 /** Провайдеры с config-dir изоляцией (аккаунт = отдельная папка стейта) → env-переменная. */
 const CONFIG_DIR_ENV: Record<string, string> = {
   'codex-cli': 'CODEX_HOME',
 }
 
-/** DTO без секрета: cred_ref не покидает main. */
-export interface SubscriptionAccountDto {
-  id: number
-  providerId: string
-  label: string
-  configDir: string | null
-  baseUrl: string | null
-  active: boolean
-  state: string
-  coolingUntil: number | null
-  createdAt: number
-  lastUsedAt: number | null
-  hasSecret: boolean
-}
+// 2.0.8-B: renderer-safe DTO — из shared-контракта. Прежний локальный DTO спредил
+// `...rest` и МОЛЧА пропускал configDir/baseUrl в renderer. Единый источник теперь один.
+export type { SubscriptionAccountDTO }
 
 export function registerSubscriptionAccountsIpc(db: Database, settings: Settings, accountsBaseDir: string): void {
-  const toDto = (a: SubscriptionAccount): SubscriptionAccountDto => {
-    const { credRef, ...rest } = a
-    return { ...rest, hasSecret: Boolean(settings.getSecret(credRef)) }
-  }
+  // WHITELIST-сериализация: credRef/configDir/baseUrl физически не попадают в DTO.
+  const toDto = (a: SubscriptionAccount): SubscriptionAccountDTO =>
+    toSubscriptionAccountDTO(a, { hasCredential: Boolean(settings.getSecret(a.credRef)), now: Date.now() })
 
   ipcMain.handle('subscription-accounts:list', (_e, providerId?: string) =>
     listSubscriptionAccounts(db, providerId).map(toDto))

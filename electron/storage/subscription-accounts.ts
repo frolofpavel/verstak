@@ -22,6 +22,10 @@ export interface SubscriptionAccount {
   state: string
   /** Epoch ms до которого аккаунт «остывает» после лимита (null = не остывает). */
   coolingUntil: number | null
+  /** 2.0.8-B scoped cooldown: область (account|model|provider), причина, модель (для model-scope). */
+  cooldownScope: string | null
+  cooldownReason: string | null
+  cooldownModel: string | null
   createdAt: number
   lastUsedAt: number | null
 }
@@ -31,7 +35,9 @@ interface Row extends Omit<SubscriptionAccount, 'active'> { active: number }
 const SELECT = `
   SELECT id, provider_id as providerId, label, cred_ref as credRef,
          config_dir as configDir, base_url as baseUrl, active, state,
-         cooling_until as coolingUntil, created_at as createdAt, last_used_at as lastUsedAt
+         cooling_until as coolingUntil,
+         cooldown_scope as cooldownScope, cooldown_reason as cooldownReason, cooldown_model as cooldownModel,
+         created_at as createdAt, last_used_at as lastUsedAt
   FROM subscription_accounts
 `
 
@@ -100,13 +106,24 @@ export function touchSubscriptionAccount(db: Database, id: number, when = Date.n
 }
 
 /** Пометить аккаунт «остывающим» после лимита (до coolingUntil epoch ms). */
-export function markAccountCooling(db: Database, id: number, coolingUntil: number | null): void {
-  db.prepare("UPDATE subscription_accounts SET state = 'cooling', cooling_until = ? WHERE id = ?").run(coolingUntil, id)
+/** 2.0.8-B: область и причина остывания для детерминированной маршрутизации. */
+export interface CooldownDetail {
+  scope?: 'account' | 'model' | 'provider'
+  reason?: 'quota' | 'rate-limit' | 'auth' | 'provider-unavailable' | 'unknown'
+  model?: string | null
 }
 
-/** Вернуть аккаунт в готовое состояние (лимит сброшен / вручную). */
+export function markAccountCooling(db: Database, id: number, coolingUntil: number | null, detail?: CooldownDetail): void {
+  db.prepare(
+    "UPDATE subscription_accounts SET state = 'cooling', cooling_until = ?, cooldown_scope = ?, cooldown_reason = ?, cooldown_model = ? WHERE id = ?"
+  ).run(coolingUntil, detail?.scope ?? null, detail?.reason ?? null, detail?.model ?? null, id)
+}
+
+/** Вернуть аккаунт в готовое состояние (лимит сброшен / вручную). Чистит и scoped-поля. */
 export function clearCooling(db: Database, id: number): void {
-  db.prepare("UPDATE subscription_accounts SET state = 'ready', cooling_until = NULL WHERE id = ?").run(id)
+  db.prepare(
+    "UPDATE subscription_accounts SET state = 'ready', cooling_until = NULL, cooldown_scope = NULL, cooldown_reason = NULL, cooldown_model = NULL WHERE id = ?"
+  ).run(id)
 }
 
 export interface SwitchResult { switched: boolean; newAccountId?: number }

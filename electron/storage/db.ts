@@ -1127,6 +1127,26 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!cols.includes('requested_provider_id')) db.exec('ALTER TABLE agent_runs ADD COLUMN requested_provider_id TEXT')
       if (!cols.includes('requested_model')) db.exec('ALTER TABLE agent_runs ADD COLUMN requested_model TEXT')
     }
+  },
+  {
+    version: 49,
+    description: '2.0.8-B подписки: subscription_accounts.cooldown_scope/reason/model (scoped cooldown поверх cooling_until 1.9.4) + chat_sessions.subscription_account_id (nullable binding) / subscription_mode (auto|pinned) — pin per-chat. Append-only, обе таблицы гардим на существование (repair-сценарий).',
+    run: (db: DB) => {
+      const has = (t: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t)
+      const colsOf = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).map(c => c.name)
+      if (has('subscription_accounts')) {
+        const c = colsOf('subscription_accounts')
+        if (!c.includes('cooldown_scope')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN cooldown_scope TEXT')
+        if (!c.includes('cooldown_reason')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN cooldown_reason TEXT')
+        if (!c.includes('cooldown_model')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN cooldown_model TEXT')
+      }
+      if (has('chat_sessions')) {
+        const c = colsOf('chat_sessions')
+        if (!c.includes('subscription_account_id')) db.exec('ALTER TABLE chat_sessions ADD COLUMN subscription_account_id INTEGER')
+        // auto — привязка выбирается автоматически (активный аккаунт); pinned — жёстко закреплён.
+        if (!c.includes('subscription_mode')) db.exec("ALTER TABLE chat_sessions ADD COLUMN subscription_mode TEXT NOT NULL DEFAULT 'auto'")
+      }
+    }
   }
 ]
 
