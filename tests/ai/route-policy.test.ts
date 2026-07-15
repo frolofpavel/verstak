@@ -3,7 +3,7 @@
 // истёкший cooldown; network retry без бана аккаунта; loop guard; два параллельных чата.
 import { describe, it, expect } from 'vitest'
 import {
-  decideRoute, classifyRouteReason, attemptKey, routeChangedText,
+  decideRoute, classifyRouteReason, attemptKey, routeChangedText, resolveChatAccount,
   type RouteDecisionInput, type RouteAttempt, type RoutePolicy, type RouteReason,
 } from '../../electron/ai/route-policy'
 import { MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from '../../electron/ai/runner-shared'
@@ -25,6 +25,28 @@ describe('attemptKey', () => {
   it('формат providerId:model:accountId, null → -', () => {
     expect(attemptKey(A('claude', 'sonnet', 7))).toBe('claude:sonnet:7')
     expect(attemptKey(A('gemini-api', 'flash', null))).toBe('gemini-api:flash:-')
+  })
+})
+
+describe('resolveChatAccount — per-chat binding (D2, инвариант удаления карточки B)', () => {
+  const exists = (ids: number[]) => (id: number) => ids.includes(id)
+
+  it('нет binding → auto (глобально-активный)', () => {
+    expect(resolveChatAccount(null, exists([1, 2]))).toEqual({ status: 'auto' })
+  })
+  it('mode auto → auto', () => {
+    expect(resolveChatAccount({ mode: 'auto', accountId: null }, exists([1]))).toEqual({ status: 'auto' })
+    expect(resolveChatAccount({ mode: 'auto', accountId: 5 }, exists([5]))).toEqual({ status: 'auto' })
+  })
+  it('pinned без accountId → auto (нормализация)', () => {
+    expect(resolveChatAccount({ mode: 'pinned', accountId: null }, exists([1]))).toEqual({ status: 'auto' })
+  })
+  it('pinned на СУЩЕСТВУЮЩИЙ аккаунт → pinned', () => {
+    expect(resolveChatAccount({ mode: 'pinned', accountId: 7 }, exists([7, 8]))).toEqual({ status: 'pinned', accountId: 7 })
+  })
+  // ГЛАВНЫЙ инвариант (координатор #3): удалили pinned-аккаунт → unavailable, НЕ тихая ротация.
+  it('pinned на УДАЛЁННЫЙ аккаунт → unavailable (без тихой ротации на глобально-активный)', () => {
+    expect(resolveChatAccount({ mode: 'pinned', accountId: 7 }, exists([8, 9]))).toEqual({ status: 'unavailable', accountId: 7 })
   })
 })
 

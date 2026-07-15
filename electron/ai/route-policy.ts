@@ -40,6 +40,30 @@ export function attemptKey(a: RouteAttempt): string {
   return `${a.providerId}:${a.model}:${a.accountId ?? '-'}`
 }
 
+/**
+ * 2.0.8-D2: разрешение аккаунта для чата по per-chat binding (2.0.8-B). Инвариант карточки B:
+ * pinned-аккаунт удалён → binding становится UNAVAILABLE и требует решения пользователя, БЕЗ
+ * тихой ротации на глобально-активный. Чистая функция (тестируется отдельно от storage).
+ *   auto        — режим auto / нет binding / accountId пуст → брать глобально-активный.
+ *   pinned      — pinned на СУЩЕСТВУЮЩИЙ аккаунт → использовать его.
+ *   unavailable — pinned на удалённый/несуществующий аккаунт → НЕ ротировать молча, спросить юзера.
+ */
+export type ChatAccountResolution =
+  | { status: 'auto' }
+  | { status: 'pinned'; accountId: number }
+  | { status: 'unavailable'; accountId: number }
+
+export function resolveChatAccount(
+  binding: { mode: 'auto' | 'pinned'; accountId: number | null } | null,
+  accountExists: (id: number) => boolean,
+): ChatAccountResolution {
+  if (!binding || binding.mode !== 'pinned' || binding.accountId == null) return { status: 'auto' }
+  // pinned: аккаунт жив → используем; удалён → unavailable (НЕ падаем молча на глобально-активный).
+  return accountExists(binding.accountId)
+    ? { status: 'pinned', accountId: binding.accountId }
+    : { status: 'unavailable', accountId: binding.accountId }
+}
+
 /** Человекочитаемый текст смены маршрута для UI-пилюли (единый для обоих runner'ов). */
 export function routeChangedText(
   action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
