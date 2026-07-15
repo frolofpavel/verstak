@@ -12,6 +12,7 @@ import { createYandexGptProvider, YANDEX_GPT_MODELS } from './yandex-gpt'
 import { createGigaChatProvider, GIGACHAT_MODELS } from './gigachat'
 import type { ChatProvider } from './types'
 import type { AgentMode } from './mode-policy'
+import type { ModelGateResult } from './model-catalog-service'
 import {
   capabilitiesFor,
   type ProviderId,
@@ -240,6 +241,9 @@ export interface CreateOptions {
   /** Режим агента — CLI-провайдеры (Codex) маппят его во флаги песочницы.
    *  Для API-провайдеров режим применяется в ipc/ai.ts через mode-policy.decide. */
   agentMode?: AgentMode
+  /** 2.0.7-E: гейт живого каталога (пока grok-cli). Блокирует запрошенную модель ДО
+   *  child-процесса, если аутентифицированный свежий каталог подтверждает её отсутствие. */
+  checkModel?: (model: string) => ModelGateResult
 }
 
 export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvider {
@@ -270,7 +274,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createGrokProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'grok-cli':
-      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
+      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, checkModel: opts.checkModel })
     case 'openai': {
       if (!opts.apiKey) throw new Error('OpenAI API key not set')
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })

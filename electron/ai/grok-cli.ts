@@ -9,6 +9,7 @@ import { buildCliPrompt } from './cli-prompt'
 import { describeAttachments } from './history-serializer'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
+import type { ModelGateResult } from './model-catalog-service'
 import { logRuntime } from '../runtime-log'
 
 /**
@@ -113,6 +114,12 @@ interface GrokCliOptions {
   skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
   agentMode?: AgentMode
+  /**
+   * Гейт живого каталога (2.0.7-E). Вызывается ПЕРЕД spawn на запрошенной модели. Если
+   * вернёт ok:false — прогон блокируется с вариантами (не молчаливая подмена на дефолт).
+   * Инъекция из ipc/ai.ts (loadLiveCatalog + checkModelAvailable). Нет колбэка → нет гейта.
+   */
+  checkModel?: (model: string) => ModelGateResult
 }
 
 export const GROK_CLI_MODELS = [
@@ -244,6 +251,12 @@ async function* runGrokComposerPlain(opts: {
   }
 }
 
+// Экспортирован для Model Doctor (2.0.7-E): discovery-путь (`grok models`) должен искать
+// бинарь той же логикой, что и send-путь, иначе доктор и прогон разошлись бы.
+export function findGrokBinary(): string {
+  return findBinary()
+}
+
 function findBinary(): string {
   const home = process.env.USERPROFILE || process.env.HOME || ''
   if (home) {
@@ -355,6 +368,22 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       }
 
       const requestedModel = opts.model && opts.model !== 'auto' ? opts.model : DEFAULT_GROK_CLI_MODEL
+
+      // 2.0.7-E: гейт по ЖИВОМУ каталогу ДО child-процесса. Если аутентифицированный
+      // свежий каталог подтверждает, что модели нет — НЕ подменяем молча на дефолт
+      // (карточка шаг 7), а блокируем с доступными вариантами. Нет каталога / он
+      // неполон / протух / пуст → gate.ok=true, поведение как раньше (см. checkModelAvailable).
+      // Ревью F2: гейтим ИСХОДНЫЙ выбор пользователя (opts.model), а НЕ резолвнутый
+      // requestedModel — иначе 'auto'/пусто (→ хардкод-дефолт) мог бы заблокироваться, хотя
+      // 'auto' означает «пусть CLI выберет сам» и блокировке не подлежит.
+      const gate = opts.checkModel?.(opts.model ?? 'auto')
+      if (gate && !gate.ok) {
+        const avail = gate.available?.length ? ` Доступные: ${gate.available.join(', ')}.` : ''
+        const sugg = gate.suggested ? ` Рекомендуется: ${gate.suggested}.` : ''
+        yield { type: 'error', message: `Модель «${requestedModel}» больше не доступна в Grok Build.${avail}${sugg} Выберите доступную в Настройках → Модели.` }
+        return
+      }
+
       const selectedModel = GROK_CLI_MODELS.includes(requestedModel)
         ? requestedModel
         : DEFAULT_GROK_CLI_MODEL

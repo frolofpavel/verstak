@@ -8,6 +8,12 @@ import {
 import { detectInstalledClis } from '../ai/cli-detect'
 import { scanLocalModelServers } from '../ai/local-models'
 import { PROVIDERS, providerCapabilities, type ProviderCapabilities } from '../ai/registry'
+import { findGrokBinary } from '../ai/grok-cli'
+import { runGrokDiscovery } from '../ai/model-discovery'
+import {
+  saveLiveCatalog, loadLiveCatalog, catalogStatus,
+  type CatalogStore, type ProviderCatalogStatusDTO,
+} from '../ai/model-catalog-service'
 import {
   authKindFor,
   executionModeFor,
@@ -125,6 +131,49 @@ export function registerSettingsIpc(settings: Settings): void {
       shortLabel: p.shortLabel,
       capabilities: providerCapabilities(p)
     }))
+  })
+
+  // ─── Model Doctor (2.0.7-E): живой каталог моделей ────────────────────────
+  // Кеш живого каталога хранится в settings (только id+timestamp, TTL 24ч).
+  const catalogStore: CatalogStore = {
+    get: key => settings.getSecret(key),
+    set: (key, value) => { settings.setSecret(key, value) },
+  }
+
+  // Провайдеры с live-адаптером обнаружения. Пока только grok-cli (первый адаптер —
+  // `grok models`, карточка 2.0.7-E). Остальным — 'static' каталог реестра.
+  const LIVE_DISCOVERY_PROVIDERS = new Set(['grok-cli'])
+
+  // providers:refresh-models — ПРИНУДИТЕЛЬНО опросить провайдера и обновить живой каталог.
+  ipcMain.handle('providers:refresh-models', async (_e, providerId: string): Promise<ProviderCatalogStatusDTO> => {
+    const now = Date.now()
+    if (!LIVE_DISCOVERY_PROVIDERS.has(providerId)) {
+      return { providerId, status: 'unknown', ids: [], defaultModel: null, source: 'bundled', authenticated: false, reasonCode: 'NO_LIVE_ADAPTER' }
+    }
+    const result = await runGrokDiscovery({ binary: findGrokBinary() })
+    // Ревью F1: НЕ сохраняем как авторитетный каталог ничего кроме 'available' с моделями.
+    // Пустой (status='empty') или ошибочный вывод, сохранённый с authenticated=true,
+    // заблокировал бы гейтом ВСЕ модели на 24ч. Пустой каталог = «не смогли», не «ноль».
+    if (result.status !== 'available' || result.models.length === 0) {
+      return { providerId, status: 'unavailable', ids: [], defaultModel: null, source: 'cli-live', authenticated: result.authenticated, fetchedAt: now, reasonCode: result.reasonCode ?? 'EMPTY_CATALOG' }
+    }
+    const entry = saveLiveCatalog(catalogStore, providerId, result, now)
+    return {
+      providerId, status: 'available', ids: entry.ids, defaultModel: entry.defaultModel,
+      source: entry.source, authenticated: entry.authenticated, fetchedAt: entry.fetchedAt,
+      expiresAt: entry.expiresAt, reasonCode: result.reasonCode,
+    }
+  })
+
+  // providers:doctor — ТЕКУЩИЙ кешированный статус живого каталога (read-only, без опроса).
+  ipcMain.handle('providers:doctor', (_e, providerId: string): ProviderCatalogStatusDTO => {
+    const entry = loadLiveCatalog(catalogStore, providerId)
+    const status = catalogStatus(entry, Date.now())
+    return {
+      providerId, status, ids: entry?.ids ?? [], defaultModel: entry?.defaultModel ?? null,
+      source: entry?.source ?? 'bundled', authenticated: entry?.authenticated ?? false,
+      fetchedAt: entry?.fetchedAt, expiresAt: entry?.expiresAt,
+    }
   })
 
   // Policy Center — снимок «что разрешено агенту»: матрица decide(tool, mode)

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
-import type { DetectedCli, PolicyMatrixDTO, PolicyDecision } from '../types/api'
+import type { DetectedCli, PolicyMatrixDTO, PolicyDecision, ProviderCatalogStatusDTO } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import {
   MOTION_LEVEL_OPTIONS,
@@ -4799,6 +4799,16 @@ function ModelsPage(props: ModelsPageProps) {
   const [authModal, setAuthModal] = useState<ProviderConfig | null>(null)
   const [cliStatus, setCliStatus] = useState<ModelsCliStatusMap | null>(null)
   const [localServerIds, setLocalServerIds] = useState<Set<string>>(new Set())
+  // 2.0.7-E Model Doctor: живой каталог grok-cli (единственный live-адаптер пока).
+  const [doctorBusy, setDoctorBusy] = useState(false)
+  const [doctorStatus, setDoctorStatus] = useState<ProviderCatalogStatusDTO | null>(null)
+
+  async function refreshGrokModels() {
+    setDoctorBusy(true)
+    try { setDoctorStatus(await window.api.providers.refreshModels('grok-cli')) }
+    catch { /* ignore — оставляем прежний статус */ }
+    finally { setDoctorBusy(false) }
+  }
 
   useEffect(() => {
     void Promise.all([
@@ -5005,6 +5015,22 @@ function ModelsPage(props: ModelsPageProps) {
           ⚠ Офлайн-каталог: список моделей не удалось получить от приложения, показан встроенный снимок — модели могут быть устаревшими.
         </p>
       )}
+
+      {/* 2.0.7-E Model Doctor: живая проверка каталога Grok Build (единственный live-адаптер). */}
+      <div className="gg-models-doctor" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '4px 0 10px' }}>
+        <button type="button" className="gg-btn gg-btn-ghost" disabled={doctorBusy} onClick={() => void refreshGrokModels()}>
+          {doctorBusy ? '⏳ Проверяю…' : '🩺 Проверить модели Grok Build'}
+        </button>
+        {doctorStatus && (
+          <span className="gg-models-card-desc" role="status">
+            {doctorStatus.status === 'available'
+              ? `Актуально: ${doctorStatus.ids.length} моделей${doctorStatus.authenticated ? '' : ' (не вошли в Grok — список может быть неполным)'}`
+              : doctorStatus.status === 'unavailable'
+                ? `Не удалось получить список (${doctorStatus.reasonCode ?? 'ошибка'})`
+                : 'Живой каталог недоступен'}
+          </span>
+        )}
+      </div>
 
       <div className="gg-models-presets" aria-label="Быстрые наборы моделей">
         <button type="button" className="gg-models-preset" onClick={() => applyPreset('current')}>

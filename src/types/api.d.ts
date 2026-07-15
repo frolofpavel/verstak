@@ -423,6 +423,10 @@ declare global {
       }
       providers: {
         list: () => Promise<ProviderDescriptorDTO[]>
+        /** 2.0.7-E: текущий кешированный статус живого каталога (read-only, без опроса). */
+        doctor: (providerId: string) => Promise<ProviderCatalogStatusDTO>
+        /** 2.0.7-E: принудительно опросить провайдера и обновить живой каталог (TTL 24ч). */
+        refreshModels: (providerId: string) => Promise<ProviderCatalogStatusDTO>
       }
       doctor: {
         run: () => Promise<DoctorReport>
@@ -1295,6 +1299,13 @@ export type {
   ProviderDescriptorDTO,
   ProviderCapabilities as ProviderCapabilitiesDTO,
 } from '../../shared/contracts/provider'
+
+/**
+ * 2.0.7-E: статус живого каталога моделей (providers:doctor / refresh-models). Тип живёт
+ * в main (electron/ai/model-catalog-service.ts) вместе с логикой; здесь только type-only
+ * реэкспорт — без дублирования (урок 2.0.7-C) и без рантайм-связи (модуль type-only-чист).
+ */
+export type { ProviderCatalogStatusDTO } from '../../electron/ai/model-catalog-service'
 
 /** Doctor — health-check провайдеров и коннекторов (см. electron/ai/doctor.ts). */
 export type DoctorStatus = 'ok' | 'no-key' | 'n-a'

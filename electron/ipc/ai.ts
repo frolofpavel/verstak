@@ -7,6 +7,7 @@ import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-hand
 import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
+import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
@@ -903,6 +904,11 @@ export function registerAiIpc(deps: AiDeps): void {
       const gigachatTlsVerify = providerId === 'gigachat'
         ? (deps.getSecret('gigachat_tls_verify') === 'true')
         : undefined
+      // 2.0.7-E: гейт живого каталога для grok-cli. Читает кешированный каталог (settings)
+      // и решает, блокировать ли запрошенную модель. Только для grok-cli (первый live-адаптер).
+      const checkModel = providerId === 'grok-cli'
+        ? (m: string) => checkModelAvailable(loadLiveCatalog({ get: deps.getSecret, set: () => {} }, 'grok-cli'), m, Date.now())
+        : undefined
       provider = createProvider(providerId, {
         apiKey,
         model,
@@ -919,7 +925,8 @@ export function registerAiIpc(deps: AiDeps): void {
         gigachatTlsVerify,
         memories: descriptor.transport !== 'API' ? memories : undefined,  // CLI + Tunnel (2.0.4)
         effortLevel: resolvedEffort,
-        agentMode
+        agentMode,
+        checkModel
       })
       logRuntime('ai.provider.created', { sendId, runId, providerId, model, transport: descriptor.transport })
       emitAgentProgress(taggedSender, sendId, {
