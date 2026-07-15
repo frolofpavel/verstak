@@ -24,10 +24,14 @@ import {
   isProviderAuthorized,
   modelSearchText,
   providerAuthLink,
+  resolveModelAvailability,
+  type CatalogProvider,
+  type CatalogSource,
   type CliAuthId,
   type CliAuthStatus,
   type ConnectionStatus
 } from '../lib/model-catalog'
+import { useProviderCatalog } from '../hooks/useProviderCatalog'
 import { modeControlInfo } from '../lib/runtime-capability'
 import {
   IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
@@ -44,294 +48,12 @@ import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../li
 import { modeModelsKey, parseModeModels, serializeModeModels } from '../lib/mode-model'
 import type { AgentMode } from './ModePicker'
 
-interface ProviderConfig {
-  id: ProviderId
-  name: string
-  transport: 'API' | 'CLI' | 'Tunnel'
-  description: string
-  models: string[]
-  defaultModel: string
-  secretKey: string | null
-  keyHint: string
-  keyLink?: { url: string; label: string }
-  supportsTools: boolean
-  /** 2.0.4: провайдер за opt-in чекбоксом (Experimental) вместо key-инпута.
-   *  secretKey хранит '1' при согласии — чекбокс, а не текстовое поле. */
-  optIn?: { warning: string; label: string }
-}
-
-const PROVIDERS: ProviderConfig[] = [
-  // ⭐ Рекомендуемый провайдер — наш собственный шлюз. Первым в списке.
-  {
-    id: 'verstak-gateway',
-    name: 'Verstak Gateway',
-    transport: 'API',
-    description: 'Единый баланс Verstak: один ключ, оплата в рублях и готовые наборы моделей',
-    models: ['kimi-k2.7-code', 'deepseek-chat', 'qwen3-coder', 'verstak/economy', 'verstak/free', 'verstak/balanced', 'verstak/coder', 'verstak/long', 'verstak/fast', 'verstak/private'],
-    defaultModel: 'kimi-k2.7-code',
-    secretKey: 'verstak_gateway_api_key',
-    keyHint: 'vsk_live_...',
-    keyLink: { url: 'https://agi-iri.ru/gateway/', label: 'agi-iri.ru/gateway' },
-    supportsTools: true
-  },
-  {
-    id: 'gemini-api',
-    name: 'Gemini',
-    transport: 'API',
-    description: 'Модели Google для больших контекстов, документов и быстрых повседневных задач',
-    models: ['gemini-3-pro', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-    defaultModel: 'gemini-3.5-flash',
-    secretKey: 'gemini_api_key',
-    keyHint: 'AIzaSy…',
-    keyLink: { url: 'https://aistudio.google.com/app/apikey', label: 'Google AI Studio API keys' },
-    supportsTools: true
-  },
-  {
-    id: 'gemini-cli',
-    name: 'Gemini CLI',
-    transport: 'CLI',
-    description: 'Работает через установленный Gemini и вход в аккаунт Google без API-ключа',
-    models: ['auto', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  {
-    id: 'claude',
-    name: 'Claude',
-    transport: 'API',
-    description: 'Сильные модели для анализа, текста, планирования и задач с большим количеством условий',
-    models: ['claude-sonnet-4-6', 'claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
-    defaultModel: 'claude-sonnet-4-6',
-    secretKey: 'anthropic_api_key',
-    keyHint: 'sk-ant-…',
-    keyLink: { url: 'https://platform.claude.com/settings/keys', label: 'Claude API keys' },
-    supportsTools: true
-  },
-  {
-    id: 'claude-cli',
-    name: 'Claude Code',
-    transport: 'CLI',
-    description: 'Работает через Claude Code и подписку Anthropic. Подходит для кода и файлов',
-    models: ['auto', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  {
-    id: 'grok',
-    name: 'Grok',
-    transport: 'API',
-    description: 'Модели xAI через API. Verstak может выполнять действия и показывать этапы работы',
-    models: ['grok-4.5'],
-    defaultModel: 'grok-4.5',
-    secretKey: 'xai_api_key',
-    keyHint: 'xai-…',
-    keyLink: { url: 'https://console.x.ai/team/default/api-keys', label: 'xAI API keys' },
-    supportsTools: true
-  },
-  {
-    id: 'grok-cli',
-    name: 'Grok Build',
-    transport: 'CLI',
-    description: 'Работает через подписку SuperGrok и установленный Grok Build',
-    models: ['grok-4.5', 'grok-composer-2.5-fast'],
-    defaultModel: 'grok-4.5',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  {
-    id: 'openai',
-    name: 'ChatGPT',
-    transport: 'API',
-    description: 'Модели OpenAI для текста, кода, анализа и аккуратной работы с инструкциями',
-    models: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
-    defaultModel: 'gpt-5',
-    secretKey: 'openai_api_key',
-    keyHint: 'sk-…',
-    keyLink: { url: 'https://platform.openai.com/api-keys', label: 'OpenAI Platform' },
-    supportsTools: true
-  },
-  {
-    id: 'codex-cli',
-    name: 'Codex CLI',
-    transport: 'CLI',
-    description: 'Работает через Codex и аккаунт OpenAI. Подходит для кода, файлов и проверок',
-    models: ['auto', 'gpt-5-codex', 'gpt-5', 'gpt-5-mini', 'o3', 'o3-mini', 'gpt-4o'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  {
-    // 2.0.4 direct-OAuth: НАШ agent-loop на подписке ChatGPT/Codex (не окно над CLI).
-    // Experimental — включается тумблером с opt-in «понимаю риск». Токен берётся из
-    // codex login (~/.codex/auth.json), отдельный ключ не нужен.
-    id: 'openai-codex-oauth',
-    name: 'OpenAI Codex OAuth (Experimental)',
-    transport: 'API',
-    description: 'Полный agent-loop Verstak на вашей подписке ChatGPT/Codex (модели gpt-5.6/5.5/5.4). Токен — из «codex login», отдельный ключ не нужен.',
-    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
-    defaultModel: 'gpt-5.6-sol',
-    secretKey: 'codex_oauth_risk_accepted',
-    keyHint: '',
-    supportsTools: true,
-    optIn: {
-      warning: 'Экспериментально. Использует OAuth-токен вашей подписки напрямую против API OpenAI (как Hermes/OpenClaw). OpenAI это разрешает и не банит автоматически (в отличие от Anthropic), НО официальной гарантии нет — policy-risk ненулевой. Включайте осознанно. Сначала выполните «codex login».',
-      label: 'Понимаю риск — включить Codex OAuth'
-    }
-  },
-  // OpenAI-compatible extra-провайдеры (zеркало EXTRA_PROVIDERS из electron/ai/extra-providers.ts).
-  // При обновлении расширений — обновляй ОБА файла; renderer не имеет доступа к main.
-  // (Verstak Gateway вынесен в начало списка — рекомендуемый.)
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    transport: 'API',
-    description: 'Один ключ для моделей разных провайдеров: Claude, GPT, Gemini, Grok и open-source',
-    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4.5', 'moonshotai/kimi-k2.7-code', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
-    defaultModel: 'anthropic/claude-sonnet-4-6',
-    secretKey: 'openrouter_api_key',
-    keyHint: 'sk-or-...',
-    keyLink: { url: 'https://openrouter.ai/keys', label: 'openrouter.ai/keys' },
-    supportsTools: true
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    transport: 'API',
-    description: 'Недорогие модели для кода, рассуждений и массовых задач',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-    defaultModel: 'deepseek-v4-flash',
-    secretKey: 'deepseek_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://platform.deepseek.com/api_keys', label: 'platform.deepseek.com' },
-    supportsTools: true
-  },
-  {
-    id: 'moonshot',
-    name: 'Moonshot Kimi',
-    transport: 'API',
-    description: 'Модели Kimi для длинного контекста, кода и задач с большим объёмом данных',
-    models: ['kimi-k2.7-code', 'kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
-    defaultModel: 'kimi-k2.7-code',
-    secretKey: 'moonshot_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://platform.moonshot.ai/console/api-keys', label: 'platform.moonshot.ai' },
-    supportsTools: true
-  },
-  {
-    id: 'kimi-coding',
-    name: 'Kimi Code (подписка)',
-    transport: 'API',
-    description: 'Подписка Kimi для задач по коду вместо оплаты за каждый запрос',
-    models: ['kimi-for-coding'],
-    defaultModel: 'kimi-for-coding',
-    secretKey: 'kimi_coding_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://www.kimi.com/code', label: 'Kimi Code Console' },
-    supportsTools: true
-  },
-  {
-    id: 'zai-coding',
-    name: 'Z.ai GLM Coding (подписка)',
-    transport: 'API',
-    description: 'Подписка Z.ai для GLM-моделей, кода и длинных задач',
-    models: ['glm-5.2', 'glm-5-turbo'],
-    defaultModel: 'glm-5.2',
-    secretKey: 'zai_coding_api_key',
-    keyHint: 'ключ Coding Plan…',
-    keyLink: { url: 'https://z.ai/manage-apikey/apikey-list', label: 'z.ai → API Keys' },
-    supportsTools: true
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen (Alibaba)',
-    transport: 'API',
-    description: 'Модели Alibaba для кода, текста и быстрых рабочих задач',
-    models: ['qwen3-max', 'qwen3-coder-plus', 'qwen3-coder-flash', 'qwen-max', 'qwen-plus', 'qwen-flash'],
-    defaultModel: 'qwen3-coder-plus',
-    secretKey: 'qwen_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://bailian.console.aliyun.com/', label: 'bailian.console.aliyun.com' },
-    supportsTools: true
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    transport: 'API',
-    description: 'Европейские модели общего назначения. Codestral полезен для кода',
-    models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'ministral-8b-latest'],
-    defaultModel: 'mistral-large-latest',
-    secretKey: 'mistral_api_key',
-    keyHint: 'API key...',
-    keyLink: { url: 'https://console.mistral.ai/api-keys', label: 'console.mistral.ai' },
-    supportsTools: true
-  },
-  {
-    id: 'groq',
-    name: 'Groq',
-    transport: 'API',
-    description: 'Очень быстрые модели для коротких ответов и задач, где важна скорость',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-    defaultModel: 'llama-3.3-70b-versatile',
-    secretKey: 'groq_api_key',
-    keyHint: 'gsk_...',
-    keyLink: { url: 'https://console.groq.com/keys', label: 'console.groq.com' },
-    supportsTools: true
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama (local)',
-    transport: 'API',
-    description: 'Локальные модели на компьютере. Нужно установить Ollama и скачать модели',
-    models: ['llama3.3', 'qwen2.5-coder', 'deepseek-r1', 'mistral', 'gemma2'],
-    defaultModel: 'llama3.3',
-    secretKey: null,
-    keyHint: '',
-    keyLink: { url: 'https://ollama.com/download', label: 'Ollama download' },
-    supportsTools: true
-  },
-  // 🇷🇺 Российские провайдеры. Mark в description для отличия.
-  {
-    id: 'yandex-gpt',
-    name: 'YandexGPT',
-    transport: 'API',
-    description: 'Модели Yandex Cloud для русского языка и корпоративных сценариев',
-    models: ['yandexgpt/latest', 'yandexgpt-lite/latest', 'yandexgpt-32k/latest'],
-    defaultModel: 'yandexgpt/latest',
-    secretKey: 'yandex_api_key',
-    keyHint: 'AQVN…',
-    keyLink: { url: 'https://console.yandex.cloud/iam', label: 'Yandex Cloud Console' },
-    supportsTools: false
-  },
-  {
-    id: 'gigachat',
-    name: 'GigaChat',
-    transport: 'API',
-    description: 'Модели Сбера для русского языка и российских бизнес-задач',
-    models: ['GigaChat', 'GigaChat-Plus', 'GigaChat-Pro', 'GigaChat-Max'],
-    defaultModel: 'GigaChat',
-    secretKey: 'gigachat_client_id',
-    keyHint: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-    keyLink: { url: 'https://developers.sber.ru/portal/products/gigachat-api', label: 'developers.sber.ru' },
-    supportsTools: false
-  },
-  {
-    id: 'custom-openai',
-    name: 'Свой провайдер',
-    transport: 'API',
-    description: 'Свой совместимый сервер: LM Studio, vLLM, локальная модель или корпоративный шлюз',
-    models: [], // Заполняется юзером через custom-блок в UI
-    defaultModel: '',
-    secretKey: 'custom_openai_api_key',
-    keyHint: 'Если сервер требует ключ',
-    supportsTools: true
-  }
-]
+/** Провайдер каталога Settings = единый контракт (src/lib/model-catalog CatalogProvider).
+ *  Раньше здесь жил хардкод-массив PROVIDERS (~270 строк — второе зеркало реестра с копией
+ *  models[], источник дрейфа «UI предлагает модель, которой рантайм не знает»). Убран в срезе
+ *  2.0.7-D: каталог грузится из providers:list (useProviderCatalog) — функциональные поля из
+ *  main-реестра, презентация из PROVIDER_UI_META. */
+type ProviderConfig = CatalogProvider
 
 type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
 type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
@@ -476,17 +198,9 @@ function ProviderSettingsToggleIcon({ open }: { open: boolean }) {
 function modelKey(providerId: ProviderId, model: string): string {
   return `${providerId}::${model}`
 }
-function allModelsSet(): Set<string> {
-  const s = new Set<string>()
-  for (const p of PROVIDERS) {
-    for (const m of p.models) s.add(modelKey(p.id, m))
-  }
-  return s
-}
-
 /** По умолчанию включена только модель активного провайдера (как при первом входе). */
-function defaultEnabledModels(providerId: ProviderId, modelVals: Record<string, string>): Set<string> {
-  const p = PROVIDERS.find(x => x.id === providerId)
+function defaultEnabledModels(providers: ProviderConfig[], providerId: ProviderId, modelVals: Record<string, string>): Set<string> {
+  const p = providers.find(x => x.id === providerId)
   if (!p || p.models.length === 0) return new Set()
   const model = modelVals[providerId] ?? p.defaultModel
   return new Set([modelKey(providerId, model)])
@@ -1689,6 +1403,9 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     .filter(g => g.tabs.length > 0)
   const activeNavGroup = TAB_GROUPS.find(g => g.tabs.some(x => x.id === tab))
   const activeNavTab = activeNavGroup?.tabs.find(x => x.id === tab)
+  // 2.0.7-D: единый каталог провайдеров — модели/транспорт из providers:list (main-реестр),
+  // а не из хардкода. bundled-снапшот до прихода live, чтобы список не был пуст на mount.
+  const { providers, source: catalogSource } = useProviderCatalog()
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
@@ -1803,24 +1520,23 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   useEffect(() => {
     void (async () => {
       const provider = await window.api.settings.getKey('provider')
-      const valid = PROVIDERS.some(p => p.id === provider) ? (provider as ProviderId) : 'gemini-api'
+      const valid = providers.some(p => p.id === provider) ? (provider as ProviderId) : 'gemini-api'
       setActiveProvider(valid)
       const keyVals: Record<string, string> = {}
       const modelVals: Record<string, string> = {}
       // Грузим ключи/модели всех провайдеров ПАРАЛЛЕЛЬНО (было последовательно —
       // 18 провайдеров × 2 await = ~36 IPC цепочкой, заметный лаг открытия).
-      await Promise.all(PROVIDERS.map(async p => {
+      await Promise.all(providers.map(async p => {
         if (p.secretKey) {
           const v = await window.api.settings.getKey(p.secretKey)
           if (v) keyVals[p.secretKey] = v
         }
-        let m = await window.api.settings.getKey(`model_${p.id}`)
-        // Migration: drop saved model values that aren't in the current list
-        // (e.g. gemini-3.5-flash for gemini-cli — alias only works for API)
-        if (m && !p.models.includes(m)) {
-          await window.api.settings.setKey(`model_${p.id}`, p.defaultModel)
-          m = p.defaultModel
-        }
+        const m = await window.api.settings.getKey(`model_${p.id}`)
+        // 2.0.7-D: НЕ перезаписываем молча сохранённую модель на дефолт (карточка, шаг 5 —
+        // «молчаливая подмена запрещена»). Устаревшую/отсутствующую в каталоге модель
+        // ModelsPage показывает как «недоступна» + Doctor (resolveModelAvailability), а
+        // save() ниже её НЕ переписывает обратно в settings. Полноценный блок «stale-модель
+        // не уходит в backend» — задача среза 2.0.7-E (Model Doctor); здесь только UI-честность.
         modelVals[p.id] = m ?? p.defaultModel
       }))
       // Аудит: вторичные ключи RU-провайдеров (folder_id / client_secret / tls)
@@ -1952,12 +1668,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       if (em) {
         try {
           const arr = JSON.parse(em) as string[]
-          setEnabledModels(Array.isArray(arr) ? new Set(arr) : defaultEnabledModels(valid, modelVals))
+          setEnabledModels(Array.isArray(arr) ? new Set(arr) : defaultEnabledModels(providers, valid, modelVals))
         } catch {
-          setEnabledModels(defaultEnabledModels(valid, modelVals))
+          setEnabledModels(defaultEnabledModels(providers, valid, modelVals))
         }
       } else {
-        setEnabledModels(defaultEnabledModels(valid, modelVals))
+        setEnabledModels(defaultEnabledModels(providers, valid, modelVals))
       }
       setSettingsLoaded(true)
     })()
@@ -2394,11 +2110,14 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     setSaving(true)
     try {
     await window.api.settings.setKey('provider', activeProvider)
-    for (const p of PROVIDERS) {
+    for (const p of providers) {
       if (p.secretKey && keys[p.secretKey] !== undefined) {
         await window.api.settings.setKey(p.secretKey, keys[p.secretKey])
       }
-      if (models[p.id]) {
+      // 2.0.7-D: не «цементируем» устаревшую модель. Если сохранённое значение вне
+      // каталога провайдера (показано как «недоступна»), НЕ переписываем его обратно —
+      // иначе Save закреплял бы мёртвую модель. Валидную/пользовательскую пишем как есть.
+      if (models[p.id] && resolveModelAvailability(p.models, models[p.id]) !== 'unavailable') {
         await window.api.settings.setKey(`model_${p.id}`, models[p.id])
       }
     }
@@ -3851,7 +3570,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
         {tab === 'providers' && (
         <ProvidersPage
-          providers={PROVIDERS}
+          providers={providers}
           keys={keys}
           setKeys={setKeys}
           enabledModels={enabledModels}
@@ -3871,7 +3590,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         <>
         {renderCostCapCard()}
         <ModelsPage
-          providers={PROVIDERS}
+          providers={providers}
           enabledModels={enabledModels}
           setEnabledModels={setEnabledModels}
           models={models}
@@ -3881,13 +3600,14 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           keys={keys}
           customOpenaiBaseUrl={customOpenaiBaseUrl}
           onGoToProviders={() => setTab('providers')}
+          catalogSource={catalogSource}
         />
         </>
         )}
 
         {tab === 'modelModes' && (
         <div className="gg-settings-extra gg-model-modes-page">
-        <ModeModelBinding providers={PROVIDERS} />
+        <ModeModelBinding providers={providers} />
         </div>
         )}
 
@@ -5056,6 +4776,8 @@ interface ModelsPageProps {
   keys: Record<string, string>
   customOpenaiBaseUrl: string
   onGoToProviders: () => void
+  /** 2.0.7-D: live = каталог из providers:list; bundled = офлайн-снапшот (IPC упал). */
+  catalogSource: CatalogSource
 }
 
 type ModelsCliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
@@ -5064,8 +4786,14 @@ function ModelsPage(props: ModelsPageProps) {
   const t = useT()
   const {
     providers, enabledModels, setEnabledModels, models, setModels,
-    activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onGoToProviders
+    activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onGoToProviders, catalogSource
   } = props
+
+  // 2.0.7-D (карточка, шаг 5): сохранённая модель, которой НЕТ в живом каталоге провайдера,
+  // — показываем её как «недоступна» (а не молча подменяем на дефолт). Пусто = всё ок.
+  function savedUnavailableModel(p: ProviderConfig): string | null {
+    return resolveModelAvailability(p.models, models[p.id]) === 'unavailable' ? models[p.id] : null
+  }
   const [search, setSearch] = useState('')
   const [detailProviders, setDetailProviders] = useState<Set<ProviderId>>(new Set())
   const [authModal, setAuthModal] = useState<ProviderConfig | null>(null)
@@ -5164,8 +4892,9 @@ function ModelsPage(props: ModelsPageProps) {
     setEnabledModels(prev => {
       const next = new Set(prev)
       for (const m of p.models) next.delete(modelKey(p.id, m))
-      const activeModel = models[p.id] ?? p.defaultModel
-      if (p.id === activeProvider) next.add(modelKey(p.id, activeModel))
+      // providerModel(p) — эффективная ВАЛИДНАЯ модель (не сырое сохранённое значение,
+      // которое после 2.0.7-D может быть вне каталога → мёртвый ключ в enabled).
+      if (p.id === activeProvider) next.add(modelKey(p.id, providerModel(p)))
       return next
     })
   }
@@ -5271,6 +5000,12 @@ function ModelsPage(props: ModelsPageProps) {
         Выбери, какие модели будут отображаться в инструментах чата. Подключение провайдера, видимость модели и текущая модель настраиваются отдельно
       </p>
 
+      {catalogSource === 'bundled' && (
+        <p className="gg-models-intro" role="status" style={{ color: 'var(--warn, #b8860b)' }}>
+          ⚠ Офлайн-каталог: список моделей не удалось получить от приложения, показан встроенный снимок — модели могут быть устаревшими.
+        </p>
+      )}
+
       <div className="gg-models-presets" aria-label="Быстрые наборы моделей">
         <button type="button" className="gg-models-preset" onClick={() => applyPreset('current')}>
           <span>Только текущая</span>
@@ -5345,6 +5080,14 @@ function ModelsPage(props: ModelsPageProps) {
                       <span className={`gg-models-card-control is-${control.tone}`} title={control.hint}>
                         {control.label}
                       </span>
+                      {savedUnavailableModel(p) && (
+                        <span
+                          className="gg-models-card-control is-limited"
+                          title={`Модель «${savedUnavailableModel(p)}» не найдена в текущем каталоге провайдера. Выберите доступную ниже — устаревшую модель приложение само заменит при отправке.`}
+                        >
+                          ⚠ модель недоступна
+                        </span>
+                      )}
                     </span>
                   </span>
                   <button
