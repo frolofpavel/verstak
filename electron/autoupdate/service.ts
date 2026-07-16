@@ -28,7 +28,7 @@ import {
 } from './paths'
 import { verifyPayloadRoot } from './payload'
 import { logAutoUpdate } from './log'
-import { acquireLock, nowState, readJson, readState, resetState, writeState } from './state'
+import { acquireLock, nowState, readJson, readState, resetState, writeState, touchLock } from './state'
 import type { AutoUpdateState, AutoUpdateStep, UiUpdateSnapshot } from './types'
 
 const PERIODIC_CHECK_MS = 4 * 60 * 60 * 1000
@@ -487,6 +487,10 @@ export class AutoUpdateService {
         }
         this.setState({ status: 'downloading', version: meta.version, installerFileName: meta.fileName, installerSha512: meta.sha512, installerSize: meta.size, percent: 0, step: 'download' })
         const installerPath = await downloadInstaller(meta, (p) => {
+          // Heartbeat лока: 360 МБ качаются дольше TTL(20 мин), и без продления лок протухал бы
+          // у ЖИВОЙ загрузки — check() отобрал бы его и запустил ВТОРУЮ загрузку в тот же .part
+          // (два append → каша → хеш не сходится → прогресс стёрт). Ревью P0.
+          touchLock()
           this.setState({ status: 'downloading', version: meta.version, installerPath: undefined, percent: p.percent, step: 'download' })
           this.send('update:progress', p)
         })
