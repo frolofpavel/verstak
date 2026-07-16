@@ -71,6 +71,57 @@ export function normalizedUsage(p: RawUsageParts): NormalizedUsage {
   return u
 }
 
+// ─────────── Read-side DTO persistence usage (2.0.8-F) ───────────
+// Один источник для main (storage/ipc), preload и renderer (api.d.ts/UsageTab) — как
+// provider.ts/subscription.ts после 2.0.7-C. НЕ дублировать форму в api.d.ts (дубли дрейфуют).
+
+/** Reason-код cache-диагностики. ТОЛЬКО код — без текста промпта (каветат #3 карточки F). */
+export type CacheDiagnosticCode =
+  | 'first-request' | 'system-prompt-changed' | 'tools-drift' | 'model-changed'
+  | 'ttl-expired' | 'provider-reported-miss' | 'unknown'
+
+/** Строка usage одного терминального прогона (как лежит в agent_run_usage). */
+export interface RunUsageRow {
+  runId: string
+  providerId: string
+  model: string
+  transport: string | null
+  accountId: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  inputAccounting: string | null
+  /** null = цена НЕИЗВЕСТНА (pricingKnown=0). НЕ трактовать как $0 (каветат #2). */
+  costAmount: number | null
+  currency: string | null
+  pricingKnown: 0 | 1
+  cacheDiagnosticCode: string | null
+  createdAt: number
+}
+
+/** Агрегат по (provider, model, transport) за период. */
+export interface UsageSummaryGroup {
+  providerId: string
+  model: string
+  transport: string | null
+  runs: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** Сумма ТОЛЬКО по прогонам с известной ценой. unknownCostRuns — сколько без цены. */
+  costAmount: number
+  unknownCostRuns: number
+  /**
+   * Доля ВСЕГО промпта, прочитанная из кэша. Знаменатель зависит от inputAccounting строки:
+   * exclusive (Claude) — input + cacheRead + cacheWrite (три непересекающиеся корзины);
+   * inclusive (OpenAI/Gemini) — reported input (cached ⊂ input). Строки с неподтверждённой
+   * семантикой в расчёт НЕ входят. null = «нет данных» (а НЕ «0%»); 0 = кэш реально не сработал.
+   */
+  cacheHitShare: number | null
+}
+
 /**
  * Billable (не-кэшированный «свежий») input — то, что pricing умножает на input-цену. ЕДИНСТВЕННОЕ
  * место, где вычитается cached, и только при ПОДТВЕРЖДЁННОЙ inclusive-семантике (каветат #4):

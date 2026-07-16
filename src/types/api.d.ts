@@ -210,14 +210,48 @@ export interface SkillArchiveMove {
  * (renderer-safe: НЕТ configDir/baseUrl/credRef). Реэкспорт — чтобы существующие импорты
  * `SubscriptionAccountDto` продолжали работать; старое имя = новый безопасный тип.
  */
-export type {
+import type {
   SubscriptionAccountDTO,
-  SubscriptionAccountDTO as SubscriptionAccountDto,
   ChatSubscriptionBindingDTO,
   SubscriptionCooldownDTO,
   SubscriptionAuthMode,
   SubscriptionState,
 } from '../../shared/contracts/subscription'
+
+/**
+ * Локальный алиас старого имени. `export { X as Y } from …` НЕ создаёт привязку Y в модуле —
+ * а тело `declare global` ниже использует именно `SubscriptionAccountDto` (строки ~625+).
+ * Без этой строки имя не разрешалось, `skipLibCheck` глушил TS2304, и вся поверхность
+ * window.api.subscriptionAccounts молча была `any` (проверено зондом). Тот же корень, что
+ * у usage-типов ниже.
+ */
+type SubscriptionAccountDto = SubscriptionAccountDTO
+
+export type {
+  SubscriptionAccountDTO,
+  SubscriptionAccountDto,
+  ChatSubscriptionBindingDTO,
+  SubscriptionCooldownDTO,
+  SubscriptionAuthMode,
+  SubscriptionState,
+}
+
+/**
+ * 2.0.8-F persistence usage: формы живут в shared/contracts/usage.ts — их же импортирует
+ * main (storage/ipc). Реэкспорт, чтобы renderer тянул типы отсюда, как остальные DTO.
+ *
+ * ВАЖНО — почему import + export, а не `export type {…} from`: реэкспорт НЕ вводит имя в
+ * локальную область модуля, поэтому в `declare global` ниже оно было бы неразрешённым (TS2304),
+ * а `skipLibCheck: true` эту ошибку ГЛУШИТ → вся поверхность window.api.usage молча получала бы
+ * `any` (типизация фиктивна). Проверено зондом: обращение к несуществующему полю не ругалось.
+ */
+import type {
+  RunUsageRow,
+  UsageSummaryGroup,
+  CacheDiagnosticCode,
+} from '../../shared/contracts/usage'
+
+export type { RunUsageRow, UsageSummaryGroup, CacheDiagnosticCode }
 
 export interface SkillImportComparison {
   currentRuleCount: number
@@ -619,6 +653,11 @@ declare global {
         list: (projectPath: string | null, limit?: number) => Promise<FeedbackEntry[]>
         submit: (input: { projectPath: string | null; providerId: string | null; rating: number | null; message: string }) => Promise<FeedbackEntry>
         remove: (id: number) => Promise<void>
+      }
+      /** 2.0.8-F: persistence usage (чтение). Формы — из shared/contracts/usage.ts. */
+      usage: {
+        summary: (sinceMs: number) => Promise<UsageSummaryGroup[]>
+        list: (opts?: { sinceMs?: number; limit?: number }) => Promise<RunUsageRow[]>
       }
       plans: {
         list: (projectPath: string) => Promise<Plan[]>
@@ -1296,6 +1335,23 @@ export interface DevTaskPackage {
  * Здесь только реэкспорт, чтобы существующие `import { ProviderDescriptorDTO } from '../types/api'`
  * продолжали работать.
  */
+// import + export по той же причине, что у usage/subscription выше: голый реэкспорт НЕ вводит
+// имя в модуль, а `declare global` ниже использует ProviderDescriptorDTO/PromptRouteOverride →
+// они были неразрешены (TS2304), skipLibCheck это глушил, и поверхности window.api.providers /
+// prompt-route молча были `any`. Проверено: `tsc --skipLibCheck false` давал 6 TS2304.
+import type {
+  ProviderId,
+  ProviderTransport,
+  ProviderExecutionMode,
+  ProviderAuthKind,
+  ProviderCatalogSource,
+  ProviderDescriptorDTO,
+  ProviderCapabilities,
+  SelectionSource,
+  PromptRouteOverride,
+  ResolvedRoute,
+} from '../../shared/contracts/provider'
+
 export type {
   ProviderId,
   ProviderTransport,
@@ -1307,14 +1363,15 @@ export type {
   SelectionSource,
   PromptRouteOverride,
   ResolvedRoute,
-} from '../../shared/contracts/provider'
+}
 
 /**
  * 2.0.7-E: статус живого каталога моделей (providers:doctor / refresh-models). Тип живёт
  * в main (electron/ai/model-catalog-service.ts) вместе с логикой; здесь только type-only
  * реэкспорт — без дублирования (урок 2.0.7-C) и без рантайм-связи (модуль type-only-чист).
  */
-export type { ProviderCatalogStatusDTO } from '../../electron/ai/model-catalog-service'
+import type { ProviderCatalogStatusDTO } from '../../electron/ai/model-catalog-service'
+export type { ProviderCatalogStatusDTO }
 
 /** Doctor — health-check провайдеров и коннекторов (см. electron/ai/doctor.ts). */
 export type DoctorStatus = 'ok' | 'no-key' | 'n-a'

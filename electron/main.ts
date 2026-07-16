@@ -78,6 +78,8 @@ import { registerPlansIpc } from './ipc/plans'
 import { registerWorkflowsIpc } from './ipc/workflows'
 import { createFeedback } from './storage/feedback'
 import { registerFeedbackIpc } from './ipc/feedback'
+import { registerUsageIpc } from './ipc/usage'
+import { createRunUsage } from './storage/agent-run-usage'
 import { registerVerifyIpc, execVerifyCommand } from './ipc/verify'
 import { registerAutonomousIpc } from './ipc/autonomous'
 import { createConnectorRegistry } from './connectors/registry'
@@ -488,6 +490,7 @@ app.whenReady().then(() => {
   const undoStack = createUndoStack(db)
   const plans = createPlans(db)
   const feedback = createFeedback(db)
+  const runUsage = createRunUsage(db) // 2.0.8-F: read-поверхность persistence usage
   const connectorRegistry = createConnectorRegistry()
   const userProfiles = createUserProfiles(db)
   const skillUsage = createSkillUsageStore(db)
@@ -738,6 +741,7 @@ app.whenReady().then(() => {
     }
   })
   registerFeedbackIpc(feedback)
+  registerUsageIpc(runUsage)
   registerVerifyIpc(getActiveProjectPath)
   // Git READ IPC (Dev Task Flow, Фаза 1) — структурированные status/diff/log.
   // ТОЛЬКО чтение; git-write (ветки/commit) добавит Фаза 3.

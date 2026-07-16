@@ -329,6 +329,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('feedback:submit', input),
     remove: (id: number) => ipcRenderer.invoke('feedback:remove', id)
   },
+  // 2.0.8-F: persistence usage (только чтение — пишет хук finalize в runner'ах).
+  usage: {
+    summary: (sinceMs: number) => ipcRenderer.invoke('usage:summary', sinceMs),
+    list: (opts?: { sinceMs?: number; limit?: number }) => ipcRenderer.invoke('usage:list', opts)
+  },
   plans: {
     list: (projectPath: string) => ipcRenderer.invoke('plans:list', projectPath),
     get: (id: number) => ipcRenderer.invoke('plans:get', id),

@@ -74,6 +74,7 @@ import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from './allowed-write
 import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
+import { usageHash } from '../storage/agent-run-usage'
 import { expandOfficeAttachments } from './attachment-text'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 
@@ -339,6 +340,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; inputAccounting: InputAccounting | undefined } = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, inputAccounting: undefined
   }
+  // 2.0.8-F: сигнатура набора инструментов прогона (для cache-диагностики), фиксируется на
+  // первом туре с инструментами; null = инструментов не было (нечего сравнивать).
+  let toolsSignature: string | null = null
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
   const commandsRun: string[] = []
@@ -658,6 +662,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // выкл: контроль-first + SSRF-периметр открывается только по явному согласию).
     if (getSecretForDelegate?.('web_access') !== 'true') {
       allToolDefs = allToolDefs.filter(t => t.name !== 'web_fetch' && t.name !== 'web_search')
+    }
+    // 2.0.8-F cache-диагностика: набор инструментов входит в кэшируемый префикс, поэтому его
+    // дрейф инвалидирует кэш. Фиксируем сигнатуру ОДИН раз — на первом туре с инструментами
+    // (последний тур намеренно без них, он не показателен).
+    if (toolsSignature == null && allToolDefs.length > 0) {
+      toolsSignature = allToolDefs.map(t => t.name).sort().join(',')
     }
     const messagesToSend = isLastTurn
       ? [...messagesForProvider, { role: 'user' as const, content: MAX_STEPS_REPORT }]
@@ -1558,11 +1568,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         // BEST-EFFORT: сбой персистенса НЕ роняет прогон. Пишем только при реальном usage.
         if (providerId && (sessionUsage.inputTokens || sessionUsage.outputTokens || sessionUsage.cachedInputTokens)) {
           try {
+            // Cache-диагностика: хешируем ЗДЕСЬ — текст промпта не покидает runner (каветат #3),
+            // в storage уходит только 16-символьный отпечаток для сравнения «то же / другое».
+            const systemText = initialMessages.find(m => m.role === 'system')?.content
             agentRuns.persistUsage({
               runId, providerId, model: model ?? '', transport: PROVIDERS[providerId]?.transport ?? null,
               inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
               cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
-              inputAccounting: sessionUsage.inputAccounting
+              inputAccounting: sessionUsage.inputAccounting,
+              systemPromptHash: systemText ? usageHash(systemText) : null,
+              toolsHash: toolsSignature ? usageHash(toolsSignature) : null
             })
           } catch { /* best-effort: персистенс не роняет финализацию */ }
         }

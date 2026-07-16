@@ -301,6 +301,9 @@ export interface AgentRuns {
     cacheWriteTokens: number
     inputAccounting: InputAccounting | undefined
     cacheDiagnosticCode?: CacheDiagnosticCode | null
+    /** ХЕШИ (не текст) system-prompt / инструментов — для cache-диагностики (каветат #3). */
+    systemPromptHash?: string | null
+    toolsHash?: string | null
   }) => void
 }
 
@@ -541,7 +544,9 @@ export function createAgentRuns(db: Database): AgentRuns {
           cacheWriteTokens: input.cacheWriteTokens,
           inputAccounting: input.inputAccounting ?? 'unknown'
         }),
-        cacheDiagnosticCode: input.cacheDiagnosticCode ?? null
+        cacheDiagnosticCode: input.cacheDiagnosticCode ?? null,
+        systemPromptHash: input.systemPromptHash ?? null,
+        toolsHash: input.toolsHash ?? null
       }, Date.now())
     }
   }

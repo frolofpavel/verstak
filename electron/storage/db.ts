@@ -1173,6 +1173,17 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_agent_run_usage_created ON agent_run_usage(created_at)')
     }
+  },
+  {
+    version: 51,
+    description: '2.0.8-F cache-diagnostic: хеши system-prompt и tools прогона (ТОЛЬКО хеши — текст промпта в БД не попадает, каветат #3). Нужны, чтобы честно ответить «что изменилось против прошлого прогона этого чата» → cache_diagnostic_code (first-request / system-prompt-changed / tools-drift / unknown). Отдельная миграция: 50 уже выпущена, append-only.',
+    run: (db: DB) => {
+      // ALTER под IF NOT EXISTS в sqlite нет — гардим по факту наличия колонки.
+      const cols = db.prepare("SELECT name FROM pragma_table_info('agent_run_usage')").all() as { name: string }[]
+      const has = (c: string) => cols.some(x => x.name === c)
+      if (!has('system_prompt_hash')) db.exec('ALTER TABLE agent_run_usage ADD COLUMN system_prompt_hash TEXT')
+      if (!has('tools_hash')) db.exec('ALTER TABLE agent_run_usage ADD COLUMN tools_hash TEXT')
+    }
   }
 ]
 

@@ -10,6 +10,7 @@ import type { ChatProvider, ChatMessage } from './types'
 import { PROVIDERS, type ProviderId } from './registry'
 import type { InputAccounting } from '../../shared/contracts/usage'
 import type { AgentRuns } from '../storage/agent-runs'
+import { usageHash } from '../storage/agent-run-usage'
 import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from './runner-shared'
 import { type ExitReason, writeSessionJournal } from './session-journal'
 import { createCostGuard } from './cost-guard'
@@ -423,11 +424,16 @@ export async function runPlainConversation(
       // с ошибкой finish. Пишем только при реальном usage.
       if (providerId && (sessionUsage.inputTokens || sessionUsage.outputTokens || sessionUsage.cachedInputTokens)) {
         try {
+          // Хешируем ЗДЕСЬ — текст промпта не покидает runner (каветат #3). toolsHash=null:
+          // на CLI-пути набор инструментов держит сам CLI, наружу он не виден — не выдумываем.
+          const systemText = messages.find(m => m.role === 'system')?.content
           agentRuns.persistUsage({
             runId, providerId, model: model ?? '', transport: PROVIDERS[providerId]?.transport ?? null,
             inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
             cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
-            inputAccounting: sessionUsage.inputAccounting
+            inputAccounting: sessionUsage.inputAccounting,
+            systemPromptHash: systemText ? usageHash(systemText) : null,
+            toolsHash: null
           })
         } catch { /* best-effort: персистенс не роняет финализацию */ }
       }
