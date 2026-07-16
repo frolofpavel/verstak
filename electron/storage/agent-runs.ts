@@ -1,4 +1,6 @@
 import type { Database } from 'better-sqlite3'
+import { persistRunUsage, type CacheDiagnosticCode } from './agent-run-usage'
+import { normalizedUsage, type InputAccounting } from '../../shared/contracts/usage'
 
 /**
  * Multi-agent Manager V1 (Фаза 1) — тонкий слой «задача» поверх существующего
@@ -269,6 +271,37 @@ export interface AgentRuns {
   latestCheckpoint: (runId: string) => RunCheckpoint | null
   /** Удалить чекпойнт прогона (на чистом завершении возобновлять нечего). */
   clearCheckpoint: (runId: string) => void
+  /**
+   * 2.0.8-F: persistence usage прогона — одна строка в agent_run_usage. Идемпотентно
+   * по run_id (INSERT OR IGNORE): повторный finalize / crash-resume-переигровка НЕ
+   * создают 2-ю строку. Зовётся рядом с finish() BEST-EFFORT: исключение отсюда не
+   * должно ронять прогон (вызывающий runner ловит). Стоимость считается внутри (тот
+   * же price-слой, что cost-guard — фикс дефекта B через billableInputTokens).
+   *
+   * СЕМАНТИКА строки = «ACTUAL final provider прогона» (как agent_runs.provider_id через
+   * updateActual). При smart-fallback пишет ТОЛЬКО терминальный фрейм (handedOff-родитель
+   * пропускает весь finalize-блок) → токены упавших до-fallback ног в строку НЕ входят;
+   * accounting↔providerId внутри строки согласованы (per-frame sessionUsage). Поэтому
+   * agent_run_usage.cost_amount (последняя нога) может быть < agent_runs.cost_cents
+   * (кумулятив общего costGuard) — это ожидаемо, не баг. Полная агрегация ног = деферрал.
+   *
+   * null-семантика: колонки токенов допускают null («провайдер не сообщил» ≠ 0), но
+   * ЖИВОЙ хук runner'а суммирует usage с `?? 0` → пишет 0, а не null (null достижим
+   * только прямым persistRunUsage). Денежного эффекта нет (0 токенов → $0 компонента).
+   */
+  persistUsage: (input: {
+    runId: string
+    providerId: string
+    model: string
+    transport: string | null
+    accountId?: number | null
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    inputAccounting: InputAccounting | undefined
+    cacheDiagnosticCode?: CacheDiagnosticCode | null
+  }) => void
 }
 
 /** Снапшот состояния агентного цикла для возобновления (Crash-resume Фаза 2). */
@@ -491,6 +524,25 @@ export function createAgentRuns(db: Database): AgentRuns {
     },
     clearCheckpoint(runId) {
       db.prepare('DELETE FROM agent_run_checkpoints WHERE run_id = ?').run(runId)
+    },
+    persistUsage(input) {
+      // NormalizedUsage строим здесь (единый билдер) → persistRunUsage считает стоимость
+      // и пишет INSERT OR IGNORE. inputAccounting не задан → 'unknown' (без вычитания cached).
+      persistRunUsage(db, {
+        runId: input.runId,
+        providerId: input.providerId,
+        model: input.model,
+        transport: input.transport,
+        accountId: input.accountId ?? null,
+        usage: normalizedUsage({
+          inputTokens: input.inputTokens,
+          outputTokens: input.outputTokens,
+          cacheReadTokens: input.cacheReadTokens,
+          cacheWriteTokens: input.cacheWriteTokens,
+          inputAccounting: input.inputAccounting ?? 'unknown'
+        }),
+        cacheDiagnosticCode: input.cacheDiagnosticCode ?? null
+      }, Date.now())
     }
   }
 }

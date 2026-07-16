@@ -1147,6 +1147,32 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         if (!c.includes('subscription_mode')) db.exec("ALTER TABLE chat_sessions ADD COLUMN subscription_mode TEXT NOT NULL DEFAULT 'auto'")
       }
     }
+  },
+  {
+    version: 50,
+    description: '2.0.8-F persistence usage: agent_run_usage — по одной строке на терминальный прогон. run_id PRIMARY KEY → INSERT OR IGNORE идемпотентен (повторный finalize / crash-resume-переигровка не создаёт 2-ю строку). Токены nullable (null=«провайдер не сообщил», НЕ 0). pricing_known=0 → цена неизвестна (НЕ $0). cache_diagnostic_code — ТОЛЬКО reason-код (без текста промпта). Append-only.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_run_usage (
+          run_id TEXT PRIMARY KEY,
+          provider_id TEXT NOT NULL,
+          model TEXT NOT NULL,
+          transport TEXT,
+          account_id INTEGER,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          cache_read_tokens INTEGER,
+          cache_write_tokens INTEGER,
+          input_accounting TEXT,
+          cost_amount REAL,
+          currency TEXT,
+          pricing_known INTEGER NOT NULL DEFAULT 0,
+          cache_diagnostic_code TEXT,
+          created_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_agent_run_usage_created ON agent_run_usage(created_at)')
+    }
   }
 ]
 

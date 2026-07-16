@@ -7,7 +7,8 @@
 
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import type { ChatProvider, ChatMessage } from './types'
-import type { ProviderId } from './registry'
+import { PROVIDERS, type ProviderId } from './registry'
+import type { InputAccounting } from '../../shared/contracts/usage'
 import type { AgentRuns } from '../storage/agent-runs'
 import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from './runner-shared'
 import { type ExitReason, writeSessionJournal } from './session-journal'
@@ -127,8 +128,9 @@ export async function runPlainConversation(
     return added
   }
   let lastAssistantText = ''
-  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
-    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
+  // 2.0.8-F: +cacheWriteTokens/inputAccounting — накапливаем для persistence прогона.
+  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; inputAccounting: InputAccounting | undefined } = {
+    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, inputAccounting: undefined
   }
   let exitReason: ExitReason = 'completed'
   const signalExitReason = (): ExitReason => isAgentRunTimeoutAbort(signal) ? 'timeout' : 'aborted'
@@ -223,6 +225,9 @@ export async function runPlainConversation(
           sessionUsage.inputTokens += event.usage.inputTokens ?? 0
           sessionUsage.outputTokens += event.usage.outputTokens ?? 0
           sessionUsage.cachedInputTokens += event.usage.cachedInputTokens ?? 0
+          // 2.0.8-F: cache-write + accounting фактического провайдера для persistence.
+          sessionUsage.cacheWriteTokens += event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? 0
+          if (event.usage.inputAccounting) sessionUsage.inputAccounting = event.usage.inputAccounting
           // Cost guard check — abort если превышен лимит.
           if (costGuard && providerId) {
             const check = costGuard.recordAndCheck(
@@ -412,6 +417,19 @@ export async function runPlainConversation(
         })
       } catch (err) {
         console.warn('[agent-runs] finish (plain) failed:', err instanceof Error ? err.message : err)
+      }
+      // 2.0.8-F: persistence usage прогона (одна строка, идемпотентно по run_id).
+      // BEST-EFFORT в отдельном try — сбой персистенса НЕ роняет прогон и не путается
+      // с ошибкой finish. Пишем только при реальном usage.
+      if (providerId && (sessionUsage.inputTokens || sessionUsage.outputTokens || sessionUsage.cachedInputTokens)) {
+        try {
+          agentRuns.persistUsage({
+            runId, providerId, model: model ?? '', transport: PROVIDERS[providerId]?.transport ?? null,
+            inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
+            cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
+            inputAccounting: sessionUsage.inputAccounting
+          })
+        } catch { /* best-effort: персистенс не роняет финализацию */ }
       }
     }
   }

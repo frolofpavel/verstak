@@ -12,7 +12,7 @@
 import type { ProviderId } from './registry'
 import { billableInputTokens, type InputAccounting } from '../../shared/contracts/usage'
 
-interface ModelPrice {
+export interface ModelPrice {
   input: number
   output: number
   cached?: number
@@ -20,7 +20,7 @@ interface ModelPrice {
 
 // Цены в $ per 1M tokens. Должны быть синхронизированы с src/lib/pricing.ts.
 // Дубликат сознательный — renderer и main не имеют shared modules.
-const PRICES: Record<string, ModelPrice> = {
+export const PRICES: Record<string, ModelPrice> = {
   'claude-opus-4-5':       { input: 15.0, output: 75.0, cached: 1.5 },
   'claude-sonnet-4-6':     { input: 3.0,  output: 15.0, cached: 0.3 },
   'claude-sonnet-4-5':     { input: 3.0,  output: 15.0, cached: 0.3 },
@@ -90,21 +90,21 @@ const PRICES: Record<string, ModelPrice> = {
 // модели (claude-sonnet), чтобы рой субов на незнакомой модели не жёг деньги
 // без счёта. Без cap (capCents == null) этот тариф не применяется — поведение
 // прежнее («не считаем»).
-const FALLBACK_PRICE: ModelPrice = { input: 3.0, output: 15.0, cached: 0.3 }
+export const FALLBACK_PRICE: ModelPrice = { input: 3.0, output: 15.0, cached: 0.3 }
 
-const CLI_FREE: Set<ProviderId> = new Set(['gemini-cli', 'claude-cli', 'grok-cli', 'codex-cli'])
+export const CLI_FREE: Set<ProviderId> = new Set(['gemini-cli', 'claude-cli', 'grok-cli', 'codex-cli'])
 
 // Провайдеры, где стоимость заведомо $0 (локальный inference / собственный
 // endpoint без известного тарифа). Их неизвестные модели НЕ попадают под
 // fail-safe — они осознанно бесплатные, а не «непосчитанные».
-const ZERO_COST_PROVIDERS: Set<ProviderId> = new Set(['ollama', 'custom-openai'])
+export const ZERO_COST_PROVIDERS: Set<ProviderId> = new Set(['ollama', 'custom-openai'])
 
 /**
  * Нормализует model id перед lookup в PRICES. OpenRouter раздаёт модели с
  * префиксом провайдера ('anthropic/claude-sonnet-4-6', 'openai/gpt-5', …) —
  * срезаем его, чтобы матчить базовое имя из PRICES.
  */
-function normalizeModelId(providerId: ProviderId, model: string): string {
+export function normalizeModelId(providerId: ProviderId, model: string): string {
   if (providerId === 'openrouter') {
     const slash = model.indexOf('/')
     if (slash >= 0) return model.slice(slash + 1)

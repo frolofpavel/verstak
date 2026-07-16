@@ -96,6 +96,21 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(cp![2].ref).toMatch(/[0-9a-f]{40}/) // полный gitHead в ref для отката
   })
 
+  it('BEST-EFFORT persistence (2.0.8-F каветат #1): persistUsage бросает → прогон всё равно финализируется', async () => {
+    // Без внутреннего try/catch в runner throw из persistUsage пробросился бы из
+    // runPlainConversation → промис бы reject-нулся. Гард ловит → прогон доходит до done.
+    const sender = makeSender()
+    const finish = vi.fn()
+    const persistUsage = vi.fn(() => { throw new Error('boom persistence') })
+    await expect(run(dir, provider([
+      { type: 'usage', usage: { inputTokens: 100, outputTokens: 50, inputAccounting: 'exclusive' } } as unknown as ChatEvent,
+      { type: 'text', text: 'ok' }, { type: 'done' },
+    ]), sender, { agentRuns: { appendEvent: vi.fn(), finish, persistUsage }, runId: 'rF' })).resolves.toBeUndefined()
+    expect(finish).toHaveBeenCalledWith('rF', expect.anything(), expect.anything()) // финализация состоялась
+    expect(persistUsage).toHaveBeenCalledTimes(1) // хук был вызван и упал
+    expect(sentEvents(sender).some(e => e.type === 'done')).toBe(true) // прогон дошёл до терминала
+  })
+
   it('SECURITY/RESILIENCE: подписочный лимит → account-switch → re-run на свежем аккаунте (1.9.7 #6)', async () => {
     // Раньше CLI-путь на yielded-error просто сдавался (done+return) — авто-свитч
     // 1.9.4 был мёртв для CLI-подписок (свой главный кейс). Теперь склейка

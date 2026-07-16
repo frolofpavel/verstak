@@ -145,6 +145,19 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
   })
 
+  // 2.0.8-F каветат #1 (best-effort, симметрично plain-loop): сбой persistUsage НЕ
+  // роняет прогон — finish/done уже состоялись, throw из хука пойман в runner.
+  it('BEST-EFFORT persistence: persistUsage бросает → прогон всё равно finish("done")', async () => {
+    const runs = { ...mockRuns(), persistUsage: vi.fn(() => { throw new Error('boom persistence') }) }
+    const p = provider('p1', () => [
+      { type: 'usage', usage: { inputTokens: 500, outputTokens: 200, cachedInputTokens: 0 } },
+      { type: 'text', text: 'ok' }, { type: 'done' },
+    ])
+    await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
+    expect(runs.persistUsage).toHaveBeenCalledTimes(1)          // хук вызван и упал
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything()) // финализация состоялась
+  })
+
   // Crash-resume Фаза 2: turn с tool-call снапшотит историю (saveCheckpoint),
   // чистое завершение — чистит (clearCheckpoint). Прерванная сессия возобновится
   // с накопленным контекстом, доведённая — нет.

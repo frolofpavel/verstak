@@ -14,6 +14,7 @@ import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } f
 import { createFileTools, createToolsForProject, TOOL_DEFS } from './tools'
 import { isWithinKnownRoots } from './path-policy'
 import { createProvider, PROVIDERS, type ProviderId } from './registry'
+import type { InputAccounting } from '../../shared/contracts/usage'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from './compose-system'
 import { applyRecipeToSkillPrompt } from './skills/recipe'
@@ -333,8 +334,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let lastCompactTurn = -COMPACT_COOLDOWN_TURNS
   let lastSummary = '' // T1.6: предыдущее резюме для итеративной компакции
   // Accumulate token usage across all turns of this session for the final journal entry.
-  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
-    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0
+  // 2.0.8-F: +cacheWriteTokens/inputAccounting — накапливаем для persistence прогона
+  // (persistUsage при finalize). inputAccounting = фактического провайдера (последний usage-event).
+  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; inputAccounting: InputAccounting | undefined } = {
+    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, inputAccounting: undefined
   }
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
@@ -753,6 +756,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         sessionUsage.inputTokens += event.usage.inputTokens ?? 0
         sessionUsage.outputTokens += event.usage.outputTokens ?? 0
         sessionUsage.cachedInputTokens += event.usage.cachedInputTokens ?? 0
+        // 2.0.8-F: cache-write + accounting фактического провайдера для persistence.
+        sessionUsage.cacheWriteTokens += event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? 0
+        if (event.usage.inputAccounting) sessionUsage.inputAccounting = event.usage.inputAccounting
         sender.send('ai:event', { id: sendId, event })
         // Cost guard в API path — на каждый usage event считаем total,
         // если превышен лимит → abort всего turn-loop'a.
@@ -1548,6 +1554,18 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           agentsCount: agentCounter.count,
           error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
         })
+        // 2.0.8-F: persistence usage прогона (одна строка, идемпотентно по run_id).
+        // BEST-EFFORT: сбой персистенса НЕ роняет прогон. Пишем только при реальном usage.
+        if (providerId && (sessionUsage.inputTokens || sessionUsage.outputTokens || sessionUsage.cachedInputTokens)) {
+          try {
+            agentRuns.persistUsage({
+              runId, providerId, model: model ?? '', transport: PROVIDERS[providerId]?.transport ?? null,
+              inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
+              cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
+              inputAccounting: sessionUsage.inputAccounting
+            })
+          } catch { /* best-effort: персистенс не роняет финализацию */ }
+        }
         // Crash-resume Фаза 2: на чистом завершении снапшот не нужен — чистим,
         // чтобы resume не предлагал возобновить доведённую сессию. Прерванные
         // (crashed/error/aborted/max-turns/loop) сохраняют чекпойнт для resume.
