@@ -101,6 +101,37 @@ describe('createCostGuard', () => {
     const check1 = g.recordAndCheck('claude', 'claude-sonnet-4-6', 1_000_000, 0, 1_000_000)
     // Cached = $0.30 / 1M, billable input - $3 / 1M.
     // input=1M, cached=1M → billableInput = 0, cachedCost = 1M * 0.3/1M = $0.30
+    // (inputAccounting не передан → default inclusive = ПРЕЖНЕЕ поведение; характеризация не меняется.)
     expect(check1.cents).toBeCloseTo(30, 0)
+  })
+
+  // 2.0.8-E commit 2 — ДЕФЕКТ B (денежный): Claude=EXCLUSIVE, input_tokens УЖЕ без кэша.
+  it('дефект B: exclusive (Claude) НЕ вычитает cached — billable = полный input, не 0', () => {
+    const g = createCostGuard(null)
+    // Тот же вход, что выше (input=1M, cached=1M), но с честным exclusive: billable=1M (НЕ 0).
+    // Раньше max(0, 1M−1M)=0 занижало Claude до одной cachedCost; теперь input считается честно.
+    const excl = g.recordAndCheck('claude', 'claude-sonnet-4-6', 1_000_000, 0, 1_000_000, 'exclusive')
+    // inputCost = 1M×$3/M = 300c + cachedCost = 1M×$0.30/M = 30c → 330c (было бы 30c при вычитании).
+    expect(excl.cents).toBeCloseTo(330, 0)
+    // Ключ: exclusive СТРОГО дороже, чем прежнее (inclusive) занижение на том же входе.
+    const g2 = createCostGuard(null)
+    const incl = g2.recordAndCheck('claude', 'claude-sonnet-4-6', 1_000_000, 0, 1_000_000, 'inclusive')
+    expect(excl.cents).toBeGreaterThan(incl.cents)
+  })
+
+  it('inclusive (OpenAI-семейство) — прежнее вычитание сохранено (характеризация)', () => {
+    const g = createCostGuard(null)
+    // openai: input=1M включает cached=900K → billable=100K. Поведение как до E.
+    const check = g.recordAndCheck('openai', 'gpt-5', 1_000_000, 0, 900_000, 'inclusive')
+    expect(check.cents).toBeGreaterThan(0) // считается; точная цифра зависит от прайса openai
+  })
+
+  // Каветат #4: usage не сообщён (null) → «нет данных»: не считаем $0 и НЕ блокируем.
+  it('null usage (нет данных) → не блокирует и не добавляет стоимость', () => {
+    const g = createCostGuard(0.01) // крошечный cap
+    const before = g.current()
+    const check = g.recordAndCheck('claude', 'claude-sonnet-4-6', null, null, null, 'exclusive')
+    expect(check.exceeded).toBe(false)   // не блокирует по «неизвестно»
+    expect(g.current()).toBe(before)     // не добавил стоимость (не $0-как-бесплатно, а «нет данных»)
   })
 })

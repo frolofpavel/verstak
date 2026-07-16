@@ -98,8 +98,9 @@ export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAg
           if (guard && ctx.subProviderId) {
             const check = guard.recordAndCheck(
               ctx.subProviderId, ctx.subModel ?? '',
-              event.usage.inputTokens ?? 0, event.usage.outputTokens ?? 0,
-              event.usage.cachedInputTokens ?? 0
+              event.usage.inputTokens ?? null, event.usage.outputTokens ?? null,
+              event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null,
+              event.usage.inputAccounting // 2.0.8-E: фикс дефекта B для субагента
             )
             if (check.exceeded) {
               return { text: lastText, toolCallCount, exitReason: 'error', error: check.message ?? 'cost cap exceeded' }

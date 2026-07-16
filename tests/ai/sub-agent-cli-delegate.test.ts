@@ -103,7 +103,8 @@ describe('delegate→CLI: транспорт Сценария Б (sub-agent-loop
       role: 'executor'
     })
 
-    expect(recordAndCheck).toHaveBeenCalledWith('claude-cli', 'claude-code', 1000, 500, 0)
+    // 2.0.8-E commit 2: cached не сообщён → null (не 0, каветат #1); +6-й арг inputAccounting (undefined).
+    expect(recordAndCheck).toHaveBeenCalledWith('claude-cli', 'claude-code', 1000, 500, null, undefined)
   }, 3000)
 
   it('cost-cap превышен на usage CLI → обрыв с error (не даём сжечь больше лимита)', async () => {

@@ -9,6 +9,7 @@
  */
 
 import type { ProviderId } from '../hooks/useProvider'
+import { billableInputTokens, type InputAccounting } from '../../shared/contracts/usage'
 
 interface ModelPrice {
   input: number   // $ per 1M input tokens
@@ -115,12 +116,15 @@ export function estimateCost(
   model: string,
   inputTokens: number,
   outputTokens: number,
-  cachedInputTokens: number
+  cachedInputTokens: number,
+  // 2.0.8-E: default 'inclusive' сохраняет прежнее поведение для вызовов без флага (Chat.tsx —
+  // вне allowlist E, покажет корректную Claude-стоимость после проброса inputAccounting пост-Ilya).
+  inputAccounting: InputAccounting = 'inclusive'
 ): CostEstimate {
   if (CLI_FREE.has(providerId)) return { usd: null, cents: 0 }
   const price = PRICES[normalizeModelId(providerId, model)]
   if (!price) return { usd: '—', cents: 0 }
-  const billableInput = Math.max(0, inputTokens - cachedInputTokens)
+  const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
   const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
@@ -157,7 +161,8 @@ export function costBreakdown(
   model: string,
   inputTokens: number,
   outputTokens: number,
-  cachedInputTokens: number
+  cachedInputTokens: number,
+  inputAccounting: InputAccounting = 'inclusive'
 ): string {
   if (CLI_FREE.has(providerId)) {
     return `Провайдер: ${providerId} (CLI, подписка — стоимость = $0)\nТокены input: ${inputTokens}\nТокены output: ${outputTokens}`
@@ -166,7 +171,7 @@ export function costBreakdown(
   if (!price) {
     return `Модель ${model}: цены неизвестны\nТокены input: ${inputTokens}\nТокены output: ${outputTokens}`
   }
-  const billableInput = Math.max(0, inputTokens - cachedInputTokens)
+  const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
   const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
   const outputCost = (outputTokens / 1_000_000) * price.output

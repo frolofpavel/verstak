@@ -10,6 +10,7 @@
  */
 
 import type { ProviderId } from './registry'
+import { billableInputTokens, type InputAccounting } from '../../shared/contracts/usage'
 
 interface ModelPrice {
   input: number
@@ -112,8 +113,15 @@ function normalizeModelId(providerId: ProviderId, model: string): string {
 }
 
 export interface CostGuard {
-  /** Накопить usage и проверить cap. Возвращает true если превышено → abort. */
-  recordAndCheck(providerId: ProviderId, model: string, input: number, output: number, cached: number): {
+  /** Накопить usage и проверить cap. Возвращает true если превышено → abort.
+   *  2.0.8-E commit 2: input/output/cached — nullable (null='провайдер не сообщил', НЕ 0, каветат #1);
+   *  inputAccounting задаёт, вычитать ли cached (billableInputTokens — единое место, фикс дефекта B).
+   *  Дефолт inputAccounting='inclusive' сохраняет прежнее поведение для старых вызовов без флага. */
+  recordAndCheck(
+    providerId: ProviderId, model: string,
+    input: number | null, output: number | null, cached: number | null,
+    inputAccounting?: InputAccounting,
+  ): {
     exceeded: boolean
     cents: number
     capCents: number | null
@@ -144,13 +152,19 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
   const reportDailyCents = () => options.onDailyCentsChange?.(Math.round(totalCents()))
 
   return {
-    recordAndCheck(providerId, model, input, output, cached) {
+    recordAndCheck(providerId, model, input, output, cached, inputAccounting) {
       if (CLI_FREE.has(providerId)) {
         // CLI = подписка, $0
         return { exceeded: false, cents: Math.round(cumulativeCents), capCents }
       }
       if (ZERO_COST_PROVIDERS.has(providerId)) {
         // Локальный / собственный endpoint без тарифа — осознанно $0.
+        return { exceeded: false, cents: Math.round(cumulativeCents), capCents }
+      }
+      // 2.0.8-E: billable-input через ЕДИНЫЙ helper (фикс дефекта B: exclusive НЕ вычитает cached).
+      const billable = billableInputTokens({ inputTokens: input, cacheReadTokens: cached, inputAccounting: inputAccounting ?? 'inclusive' })
+      // Каветат #4: usage целиком не сообщён (null) → «нет данных»: НЕ считаем $0 и НЕ блокируем.
+      if (billable == null && output == null && cached == null) {
         return { exceeded: false, cents: Math.round(cumulativeCents), capCents }
       }
       const lookup = normalizeModelId(providerId, model)
@@ -164,10 +178,9 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
         }
         price = FALLBACK_PRICE
       }
-      const billableInput = Math.max(0, input - cached)
-      const inputCost = (billableInput / 1_000_000) * price.input
-      const cachedCost = price.cached ? (cached / 1_000_000) * price.cached : 0
-      const outputCost = (output / 1_000_000) * price.output
+      const inputCost = ((billable ?? 0) / 1_000_000) * price.input
+      const cachedCost = price.cached ? ((cached ?? 0) / 1_000_000) * price.cached : 0
+      const outputCost = ((output ?? 0) / 1_000_000) * price.output
       const total = inputCost + cachedCost + outputCost
       cumulativeCents += total * 100
       reportDailyCents()

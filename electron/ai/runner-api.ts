@@ -758,8 +758,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         // если превышен лимит → abort всего turn-loop'a.
         if (costGuard && providerId) {
           const check = costGuard.recordAndCheck(
-            providerId, model ?? '', event.usage.inputTokens ?? 0,
-            event.usage.outputTokens ?? 0, event.usage.cachedInputTokens ?? 0
+            providerId, model ?? '', event.usage.inputTokens ?? null,
+            event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null,
+            event.usage.inputAccounting // 2.0.8-E: exclusive (Claude) → billable НЕ вычитает cached (фикс B)
           )
           if (check.exceeded) {
             exitReason = 'error'
@@ -1319,7 +1320,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             sessionUsage.outputTokens += ev.usage.outputTokens ?? 0
             sessionUsage.cachedInputTokens += ev.usage.cachedInputTokens ?? 0
             if (costGuard && providerId) {
-              costGuard.recordAndCheck(providerId, model ?? '', ev.usage.inputTokens ?? 0, ev.usage.outputTokens ?? 0, ev.usage.cachedInputTokens ?? 0)
+              costGuard.recordAndCheck(providerId, model ?? '', ev.usage.inputTokens ?? null, ev.usage.outputTokens ?? null, ev.usage.cacheReadTokens ?? ev.usage.cachedInputTokens ?? null, ev.usage.inputAccounting)
             }
           }
           else if (ev.type === 'done') { summaryDone = true; break }

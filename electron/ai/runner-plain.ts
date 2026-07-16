@@ -226,8 +226,9 @@ export async function runPlainConversation(
           // Cost guard check — abort если превышен лимит.
           if (costGuard && providerId) {
             const check = costGuard.recordAndCheck(
-              providerId, model ?? '', event.usage.inputTokens ?? 0,
-              event.usage.outputTokens ?? 0, event.usage.cachedInputTokens ?? 0
+              providerId, model ?? '', event.usage.inputTokens ?? null,
+              event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null,
+              event.usage.inputAccounting // 2.0.8-E: exclusive → billable без вычитания cached (фикс B)
             )
             if (check.exceeded) {
               exitReason = 'error'

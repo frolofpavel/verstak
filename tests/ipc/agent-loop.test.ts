@@ -190,7 +190,8 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(runs.finish).toHaveBeenCalledTimes(1)
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything()) // #15
     // #7: стоимость записана по модели fallback (claude-opus-4-5), не упавшего gemini-3-flash.
-    expect(recordSpy).toHaveBeenCalledWith('claude', 'claude-opus-4-5', 1000, 1000, 0)
+    // 2.0.8-E commit 2: +6-й арг inputAccounting (undefined у старого usage-shape мока → default inclusive).
+    expect(recordSpy).toHaveBeenCalledWith('claude', 'claude-opus-4-5', 1000, 1000, 0, undefined)
   }, 15000)
 
   // 2.0.8-D2 инвариант 1 (координатор #2): pinned-чат API-путь НЕ ротирует аккаунт и НЕ

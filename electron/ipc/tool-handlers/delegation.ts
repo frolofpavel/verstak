@@ -687,7 +687,9 @@ export async function decomposeGoal(
       // baseProviderId/plannerModel из orchestrate, поэтому модель совпадёт с PRICES.
       const guard = ctx.subCostGuard
       if (guard) {
-        guard.recordAndCheck(providerId, model, event.usage.inputTokens ?? 0, event.usage.outputTokens ?? 0, event.usage.cachedInputTokens ?? 0)
+        // 2.0.8-E commit 2 (ревью-находка): decomposeGoal — 5-й денежный потребитель, карточка его
+        // пропустила. Без inputAccounting дефект B жил бы здесь для Claude (planner на exclusive).
+        guard.recordAndCheck(providerId, model, event.usage.inputTokens ?? null, event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null, event.usage.inputAccounting)
       }
     }
     else if (event.type === 'error') throw new Error(event.message)
