@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { normalizedUsage } from '../../shared/contracts/usage'
 import { formatVerstakMeta, mapGatewayError } from './gateway-meta'
 import { parseTextToolCalls } from './tool-call-repair'
 
@@ -170,12 +171,15 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
             usageSent = true
             yield {
               type: 'usage',
-              usage: {
+              // 2.0.8-E: OpenAI Chat Completions = INCLUSIVE (prompt_tokens ВКЛЮЧАЕТ
+              // prompt_tokens_details.cached_tokens) → billable вычитает cached. Все OpenAI-совместимые.
+              usage: normalizedUsage({
                 inputTokens: u.prompt_tokens,
                 outputTokens: u.completion_tokens,
-                cachedInputTokens: u.prompt_tokens_details?.cached_tokens,
+                cacheReadTokens: u.prompt_tokens_details?.cached_tokens,
+                inputAccounting: 'inclusive',
                 model
-              }
+              })
             }
           }
           const delta = chunk.choices?.[0]?.delta

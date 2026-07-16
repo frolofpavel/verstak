@@ -3,6 +3,7 @@ import { platform } from 'os'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { normalizedUsage } from '../../shared/contracts/usage'
 import type { AgentMode } from './mode-policy'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
@@ -43,6 +44,9 @@ export function sandboxArgsForMode(
     return ['--dangerously-bypass-approvals-and-sandbox']
   }
   const winFix = isWindows ? ['-c', 'windows.sandbox=unelevated'] : []
+  // pre-existing baseline (undefined-case через default ниже). E обязан менять codex-cli.ts → error
+  // всплыл; фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (mode) {
     case 'auto':
     case 'accept-edits':
@@ -242,7 +246,9 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
             if ((input ?? 0) > 0 || (output ?? 0) > 0) {
               queue.push({
                 type: 'usage',
-                usage: { inputTokens: input, outputTokens: output, cachedInputTokens: cached, model: opts.model ?? 'codex-cli' }
+                // 2.0.8-E: wire-shape Codex CLI не пиннут (мульти-shape суперсет) → inputAccounting
+                // UNKNOWN: cached НЕ вычитается без подтверждённой семантики (каветат #4). CLI=$0.
+                usage: normalizedUsage({ inputTokens: input, outputTokens: output, cacheReadTokens: cached, inputAccounting: 'unknown', model: opts.model ?? 'codex-cli' })
               })
             }
           }

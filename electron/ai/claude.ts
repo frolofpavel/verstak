@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { CACHE_BREAKPOINT } from './compose-prompt'
+import { normalizedUsage } from '../../shared/contracts/usage'
 
 interface ClaudeOptions {
   apiKey: string
@@ -152,6 +153,9 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
         : {}
 
       try {
+        // pre-existing baseline (lint-baseline): SDK stream() «thenable»-подобен, но не Promise. E
+        // обязан менять claude.ts → error всплыл; реальный фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
+        // eslint-disable-next-line @typescript-eslint/await-thenable
         const stream = await client.messages.stream({
           model,
           max_tokens: maxTokens,
@@ -208,7 +212,9 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
           }
         }
         if (inputTokens || outputTokens) {
-          yield { type: 'usage', usage: { inputTokens, outputTokens, cachedInputTokens, cacheCreationInputTokens, model } }
+          // 2.0.8-E: Claude = EXCLUSIVE (input_tokens БЕЗ кэша; cache_read/creation отдельно) →
+          // billable НЕ вычитает cached (фикс дефекта B). cache write не теряется (фикс A).
+          yield { type: 'usage', usage: normalizedUsage({ inputTokens, outputTokens, cacheReadTokens: cachedInputTokens, cacheWriteTokens: cacheCreationInputTokens, inputAccounting: 'exclusive', model }) }
         }
         yield { type: 'done' }
       } catch (err) {

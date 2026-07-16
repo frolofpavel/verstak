@@ -3,6 +3,7 @@ import { platform } from 'os'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { normalizedUsage } from '../../shared/contracts/usage'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
@@ -42,6 +43,9 @@ export const CLAUDE_CLI_MODELS = [
  *   plan → plan · bypass → bypassPermissions.
  */
 export function claudePermissionMode(mode: AgentMode | undefined): string {
+  // pre-existing baseline (undefined-case через default ниже). E обязан менять claude-cli.ts → error
+  // всплыл; фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (mode) {
     case 'accept-edits':
     case 'auto':
@@ -291,12 +295,15 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           if ((u.input_tokens ?? 0) > 0 || (u.output_tokens ?? 0) > 0) {
             queue.push({
               type: 'usage',
-              usage: {
+              // 2.0.8-E: Claude = EXCLUSIVE; cache write (cache_creation) больше НЕ теряется (фикс A).
+              usage: normalizedUsage({
                 inputTokens: u.input_tokens,
                 outputTokens: u.output_tokens,
-                cachedInputTokens: u.cache_read_input_tokens,
+                cacheReadTokens: u.cache_read_input_tokens,
+                cacheWriteTokens: u.cache_creation_input_tokens,
+                inputAccounting: 'exclusive',
                 model: opts.model ?? 'claude-cli'
-              }
+              })
             })
             wake()
           }
@@ -306,12 +313,14 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           if (ev.usage && ((ev.usage.input_tokens ?? 0) > 0 || (ev.usage.output_tokens ?? 0) > 0)) {
             queue.push({
               type: 'usage',
-              usage: {
+              usage: normalizedUsage({
                 inputTokens: ev.usage.input_tokens,
                 outputTokens: ev.usage.output_tokens,
-                cachedInputTokens: ev.usage.cache_read_input_tokens,
+                cacheReadTokens: ev.usage.cache_read_input_tokens,
+                cacheWriteTokens: ev.usage.cache_creation_input_tokens,
+                inputAccounting: 'exclusive',
                 model: opts.model ?? 'claude-cli'
-              }
+              })
             })
           }
           if (ev.is_error) {

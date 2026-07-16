@@ -3,6 +3,7 @@ import { platform } from 'os'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { normalizedUsage } from '../../shared/contracts/usage'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
@@ -191,7 +192,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
         } else if (ev.type === 'usage') {
           const u = extractUsage(ev)
           if (u) {
-            events.push({ type: 'usage', usage: { ...u, model: opts.model ?? 'gemini-cli' } })
+            events.push({ type: 'usage', usage: normalizedUsage({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: u.cachedInputTokens, inputAccounting: 'unknown', model: opts.model ?? 'gemini-cli' }) })
             wake()
           }
         } else if (ev.type === 'result') {
@@ -200,7 +201,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
           // `usage` event between message and result.
           const u = extractUsage(ev)
           if (u) {
-            events.push({ type: 'usage', usage: { ...u, model: opts.model ?? 'gemini-cli' } })
+            events.push({ type: 'usage', usage: normalizedUsage({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: u.cachedInputTokens, inputAccounting: 'unknown', model: opts.model ?? 'gemini-cli' }) })
           }
           if (ev.status === 'success') {
             events.push({ type: 'done' })

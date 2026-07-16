@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'crypto'
 import type { ChatMessage, ChatEvent, ToolDefinition, ToolResult, ChatProvider, UsageDelta } from '../types'
+import { normalizedUsage } from '../../../shared/contracts/usage'
 import { createCodexCredentialStore } from './credential-store'
 import { buildHeaders, buildBody, userMessage, functionTool, functionCallOutput, type ResponseItem } from './request-builder'
 
@@ -60,12 +61,15 @@ function toolResultText(tr: ToolResult): string {
 function mapUsage(u: unknown, model: string): UsageDelta | null {
   if (!u || typeof u !== 'object') return null
   const x = u as Record<string, any>
-  return {
-    inputTokens: x.input_tokens ?? 0,
-    outputTokens: x.output_tokens ?? 0,
-    cachedInputTokens: x.input_tokens_details?.cached_tokens ?? 0,
+  // 2.0.8-E: Responses API = INCLUSIVE (input_tokens ВКЛЮЧАЕТ input_tokens_details.cached_tokens) →
+  // billable вычитает cached (корректно). null-семантика: не сообщил → null, не 0 (каветат #1).
+  return normalizedUsage({
+    inputTokens: x.input_tokens ?? null,
+    outputTokens: x.output_tokens ?? null,
+    cacheReadTokens: x.input_tokens_details?.cached_tokens ?? null,
+    inputAccounting: 'inclusive',
     model,
-  }
+  })
 }
 
 function safeJsonArgs(raw: unknown): Record<string, unknown> {

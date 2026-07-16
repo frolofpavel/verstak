@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
+import { normalizedUsage } from '../../shared/contracts/usage'
 
 interface GeminiOptions {
   apiKey: string
@@ -273,7 +274,8 @@ export function createGeminiProvider(opts: GeminiOptions): ChatProvider {
         if (lastUsage.prompt !== undefined || lastUsage.output !== undefined) {
           yield {
             type: 'usage',
-            usage: { inputTokens: lastUsage.prompt, outputTokens: lastUsage.output, cachedInputTokens: lastUsage.cached, model }
+            // 2.0.8-E: Gemini = INCLUSIVE (promptTokenCount ВКЛЮЧАЕТ cachedContentTokenCount) → billable вычитает cached.
+            usage: normalizedUsage({ inputTokens: lastUsage.prompt, outputTokens: lastUsage.output, cacheReadTokens: lastUsage.cached, inputAccounting: 'inclusive', model })
           }
         }
         yield { type: 'done' }

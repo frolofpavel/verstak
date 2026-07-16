@@ -65,17 +65,30 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>  // JSON Schema
 }
 
+export type { NormalizedUsage, InputAccounting } from '../../shared/contracts/usage'
+import type { InputAccounting } from '../../shared/contracts/usage'
+
+/**
+ * Событие usage. 2.0.8-E: совместимый СУПЕРСЕТ — адаптеры кладут полный NormalizedUsage (через
+ * `normalizedUsage()`), старые construction-сайты (тесты) — частичный старый shape. Все поля
+ * optional, чтобы оба варианта типизировались. Commit 2 мигрирует потребителей на
+ * cacheReadTokens/cacheWriteTokens/inputAccounting + billableInputTokens; старые имена — мост.
+ */
 export interface UsageDelta {
-  /** Tokens in the prompt for this turn */
-  inputTokens?: number
-  /** Tokens produced by the model in this turn */
-  outputTokens?: number
-  /** Tokens already cached on the provider side (Anthropic / OpenAI) */
+  inputTokens?: number | null
+  outputTokens?: number | null
+  /** @deprecated старое имя cacheReadTokens (мост до commit 2). */
   cachedInputTokens?: number
-  /** Tokens записанные В кэш на этом ходу (Anthropic cache write, ~1.25× цены input).
-   *  Нужен для честной оценки стоимости 1-го хода в cost-controller. */
+  /** @deprecated старое имя cacheWriteTokens (мост до commit 2). */
   cacheCreationInputTokens?: number
-  /** Model that produced the usage, helps cost lookup */
+  /** 2.0.8-E: прочитано из кэша (null = не сообщил). */
+  cacheReadTokens?: number | null
+  /** 2.0.8-E: записано в кэш — Claude cache write ~1.25× (null = не сообщил/не поддерживает). */
+  cacheWriteTokens?: number | null
+  /** 2.0.8-E: входит ли cached в reported input (exclusive=Claude / inclusive=OpenAI/Gemini / unknown). */
+  inputAccounting?: InputAccounting
+  /** 2.0.8-E: raw reported input до нормализации billable. */
+  providerReportedInputTokens?: number
   model?: string
 }
 
