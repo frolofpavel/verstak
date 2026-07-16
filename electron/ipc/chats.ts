@@ -60,6 +60,7 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
 
   // Messages
   ipcMain.handle('chats:list', (_e, sessionId: number) => chats.listBySession(sessionId))
+  ipcMain.handle('chats:list-window', (_e, sessionId: number, opts?: { beforeId?: number | null; limit?: number }) => chats.listWindowBySession(sessionId, opts))
   ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) => {
     const message = chats.appendToSession(sessionId, projectPath, role, content, meta)
     logRuntime('chat_message.append', {

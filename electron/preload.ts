@@ -56,6 +56,9 @@ contextBridge.exposeInMainWorld('api', {
   runtimeLogs: {
     info: () => ipcRenderer.invoke('runtime-logs:info') as Promise<{ dir: string; runtime: string; errors: string }>
   },
+  clipboard: {
+    writeText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text) as Promise<boolean>
+  },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize') as Promise<void>,
     maximize: () => ipcRenderer.invoke('window:maximize') as Promise<boolean>,
@@ -226,6 +229,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   chats: {
     list: (sessionId: number) => ipcRenderer.invoke('chats:list', sessionId),
+    listWindow: (sessionId: number, opts?: { beforeId?: number | null; limit?: number }) =>
+      ipcRenderer.invoke('chats:list-window', sessionId, opts),
     append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) =>
       ipcRenderer.invoke('chats:append', sessionId, projectPath, role, content, meta),
     maxMessageId: (sessionId: number) => ipcRenderer.invoke('chats:max-message-id', sessionId) as Promise<number>,

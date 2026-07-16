@@ -119,7 +119,7 @@ export const ru: Translations = {
     files: 'Файлы',
     inRoot: '{count} в корне',
     mainChat: 'Основной чат',
-    project: 'Проект',
+    project: 'Управление проектом',
     workSection: 'Работа',
     controlSection: 'Контроль',
     projectSection: 'Проект',

@@ -397,6 +397,9 @@ declare global {
       runtimeLogs: {
         info: () => Promise<{ dir: string; runtime: string; errors: string }>
       }
+      clipboard: {
+        writeText: (text: string) => Promise<boolean>
+      }
       window: {
         minimize: () => Promise<void>
         maximize: () => Promise<boolean>
@@ -530,6 +533,7 @@ declare global {
       }
       chats: {
         list: (sessionId: number) => Promise<StoredChatMessage[]>
+        listWindow: (sessionId: number, opts?: { beforeId?: number | null; limit?: number }) => Promise<{ messages: StoredChatMessage[]; totalCount: number; hasMoreBefore: boolean }>
         append: (sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => Promise<StoredChatMessage>
         maxMessageId: (sessionId: number) => Promise<number>
         getSubscriptionBinding: (chatId: number) => Promise<ChatSubscriptionBindingDTO | null>

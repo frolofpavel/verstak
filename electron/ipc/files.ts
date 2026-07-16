@@ -10,6 +10,9 @@ import type { FileNode } from '../shared-types'
 export type { FileNode }
 
 const IGNORE = new Set(['node_modules', '.git', 'out', 'dist', '.verstak-data', '.superpowers'])
+const COLLAPSE_DIRS = new Set(['logs', 'agent-tools', 'terminals', 'reports', 'campaigns', 'creatives'])
+const MAX_TREE_NODES = 300
+const MAX_DIR_ENTRIES = 80
 const MAX_READ_BYTES = 2 * 1024 * 1024  // 2 MB safety cap
 const SKILL_PREVIEW_ROOTS = [
   join(homedir(), '.verstak', 'skills'),
@@ -129,7 +132,7 @@ function relForPolicy(abs: string, deps: FilesIpcDeps): string {
 
 // export для regression-теста (ревью F4): symlink-директория наружу не должна
 // раскрываться listTree (lstat + isSymbolicLink continue).
-export async function listTree(current: string, depth: number): Promise<FileNode[]> {
+export async function listTree(current: string, depth: number, budget = { nodes: 0 }): Promise<FileNode[]> {
   if (depth > 5) return []
   let entries: string[]
   try {
@@ -138,14 +141,17 @@ export async function listTree(current: string, depth: number): Promise<FileNode
     return []
   }
   const nodes: FileNode[] = []
-  for (const name of entries) {
+  for (const name of entries.slice(0, MAX_DIR_ENTRIES)) {
+    if (budget.nodes >= MAX_TREE_NODES) break
     if (IGNORE.has(name) || name.startsWith('.')) continue
     const abs = join(current, name)
     let lst
     try { lst = await lstat(abs) } catch { continue }
     if (lst.isSymbolicLink()) continue // Игнорируем символические ссылки во избежание обхода дерева наружу или бесконечных циклов
+    budget.nodes += 1
     if (lst.isDirectory()) {
-      nodes.push({ name, path: abs, isDirectory: true, children: await listTree(abs, depth + 1) })
+      const collapse = depth === 0 && COLLAPSE_DIRS.has(name)
+      nodes.push({ name, path: abs, isDirectory: true, children: collapse ? [] : await listTree(abs, depth + 1, budget) })
     } else {
       nodes.push({ name, path: abs, isDirectory: false })
     }

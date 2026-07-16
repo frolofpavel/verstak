@@ -1374,7 +1374,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   // Смысловые блоки левой панели: не техническая свалка, а маршрут пользователя.
   const TAB_GROUPS: ReadonlyArray<SettingsNavGroup> = [
     { title: 'Приложение', tabs: [
-      { id: 'appearance', label: t.settings.appearance, icon: 'appearance', keywords: 'theme ui вид внешний вид тема светлая темная тёмная ночь день масштаб размер интерфейс плотность компактно просторно анимации полный выключены оформление шрифт панель' },
+      { id: 'appearance', label: t.settings.appearance, icon: 'appearance', keywords: 'theme ui вид внешний вид тема светлая темная тёмная ночь день масштаб размер интерфейс плотность компактно анимации полный выключены оформление шрифт панель' },
       { id: 'notifications', label: t.settings.notifications, icon: 'notifications', keywords: 'toast push telegram уведомления всплывающее всплывающие звук проект тихие часы режим всегда вне фокуса окно проверка сигналы ошибки напоминания ответы' },
       { id: 'updates', label: t.settings.updates, icon: 'updates', keywords: 'release installer автообновление версия обновление обновить патчноут патч ноут список изменений загрузка установка временные файлы очистка кэш кеш диагностика' },
       { id: 'profiles', label: t.settings.profiles, icon: 'profiles', soon: true, disabled: true, keywords: 'user profile профиль аккаунт пользователь организация команда компания роль доступ участники приглашение почта регистрация' }
@@ -3920,7 +3920,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             <div className="gg-appearance-section-head">
               <div>
                 <div className="gg-appearance-title">Плотность интерфейса</div>
-                <p className="gg-appearance-desc">Меняет отступы и расстояние между основными блоками без изменения размера текста</p>
+                <p className="gg-appearance-desc">Меняет плотность панели проектов и основных блоков без изменения размера текста</p>
               </div>
             </div>
             <div className="gg-appearance-choice-grid" role="group" aria-label="Плотность интерфейса">

@@ -363,17 +363,20 @@ type GithubRelease = {
 }
 
 export function cleanReleaseBody(body: string): string {
-  return body.replace(/\r\n/g, '\n').replace(/\n---\n[\s\S]*$/m, '').trim()
+  const clean = body.replace(/\r\n/g, '\n').replace(/\n---\n[\s\S]*$/m, '').trim()
+  return /^Verstak\s+v?\d+\.\d+\.\d+$/i.test(clean) ? '' : clean
 }
 
 function mapRelease(data: GithubRelease): ReleaseNote | null {
   if (!data.body || !data.tag_name) return null
   const version = normalizeVersion(data.tag_name)
   if (!SEMVER_RE.test(version)) return null
+  const body = cleanReleaseBody(data.body)
+  if (!body) return null
   return {
     version,
     name: data.name || `Verstak ${version}`,
-    body: cleanReleaseBody(data.body),
+    body,
     htmlUrl: data.html_url || `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/tag/v${version}`,
     publishedAt: data.published_at,
   }

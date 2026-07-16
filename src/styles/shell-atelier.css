@@ -390,10 +390,24 @@ html[data-theme="light"] .gg-app-atelier .gg-rail-avatar-wrap.is-status-interrup
 }
 
 .gg-app-atelier .gg-nav-item.is-active {
-  background: var(--vol-recessed-bg);
-  border-color: var(--border-subtle);
+  --project-nav-active-bg-top: color-mix(in srgb, var(--bg-input) 78%, transparent);
+  --project-nav-active-bg-bottom: color-mix(in srgb, var(--bg-base) 86%, transparent);
+  --project-nav-active-shadow:
+    inset 0 1px 5px color-mix(in srgb, black 24%, transparent),
+    0 1px 0 color-mix(in srgb, white 5%, transparent);
+  background:
+    linear-gradient(180deg, var(--project-nav-active-bg-top), var(--project-nav-active-bg-bottom));
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-subtle));
   color: var(--text-primary);
-  box-shadow: var(--vol-shadow-inset);
+  box-shadow: var(--project-nav-active-shadow);
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-nav-item.is-active {
+  --project-nav-active-bg-top: color-mix(in srgb, var(--bg-input) 88%, white 12%);
+  --project-nav-active-bg-bottom: color-mix(in srgb, var(--bg-base) 82%, white 18%);
+  --project-nav-active-shadow:
+    inset 0 1px 4px color-mix(in srgb, #7b8aa0 24%, transparent),
+    0 1px 0 color-mix(in srgb, white 56%, transparent);
 }
 
 .gg-app-atelier .gg-nav-item.is-active .gg-nav-icon {

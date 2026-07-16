@@ -175,7 +175,7 @@ export async function runPlainConversation(
       })
 
       try {
-      for await (const event of provider.send(currentMessages, [])) {
+      for await (const event of provider.send(currentMessages, [], undefined, signal)) {
         if (signal.aborted) {
           exitReason = signalExitReason()
           waitHeartbeat.stop('done', 'Запрос остановлен.')
