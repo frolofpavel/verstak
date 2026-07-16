@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // Keep it minimal — only the methods the tested actions actually call.
 const appendSpy = vi.fn(async () => {})
 const agentRunsListSpy = vi.fn(async (_path?: string, _opts?: { status?: string }) => [] as Array<{ runId: string }>)
-const windowStub = { api: { chats: { append: appendSpy }, agentRuns: { list: agentRunsListSpy } } }
+const windowStub = { api: { chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), append: appendSpy }, agentRuns: { list: agentRunsListSpy } } }
 // Стабим ДО импорта стора (безопасность загрузки модуля). Переставляем в
 // beforeEach: глобальный afterEach (tests/setup.ts) снимает все стабы после
 // каждого теста, иначе window исчезает со второго теста файла.

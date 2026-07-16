@@ -6,7 +6,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // порождало #8/#17. Тесты ЛОКИРУЮТ текущее поведение перед рефактором
 // (вынос captureBundle/restoreBundle) — рефактор обязан их сохранить зелёными.
 
-const listSpy = vi.fn(async () => [] as Array<{ role: string; content: string; createdAt?: number }>)
+// Илья (reapply-2.0.7): гидратация чата перешла на оконный chats.listWindow
+// (последние 50 + догрузка старых) — мок повторяет его форму ответа.
+const listSpy = vi.fn(async () => ({
+  messages: [] as Array<{ role: string; content: string; createdAt?: number }>,
+  totalCount: 0,
+  hasMoreBefore: false,
+}))
 const setKeySpy = vi.fn(async () => {})
 const getKeySpy = vi.fn(async (_k: string) => null as string | null)
 const listReviewsSpy = vi.fn(async () => [] as Array<{ id: number }>)
@@ -15,7 +21,7 @@ const sessionsListSpy = vi.fn(async () => [] as Array<{ id: number }>)
 const setModelSpy = vi.fn(async () => {})
 const windowStub = {
   api: {
-    chats: { list: listSpy, append: vi.fn(async () => {}) },
+    chats: { listWindow: listSpy, list: vi.fn(async () => []), append: vi.fn(async () => {}) },
     settings: { setKey: setKeySpy, getKey: getKeySpy },
     chatSessions: { listReviews: listReviewsSpy, create: createSpy, list: sessionsListSpy, setModel: setModelSpy, getOrCreateHelp: vi.fn(async () => ({ id: 999 })) },
     skills: { recordUse: vi.fn(async () => {}) },
@@ -194,7 +200,7 @@ describe('switchChatSession — restore входящего чата', () => {
   })
 
   it('переключение на чат БЕЗ снапшота даёт чистое состояние + гидратацию из БД', async () => {
-    listSpy.mockResolvedValueOnce([{ role: 'user', content: 'из БД', createdAt: 7 }])
+    listSpy.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'из БД', createdAt: 7 }], totalCount: 1, hasMoreBefore: false })
     useProject.setState({
       activeChatId: 1,
       messages: [{ role: 'user', content: 'старое' }] as ChatMessage[],
@@ -212,7 +218,7 @@ describe('switchChatSession — restore входящего чата', () => {
     expect(st.pendingWrites).toEqual([])
     expect(st.pendingCommand).toBeNull()
     // гидратация истории из БД
-    expect(listSpy).toHaveBeenCalledWith(9)
+    expect(listSpy).toHaveBeenCalledWith(9, { limit: 50 })
     expect(st.messages).toEqual([{ role: 'user', content: 'из БД', createdAt: 7 }])
   })
 

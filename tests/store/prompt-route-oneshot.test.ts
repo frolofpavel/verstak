@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const baseWindow = {
   api: {
-    chats: { append: vi.fn(async () => {}), list: vi.fn(async () => []) },
+    chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), append: vi.fn(async () => {}), list: vi.fn(async () => []) },
     agentRuns: { list: vi.fn(async () => []) },
     settings: { getKey: vi.fn(async () => null), setKey: vi.fn(async () => {}) },
     chatSessions: {

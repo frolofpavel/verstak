@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const getActive = vi.fn(async () => null as unknown)
 const advance = vi.fn(async () => null as unknown)
 const cancel = vi.fn(async () => undefined)
-const windowStub = { api: { pipeline: { getActive, advance, cancel }, chats: { append: vi.fn() } } }
+const windowStub = { api: { pipeline: { getActive, advance, cancel }, chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), append: vi.fn() } } }
 vi.stubGlobal('window', windowStub)
 
 import { useProject } from '../../src/store/projectStore'

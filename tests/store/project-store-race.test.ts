@@ -16,7 +16,13 @@ const appendSpy = vi.fn(async () => {})
 const agentRunsListSpy = vi.fn(async () => [] as Array<{ runId: string }>)
 const baseWindow = {
   api: {
-    chats: { append: appendSpy, list: vi.fn(async () => []) },
+    // Илья (reapply-2.0.7): гидратация перешла на оконный listWindow — форма ответа
+    // {messages,totalCount,hasMoreBefore}. Смысл теста прежний: стейл-история отбрасывается.
+    chats: {
+      append: appendSpy,
+      list: vi.fn(async () => []),
+      listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false }))
+    },
     agentRuns: { list: agentRunsListSpy },
     settings: { getKey: vi.fn(async () => null), setKey: vi.fn(async () => {}) },
     chatSessions: {
@@ -72,18 +78,19 @@ beforeEach(() => {
 // ─── Сценарий 1: A→B, history приходит в обратном порядке ────────────────────
 describe('Сц.1 — стейл-загрузка history отбрасывается при более новом switch', () => {
   it('history чата A (устаревшего) не затирает сообщения активного чата B', async () => {
-    const dA = deferred<Array<{ id: number; role: string; content: string }>>()
-    const dB = deferred<Array<{ id: number; role: string; content: string }>>()
-    baseWindow.api.chats.list = vi.fn((id: number) => (id === 1 ? dA.promise : dB.promise)) as never
+    type Win = { messages: Array<{ id: number; role: string; content: string }>; totalCount: number; hasMoreBefore: boolean }
+    const dA = deferred<Win>()
+    const dB = deferred<Win>()
+    baseWindow.api.chats.listWindow = vi.fn((id: number) => (id === 1 ? dA.promise : dB.promise)) as never
     useProject.setState({ chatSessions: [{ id: 1 }, { id: 2 }] as never }, false)
 
     await useProject.getState().switchChatSession(1) // active=1, ждёт dA
     await useProject.getState().switchChatSession(2) // active=2, ждёт dB, token++
 
     // Обратный порядок: сначала резолвим B (актуальный), потом A (устаревший).
-    dB.resolve([{ id: 20, role: 'assistant', content: 'ответ чата B' }])
+    dB.resolve({ messages: [{ id: 20, role: 'assistant', content: 'ответ чата B' }], totalCount: 1, hasMoreBefore: false })
     await Promise.resolve()
-    dA.resolve([{ id: 10, role: 'user', content: 'история чата A' }])
+    dA.resolve({ messages: [{ id: 10, role: 'user', content: 'история чата A' }], totalCount: 1, hasMoreBefore: false })
     await Promise.resolve(); await Promise.resolve()
 
     const st = useProject.getState()

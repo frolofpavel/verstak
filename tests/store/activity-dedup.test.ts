@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const windowStub = {
   api: {
-    chats: { list: vi.fn(async () => []), append: vi.fn(async () => {}) },
+    chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), list: vi.fn(async () => []), append: vi.fn(async () => {}) },
     settings: { setKey: vi.fn(async () => {}) },
     chatSessions: { listReviews: vi.fn(async () => []) },
   },
