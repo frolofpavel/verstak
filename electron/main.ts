@@ -103,6 +103,7 @@ import { registerSuggestionsIpc } from './ipc/suggestions'
 import { initAutoUpdater, registerReleaseNotesIpc } from './updater'
 import { registerNotifyIpc } from './ipc/notify'
 import { bindWindowChromeEvents, registerWindowIpc } from './ipc/window'
+import { registerClipboardIpc } from './ipc/clipboard'
 import { bindReminderToastActions, initNotificationWindow, registerNotificationWindowIpc } from './notification-window'
 import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
@@ -315,6 +316,7 @@ app.whenReady().then(() => {
     }
   })
   registerWindowIpc()
+  registerClipboardIpc()
   registerNotificationWindowIpc()
   registerRuntimeLogIpc()
 

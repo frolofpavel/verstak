@@ -65,13 +65,21 @@ function highlightForBlock(language: string, code: string): { html: string | nul
   return { html: null, label: language || 'text' }
 }
 
+async function copyText(text: string): Promise<void> {
+  if (window.api?.clipboard?.writeText) {
+    const ok = await window.api.clipboard.writeText(text)
+    if (ok) return
+  }
+  await navigator.clipboard.writeText(text)
+}
+
 function CodeBlock({ language, code }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
   const { html, label } = highlightForBlock(language, code)
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(code)
+      await copyText(code)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch { /* clipboard denied */ }
@@ -95,7 +103,7 @@ function CopyableTextBlock({ code }: { code: string }) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(code)
+      await copyText(code)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch { /* clipboard denied */ }

@@ -58,6 +58,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   path: string | null
   tree: FileNode[]
   messages: ChatMessage[]
+  chatHasMoreBefore: boolean
+  chatTotalCount: number
   isStreaming: boolean
   streamStartedAt: number | null
   pendingWrites: PendingWrite[]
@@ -130,6 +132,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   removeProject: (path: string, options?: { deleteData?: boolean }) => Promise<{ ok: boolean; error?: string }>
   setActiveView: (v: ViewId) => void
   refreshFileTree: (path?: string | null) => Promise<void>
+  loadOlderMessages: () => Promise<void>
   addMessage: (msg: ChatMessage) => void
   /** Вставить сообщение перед последним (обычно — перед стримящим assistant). */
   insertMessageBeforeLast: (msg: ChatMessage) => void
@@ -294,6 +297,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   path: null,
   tree: [],
   messages: [],
+  chatHasMoreBefore: false,
+  chatTotalCount: 0,
   isStreaming: false,
   streamStartedAt: null,
   pendingWrites: [],
@@ -395,6 +400,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       path,
       tree: [],
       messages: optimisticMessages,
+      chatHasMoreBefore: false,
+      chatTotalCount: optimisticMessages.length,
       isStreaming: target.isStreaming,
       streamStartedAt: target.streamStartedAt,
       pendingWrites: target.pendingWrites,
@@ -452,6 +459,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       path,
       tree: [],
       messages: initialMessages,
+      chatHasMoreBefore: false,
+      chatTotalCount: initialMessages.length,
       isStreaming: target.isStreaming,
       streamStartedAt: target.streamStartedAt,
       pendingWrites: target.pendingWrites,
@@ -493,11 +502,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     if (needsDbHydrate && activeChatId != null) {
       const hydrateChatId = activeChatId
       void (async () => {
-        const history = await window.api.chats.list(hydrateChatId)
+        const history = await window.api.chats.listWindow(hydrateChatId, { limit: 50 })
         if (myToken !== setProjectToken) return
         const cur = get()
         if (cur.path !== path || cur.activeChatId !== hydrateChatId) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
+        set({
+          messages: history.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })),
+          chatHasMoreBefore: history.hasMoreBefore,
+          chatTotalCount: history.totalCount
+        })
       })()
     }
 
@@ -518,6 +531,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     path: null,
     tree: [],
     messages: [],
+    chatHasMoreBefore: false,
+    chatTotalCount: 0,
     isStreaming: false,
     streamStartedAt: null,
     pendingWrites: [],
@@ -565,7 +580,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const state = get()
     const composerDrafts = pruneComposerDraftsForProject(state.composerDrafts, path)
     if (state.path === path) {
-      set({ path: null, tree: [], messages: [], agentProgress: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
+      set({ path: null, tree: [], messages: [], chatHasMoreBefore: false, chatTotalCount: 0, agentProgress: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
     } else {
       set({ projectList, composerDrafts })
     }
@@ -585,6 +600,21 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     } catch {
       // The files panel will keep its empty state if the tree cannot be loaded.
     }
+  },
+  loadOlderMessages: async () => {
+    const state = get()
+    const chatId = state.activeChatId
+    const beforeId = state.messages.find(m => typeof m.dbId === 'number')?.dbId
+    if (!chatId || !beforeId || !state.chatHasMoreBefore) return
+    const result = await window.api.chats.listWindow(chatId, { beforeId, limit: 50 })
+    const older = result.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
+    const existingIds = new Set(get().messages.map(m => m.dbId).filter((id): id is number => typeof id === 'number'))
+    const uniqueOlder = older.filter(m => typeof m.dbId !== 'number' || !existingIds.has(m.dbId))
+    set(s => ({
+      messages: [...uniqueOlder, ...s.messages],
+      chatHasMoreBefore: result.hasMoreBefore,
+      chatTotalCount: result.totalCount
+    }))
   },
   addMessage: (msg) => set(s => ({
     messages: [...s.messages, { ...msg, createdAt: msg.createdAt ?? Date.now() }],
@@ -739,6 +769,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       set({
         activeChatId: id,
         messages: [],
+        chatHasMoreBefore: false,
+        chatTotalCount: 0,
         isStreaming: false,
         streamStartedAt: null,
         pendingWrites: [],
@@ -757,10 +789,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         subagentRuns: []
       })
       void (async () => {
-        const history = await window.api.chats.list(id)
+        const history = await window.api.chats.listWindow(id, { limit: 50 })
         if (myToken !== switchChatSessionToken) return
         if (get().activeChatId !== id) return
-        set({ messages: history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })) })
+        set({
+          messages: history.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })),
+          chatHasMoreBefore: history.hasMoreBefore,
+          chatTotalCount: history.totalCount
+        })
       })()
     }
 

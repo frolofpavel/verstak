@@ -32,6 +32,7 @@ type ChatMessageRow = Omit<ChatMessage, 'appliedSkills'> & {
 export interface Chats {
   /** List messages — new API: by sessionId. */
   listBySession: (sessionId: number) => ChatMessage[]
+  listWindowBySession: (sessionId: number, opts?: { beforeId?: number | null; limit?: number }) => { messages: ChatMessage[]; totalCount: number; hasMoreBefore: boolean }
   /** Legacy: list all messages of a project (across sessions) — left for back-compat callers. */
   list: (projectPath: string) => ChatMessage[]
   /** Append a message to a specific session. */
@@ -109,6 +110,24 @@ export function createChats(db: Database): Chats {
         `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id ASC`
       ).all(sessionId) as ChatMessageRow[]
       return rows.map(mapMessage)
+    },
+    listWindowBySession(sessionId, opts) {
+      const limit = Math.max(1, Math.min(200, Math.floor(opts?.limit ?? 50)))
+      const beforeId = typeof opts?.beforeId === 'number' && Number.isFinite(opts.beforeId) ? Math.floor(opts.beforeId) : null
+      const totalRow = db.prepare('SELECT COUNT(*) as count FROM chats WHERE session_id = ?').get(sessionId) as { count: number }
+      const rows = beforeId != null
+        ? db.prepare(
+          `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?`
+        ).all(sessionId, beforeId, limit) as ChatMessageRow[]
+        : db.prepare(
+          `SELECT id, role, content, ${thinkingSelect} as thinking, ${appliedSkillsSelect} as appliedSkillsJson, created_at as createdAt FROM chats WHERE session_id = ? ORDER BY id DESC LIMIT ?`
+        ).all(sessionId, limit) as ChatMessageRow[]
+      const messages = rows.reverse().map(mapMessage)
+      const firstId = messages[0]?.id ?? beforeId ?? 0
+      const olderRow = firstId > 0
+        ? db.prepare('SELECT COUNT(*) as count FROM chats WHERE session_id = ? AND id < ?').get(sessionId, firstId) as { count: number }
+        : { count: 0 }
+      return { messages, totalCount: totalRow.count, hasMoreBefore: olderRow.count > 0 }
     },
     list(projectPath) {
       const rows = db.prepare(

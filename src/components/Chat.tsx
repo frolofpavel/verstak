@@ -551,6 +551,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     agentProgress: projectAgentProgress,
     sessionUsage: projectSessionUsage,
     path: activePath, chatSessions, activeChatId, resumableRuns,
+    chatHasMoreBefore, chatTotalCount, loadOlderMessages,
     addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
     setHelpStreaming, clearHelpActivity, pushHelpActivity, setHelpAgentProgress, addHelpUsage,
     appendHelpLastAssistantThinking,
@@ -562,6 +563,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const isHelpChat = helpMode
   const [skillSuggestionsEnabled, setSkillSuggestionsEnabled] = useState(() => readSkillSuggestionsEnabled(activePath))
   const messages = helpMode ? help.messages : projectMessages
+  const hasOlderMessages = !helpMode && chatHasMoreBefore
   const isStreaming = helpMode ? help.isStreaming : projectIsStreaming
   const streamStartedAt = helpMode ? help.streamStartedAt : projectStreamStartedAt
   const activity = helpMode ? help.activity : projectActivity
@@ -3255,6 +3257,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 ))}
               </div>
             )}
+          </div>
+        )}
+        {hasOlderMessages && (
+          <div className="gg-chat-history-more">
+            <button className="gg-btn gg-btn-ghost" type="button" onClick={() => void loadOlderMessages()}>
+              Показать ранние сообщения
+              {chatTotalCount > messages.length ? ` (${messages.length}/${chatTotalCount})` : ''}
+            </button>
           </div>
         )}
         {messages.map((m, i) => {

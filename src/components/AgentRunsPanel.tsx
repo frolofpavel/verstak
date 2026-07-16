@@ -416,6 +416,7 @@ export function AgentRunsPanel() {
   const [ownerFilter, setOwnerFilter] = useState<string>('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [providerMeta, setProviderMeta] = useState<Record<string, string>>({})
+  const [visibleLimit, setVisibleLimit] = useState(20)
 
   useEffect(() => {
     void window.api.providers.list().then((list: ProviderDescriptorDTO[]) => {
@@ -433,16 +434,24 @@ export function AgentRunsPanel() {
   const refresh = useCallback(async () => {
     if (!path) return
     try {
-      const list = await window.api.agentRuns.list(path)
+      const list = await window.api.agentRuns.list(path, { limit: visibleLimit })
       setRuns(list)
     } catch { /* IPC недоступен в dev */ }
-  }, [path])
+  }, [path, visibleLimit])
 
   useEffect(() => {
     void refresh()
-    const timer = setInterval(() => { if (!document.hidden) void refresh() }, 2000)
+    const timer = setInterval(() => {
+      if (document.hidden) return
+      if (!runs.some(r => r.status === 'running' || r.status === 'queued')) return
+      void refresh()
+    }, 2000)
     return () => clearInterval(timer)
-  }, [refresh])
+  }, [refresh, runs])
+
+  useEffect(() => {
+    setVisibleLimit(20)
+  }, [path])
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -537,6 +546,11 @@ export function AgentRunsPanel() {
                 onResume={(id, status) => void handleResume(id, status)}
               />
             ))}
+            {runs.length >= visibleLimit && (
+              <button className="gg-btn gg-btn-ghost" type="button" onClick={() => setVisibleLimit(limit => limit + 20)}>
+                Показать еще
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export type UiDensity = 'compact' | 'standard' | 'spacious'
+export type UiDensity = 'compact' | 'standard'
 export type MotionLevel = 'full' | 'off'
 export type ProjectStatusDisplay = 'avatar' | 'text' | 'errors'
 
@@ -23,8 +23,8 @@ const STORAGE_KEYS = {
 } as const
 
 export const UI_DENSITY_OPTIONS: Array<{ id: UiDensity; label: string; description: string }> = [
-  { id: 'standard', label: 'Стандартно', description: 'Стандартный интерфейс' },
-  { id: 'spacious', label: 'Просторно', description: 'Больше пространства между блоками' }
+  { id: 'standard', label: 'Стандартно', description: 'Обычные отступы и размер строк' },
+  { id: 'compact', label: 'Компактно', description: 'Больше проектов в панели, аватарки и названия остаются видимыми' }
 ]
 
 export const MOTION_LEVEL_OPTIONS: Array<{ id: MotionLevel; label: string; description: string }> = [
@@ -39,8 +39,8 @@ export const PROJECT_STATUS_DISPLAY_OPTIONS: Array<{ id: ProjectStatusDisplay; l
 ]
 
 function normalizeUiDensity(raw: unknown): UiDensity {
-  if (raw === 'compact') return 'standard'
-  return raw === 'standard' || raw === 'spacious'
+  if (raw === 'spacious') return 'compact'
+  return raw === 'standard' || raw === 'compact'
     ? raw
     : APPEARANCE_DEFAULTS.uiDensity
 }

@@ -3514,20 +3514,24 @@ html[data-theme="light"] .gg-project-settings {
   color: var(--text-primary);
 }
 .gg-project-button.is-project-chip {
+  --project-button-active-bg-top: color-mix(in srgb, var(--bg-input) 78%, transparent);
+  --project-button-active-bg-bottom: color-mix(in srgb, var(--bg-base) 86%, transparent);
+  --project-button-active-border: color-mix(in srgb, var(--accent) 44%, var(--border-subtle));
+  --project-button-active-shadow:
+    inset 0 1px 5px color-mix(in srgb, black 24%, transparent),
+    0 1px 0 color-mix(in srgb, white 5%, transparent);
   height: auto;
   min-height: 40px;
   padding: 5px 10px 5px 8px;
   gap: 10px;
   border-style: solid;
-  border-color: color-mix(in srgb, var(--project-accent, var(--accent)) 44%, var(--border-subtle));
+  border-color: var(--project-button-active-border);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-input) 78%, transparent), color-mix(in srgb, var(--bg-base) 86%, transparent));
-  box-shadow:
-    inset 0 1px 5px color-mix(in srgb, black 24%, transparent),
-    0 1px 0 color-mix(in srgb, white 5%, transparent);
+    linear-gradient(180deg, var(--project-button-active-bg-top), var(--project-button-active-bg-bottom));
+  box-shadow: var(--project-button-active-shadow);
 }
 .gg-project-button.is-project-chip:hover {
-  border-color: color-mix(in srgb, var(--project-accent, var(--accent)) 52%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border-subtle));
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-input) 82%, transparent), color-mix(in srgb, var(--bg-base) 88%, transparent));
   box-shadow:
@@ -3571,11 +3575,14 @@ html[data-theme="light"] .gg-project-settings {
   line-height: 1.15;
 }
 html[data-theme="light"] .gg-project-button.is-project-chip {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-input) 88%, white 12%), color-mix(in srgb, var(--bg-base) 82%, white 18%));
-  box-shadow:
+  --project-button-active-bg-top: color-mix(in srgb, var(--bg-input) 88%, white 12%);
+  --project-button-active-bg-bottom: color-mix(in srgb, var(--bg-base) 82%, white 18%);
+  --project-button-active-shadow:
     inset 0 1px 4px color-mix(in srgb, #7b8aa0 24%, transparent),
     0 1px 0 color-mix(in srgb, white 56%, transparent);
+  background:
+    linear-gradient(180deg, var(--project-button-active-bg-top), var(--project-button-active-bg-bottom));
+  box-shadow: var(--project-button-active-shadow);
 }
 html[data-theme="light"] .gg-project-button.is-project-chip:hover {
   background:
