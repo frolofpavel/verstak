@@ -16,6 +16,8 @@ import {
   useNotifySettings
 } from '../hooks/useNotifySettings'
 import { UpdatesSettings } from './UpdatesSettings'
+import { SubscriptionsTab } from './settings/SubscriptionsTab'
+import { UsageTab } from './settings/UsageTab'
 import { SubscriptionAccountsPanel } from './SubscriptionAccountsPanel'
 import { ProfilesTab } from './ProfilesTab'
 import {
@@ -55,8 +57,8 @@ import type { AgentMode } from './ModePicker'
  *  main-реестра, презентация из PROVIDER_UI_META. */
 type ProviderConfig = CatalogProvider
 
-type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
-type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy'
+type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'subscriptions' | 'usage'
+type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'subscriptions' | 'usage'
 type SettingsNavTab = { id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean; disabled?: boolean; keywords?: string }
 type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
@@ -153,6 +155,24 @@ function SettingsNavIcon({ name }: { name: SettingsNavIconName }) {
         <svg {...svgProps}>
           <path d="M12 4.6 17.8 7v4.7c0 3.6-2.15 6-5.8 7.7-3.65-1.7-5.8-4.1-5.8-7.7V7L12 4.6Z" {...strokeProps} />
           <path d="m9.4 12.1 1.7 1.7 3.6-3.75" {...strokeProps} />
+        </svg>
+      )
+    // 2.0.8: «Подписки» — карточка аккаунта; «Расход» — столбики отчёта.
+    case 'subscriptions':
+      return (
+        <svg {...svgProps}>
+          <rect x="3.5" y="6" width="17" height="12" rx="2.2" {...strokeProps} />
+          <path d="M3.5 10h17" {...strokeProps} />
+          <path d="M7 14h3.5" {...strokeProps} />
+        </svg>
+      )
+    case 'usage':
+      return (
+        <svg {...svgProps}>
+          <path d="M4 19.2h16" {...strokeProps} />
+          <path d="M7.4 19.2v-5.4" {...strokeProps} />
+          <path d="M12 19.2V7.6" {...strokeProps} />
+          <path d="M16.6 19.2v-8.3" {...strokeProps} />
         </svg>
       )
     default:
@@ -1384,6 +1404,9 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       { id: 'models', label: t.settings.models, icon: 'models', keywords: 'default fallback reviewer planner picker пресеты модели выбор модель показывать подключенные подключённые рабочий набор текущая чат лимит расходы сутки рубли доллары бюджет стоимость' },
       { id: 'modelModes', label: 'Режимы работы моделей', icon: 'modelModes', keywords: 'режимы модели планирование авто правки привязка стандарт турбо простой поведение подтверждение без подтверждений разрешения задачи' },
       { id: 'policy', label: 'Права модели', icon: 'policy', keywords: 'allowlist permissions bash команды политика права модели доступ что разрешено разрешения запреты запрет доверенные действия папки файлы команды коннекторы подтверждение' },
+      // 2.0.8: подписочные аккаунты (состояние/остывание) и история расхода.
+      { id: 'subscriptions', label: 'Подписки', icon: 'subscriptions', keywords: 'подписка подписки аккаунт аккаунты claude max codex chatgpt plus вход логин остывание лимит квота готов переключение несколько аккаунтов' },
+      { id: 'usage', label: 'Расход', icon: 'usage', keywords: 'расход расходы токены деньги стоимость сколько потратил кэш кеш история статистика отчёт провайдер модель за неделю за месяц' },
     ] },
     { title: 'Интеграции', tabs: [
       { id: 'connectors', label: t.settings.connectors, icon: 'connectors', keywords: 'telegram bitrix bitrix24 битрикс б24 sheets таблицы google github yandex яндекс direct директ metrika метрика wordstat вордстат диск drive http ssh api webhook вебхук токен ключ crm сделки задачи контакты реклама семантика' },
@@ -3739,6 +3762,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         {tab === 'policy' && (
           <PolicyTab />
         )}
+
+        {/* 2.0.8: обе вкладки строились standalone (ждали merge ветки дизайнера) —
+            merge случился, монтируем, чтобы фичи перестали быть недоступными. */}
+        {tab === 'subscriptions' && <SubscriptionsTab />}
+
+        {tab === 'usage' && <UsageTab />}
 
         {tab === 'updates' && <UpdatesSettings />}
 

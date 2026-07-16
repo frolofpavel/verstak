@@ -249,9 +249,10 @@ import type {
   RunUsageRow,
   UsageSummaryGroup,
   CacheDiagnosticCode,
+  InputAccounting,
 } from '../../shared/contracts/usage'
 
-export type { RunUsageRow, UsageSummaryGroup, CacheDiagnosticCode }
+export type { RunUsageRow, UsageSummaryGroup, CacheDiagnosticCode, InputAccounting }
 
 export interface SkillImportComparison {
   currentRuleCount: number
@@ -305,10 +306,23 @@ export interface SchedulerHealth {
   stalled: boolean
 }
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
+/**
+ * Зеркало electron/ai/types.ts UsageDelta. 2.0.8-E добавил в main новые имена и СЕМАНТИКУ
+ * кэша, а сюда они не доехали — из-за этого ценник чата не знал inputAccounting, считал по
+ * дефолту 'inclusive' и вычитал кэш из input у Claude (exclusive), занижая стоимость
+ * (дефект B). Поля обязаны совпадать с main-типом.
+ */
 export interface UsageDelta {
   inputTokens?: number
   outputTokens?: number
+  /** @deprecated старое имя cacheReadTokens (мост 2.0.8-E). */
   cachedInputTokens?: number
+  /** @deprecated старое имя cacheWriteTokens (мост 2.0.8-E). */
+  cacheCreationInputTokens?: number
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
+  /** Входит ли кэш в reported input: exclusive (Claude) / inclusive (OpenAI, Gemini) / unknown. */
+  inputAccounting?: InputAccounting
   model?: string
 }
 

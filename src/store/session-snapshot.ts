@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types/api'
 import type { AgentProgressEntry } from '../lib/agent-progress'
+import type { InputAccounting } from '../../shared/contracts/usage'
 
 // Pure, store-agnostic building blocks вынесены из projectStore.ts:
 // типы одной сессии/чата + фабрика пустого снапшота + touch-marker данные.
@@ -39,6 +40,13 @@ export interface SessionUsage {
   inputTokens: number
   outputTokens: number
   cachedInputTokens: number
+  /**
+   * 2.0.8-E хвост: семантика reported input ФАКТИЧЕСКОГО провайдера (последнее usage-событие).
+   * Без неё ценник чата считал по дефолту 'inclusive' и вычитал кэш из input у Claude
+   * (exclusive) → занижал стоимость на больших cache-hit (дефект B). undefined = провайдер
+   * не сообщил → pricing не вычитает кэш (безопасный дефолт).
+   */
+  inputAccounting?: InputAccounting
 }
 
 export interface RunningPlanStep {

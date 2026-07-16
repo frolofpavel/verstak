@@ -1627,7 +1627,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         store.addUsage({
           inputTokens: event.usage.inputTokens,
           outputTokens: event.usage.outputTokens,
-          cachedInputTokens: event.usage.cachedInputTokens
+          cachedInputTokens: event.usage.cachedInputTokens,
+          // 2.0.8-E хвост: без семантики ценник считал по 'inclusive' и вычитал кэш
+          // из input у Claude (exclusive) → занижал стоимость на больших cache-hit.
+          inputAccounting: event.usage.inputAccounting
         })
       }
       else if (event.type === 'plan-created') {
@@ -4018,9 +4021,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 )
               })()}
               {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
-                const cost = estimateCost(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens)
+                // 2.0.8-E хвост: передаём семантику провайдера — иначе у Claude (exclusive)
+                // из input повторно вычитался кэш и ценник занижал реальную стоимость (дефект B).
+                const cost = estimateCost(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting)
                 const severity = costSeverity(cost.cents)
-                const breakdown = costBreakdown(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens)
+                const breakdown = costBreakdown(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting)
                 return (
                   <span className={`gg-usage-pill ${severity}`} title={breakdown}>
                     <span>↑{formatTokens(sessionUsage.inputTokens)}</span>

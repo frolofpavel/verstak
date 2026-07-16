@@ -3,6 +3,7 @@ import type { FileNode, ChatMessage, ProjectMeta, ChatSession, DevTask, Resumabl
 import { sortProjectsByName } from '../lib/project-sort'
 import { isModelValidForProvider } from '../hooks/useProvider'
 import type { PromptRouteOverride } from '../../shared/contracts/provider'
+import type { InputAccounting } from '../../shared/contracts/usage'
 import { isGenericChatTitle, titleFromFirstMessage } from '../lib/chat-session-title'
 import { useSkills } from './skillStore'
 import {
@@ -173,7 +174,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   refreshDevTask: () => Promise<void>
   /** Сбросить активную задачу (снимок + id). Вкладку не переключает. */
   closeDevTask: () => void
-  addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
+  addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; inputAccounting?: InputAccounting }) => void
   resetUsage: () => void
   setRunningPlanStep: (s: RunningPlanStep | null) => void
   /** Apply an ai:event to a background session (used when projectPath !== current). */
@@ -697,7 +698,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     sessionUsage: {
       inputTokens: s.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
       outputTokens: s.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
-      cachedInputTokens: s.sessionUsage.cachedInputTokens + (delta.cachedInputTokens ?? 0)
+      cachedInputTokens: s.sessionUsage.cachedInputTokens + (delta.cachedInputTokens ?? 0),
+      // 2.0.8-E хвост: держим семантику фактического провайдера (последнее событие
+      // побеждает — как в runner'ах). Без неё ценник занижал Claude (дефект B).
+      inputAccounting: delta.inputAccounting ?? s.sessionUsage.inputAccounting
     }
   })),
   resetUsage: () => set({ sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }),
