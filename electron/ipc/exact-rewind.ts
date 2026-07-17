@@ -69,6 +69,64 @@ export async function preflightRewind(
   return { coverage, files }
 }
 
+// ─── Сам откат в транзакции с бэкапами + unrevert (2.0.11-F, за флагом) ───
+
+export interface RewindPlanItem {
+  filePath: string
+  action: RewindAction
+  /** Прежнее содержимое (для restore). null — файл создавался (action delete). */
+  beforeContent: string | null
+}
+
+/** Бэкап: путь → содержимое ДО отката (null — файла не было). Для unrevert. */
+export type RewindBackups = Record<string, string | null>
+
+export interface RewindExecResult {
+  restored: string[]
+  failed: Array<{ filePath: string; reason: string }>
+  /** Снимок состояния ДО отката — для unrevert. */
+  backups: RewindBackups
+}
+
+export interface RewindFsDeps {
+  /** Текущее содержимое файла (null — файла нет). */
+  readCurrent: (filePath: string) => Promise<string | null>
+  writeFile: (filePath: string, content: string) => Promise<void>
+  deleteFile: (filePath: string) => Promise<void>
+}
+
+/**
+ * Применить откат. Бэкап ТЕКУЩЕГО состояния снимается ДО первой записи — иначе частичный
+ * сбой оставил бы файлы в состоянии, которое unrevert'у нечем вернуть. backups → unrevert.
+ */
+export async function executeRewind(items: RewindPlanItem[], fs: RewindFsDeps): Promise<RewindExecResult> {
+  // 1. Сначала снимаем ВСЕ бэкапы (транзакционность: до любой мутации).
+  const backups: RewindBackups = {}
+  for (const it of items) backups[it.filePath] = await fs.readCurrent(it.filePath)
+
+  // 2. Применяем откат. Сбой одного файла не роняет остальные — копим в failed.
+  const restored: string[] = []
+  const failed: Array<{ filePath: string; reason: string }> = []
+  for (const it of items) {
+    try {
+      if (it.action === 'delete') await fs.deleteFile(it.filePath)
+      else await fs.writeFile(it.filePath, it.beforeContent ?? '')
+      restored.push(it.filePath)
+    } catch (err) {
+      failed.push({ filePath: it.filePath, reason: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { restored, failed, backups }
+}
+
+/** Отменить откат: вернуть файлы к состоянию из бэкапов (null → файла не было → удалить). */
+export async function unrevert(backups: RewindBackups, fs: RewindFsDeps): Promise<void> {
+  for (const [filePath, content] of Object.entries(backups)) {
+    if (content === null) await fs.deleteFile(filePath)
+    else await fs.writeFile(filePath, content)
+  }
+}
+
 /** assessRewind поверх реальных записей + инъекция хешей. */
 async function assessCoverage(entries: UndoEntry[], deps: PreflightDeps): Promise<RewindCoverage> {
   // Хеши считаем один раз, кешируем по файлу (assessRewind зовёт currentHash синхронно).
