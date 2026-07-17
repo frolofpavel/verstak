@@ -112,4 +112,21 @@ describe('UNC edge-cases (ре-ревью C #3/#4/#5)', () => {
     const out = redactPathsForExport('открой https://api.example.com/path', {})
     expect(out).toContain('https://api.example.com/path')
   })
+
+  // Точность UNC-маски: экранированный backslash в коде (JSON/regex/строка) — НЕ UNC.
+  // UNC начинается с \\ в начале токена; escaped-путь имеет \\ в середине (слева буква/:).
+  // Иначе экспорт для code-review искажал бы легитимный код.
+  it('экранированный backslash в JSON-строке НЕ искажается (\\\\ в середине токена)', () => {
+    const src = '"path": "C:\\\\Users\\\\shared"'
+    expect(redactPathsForExport(src, {})).toBe(src) // нет контекста корней → не трогаем
+  })
+
+  // ГРАНИЦА: `\\` в НАЧАЛЕ токена (после пробела/начала) неотличимо от UNC — маскируется,
+  // даже если это редкий regex-escape вроде `\\d`. Over-redaction в безопасную (приватную)
+  // сторону; настоящий UNC важнее редкого escape. Главная утечка — escaped PATH в середине
+  // токена — закрыта тестом выше (сохраняется).
+  it('escaped backslash в СЕРЕДИНЕ токена (главный кейс кода) сохранён', () => {
+    // Windows-путь в двойных кавычках как параметр — \\ в середине, слева буква/двоеточие.
+    expect(redactPathsForExport('run "D:\\\\build\\\\out"', {})).toBe('run "D:\\\\build\\\\out"')
+  })
 })
