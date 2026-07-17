@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   chatAccountView, canPinAccounts, accountStateLabel, isPinnable, pinBinding, autoBinding,
+  shouldShowAccountBinding,
 } from '../../src/lib/chat-account-binding'
 import type { SubscriptionAccountDTO, ChatSubscriptionBindingDTO } from '../../src/types/api'
 
@@ -116,5 +117,50 @@ describe('биндинги для записи', () => {
 
   it('открепить — accountId обязан обнулиться, иначе движок счёл бы чат закреплённым', () => {
     expect(autoBinding(7, 'claude')).toEqual({ chatId: 7, providerId: 'claude', mode: 'auto', accountId: null })
+  })
+})
+
+/**
+ * Honesty & unbrick срез (ре-ревью 2.0.11-B, находка #4): чат-кирпич без выхода.
+ *
+ * Человек закрепил аккаунт за чатом, потом удалил все аккаунты этого провайдера. Движок
+ * честно останавливает прогон («аккаунт удалён»), а секция «Аккаунт подписки» в UI
+ * показывалась ТОЛЬКО при accounts.length > 0 — то есть исчезала вместе с последним
+ * аккаунтом, унося и предупреждение, и единственный способ открепиться («Автоматически»).
+ * Чат замолкал навсегда, а починить его из интерфейса было нечем.
+ *
+ * Правило: если закрепление ВИСИТ, секция обязана быть видна — даже когда закреплять уже
+ * не на что. Выход из тупика важнее чистоты меню.
+ */
+describe('чат-кирпич: открепиться можно всегда (unbrick)', () => {
+  const dangling = bind({ accountId: 99 })
+
+  it('аккаунтов не осталось, но закрепление висит → секцию ПОКАЗЫВАЕМ', () => {
+    const view = chatAccountView(dangling, [], 'claude')
+    expect(view).toEqual({ kind: 'unavailable', accountId: 99 })
+    expect(shouldShowAccountBinding([], view)).toBe(true)
+  })
+
+  it('аккаунтов нет и закрепления нет → секции нет (шум ни к чему)', () => {
+    expect(shouldShowAccountBinding([], { kind: 'auto' })).toBe(false)
+  })
+
+  it('аккаунты есть → секция как раньше', () => {
+    expect(shouldShowAccountBinding([acc()], { kind: 'auto' })).toBe(true)
+    expect(shouldShowAccountBinding([acc()], { kind: 'pinned', accountId: 1, label: 'Личный Max' })).toBe(true)
+  })
+
+  it('протухшее закрепление при живых аккаунтах — секция тоже видна', () => {
+    expect(shouldShowAccountBinding([acc({ id: 1 })], chatAccountView(dangling, [acc({ id: 1 })], 'claude'))).toBe(true)
+  })
+
+  // Открепление = вернуть авто-выбор. Это существующий путь, ему просто негде было
+  // показаться. Проверяем, что он собирается корректно и без ссылки на мёртвый аккаунт.
+  it('открепление собирается как авто-биндинг (без мёртвого accountId)', () => {
+    const b = autoBinding(7, 'claude')
+    expect(b.mode).toBe('auto')
+    expect(b.chatId).toBe(7)
+    expect(b.providerId).toBe('claude')
+    expect(b.accountId ?? null).toBeNull()
   })
 })

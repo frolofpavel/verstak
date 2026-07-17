@@ -270,3 +270,41 @@ describe('decideRoute — детерминизм (DoD: один input → одн
     expect(chatB.next).toEqual(A('openai', 'gpt-5'))
   })
 })
+
+/**
+ * Honesty & unbrick срез (ре-ревью 2.0.11-B, находка #4): выход из чата-кирпича.
+ *
+ * Сценарий целиком: чат закреплён за аккаунтом → аккаунт удалили → движок честно
+ * останавливает прогон (unavailable) → человек жмёт «Открепить и вернуть автовыбор»
+ * (binding.mode='auto') → прогон снова проходит.
+ *
+ * Проверяется движок: именно он решает, жив чат или нет. UI-половина — в
+ * tests/lib/chat-account-binding (секция видна, пока закрепление висит).
+ */
+describe('unbrick: открепление оживляет чат (ре-ревью B #4)', () => {
+  const noAccounts = () => null // все аккаунты провайдера удалены
+
+  it('закрепление на удалённый аккаунт → прогон останавливается', () => {
+    expect(pickChatAccountId('claude', { mode: 'pinned', accountId: 99 }, noAccounts))
+      .toEqual({ kind: 'unavailable' })
+  })
+
+  // Ключевое: открепление возвращает чат к жизни ДАЖЕ когда аккаунтов не осталось вовсе.
+  it('после открепления (mode=auto) прогон проходит — чат снова живой', () => {
+    expect(pickChatAccountId('claude', { mode: 'auto', accountId: null }, noAccounts))
+      .toEqual({ kind: 'auto' })
+  })
+
+  it('открепление игнорирует застрявший accountId мёртвого аккаунта', () => {
+    // UI шлёт autoBinding без accountId, но даже если старый id где-то залипнет —
+    // режим auto обязан победить, иначе тупик вернётся.
+    expect(pickChatAccountId('claude', { mode: 'auto', accountId: 99 }, noAccounts))
+      .toEqual({ kind: 'auto' })
+  })
+
+  it('открепление одного чата не оживляет и не ломает закрепление другого', () => {
+    const live = (id: number) => (id === 1 ? 'claude' : null)
+    expect(pickChatAccountId('claude', { mode: 'auto', accountId: null }, live)).toEqual({ kind: 'auto' })
+    expect(pickChatAccountId('claude', { mode: 'pinned', accountId: 1 }, live)).toEqual({ kind: 'pinned', accountId: 1 })
+  })
+})

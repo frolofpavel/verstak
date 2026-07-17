@@ -3,6 +3,7 @@ import { useProvider, type ProviderId } from '../hooks/useProvider'
 import { useProject } from '../store/projectStore'
 import {
   chatAccountView, canPinAccounts, accountStateLabel, isPinnable, pinBinding, autoBinding,
+  shouldShowAccountBinding,
 } from '../lib/chat-account-binding'
 import type { SubscriptionAccountDTO, ChatSubscriptionBindingDTO } from '../types/api'
 import { useT } from '../i18n'
@@ -366,7 +367,9 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
 
           {/* Закрепление аккаунта за чатом (хвост 2.0.8-D2). Показываем ТОЛЬКО там, где есть
               что закреплять: у обычного API-провайдера с одним ключом это был бы шум. */}
-          {activeChatId != null && canPinAccounts(accounts) && (
+          {/* unbrick (ре-ревью B #4): секция видна и когда аккаунтов не осталось, но
+              закрепление ВИСИТ — иначе чат молчит навсегда, а открепиться нечем. */}
+          {activeChatId != null && shouldShowAccountBinding(accounts, accountView) && (
             <div className="gg-mp-section gg-mp-accounts">
               <div className="gg-mp-section-title">Аккаунт подписки</div>
 
@@ -387,8 +390,16 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
                 aria-selected={accountView.kind === 'auto'}
                 onClick={() => void applyBinding(autoBinding(activeChatId, provider.id))}
               >
-                <span className="gg-mp-row-label">Автоматически</span>
-                <span className="gg-mp-row-meta">Verstak сам переключится на свежий аккаунт при лимите</span>
+                {/* При висящем закреплении это единственный выход из тупика — и подпись
+                    обязана читаться как выход, а не как настройка (ре-ревью B #4). */}
+                <span className="gg-mp-row-label">
+                  {accountView.kind === 'unavailable' ? 'Открепить и вернуть автовыбор' : 'Автоматически'}
+                </span>
+                <span className="gg-mp-row-meta">
+                  {accountView.kind === 'unavailable'
+                    ? 'снимет закрепление на удалённый аккаунт — чат снова заработает'
+                    : 'Verstak сам переключится на свежий аккаунт при лимите'}
+                </span>
               </button>
 
               {accounts.map(a => {

@@ -47,6 +47,25 @@ export function canPinAccounts(accounts: SubscriptionAccountDTO[]): boolean {
   return accounts.length > 0
 }
 
+/**
+ * Показывать ли секцию «Аккаунт подписки» — honesty & unbrick срез (ре-ревью B #4).
+ *
+ * Раньше решал только `canPinAccounts`, и получался чат-кирпич БЕЗ ВЫХОДА: человек
+ * закрепил аккаунт, потом удалил все аккаунты провайдера — секция исчезла вместе с
+ * последним аккаунтом, унося и предупреждение, и единственный способ открепиться
+ * («Автоматически»). Движок при этом честно останавливает прогон, то есть чат молчит
+ * навсегда, а починить его из интерфейса нечем.
+ *
+ * Поэтому: закрепление ВИСИТ → секция видна, даже когда закреплять уже не на что.
+ * Выход из тупика важнее чистоты меню.
+ */
+export function shouldShowAccountBinding(
+  accounts: SubscriptionAccountDTO[],
+  view: ChatAccountView,
+): boolean {
+  return canPinAccounts(accounts) || view.kind !== 'auto'
+}
+
 /** Человеческая подпись состояния аккаунта — без жаргона (Павел маркетолог). */
 export function accountStateLabel(a: SubscriptionAccountDTO): string {
   if (!a.hasCredential) return 'ключ не найден'
