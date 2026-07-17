@@ -71,6 +71,29 @@ export function maxMessageId(db: Database, chatId: number): number {
   return row?.maxId ?? 0
 }
 
+/**
+ * Убрать снапшоты, которые пересказывают УДАЛЁННЫЕ сообщения (ревью B #1).
+ *
+ * Зовётся вместе с truncateAfter («Откатить задачу»): человек отменил ветку диалога, и
+ * итог, который её пересказывал, обязан уйти вместе с ней. Иначе:
+ *   · хвост (id > границы) пуст → модель получит ОДИН summary, а весь видимый диалог
+ *     выпадет из запроса;
+ *   · сам summary будет пересказывать отменённое — как актуальный контекст.
+ * И это не лечится проверкой «граница не выше максимума»: первое же новое сообщение
+ * поднимет максимум, и снапшот-зомби снова сойдёт за валидный.
+ *
+ * Рубим ТОЛЬКО задетые (through > afterMessageId): снапшоты целиком внутри уцелевшей
+ * части остаются рабочими. Более ранний снапшот при этом снова становится активным —
+ * журнал сжатий для того и ведётся.
+ *
+ * @returns сколько снапшотов убрано.
+ */
+export function invalidateSnapshotsAfter(db: Database, chatId: number, afterMessageId: number): number {
+  return db.prepare(
+    'DELETE FROM chat_context_snapshots WHERE chat_id = ? AND through_message_id > ?'
+  ).run(chatId, afterMessageId).changes
+}
+
 /** Активный снапшот чата — самый свежий. null, если сжатия не было. */
 export function activeSnapshot(db: Database, chatId: number): ChatContextSnapshot | null {
   const row = db.prepare(`${SELECT} WHERE chat_id = ? ORDER BY id DESC LIMIT 1`).get(chatId)

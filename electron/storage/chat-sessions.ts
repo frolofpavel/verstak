@@ -150,6 +150,9 @@ export function createChatSessions(db: Database): ChatSessions {
         const allIds = [id, ...subIds]
         const placeholders = allIds.map(() => '?').join(',')
         db.prepare(`DELETE FROM chats WHERE session_id IN (${placeholders})`).run(...allIds)
+        // 2.0.11-B: сжатые итоги удаляемых чатов — в тот же каскад, иначе копятся сироты
+        // (ревью B #14) и id чата когда-нибудь переиспользуется с чужим снапшотом.
+        db.prepare(`DELETE FROM chat_context_snapshots WHERE chat_id IN (${placeholders})`).run(...allIds)
         db.prepare(`DELETE FROM chat_sessions WHERE id IN (${placeholders})`).run(...allIds)
         // Форк-ветки, висевшие на удалённом чате, отвязываем в корень — их работа цела.
         db.prepare("UPDATE chat_sessions SET parent_chat_id = NULL WHERE parent_chat_id = ? AND kind = 'main'").run(id)

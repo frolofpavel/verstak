@@ -6,6 +6,7 @@ import { forgetMemorizedChat } from './ai'
 import { summarizeAndSaveSession } from '../ai/session-summary'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { isChatSubscriptionBinding, type ChatSubscriptionBindingDTO } from '../../shared/contracts/subscription'
+import { invalidateSnapshotsAfter } from '../storage/chat-context-snapshots'
 import { isKnownProviderId } from '../../shared/contracts/provider'
 
 export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Database): void {
@@ -108,5 +109,20 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
   })
 
   ipcMain.handle('chats:max-message-id', (_e, sessionId: number) => chats.maxMessageId(sessionId))
-  ipcMain.handle('chats:truncate-after', (_e, sessionId: number, afterMessageId: number) => chats.truncateAfter(sessionId, afterMessageId))
+  /**
+   * Откат диалога к чекпоинту. Вместе с сообщениями обязан уйти и сжатый итог, который
+   * их пересказывал (ревью 2.0.11-B #1) — иначе модель продолжит работать на итоге
+   * ветки, которую человек только что отменил, а видимый диалог выпадет из запроса.
+   *
+   * ОДНА транзакция: краш между удалением и инвалидацией оставил бы снапшот-зомби,
+   * а он опаснее обоих исходов по отдельности.
+   */
+  const truncateWithSnapshots = db.transaction((sessionId: number, afterMessageId: number) => {
+    const deleted = chats.truncateAfter(sessionId, afterMessageId)
+    const snapshots = invalidateSnapshotsAfter(db, sessionId, afterMessageId)
+    if (snapshots > 0) logRuntime('context.snapshot.invalidated', { chatId: sessionId, afterMessageId, snapshots })
+    return deleted
+  })
+  ipcMain.handle('chats:truncate-after', (_e, sessionId: number, afterMessageId: number) =>
+    truncateWithSnapshots(sessionId, afterMessageId))
 }
