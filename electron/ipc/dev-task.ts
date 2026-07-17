@@ -61,7 +61,12 @@ interface GitBase {
  * Не git-репозиторий / git не установлен → { null, null } (не падаем).
  */
 async function readGitBase(cwd: string): Promise<GitBase> {
-  const opts = { cwd, timeout: GIT_TIMEOUT, windowsHide: true }
+  // Под git-хуком (pre-commit) git сам выставляет GIT_DIR/GIT_INDEX_FILE; в linked
+  // worktree путь абсолютный → git игнорирует cwd и отвечает про ЧУЖОЙ репозиторий
+  // (не-git проект получил бы ветку приложения). Конвенция проекта — git-worktree.ts:27.
+  const env = { ...process.env }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_NAMESPACE', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[k]
+  const opts = { cwd, timeout: GIT_TIMEOUT, windowsHide: true, env }
   let branch: string | null = null
   let sha: string | null = null
   try {

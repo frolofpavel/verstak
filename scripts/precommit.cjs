@@ -14,6 +14,14 @@ const { spawnSync } = require('child_process')
 const { decideTestGate } = require('./gate-lib.cjs')
 const { ensureNodeAbi } = require('./safe-rebuild.cjs')
 
+// КРИТИЧНО (инцидент 17.07, linked worktree): git запускает хук с GIT_DIR/GIT_INDEX_FILE
+// в окружении; в основном дереве пути ОТНОСИТЕЛЬНЫЕ (безвредны при смене cwd), в linked
+// worktree — АБСОЛЮТНЫЕ. Тогда git-операции ТЕСТОВ из временных папок (control-envelope,
+// dev-task, worktree-*) бьют в РЕАЛЬНУЮ ветку: фикстурные коммиты «baseline» с calc.mjs
+// поверх ветки, чужой индекс, даже core.bare=true у основного репо. Чистим окружение
+// хука ДО запуска детей — тесты снова резолвят git по своему cwd, как задумано.
+for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_NAMESPACE', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete process.env[k]
+
 function run(cmd, args) {
   return spawnSync(cmd, args, { cwd: process.cwd(), shell: process.platform === 'win32', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
