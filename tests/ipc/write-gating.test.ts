@@ -20,6 +20,7 @@ interface Harness {
   ctx: ToolContext
   writes: Array<{ path: string; content: string }>
   recordWriteCalls: number
+  lastProvenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }
   controller: AbortController
 }
 
@@ -28,6 +29,7 @@ function harness(dir: string, mode: AgentMode): Harness {
   const controller = new AbortController()
   const h = { writes, recordWriteCalls: 0, controller } as Harness
   h.ctx = {
+    runId: 'run-x', // 2.0.11-E: провенанс отката — recordWrite должен его прокинуть
     projectPath: dir,
     sendId: 't',
     agentMode: mode,
@@ -35,7 +37,10 @@ function harness(dir: string, mode: AgentMode): Harness {
     sender: { send: () => {} },
     pendingWrites: new Map(),
     scopedKey: (sendId: unknown, callId: unknown) => `${sendId}:${callId}`,
-    recordWrite: () => { h.recordWriteCalls++ },
+    recordWrite: (_p: unknown, _f: unknown, _b: unknown, _a: unknown, provenance?: Harness['lastProvenance']) => {
+      h.recordWriteCalls++
+      h.lastProvenance = provenance
+    },
     recordRunEvent: () => {},
     tools: {
       execute: async (name: string, args: Record<string, unknown>) => {
@@ -74,6 +79,14 @@ describe('write_file gating (diffConfirmWrite)', () => {
     expect(h.recordWriteCalls).toBe(1)
     expect(res.result).toContain('Applied write to src/foo.ts')
     expect(res.error).toBeFalsy()
+  })
+
+  // 2.0.11-E: undo-запись должна нести провенанс прогона (runId), иначе rewindCoverage
+  // не отличит трассируемую правку от непротрассированной.
+  it('recordWrite получает провенанс прогона (runId)', async () => {
+    const h = harness(dir, 'accept-edits')
+    await writeFileHandler.handle(call(), h.ctx)
+    expect(h.lastProvenance?.runId).toBe('run-x')
   })
 
   it('absolute Downloads-style write does not create project undo entry', async () => {

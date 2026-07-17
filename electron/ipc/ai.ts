@@ -85,7 +85,8 @@ export interface AiDeps {
   /** Корни зарегистрированных проектов — для валидации projectPath из рендерера. */
   getKnownRoots: () => string[]
   /** Persist a write so the user can ↶ revert it later. */
-  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
+  // 2.0.11-E: provenance опционален (обратно совместимо с 4-арг реализациями/типами).
+  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) => void
   /** Fetch the N most recent accepted writes for the Context Pack. */
   recentWrites: (projectPath: string, limit: number) => Array<{ filePath: string; createdAt: number }>
   /** Project Brain (Итер.4): прогретый ContextPack под задачу. null если не прогрет. */

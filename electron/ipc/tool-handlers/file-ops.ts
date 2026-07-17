@@ -103,7 +103,10 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
   try {
     await ctx.tools.execute('write_file', { path, content: after })
     if (!isExternalWrite) {
-      try { ctx.recordWrite(ctx.projectPath, path, existedBefore ? before : null, after) } catch { /* undo not critical */ }
+      // 2.0.11-E: провенанс отката — какой прогон менял файл. runId из контекста;
+      // chatId/messageId в ToolContext не носятся (пока), остаются null. По runId
+      // rewindCoverage отличит трассируемую правку от непротрассированной.
+      try { ctx.recordWrite(ctx.projectPath, path, existedBefore ? before : null, after, { runId: ctx.runId ?? null }) } catch { /* undo not critical */ }
       // Incremental project map update — mark file dirty instead of full rebuild
       markFileDirty(ctx.projectPath, join(ctx.projectPath, path))
     }

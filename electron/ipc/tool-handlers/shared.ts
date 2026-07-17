@@ -30,7 +30,9 @@ export interface ToolContext {
   signal: AbortSignal
   projectPath: string
   tools: FileTools
-  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
+  // 2.0.11-E: provenance опционален — не ломает существующие 4-арг реализации (совместимо
+  // с типом в runner-api.ts), но file-ops прокидывает runId прогона для честного отката.
+  recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) => void
   recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   /** Read recent journal entries — used by the `read_journal` AI tool for self-reflection. */

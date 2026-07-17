@@ -598,8 +598,9 @@ app.whenReady().then(() => {
     // 1.9.4: лимит активного аккаунта → cooling + переключение на следующий готовый аккаунт пула.
     switchSubscriptionAccountOnLimit: (providerId, resetEta) => switchActiveOnLimit(db, providerId, resetEta),
     getKnownRoots: knownRoots,
-    recordWrite: (projectPath, filePath, before, after) => {
-      undoStack.push(projectPath, filePath, before, after)
+    recordWrite: (projectPath, filePath, before, after, provenance) => {
+      // 2.0.11-E: провенанс (runId и т.д.) прокидывается в undo-запись для rewindCoverage.
+      undoStack.push(projectPath, filePath, before, after, provenance)
     },
     recentWrites: (projectPath, limit) => {
       const list = undoStack.list(projectPath)
