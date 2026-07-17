@@ -18,6 +18,22 @@ export interface AppliedSkillRef { id: string; name?: string; icon?: string; des
 export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; appliedSkills?: AppliedSkillRef[]; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; appliedSkills?: AppliedSkillRef[]; createdAt: number }
 
+// ── 2.0.11-F: Exact Rewind DTO (mirror форм из electron/ipc/exact-rewind*.ts) ──
+export interface RewindCoverageDTO {
+  level: 'complete' | 'partial' | 'none'
+  tracedFiles: number
+  hasUntracedWriters: boolean
+  staleFiles: number
+}
+export interface RewindPreflightFileDTO { filePath: string; action: 'restore' | 'delete'; stale: boolean }
+export type ExactRewindPreflightDTO =
+  | { disabled: true }
+  | { disabled?: false; coverage: RewindCoverageDTO; files: RewindPreflightFileDTO[] }
+export type ExactRewindExecuteDTO =
+  | { disabled: true }
+  | { ok: boolean; restored: string[]; failed: Array<{ filePath: string; reason: string }>; backups: Record<string, string | null>; coverage: RewindCoverageDTO }
+  | { ok: false; error: string }
+
 // ── 2.0.11-B: ручная компакция контекста (mirror форм из electron/ai/compaction-service.ts
 //    и electron/storage/chat-context-snapshots.ts; renderer не импортирует из electron/) ──
 export interface ContextStateDTO {
@@ -645,6 +661,12 @@ declare global {
           count: number
           failed?: Array<{ id: number; filePath: string; reason: string }>
         }>
+      }
+      // 2.0.11-F: Exact Rewind (за флагом exact_rewind_enabled). disabled=true → фича выключена.
+      exactRewind: {
+        preflight: (checkpointId: number) => Promise<ExactRewindPreflightDTO>
+        execute: (checkpointId: number) => Promise<ExactRewindExecuteDTO>
+        unrevert: (backups: Record<string, string | null>) => Promise<{ ok: boolean } | { disabled: true }>
       }
       skills: {
         list: () => Promise<Skill[]>

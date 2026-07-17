@@ -291,6 +291,13 @@ contextBridge.exposeInMainWorld('api', {
     revertToCheckpoint: (projectPath: string, checkpointId: number) =>
       ipcRenderer.invoke('undo:revertToCheckpoint', projectPath, checkpointId)
   },
+  // 2.0.11-F: Exact Rewind — ЗА ФЛАГОМ (exact_rewind_enabled). Пути checkpointId/backups,
+  // не произвольные — реальный путь выбирает main через safeRealJoin.
+  exactRewind: {
+    preflight: (checkpointId: number) => ipcRenderer.invoke('exact-rewind:preflight', checkpointId),
+    execute: (checkpointId: number) => ipcRenderer.invoke('exact-rewind:execute', checkpointId),
+    unrevert: (backups: Record<string, string | null>) => ipcRenderer.invoke('exact-rewind:unrevert', backups)
+  },
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
     get: (id: string) => ipcRenderer.invoke('skills:get', id),
