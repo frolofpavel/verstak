@@ -23,6 +23,50 @@ export interface RewindCoverage extends RewindCoverageInput {
   level: RewindLevel
 }
 
+/** Минимум полей undo-записи, нужный для оценки покрытия. */
+export interface RewindEntry {
+  id: number
+  filePath: string
+  runId: string | null
+  afterHash: string | null
+}
+
+/**
+ * Оценка покрытия над РЕАЛЬНЫМИ undo-записями — соединяет провенанс (E1) с логикой (E2).
+ *
+ * Единица покрытия — ФАЙЛ, не запись: файл могли править много раз, важна последняя запись
+ * (она отражает конечное состояние). Файл считается:
+ *  · непротрассированным — если у последней записи нет runId (правка мимо нашего loop);
+ *  · протухшим (stale) — если текущий хеш файла разошёлся с afterHash (кто-то переписал
+ *    после нас; откат перезатёр бы чужое).
+ *
+ * currentHash инъектируется (в проде — sha256 содержимого файла; null — файла нет).
+ */
+export function assessRewind(
+  entries: RewindEntry[],
+  opts: { currentHash: (filePath: string) => string | null },
+): RewindCoverage {
+  // Последняя запись каждого файла = с МАКСИМАЛЬНЫМ id. НЕ полагаемся на порядок входа:
+  // list() отдаёт DESC, и «последняя встреченная» была бы самой СТАРОЙ — перепутали бы
+  // конечное состояние файла.
+  const latestByFile = new Map<string, RewindEntry>()
+  for (const e of entries) {
+    const prev = latestByFile.get(e.filePath)
+    if (!prev || e.id > prev.id) latestByFile.set(e.filePath, e)
+  }
+
+  let tracedFiles = 0
+  let untracedFiles = 0
+  let staleFiles = 0
+  for (const [filePath, e] of latestByFile) {
+    if (e.runId == null) { untracedFiles++; continue }
+    tracedFiles++
+    if (opts.currentHash(filePath) !== e.afterHash) staleFiles++
+  }
+
+  return computeRewindCoverage({ tracedFiles, hasUntracedWriters: untracedFiles > 0, staleFiles })
+}
+
 export function computeRewindCoverage(input: RewindCoverageInput): RewindCoverage {
   const { tracedFiles, hasUntracedWriters, staleFiles } = input
 
