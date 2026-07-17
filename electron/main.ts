@@ -738,7 +738,10 @@ app.whenReady().then(() => {
   registerVerificationsIpc(verifications)
   // Proof Pack — доказательство выполнения прогона (proof.json + proof.html).
   registerProofIpc(proofDeps, proofService)
-  registerHandoffIpc(chats, chatSessions, agentRuns)
+  registerHandoffIpc(chats, chatSessions, agentRuns, {
+    getKnownRoots: knownRoots,
+    getWindow: () => mainWindowRef,
+  })
   registerTasksIpc(tasks)
   registerJournalIpc(journal)
   registerRemindersIpc(reminders, reminderService)

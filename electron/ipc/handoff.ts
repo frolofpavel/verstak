@@ -1,6 +1,7 @@
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, dialog, type BrowserWindow } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
+import { homedir } from 'os'
 import type { Chats } from '../storage/chats'
 import type { ChatSessions } from '../storage/chat-sessions'
 import { generateHandoff } from '../ai/handoff'
@@ -13,12 +14,27 @@ export type HandoffSaveResult =
   | { ok: true; path: string; markdown: string }
   | { ok: false; error: string }
 
+/** Результат безопасного экспорта. Отмена — отдельная ветка, НЕ ошибка (карточка C). */
+export type TranscriptExportResult =
+  | { ok: true; path: string }
+  | { ok: false; cancelled: true }
+  | { ok: false; error: string }
+
+export interface HandoffIpcDeps {
+  /** Корни известных проектов — для нормализации путей в экспорте (приватность). */
+  getKnownRoots?: () => string[]
+  /** Домашняя папка — её вхождения в экспорте → `~`. По умолчанию os.homedir(). */
+  getHomeDir?: () => string
+  /** Родительское окно для нативного save-диалога (модальность). null допустим. */
+  getWindow?: () => BrowserWindow | null
+}
+
 /**
  * Тонкий IPC поверх чистого generateHandoff: по sessionId читает сообщения и
  * отдаёт markdown-handoff. Сами сообщения в storage плоские (role + content),
  * поэтому файлы извлекаются через regex-фоллбэк внутри generateHandoff.
  */
-export function registerHandoffIpc(chats: Chats, sessions: ChatSessions, agentRuns?: AgentRuns): void {
+export function registerHandoffIpc(chats: Chats, sessions: ChatSessions, agentRuns?: AgentRuns, deps: HandoffIpcDeps = {}): void {
   function buildMarkdown(sessionId: number, parentId?: string | null): { markdown: string; title?: string | null } {
     const session = sessions.get(sessionId)
     const stored = chats.listBySession(sessionId)
@@ -84,21 +100,63 @@ export function registerHandoffIpc(chats: Chats, sessions: ChatSessions, agentRu
     }
   })
 
-  // Полный дословный транскрипт сессии в Markdown (в отличие от сжатого handoff) —
-  // для code-review / багрепорта / архива. scanText внутри buildTranscriptMarkdown.
+  /** Транскрипт сессии в Markdown с нормализацией приватности (секреты + пути). */
+  function buildSafeTranscript(sessionId: number): { markdown: string; slug: string } {
+    const session = sessions.get(sessionId)
+    const stored = chats.listBySession(sessionId)
+    const markdown = buildTranscriptMarkdown(
+      stored.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })),
+      {
+        title: session?.title,
+        provider: session?.providerId ?? undefined,
+        exportedAt: Date.now(),
+        // 2.0.11-C: нормализуем пути — экспорт уходит наружу, имя пользователя утекать не должно.
+        pathContext: {
+          homeDir: deps.getHomeDir?.() ?? homedir(),
+          projectRoots: deps.getKnownRoots?.() ?? [],
+        },
+      }
+    )
+    return { markdown, slug: sanitizeHandoffFilePart(session?.title) }
+  }
+
+  // Legacy: авто-запись в Downloads (без диалога). Оставлен для существующих вызовов; путь
+  // приватности теперь тоже чистит (buildSafeTranscript).
   ipcMain.handle('transcript:export-to-downloads', (_e, sessionId: number): HandoffSaveResult => {
     try {
-      const session = sessions.get(sessionId)
-      const stored = chats.listBySession(sessionId)
-      const markdown = buildTranscriptMarkdown(
-        stored.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })),
-        { title: session?.title, provider: session?.providerId ?? undefined, exportedAt: Date.now() }
-      )
-      const slug = sanitizeHandoffFilePart(session?.title)
+      const { markdown, slug } = buildSafeTranscript(sessionId)
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const filePath = join(app.getPath('downloads'), `verstak-транскрипт-${sessionId}-${slug}-${stamp}.md`)
       writeFileSync(filePath, markdown, 'utf8')
       return { ok: true, path: filePath, markdown }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  /**
+   * Безопасный экспорт транскрипта — срез 2.0.11-C.
+   *
+   * Renderer шлёт ТОЛЬКО chatId: путь записи выбирает пользователь в нативном save-диалоге
+   * (main). Так renderer не может записать в произвольное место. Отмена диалога — отдельная
+   * ветка `cancelled`, а не ошибка: человек передумал, это не сбой.
+   */
+  ipcMain.handle('transcript:export', async (_e, sessionId: number): Promise<TranscriptExportResult> => {
+    try {
+      const { markdown, slug } = buildSafeTranscript(sessionId)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const win = deps.getWindow?.() ?? null
+      const options = {
+        title: 'Сохранить транскрипт',
+        defaultPath: join(app.getPath('downloads'), `verstak-транскрипт-${sessionId}-${slug}-${stamp}.md`),
+        filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Все файлы', extensions: ['*'] }],
+      }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return { ok: false, cancelled: true }
+      writeFileSync(result.filePath, markdown, 'utf8')
+      return { ok: true, path: result.filePath }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

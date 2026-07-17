@@ -595,6 +595,12 @@ declare global {
           | { ok: true; path: string; markdown: string }
           | { ok: false; error: string }
         >
+        // 2.0.11-C: безопасный экспорт с save-диалогом. Отмена — отдельная ветка cancelled.
+        exportTranscriptSafe: (sessionId: number) => Promise<
+          | { ok: true; path: string }
+          | { ok: false; cancelled: true }
+          | { ok: false; error: string }
+        >
       }
       tasks: {
         list: (projectPath: string) => Promise<Task[]>

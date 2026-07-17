@@ -248,7 +248,11 @@ contextBridge.exposeInMainWorld('api', {
     saveToDownloads: (sessionId: number, parentId?: string | null) =>
       ipcRenderer.invoke('handoff:save-to-downloads', sessionId, parentId),
     exportTranscript: (sessionId: number) =>
-      ipcRenderer.invoke('transcript:export-to-downloads', sessionId)
+      ipcRenderer.invoke('transcript:export-to-downloads', sessionId),
+    // 2.0.11-C: безопасный экспорт — путь выбирает пользователь в save-диалоге (main).
+    // Renderer шлёт только sessionId, произвольный путь записи передать нельзя.
+    exportTranscriptSafe: (sessionId: number) =>
+      ipcRenderer.invoke('transcript:export', sessionId)
   },
   tasks: {
     list: (projectPath: string) => ipcRenderer.invoke('tasks:list', projectPath),

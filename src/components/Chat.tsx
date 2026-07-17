@@ -1253,9 +1253,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     if (activeChatId == null || handoffBusy) return
     setHandoffBusy(true)
     try {
-      const result = await window.api.handoff.exportTranscript(activeChatId)
-      if (!result.ok) { flashExportNotice('Экспорт чата не сохранён', result.error, false); return }
-      flashExportNotice('Экспорт чата готов', `Полная история сохранена: ${result.path}.`)
+      // 2.0.11-C: безопасный экспорт — путь выбирает пользователь в save-диалоге.
+      const result = await window.api.handoff.exportTranscriptSafe(activeChatId)
+      if (result.ok) {
+        flashExportNotice('Экспорт чата готов', `Полная история сохранена: ${result.path}.`)
+      } else if ('cancelled' in result) {
+        // Человек передумал — это НЕ ошибка, молча выходим (карточка C).
+      } else {
+        flashExportNotice('Экспорт чата не сохранён', result.error, false)
+      }
     } catch (err) {
       flashExportNotice('Экспорт чата не сохранён', err instanceof Error ? err.message : String(err), false)
     } finally {
