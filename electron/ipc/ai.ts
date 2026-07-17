@@ -503,9 +503,6 @@ export function registerAiIpc(deps: AiDeps): void {
     const runId = randomUUID()
     const ctrl = new AbortController()
     activeAborts.set(sendId, ctrl)
-    // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Снимается в cleanup —
-    // ровно там же, где activeAborts, чтобы не остаться «занятым» после прогона.
-    registerChatRun(sendId, chatIdNum)
     let runTimeout: ReturnType<typeof setTimeout> | null = null
     const clearRunTimeout = () => {
       if (runTimeout) {
@@ -530,6 +527,12 @@ export function registerAiIpc(deps: AiDeps): void {
       clearRunTimeout()
       return 0
     }
+    // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Ставится ЗДЕСЬ — ПОСЛЕ
+    // раннего выхода на удалённом pin'е и до любой длительной работы: прогон стартовал
+    // по-настоящему. Раньше стояло рядом с activeAborts.set, и ранний выход оставлял чат
+    // «занятым» навсегда — кнопка сжатия серела до перезапуска (ревью B #5/#7). Снимается
+    // в cleanup, между этой строкой и ним ранних выходов нет — забыть снятие нельзя.
+    registerChatRun(sendId, chatIdNum)
     const lastUserText = compactProgressText([...messages].reverse().find(m => m.role === 'user')?.content, 260)
     emitAgentProgress(taggedSender, sendId, {
       id: 'run-accepted',
