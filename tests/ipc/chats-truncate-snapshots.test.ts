@@ -85,3 +85,37 @@ describe('продовый шов: откат диалога через IPC ун
     expect(activeSnapshot(db, CHAT)).toBeNull()
   })
 })
+
+/**
+ * Ре-ревью honesty, находка #3 (medium): чат-кирпич с provider_id = NULL.
+ *
+ * Легаси-чат (или созданный при пустом settings['provider']) имеет provider_id = NULL.
+ * Закрепление аккаунта висит, аккаунт удалён → движок останавливает прогон. А
+ * get-subscription-binding возвращал null при неизвестном провайдере → UI не видел
+ * закрепления → секция скрыта → открепиться нечем. Кирпич.
+ *
+ * Дёргаем настоящий IPC-handler, а не половину (урок «шва»).
+ */
+describe('чат-кирпич с provider_id = NULL (ре-ревью honesty #3)', () => {
+  it('висящее закрепление ВИДНО через IPC даже при неизвестном провайдере чата', () => {
+    const sessions = createChatSessions(db)
+    // Чат без провайдера (NULL) — легаси-случай.
+    const s = sessions.create('/p', { title: 'легаси' })
+    sessions.setSubscriptionBinding(s.id, 'pinned', 42)
+
+    const binding = handlers.get('chats:get-subscription-binding')!({}, s.id) as { mode: string; accountId: number } | null
+
+    // Раньше здесь был null → секция пряталась → кирпич. Теперь закрепление доходит до UI.
+    expect(binding).not.toBeNull()
+    expect(binding!.mode).toBe('pinned')
+    expect(binding!.accountId).toBe(42)
+  })
+
+  it('без закрепления NULL-провайдер по-прежнему не плодит шум', () => {
+    const sessions = createChatSessions(db)
+    const s = sessions.create('/p', { title: 'легаси' })
+
+    const binding = handlers.get('chats:get-subscription-binding')!({}, s.id)
+    expect(binding).toBeNull()
+  })
+})

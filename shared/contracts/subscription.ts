@@ -37,7 +37,11 @@ export interface SubscriptionAccountDTO {
 /** Привязка чата к аккаунту. pin — свойство КОНКРЕТНОГО чата, не глобальный флаг аккаунта. */
 export interface ChatSubscriptionBindingDTO {
   chatId: number
-  providerId: ProviderId
+  /** Провайдер СИНТЕТИЧЕСКИЙ (в БД провайдера пина нет — main берёт текущий провайдер чата)
+   *  и на решение chatAccountView не влияет. Опционален: у легаси-чата провайдер может быть
+   *  неизвестен, но висящее закрепление всё равно обязано дойти до UI (ре-ревью honesty #3),
+   *  иначе чат-кирпич без выхода. */
+  providerId?: ProviderId
   mode: 'auto' | 'pinned'
   accountId: number | null
 }

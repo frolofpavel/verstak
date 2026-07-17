@@ -63,3 +63,21 @@ export function fileRevertBlockedReason(worktreeActive: boolean): string | null 
 export function fileRevertBlockedHint(worktreeActive: boolean): string | null {
   return worktreeActive ? 'в изоляции — жми «✕ Отбросить» над чатом' : null
 }
+
+/**
+ * Предупреждение, когда изоляция АКТИВНА, но провайдер её не исполняет (ре-ревью honesty #2).
+ *
+ * Дверь, которую фикс создания не закрыл: изолировал чат на API → переключил провайдер на
+ * CLI. Изоляция осталась активной, бар честно рисует «🌿 Изолировано», а CLI-бинарь правит
+ * НАСТОЯЩИЙ репозиторий с cwd реального проекта — ровно тот вред, ради которого гейтили
+ * кнопку создания, только через смену провайдера постфактум.
+ *
+ * Условие — transport, а не canIsolateChat: у API-без-тулзов изоляция тоже «недоступна», но
+ * он файлы не пишет вовсе, пугать «правки идут в реальный проект» там неверно.
+ *
+ * @returns текст предупреждения либо null, если изоляция реально действует.
+ */
+export function isolationIneffectiveWarning(active: boolean, p: IsolationTarget): string | null {
+  if (!active || p.transport === 'API') return null
+  return `Изоляция не действует на ${p.label}: правки идут в реальный проект, а не в копию. Отбросьте изоляцию (✕) или вернитесь на API-провайдер.`
+}

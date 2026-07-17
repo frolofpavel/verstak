@@ -99,8 +99,16 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
     const b = sessions.getSubscriptionBinding(chatId)
     if (!b) return null
     const providerId = sessions.get(chatId)?.providerId
-    if (!isKnownProviderId(providerId)) return null
-    return { chatId, providerId, mode: b.mode, accountId: b.accountId }
+    // Известный провайдер — как раньше, любой режим.
+    if (isKnownProviderId(providerId)) return { chatId, providerId, mode: b.mode, accountId: b.accountId }
+    // Ре-ревью honesty #3: провайдер чата неизвестен (легаси-чат, NULL). Раньше здесь
+    // возвращали null — и висящее закрепление ИСЧЕЗАЛО из UI, хотя движок его видел и
+    // останавливал прогон: чат-кирпич без выхода. Теперь висящий pin возвращаем БЕЗ
+    // providerId (он синтетический, chatAccountView его не читает — судит по глобальному
+    // существованию аккаунта, как движок). auto при неизвестном провайдере не возвращаем:
+    // закрепления нет — секции нет, шум ни к чему.
+    if (b.mode !== 'pinned') return null
+    return { chatId, mode: b.mode, accountId: b.accountId }
   })
   ipcMain.handle('chats:set-subscription-binding', (_e, binding: unknown): { ok: boolean; error?: string } => {
     if (!isChatSubscriptionBinding(binding)) return { ok: false, error: 'invalid binding' }

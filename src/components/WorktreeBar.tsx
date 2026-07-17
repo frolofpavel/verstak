@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
+import { useProvider } from '../hooks/useProvider'
+import { isolationIneffectiveWarning } from '../lib/worktree-honesty'
 
 /**
  * #5 worktree-lifecycle: панель изоляции чата. «Изолировать» создаёт отдельную
@@ -10,6 +12,7 @@ type Status = { active: false } | { active: true; worktreePath: string; fileCoun
 
 export function WorktreeBar() {
   const { activeChatId, path, isStreaming, helpMode } = useProject()
+  const provider = useProvider()
   const [status, setStatus] = useState<Status>({ active: false })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -37,9 +40,22 @@ export function WorktreeBar() {
 
   if (!status.active) return null
 
+  // Ре-ревью honesty #2: изоляция активна, но провайдер чата стал CLI (переключили
+  // постфактум). CLI правит реальный проект — «🌿 Изолировано» тут ложь. Говорим правду.
+  const ineffective = isolationIneffectiveWarning(status.active, {
+    transport: provider.transport,
+    supportsTools: provider.supportsTools,
+    label: provider.label,
+  })
+
   return (
-    <div className="gg-worktree-bar is-active">
-      <span className="gg-worktree-label">🌿 Изолировано{status.hasChanges ? ` · ${status.fileCount} файл(ов) изменено` : ' · без изменений'}</span>
+    <div className={`gg-worktree-bar is-active${ineffective ? ' is-warn' : ''}`}>
+      <span className="gg-worktree-label">
+        {ineffective
+          ? `⚠ Изоляция не действует · ${provider.label}`
+          : `🌿 Изолировано${status.hasChanges ? ` · ${status.fileCount} файл(ов) изменено` : ' · без изменений'}`}
+      </span>
+      {ineffective && <span className="gg-worktree-err" role="status">{ineffective}</span>}
       <button
         className="gg-btn gg-btn-success"
         disabled={busy || isStreaming || !status.hasChanges}

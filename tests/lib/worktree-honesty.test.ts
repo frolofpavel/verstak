@@ -5,6 +5,7 @@ import {
   isolationBlockedHint,
   fileRevertBlockedReason,
   fileRevertBlockedHint,
+  isolationIneffectiveWarning,
 } from '../../src/lib/worktree-honesty'
 // Реестр берём из main: это источник правды о реальных провайдерах. Тест идёт в Node,
 // так что импорт легален — в рантайме renderer этого не делает (правило зон src/).
@@ -87,5 +88,27 @@ describe('откат файлов в изолированной сессии', (
   it('вне изоляции откат работает как раньше (легитимный путь не сломан)', () => {
     expect(fileRevertBlockedReason(false)).toBeNull()
     expect(fileRevertBlockedHint(false)).toBeNull()
+  })
+})
+
+describe('изоляция активна, но провайдер её не исполняет (ре-ревью honesty #2)', () => {
+  it('изоляция активна + CLI → предупреждение «правки в реальный проект»', () => {
+    const w = isolationIneffectiveWarning(true, cli)!
+    expect(w).toMatch(/реальн/i)
+    expect(w).toContain('Claude Code')
+    expect(w).toMatch(/✕|Отбросьте|API/)
+  })
+
+  it('изоляция активна + API → предупреждения нет (изоляция действует)', () => {
+    expect(isolationIneffectiveWarning(true, api)).toBeNull()
+  })
+
+  // API без тулзов файлы не пишет — пугать «правки в реальный проект» неверно.
+  it('изоляция активна + API-без-тулзов → предупреждения нет', () => {
+    expect(isolationIneffectiveWarning(true, apiNoTools)).toBeNull()
+  })
+
+  it('изоляция НЕ активна → предупреждения нет никогда', () => {
+    expect(isolationIneffectiveWarning(false, cli)).toBeNull()
   })
 })

@@ -1932,6 +1932,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     void window.api.undo.count(path).then(setUndoCount)
   }, [messages.length])
 
+  // Ре-ревью honesty #4: undo-стек ключуется по ГЛАВНОМУ проекту, а изолированный чат
+  // пишет в worktree. Кнопка ↩ здесь откатила бы чужую правку (параллельного чата) в
+  // реальном проекте и отрапортовала успехом. В изоляции откат — только «✕ Отбросить»
+  // (WorktreeBar), поэтому кнопку в изолированном чате прячем.
+  const [chatIsolated, setChatIsolated] = useState(false)
+  useEffect(() => {
+    if (helpMode || activeChatId == null) { setChatIsolated(false); return }
+    let cancelled = false
+    void window.api.worktree.status(activeChatId)
+      .then(s => { if (!cancelled) setChatIsolated(!!s?.active) })
+      .catch(() => { if (!cancelled) setChatIsolated(false) })
+    return () => { cancelled = true }
+  }, [activeChatId, helpMode, isStreaming, messages.length])
+
   async function revertLastWrite() {
     const path = useProject.getState().path
     if (!path) return
@@ -4163,7 +4177,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   {sessionStats.filesCount > 0 && (<><span className="gg-usage-sep">·</span><span>📄{sessionStats.filesCount}</span></>)}
                 </span>
               )}
-              {undoCount > 0 && (
+              {undoCount > 0 && !chatIsolated && (
                 <button
                   type="button"
                   className="gg-undo-btn"
