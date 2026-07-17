@@ -1,5 +1,14 @@
 import type { Database } from 'better-sqlite3'
+import { createHash } from 'crypto'
 import { createFloorTracker } from './undo-floors'
+
+/** КТО сделал правку — провенанс отката (2.0.11-E). Всё опционально: запись без контекста
+ *  (legacy, run_command мимо loop, CLI-бинарь) остаётся валидной «непротрассированной». */
+export interface UndoProvenance {
+  runId?: string | null
+  chatId?: number | null
+  messageId?: number | null
+}
 
 export interface UndoEntry {
   id: number
@@ -7,10 +16,17 @@ export interface UndoEntry {
   beforeContent: string | null
   afterContent: string | null
   createdAt: number
+  // Провенанс (2.0.11-E). null → запись непротрассирована (rewindCoverage не даст complete).
+  runId: string | null
+  chatId: number | null
+  messageId: number | null
+  /** Хеши содержимого. beforeHash null — файл создавался (before отсутствовал). */
+  beforeHash: string | null
+  afterHash: string | null
 }
 
 export interface UndoStack {
-  push: (projectPath: string, filePath: string, before: string | null, after: string) => UndoEntry
+  push: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: UndoProvenance) => UndoEntry
   list: (projectPath: string) => UndoEntry[]
   pop: (id: number) => UndoEntry | null
   clear: (projectPath: string) => number
@@ -24,13 +40,25 @@ export interface UndoStack {
 
 const MAX_PER_PROJECT = 50
 
+const hashOf = (s: string | null): string | null => (s == null ? null : createHash('sha256').update(s).digest('hex'))
+
 interface Row {
   id: number
   filePath: string
   beforeContent: string | null
   afterContent: string | null
   createdAt: number
+  runId: string | null
+  chatId: number | null
+  messageId: number | null
+  beforeHash: string | null
+  afterHash: string | null
 }
+
+/** Общий SELECT-список с провенансом — один источник для list/pop. */
+const SELECT_COLS = `id, file_path as filePath, before_content as beforeContent, after_content as afterContent,
+  created_at as createdAt, run_id as runId, chat_id as chatId, message_id as messageId,
+  before_hash as beforeHash, after_hash as afterHash`
 
 export function createUndoStack(db: Database): UndoStack {
   // Защищённые floor'ы чекпоинтов: записи с id > floor НЕ пруньются (review fix #4).
@@ -47,11 +75,18 @@ export function createUndoStack(db: Database): UndoStack {
     floors.add(row.projectPath, row.floorId)
   }
   return {
-    push(projectPath, filePath, before, after) {
+    push(projectPath, filePath, before, after, provenance) {
       const now = Date.now()
+      const runId = provenance?.runId ?? null
+      const chatId = provenance?.chatId ?? null
+      const messageId = provenance?.messageId ?? null
+      const beforeHash = hashOf(before)
+      const afterHash = hashOf(after)
       const info = db.prepare(
-        'INSERT INTO file_undo (project_path, file_path, before_content, after_content, created_at) VALUES (?, ?, ?, ?, ?)'
-      ).run(projectPath, filePath, before, after, now)
+        `INSERT INTO file_undo (project_path, file_path, before_content, after_content, created_at,
+           run_id, chat_id, message_id, before_hash, after_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(projectPath, filePath, before, after, now, runId, chatId, messageId, beforeHash, afterHash)
       // Prune за пределами MAX_PER_PROJECT, НО никогда не трогаем записи новее
       // активного чекпоинта (id > floor): иначе откат к чекпоинту был бы неполным.
       // floor = минимум активных чекпоинтов проекта (или NO_FLOOR если нет).
@@ -62,7 +97,7 @@ export function createUndoStack(db: Database): UndoStack {
           AND id NOT IN (SELECT id FROM file_undo WHERE project_path = ? ORDER BY id DESC LIMIT ?)
           AND id <= ?
       `).run(projectPath, projectPath, MAX_PER_PROJECT, floor)
-      return { id: Number(info.lastInsertRowid), filePath, beforeContent: before, afterContent: after, createdAt: now }
+      return { id: Number(info.lastInsertRowid), filePath, beforeContent: before, afterContent: after, createdAt: now, runId, chatId, messageId, beforeHash, afterHash }
     },
     protectFrom(projectPath, floorId) {
       // DB-first (ревью 23.06 #3): сперва персист, потом in-memory. При сбое INSERT
@@ -85,7 +120,7 @@ export function createUndoStack(db: Database): UndoStack {
     },
     list(projectPath) {
       const rows = db.prepare(`
-        SELECT id, file_path as filePath, before_content as beforeContent, after_content as afterContent, created_at as createdAt
+        SELECT ${SELECT_COLS}
         FROM file_undo WHERE project_path = ?
         ORDER BY id DESC
       `).all(projectPath) as Row[]
@@ -93,7 +128,7 @@ export function createUndoStack(db: Database): UndoStack {
     },
     pop(id) {
       const row = db.prepare(
-        'SELECT id, file_path as filePath, before_content as beforeContent, after_content as afterContent, created_at as createdAt FROM file_undo WHERE id = ?'
+        `SELECT ${SELECT_COLS} FROM file_undo WHERE id = ?`
       ).get(id) as Row | undefined
       if (!row) return null
       db.prepare('DELETE FROM file_undo WHERE id = ?').run(id)

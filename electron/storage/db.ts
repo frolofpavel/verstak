@@ -1209,6 +1209,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       // Активный снапшот чата = самый свежий. Индекс под этот запрос.
       db.exec('CREATE INDEX IF NOT EXISTS idx_chat_ctx_snap_chat ON chat_context_snapshots(chat_id, id DESC)')
     }
+  },
+  {
+    version: 53,
+    description: '2.0.11-E провенанс отката файлов: file_undo обогащается run_id/chat_id/message_id (КТО менял) + before_hash/after_hash (не переписал ли файл кто-то ПОСЛЕ). Append-only: все колонки nullable — legacy-записи и записи без контекста остаются валидными «непротрассированными» (по ним rewindCoverage не даст complete).',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(file_undo)').all() as Array<{ name: string }>).map(c => c.name)
+      const has = (c: string) => cols.includes(c)
+      if (!has('run_id')) db.exec('ALTER TABLE file_undo ADD COLUMN run_id TEXT')
+      if (!has('chat_id')) db.exec('ALTER TABLE file_undo ADD COLUMN chat_id INTEGER')
+      if (!has('message_id')) db.exec('ALTER TABLE file_undo ADD COLUMN message_id INTEGER')
+      if (!has('before_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN before_hash TEXT')
+      if (!has('after_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN after_hash TEXT')
+    }
   }
 ]
 
