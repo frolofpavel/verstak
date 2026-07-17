@@ -3,6 +3,7 @@ import { useProject } from '../store/projectStore'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
 import { MULTI_AGENT_LIST } from '../lib/multi-agent-templates'
+import { ContextMeter } from './ContextMeter'
 
 const PROVIDER_LABELS: Record<string, string> = {
   'gemini-api': 'Gemini (API)',
@@ -16,7 +17,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
-type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree' | 'export'
+type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree' | 'export' | 'context'
 type WorktreeStatus = { active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }
 
 export function ComposerToolsMenu({
@@ -81,7 +82,9 @@ export function ComposerToolsMenu({
       }
     }
     void load()
-    const t = window.setInterval(load, 2000)
+    // void-обёртка: setInterval ждёт void-возврат, а load — async (no-misused-promises).
+    // Всплыло, когда файл попал под линт изменённых; поведение прежнее.
+    const t = window.setInterval(() => { void load() }, 2000)
     return () => { alive = false; window.clearInterval(t) }
   }, [])
 
@@ -282,6 +285,14 @@ export function ComposerToolsMenu({
   const reviewMeta = hasAssistantContent
     ? (defaultReviewer ? PROVIDER_LABELS[defaultReviewer] ?? defaultReviewer : 'выбрать модель')
     : 'нужен ответ агента'
+  // Мета пункта «Контекст» — из уже загруженного store: подписи в меню не стоят
+  // отдельного IPC-запроса. Точное состояние читает сам ContextMeter при открытии.
+  const contextMeta = !path
+    ? 'нет проекта'
+    : isStreaming
+      ? 'идёт ответ'
+      : `${messages.length} сообщений`
+
   const checkpointMeta = !path
     ? 'открой проект'
     : checkpointId === null
@@ -591,6 +602,32 @@ export function ComposerToolsMenu({
                       </button>
                     </>
                   )}
+                </div>
+              )}
+            </li>
+
+            {/* 2.0.11-B: сжатие контекста. Длинный чат упирается в контекстное окно —
+                здесь человек сам решает свернуть начало в итог. Переписка не трогается. */}
+            <li
+              className={`gg-tools-menu-item ${openSub === 'context' ? 'is-submenu-open' : ''}`}
+              role="none"
+            >
+              <button
+                type="button"
+                className={`gg-tools-menu-trigger ${!path ? 'is-disabled' : ''}`}
+                role="menuitem"
+                aria-expanded={openSub === 'context'}
+                disabled={!path}
+                onClick={() => toggleSub('context')}
+              >
+                <span className="gg-tools-menu-label">Контекст</span>
+                <span className="gg-tools-menu-meta">{contextMeta}</span>
+                <span className="gg-tools-menu-arrow" aria-hidden>›</span>
+              </button>
+              {openSub === 'context' && (
+                <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
+                  <div className="gg-tools-submenu-title">Память разговора</div>
+                  <ContextMeter />
                 </div>
               )}
             </li>
