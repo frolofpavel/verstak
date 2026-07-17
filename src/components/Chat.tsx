@@ -2988,7 +2988,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           window.dispatchEvent(new CustomEvent('gg-reminders-changed', { detail: { projectPath: payload.projectPath } }))
 
           store = useProject.getState()
-          if (isActiveTarget) {
+          // ДЕФЕКТ №3 карты (§3.3): здесь стоял isActiveTarget, посчитанный ВЫШЕ — ДО трёх
+          // await'ов (история, две записи в БД, ack). Стор рядом перечитывался, а производный
+          // флаг — нет. Если человек за это время переключил чат, сообщение напоминания
+          // всплывало в ЧУЖОМ видимом чате (addMessage) вместо снапшота своего.
+          // Близнец startQueuedBackgroundChatMessage (≈2367) перепроверяет активность после
+          // КАЖДОГО await — берём его, более строгий, вариант.
+          const stillActiveTarget = !store.helpMode && store.activeChatId === payload.chatId
+          if (stillActiveTarget) {
             store.clearActivity()
             setExhausted(null)
             setCrossVerify(null)
@@ -3015,13 +3022,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             String(payload.chatId)
           )
 
+          // Ещё один await позади (сама отправка) — активность снова могла смениться.
+          // Близнец в этой точке считает activeAfterSend; здесь стоял всё тот же флаг
+          // из начала обработчика. Пересчитываем (дефект №3, продолжение).
+          const activeAfterSend = (() => {
+            const s = useProject.getState()
+            return !s.helpMode && s.activeChatId === payload.chatId
+          })()
           if (sendId > 0) {
             useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: payload.chatId, projectPath: payload.projectPath })
             registerPersistedAssistant(sendId, assistantRow.id)
-            if (isActiveTarget) {
+            if (activeAfterSend) {
               currentSendIdRef.current = sendId
             }
-          } else if (isActiveTarget) {
+          } else if (activeAfterSend) {
             useProject.getState().updateLastAssistant('\n\n[Ошибка: провайдер недоступен]')
             useProject.getState().setStreaming(false)
           } else {

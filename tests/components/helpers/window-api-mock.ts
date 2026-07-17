@@ -47,12 +47,21 @@ export interface ApiMock {
   aiEvents: AiEventsControl
   /** Все вызовы вида "namespace.method" — для проверки «что дёрнул компонент». */
   calls: Map<string, ReturnType<typeof vi.fn>>
+  /**
+   * Захваченные обработчики ЛЮБЫХ подписок (`notify.onSendChatReminder`, `settings.on…`),
+   * ключ — "namespace.method". Позволяет дёрнуть IPC-событие руками и проверить реакцию.
+   * ai.onEvent живёт отдельно (aiEvents) — у него своя механика счётчиков.
+   */
+  subscriptions: Map<string, Array<(...args: unknown[]) => void>>
+  /** Отправить событие во все обработчики подписки. Возвращает их число (0 = никто не слушает). */
+  emit: (key: string, ...args: unknown[]) => number
 }
 
 const isSubscription = (method: string): boolean => /^on[A-Z]/.test(method)
 
 export function makeApiMock(overrides: ApiOverrides = {}): ApiMock {
   const calls = new Map<string, ReturnType<typeof vi.fn>>()
+  const subscriptions = new Map<string, Array<(...args: unknown[]) => void>>()
 
   const aiEvents: AiEventsControl = {
     handlers: [],
@@ -97,8 +106,18 @@ export function makeApiMock(overrides: ApiOverrides = {}): ApiMock {
           if (typeof override === 'function') {
             fn = vi.fn(override as (...a: unknown[]) => unknown)
           } else if (isSubscription(prop)) {
-            // Подписка обязана вернуть отписку — React ждёт cleanup, не промис.
-            fn = vi.fn(() => () => {})
+            // Подписка обязана вернуть отписку — React ждёт cleanup, не промис. Колбэк
+            // ЗАПОМИНАЕМ: иначе IPC-события (напоминания и т.п.) нечем дёрнуть в тесте.
+            fn = vi.fn((cb: (...a: unknown[]) => void) => {
+              const list = subscriptions.get(key) ?? []
+              list.push(cb)
+              subscriptions.set(key, list)
+              return () => {
+                const cur = subscriptions.get(key) ?? []
+                const i = cur.indexOf(cb)
+                if (i >= 0) cur.splice(i, 1)
+              }
+            })
           } else if (override !== undefined) {
             fn = vi.fn(async () => override)
           } else {
@@ -120,7 +139,13 @@ export function makeApiMock(overrides: ApiOverrides = {}): ApiMock {
     },
   })
 
-  return { api: api as Record<string, unknown>, aiEvents, calls }
+  const emit = (key: string, ...args: unknown[]): number => {
+    const list = subscriptions.get(key) ?? []
+    for (const cb of [...list]) cb(...args)
+    return list.length
+  }
+
+  return { api: api as Record<string, unknown>, aiEvents, calls, subscriptions, emit }
 }
 
 /**
