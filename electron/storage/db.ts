@@ -1184,6 +1184,31 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('system_prompt_hash')) db.exec('ALTER TABLE agent_run_usage ADD COLUMN system_prompt_hash TEXT')
       if (!has('tools_hash')) db.exec('ALTER TABLE agent_run_usage ADD COLUMN tools_hash TEXT')
     }
+  },
+  {
+    version: 52,
+    description: '2.0.11-B persistent context snapshot: chat_context_snapshots — сжатый итог истории чата, переживающий рестарт. Append-only ЖУРНАЛ: новый снапшот логически ЗАМЕНЯЕТ активный, но старые строки остаются для аудита и отката (карточка B п.9). Видимые сообщения (chats) не трогаются вообще — компакция влияет только на то, что уходит модели. source_max_message_id — для optimistic concurrency: если чат изменился между чтением и записью, коммит отклоняется (п.5).',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_context_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          -- До какого сообщения включительно summary покрывает историю.
+          through_message_id INTEGER NOT NULL,
+          -- Каким был максимальный id сообщений чата в момент ЧТЕНИЯ. Страж гонки:
+          -- перед коммитом сверяем заново; разошлось — значит чат пополнился, отказ.
+          source_max_message_id INTEGER NOT NULL,
+          provider_id TEXT,
+          model TEXT,
+          estimated_tokens_before INTEGER,
+          estimated_tokens_after INTEGER,
+          created_at INTEGER NOT NULL
+        )
+      `)
+      // Активный снапшот чата = самый свежий. Индекс под этот запрос.
+      db.exec('CREATE INDEX IF NOT EXISTS idx_chat_ctx_snap_chat ON chat_context_snapshots(chat_id, id DESC)')
+    }
   }
 ]
 
