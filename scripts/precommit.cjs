@@ -18,6 +18,15 @@ function run(cmd, args) {
   return spawnSync(cmd, args, { cwd: process.cwd(), shell: process.platform === 'win32', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
 
+process.stdout.write('[pre-commit] mojibake check... ')
+const mojibake = run('npm', ['run', 'check:mojibake'])
+if (mojibake.status !== 0) {
+  console.error('failed\n[pre-commit] check:mojibake failed - commit blocked.')
+  console.error((mojibake.stdout || '') + (mojibake.stderr || ''))
+  process.exit(1)
+}
+console.log('ok')
+
 // 0) lint:changed — гейт по изменённым .ts/.tsx (Фаза 1). Падает только на
 //    ESLint-errors (реальные LLM-дефекты из плана §1.2), warnings — ratchet.
 //    Быстрый (только staged-файлы), поэтому идёт первым.

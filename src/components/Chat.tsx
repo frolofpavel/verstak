@@ -919,6 +919,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const [contextCompactNotice, setContextCompactNotice] = useState<{ text: string; loading: boolean } | null>(null)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
+  const visibleDateRafRef = useRef<number | null>(null)
+  const visibleDateLabelRef = useRef<string | null>(null)
+  const [visibleDateLabel, setVisibleDateLabel] = useState<string | null>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
   const autoScrollEnabledRef = useRef(autoScrollEnabled)
   /** Пока true и автопрокрутка вкл — новые сообщения тянут чат вниз. */
@@ -1762,6 +1765,41 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_THRESHOLD
   }
 
+  function refreshVisibleDateLabel() {
+    const el = streamRef.current
+    if (!el || messages.length === 0) {
+      visibleDateLabelRef.current = null
+      setVisibleDateLabel(null)
+      return
+    }
+    const streamRect = el.getBoundingClientRect()
+    const targetY = streamRect.top + 34
+    const nodes = Array.from(el.querySelectorAll<HTMLElement>('.gg-msg[data-message-date-label]'))
+    let nextLabel: string | null = null
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect()
+      if (rect.bottom >= targetY && rect.top <= streamRect.bottom) {
+        nextLabel = node.dataset.messageDateLabel ?? null
+        break
+      }
+      if (rect.top < targetY) {
+        nextLabel = node.dataset.messageDateLabel ?? nextLabel
+      }
+    }
+    if (nextLabel !== visibleDateLabelRef.current) {
+      visibleDateLabelRef.current = nextLabel
+      setVisibleDateLabel(nextLabel)
+    }
+  }
+
+  function scheduleVisibleDateRefresh() {
+    if (visibleDateRafRef.current != null) return
+    visibleDateRafRef.current = window.requestAnimationFrame(() => {
+      visibleDateRafRef.current = null
+      refreshVisibleDateLabel()
+    })
+  }
+
   function applyScrollToBottom(behavior: ScrollBehavior = 'auto') {
     const el = streamRef.current
     if (!el) return
@@ -1855,6 +1893,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     if (!el) return
     function onScroll() {
       if (!el) return
+      scheduleVisibleDateRefresh()
       const atBottom = isNearBottom(el)
       if (pendingPinToBottomRef.current) {
         if (!atBottom) pendingPinToBottomRef.current = false
@@ -1866,8 +1905,22 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     onScroll()
-    return () => el.removeEventListener('scroll', onScroll)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      if (visibleDateRafRef.current != null) {
+        window.cancelAnimationFrame(visibleDateRafRef.current)
+        visibleDateRafRef.current = null
+      }
+    }
   }, [messages.length, autoScrollEnabled])
+
+  useEffect(() => {
+    scheduleVisibleDateRefresh()
+    if (messages.length === 0 && visibleDateLabelRef.current != null) {
+      visibleDateLabelRef.current = null
+      setVisibleDateLabel(null)
+    }
+  }, [messages.length])
 
   // Refresh undo count when project changes / after each assistant turn settles
   useEffect(() => {
@@ -3148,7 +3201,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         </div>
       )}
 
-      <div className="gg-chat-stream-area">
+      <div className={`gg-chat-stream-area ${visibleDateLabel ? 'has-visible-date' : ''}`}>
+        {visibleDateLabel ? (
+          <div className="gg-chat-visible-date" aria-hidden="true">
+            {visibleDateLabel}
+          </div>
+        ) : null}
         <div className="gg-chat-stream" ref={streamRef}>
         <div className="gg-chat-stream-inner">
         {isHelpChat && (
@@ -3285,6 +3343,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           const prevMsg = i > 0 ? messages[i - 1] : null
           const showDateDivider = m.createdAt != null
             && (prevMsg?.createdAt == null || !isSameLocalDay(prevMsg.createdAt, m.createdAt))
+          const messageDateLabel = m.createdAt != null ? formatChatDateDivider(m.createdAt) : undefined
+          const messageDay = m.createdAt != null ? new Date(m.createdAt).toLocaleDateString('en-CA') : undefined
           const supplement = m.role === 'user' && m.content ? parseSupplementMessage(m.content) : null
           const hideProgressMeta = m.role === 'assistant' && hasAgentProgress
           const hideStreamingProgressPlaceholder = isStreamingAssistant
@@ -3317,7 +3377,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                     <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
                   </div>
                 )}
-                <div className="gg-msg gg-msg-assistant gg-msg-agent-progress-standalone">
+                <div
+                  className="gg-msg gg-msg-assistant gg-msg-agent-progress-standalone"
+                  data-message-day={messageDay}
+                  data-message-date-label={messageDateLabel}
+                >
                   <div className="gg-agent-progress-inline is-standalone">
                     <AgentProgressPanel
                       entries={buildInterruptedAnswerProgress(m.createdAt, provider.label)}
@@ -3337,7 +3401,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
               </div>
             )}
-            <div className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}${supplement ? ' is-supplement' : ''}`}>
+            <div
+              className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}${supplement ? ' is-supplement' : ''}`}
+              data-message-day={messageDay}
+              data-message-date-label={messageDateLabel}
+            >
               {showInlineAgentProgress && (
                 <div className="gg-agent-progress-inline">
                   <AgentProgressPanel

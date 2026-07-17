@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
 import type { ProjectGroup, ProjectLabel, ProjectMeta, ProjectStatus, RemoteDoctorResult, RemoteDoctorStatus } from '../types/api'
@@ -94,7 +94,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
         if (!cancelled) setProjectGroups(groups)
       })
       .catch(err => {
-        if (!cancelled) setGroupError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РіСЂСѓРїРїС‹')
+        if (!cancelled) setGroupError(err instanceof Error ? err.message : 'Не удалось загрузить группы')
       })
       .finally(() => {
         if (!cancelled) setGroupsLoading(false)
@@ -195,7 +195,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
         }
       }
     } catch (err) {
-      setLabelError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ СЏСЂР»С‹Рє')
+      setLabelError(err instanceof Error ? err.message : 'Не удалось создать ярлык')
     } finally {
       setLabelBusy(false)
     }
@@ -215,7 +215,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
   async function handleProjectAction(action: 'backup' | 'duplicate' | 'cleanup') {
     setProjectActionStatus(null)
     if (action === 'cleanup') {
-      const ok = window.confirm('РћС‡РёСЃС‚РєР° СѓРґР°Р»РёС‚ РІСЂРµРјРµРЅРЅС‹Рµ С„Р°Р№Р»С‹ Рё РєСЌС€ РїСЂРѕРµРєС‚Р°. Р§Р°С‚С‹, С„Р°Р№Р»С‹ РїСЂРѕРµРєС‚Р°, Р·Р°РґР°С‡Рё Рё Р¶СѓСЂРЅР°Р» РѕСЃС‚Р°РЅСѓС‚СЃСЏ. РџСЂРѕРґРѕР»Р¶РёС‚СЊ?')
+      const ok = window.confirm('Очистка удалит временные файлы и кэш проекта. Чаты, файлы проекта, задачи и журнал останутся. Продолжить?')
       if (!ok) return
     }
     const result = action === 'backup'
@@ -227,12 +227,12 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       setProjectActionStatus(result.error)
       return
     }
-    if (action === 'backup') setProjectActionStatus(`Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ СЃРѕР·РґР°РЅР°: ${(result as { ok: true; path: string }).path}`)
+    if (action === 'backup') setProjectActionStatus(`Резервная копия создана: ${(result as { ok: true; path: string }).path}`)
     if (action === 'duplicate') {
-      setProjectActionStatus(`РљРѕРїРёСЏ РїСЂРѕРµРєС‚Р° СЃРѕР·РґР°РЅР°: ${(result as { ok: true; path: string }).path}`)
+      setProjectActionStatus(`Копия проекта создана: ${(result as { ok: true; path: string }).path}`)
       await refreshProjectList()
     }
-    if (action === 'cleanup') setProjectActionStatus(`РћС‡РёСЃС‚РєР° Р·Р°РІРµСЂС€РµРЅР°. РЈРґР°Р»РµРЅРѕ РїР°РїРѕРє: ${(result as { ok: true; removed: number }).removed}`)
+    if (action === 'cleanup') setProjectActionStatus(`Очистка завершена. Удалено папок: ${(result as { ok: true; removed: number }).removed}`)
   }
 
   async function handleProjectGroupChange(value: string) {
@@ -250,7 +250,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
         : latestGroups.find(group => group.id === nextGroupId) ?? null
 
       if (nextGroupId !== null && !nextGroup) {
-        throw new Error('Р“СЂСѓРїРїР° РЅРµ РЅР°Р№РґРµРЅР°')
+        throw new Error('Группа не найдена')
       }
 
       if (nextGroup) {
@@ -272,7 +272,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       setGroupSaved(true)
       window.setTimeout(() => setGroupSaved(false), 2000)
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ РіСЂСѓРїРїСѓ РїСЂРѕРµРєС‚Р°')
+      setGroupError(err instanceof Error ? err.message : 'Не удалось изменить группу проекта')
     } finally {
       setGroupBusy(false)
     }
@@ -314,7 +314,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       const result = await window.api.projects.remoteDoctor(project.path)
       setRemoteDoctor(result)
     } catch (err) {
-      setRemoteDoctorError(err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РїСЂРѕРІРµСЂРєСѓ')
+      setRemoteDoctorError(err instanceof Error ? err.message : 'Не удалось выполнить проверку')
     } finally {
       setRemoteDoctorBusy(false)
     }
@@ -322,15 +322,15 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
 
   const isSshProject = localProject.kind === 'ssh' || localProject.remote?.kind === 'ssh' || /^ssh:\/\//i.test(project.path)
   const projectKindLabel = localProject.kind === 'ssh'
-    ? 'SSH-РїСЂРѕРµРєС‚'
+    ? 'SSH-проект'
     : localProject.kind === 'git'
-      ? 'Git-РїСЂРѕРµРєС‚'
-      : 'Р›РѕРєР°Р»СЊРЅР°СЏ РїР°РїРєР°'
+      ? 'Git-проект'
+      : 'Локальная папка'
   const projectStatusLabel = projectStatus === 'paused'
-    ? 'РќР° РїР°СѓР·Рµ'
+    ? 'На паузе'
     : projectStatus === 'done'
-      ? 'Р—Р°РІРµСЂС€С‘РЅ'
-      : 'РђРєС‚РёРІРЅС‹Р№'
+      ? 'Завершён'
+      : 'Активный'
   const lastActivityLabel = localProject.lastAssistantAt
     ? new Date(localProject.lastAssistantAt).toLocaleString('ru-RU', {
       day: '2-digit',
@@ -339,7 +339,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       hour: '2-digit',
       minute: '2-digit'
     })
-    : 'РќРµС‚ РґР°РЅРЅС‹С…'
+    : 'Нет данных'
   const createdAtLabel = localProject.createdAt
     ? new Date(localProject.createdAt).toLocaleString('ru-RU', {
       day: '2-digit',
@@ -348,7 +348,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       hour: '2-digit',
       minute: '2-digit'
     })
-    : 'РќРµС‚ РґР°РЅРЅС‹С…'
+    : 'Нет данных'
 
   const projectSettingsDirty =
     displayName.trim() !== localProject.name ||
@@ -357,12 +357,12 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
     notificationsMuted !== Boolean(localProject.notificationsMuted) ||
     projectStatus !== (localProject.status ?? 'active')
   const projectSaveStatus = saving
-    ? 'РЎРѕС…СЂР°РЅСЏСЋвЂ¦'
+    ? 'Сохраняю…'
     : appearanceSaved || metaSaved
-      ? 'РЎРѕС…СЂР°РЅРµРЅРѕ'
+      ? 'Сохранено'
       : projectSettingsDirty
-        ? 'Р•СЃС‚СЊ РЅРµСЃРѕС…СЂР°РЅС‘РЅРЅС‹Рµ РёР·РјРµРЅРµРЅРёСЏ'
-        : 'РР·РјРµРЅРµРЅРёР№ РЅРµС‚'
+        ? 'Есть несохранённые изменения'
+        : '�?зменений нет'
 
   return createPortal(
     <>
@@ -376,10 +376,10 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
       >
         <div className="gg-ps-header">
           <div className="gg-ps-title-block">
-            <div className="gg-ps-kicker" id="gg-ps-title">РџР°СЂР°РјРµС‚СЂС‹ РїСЂРѕРµРєС‚Р°</div>
-            <div className="gg-ps-title">РћСЃРЅРѕРІРЅС‹Рµ РЅР°СЃС‚СЂРѕР№РєРё Рё РґРѕСЃС‚СѓРї Рє РїСЂРѕРµРєС‚Сѓ</div>
+            <div className="gg-ps-kicker" id="gg-ps-title">Параметры проекта</div>
+            <div className="gg-ps-title">Основные настройки и доступ к проекту</div>
           </div>
-          <button className="gg-ps-close" onClick={onClose} title="Р—Р°РєСЂС‹С‚СЊ">Г—</button>
+          <button className="gg-ps-close" onClick={onClose} title="Закрыть">×</button>
         </div>
 
         <div className="gg-ps-body">
@@ -389,8 +389,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
               className="gg-ps-avatar-btn"
               onClick={() => void handlePickIcon()}
               disabled={iconBusy}
-              title="РР·РјРµРЅРёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ РїСЂРѕРµРєС‚Р°"
-              aria-label="РР·РјРµРЅРёС‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ РїСЂРѕРµРєС‚Р°"
+              title="�?зменить изображение проекта"
+              aria-label="�?зменить изображение проекта"
             >
               <ProjectAvatar
                 project={{ ...localProject, name: displayName || localProject.name, accentColor: accentColor || null }}
@@ -400,17 +400,17 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             </button>
             <div className="gg-ps-identity-main">
               <div className="gg-ps-identity-topline">
-                <span>РќР°Р·РІР°РЅРёРµ РїСЂРѕРµРєС‚Р°</span>
-                {appearanceSaved && <span className="gg-ps-saved-note">РЎРѕС…СЂР°РЅРµРЅРѕ</span>}
+                <span>Название проекта</span>
+                {appearanceSaved && <span className="gg-ps-saved-note">Сохранено</span>}
               </div>
               <input
                 id="gg-ps-display-name"
                 className="gg-ps-hero-name"
                 value={displayName}
                 onChange={e => setDisplayName(e.target.value)}
-                placeholder="РќР°Р·РІР°РЅРёРµ РїСЂРѕРµРєС‚Р°"
+                placeholder="Название проекта"
                 maxLength={80}
-                aria-label="РќР°Р·РІР°РЅРёРµ РїСЂРѕРµРєС‚Р°"
+                aria-label="Название проекта"
               />
               <div className="gg-ps-hero-actions">
                 <button
@@ -419,7 +419,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                   onClick={() => void handlePickIcon()}
                   disabled={iconBusy}
                 >
-                  {iconBusy ? 'Р—Р°РіСЂСѓР·РєР°вЂ¦' : 'Р’С‹Р±СЂР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ'}
+                  {iconBusy ? 'Загрузка…' : 'Выбрать изображение'}
                 </button>
                 {localProject.iconPath && (
                   <button
@@ -428,7 +428,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     onClick={() => void handleClearIcon()}
                     disabled={iconBusy}
                   >
-                    РЈР±СЂР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ
+                    Убрать изображение
                   </button>
                 )}
               </div>
@@ -439,15 +439,15 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-card-main">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">Р—Р°РјРµС‚РєРё</div>
-                  <div className="gg-ps-card-desc">РљРѕСЂРѕС‚РєР°СЏ РІРЅСѓС‚СЂРµРЅРЅСЏСЏ Р·Р°РјРµС‚РєР° РїРѕ РїСЂРѕРµРєС‚Сѓ</div>
+                  <div className="gg-ps-card-title">Заметки</div>
+                  <div className="gg-ps-card-desc">Короткая внутренняя заметка по проекту</div>
                 </div>
               </div>
               <textarea
                 className="gg-ps-notes"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
-                placeholder="РќР°РїСЂРёРјРµСЂ: РѕСЃРЅРѕРІРЅРѕР№ РєР»РёРµРЅС‚, РІР°Р¶РЅС‹Рµ РєРѕРЅС‚Р°РєС‚С‹, РѕСЃРѕР±РµРЅРЅРѕСЃС‚Рё РїСЂРѕРµРєС‚Р°"
+                placeholder="Например: основной клиент, важные контакты, особенности проекта"
                 rows={3}
               />
             </section>
@@ -455,25 +455,25 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-card-main">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">РЎРІРµРґРµРЅРёСЏ</div>
-                  <div className="gg-ps-card-desc">РљСЂР°С‚РєР°СЏ СЃРІРѕРґРєР° РїРѕ С‚РµРєСѓС‰РµРјСѓ РїСЂРѕРµРєС‚Сѓ</div>
+                  <div className="gg-ps-card-title">Сведения</div>
+                  <div className="gg-ps-card-desc">Краткая сводка по текущему проекту</div>
                 </div>
               </div>
               <div className="gg-ps-stats">
                 <div>
-                  <span>РўРёРї</span>
+                  <span>Тип</span>
                   <strong>{projectKindLabel}</strong>
                 </div>
                 <div>
-                  <span>РЎС‚Р°С‚СѓСЃ</span>
+                  <span>Статус</span>
                   <strong>{projectStatusLabel}</strong>
                 </div>
                 <div>
-                  <span>РЎРѕР·РґР°РЅ</span>
+                  <span>Создан</span>
                   <strong>{createdAtLabel}</strong>
                 </div>
                 <div>
-                  <span>РџРѕСЃР»РµРґРЅРёРµ РґРµР№СЃС‚РІРёСЏ</span>
+                  <span>Последние действия</span>
                   <strong>{lastActivityLabel}</strong>
                 </div>
               </div>
@@ -482,8 +482,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-card-main">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">РЇСЂР»С‹РєРё</div>
-                  <div className="gg-ps-card-desc">Рљ РїСЂРѕРµРєС‚Сѓ РјРѕР¶РЅРѕ РїСЂРёРєСЂРµРїРёС‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ СЏСЂР»С‹РєРѕРІ</div>
+                  <div className="gg-ps-card-title">Ярлыки</div>
+                  <div className="gg-ps-card-desc">К проекту можно прикрепить несколько ярлыков</div>
                 </div>
               </div>
               <div className="gg-ps-labels">
@@ -493,13 +493,13 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     key={label.id}
                     className="gg-ps-label-chip is-active"
                     onClick={() => void handleToggleLabel(label.id)}
-                    title="РЈР±СЂР°С‚СЊ СЏСЂР»С‹Рє СЃ РїСЂРѕРµРєС‚Р°"
+                    title="Убрать ярлык с проекта"
                   >
                     <span style={{ background: label.color }} />
                     {label.name}
                   </button>
                 ))}
-                {localProject.labels.length === 0 && <span className="gg-ps-empty-note">РЈ РїСЂРѕРµРєС‚Р° РїРѕРєР° РЅРµС‚ СЏСЂР»С‹РєРѕРІ</span>}
+                {localProject.labels.length === 0 && <span className="gg-ps-empty-note">У проекта пока нет ярлыков</span>}
               </div>
               <div className="gg-ps-label-create">
                 <div className="gg-ps-label-input-wrap">
@@ -507,7 +507,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     className="gg-ps-inline-input"
                     value={labelName}
                     onChange={e => setLabelName(e.target.value)}
-                    placeholder="РќР°Р№С‚Рё РёР»Рё СЃРѕР·РґР°С‚СЊ СЏСЂР»С‹Рє"
+                    placeholder="Найти или создать ярлык"
                   />
                   {matchingLabels.length > 0 && (
                     <div className="gg-ps-label-suggest" role="listbox">
@@ -533,7 +533,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                   onClick={() => void handleCreateLabel()}
                   disabled={labelBusy || !labelName.trim()}
                 >
-                  {labelBusy ? 'Р”РѕР±Р°РІР»СЏСЋ...' : 'Р”РѕР±Р°РІРёС‚СЊ'}
+                  {labelBusy ? 'Добавляю...' : 'Добавить'}
                 </button>
               </div>
               {labelError && <div className="gg-ps-group-error" role="alert">{labelError}</div>}
@@ -542,17 +542,17 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-equal-card">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">Р“СЂСѓРїРїР°</div>
-                  <div className="gg-ps-card-desc">Р“РґРµ РїСЂРѕРµРєС‚ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ РІ Р»РµРІРѕРј СЃРїРёСЃРєРµ</div>
+                  <div className="gg-ps-card-title">Группа</div>
+                  <div className="gg-ps-card-desc">Где проект показывается в левом списке</div>
                 </div>
                 <span className={`gg-ps-group-status ${groupSaved ? 'is-saved' : ''}`}>
                   {groupBusy
-                    ? 'РЎРѕС…СЂР°РЅСЏСЋ...'
+                    ? 'Сохраняю...'
                     : groupSaved
-                      ? 'РЎРѕС…СЂР°РЅРµРЅРѕ'
+                      ? 'Сохранено'
                       : currentGroup
                         ? currentGroup.name
-                        : 'Р‘РµР· РіСЂСѓРїРїС‹'}
+                        : 'Без группы'}
                 </span>
               </div>
               <div className="gg-ps-control-slot">
@@ -561,16 +561,16 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                   value={currentGroup?.id ?? ''}
                   onChange={e => void handleProjectGroupChange(e.target.value)}
                   disabled={groupsLoading || groupBusy || projectGroups.length === 0}
-                  aria-label="Р“СЂСѓРїРїР° РїСЂРѕРµРєС‚Р°"
+                  aria-label="Группа проекта"
                 >
-                  <option value="">Р‘РµР· РіСЂСѓРїРїС‹</option>
+                  <option value="">Без группы</option>
                   {projectGroups.map(group => (
                     <option key={group.id} value={group.id}>{group.name}</option>
                   ))}
                 </select>
               </div>
               {!groupsLoading && projectGroups.length === 0 && (
-                <p className="gg-ps-section-hint-block">РЎРЅР°С‡Р°Р»Р° СЃРѕР·РґР°Р№С‚Рµ РіСЂСѓРїРїСѓ РІ Р»РµРІРѕР№ РїР°РЅРµР»Рё РїСЂРѕРµРєС‚РѕРІ</p>
+                <p className="gg-ps-section-hint-block">Сначала создайте группу в левой панели проектов</p>
               )}
               {groupError && <div className="gg-ps-group-error" role="alert">{groupError}</div>}
             </section>
@@ -578,8 +578,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-equal-card">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">Р Р°СЃРїРѕР»РѕР¶РµРЅРёРµ</div>
-                  <div className="gg-ps-card-desc">РџР°РїРєР°, РіРґРµ Р»РµР¶Р°С‚ С„Р°Р№Р»С‹ РїСЂРѕРµРєС‚Р°</div>
+                  <div className="gg-ps-card-title">Расположение</div>
+                  <div className="gg-ps-card-desc">Папка, где лежат файлы проекта</div>
                 </div>
               </div>
               <div className="gg-ps-control-slot">
@@ -589,8 +589,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                   <button
                     className="gg-ps-path-open"
                     onClick={() => void window.api.files.revealInExplorer?.(project.path).catch(() => {})}
-                    title="РћС‚РєСЂС‹С‚СЊ РІ РїСЂРѕРІРѕРґРЅРёРєРµ"
-                  >в†—</button>
+                    title="Открыть в проводнике"
+                  >↗</button>
                 </div>
               </div>
             </section>
@@ -598,16 +598,16 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-equal-card">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">РЎС‚Р°С‚СѓСЃ РїСЂРѕРµРєС‚Р°</div>
-                  <div className="gg-ps-card-desc">РџРѕРјРѕРіР°РµС‚ С„РёР»СЊС‚СЂРѕРІР°С‚СЊ РїСЂРѕРµРєС‚С‹ РІ Р»РµРІРѕРј РјРµРЅСЋ</div>
+                  <div className="gg-ps-card-title">Статус проекта</div>
+                  <div className="gg-ps-card-desc">Помогает фильтровать проекты в левом меню</div>
                 </div>
               </div>
               <div className="gg-ps-control-slot">
                 <div className="gg-ps-status-segment">
                   {[
-                    ['active', 'РђРєС‚РёРІРЅС‹Р№'],
-                    ['paused', 'РќР° РїР°СѓР·Рµ'],
-                    ['done', 'Р—Р°РІРµСЂС€С‘РЅ']
+                    ['active', 'Активный'],
+                    ['paused', 'На паузе'],
+                    ['done', 'Завершён']
                   ].map(([value, label]) => (
                     <button
                       type="button"
@@ -628,13 +628,13 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
             <section className="gg-ps-card gg-ps-equal-card">
               <div className="gg-ps-card-head">
                 <div>
-                  <div className="gg-ps-card-title">Р¦РІРµС‚</div>
-                  <div className="gg-ps-card-desc">РћС‚РѕР±СЂР°Р¶Р°РµС‚СЃСЏ РїРѕ РєРѕРЅС‚СѓСЂСѓ Р°РІР°С‚Р°СЂРєРё РїСЂРѕРµРєС‚Р°</div>
+                  <div className="gg-ps-card-title">Цвет</div>
+                  <div className="gg-ps-card-desc">Отображается по контуру аватарки проекта</div>
                 </div>
               </div>
               <div className="gg-ps-control-slot">
                 <div className="gg-ps-color-row">
-                  <div className="gg-ps-color-grid" aria-label="Р¦РІРµС‚ РїСЂРѕРµРєС‚Р°">
+                  <div className="gg-ps-color-grid" aria-label="Цвет проекта">
                     {PROJECT_ACCENT_COLORS.map(color => (
                       <button
                         type="button"
@@ -642,7 +642,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                         className={`gg-ps-color-choice ${accentColor === color ? 'is-active' : ''}`}
                         style={{ background: color }}
                         onClick={() => setAccentColor(color)}
-                        aria-label={`Р¦РІРµС‚ ${color}`}
+                        aria-label={`Цвет ${color}`}
                       />
                     ))}
                   </div>
@@ -651,7 +651,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     className="gg-ps-action-btn"
                     onClick={() => setAccentColor('')}
                   >
-                    РЎР±СЂРѕСЃРёС‚СЊ
+                    Сбросить
                   </button>
                 </div>
               </div>
@@ -661,8 +661,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
               <section className="gg-ps-card gg-ps-card-main gg-ps-remote-section">
                 <div className="gg-ps-card-head">
                   <div>
-                    <div className="gg-ps-card-title">РЈРґР°Р»С‘РЅРЅС‹Р№ РїСЂРѕРµРєС‚</div>
-                    <div className="gg-ps-card-desc">РџСЂРѕРІРµСЂРєР° SSH-РґРѕСЃС‚СѓРїР°, РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ Рё РїСЂР°РІ Р·Р°РїРёСЃРё</div>
+                    <div className="gg-ps-card-title">Удалённый проект</div>
+                    <div className="gg-ps-card-desc">Проверка SSH-доступа, инструментов и прав записи</div>
                   </div>
                   <button
                     type="button"
@@ -670,7 +670,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                     onClick={() => void handleRemoteDoctor()}
                     disabled={remoteDoctorBusy}
                   >
-                    {remoteDoctorBusy ? 'РџСЂРѕРІРµСЂСЏСЋ...' : 'РџСЂРѕРІРµСЂРёС‚СЊ'}
+                    {remoteDoctorBusy ? 'Проверяю...' : 'Проверить'}
                   </button>
                 </div>
                 <div
@@ -678,12 +678,12 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
                 >
                   <div>
                     <div className="gg-ps-remote-summary-title">
-                      {remoteDoctor ? remoteDoctor.summary : 'РЎРµСЂРІРµСЂ РµС‰С‘ РЅРµ РїСЂРѕРІРµСЂРµРЅ'}
+                      {remoteDoctor ? remoteDoctor.summary : 'Сервер ещё не проверен'}
                     </div>
                     <div className="gg-ps-remote-summary-detail">
                       {remoteDoctor
                         ? `${remoteDoctor.target.user ? `${remoteDoctor.target.user}@` : ''}${remoteDoctor.target.host}${remoteDoctor.target.remoteRoot}`
-                        : 'РџСЂРѕРІРµСЂРєР° shell, git, node/npm/npx, rg, tsc Рё РїСЂР°РІ Р·Р°РїРёСЃРё'}
+                        : 'Проверка shell, git, node/npm/npx, rg, tsc и прав записи'}
                     </div>
                   </div>
                 </div>
@@ -715,34 +715,34 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
           <section className="gg-ps-card gg-ps-card-main">
             <div className="gg-ps-card-head">
               <div>
-                <div className="gg-ps-card-title">Р”Р°РЅРЅС‹Рµ РїСЂРѕРµРєС‚Р°</div>
-                <div className="gg-ps-card-desc">РЎРѕР·РґР°РЅРёРµ РєРѕРїРёР№ Рё РѕР±СЃР»СѓР¶РёРІР°РЅРёРµ РІСЂРµРјРµРЅРЅС‹С… РґР°РЅРЅС‹С…</div>
+                <div className="gg-ps-card-title">Данные проекта</div>
+                <div className="gg-ps-card-desc">Создание копий и обслуживание временных данных</div>
               </div>
             </div>
             <div className="gg-ps-maintenance">
               <button type="button" className="gg-ps-action-btn" onClick={() => void handleProjectAction('backup')}>
-                РЎРѕР·РґР°С‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ
+                Создать резервную копию
               </button>
               <button type="button" className="gg-ps-action-btn" onClick={() => void handleProjectAction('duplicate')}>
-                РЎРѕР·РґР°С‚СЊ РєРѕРїРёСЋ РїСЂРѕРµРєС‚Р°
+                Создать копию проекта
               </button>
               <button type="button" className="gg-ps-action-btn" onClick={() => void handleProjectAction('cleanup')}>
-                РћС‡РёСЃС‚РёС‚СЊ РІСЂРµРјРµРЅРЅС‹Рµ С„Р°Р№Р»С‹
+                Очистить временные файлы
               </button>
             </div>
             <div className="gg-ps-section-hint-block">
-              РћС‡РёСЃС‚РєР° СѓРґР°Р»СЏРµС‚ С‚РѕР»СЊРєРѕ СЃР»СѓР¶РµР±РЅС‹Рµ РІСЂРµРјРµРЅРЅС‹Рµ РїР°РїРєРё Verstak. Р¤Р°Р№Р»С‹ РїСЂРѕРµРєС‚Р°, С‡Р°С‚С‹, Р·Р°РґР°С‡Рё Рё Р¶СѓСЂРЅР°Р» РѕСЃС‚Р°СЋС‚СЃСЏ
+              Очистка удаляет только служебные временные папки Verstak. Файлы проекта, чаты, задачи и журнал остаются
             </div>
             {projectActionStatus && <div className="gg-ps-action-status">{projectActionStatus}</div>}
           </section>
 
           <section className="gg-ps-section gg-ps-danger-zone">
-            <div className="gg-ps-danger-label">РЈРїСЂР°РІР»РµРЅРёРµ РїСЂРѕРµРєС‚РѕРј</div>
+            <div className="gg-ps-danger-label">Управление проектом</div>
 
             <div className="gg-ps-danger-row gg-ps-danger-row-stack">
               <div>
-                <div className="gg-ps-danger-title">РђСЂС…РёРІ</div>
-                <div className="gg-ps-danger-desc">РџСЂРѕРµРєС‚ РёСЃС‡РµР·РЅРµС‚ РёР· РѕСЃРЅРѕРІРЅРѕРіРѕ СЃРїРёСЃРєР°, РЅРѕ РѕСЃС‚Р°РЅРµС‚СЃСЏ РґРѕСЃС‚СѓРїРµРЅ С‡РµСЂРµР· С„РёР»СЊС‚СЂ Р°СЂС…РёРІР°</div>
+                <div className="gg-ps-danger-title">Архив</div>
+                <div className="gg-ps-danger-desc">Проект исчезнет из основного списка, но останется доступен через фильтр архива</div>
               </div>
               <label className="gg-ps-switch">
                 <input
@@ -757,8 +757,8 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
 
             <div className="gg-ps-danger-row gg-ps-danger-row-stack">
               <div>
-                <div className="gg-ps-danger-title">РЈРІРµРґРѕРјР»РµРЅРёСЏ</div>
-                <div className="gg-ps-danger-desc">РћС‚РєР»СЋС‡Р°РµС‚ СЃРёРіРЅР°Р»С‹ С‚РѕР»СЊРєРѕ РґР»СЏ СЌС‚РѕРіРѕ РїСЂРѕРµРєС‚Р°</div>
+                <div className="gg-ps-danger-title">Уведомления</div>
+                <div className="gg-ps-danger-desc">Отключает сигналы только для этого проекта</div>
               </div>
               <label className="gg-ps-switch">
                 <input
@@ -804,14 +804,14 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
           <div className={`gg-settings-save-status ${projectSettingsDirty ? 'is-dirty' : appearanceSaved || metaSaved ? 'is-saved' : ''}`}>
             {projectSaveStatus}
           </div>
-          <button type="button" className="gg-btn gg-btn-ghost" onClick={onClose}>Р—Р°РєСЂС‹С‚СЊ</button>
+          <button type="button" className="gg-btn gg-btn-ghost" onClick={onClose}>Закрыть</button>
           <button
             type="button"
             className="gg-btn gg-btn-primary"
             onClick={() => void handleSaveProjectSettings()}
             disabled={saving || !displayName.trim()}
           >
-            {saving ? 'РЎРѕС…СЂР°РЅСЏСЋвЂ¦' : appearanceSaved || metaSaved ? 'РЎРѕС…СЂР°РЅРµРЅРѕ' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
+            {saving ? 'Сохраняю…' : appearanceSaved || metaSaved ? 'Сохранено' : 'Сохранить'}
           </button>
         </div>
       </div>
@@ -822,7 +822,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
         <div className="gg-modal gg-delete-client-confirm" onClick={e => e.stopPropagation()} role="alertdialog" aria-modal="true">
           <div className="gg-modal-header">
             <div className="gg-modal-title">{t.projectSettings.deleteConfirmTitle}</div>
-            <button type="button" className="gg-modal-close" onClick={() => setShowDeleteConfirm(false)}>Г—</button>
+            <button type="button" className="gg-modal-close" onClick={() => setShowDeleteConfirm(false)}>×</button>
           </div>
           <div className="gg-modal-body">
             <p className="gg-delete-confirm-text">
@@ -850,7 +850,7 @@ export function ProjectSettings({ project, onClose, onProjectUpdated }: ProjectS
 }
 
 function remoteStatusMark(status: RemoteDoctorStatus): string {
-  if (status === 'pass') return 'вњ“'
+  if (status === 'pass') return '✓'
   if (status === 'warn') return '!'
-  return 'Г—'
+  return '×'
 }

@@ -566,6 +566,364 @@ html[data-theme="light"] .gg-app-atelier .gg-nav-item.is-active {
   border-left-color: var(--accent);
 }
 
+/* ─── Chat redesign: calm document workspace above composer ─── */
+.gg-app-atelier .gg-chat-area,
+.gg-app-atelier .gg-chat {
+  background: transparent;
+}
+
+.gg-app-atelier .gg-chat {
+  --chat-window-bg-top: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg-overlay) 4%);
+  --chat-window-bg-mid: var(--bg-elevated);
+  --chat-window-bg-bottom: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg-base) 4%);
+  background:
+    linear-gradient(
+      180deg,
+      var(--chat-window-bg-top) 0%,
+      var(--chat-window-bg-mid) 48%,
+      var(--chat-window-bg-bottom) 100%
+    );
+}
+
+.gg-app-atelier .gg-chat-stream-area {
+  position: relative;
+  background: transparent;
+}
+
+.gg-app-atelier .gg-chat-stream {
+  background: transparent;
+}
+
+.gg-app-atelier .gg-chat-stream {
+  scroll-padding-top: 58px;
+}
+
+.gg-app-atelier .gg-chat-stream-inner {
+  gap: 22px;
+  padding: 42px 30px 18px;
+}
+
+.gg-app-atelier .gg-chat-visible-date {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 8;
+  transform: translateX(-50%);
+  max-width: min(320px, calc(100% - 48px));
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 78%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  box-shadow:
+    0 6px 18px color-mix(in srgb, var(--bg-base) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.gg-app-atelier .gg-chat-date-divider {
+  gap: 12px;
+  margin: 16px 0 8px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.gg-app-atelier .gg-chat-date-divider::before,
+.gg-app-atelier .gg-chat-date-divider::after {
+  background: color-mix(in srgb, var(--border-subtle) 74%, transparent);
+}
+
+.gg-app-atelier .gg-chat-date-divider-label {
+  padding: 4px 11px;
+  border-color: color-mix(in srgb, var(--border-default) 62%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.gg-app-atelier .gg-msg {
+  gap: 7px;
+  animation: gg-chat-message-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+@keyframes gg-chat-message-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.gg-app-atelier .gg-msg-user {
+  padding-right: 4px;
+}
+
+.gg-app-atelier .gg-msg-bubble {
+  font-size: var(--text-base);
+  line-height: 1.62;
+}
+
+.gg-app-atelier .gg-msg-user .gg-msg-bubble {
+  max-width: min(76%, 760px);
+  padding: 12px 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default));
+  border-left: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-default));
+  border-radius: var(--radius-lg) var(--radius-sm) var(--radius-lg) var(--radius-lg);
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--text-primary) 5%, transparent) 0%, transparent 36%),
+    color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 8%);
+  color: var(--text-primary);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--bg-base) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.gg-app-atelier .gg-msg-user .gg-msg-bubble::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 42%, transparent), transparent);
+  opacity: .65;
+  pointer-events: none;
+}
+
+.gg-app-atelier .gg-msg-assistant .gg-msg-bubble {
+  max-width: 100%;
+  padding: 10px 0 12px 18px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-default));
+  border-radius: 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--bg-elevated) 46%, transparent), transparent 58%);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.gg-app-atelier .gg-msg-assistant:hover .gg-msg-bubble {
+  border-left-color: color-mix(in srgb, var(--accent) 58%, var(--border-default));
+}
+
+.gg-app-atelier .gg-msg-meta {
+  gap: 7px;
+  padding: 0 4px;
+  color: var(--text-tertiary);
+}
+
+.gg-app-atelier .gg-msg-user .gg-msg-meta {
+  max-width: min(76%, 760px);
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.gg-app-atelier .gg-msg-assistant .gg-msg-meta {
+  padding-left: 18px;
+}
+
+.gg-app-atelier .gg-msg-author {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.gg-app-atelier .gg-msg-time,
+.gg-app-atelier .gg-msg-duration {
+  min-height: 18px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--bg-elevated) 42%, transparent);
+  color: var(--text-tertiary);
+}
+
+.gg-app-atelier .gg-msg-duration.is-live {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-subtle));
+  color: var(--accent);
+}
+
+.gg-app-atelier .gg-agent-progress-host {
+  max-width: 920px;
+  margin-bottom: 6px;
+}
+
+.gg-app-atelier .gg-agent-progress-inline {
+  margin: 2px 0 10px;
+}
+
+.gg-app-atelier .gg-agent-progress {
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-default));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--text-primary) 5%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, var(--bg-elevated) 86%, var(--bg-base));
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--bg-base) 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent);
+  backdrop-filter: blur(12px) saturate(1.06);
+  -webkit-backdrop-filter: blur(12px) saturate(1.06);
+}
+
+.gg-app-atelier .gg-agent-progress-summary {
+  min-height: 40px;
+  padding: 9px 13px;
+}
+
+.gg-app-atelier .gg-agent-progress-summary:hover {
+  background: color-mix(in srgb, var(--bg-hover) 44%, transparent);
+}
+
+.gg-app-atelier .gg-agent-progress-body {
+  gap: 11px;
+  padding: 6px 13px 13px;
+}
+
+.gg-app-atelier .gg-agent-progress-now,
+.gg-app-atelier .gg-agent-progress-focus {
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-subtle));
+  border-left: 1px solid color-mix(in srgb, var(--accent) 44%, var(--border-default));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-base) 38%, transparent);
+}
+
+.gg-app-atelier .gg-agent-progress-trail {
+  position: relative;
+  gap: 8px;
+}
+
+.gg-app-atelier .gg-agent-progress-event {
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+
+.gg-app-atelier .gg-agent-progress-event-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+}
+
+.gg-app-atelier .gg-activity-list,
+.gg-app-atelier .gg-changed-files,
+.gg-app-atelier .gg-thinking,
+.gg-app-atelier .gg-preflight,
+.gg-app-atelier .gg-subagent,
+.gg-app-atelier .gg-chat-history-more {
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--text-primary) 4%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--bg-base) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.gg-app-atelier .gg-activity-list {
+  padding: 8px;
+}
+
+.gg-app-atelier .gg-activity-row {
+  min-height: 28px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--bg-base) 28%, transparent);
+}
+
+.gg-app-atelier .gg-preflight,
+.gg-app-atelier .gg-subagent {
+  border-left-width: 1px;
+  padding: 12px;
+}
+
+.gg-app-atelier .gg-preflight.is-low,
+.gg-app-atelier .gg-subagent.is-done {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border-default));
+}
+
+.gg-app-atelier .gg-preflight.is-medium,
+.gg-app-atelier .gg-subagent.is-running {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border-default));
+}
+
+.gg-app-atelier .gg-preflight.is-high,
+.gg-app-atelier .gg-subagent.is-error {
+  border-color: color-mix(in srgb, var(--error) 30%, var(--border-default));
+}
+
+.gg-app-atelier .gg-thinking {
+  overflow: hidden;
+}
+
+.gg-app-atelier .gg-thinking-summary {
+  background: transparent;
+}
+
+.gg-app-atelier .gg-thinking-body {
+  background: color-mix(in srgb, var(--bg-base) 38%, transparent);
+}
+
+.gg-app-atelier .gg-changed-files {
+  padding: 10px 12px;
+}
+
+.gg-app-atelier .gg-chat-history-more {
+  padding: 10px;
+  text-align: center;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-chat-stream-area {
+  background: transparent;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-chat-area,
+html[data-theme="light"] .gg-app-atelier .gg-chat {
+  background: transparent;
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-chat {
+  --chat-window-bg-top: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg-base) 4%);
+  --chat-window-bg-mid: var(--bg-elevated);
+  --chat-window-bg-bottom: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg-overlay) 4%);
+}
+
+html[data-theme="light"] .gg-app-atelier .gg-msg-user .gg-msg-bubble,
+html[data-theme="light"] .gg-app-atelier .gg-agent-progress,
+html[data-theme="light"] .gg-app-atelier .gg-activity-list,
+html[data-theme="light"] .gg-app-atelier .gg-changed-files,
+html[data-theme="light"] .gg-app-atelier .gg-thinking,
+html[data-theme="light"] .gg-app-atelier .gg-preflight,
+html[data-theme="light"] .gg-app-atelier .gg-subagent,
+html[data-theme="light"] .gg-app-atelier .gg-chat-history-more {
+  box-shadow:
+    0 8px 18px rgba(15, 25, 40, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+@media (max-width: 720px) {
+  .gg-app-atelier .gg-chat-stream-inner {
+    padding: 38px 16px 16px;
+  }
+
+  .gg-app-atelier .gg-msg-user .gg-msg-bubble,
+  .gg-app-atelier .gg-msg-user .gg-msg-meta {
+    max-width: 92%;
+  }
+
+  .gg-app-atelier .gg-chat-visible-date {
+    max-width: calc(100% - 32px);
+  }
+}
+
 /* ─── Empty state ─── */
 .gg-app-atelier .gg-chat-empty-mark-img {
   width: 96px;
@@ -614,7 +972,7 @@ html[data-theme="nord"] .gg-app-atelier .gg-chat-empty-modes {
 .gg-app-atelier .gg-composer {
   padding: 12px 28px 18px;
   border-top: none;
-  background: linear-gradient(0deg, color-mix(in srgb, var(--bg-elevated) 92%, transparent) 0%, transparent 100%);
+  background: transparent;
 }
 
 .gg-app-atelier .gg-agent-progress-host + .gg-composer {
