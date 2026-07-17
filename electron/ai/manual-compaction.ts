@@ -90,7 +90,45 @@ export function buildCompactionPrompt(messages: CompactableMessage[], throughMes
   }
 }
 
-/** Грубая оценка размера в токенах (~4 символа на токен). Именно ОЦЕНКА, не биллинг. */
-export function estimateTokens(messages: Array<{ content: string }>): number {
-  return Math.ceil(messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0) / 4)
+/**
+ * Грубая оценка размера в токенах (~4 символа на токен). Именно ОЦЕНКА, не биллинг —
+ * настоящие цифры приходят от провайдера и живут во вкладке «Расход».
+ *
+ * Считаем НЕ только видимый текст (ревью B #15). Сообщение несёт ещё вложения, ход
+ * рассуждений и tool-нагрузку — для модели это реальный вес. Чат из двадцати скриншотов
+ * давал оценку ≈0: счётчик уверял, что всё в порядке, пока окно не лопнет.
+ */
+const CHARS_PER_TOKEN = 4
+/** Вклад одного вложения. Картинки токенизируются не по символам, точной формулы у нас
+ *  нет и врать точностью не будем: берём порядок величины типового изображения. */
+const TOKENS_PER_ATTACHMENT = 1500
+
+export interface SizedMessage {
+  content?: string
+  thinking?: string
+  attachments?: unknown[]
+  toolCalls?: unknown[]
+  toolResults?: unknown[]
+}
+
+const jsonChars = (v: unknown[] | undefined): number => {
+  if (!v?.length) return 0
+  try {
+    return JSON.stringify(v).length
+  } catch {
+    return 0 // циклическая ссылка — не роняем счётчик из-за оценки
+  }
+}
+
+export function estimateTokens(messages: SizedMessage[]): number {
+  let chars = 0
+  let attachments = 0
+  for (const m of messages) {
+    chars += m.content?.length ?? 0
+    chars += m.thinking?.length ?? 0
+    chars += jsonChars(m.toolCalls)
+    chars += jsonChars(m.toolResults)
+    attachments += m.attachments?.length ?? 0
+  }
+  return Math.ceil(chars / CHARS_PER_TOKEN) + attachments * TOKENS_PER_ATTACHMENT
 }

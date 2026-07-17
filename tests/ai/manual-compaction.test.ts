@@ -113,4 +113,27 @@ describe('оценка размера', () => {
     expect(big).toBe(1000)
     expect(big).toBeGreaterThan(small)
   })
+
+  // Ревью B #15: чат из скриншотов давал оценку ≈0 — счётчик уверял, что всё в порядке,
+  // пока окно не лопнет.
+  it('вложения весят: чат из скриншотов не выглядит пустым', () => {
+    const screenshots = estimateTokens([{ content: '', attachments: [{ name: 'a.png' }, { name: 'b.png' }] }])
+    expect(screenshots).toBeGreaterThan(1000)
+  })
+
+  it('ход рассуждений модели тоже занимает место', () => {
+    expect(estimateTokens([{ content: 'ок', thinking: 'а'.repeat(4000) }]))
+      .toBeGreaterThan(estimateTokens([{ content: 'ок' }]))
+  })
+
+  it('tool-нагрузка учитывается (в длинных агентных сессиях это основной вес)', () => {
+    const withTools = estimateTokens([{ content: 'ок', toolResults: [{ id: '1', content: 'я'.repeat(2000) }] }])
+    expect(withTools).toBeGreaterThan(400)
+  })
+
+  it('битые данные не роняют счётчик', () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(() => estimateTokens([{ content: 'ок', toolCalls: [cyclic] }])).not.toThrow()
+  })
 })

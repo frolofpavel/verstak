@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import { pickBoundary, buildCompactionPrompt, estimateTokens } from './manual-compaction'
 import type { CompactableMessage } from './manual-compaction'
 import { saveSnapshot, maxMessageId, activeSnapshot } from '../storage/chat-context-snapshots'
+import { prepareHistoryForModel } from './history-preparation'
 import type { ChatContextSnapshot } from '../storage/chat-context-snapshots'
 
 /**
@@ -39,6 +40,16 @@ export type CompactionResult =
   /** Чат пополнился, пока считали summary. Не записали ничего. */
   | { ok: false; reason: 'conflict'; detail: string }
 
+/**
+ * Чаты, по которым компакция идёт ПРЯМО СЕЙЧАС (ревью B #11).
+ *
+ * Кнопка своим состоянием защитить не может: ContextMeter смонтирован условно — закрыл
+ * меню, и его локальный «сворачиваю…» умер вместе с компонентом, а вызов в main крутится
+ * дальше. Человек открывает меню снова («завис, нажму ещё») — и платит за вторую
+ * генерацию итога. Поэтому гард живёт здесь, в main: он переживает любой UI.
+ */
+const compactingChats = new Set<number>()
+
 export async function compactChatContext(
   db: Database,
   chatId: number,
@@ -48,6 +59,23 @@ export async function compactChatContext(
   if (deps.hasActiveRun(chatId)) {
     return { ok: false, reason: 'busy', detail: 'идёт ответ — дождитесь окончания и повторите' }
   }
+  if (compactingChats.has(chatId)) {
+    return { ok: false, reason: 'busy', detail: 'этот чат уже сворачивается — подождите' }
+  }
+  compactingChats.add(chatId)
+  try {
+    return await runCompaction(db, chatId, deps)
+  } finally {
+    // Снимаем ВСЕГДА: осечка не должна оставлять чат заблокированным навсегда.
+    compactingChats.delete(chatId)
+  }
+}
+
+async function runCompaction(
+  db: Database,
+  chatId: number,
+  deps: CompactionDeps,
+): Promise<CompactionResult> {
 
   const messages = deps.loadMessages(chatId)
   const boundary = pickBoundary(messages)
@@ -105,7 +133,13 @@ export async function compactChatContext(
   }
 }
 
-/** Состояние контекста чата для ContextMeter — честные факты, без обещаний. */
+/**
+ * Состояние контекста чата для ContextMeter — честные факты, без обещаний.
+ *
+ * estimatedTokens считается по тому, что РЕАЛЬНО уйдёт модели (ревью B #15): после сжатия
+ * это [итог + хвост], а не сырая переписка. Иначе счётчик показывал бы прежний вес и
+ * человек не увидел бы эффекта от собственного нажатия.
+ */
 export function contextState(db: Database, chatId: number, messages: CompactableMessage[]): {
   totalMessages: number
   estimatedTokens: number
@@ -115,9 +149,10 @@ export function contextState(db: Database, chatId: number, messages: Compactable
 } {
   const snap = activeSnapshot(db, chatId)
   const boundary = pickBoundary(messages)
+  const sent = prepareHistoryForModel(messages, snap ? { summary: snap.summary, throughMessageId: snap.throughMessageId } : null)
   return {
     totalMessages: messages.length,
-    estimatedTokens: estimateTokens(messages),
+    estimatedTokens: estimateTokens(sent),
     compacted: !!snap,
     compactedThroughMessageId: snap?.throughMessageId ?? null,
     canCompact: boundary.ok,
