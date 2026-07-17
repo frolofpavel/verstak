@@ -133,7 +133,10 @@ export function ReviewPanel() {
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
-    const sendId = await window.api.ai.send(allMessages, path)
+    // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
+    // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
+    // через registerSendOwner — main об этом не знал.
+    const sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
     registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
     toggleReviewPanel(null)
   }
@@ -165,7 +168,10 @@ export function ReviewPanel() {
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
-    const sendId = await window.api.ai.send(allMessages, path)
+    // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
+    // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
+    // через registerSendOwner — main об этом не знал.
+    const sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
     registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
     toggleReviewPanel(null)
   }
@@ -350,6 +356,9 @@ function severityClass(sev: FindingSeverity): string {
     case 'P0': return 'p0'
     case 'P1': return 'p1'
     case 'P2': return 'p2'
+    // P3 явно: линтер требует полноты switch (всплыло, когда файл попал под линт
+    // изменённых). Поведение прежнее — default сохранён как страховка.
+    case 'P3': return 'p3'
     default: return 'p3'
   }
 }
@@ -362,6 +371,7 @@ function sevRank(sev: FindingSeverity): number {
     case 'P0': return 0
     case 'P1': return 1
     case 'P2': return 2
+    case 'P3': return 3
     default: return 3
   }
 }
@@ -381,6 +391,7 @@ function dodLabel(v: VerificationRow): string {
     case 'passed': return `✅ DoD ${nm}`
     case 'failed': return `✗ DoD ${nm}`
     case 'partial': return `⚠ DoD ${nm}`
+    case 'not_run': return `⚠ DoD не запущен`
     default: return `⚠ DoD не запущен`
   }
 }

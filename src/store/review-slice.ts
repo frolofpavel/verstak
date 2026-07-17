@@ -185,7 +185,12 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
           model,
           noTools: true,
           useReviewerPrompt: true
-        }
+        },
+        // Ревью-чат — настоящий чат (строка в chat_sessions, свой pill в Timeline).
+        // Передаём его id, чтобы прогон был привязан к нему в main: реестр «чат занят»
+        // видит ревью, аудит прогона ссылается на свой чат (ре-ревью B, #2). Компакции и
+        // worktree у ревью-чата нет — резолв вернёт «пусто», поведение не меняется.
+        String(reviewChat.id)
       )
       // Grok audit fix: ai:send возвращает 0 если провайдер недоступен
       // (нет API key, не найден бинарь CLI, и т.п.). Error event улетел с

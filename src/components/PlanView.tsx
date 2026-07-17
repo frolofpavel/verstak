@@ -188,7 +188,9 @@ ${remaining || '— нет —'}
     setStreaming(true)
     setActiveView('chat')
     const allMessages = [...useProject.getState().messages].slice(0, -1) as ChatMessage[]
-    await window.api.ai.send(allMessages, path)
+    // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
+    // изоляция worktree (ре-ревью B, #2). Страж: tests/contracts/chat-send-chatid-contract.
+    await window.api.ai.send(allMessages, path, activeChatId != null ? String(activeChatId) : undefined)
     // refresh on next paint cycle so user sees the step go to 'running'
     void refresh()
   }

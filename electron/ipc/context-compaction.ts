@@ -23,9 +23,25 @@ export interface ContextCompactionDeps {
   createSummaryProvider: () => { provider: ChatProvider; providerId: string; model: string | null } | null
 }
 
-/** storage-сообщения → вход компакции. id строки становится границей снапшота. */
+/**
+ * storage-сообщения → вход компакции. id строки становится границей снапшота.
+ *
+ * thinking прокидывается ОСОЗНАННО (ре-ревью B, #6/#7/#9): в длинной агентной сессии ход
+ * рассуждений весит не меньше видимого текста, и без него счётчик занижал размер.
+ *
+ * ЧЕСТНАЯ ГРАНИЦА: вложения (скриншоты, PDF) в таблице `chats` НЕ хранятся вовсе — они
+ * живут только в renderer и уходят прямо в ai:send. Поэтому счётчик контекста их не видит
+ * и на чате со скриншотами занижает оценку. Это ограничение ИСТОЧНИКА, а не счётчика:
+ * estimateTokens вложения считать умеет, подать их сюда неоткуда. Заявление коммита
+ * d02b813 («чат из скриншотов не выглядит пустым») в этой части было неверным.
+ */
 function toCompactable(messages: ReturnType<Chats['listBySession']>): CompactableMessage[] {
-  return messages.map(m => ({ role: m.role, content: m.content, dbId: m.id }))
+  return messages.map(m => ({
+    role: m.role,
+    content: m.content,
+    dbId: m.id,
+    ...(m.thinking ? { thinking: m.thinking } : {}),
+  }))
 }
 
 export function registerContextCompactionIpc(deps: ContextCompactionDeps): void {

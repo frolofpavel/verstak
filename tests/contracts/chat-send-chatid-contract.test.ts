@@ -17,12 +17,29 @@
 // прогон отправки в jsdom упирается в инфраструктурный предел (в 2.0.9-A по этой же причине
 // уже снимались два теста). Здесь проверяется само место шва — в исходнике, дёшево и точно.
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 
 const ROOT = process.cwd()
-const CHAT_PATH = join(ROOT, 'src', 'components', 'Chat.tsx')
+
+/**
+ * Сканируем ВЕСЬ renderer, а не один Chat.tsx (ре-ревью B, находка #2).
+ *
+ * Первая версия стража смотрела только Chat.tsx — и пропустила PlanView и ReviewPills,
+ * которые шлют в тот же главный чат тем же ai.send. Страж, знающий одно место, даёт
+ * ложное спокойствие: дыра переезжает в соседний файл и «покрытие» об этом молчит.
+ */
+function rendererFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...rendererFiles(full))
+    else if (/\.tsx?$/.test(entry.name)) out.push(full)
+  }
+  return out
+}
+const SRC = join(ROOT, 'src')
 
 /** Индекс аргумента chatId в сигнатурах preload. */
 const CHATID_ARG_INDEX: Record<string, number> = {
@@ -33,6 +50,7 @@ const CHATID_ARG_INDEX: Record<string, number> = {
 
 interface SendCall {
   method: string
+  file: string
   line: number
   argCount: number
   /** Текст аргумента chatId, если он передан. */
@@ -41,6 +59,7 @@ interface SendCall {
 
 function collectSendCalls(file: string): SendCall[] {
   const src = readFileSync(file, 'utf8')
+  if (!src.includes('api.ai.')) return []
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const out: SendCall[] = []
 
@@ -54,6 +73,7 @@ function collectSendCalls(file: string): SendCall[] {
         const arg = node.arguments[idx]
         out.push({
           method,
+          file: file.slice(ROOT.length + 1).replace(/\\/g, '/'),
           line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
           argCount: node.arguments.length,
           chatIdArg: arg ? arg.getText(sf) : null,
@@ -66,24 +86,28 @@ function collectSendCalls(file: string): SendCall[] {
   return out
 }
 
-describe('контракт: каждая отправка из Chat.tsx знает свой чат', () => {
-  const calls = collectSendCalls(CHAT_PATH)
+describe('контракт: каждая отправка из renderer знает свой чат', () => {
+  const calls = rendererFiles(SRC).flatMap(collectSendCalls)
 
   it('вызовы ai.send* вообще найдены (страж не ослеп после рефактора)', () => {
-    // Если Chat.tsx переименуют/перенесут отправку — страж молча пройдёт на пустом списке.
-    expect(calls.length).toBeGreaterThanOrEqual(4)
+    // Если отправку переименуют/перенесут — страж молча прошёл бы на пустом списке.
+    expect(calls.length).toBeGreaterThanOrEqual(8)
+  })
+
+  it('страж видит НЕ ТОЛЬКО Chat.tsx (иначе дыра переезжает в соседний файл)', () => {
+    expect(new Set(calls.map(c => c.file)).size).toBeGreaterThan(1)
   })
 
   // ГЛАВНОЕ. Пропуск этого аргумента = три мёртвые фичи и ноль сигналов.
   it('НИ ОДИН вызов не забывает chatId', () => {
     const missing = calls.filter(c => c.chatIdArg === null)
     expect(
-      missing.map(c => `${c.method} @ Chat.tsx:${c.line} — chatId не передан`),
+      missing.map(c => `${c.method} @ ${c.file}:${c.line} — chatId не передан`),
     ).toEqual([])
   })
 
   it('chatId — не пустая заглушка', () => {
     const bad = calls.filter(c => c.chatIdArg === 'undefined' || c.chatIdArg === 'null' || c.chatIdArg === "''")
-    expect(bad.map(c => `${c.method} @ Chat.tsx:${c.line} — chatId = ${c.chatIdArg}`)).toEqual([])
+    expect(bad.map(c => `${c.method} @ ${c.file}:${c.line} — chatId = ${c.chatIdArg}`)).toEqual([])
   })
 })
