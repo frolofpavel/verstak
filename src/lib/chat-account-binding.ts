@@ -27,16 +27,36 @@ export type ChatAccountView =
  * Биндинг ЧУЖОГО провайдера игнорируем: он про другой провайдер, к текущему выбору отношения
  * не имеет (иначе бейдж «закреплено» висел бы на провайдере, где закрепления нет).
  */
+/**
+ * Как показать закрепление аккаунта — ДОЛЖНО зеркалить движок (route-policy.pickChatAccountId),
+ * иначе UI и прогон разъезжаются (ре-ревью honesty, HIGH-регрессия 8bdc11e).
+ *
+ * Ловушка, которую это чинит: `binding.providerId` main СИНТЕЗИРУЕТ из текущего провайдера
+ * чата (chats.ts) — в БД провайдера пина нет. Поэтому сверка `binding.providerId !==
+ * currentProviderId` в проде всегда ложна (оба операнда из одного источника) и была мертва.
+ * Из-за этого пин на аккаунт ДРУГОГО, живого провайдера показывался как «аккаунт удалён»,
+ * а кнопка «Открепить» снесла бы рабочий пин — при том, что движок спокойно даёт auto.
+ *
+ * Движок судит по ГЛОБАЛЬНОМУ существованию аккаунта: жив под текущим провайдером → pinned;
+ * жив под другим → пин нерелевантен → auto; не существует нигде → unavailable. Здесь так же —
+ * поэтому нужен `allAccounts` (все провайдеры), а не только текущий.
+ *
+ * @param accounts    аккаунты ТЕКУЩЕГО провайдера (для ярлыка закреплённого).
+ * @param allAccounts аккаунты ВСЕХ провайдеров (для сверки «жив ли где-нибудь»).
+ */
 export function chatAccountView(
   binding: ChatSubscriptionBindingDTO | null,
   accounts: SubscriptionAccountDTO[],
   currentProviderId: string,
+  allAccounts: SubscriptionAccountDTO[] = accounts,
 ): ChatAccountView {
   if (!binding || binding.mode !== 'pinned' || binding.accountId == null) return { kind: 'auto' }
-  if (binding.providerId !== currentProviderId) return { kind: 'auto' }
   const acc = accounts.find(a => a.id === binding.accountId)
-  if (!acc) return { kind: 'unavailable', accountId: binding.accountId }
-  return { kind: 'pinned', accountId: acc.id, label: acc.label }
+  if (acc) return { kind: 'pinned', accountId: acc.id, label: acc.label }
+  // Нет среди аккаунтов текущего провайдера. Жив под другим → пин нерелевантен (движок даёт
+  // auto, не трогаем). Не существует нигде → реально удалён → unavailable (стоп-с-вопросом).
+  if (allAccounts.some(a => a.id === binding.accountId)) return { kind: 'auto' }
+  return { kind: 'unavailable', accountId: binding.accountId }
 }
 
 /**

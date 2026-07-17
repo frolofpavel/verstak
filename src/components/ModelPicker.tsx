@@ -157,6 +157,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
   // Хвост 2.0.8-D2: закрепление аккаунта за чатом. Бэкенд был готов ещё тогда, а в notes
   // 2.0.8 честно написано «кнопка появится в следующем релизе» — вот она.
   const [accounts, setAccounts] = useState<SubscriptionAccountDTO[]>([])
+  const [allAccounts, setAllAccounts] = useState<SubscriptionAccountDTO[]>([])
   const [binding, setBinding] = useState<ChatSubscriptionBindingDTO | null>(null)
 
   useEffect(() => {
@@ -250,21 +251,26 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
     let cancelled = false
     void (async () => {
       try {
-        const [list, b] = await Promise.all([
+        const [list, all, b] = await Promise.all([
           window.api.subscriptionAccounts.list(provider.id),
+          // Все аккаунты (без фильтра провайдера): нужны, чтобы отличить «пин на аккаунт
+          // другого, живого провайдера» (→ auto) от «аккаунт реально удалён» (→ unavailable),
+          // как это делает движок. Иначе UI лжёт «аккаунт удалён» (ре-ревью honesty).
+          window.api.subscriptionAccounts.list(),
           activeChatId ? window.api.chats.getSubscriptionBinding(activeChatId) : Promise.resolve(null),
         ])
         if (cancelled) return
         setAccounts(Array.isArray(list) ? list : [])
+        setAllAccounts(Array.isArray(all) ? all : [])
         setBinding(b ?? null)
       } catch {
-        if (!cancelled) { setAccounts([]); setBinding(null) }
+        if (!cancelled) { setAccounts([]); setAllAccounts([]); setBinding(null) }
       }
     })()
     return () => { cancelled = true }
   }, [provider.id, activeChatId, open])
 
-  const accountView = chatAccountView(binding, accounts, provider.id)
+  const accountView = chatAccountView(binding, accounts, provider.id, allAccounts)
 
   async function applyBinding(next: ChatSubscriptionBindingDTO) {
     if (!activeChatId) return
