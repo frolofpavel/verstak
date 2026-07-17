@@ -31,8 +31,12 @@ const BASELINE = new Set([
 
 /** Только версионируемые исходники — генерённое/бинарное (иконки, out/) не наше дело. */
 function trackedSources(): string[] {
+  // Под pre-commit хуком git выставляет GIT_DIR/GIT_INDEX_FILE; в linked worktree путь
+  // абсолютный → ls-files отвечал бы про чужой контекст. Конвенция: git-worktree.ts:27.
+  const env = { ...process.env }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_NAMESPACE', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[k]
   const out = execFileSync('git', ['ls-files', '-z', '*.ts', '*.tsx', '*.mjs', '*.cjs', '*.json', '*.css', '*.md'], {
-    cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+    cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env,
   })
   return out.split('\0').filter(Boolean)
 }
