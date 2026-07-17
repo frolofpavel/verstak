@@ -59,3 +59,24 @@ export const suspendedSends = new Set<number>()
 export function scopedKey(sendId: number, callId: string): string {
   return `${sendId}::${callId}`
 }
+
+// ─── Реестр активных прогонов по чату (2.0.11-B) ───
+// activeAborts в ai.ts ключуется по sendId и на вопрос «идёт ли сейчас стрим В ЭТОМ
+// ЧАТЕ» не отвечает. Ручная компакция обязана его задать: сжать контекст под работающим
+// прогоном — значит увести историю из-под него на полуслове.
+// Заполняется там же, где activeAborts (ai.ts), теми же set/delete.
+const activeChatRuns = new Map<number, number>() // sendId → chatId
+
+export function registerChatRun(sendId: number, chatId: number | null | undefined): void {
+  if (typeof chatId === 'number' && Number.isFinite(chatId)) activeChatRuns.set(sendId, chatId)
+}
+
+export function unregisterChatRun(sendId: number): void {
+  activeChatRuns.delete(sendId)
+}
+
+/** Идёт ли прямо сейчас прогон в этом чате. Гейт ручной компакции. */
+export function hasActiveRunForChat(chatId: number): boolean {
+  for (const id of activeChatRuns.values()) if (id === chatId) return true
+  return false
+}
