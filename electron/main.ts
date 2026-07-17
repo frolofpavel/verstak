@@ -86,6 +86,7 @@ import { createConnectorRegistry } from './connectors/registry'
 import { PROVIDERS, createProvider, type ProviderId } from './ai/registry'
 import { registerContextCompactionIpc } from './ipc/context-compaction'
 import { pickSummaryProvider } from './ai/pick-summary-provider'
+import { activeSnapshot as activeContextSnapshot } from './storage/chat-context-snapshots'
 import { AGENT_MODES } from './ai/mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
 import { registerSkillsIpc } from './ipc/skills'
@@ -708,6 +709,11 @@ app.whenReady().then(() => {
     linkDevTaskRun: (projectPath, chatId, runId) => {
       const active = devTasks.list(projectPath).find(t => t.chatId === chatId && isActiveDevTask(t))
       if (active) devTasks.linkRun(active.id, runId)
+    },
+    // 2.0.11-B: активный снапшот компакции чата → модель получает [summary + хвост].
+    getContextSnapshot: chatId => {
+      const snap = activeContextSnapshot(db, chatId)
+      return snap ? { summary: snap.summary, throughMessageId: snap.throughMessageId } : null
     }
   }
   registerAiIpc(aiDeps)

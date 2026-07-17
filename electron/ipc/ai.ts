@@ -11,6 +11,7 @@ import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-servic
 import { isKnownProviderId, type PromptRouteOverride } from '../../shared/contracts/provider'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
+import { prepareHistoryForModel } from '../ai/history-preparation'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
 import type { RecipeSpec } from '../ai/skills/types'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
@@ -151,6 +152,10 @@ export interface AiDeps {
    *  dev_task просто не накапливает run_id'ы (откат всё равно работает через
    *  checkpoint). Возвращает true если связал. */
   linkDevTaskRun?: (projectPath: string, chatId: number | null, runId: string) => void
+  /** 2.0.11-B: активный snapshot компакции чата. Модель получает [summary + хвост после
+   *  границы] вместо всей истории. null/не передан → история как есть (прежнее поведение).
+   *  Сжатие НЕ трогает видимую переписку — только то, что уходит в запрос. */
+  getContextSnapshot?: (chatId: number) => { summary: string; throughMessageId: number } | null
 }
 
 let currentSendId = 0
@@ -453,7 +458,13 @@ export function registerAiIpc(deps: AiDeps): void {
       const r = deps.resolveSubscriptionAccount?.(pid, chatIdNum)
       return r && !('unavailable' in r) ? r : null
     }
-    const messages = await expandOfficeAttachments(incomingMessages)
+    // 2.0.11-B: активный снапшот компакции → модель получает [summary + хвост] вместо
+    // всей простыни. Видимая переписка при этом не трогается — сжатие живёт только здесь,
+    // в сборке запроса. Снапшота нет → история как есть (поведение прежнее).
+    // resume-путь не задет: он перезаписывает messagesWithSystem целиком (историей из
+    // чекпойнта, которая уже полная).
+    const contextSnapshot = chatIdNum ? (deps.getContextSnapshot?.(chatIdNum) ?? null) : null
+    const messages = prepareHistoryForModel(await expandOfficeAttachments(incomingMessages), contextSnapshot)
     // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
     // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
     // (она уже содержит system + все turn'ы), минуя пере-сборку system ниже.

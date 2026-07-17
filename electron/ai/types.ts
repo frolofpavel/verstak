@@ -24,6 +24,12 @@ export interface ChatMessage {
    *  Claude extended thinking, OpenAI o1 reasoning). Rendered as a
    *  collapsible block in the chat, not part of the visible answer. */
   thinking?: string
+  /** 2.0.11-B: id строки в `chats`. Renderer шлёт его в ai:send с самого начала (store
+   *  кладёт `dbId: m.id`), но main-тип этого не описывал — поле доезжало «само».
+   *  Компакции оно нужно ЯВНО: по нему история режется по границе снапшота. Нет dbId —
+   *  сообщение считается свежим (ещё не в БД) и всегда идёт модели. Зеркало поля в
+   *  src/types/api.d.ts (§5 дубли renderer↔main). */
+  dbId?: number
 }
 
 export interface ToolCall {
