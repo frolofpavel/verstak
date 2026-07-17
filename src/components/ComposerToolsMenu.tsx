@@ -4,6 +4,8 @@ import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
 import { MULTI_AGENT_LIST } from '../lib/multi-agent-templates'
 import { ContextMeter } from './ContextMeter'
+import { useProvider } from '../hooks/useProvider'
+import { canIsolateChat, isolationBlockedReason, isolationBlockedHint, fileRevertBlockedReason, fileRevertBlockedHint } from '../lib/worktree-honesty'
 
 const PROVIDER_LABELS: Record<string, string> = {
   'gemini-api': 'Gemini (API)',
@@ -41,6 +43,16 @@ export function ComposerToolsMenu({
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)
   const startReview = useProject(s => s.startReview)
+
+  // Честность изоляции и отката — решение и тексты живут в src/lib/worktree-honesty
+  // (покрыто тестами, сверяется с контрактом провайдеров). Здесь только показать.
+  const activeProvider = useProvider()
+  const isolationTarget = {
+    transport: activeProvider.transport,
+    supportsTools: activeProvider.supportsTools,
+    label: activeProvider.label,
+  }
+  const canIsolate = canIsolateChat(isolationTarget)
 
   const skills = useSkills(s => s.skills)
   const activeSkillId = useSkills(s => s.activeSkillId)
@@ -521,11 +533,17 @@ export function ComposerToolsMenu({
                       type="button"
                       className="gg-tools-row"
                       onClick={() => void isolateWorktree()}
-                      disabled={worktreeBusy || isStreaming || activeChatId == null}
-                      title="Правки агента пойдут в отдельную git-копию и не затронут основной проект до применения"
+                      disabled={worktreeBusy || isStreaming || activeChatId == null || !canIsolate}
+                      title={isolationBlockedReason(isolationTarget)
+                        ?? 'Правки агента пойдут в отдельную git-копию и не затронут основной проект до применения'}
                     >
                       <span className="gg-tools-row-label">🌿 Изолировать сессию</span>
-                      <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения ответа' : 'отдельная git-копия для правок агента'}</span>
+                      <span className="gg-tools-row-meta">
+                        {/* Честнее показать «недоступно», чем изолировать понарошку: правки
+                            ушли бы в настоящий репозиторий под вывеской «🌿 Изолировано». */}
+                        {isolationBlockedHint(isolationTarget)
+                          ?? (isStreaming ? 'дождись завершения ответа' : 'отдельная git-копия для правок агента')}
+                      </span>
                     </button>
                   )}
                   {worktreeErr && <div className="gg-tools-empty">{worktreeErr}</div>}
@@ -604,17 +622,41 @@ export function ComposerToolsMenu({
                     </button>
                   ) : (
                     <>
-                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertFiles()} disabled={isStreaming}>
+                      {/* Ре-ревью 2.0.11-B #1: в изолированном чате правки живут в git-копии,
+                          а этот откат смотрит на основной проект — своё не откатит, чужое
+                          (правки параллельного чата) откатит и отрапортует успехом. Пока
+                          механику не починили, честнее не давать нажать: у изоляции свой
+                          штатный откат — «✕ Отбросить» в панели над чатом. */}
+                      <button
+                        type="button"
+                        className="gg-tools-row is-warn"
+                        onClick={() => void revertFiles()}
+                        disabled={isStreaming || worktreeStatus.active}
+                        title={fileRevertBlockedReason(worktreeStatus.active) ?? undefined}
+                      >
                         <span className="gg-tools-row-label">Откатить файлы</span>
-                        <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения ответа' : `После #${checkpointId === 0 ? 'start' : checkpointId}`}</span>
+                        <span className="gg-tools-row-meta">
+                          {fileRevertBlockedHint(worktreeStatus.active)
+                            ?? (isStreaming ? 'дождись завершения ответа' : `После #${checkpointId === 0 ? 'start' : checkpointId}`)}
+                        </span>
                       </button>
                       <button type="button" className="gg-tools-row is-warn" onClick={() => void revertTask()} disabled={isStreaming || checkpointMessageId == null}>
                         <span className="gg-tools-row-label">Откатить задачу (диалог)</span>
                         <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения' : checkpointMessageId == null ? 'граница не захвачена' : 'обрезать диалог к чекпоинту'}</span>
                       </button>
-                      <button type="button" className="gg-tools-row is-warn" onClick={() => void revertBoth()} disabled={isStreaming}>
+                      <button
+                        type="button"
+                        className="gg-tools-row is-warn"
+                        onClick={() => void revertBoth()}
+                        disabled={isStreaming || worktreeStatus.active}
+                        title={fileRevertBlockedReason(worktreeStatus.active) ?? undefined}
+                      >
                         <span className="gg-tools-row-label">Файлы + задачу</span>
-                        <span className="gg-tools-row-meta">{isStreaming ? 'дождись завершения' : 'откатить всё'}</span>
+                        <span className="gg-tools-row-meta">
+                          {worktreeStatus.active
+                            ? 'в изоляции — файлы через «✕ Отбросить»'
+                            : isStreaming ? 'дождись завершения' : 'откатить всё'}
+                        </span>
                       </button>
                     </>
                   )}

@@ -30,6 +30,7 @@ function dto(over: Partial<ProviderDescriptorDTO> & Pick<ProviderDescriptorDTO, 
     capabilities: over.capabilities ?? {
       tools: true, attachments: true, verification: true, liveTimeline: true,
       resumeSafe: true, mcp: true, delegation: true, perFileUndo: true,
+      worktreeIsolation: true,
     },
   }
 }
