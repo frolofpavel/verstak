@@ -2302,7 +2302,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
     setStreaming(true)
     const msgs = [...useProject.getState().messages].slice(0, -1)
-    const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
+    // chatId обязателен и здесь: «Продолжить ходы» — тот же чат, те же компакция/pin/worktree.
+    const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget, activeChatId != null ? String(activeChatId) : undefined)
     if (activeChatId != null) registerChatSendOwner(sendId, activeChatId, false, store.path)
     if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
   }
@@ -2873,6 +2874,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // СРАЗУ снимаем после отправки (one-shot). requested пишется в agent_run (main).
     const oneShotRoute = useProject.getState().promptRouteOverride
     const routeOverride = oneShotRoute ? { promptRoute: oneShotRoute } : {}
+    // Хвост ревью 2.0.11-B: chatId ОБЯЗАН доехать до ai:send. От него в main зависят три
+    // вещи разом: компакция контекста (2.0.11-B), закреплённый за чатом аккаунт (2.0.8-D2)
+    // и изоляция worktree. Фоновые пути его передавали, главный — забывал, и все три
+    // молча не работали в основном чате. Страж: tests/contracts/chat-send-chatid-contract.
+    const sendChatId = activeChatId != null ? String(activeChatId) : undefined
     if (activeSkill || skillSystemPrompt) {
       // Узнаём текущий provider пользователя — чтобы решить override или нет
       const currentProvider = activeSkill ? await window.api.settings.getKey('provider') : null
@@ -2899,7 +2905,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {}),
         ...routeOverride
-      })
+      }, sendChatId)
     } else if (resumeFromRunId) {
       // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
       const effort = useProject.getState().effortLevel
@@ -2908,14 +2914,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         agentMode: sendAgentMode,
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
         ...routeOverride
-      })
+      }, sendChatId)
     } else {
       const effort = useProject.getState().effortLevel
       sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
         agentMode: sendAgentMode,
         ...routeOverride
-      })
+      }, sendChatId)
     }
     // one-shot: маршрут действовал только на эту отправку — снимаем.
     if (oneShotRoute) useProject.getState().setPromptRouteOverride(null)
