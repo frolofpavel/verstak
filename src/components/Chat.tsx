@@ -3663,7 +3663,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 </div>
               )}
               {m.content && !isStreamingAssistant && (
-                <MessageActions text={m.content} />
+                <MessageActions
+                  text={m.content}
+                  // «Править» — только на своём (user) сообщении, записанном в БД (есть dbId).
+                  // Ведёт в ветку через editViaFork: оригинальный чат остаётся нетронутым.
+                  onEdit={m.role === 'user' && typeof m.dbId === 'number' && activeChatId != null
+                    ? () => { void useProject.getState().editViaFork(activeChatId, m.dbId!) }
+                    : undefined}
+                />
               )}
               {/* Cross-verify pill: показываем под последним assistant-сообщением */}
               {isLast && m.role === 'assistant' && !isStreaming && crossVerify && (
@@ -4342,7 +4349,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
  * Hidden by default; fades in on .gg-msg:hover (см. layout.css).
  * При наведении появляется кнопка копирования.
  */
-function MessageActions({ text }: { text: string }) {
+function MessageActions({ text, onEdit }: { text: string; onEdit?: () => void }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     try {
@@ -4353,6 +4360,22 @@ function MessageActions({ text }: { text: string }) {
   }
   return (
     <div className="gg-msg-actions">
+      {/* 2.0.11-D: «править» доступна только на своих сообщениях. Правка не меняет
+          оригинал — создаёт ветку с этого места, текст ждёт черновиком в композере. */}
+      {onEdit && (
+        <button
+          type="button"
+          className="gg-msg-action"
+          onClick={onEdit}
+          title="Править в новой ветке (оригинал не меняется)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          <span>править</span>
+        </button>
+      )}
       <button
         type="button"
         className="gg-msg-action"
