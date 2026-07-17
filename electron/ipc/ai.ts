@@ -31,7 +31,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
-import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from '../ai/runner-shared'
+import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -492,6 +492,9 @@ export function registerAiIpc(deps: AiDeps): void {
     const runId = randomUUID()
     const ctrl = new AbortController()
     activeAborts.set(sendId, ctrl)
+    // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Снимается в cleanup —
+    // ровно там же, где activeAborts, чтобы не остаться «занятым» после прогона.
+    registerChatRun(sendId, chatIdNum)
     let runTimeout: ReturnType<typeof setTimeout> | null = null
     const clearRunTimeout = () => {
       if (runTimeout) {
@@ -542,6 +545,7 @@ export function registerAiIpc(deps: AiDeps): void {
     const cleanup = () => {
       clearRunTimeout()
       activeAborts.delete(sendId)
+      unregisterChatRun(sendId)
       // Drain pending confirmations for this sendId — resolving with false so
       // any awaiter unwinds cleanly instead of leaking the Promise.
       for (const [k, p] of pendingWrites) {
