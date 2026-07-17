@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { findRunForChat } from '../lib/own-run'
+import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
@@ -945,11 +946,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     timer: number | null
     thinkingTimer: number | null
   }>())
-  const pendingScopeKey = isHelpChat
-    ? `help:${helpChatId ?? 'global'}`
-    : activePath && activeChatId != null
-      ? `project:${normalizeProjectPath(activePath)}:${activeChatId}`
-      : 'none'
+  // Одна формула на оба места (см. pendingScopeKeyFor): раньше ключ строился дважды, и это
+  // расхождение и было дефектом №1 — не в формуле, а в источнике данных.
+  const pendingScopeKey = activeScopeKey({ isHelpChat, helpChatId, activePath, activeChatId })
   const pendingScopeKeyRef = useRef(pendingScopeKey)
   const pendingStateByScopeRef = useRef(new Map<string, ComposerPendingState>())
   const queuedMessagesRef = useRef<QueuedComposerMessage[]>([])
@@ -1073,10 +1072,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }
 
   function pendingScopeKeyFor(owner: SendOwner | null): string | null {
-    if (owner?.kind !== 'chat') return null
-    if (owner.isHelp) return `help:${helpChatId ?? 'global'}`
-    if (!owner.projectPath || owner.chatId == null) return null
-    return `project:${normalizeProjectPath(owner.projectPath)}:${owner.chatId}`
+    // ДЕФЕКТ №1 карты (§3.1): здесь брался helpChatId ИЗ ЗАМЫКАНИЯ. Роутер ai.onEvent —
+    // замыкание ПЕРВОГО рендера (подписка ставится один раз), а справка открывается позже,
+    // поэтому helpChatId навсегда оставался null → ключ выходил `help:global`, тогда как
+    // живой ключ — `help:<id>`. Формула совпадала, значения нет: очистка чистила
+    // несуществующий scope, флаш уходил в «чужой scope» и возвращал элемент в очередь —
+    // очередь справки не отправлялась (маскировал страховочный эффект-флаш).
+    // Берём свежее из стора — тем же способом, каким роутер живёт для всего остального.
+    return ownerScopeKey(owner, useProject.getState().helpChatId)
   }
 
   function clearPendingSupplementsForScope(key: string | null): void {

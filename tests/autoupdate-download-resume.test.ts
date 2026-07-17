@@ -53,7 +53,10 @@ beforeEach(async () => {
   ignoreRange = false
   dir = mkdtempSync(join(tmpdir(), 'vst-upd-'))
   process.env.LOCALAPPDATA = dir
-  process.env.VERSTAK_UPDATE_IDLE_MS = '1500' // в тесте не ждём боевые 90с
+  // Боевые 90с в тесте не ждём, но и 1.5с нельзя: под параллельной нагрузкой (340 файлов)
+  // сторож тишины срабатывал ЛОЖНО и ронял прогон флейком. Порог мягкий по умолчанию —
+  // жёсткий ставит только тест, который сторож и проверяет.
+  process.env.VERSTAK_UPDATE_IDLE_MS = '15000'
 
   server = createServer((req, res) => {
     const range = req.headers.range ?? null
@@ -217,6 +220,7 @@ describe('автообновление: докачка установщика (P
   // реагирует только на ОШИБКУ, а столл ошибкой не является → без idle-таймаута попытка висит
   // вечно, status застревает в 'downloading', и пользователь заперт до перезапуска приложения.
   it('соединение ЗАВИСЛО (байты кончились, сокет не закрыт) → не виснем вечно, докачиваем', async () => {
+    process.env.VERSTAK_UPDATE_IDLE_MS = '1500' // здесь сторож тишины — предмет проверки
     await new Promise<void>(r => server.close(() => r()))
     let hits = 0
     server = createServer((req, res) => {
