@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
+import { findRunForChat } from '../lib/own-run'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
@@ -2533,7 +2534,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   async function appendTextToCurrentContext(text: string): Promise<boolean> {
     const clean = text.trim()
     if (!clean || !isStreaming) return false
-    const sendId = currentSendIdRef.current
+    // ДЕФЕКТ №2 карты (§3.2): раньше брали currentSendIdRef — ОДИН слот на все чаты. Чат A
+    // стримит → ушли в B → отправили → ref перезаписан прогоном B → вернулись в A и дописали
+    // контекст → дополнение уезжало в ЧУЖОЙ прогон, молча. Спрашиваем реестр владельцев: он
+    // уже знает, чей прогон какой, и в отличие от единственного слота — не врёт.
+    const st = useProject.getState()
+    const sendId = findRunForChat(st.sendOwners, st.helpMode ? st.helpChatId : st.activeChatId, { help: st.helpMode })
     const ctx = await ensureProjectForChat()
     const formatted = formatSupplementForAgent(clean)
     let messageId: number | undefined
