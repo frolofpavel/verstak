@@ -5,6 +5,7 @@
  * тексты могут содержать токены — handoff этого не делает, для полного дампа критично).
  */
 import { scanText } from './secret-scanner'
+import { redactPathsForExport, type PathRedactionContext } from './export-path-redaction'
 
 export interface TranscriptMessage {
   role: string
@@ -16,6 +17,8 @@ export interface TranscriptOptions {
   title?: string | null
   provider?: string | null
   exportedAt?: number
+  /** 2.0.11-C: корни для нормализации путей (приватность). Нет контекста → пути не трогаем. */
+  pathContext?: PathRedactionContext
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -43,7 +46,11 @@ export function buildTranscriptMarkdown(messages: TranscriptMessage[], opts: Tra
   const body = messages.map(m => {
     const label = ROLE_LABEL[m.role] ?? m.role
     const time = fmtTime(m.createdAt)
-    const safe = scanText(m.content ?? '').redacted
+    // Порядок: секреты → пути. Секреты гасятся первыми (могут содержать сегменты, похожие
+    // на пути); нормализация путей затем работает по уже-очищенному тексту. Обе чистки —
+    // на ВЕСЬ текст сообщения, не только на code blocks (2.0.11-C).
+    let safe = scanText(m.content ?? '').redacted
+    if (opts.pathContext) safe = redactPathsForExport(safe, opts.pathContext)
     return `## ${label}${time ? ` · ${time}` : ''}\n\n${safe}`
   }).join('\n\n---\n\n')
 
