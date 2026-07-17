@@ -64,4 +64,36 @@ describe('buildTranscriptMarkdown — полный экспорт диалога
     expect(md).not.toContain('SECRETSECRETSECRET')
     expect(md).not.toContain('Pavel')
   })
+
+  // Ре-ревью C #1 (HIGH): заголовок сессии авто-генерится из первого сообщения и лишь
+  // усекается — путь/секрет из первой строки попадали в шапку экспорта СЫРЫМИ, мимо чисток.
+  it('заголовок сессии чистится так же, как тело (секрет+путь не в шапке)', () => {
+    const md = buildTranscriptMarkdown(
+      [{ role: 'user', content: 'x' }],
+      {
+        title: 'почини C:\\Users\\Pavel\\app.ts ключ sk-ant-api03-TITLESECRET1234567890',
+        pathContext: { homeDir: 'C:\\Users\\Pavel' },
+      }
+    )
+    expect(md).not.toContain('Pavel')
+    expect(md).not.toContain('TITLESECRET')
+  })
+
+  // Ре-ревью C #2 (HIGH): секрет в query-параметре URL (?token=/?sig=). scanText его не
+  // ловит (опаковое значение), но redactForDisplay гасит по ИМЕНИ параметра. Экспорт
+  // уходит наружу — он не должен быть слабее показа на экране.
+  it('секрет в query-параметре URL вычищен (как на экране)', () => {
+    const md = buildTranscriptMarkdown([
+      { role: 'assistant', content: 'ссылка https://api.example.com/d?token=aB3xOpaqueTokenValue1234567890 готова' }
+    ])
+    expect(md).not.toContain('aB3xOpaqueTokenValue')
+    expect(md).toContain('REDACTED')
+  })
+
+  it('подписанный S3/Я.Диск URL (?sig=/x-amz-signature) вычищен', () => {
+    const md = buildTranscriptMarkdown([
+      { role: 'assistant', content: 'https://s3.example.com/f?x-amz-signature=SIGSIGSIGSIG1234567890&other=ok' }
+    ])
+    expect(md).not.toContain('SIGSIGSIGSIG')
+  })
 })

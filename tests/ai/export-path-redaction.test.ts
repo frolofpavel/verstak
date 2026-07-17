@@ -88,3 +88,28 @@ describe('redactPathsForExport — приватность путей в эксп
     expect(redactPathsForExport('C:\\Users\\Pavel\\x', {})).toBe('C:\\Users\\Pavel\\x')
   })
 })
+
+describe('UNC edge-cases (ре-ревью C #3/#4/#5)', () => {
+  // #3: host без trailing separator — \\FILESRV01 в конце строки или перед пробелом.
+  it('bare UNC host в конце строки маскируется', () => {
+    expect(redactPathsForExport('не достучаться до \\\\BACKUPSRV', {})).not.toContain('BACKUPSRV')
+  })
+
+  it('bare UNC host перед пробелом маскируется', () => {
+    const out = redactPathsForExport('ping \\\\FILESRV01 сейчас', {})
+    expect(out).not.toContain('FILESRV01')
+    expect(out).toContain('сейчас') // остальной текст цел
+  })
+
+  it('UNC host\\share по-прежнему маскирует только host', () => {
+    const out = redactPathsForExport('\\\\FILESRV01\\common\\report.xlsx', {})
+    expect(out).not.toContain('FILESRV01')
+    expect(out).toMatch(/\\common\\report\.xlsx/)
+  })
+
+  // Слепая замена //host сломала бы http://host — это ГРАНИЦА, а не дефект.
+  it('http:// URL НЕ ломается UNC-маской (не путаем схему с UNC)', () => {
+    const out = redactPathsForExport('открой https://api.example.com/path', {})
+    expect(out).toContain('https://api.example.com/path')
+  })
+})

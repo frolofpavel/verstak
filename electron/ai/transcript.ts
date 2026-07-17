@@ -4,7 +4,7 @@
  * временем и содержимым. ОБЯЗАТЕЛЬНО прогоняем через scanText (сырые user/assistant
  * тексты могут содержать токены — handoff этого не делает, для полного дампа критично).
  */
-import { scanText } from './secret-scanner'
+import { redactForDisplay } from './secret-scanner'
 import { redactPathsForExport, type PathRedactionContext } from './export-path-redaction'
 
 export interface TranscriptMessage {
@@ -35,7 +35,19 @@ function fmtTime(ts?: number): string {
 }
 
 export function buildTranscriptMarkdown(messages: TranscriptMessage[], opts: TranscriptOptions = {}): string {
-  const header: string[] = [`# Транскрипт${opts.title ? `: ${opts.title}` : ''}`]
+  // Чистка на ВЕСЬ текст (не только code blocks): redactForDisplay = секреты по паттернам
+  // + Bearer/basic-auth + секрет-параметры во встроенных URL (?token=/?sig=/?sas= по ИМЕНИ —
+  // scanText их не ловит, экспорт не должен быть слабее показа на экране, ре-ревью C #2).
+  // Затем нормализация путей (по уже-очищенному тексту). Порядок: секреты → пути.
+  const sanitize = (text: string): string => {
+    const safe = redactForDisplay(text ?? '')
+    return opts.pathContext ? redactPathsForExport(safe, opts.pathContext) : safe
+  }
+
+  // Заголовок авто-генерится из первого сообщения и мог нести путь/секрет — чистим ТАК ЖЕ,
+  // как тело (ре-ревью C #1: раньше title шёл в шапку сырым, мимо всех чисток).
+  const safeTitle = opts.title ? sanitize(opts.title) : ''
+  const header: string[] = [`# Транскрипт${safeTitle ? `: ${safeTitle}` : ''}`]
   const meta = [
     opts.provider ? `провайдер: ${opts.provider}` : '',
     opts.exportedAt ? `экспорт: ${fmtTime(opts.exportedAt)}` : '',
@@ -46,12 +58,7 @@ export function buildTranscriptMarkdown(messages: TranscriptMessage[], opts: Tra
   const body = messages.map(m => {
     const label = ROLE_LABEL[m.role] ?? m.role
     const time = fmtTime(m.createdAt)
-    // Порядок: секреты → пути. Секреты гасятся первыми (могут содержать сегменты, похожие
-    // на пути); нормализация путей затем работает по уже-очищенному тексту. Обе чистки —
-    // на ВЕСЬ текст сообщения, не только на code blocks (2.0.11-C).
-    let safe = scanText(m.content ?? '').redacted
-    if (opts.pathContext) safe = redactPathsForExport(safe, opts.pathContext)
-    return `## ${label}${time ? ` · ${time}` : ''}\n\n${safe}`
+    return `## ${label}${time ? ` · ${time}` : ''}\n\n${sanitize(m.content)}`
   }).join('\n\n---\n\n')
 
   return `${header.join('\n')}\n\n${body}\n`
