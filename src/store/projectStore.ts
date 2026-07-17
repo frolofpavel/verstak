@@ -33,8 +33,10 @@ import {
   EMPTY_COMPOSER_DRAFT,
   isEmptyComposerDraft,
   pruneComposerDraftsForProject,
+  projectChatDraftKey,
   type ComposerDraft,
 } from '../lib/composer-drafts'
+import { forkPointForMessage } from '../lib/fork-edit'
 import { stampDurationOnStreamEnd } from '../lib/response-duration'
 
 // PreflightCard / SubagentRunCard перенесены в session-snapshot.ts (store-agnostic),
@@ -216,6 +218,10 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   newChatSession: (title?: string) => Promise<ChatSession | null>
   /** Tier-2 #3 — ветвление: форк сессии (копия истории) + переключение на ветку. */
   forkChat: (sourceId: number) => Promise<ChatSession | null>
+  /** 2.0.11-D: правка сообщения через Fork. Форкает историю ДО редактируемого, кладёт его
+   *  текст черновиком в ветку (не отправляет), переключает на ветку. Оригинал неизменен,
+   *  стрим оригинала не трогается. null — нельзя (нет проекта / не user / нет сообщения). */
+  editViaFork: (sourceId: number, messageId: number) => Promise<ChatSession | null>
   /** Открыть глобальный чат справки (скилл verstak-guide). */
   openHelpChat: () => Promise<void>
   /** Выйти из экрана справки в рабочий чат проекта. */
@@ -999,6 +1005,38 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       console.error('[forkChat] fork failed:', e instanceof Error ? e.message : e)
       return null
     }
+  },
+  editViaFork: async (sourceId, messageId) => {
+    const s = get()
+    if (!s.path) return null
+    // Сообщения оригинала: активный чат берёт из messages, фоновый — из снапшота.
+    const messages = sourceId === s.activeChatId ? s.messages : (s.chatSnapshots[sourceId]?.messages ?? [])
+    const point = forkPointForMessage(messages, messageId)
+    if (!point.ok) return null
+    // В ОТЛИЧИЕ от forkChat здесь НЕТ гарда «не форкать стримящий»: правим ПРОШЛОЕ
+    // сообщение (uptoMessageId давно в БД), текущий стрим в форк не входит и продолжается
+    // в оригинале — снапшотится через switchChatSession (инвариант «стрим не трогается»).
+    let branch: ChatSession | null
+    try {
+      // ВСЕГДА передаём границу, даже для первого сообщения (uptoMessageId null → 0 = ПУСТАЯ
+      // ветка). undefined тут форкнул бы ВСЮ историю — при правке первого сообщения это дало
+      // бы ветку с оригинальным первым сообщением, которое мы как раз заменяем.
+      branch = await window.api.chatSessions.fork(sourceId, { uptoMessageId: point.uptoMessageId ?? 0 })
+    } catch (e) {
+      console.error('[editViaFork] fork failed:', e instanceof Error ? e.message : e)
+      return null
+    }
+    if (!branch) return null
+    const list = await window.api.chatSessions.list(s.path)
+    set({ chatSessions: list })
+    await get().switchChatSession(branch.id)
+    // Отредактированный текст — ЧЕРНОВИКОМ в композер ветки. НЕ отправляем: сбой отправки
+    // не должен рушить правку (инвариант «черновик не теряется»). Человек правит и шлёт сам.
+    get().setComposerDraft(projectChatDraftKey(s.path, branch.id), {
+      text: point.originalText,
+      attachments: [],
+    })
+    return branch
   },
   leaveHelpMode: () => {
     const s = get()
