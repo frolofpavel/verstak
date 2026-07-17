@@ -339,6 +339,12 @@ contextBridge.exposeInMainWorld('api', {
     summary: (sinceMs: number) => ipcRenderer.invoke('usage:summary', sinceMs),
     list: (opts?: { sinceMs?: number; limit?: number }) => ipcRenderer.invoke('usage:list', opts)
   },
+  // 2.0.11-B: ручная компакция контекста чата.
+  context: {
+    state: (chatId: number) => ipcRenderer.invoke('context:state', chatId),
+    snapshots: (chatId: number) => ipcRenderer.invoke('context:snapshots', chatId),
+    compact: (chatId: number) => ipcRenderer.invoke('context:compact', chatId)
+  },
   plans: {
     list: (projectPath: string) => ipcRenderer.invoke('plans:list', projectPath),
     get: (id: number) => ipcRenderer.invoke('plans:get', id),

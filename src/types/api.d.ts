@@ -17,6 +17,35 @@ export interface Attachment { name: string; mimeType: string; data: string; size
 export interface AppliedSkillRef { id: string; name?: string; icon?: string; description?: string }
 export interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[]; thinking?: string; createdAt?: number; source?: 'reminder'; appliedSkills?: AppliedSkillRef[]; dbId?: number; /** Длительность ответа ассистента (мс), только в UI сессии. */ responseDurationMs?: number }
 export interface StoredChatMessage { id: number; role: 'user' | 'assistant' | 'system'; content: string; thinking?: string; appliedSkills?: AppliedSkillRef[]; createdAt: number }
+
+// ── 2.0.11-B: ручная компакция контекста (mirror форм из electron/ai/compaction-service.ts
+//    и electron/storage/chat-context-snapshots.ts; renderer не импортирует из electron/) ──
+export interface ContextStateDTO {
+  totalMessages: number
+  /** Грубая оценка (~4 символа на токен), НЕ биллинг провайдера. */
+  estimatedTokens: number
+  compacted: boolean
+  compactedThroughMessageId: number | null
+  canCompact: boolean
+  /** Идёт прогон — сжимать нельзя. */
+  busy: boolean
+}
+export interface ContextSnapshotDTO {
+  id: number
+  chatId: number
+  summary: string
+  throughMessageId: number
+  sourceMaxMessageId: number
+  providerId: string | null
+  model: string | null
+  estimatedTokensBefore: number | null
+  estimatedTokensAfter: number | null
+  createdAt: number
+}
+export type CompactResultDTO =
+  | { ok: true; snapshot: ContextSnapshotDTO; compactedCount: number; keptCount: number }
+  /** Осечка. detail — человеческая причина для UI. Контекст при этом ЦЕЛ. */
+  | { ok: false; reason: 'busy' | 'nothing-to-compact' | 'summary-failed' | 'conflict'; detail: string }
 export type ChatKind = 'main' | 'review' | 'help'
 export interface ChatSession {
   id: number
@@ -676,6 +705,13 @@ declare global {
       usage: {
         summary: (sinceMs: number) => Promise<UsageSummaryGroup[]>
         list: (opts?: { sinceMs?: number; limit?: number }) => Promise<RunUsageRow[]>
+      }
+      /** 2.0.11-B: ручная компакция контекста чата. Сжатие меняет ТОЛЬКО то, что уходит
+       *  модели — видимая переписка не трогается ни при каком исходе. */
+      context: {
+        state: (chatId: number) => Promise<ContextStateDTO>
+        snapshots: (chatId: number) => Promise<ContextSnapshotDTO[]>
+        compact: (chatId: number) => Promise<CompactResultDTO>
       }
       plans: {
         list: (projectPath: string) => Promise<Plan[]>

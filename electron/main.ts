@@ -83,7 +83,9 @@ import { createRunUsage } from './storage/agent-run-usage'
 import { registerVerifyIpc, execVerifyCommand } from './ipc/verify'
 import { registerAutonomousIpc } from './ipc/autonomous'
 import { createConnectorRegistry } from './connectors/registry'
-import { PROVIDERS, type ProviderId } from './ai/registry'
+import { PROVIDERS, createProvider, type ProviderId } from './ai/registry'
+import { registerContextCompactionIpc } from './ipc/context-compaction'
+import { pickSummaryProvider } from './ai/pick-summary-provider'
 import { AGENT_MODES } from './ai/mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
 import { registerSkillsIpc } from './ipc/skills'
@@ -735,6 +737,24 @@ app.whenReady().then(() => {
   registerJournalIpc(journal)
   registerRemindersIpc(reminders, reminderService)
   registerUndoIpc(undoStack)
+  // 2.0.11-B: ручная компакция контекста. Провайдер для summary выбирается отдельно от
+  // провайдера чата (pickSummaryProvider): у человека на подписке активен CLI, а сжатию
+  // нужен дешёвый одноразовый API-вызов.
+  registerContextCompactionIpc({
+    db,
+    chats,
+    createSummaryProvider: () => {
+      const choice = pickSummaryProvider(getProviderId(), key => !!getSecret(key), getProviderModel)
+      if (!choice) return null
+      const apiKey = getSecret(choice.secretKey)
+      if (!apiKey) return null
+      return {
+        provider: createProvider(choice.providerId, { apiKey, model: choice.model }),
+        providerId: choice.providerId,
+        model: choice.model,
+      }
+    },
+  })
   registerPlansIpc(plans)
   registerWorkflowsIpc({
     createPlan: (projectPath, title, steps) => {
