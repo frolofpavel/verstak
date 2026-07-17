@@ -36,10 +36,16 @@ export function registerExactRewindIpc(deps: ExactRewindIpcDeps): void {
   /** Реальный fs поверх проекта: пути только через safeRealJoin. */
   const fsFor = (projectRoot: string): RewindFsDeps & { readCurrent: (p: string) => Promise<string | null> } => ({
     readCurrent: async (filePath) => {
+      const abs = await safeRealJoin(projectRoot, filePath)
       try {
-        const abs = await safeRealJoin(projectRoot, filePath)
         return await readFile(abs, 'utf8')
-      } catch { return null } // файла нет / недоступен → null
+      } catch (err) {
+        // ENOENT = файла НЕТ → null (бэкап null корректен: unrevert его удалит, чего мы и
+        // хотим). ЛЮБАЯ другая ошибка (EBUSY/EACCES — файл залочен) — НЕ глотаем: файл ЕСТЬ,
+        // но не прочитан. Иначе backup=null и unrevert удалил бы реальный файл (ре-ревью F).
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null
+        throw err
+      }
     },
     writeFile: async (filePath, content) => {
       const abs = await safeRealJoin(projectRoot, filePath)

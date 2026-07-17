@@ -118,14 +118,27 @@ export interface RewindFsDeps {
  * сбой оставил бы файлы в состоянии, которое unrevert'у нечем вернуть. backups → unrevert.
  */
 export async function executeRewind(items: RewindPlanItem[], fs: RewindFsDeps): Promise<RewindExecResult> {
-  // 1. Сначала снимаем ВСЕ бэкапы (транзакционность: до любой мутации).
   const backups: RewindBackups = {}
-  for (const it of items) backups[it.filePath] = await fs.readCurrent(it.filePath)
-
-  // 2. Применяем откат. Сбой одного файла не роняет остальные — копим в failed.
-  const restored: string[] = []
   const failed: Array<{ filePath: string; reason: string }> = []
+
+  // 1. Снимаем ВСЕ бэкапы ДО любой мутации (транзакционность). Если бэкап СНЯТЬ не удалось
+  //    (файл существует, но read упал — Windows-лок EBUSY/EACCES), файл ИСКЛЮЧАЕТСЯ из
+  //    отката: иначе backup был бы ложным null, и unrevert УДАЛИЛ бы реальный файл
+  //    (ре-ревью F, HIGH data-loss). readCurrent обязан кидать на не-ENOENT, а не глотать.
+  const rewindable: RewindPlanItem[] = []
   for (const it of items) {
+    try {
+      backups[it.filePath] = await fs.readCurrent(it.filePath)
+      rewindable.push(it)
+    } catch (err) {
+      failed.push({ filePath: it.filePath, reason: `не удалось прочитать текущее состояние для бэкапа: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+
+  // 2. Откатываем только те файлы, чей бэкап надёжно снят. Сбой записи одного не роняет
+  //    остальные — копим в failed (бэкап у него уже есть → unrevert сможет вернуть).
+  const restored: string[] = []
+  for (const it of rewindable) {
     try {
       if (it.action === 'delete') await fs.deleteFile(it.filePath)
       else await fs.writeFile(it.filePath, it.beforeContent ?? '')

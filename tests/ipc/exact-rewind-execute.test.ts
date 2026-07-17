@@ -53,6 +53,25 @@ describe('executeRewind — откат с бэкапами', () => {
     expect(r.backups['new.ts']).toBe('создано') // текущее содержимое = бэкап
   })
 
+  // Ре-ревью F (HIGH, data-loss): если бэкап текущего состояния не удалось СНЯТЬ (файл
+  // существует, но read упал — Windows-лок EBUSY), НЕЛЬЗЯ откатывать этот файл: иначе
+  // backups=null и unrevert УДАЛИЛ бы реальный файл. Такой файл → failed, не трогаем.
+  it('read текущего состояния упал → файл в failed, НЕ откатывается, НЕ в backups', async () => {
+    const fs = {
+      files: new Map<string, string | null>([['a.ts', 'важное']]),
+      deps: {
+        readCurrent: async (p: string) => { if (p === 'a.ts') throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return null },
+        writeFile: async (p: string, c: string) => { /* не должно быть вызвано для a.ts */ (fs.files as Map<string, string | null>).set(p, c) },
+        deleteFile: async (p: string) => { (fs.files as Map<string, string | null>).set(p, null) },
+      },
+    }
+    const r = await executeRewind([item({ filePath: 'a.ts', action: 'restore', beforeContent: 'старое' })], fs.deps)
+    expect(r.failed.map(f => f.filePath)).toEqual(['a.ts'])
+    expect(r.restored).toEqual([])
+    expect('a.ts' in r.backups).toBe(false)     // НЕ ложный null-бэкап
+    expect(fs.files.get('a.ts')).toBe('важное')  // файл не тронут
+  })
+
   it('несколько файлов — все откачены, бэкапы у всех', async () => {
     const fs = fakeFs({ 'a.ts': 'a-new', 'b.ts': 'b-new' })
     const r = await executeRewind([
