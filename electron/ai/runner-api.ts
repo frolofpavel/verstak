@@ -199,6 +199,11 @@ export interface AgentRunContext {
    *  обязательный review gate при recipe.reviewer.required (P2). Нет recipe →
    *  обычный agent run без enforcement. */
   recipe?: RecipeSpec
+  /** Дефект 2a: сколько corrective-nudge уже потрачено за ПРОГОН (не за кадр).
+   *  Рекурсивные кадры (JSON-эскалация, provider-fallback, account-switch) несут
+   *  накопленный счётчик сюда, иначе frame-local бюджет обнулялся в новом кадре и
+   *  nudge выдавался повторно (симптом «Задача выполнена.» ×N). */
+  nudgeBudgetUsed?: number
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -286,9 +291,22 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   }
   // Hardening: bounded corrective-nudge для «слабых» провайдеров, когда модель
   // ответила прозой и не вызвала ни одного инструмента (см. continueAfterPlainReply).
-  let plainReplyNudges = 0
+  // Дефект 2a: инициализируем из ctx — бюджет run-scoped, а не frame-local (иначе
+  // рекурсивный кадр эскалации переоткрывал nudge → «Задача выполнена.» ×N).
+  let plainReplyNudges = ctx.nudgeBudgetUsed ?? 0
   const MAX_PLAIN_NUDGES = 1
   const coaxableProvider = isCoaxableProvider(providerId)
+  // Дефект 1: nudge осмыслен только на АГЕНТНОМ ходу. Разговорный запрос ('ask'/'plan'
+  // без recipe) — прозаичный ответ это НОРМА, а не «модель проигнорировала тулзы».
+  // Агентность берём из режима/recipe (НЕ из слов юзера — их подбором обойти нельзя):
+  // recipe = структурная агентная задача; accept-edits/auto/bypass = режимы исполнения.
+  // 'ask' (дефолт) и 'plan' (проза-план — законный финал) остаются разговорными.
+  // runAgentMode мутабельный (approve плана меняет режим) — читаем на момент проверки.
+  const isAgenticTurn = (): boolean =>
+    ctx.recipe != null
+    || runAgentMode === 'accept-edits'
+    || runAgentMode === 'auto'
+    || runAgentMode === 'bypass'
   // Этап 2 (agentic fallback routing), все bounded:
   let forcedJsonThisRun = false            // эскалация native→JSON-режим на той же модели (1 раз)
   let malformedRetries = 0                 // corrective retry на битый JSON аргументов
@@ -306,7 +324,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // явно завершить, либо вызвать тул. Гейт: coaxable-провайдер + тулзы доступны +
     // за прогон не было ни одного вызова + бюджет nudge не исчерпан. Frontier/RU не
     // трогаем — они надёжны, nudge дал бы ложные срабатывания на обычном Q&A.
-    if (coaxableProvider && projectPath && toolCallCount === 0 && plainReplyNudges < MAX_PLAIN_NUDGES && text.trim()) {
+    if (coaxableProvider && projectPath && toolCallCount === 0 && plainReplyNudges < MAX_PLAIN_NUDGES && text.trim() && isAgenticTurn()) {
       plainReplyNudges++
       currentMessages.push({ role: 'user', content: IGNORED_TOOLS_NUDGE })
       sender.send('ai:event', {
@@ -476,7 +494,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
     }
     handedOff = true
-    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel })
+    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel, nudgeBudgetUsed: plainReplyNudges })
   }
 
   // 1.9.4: подписочный лимит активного аккаунта → переключаемся на ДРУГОЙ аккаунт пула
@@ -500,7 +518,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const acctTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
     })
-    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: freshProvider, tools: acctTools, initialMessages: currentMessages, providerId, model })
+    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: freshProvider, tools: acctTools, initialMessages: currentMessages, providerId, model, nudgeBudgetUsed: plainReplyNudges })
   }
 
   // Этап 2: эскалация native→JSON tool mode на ТОЙ ЖЕ модели (bounded, 1 раз за прогон).
@@ -515,7 +533,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const jsonTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
     })
-    return runApiConversation({ ...ctx, isFallbackFrame: true, forceToolMode: 'json', tools: jsonTools, initialMessages: currentMessages })
+    return runApiConversation({ ...ctx, isFallbackFrame: true, forceToolMode: 'json', tools: jsonTools, initialMessages: currentMessages, nudgeBudgetUsed: plainReplyNudges })
   }
 
   // Этап 2, приоритет 1+2: модель так и не вызвала инструмент (после corrective nudge).

@@ -655,3 +655,92 @@ describe('agent-loop Этап 2 — fallback routing', () => {
     expect(remaining[0].command).toBe('foreign watcher')
   }, 15000)
 })
+
+// ── Дефекты 1 и 2a: ложный no-tool-call nudge на разговорном запросе ──
+// (ТЗ tz_verstak_no_tool_call_nudge_2026-07-17). Дефект 1: гейт nudge стрелял на
+// ЛЮБОМ прозаичном ответе coaxable-провайдера с открытым проектом, включая
+// корректный разговорный ответ. Дефект 2a: бюджет nudge был frame-local — рекурсивный
+// кадр JSON-эскалации переоткрывал его (отсюда «Задача выполнена.» ×N). kimi-coding/
+// zai-coding — coaxable, значит встречали дефект на первом же «привет».
+describe('agent-loop — no-tool-call nudge: агентность хода (дефекты 1, 2a)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-nudge-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  const nudgeEvents = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; name?: string } })?.event)
+      .filter((e): e is { type: string; name?: string } => e?.type === 'tool-blocked' && e?.name === 'no-tool-call')
+
+  const infoTexts = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; text?: string } })?.event)
+      .filter((e): e is { type: string; text: string } => e?.type === 'info')
+      .map(e => e.text)
+
+  // Дефект 1: разговорный запрос ('ask'-режим, без recipe) на coaxable-провайдере,
+  // модель отвечает прозой без вызовов → НИКАКОГО nudge, никакой эскалации, один ход.
+  it('разговорный запрос (ask) на coaxable → ноль nudge, ноль эскалаций, один ход', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    let sends = 0
+    const p: ChatProvider = {
+      id: 'kimi-coding', name: 'kimi', models: ['kimi-for-coding'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        sends++
+        yield { type: 'text', text: 'Я работаю через агентный цикл. Какие есть вопросы?' }
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'kimi-coding', model: 'kimi-for-coding',
+      agentMode: 'ask', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    expect(nudgeEvents(sender)).toHaveLength(0)                       // ноль красных плашек no-tool-call
+    expect(infoTexts(sender).some(t => t.includes('JSON-режим'))).toBe(false)  // ноль эскалаций
+    expect(sends).toBe(1)                                            // ровно один ход модели
+    expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  }, 15000)
+
+  // Guard (зелёный и до, и после фикса): агентный режим ('auto') на том же coaxable-
+  // провайдере, модель описала действие прозой вместо вызова → nudge СРАБАТЫВАЕТ.
+  // Защита от реального симптома DeepSeek/Ollama не теряется.
+  it('агентная задача (auto) на coaxable → nudge срабатывает', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const p: ChatProvider = {
+      id: 'kimi-coding', name: 'kimi', models: ['kimi-for-coding'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        yield { type: 'text', text: 'Сейчас прочитаю файл и поправлю его.' }  // описал действие, tool не вызвал
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'kimi-coding', model: 'kimi-for-coding',
+      agentMode: 'auto', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    expect(nudgeEvents(sender).length).toBeGreaterThanOrEqual(1)
+  }, 15000)
+
+  // Дефект 2a: агентный прогон ('bypass'), модель ВСЕГДА прозой. Бюджет nudge должен
+  // быть run-scoped: ровно ОДИН nudge на весь прогон, несмотря на рекурсивный кадр
+  // JSON-эскалации. До фикса кадр F2 обнулял счётчик → второй nudge (2 на прогон).
+  it('run-scoped бюджет: ровно один nudge на прогон, кадр эскалации не переоткрывает', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const p: ChatProvider = {
+      id: 'kimi-coding', name: 'kimi', models: ['kimi-for-coding'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        yield { type: 'text', text: 'Задача выполнена.' }  // всегда прозой, tool не зовём
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'kimi-coding', model: 'kimi-for-coding',
+      agentMode: 'bypass', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    // kimi-coding нет в FALLBACK_CHAINS → после native-кадра ровно один JSON-кадр,
+    // без provider-fallback. Бюджет run-scoped ⇒ суммарно один nudge.
+    expect(nudgeEvents(sender)).toHaveLength(1)
+  }, 15000)
+})
