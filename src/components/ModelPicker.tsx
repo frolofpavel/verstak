@@ -1,6 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProvider, type ProviderId } from '../hooks/useProvider'
 import { useProject } from '../store/projectStore'
+import {
+  chatAccountView, canPinAccounts, accountStateLabel, isPinnable, pinBinding, autoBinding,
+} from '../lib/chat-account-binding'
+import type { SubscriptionAccountDTO, ChatSubscriptionBindingDTO } from '../types/api'
 import { useT } from '../i18n'
 import type { ProviderDescriptorDTO } from '../types/api'
 import {
@@ -149,6 +153,10 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
   const [authorizedIds, setAuthorizedIds] = useState<Set<ProviderId>>(new Set())
   const [storedModels, setStoredModels] = useState<Record<string, string>>({})
   const [currentAuthorized, setCurrentAuthorized] = useState(true)
+  // Хвост 2.0.8-D2: закрепление аккаунта за чатом. Бэкенд был готов ещё тогда, а в notes
+  // 2.0.8 честно написано «кнопка появится в следующем релизе» — вот она.
+  const [accounts, setAccounts] = useState<SubscriptionAccountDTO[]>([])
+  const [binding, setBinding] = useState<ChatSubscriptionBindingDTO | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -234,6 +242,36 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
 
   const readyEntries = entries.filter(e => e.authorized)
   const readyGroups = useMemo(() => groupEntriesByProvider(readyEntries), [readyEntries])
+
+  // Аккаунты текущего провайдера + закрепление ЭТОГО чата. Перечитываем при смене чата,
+  // провайдера и при открытии меню (аккаунт мог появиться/остыть в Настройках).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const [list, b] = await Promise.all([
+          window.api.subscriptionAccounts.list(provider.id),
+          activeChatId ? window.api.chats.getSubscriptionBinding(activeChatId) : Promise.resolve(null),
+        ])
+        if (cancelled) return
+        setAccounts(Array.isArray(list) ? list : [])
+        setBinding(b ?? null)
+      } catch {
+        if (!cancelled) { setAccounts([]); setBinding(null) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [provider.id, activeChatId, open])
+
+  const accountView = chatAccountView(binding, accounts, provider.id)
+
+  async function applyBinding(next: ChatSubscriptionBindingDTO) {
+    if (!activeChatId) return
+    try {
+      await window.api.chats.setSubscriptionBinding(next)
+      setBinding(next)
+    } catch { /* не блокируем UX; состояние перечитается при следующем открытии */ }
+  }
 
   async function persistOnSession(providerId: ProviderId, model: string | null) {
     if (!activeChatId) return
@@ -323,6 +361,55 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
                 <span className="gg-mp-row-label">{t.modelPicker.noConnected}</span>
                 <span className="gg-mp-row-meta">{t.modelPicker.enableIn}</span>
               </div>
+            </div>
+          )}
+
+          {/* Закрепление аккаунта за чатом (хвост 2.0.8-D2). Показываем ТОЛЬКО там, где есть
+              что закреплять: у обычного API-провайдера с одним ключом это был бы шум. */}
+          {activeChatId != null && canPinAccounts(accounts) && (
+            <div className="gg-mp-section gg-mp-accounts">
+              <div className="gg-mp-section-title">Аккаунт подписки</div>
+
+              {/* Закреплённый аккаунт удалён — движок в этом случае ОСТАНАВЛИВАЕТ прогон
+                  вопросом (route-policy: unavailable). Молчать нельзя: человек иначе не
+                  поймёт, почему чат встал. */}
+              {accountView.kind === 'unavailable' && (
+                <div className="gg-mp-row gg-mp-row-warn">
+                  <span className="gg-mp-row-label">⚠ Закреплённый аккаунт удалён</span>
+                  <span className="gg-mp-row-meta">Чат не будет отвечать — выберите аккаунт или снимите закрепление</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                className={`gg-mp-row${accountView.kind === 'auto' ? ' is-active' : ''}`}
+                role="option"
+                aria-selected={accountView.kind === 'auto'}
+                onClick={() => void applyBinding(autoBinding(activeChatId, provider.id))}
+              >
+                <span className="gg-mp-row-label">Автоматически</span>
+                <span className="gg-mp-row-meta">Verstak сам переключится на свежий аккаунт при лимите</span>
+              </button>
+
+              {accounts.map(a => {
+                const pinned = accountView.kind === 'pinned' && accountView.accountId === a.id
+                const pinnable = isPinnable(a)
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={`gg-mp-row${pinned ? ' is-active' : ''}${pinnable ? '' : ' is-disabled'}`}
+                    role="option"
+                    aria-selected={pinned}
+                    disabled={!pinnable}
+                    title={pinnable ? 'Закрепить чат за этим аккаунтом' : 'Нельзя закрепить: прогоны в этом чате не пойдут'}
+                    onClick={() => void applyBinding(pinBinding(activeChatId, provider.id, a.id))}
+                  >
+                    <span className="gg-mp-row-label">{pinned ? '📌 ' : ''}{a.label}</span>
+                    <span className="gg-mp-row-meta">{accountStateLabel(a)}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
 
