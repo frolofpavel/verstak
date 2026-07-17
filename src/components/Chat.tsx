@@ -2303,8 +2303,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const msgs = [...useProject.getState().messages].slice(0, -1)
     // chatId обязателен и здесь: «Продолжить ходы» — тот же чат, те же компакция/pin/worktree.
     const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget, activeChatId != null ? String(activeChatId) : undefined)
+    // sendId<=0 = прогон не стартовал (нет ключа, недоступен провайдер, закреплённый
+    // аккаунт удалён). Без этого гарда спиннер, включённый выше, висел бы ВЕЧНО и
+    // человек ждал бы ответа, которого не будет (ре-ревью B, #5). Основной send()
+    // так и делает — здесь ветка про это не знала.
+    if (sendId <= 0) {
+      const errorText = '\n\n[Ошибка: провайдер недоступен]'
+      updateLastAssistant(errorText)
+      if (assistantRow) void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
+      setStreaming(false)
+      return
+    }
     if (activeChatId != null) registerChatSendOwner(sendId, activeChatId, false, store.path)
-    if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
+    if (assistantRow) registerPersistedAssistant(sendId, assistantRow.id)
   }
 
   async function ensureProjectForChat(): Promise<{ path: string; activeChatId: number } | null> {

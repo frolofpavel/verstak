@@ -67,4 +67,46 @@ describe('project-purge', () => {
     deleteProjectDirectory(folder)
     expect(existsSync(folder)).toBe(false)
   })
+
+  /**
+   * Ре-ревью 2.0.11-B, находка #10. Сжатый итог — контент-несущая таблица: в нём лежит
+   * пересказ переписки. «Удалить данные проекта» обязано унести и его, иначе человек
+   * удалил проект, а содержимое его разговоров осталось в базе. Тот же класс, что уже
+   * ловили в project_brain/context_pack (см. комментарий в project-purge).
+   */
+  it('удаляет сжатые итоги чатов проекта (в них пересказ переписки)', () => {
+    db = openDb(join(dir, 't.db'))
+    const path = 'C:\\clients\\demo'
+    db.prepare('INSERT INTO chat_sessions (project_path, title, created_at, last_message_at) VALUES (?, ?, 1, 1)')
+      .run(path, 'Main')
+    const sid = (db.prepare('SELECT id FROM chat_sessions WHERE project_path = ?').get(path) as { id: number }).id
+    db.prepare(
+      `INSERT INTO chat_context_snapshots (chat_id, summary, through_message_id, source_max_message_id, created_at)
+       VALUES (?, ?, 1, 1, 1)`
+    ).run(sid, 'пересказ приватного разговора с клиентом')
+
+    purgeProjectAppData(db, path)
+
+    const left = db.prepare('SELECT COUNT(*) as c FROM chat_context_snapshots').get() as { c: number }
+    expect(left.c).toBe(0)
+  })
+
+  it('не трогает сжатые итоги ДРУГОГО проекта', () => {
+    db = openDb(join(dir, 't.db'))
+    const mine = 'C:\\clients\\demo'
+    const other = 'C:\\clients\\keep'
+    for (const p of [mine, other]) {
+      db.prepare('INSERT INTO chat_sessions (project_path, title, created_at, last_message_at) VALUES (?, ?, 1, 1)').run(p, 'Main')
+    }
+    const otherSid = (db.prepare('SELECT id FROM chat_sessions WHERE project_path = ?').get(other) as { id: number }).id
+    db.prepare(
+      `INSERT INTO chat_context_snapshots (chat_id, summary, through_message_id, source_max_message_id, created_at)
+       VALUES (?, ?, 1, 1, 1)`
+    ).run(otherSid, 'итог соседнего проекта')
+
+    purgeProjectAppData(db, mine)
+
+    const left = db.prepare('SELECT COUNT(*) as c FROM chat_context_snapshots').get() as { c: number }
+    expect(left.c).toBe(1)
+  })
 })

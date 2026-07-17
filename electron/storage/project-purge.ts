@@ -17,6 +17,11 @@ export function purgeProjectAppData(db: Database, projectPath: string): void {
     if (sessionIds.length > 0) {
       const ph = sessionIds.map(() => '?').join(',')
       db.prepare(`DELETE FROM chats WHERE session_id IN (${ph})`).run(...sessionIds)
+      // 2.0.11-B: сжатые итоги — контент-несущая таблица (в summary пересказ переписки),
+      // и своего project_path у неё нет — только chat_id. Берём по сессиям проекта ДО их
+      // удаления, иначе итоги приватных разговоров пережили бы «удалить данные проекта»
+      // (ре-ревью B #10; тот же класс, что project_brain/context_pack ниже).
+      db.prepare(`DELETE FROM chat_context_snapshots WHERE chat_id IN (${ph})`).run(...sessionIds)
     }
     db.prepare('DELETE FROM chats WHERE project_path = ?').run(projectPath)
     db.prepare('DELETE FROM chat_sessions WHERE project_path = ?').run(projectPath)
