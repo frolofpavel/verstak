@@ -103,4 +103,24 @@ describe('editViaFork — правка через ветку', () => {
     expect(await useProject.getState().editViaFork(7, 3)).toBeNull()
     expect(forkSpy).not.toHaveBeenCalled()
   })
+
+  // Ре-ревью D #1: двойной клик по «править» БЕЗ гарда плодил две ветки (одна осиротевшая
+  // с черновиком). Оригинал цел, но мусор. Reentrancy-гард: второй вызов, пока первый не
+  // завершился, отклоняется.
+  it('двойной клик → ровно ОДИН форк (reentrancy-гард)', async () => {
+    const p1 = useProject.getState().editViaFork(7, 3)
+    const p2 = useProject.getState().editViaFork(7, 3) // «второй клик» до завершения первого
+    const [r1, r2] = await Promise.all([p1, p2])
+
+    expect(forkSpy).toHaveBeenCalledTimes(1) // ветка одна, не две
+    // Один из вызовов сделал ветку, другой отклонён (null).
+    expect([r1, r2].filter(Boolean)).toHaveLength(1)
+  })
+
+  it('после завершения форка следующая правка снова проходит (гард снят)', async () => {
+    await useProject.getState().editViaFork(7, 3)
+    forkSpy.mockClear()
+    await useProject.getState().editViaFork(7, 3)
+    expect(forkSpy).toHaveBeenCalledTimes(1) // не залип
+  })
 })

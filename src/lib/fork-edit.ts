@@ -15,6 +15,23 @@ export type ForkPoint =
   | { ok: true; uptoMessageId: number | null; originalText: string }
   | { ok: false; reason: 'not-found' | 'not-user-message' }
 
+/**
+ * Показывать ли кнопку «править» на сообщении (ре-ревью D #2).
+ *
+ * Только на СВОЁМ сообщении, записанном в БД (есть dbId), в обычном чате. В справке —
+ * НЕТ: help-сообщения несут глобально-уникальный id, которого нет среди проектных, и клик
+ * был бы мёртвым (editViaFork → null). Гейт видимости — здесь, а не россыпью условий в JSX.
+ */
+export function canEditMessage(
+  msg: Pick<ChatMessage, 'role' | 'dbId'>,
+  ctx: { activeChatId: number | null; helpMode: boolean },
+): boolean {
+  return !ctx.helpMode
+    && ctx.activeChatId != null
+    && msg.role === 'user'
+    && typeof msg.dbId === 'number'
+}
+
 export function forkPointForMessage(messages: ChatMessage[], messageId: number): ForkPoint {
   // Форкать можно только по реальному id строки БД. Нечисловой messageId (или dbId у
   // оптимистичного, ещё не записанного сообщения) не годится — иначе findIndex по

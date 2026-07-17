@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { forkPointForMessage } from '../../src/lib/fork-edit'
+import { forkPointForMessage, canEditMessage } from '../../src/lib/fork-edit'
 import type { ChatMessage } from '../../src/types/api'
 
 /**
@@ -74,5 +74,36 @@ describe('forkPointForMessage — где резать форк при правк
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.uptoMessageId).toBe(25) // предыдущее по позиции, не 39
+  })
+})
+
+/**
+ * Ре-ревью D #2: кнопка «править» показывалась в справке (help-чат) — мёртвый клик
+ * (editViaFork возвращал null, т.к. help-id глобально уникален и не находится среди
+ * проектных сообщений). Порчи нет, но рабочая на вид кнопка молча ничего не делает.
+ * Гард isHelpChat был забыт (в ~25 других мест он есть).
+ */
+describe('canEditMessage — где показывать «править»', () => {
+  const userMsg: ChatMessage = { role: 'user', content: 'вопрос', dbId: 3 }
+
+  it('своё сообщение в обычном чате → можно', () => {
+    expect(canEditMessage(userMsg, { activeChatId: 7, helpMode: false })).toBe(true)
+  })
+
+  // Главное: в справке кнопки быть не должно.
+  it('режим справки → нельзя (мёртвый клик)', () => {
+    expect(canEditMessage(userMsg, { activeChatId: 7, helpMode: true })).toBe(false)
+  })
+
+  it('ответ ассистента → нельзя', () => {
+    expect(canEditMessage({ role: 'assistant', dbId: 4 }, { activeChatId: 7, helpMode: false })).toBe(false)
+  })
+
+  it('оптимистичное (без dbId) → нельзя (форкать нечего)', () => {
+    expect(canEditMessage({ role: 'user' }, { activeChatId: 7, helpMode: false })).toBe(false)
+  })
+
+  it('нет активного чата → нельзя', () => {
+    expect(canEditMessage(userMsg, { activeChatId: null, helpMode: false })).toBe(false)
   })
 })

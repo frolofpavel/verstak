@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragE
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { findRunForChat } from '../lib/own-run'
 import { historyForSend } from '../lib/chat-messages'
+import { canEditMessage } from '../lib/fork-edit'
 import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
@@ -3665,10 +3666,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               {m.content && !isStreamingAssistant && (
                 <MessageActions
                   text={m.content}
-                  // «Править» — только на своём (user) сообщении, записанном в БД (есть dbId).
-                  // Ведёт в ветку через editViaFork: оригинальный чат остаётся нетронутым.
-                  onEdit={m.role === 'user' && typeof m.dbId === 'number' && activeChatId != null
-                    ? () => { void useProject.getState().editViaFork(activeChatId, m.dbId!) }
+                  // «Править» ведёт в ветку через editViaFork: оригинал не трогается.
+                  // Видимость — единый гейт canEditMessage (в т.ч. НЕ в справке, ре-ревью D #2).
+                  onEdit={canEditMessage(m, { activeChatId, helpMode })
+                    ? () => { void useProject.getState().editViaFork(activeChatId!, m.dbId!) }
                     : undefined}
                 />
               )}
