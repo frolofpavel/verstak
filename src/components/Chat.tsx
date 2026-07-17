@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { findRunForChat } from '../lib/own-run'
+import { historyForSend } from '../lib/chat-messages'
 import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
@@ -199,11 +200,9 @@ function notifyAgentFinished(
   })
 }
 
-function compactMessagesForSend(messages: ChatMessage[]): ChatMessage[] {
-  return messages
-    .filter(m => m.content.trim())
-    .map(m => ({ role: m.role, content: m.content }))
-}
+/** История для модели. Живёт в lib и СОХРАНЯЕТ dbId — по нему main режет историю по
+ *  границе сжатого итога (ревью 2.0.11-B #4). Раньше была локальной копией и срезала его. */
+const compactMessagesForSend = historyForSend
 
 const MAX_BYTES_PER_FILE = 5 * 1024 * 1024  // 5 MB
 const MAX_ATTACHMENTS = 8

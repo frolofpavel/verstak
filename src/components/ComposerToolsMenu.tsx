@@ -206,7 +206,10 @@ export function ComposerToolsMenu({
     if (activeChatId == null || checkpointMessageId == null) return
     const deleted = await window.api.chats.truncateAfter(activeChatId, checkpointMessageId)
     const msgs = await window.api.chats.list(activeChatId)
-    useProject.setState({ messages: msgs.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt })) })
+    // dbId обязателен (ревью 2.0.11-B #3/#9): без него сообщения выглядят «ещё не в БД» —
+    // сжатие видит пустой чат («сжимать нечего»), а если итог уже был, модель получила бы
+    // его вместе со ВСЕЙ историей. Остальные пути загрузки истории dbId тоже кладут.
+    useProject.setState({ messages: msgs.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt, dbId: m.id })) })
     pushActivity({
       id: `revert-task-${Date.now()}`, kind: 'write', label: `↶ Откатил задачу: −${deleted} сообщений`,
       detail: 'диалог обрезан к чекпоинту (файлы не тронуты)', status: 'ok', timestamp: Date.now(),

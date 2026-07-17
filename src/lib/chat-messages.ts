@@ -40,3 +40,23 @@ export function appendThinkingToLastAssistant(messages: ChatMessage[], text: str
   }
   return msgs
 }
+
+/**
+ * История для отправки модели: без пустых болванок и без UI-обвеса.
+ *
+ * dbId СОХРАНЯЕТСЯ ОСОЗНАННО (ревью 2.0.11-B #3/#4/#9). По нему main режет историю по
+ * границе сжатого итога. Срезать его — не «мелкая экономия», а тихая порча: сообщения
+ * без dbId считаются свежими, и модель получает [итог + ВСЮ историю] — контекст РАСТЁТ
+ * вместо того, чтобы сжаться, и человек платит за сжатие дважды.
+ *
+ * Раньше эта функция жила двумя копиями (Chat.tsx и SideChat.tsx), и обе теряли dbId.
+ */
+export function historyForSend(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .filter(m => m.content.trim())
+    .map(m => ({
+      role: m.role,
+      content: m.content,
+      ...(typeof m.dbId === 'number' ? { dbId: m.dbId } : {}),
+    }))
+}

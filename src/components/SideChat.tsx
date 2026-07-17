@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useProject } from '../store/projectStore'
+import { historyForSend } from '../lib/chat-messages'
 import { useProvider } from '../hooks/useProvider'
 import type { ProviderDescriptorDTO } from '../types/api'
 import { Markdown } from './Markdown'
@@ -205,9 +206,9 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
     const store = useProject.getState()
     const priorMessages = store.chatSnapshots[chatId]?.messages ?? draftMessages
     const isFirstUserMessage = !priorMessages.some(m => m.role === 'user' && m.content.trim())
-    const history = priorMessages
-      .filter(m => m.content)
-      .map(m => ({ role: m.role, content: m.content }))
+    // historyForSend сохраняет dbId — по нему main режет историю по границе сжатого
+    // итога (ревью 2.0.11-B #4). Локальная копия его срезала, и сжатие вырождалось.
+    const history = historyForSend(priorMessages)
     const userMsg = { role: 'user' as const, content: text }
     setDraftMessages([])
     store.pushUserToChatSnapshot(chatId, text)
