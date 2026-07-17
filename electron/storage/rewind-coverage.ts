@@ -41,10 +41,16 @@ export interface RewindEntry {
  *    после нас; откат перезатёр бы чужое).
  *
  * currentHash инъектируется (в проде — sha256 содержимого файла; null — файла нет).
+ *
+ * hasBypassWriters — ЯВНЫЙ сигнал от потребителя: прогон менял файлы МИМО undo-стека
+ * (run_command, CLI-бинарь). Такие правки не оставляют undo-записей ВООБЩЕ, поэтому по
+ * записям их не увидеть — потребитель (F) обязан сообщить из знания о прогоне (agent_run:
+ * были ли run_command/CLI-инструменты). Без этого complete соврал бы: мы обещали полный
+ * откат, не видя половину правок (ревью E — латентная дыра, закрыта до подключения).
  */
 export function assessRewind(
   entries: RewindEntry[],
-  opts: { currentHash: (filePath: string) => string | null },
+  opts: { currentHash: (filePath: string) => string | null; hasBypassWriters?: boolean },
 ): RewindCoverage {
   // Последняя запись каждого файла = с МАКСИМАЛЬНЫМ id. НЕ полагаемся на порядок входа:
   // list() отдаёт DESC, и «последняя встреченная» была бы самой СТАРОЙ — перепутали бы
@@ -64,7 +70,10 @@ export function assessRewind(
     if (opts.currentHash(filePath) !== e.afterHash) staleFiles++
   }
 
-  return computeRewindCoverage({ tracedFiles, hasUntracedWriters: untracedFiles > 0, staleFiles })
+  // Непротрассированность — из ДВУХ источников: записи без runId (видимые) И явный сигнал
+  // потребителя о bypass-writers (невидимые в стеке — run_command/CLI).
+  const hasUntracedWriters = untracedFiles > 0 || opts.hasBypassWriters === true
+  return computeRewindCoverage({ tracedFiles, hasUntracedWriters, staleFiles })
 }
 
 export function computeRewindCoverage(input: RewindCoverageInput): RewindCoverage {

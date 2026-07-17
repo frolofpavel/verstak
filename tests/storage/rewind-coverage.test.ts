@@ -99,6 +99,21 @@ describe('assessRewind — покрытие над реальными запис
     expect(assessRewind([], { currentHash: () => null }).level).toBe('none')
   })
 
+  // Ревью E: bypass-writers (run_command/CLI) НЕ оставляют undo-записи вовсе — assessRewind
+  // не увидит их по записям. Потребитель (F) обязан сообщить об этом явно, иначе complete
+  // соврёт: прогон менял файлы мимо нас, а мы обещали полный откат.
+  it('прогон использовал bypass-writers (run_command/CLI) → НЕ complete, даже если записи чисты', () => {
+    const entries = [entry({ id: 1, filePath: 'a.ts', afterHash: 'ah1' })]
+    const r = assessRewind(entries, { currentHash: () => 'ah1', hasBypassWriters: true })
+    expect(r.level).toBe('partial')
+    expect(r.hasUntracedWriters).toBe(true)
+  })
+
+  it('без bypass-сигнала и без untraced-записей → complete (как раньше)', () => {
+    const entries = [entry({ id: 1, filePath: 'a.ts', afterHash: 'ah1' })]
+    expect(assessRewind(entries, { currentHash: () => 'ah1', hasBypassWriters: false }).level).toBe('complete')
+  })
+
   // Один файл — несколько записей (правился много раз): stale считается по файлу, не по записи.
   it('несколько записей одного файла → один traced-файл', () => {
     const entries = [
