@@ -93,6 +93,22 @@ describe('preflightRewind — превью отката', () => {
     expect(undo.count('/p')).toBe(before) // записи на месте, ничего не pop'нуто
   })
 
+  // Файл СОЗДАН и потом изменён в одной сессии: откат должен УДАЛИТЬ его (на чекпоинте
+  // файла не было), а не восстановить промежуточную версию. action берётся по ПЕРВОЙ
+  // записи (файл создавался), не по последней.
+  it('файл создан+изменён → откат удаляет (action по первой записи, не последней)', async () => {
+    undo.push('/p', 'new.ts', null, 'версия-1', { runId: 'r', chatId: 1, messageId: 1 })     // создан
+    undo.push('/p', 'new.ts', 'версия-1', 'версия-2', { runId: 'r', chatId: 1, messageId: 2 }) // изменён
+
+    const r = await preflightRewind(undo, '/p', 0, {
+      hashFile: hashMap({ 'new.ts': sha('версия-2') }),
+      hasBypassWriters: false,
+    })
+    expect(r.files).toHaveLength(1)
+    expect(r.files[0].action).toBe('delete') // на чекпоинте файла не было → удалить
+    expect(r.files[0].stale).toBe(false)      // текущий = версия-2 (последняя) → не переписан
+  })
+
   it('откат только записей после чекпоинта (id > checkpointId)', async () => {
     const e1 = undo.push('/p', 'a.ts', 'a0', 'a1', { runId: 'r', chatId: 1, messageId: 1 })
     undo.push('/p', 'b.ts', 'b0', 'b1', { runId: 'r', chatId: 1, messageId: 2 })

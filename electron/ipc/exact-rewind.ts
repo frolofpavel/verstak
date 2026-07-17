@@ -48,25 +48,43 @@ export async function preflightRewind(
 
   const coverage = await assessCoverage(toRevert, deps)
 
-  // Последняя запись каждого файла — она определяет, что делать при откате.
-  const latestByFile = new Map<string, UndoEntry>()
+  // Для каждого файла нужны ДВЕ записи:
+  //  · ПЕРВАЯ (min id) — определяет, что делать при откате: её beforeContent = состояние
+  //    файла на момент чекпоинта. before null → файл создавался → откат его УДАЛЯЕТ;
+  //  · ПОСЛЕДНЯЯ (max id) — её afterHash = ожидаемое ТЕКУЩЕЕ содержимое; расходится с
+  //    реальным хешем → файл переписан кем-то после нас (stale).
+  const firstByFile = new Map<string, UndoEntry>()
+  const lastByFile = new Map<string, UndoEntry>()
   for (const e of toRevert) {
-    const prev = latestByFile.get(e.filePath)
-    if (!prev || e.id > prev.id) latestByFile.set(e.filePath, e)
+    const f = firstByFile.get(e.filePath)
+    if (!f || e.id < f.id) firstByFile.set(e.filePath, e)
+    const l = lastByFile.get(e.filePath)
+    if (!l || e.id > l.id) lastByFile.set(e.filePath, e)
   }
 
   const files: PreflightFile[] = []
-  for (const [filePath, e] of latestByFile) {
+  for (const [filePath, first] of firstByFile) {
+    const last = lastByFile.get(filePath)!
     const current = await deps.hashFile(filePath)
     files.push({
       filePath,
-      // beforeContent null → файл создавался этой правкой → при откате удаляется.
-      action: e.beforeContent === null ? 'delete' : 'restore',
-      stale: e.runId != null && current !== e.afterHash,
+      action: first.beforeContent === null ? 'delete' : 'restore',
+      stale: last.runId != null && current !== last.afterHash,
     })
   }
 
   return { coverage, files }
+}
+
+/**
+ * Включена ли Exact Rewind. Фича поставляется ВЫКЛЮЧЕННОЙ (карточка F: ручной Windows-smoke
+ * только Павлом). Гейт строгий — ТОЛЬКО явное 'true'; ключа нет / любое другое → выкл.
+ * Настройка живёт в settings под ключом exact_rewind_enabled.
+ */
+export const EXACT_REWIND_FLAG_KEY = 'exact_rewind_enabled'
+
+export function isExactRewindEnabled(getKey: (key: string) => string | null): boolean {
+  return getKey(EXACT_REWIND_FLAG_KEY) === 'true'
 }
 
 // ─── Сам откат в транзакции с бэкапами + unrevert (2.0.11-F, за флагом) ───

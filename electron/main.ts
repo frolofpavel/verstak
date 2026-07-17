@@ -73,6 +73,7 @@ import { createProjects } from './storage/projects'
 import { createProjectGroups } from './storage/project-groups'
 import { createUndoStack } from './storage/undo'
 import { registerUndoIpc } from './ipc/undo'
+import { registerExactRewindIpc } from './ipc/exact-rewind-ipc'
 import { createPlans } from './storage/plans'
 import { registerPlansIpc } from './ipc/plans'
 import { registerWorkflowsIpc } from './ipc/workflows'
@@ -747,6 +748,20 @@ app.whenReady().then(() => {
   registerJournalIpc(journal)
   registerRemindersIpc(reminders, reminderService)
   registerUndoIpc(undoStack)
+  // 2.0.11-F: Exact Rewind — ЗА ФЛАГОМ (exact_rewind_enabled, по умолчанию выключено).
+  // hasBypassWriters: пока консервативно true, если в стеке есть непротрассированные записи
+  // (runId=null) — точная детекция run_command/CLI из agent_run — follow-up. Флаг OFF, так
+  // что путь ночью неактивен; честнее переоценить непротрассированность, чем недооценить.
+  registerExactRewindIpc({
+    undoStack,
+    getKey: getSecret,
+    getProjectRoot: getActiveProjectPath,
+    hasBypassWriters: (checkpointId) => {
+      const root = getActiveProjectPath()
+      if (!root) return false
+      return undoStack.list(root).some(e => e.id > checkpointId && e.runId == null)
+    },
+  })
   // 2.0.11-B: ручная компакция контекста. Провайдер для summary выбирается отдельно от
   // провайдера чата (pickSummaryProvider): у человека на подписке активен CLI, а сжатию
   // нужен дешёвый одноразовый API-вызов.

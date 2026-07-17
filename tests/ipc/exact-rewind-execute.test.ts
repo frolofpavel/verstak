@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { executeRewind, unrevert, type RewindPlanItem } from '../../electron/ipc/exact-rewind'
+import { executeRewind, unrevert, isExactRewindEnabled, type RewindPlanItem } from '../../electron/ipc/exact-rewind'
 
 /**
  * Срез 2.0.11-F: Exact Rewind — сам откат в транзакции с бэкапами + unrevert.
@@ -85,5 +85,23 @@ describe('unrevert — вернуть как было ДО отката', () => 
     expect(fs.files.get('a.ts')).toBe('старое') // откат применён
     await unrevert(r.backups, fs.deps)
     expect(fs.files.get('a.ts')).toBe('исходное') // вернулись точно к тому, что было
+  })
+})
+
+/**
+ * Feature flag — F поставляется ВЫКЛЮЧЕННОЙ (карточка F: ручной smoke только Павлом).
+ * Гейт обязан быть строгим: включает ТОЛЬКО явное 'true', всё остальное — выкл.
+ */
+describe('isExactRewindEnabled — фича по умолчанию ВЫКЛЮЧЕНА', () => {
+  it('ключа нет → выключено (default OFF)', () => {
+    expect(isExactRewindEnabled(() => null)).toBe(false)
+  })
+  it('явное true → включено', () => {
+    expect(isExactRewindEnabled(() => 'true')).toBe(true)
+  })
+  it('любое другое значение → выключено (не путаем truthy)', () => {
+    for (const v of ['1', 'yes', 'on', 'TRUE', '', 'false']) {
+      expect(isExactRewindEnabled(() => v), v).toBe(false)
+    }
   })
 })
