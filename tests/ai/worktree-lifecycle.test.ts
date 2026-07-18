@@ -94,8 +94,9 @@ describe('worktree lifecycle snapshots', () => {
     } catch {
       // best-effort cleanup
     }
-    // rmDirRobust: git метит pack-файлы read-only → обычный rmSync падает EPERM на Windows.
-    rmDirRobust(root)
+    // best-effort: EPERM под антивирусом (хендл temp-дерева) НЕ должен ронять тест — это среда,
+    // не продуктовый дефект. Leftover добьёт teardown-свип globalSetup (temp-sweep.ts, карточка #1).
+    try { rmDirRobust(root) } catch { /* teardown-свип уберёт */ }
   })
 
   it('refuses to remove dirty worktree without force', async () => {

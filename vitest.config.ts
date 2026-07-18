@@ -40,6 +40,10 @@ export default defineConfig({
           // git под нагрузкой корректен, но медленный — поднимаем таймауты под гейт.
           testTimeout: 60_000,
           hookTimeout: 60_000,
+          // worktree-setup: снятие GIT_*-переменных (карточка #2, класс 747e3e0) — чтобы прямой
+          // прогон не тёк core.bare=true в main. Явно перечисляем оба (project.setupFiles
+          // заменяет унаследованный, не мержит).
+          setupFiles: ['tests/setup.ts', 'tests/worktree-setup.ts'],
         },
       },
     ],

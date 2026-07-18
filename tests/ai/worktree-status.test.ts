@@ -70,7 +70,8 @@ describe('detectWorktreeState', () => {
   })
 
   afterEach(() => {
-    rmDirRobust(root)  // git pack-файлы read-only → обычный rmSync падает EPERM на Windows
+    // best-effort: EPERM под антивирусом НЕ ронять тест (среда, не дефект) — teardown-свип добьёт.
+    try { rmDirRobust(root) } catch { /* teardown-свип globalSetup уберёт leftover */ }
   })
 
   it('reports a clean pushed worktree', async () => {
