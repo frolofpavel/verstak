@@ -17,6 +17,10 @@ export interface OpenAiCompatOptions {
   fallbackBaseUrl?: string
   model?: string
   effortLevel?: 'quick' | 'standard' | 'deep'
+  /** Дефект 3: умеет ли провайдер vision (картинки). undefined/true — умеет (как
+   *  было). false — картинки НЕ отправляем массивом image_url (иначе 400 у GLM
+   *  Coding и т.п.), деградируем честно: текст доходит, юзеру шлём info. */
+  supportsImages?: boolean
 }
 
 interface OpenAiContentPart {
@@ -25,8 +29,17 @@ interface OpenAiContentPart {
   image_url?: { url: string }
 }
 
-function buildUserContent(message: ChatMessage): string | OpenAiContentPart[] {
+/** true — в user-сообщении есть вложение-картинка. */
+function hasImageAttachment(message: ChatMessage): boolean {
+  return !!message.attachments?.some(a => a.mimeType.startsWith('image/'))
+}
+
+function buildUserContent(message: ChatMessage, supportsImages: boolean): string | OpenAiContentPart[] {
   if (!message.attachments?.length) return message.content
+  // Дефект 3: провайдер без vision (GLM Coding и т.п.) — картинки НЕ вкладываем
+  // (сервер вернул бы 400 и убил прогон, потеряв текст). Отдаём чистый текст;
+  // уведомление юзеру шлётся один раз из send().
+  if (!supportsImages) return message.content
   const parts: OpenAiContentPart[] = []
   if (message.content) parts.push({ type: 'text', text: message.content })
   for (const att of message.attachments) {
@@ -43,7 +56,7 @@ function buildUserContent(message: ChatMessage): string | OpenAiContentPart[] {
  * - User messages with toolResults become a *sequence* of `role: 'tool'` messages.
  *   The original user content (if any) becomes a regular user message before them.
  */
-function buildOpenAiMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
+function buildOpenAiMessages(messages: ChatMessage[], supportsImages: boolean): OpenAI.Chat.ChatCompletionMessageParam[] {
   const out: OpenAI.Chat.ChatCompletionMessageParam[] = []
   for (const m of messages) {
     if (m.role === 'system') {
@@ -69,7 +82,7 @@ function buildOpenAiMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletio
     if (m.toolResults?.length) {
       // Tool results travel as their own role:'tool' entries, one per result.
       // Any actual user text in the same logical turn is emitted FIRST as user.
-      if (m.content) out.push({ role: 'user', content: buildUserContent(m) as never })
+      if (m.content) out.push({ role: 'user', content: buildUserContent(m, supportsImages) as never })
       for (const r of m.toolResults) {
         const content = r.error
           ? `Error: ${r.error}\n${typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000)}`
@@ -77,7 +90,7 @@ function buildOpenAiMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletio
         out.push({ role: 'tool', tool_call_id: r.id, content })
       }
     } else {
-      out.push({ role: 'user', content: buildUserContent(m) as never })
+      out.push({ role: 'user', content: buildUserContent(m, supportsImages) as never })
     }
   }
   return out
@@ -99,7 +112,14 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
     models: opts.models,
 
     async *send(messages: ChatMessage[], tools: ToolDefinition[], _results?: ToolResult[], signal?: AbortSignal): AsyncIterable<ChatEvent> {
-      const apiMessages = buildOpenAiMessages(messages)
+      // Дефект 3: провайдер без vision — картинки не уходят на сервер (см. buildUserContent).
+      // undefined трактуем как «умеет» (обратная совместимость всех прежних провайдеров).
+      const imagesSupported = opts.supportsImages !== false
+      const droppedImages = !imagesSupported && messages.some(m => m.role === 'user' && hasImageAttachment(m))
+      if (droppedImages) {
+        yield { type: 'info', text: `${opts.name} не принимает изображения — отправлен только текст, вложение пропущено` }
+      }
+      const apiMessages = buildOpenAiMessages(messages, imagesSupported)
       const apiTools: OpenAI.Chat.ChatCompletionTool[] | undefined = tools.length > 0
         ? tools.map(t => ({
             type: 'function' as const,

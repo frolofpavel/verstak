@@ -43,6 +43,10 @@ export interface ExtraProviderSpec {
   defaultModel: string
   /** baseUrl для OpenAI SDK. Для Custom — из settings.custom_openai_baseurl. */
   baseUrl: string | null
+  /** Дефект 3: умеет ли провайдер vision (картинки). Опущено = умеет (консервативно
+   *  для остальных, поведение не меняется). false ставим только подтверждённым живым
+   *  прогоном без vision (zai-coding: 400 на image_url). */
+  supportsImages?: boolean
   /** Запасной baseUrl: при сетевой недоступности основного хоста (релей лёг)
    *  повторяем запрос сюда тем же ключом. Для verstak-gateway — прямой Амстердам
    *  в обход РФ-релея (страховка от падения релей-бокса). */
@@ -173,7 +177,10 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
     defaultModel: 'glm-5.2',
     // Критично: строго coding-endpoint. Общий /api/paas/v4 НЕ принимает ключи
     // Coding Plan — endpoints не взаимозаменяемы (доки Z.ai).
-    baseUrl: 'https://api.z.ai/api/coding/paas/v4'
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    // Дефект 3: GLM Coding endpoint отвергает image_url (400 content.type invalid,
+    // allowed: text) — подтверждено живым прогоном 17.07. Картинки не шлём.
+    supportsImages: false
   },
   {
     id: 'qwen',
@@ -312,6 +319,7 @@ export function createExtraProvider(
     apiKey: opts.apiKey,
     baseUrl,
     fallbackBaseUrl: spec.fallbackBaseUrl,
-    model: opts.model
+    model: opts.model,
+    supportsImages: spec.supportsImages
   })
 }
