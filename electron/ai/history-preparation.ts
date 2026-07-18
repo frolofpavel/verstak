@@ -1,4 +1,5 @@
 import type { ChatMessage } from './types'
+import { IGNORED_TOOLS_NUDGE } from './tool-mode'
 
 /**
  * Сборка истории для модели с учётом persistent context snapshot — срез 2.0.11-B.
@@ -56,8 +57,13 @@ export function summaryBlock(summary: string): ChatMessage {
  * попадают в хвост: иначе только что напечатанное человеком исчезло бы из запроса.
  */
 export function prepareHistoryForModel(messages: HistoryMessage[], snapshot: ActiveSnapshot | null): ChatMessage[] {
-  if (!snapshot || !snapshot.summary.trim()) return messages
-  const tail = messages.filter(m => m.dbId == null || m.dbId > snapshot.throughMessageId)
+  // Протухшие corrective-nudge из ПРОШЛЫХ прогонов, осевшие в истории чата, продолжали
+  // отравлять контекст будущих ходов (модель читала «Ты не вызвал инструмент…» как факт).
+  // Вырезаем их из payload'а. ЖИВОЙ in-run nudge сюда НЕ попадает — он добавляется в
+  // currentMessages (runner-api) уже ПОСЛЕ сборки payload'а, минуя эту функцию.
+  const clean = messages.filter(m => m.content !== IGNORED_TOOLS_NUDGE)
+  if (!snapshot || !snapshot.summary.trim()) return clean
+  const tail = clean.filter(m => m.dbId == null || m.dbId > snapshot.throughMessageId)
   // Снапшот покрыл всё, а хвоста нет — отдать один summary лучше, чем пустую историю.
   return [summaryBlock(snapshot.summary), ...tail]
 }

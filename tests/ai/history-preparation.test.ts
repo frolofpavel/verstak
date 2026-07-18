@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { prepareHistoryForModel, historyStats, summaryBlock } from '../../electron/ai/history-preparation'
 import type { HistoryMessage } from '../../electron/ai/history-preparation'
+import { IGNORED_TOOLS_NUDGE } from '../../electron/ai/tool-mode'
 
 /**
  * Срез 2.0.11-B: что реально уходит модели после сжатия (карточка п.6).
@@ -92,5 +93,48 @@ describe('история для модели со снапшотом (2.0.11-B)'
   it('пустая история не падает', () => {
     expect(prepareHistoryForModel([], null)).toEqual([])
     expect(prepareHistoryForModel([], { summary: 'итог', throughMessageId: 5 })).toHaveLength(1)
+  })
+})
+
+// Бэклог (наблюдение живого прогона 18.07): corrective-nudge из ПРОШЛЫХ прогонов оседали в
+// истории чата и продолжали отравлять контекст будущих ходов (модель читала «Ты не вызвал
+// инструмент…» как факт и рефлексировала «система ожидает tool call»). Фильтруем их из payload'а.
+// ЖИВОЙ in-run nudge сюда НЕ попадает: он добавляется в currentMessages в runner-api уже ПОСЛЕ
+// сборки payload'а (ai.ts:468 → prepareHistoryForModel), поэтому анти-DeepSeek не страдает.
+describe('протухшие corrective-nudge не уходят модели', () => {
+  it('без снапшота: осевший в истории IGNORED_TOOLS_NUDGE вырезается из payload', () => {
+    const hist: HistoryMessage[] = [
+      m(1, 'user', 'сделай X'),
+      m(2, 'assistant', 'думаю'),
+      m(3, 'user', IGNORED_TOOLS_NUDGE),
+      m(4, 'assistant', 'ок'),
+      m(5, 'user', 'что на картинке?'),
+    ]
+    const out = prepareHistoryForModel(hist, null)
+    expect(out.map(x => x.content)).not.toContain(IGNORED_TOOLS_NUDGE)
+    expect(out).toHaveLength(4)
+    expect(out.at(-1)!.content).toBe('что на картинке?')
+  })
+
+  it('со снапшотом: протухший nudge в хвосте тоже вырезается', () => {
+    const hist: HistoryMessage[] = [
+      m(1, 'user', 'старое'),
+      m(2, 'assistant', 'старый ответ'),
+      m(3, 'user', IGNORED_TOOLS_NUDGE),
+      m(4, 'user', 'свежее'),
+    ]
+    const out = prepareHistoryForModel(hist, { summary: 'итог', throughMessageId: 2 })
+    const joined = out.map(x => x.content).join('\n')
+    expect(joined).not.toContain(IGNORED_TOOLS_NUDGE)
+    expect(joined).toContain('свежее')
+  })
+
+  it('historyStats считает уже без протухших nudge', () => {
+    const hist: HistoryMessage[] = [
+      m(1, 'user', 'a'),
+      m(2, 'user', IGNORED_TOOLS_NUDGE),
+      m(3, 'user', 'b'),
+    ]
+    expect(historyStats(hist, null).sentMessages).toBe(2)
   })
 })
