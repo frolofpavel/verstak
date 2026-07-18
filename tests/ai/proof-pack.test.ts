@@ -108,3 +108,51 @@ describe('renderProofPackHtml', () => {
     expect(JSON.stringify(p)).not.toContain('sk-proj-123456789012345678901234567890')
   })
 })
+
+// Proof-A: characterization текущего паспорта — backward-compat lock ПЕРЕД Proof Passport V2.
+// ЗАЧЕМ: V2 добавляет честность (unknown-стоимость, legacy-incomplete, полнота scanner), но
+// экспорты JSON/HTML/MD обязаны остаться обратно совместимыми. Эти тесты фиксируют ТЕКУЩУЮ
+// форму и честные состояния — любое их изменение в V2 станет видимым и осознанным.
+describe('Proof Passport — характеризация (backward-compat lock перед V2)', () => {
+  it('ФОРМА ProofPack зафиксирована (V2 добавляет поля осознанно, а не ломает)', () => {
+    const p = assembleProofPack(baseInput())
+    expect(Object.keys(p).sort()).toEqual(
+      ['changedFiles', 'decisions', 'generatedAt', 'result', 'reviewGate', 'run', 'timeline', 'verification'].sort()
+    )
+    expect(Object.keys(p.run).sort()).toEqual(
+      ['agentMode', 'agentsCount', 'costUsd', 'durationMs', 'endedAt', 'error', 'filesCount', 'model',
+        'provider', 'runId', 'startedAt', 'status', 'title', 'toolCount', 'turnIndex'].sort()
+    )
+  })
+
+  it('честное состояние partial → «ЧАСТИЧНО», не выдаётся за пройденное', () => {
+    const inp = baseInput()
+    inp.verification = { overall: 'partial', checksTotal: 5, checksPassed: 3, taskSummary: null }
+    expect(renderProofPackHtml(assembleProofPack(inp))).toContain('ЧАСТИЧНО · 3/5')
+  })
+
+  it('нет review-события → reviewGate.missing (не «passed» по умолчанию)', () => {
+    const inp = baseInput()
+    inp.events = inp.events.filter(e => e.label !== 'review_before_commit')
+    const p = assembleProofPack(inp)
+    expect(p.reviewGate.status).toBe('missing')
+    expect(p.reviewGate.at).toBeNull()
+  })
+
+  // ТЕКУЩЕЕ (до V2) поведение стоимости зафиксировано: costCents 0 → $0.00. V2 сделает
+  // РАЗНИЦУ между «известный ноль» (CLI/локально) и «неизвестно» (модель без цен) — тогда
+  // этот тест осознанно обновится.
+  it('текущее поведение стоимости: costCents 0 → costUsd 0 → $0.00', () => {
+    const inp = baseInput()
+    inp.run.costCents = 0
+    const p = assembleProofPack(inp)
+    expect(p.run.costUsd).toBe(0)
+    expect(renderProofPackHtml(p)).toContain('$0.00')
+  })
+
+  it('Markdown без verification честно пишет not_run', () => {
+    const inp = baseInput()
+    inp.verification = null
+    expect(renderProofPackMarkdown(assembleProofPack(inp))).toContain('- Status: not_run')
+  })
+})
