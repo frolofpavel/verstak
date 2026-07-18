@@ -38,7 +38,8 @@
     "deploy:local": "node scripts/deploy-local.cjs",
     "sync:shortcuts": "node scripts/sync-windows-shortcuts.cjs",
     "sync:changelog": "node scripts/sync-verstak-changelog.cjs",
-    "generate:icon": "node scripts/generate-app-icon.mjs"
+    "generate:icon": "node scripts/generate-app-icon.mjs",
+    "eval:models": "node scripts/eval/index.mjs"
   },
   "build": {
     "afterPack": "scripts/patch-exe-icon.cjs",
