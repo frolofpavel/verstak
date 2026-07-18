@@ -484,10 +484,10 @@ describe('agent-loop Этап 2 — fallback routing', () => {
     expect(received[0]).toContain(JSON_MARK)
   }, 15000)
 
-  // Приоритет 1+2: coaxable-модель (deepseek-chat, native) дважды отвечает прозой,
-  // не вызвав tool → nudge (ход 1) → всё равно проза (ход 2) → эскалация в JSON-режим
-  // (тот же провайдер, forceToolMode='json'). Проверяем: JSON-инъекция появилась в
-  // запросе ПОСЛЕ эскалации + info-событие про JSON-режим.
+  // Приоритет 1+2: coaxable-модель (deepseek-chat, native) дважды ПРЕТЕНДУЕТ на выполненное
+  // действие прозой, не вызвав tool → nudge (ход 1) → всё равно претензия (ход 2) → эскалация
+  // в JSON-режим (тот же провайдер, forceToolMode='json'). Текст — claim («задача выполнена»),
+  // т.к. после follow-up 18.07 nudge (и downstream-эскалация) стреляют только на претензию.
   it('coaxable модель игнорит tools → nudge → эскалация в JSON-режим', async () => {
     const runs = mockRuns()
     const sender = makeSender()
@@ -496,7 +496,7 @@ describe('agent-loop Этап 2 — fallback routing', () => {
       id: 'deepseek', name: 'deepseek', models: ['deepseek-chat'],
       async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
         received.push(JSON.stringify(messages))
-        yield { type: 'text', text: 'я подумаю и сделаю' }  // всегда проза, tool не зовём
+        yield { type: 'text', text: 'Готово, задача выполнена.' }  // претензия на действие, tool не зовём
         yield { type: 'done' }
       },
     }
@@ -672,6 +672,13 @@ describe('agent-loop — no-tool-call nudge: агентность хода (де
       .map((c: unknown[]) => (c[1] as { event?: { type?: string; name?: string } })?.event)
       .filter((e): e is { type: string; name?: string } => e?.type === 'tool-blocked' && e?.name === 'no-tool-call')
 
+  // Событие «выбран инструмент» (runner-progress: agent-progress phase='tool') — эмитится
+  // РОВНО когда модель прислала tool-call. Ноль таких = модель ни разу не дёрнула инструмент.
+  const toolEvents = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; phase?: string } })?.event)
+      .filter((e): e is { type: string; phase: string } => e?.type === 'agent-progress' && e?.phase === 'tool')
+
   const infoTexts = (sender: ReturnType<typeof makeSender>) =>
     sender.send.mock.calls
       .map((c: unknown[]) => (c[1] as { event?: { type?: string; text?: string } })?.event)
@@ -702,16 +709,16 @@ describe('agent-loop — no-tool-call nudge: агентность хода (де
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
   }, 15000)
 
-  // Guard (зелёный и до, и после фикса): агентный режим ('auto') на том же coaxable-
-  // провайдере, модель описала действие прозой вместо вызова → nudge СРАБАТЫВАЕТ.
-  // Защита от реального симптома DeepSeek/Ollama не теряется.
-  it('агентная задача (auto) на coaxable → nudge срабатывает', async () => {
+  // Guard анти-DeepSeek (follow-up 18.07): агентный режим ('auto') на coaxable, модель
+  // ПРЕТЕНДУЕТ на выполненное действие («Готово, я создал файл…») без вызова инструмента →
+  // nudge СРАБАТЫВАЕТ. Защита от реального симптома «говорит готово, ничего не сделал» цела.
+  it('агентная задача (auto) на coaxable + претензия на действие → nudge срабатывает', async () => {
     const runs = mockRuns()
     const sender = makeSender()
     const p: ChatProvider = {
       id: 'kimi-coding', name: 'kimi', models: ['kimi-for-coding'],
       async *send(): AsyncGenerator<ChatEvent> {
-        yield { type: 'text', text: 'Сейчас прочитаю файл и поправлю его.' }  // описал действие, tool не вызвал
+        yield { type: 'text', text: 'Готово, я создал файл config.ts.' }  // претензия на действие, tool не вызван
         yield { type: 'done' }
       },
     }
@@ -720,6 +727,43 @@ describe('agent-loop — no-tool-call nudge: агентность хода (де
       agentMode: 'auto', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
     }) as Parameters<typeof runApiConversation>))
     expect(nudgeEvents(sender).length).toBeGreaterThanOrEqual(1)
+  }, 15000)
+
+  // Follow-up 18.07 (RED до фикса — кейс Павла) + анти-провокация (инцидент zai): агентный
+  // режим ('auto') на coaxable, ответ РАЗГОВОРНЫЙ (объяснение, без претензии на действие).
+  // Павел живёт в 'auto', его «расскажи, как ты работаешь» шёл под mode-агентность и ложно
+  // ловил nudge («цирк») — а на zai ложный nudge СПРОВОЦИРОВАЛ модель на НЕЗАПРОШЕННЫЕ
+  // tool-действия (screen_capture экрана + run_command) на следующем ходу. Дискриминатор по
+  // выхлопу: нет претензии → нет nudge → нет 2-го хода → модель не получает шанс дёрнуть тул.
+  // Мок на ходу 2 (достижим ТОЛЬКО через nudge) отдал бы run_command — ассерты доказывают,
+  // что туда не попадаем: ноль nudge, ноль tool-вызовов, ровно один ход.
+  it('разговорный ответ в auto на coaxable → 0 nudge, 0 tool-вызовов, один ход (кейс Павла)', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    let sends = 0
+    const p: ChatProvider = {
+      id: 'kimi-coding', name: 'kimi', models: ['kimi-for-coding'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        sends++
+        if (sends === 1) {
+          yield { type: 'text', text: 'Я работаю через агентный цикл: читаю запрос, выбираю инструменты и объясняю ход. Какие есть вопросы?' }
+          yield { type: 'done' }
+        } else {
+          // Ход 2 наступает ТОЛЬКО если сработал nudge — тогда модель дёрнула бы незапрошенный
+          // инструмент (класс zai-инцидента). С фиксом сюда не попадаем.
+          yield { type: 'tool-call', call: { id: 'x1', name: 'run_command', args: { command: 'dir' } } }
+          yield { type: 'done' }
+        }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'kimi-coding', model: 'kimi-for-coding',
+      agentMode: 'auto', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    expect(nudgeEvents(sender)).toHaveLength(0)                       // ноль красных плашек no-tool-call
+    expect(toolEvents(sender)).toHaveLength(0)                        // ноль tool-вызовов (анти-провокация)
+    expect(infoTexts(sender).some(t => t.includes('JSON-режим'))).toBe(false)  // ноль эскалаций
+    expect(sends).toBe(1)                                            // ровно один ход, без спровоцированного 2-го
   }, 15000)
 
   // Дефект 2a: агентный прогон ('bypass'), модель ВСЕГДА прозой. Бюджет nudge должен
@@ -742,5 +786,38 @@ describe('agent-loop — no-tool-call nudge: агентность хода (де
     // kimi-coding нет в FALLBACK_CHAINS → после native-кадра ровно один JSON-кадр,
     // без provider-fallback. Бюджет run-scoped ⇒ суммарно один nudge.
     expect(nudgeEvents(sender)).toHaveLength(1)
+  }, 15000)
+})
+
+// Дефект 3 (vision per-provider): провайдер без vision (openai-compat) yield'ит info-событие
+// «X не принимает изображения — вложение пропущено». Раньше цикл runner-api форвардил только
+// text/thought/tool-call/usage/done/error → провайдерские info МОЛЧА терялись, и честная
+// деградация была НЕВИДИМА (жалоба Павла: на скринах zai уведомления нет). Лочим доставку в UI.
+describe('agent-loop — провайдерские info-события доходят до UI', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-info-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  it('info от провайдера (vision не поддержан) форвардится в sender (Timeline)', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const notice = 'GLM Coding не принимает изображения — отправлен только текст, вложение пропущено'
+    const p: ChatProvider = {
+      id: 'zai-coding', name: 'zai', models: ['glm-4.6'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        yield { type: 'info', text: notice }
+        yield { type: 'text', text: 'Вижу только текст.' }
+        yield { type: 'done' }
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'zai-coding', model: 'glm-4.6',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    const infos = sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; text?: string } })?.event)
+      .filter((e): e is { type: string; text: string } => e?.type === 'info')
+      .map(e => e.text)
+    expect(infos.some(t => t.includes('не принимает изображения'))).toBe(true)
   }, 15000)
 })

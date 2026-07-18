@@ -53,7 +53,7 @@ import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfigur
 import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart-fallback'
 import { classifyRouteReason, routeChangedText } from './route-policy'
 import { detectSubscriptionLimit } from './subscription-limits'
-import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE } from './tool-mode'
+import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from './smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from './session-journal'
 import {
@@ -296,17 +296,24 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let plainReplyNudges = ctx.nudgeBudgetUsed ?? 0
   const MAX_PLAIN_NUDGES = 1
   const coaxableProvider = isCoaxableProvider(providerId)
-  // Дефект 1: nudge осмыслен только на АГЕНТНОМ ходу. Разговорный запрос ('ask'/'plan'
-  // без recipe) — прозаичный ответ это НОРМА, а не «модель проигнорировала тулзы».
-  // Агентность берём из режима/recipe (НЕ из слов юзера — их подбором обойти нельзя):
-  // recipe = структурная агентная задача; accept-edits/auto/bypass = режимы исполнения.
-  // 'ask' (дефолт) и 'plan' (проза-план — законный финал) остаются разговорными.
-  // runAgentMode мутабельный (approve плана меняет режим) — читаем на момент проверки.
-  const isAgenticTurn = (): boolean =>
-    ctx.recipe != null
-    || runAgentMode === 'accept-edits'
-    || runAgentMode === 'auto'
-    || runAgentMode === 'bypass'
+  // Дефект 1 (+ follow-up 18.07): гейт corrective-nudge.
+  //  · recipe = структурная агентная задача → проза без действия это провал, nudge безусловен.
+  //  · Режим-агентность (accept-edits/auto/bypass) — это ОКРУЖЕНИЕ прогона, а НЕ сигнал «это
+  //    агентная задача»: per-chat режим часто не задан → фолбэк на глобальный agent_mode
+  //    (useAgentMode), а Павел повседневно живёт в 'auto'. Поэтому «расскажи, как ты работаешь»
+  //    здесь — разговорный запрос, и безусловный nudge давал ложные срабатывания («цирк»
+  //    из повторов). В этих режимах nudge стреляет ТОЛЬКО когда ответ ПРЕТЕНДУЕТ на выполненное
+  //    действие без вызова инструмента (claimsCompletedAction — ровно симптом DeepSeek-цикла);
+  //    чистая проза (объяснение/шаги/вопрос/оффер) — не трогаем.
+  //  · 'ask' (дефолт) и 'plan' (проза-план — законный финал) остаются разговорными всегда.
+  //  Дискриминатор по ВЫХЛОПУ модели, не по словам юзера (их подбором обойти нельзя).
+  //  runAgentMode мутабельный (approve плана меняет режим) — читаем на момент проверки.
+  const shouldPlainNudge = (replyText: string): boolean => {
+    if (ctx.recipe != null) return true
+    if (runAgentMode === 'accept-edits' || runAgentMode === 'auto' || runAgentMode === 'bypass')
+      return claimsCompletedAction(replyText)
+    return false
+  }
   // Этап 2 (agentic fallback routing), все bounded:
   let forcedJsonThisRun = false            // эскалация native→JSON-режим на той же модели (1 раз)
   let malformedRetries = 0                 // corrective retry на битый JSON аргументов
@@ -324,7 +331,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // явно завершить, либо вызвать тул. Гейт: coaxable-провайдер + тулзы доступны +
     // за прогон не было ни одного вызова + бюджет nudge не исчерпан. Frontier/RU не
     // трогаем — они надёжны, nudge дал бы ложные срабатывания на обычном Q&A.
-    if (coaxableProvider && projectPath && toolCallCount === 0 && plainReplyNudges < MAX_PLAIN_NUDGES && text.trim() && isAgenticTurn()) {
+    if (coaxableProvider && projectPath && toolCallCount === 0 && plainReplyNudges < MAX_PLAIN_NUDGES && text.trim() && shouldPlainNudge(text)) {
       plainReplyNudges++
       currentMessages.push({ role: 'user', content: IGNORED_TOOLS_NUDGE })
       sender.send('ai:event', {
@@ -766,6 +773,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         }
         // Forward chain-of-thought verbatim — renderer accumulates into the
         // assistant message's `thinking` field for collapsed display.
+        sender.send('ai:event', { id: sendId, event })
+      } else if (event.type === 'info') {
+        // Дефект 3 (vision per-provider): провайдер сам объявляет честную деградацию —
+        // напр. openai-compat без vision: «X не принимает изображения — вложение пропущено».
+        // Форвардим как обычный info-ивент, иначе уведомление молча терялось (ветки цикла
+        // его не обрабатывали) и деградация была невидима юзеру (жалоба Павла на скринах zai).
         sender.send('ai:event', { id: sendId, event })
       } else if (event.type === 'tool-call') {
         if (!turnSawTool) {
