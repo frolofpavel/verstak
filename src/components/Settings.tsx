@@ -1397,7 +1397,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       { id: 'appearance', label: t.settings.appearance, icon: 'appearance', keywords: 'theme ui вид внешний вид тема светлая темная тёмная ночь день масштаб размер интерфейс плотность компактно анимации полный выключены оформление шрифт панель' },
       { id: 'notifications', label: t.settings.notifications, icon: 'notifications', keywords: 'toast push telegram уведомления всплывающее всплывающие звук проект тихие часы режим всегда вне фокуса окно проверка сигналы ошибки напоминания ответы' },
       { id: 'updates', label: t.settings.updates, icon: 'updates', keywords: 'release installer автообновление версия обновление обновить патчноут патч ноут список изменений загрузка установка временные файлы очистка кэш кеш диагностика' },
-      { id: 'profiles', label: t.settings.profiles, icon: 'profiles', soon: true, disabled: true, keywords: 'user profile профиль аккаунт пользователь организация команда компания роль доступ участники приглашение почта регистрация' }
+      // 2.0.8-G: живая вкладка (ProfilesTab поверх userProfiles API) — «Скоро»/disabled сняты.
+      { id: 'profiles', label: t.settings.profiles, icon: 'profiles', keywords: 'user profile профиль аккаунт пользователь организация команда компания роль доступ участники приглашение почта регистрация' }
     ] },
     { title: 'AI', tabs: [
       { id: 'providers', label: t.settings.providers, icon: 'providers', keywords: 'api key gateway cli ключи провайдеры подключение авторизация токен где взять ключ grok grok build composer chatgpt openai claude codex gemini deepseek kimi qwen openrouter ollama lm studio' },
