@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'fs'
+import { rmDirRobust } from '../../electron/ai/git-worktree'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { detectWorktreeState, WorktreeStatusError } from '../../electron/ai/worktree-status'
@@ -69,7 +70,7 @@ describe('detectWorktreeState', () => {
   })
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
+    rmDirRobust(root)  // git pack-файлы read-only → обычный rmSync падает EPERM на Windows
   })
 
   it('reports a clean pushed worktree', async () => {

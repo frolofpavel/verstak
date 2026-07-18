@@ -10,9 +10,48 @@
  */
 import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
-import { mkdtempSync, rmSync, realpathSync } from 'fs'
+import { mkdtempSync, rmSync, realpathSync, chmodSync, lstatSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
+
+/**
+ * Устойчивое удаление каталога на Windows. Два режима сбоя temp-репо/worktree:
+ *  (1) ТРАНЗИЕНТНЫЕ ЛОКИ — антивирус/индексатор/фоновый git держат хендл файла → EPERM/EBUSY.
+ *      Проверено на машине разработчика: именно это роняло worktree-тесты (readonly сам по себе
+ *      здесь НЕ блокирует — `fs.rm({force})` сносит readonly-файл штатно). Лечится bounded-retry
+ *      с backoff — лок обычно снимается за сотни мс.
+ *  (2) READONLY git pack-файлов — на части Windows/Node `fs.rm` не снимает readonly-атрибут и
+ *      падает EPERM. Защитно: при первом EPERM снимаем readonly рекурсивно и повторяем.
+ * Кидает только если и второй заход упал (проблема НЕ readonly и не транзиентна — правда наружу).
+ */
+export function rmDirRobust(target: string): void {
+  // Под ВНЕШНЕЙ нагрузкой (Codex/сборка/антивирус) хендл temp-дерева держится дольше — даём
+  // ретраю больше времени (12×150мс linear backoff ≈ до ~12с на заход, два захода). Латентность
+  // платится ТОЛЬКО при локе: без лока rmSync проходит с первой попытки без задержек.
+  const opts = { recursive: true as const, force: true as const, maxRetries: 12, retryDelay: 150 }
+  try {
+    rmSync(target, opts)
+    return
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return
+    if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY' && code !== 'ENOTEMPTY') throw e
+  }
+  clearReadonlyRecursive(target)
+  rmSync(target, opts)
+}
+
+/** Рекурсивно снять readonly (chmod 0o666) — иначе Windows не даёт удалить git pack-файлы. */
+function clearReadonlyRecursive(target: string): void {
+  let st
+  try { st = lstatSync(target) } catch { return } // исчез между заходами — ок
+  if (st.isDirectory()) {
+    let names: string[]
+    try { names = readdirSync(target) } catch { names = [] }
+    for (const name of names) clearReadonlyRecursive(join(target, name))
+  }
+  try { chmodSync(target, 0o666) } catch { /* best-effort — символические ссылки и т.п. */ }
+}
 
 /** Канонический путь для сравнения: realpath (git нормализует), без хвостовых слэшей,
  *  case-insensitive на Windows. Пути от addWorktree и `git worktree list` иначе расходятся. */
@@ -73,7 +112,7 @@ export function addWorktree(repoRoot: string, label = 'wt', ref = 'HEAD'): strin
   const dir = join(parent, safe)
   const out = git(repoRoot, ['worktree', 'add', '--detach', dir, ref])
   if (out == null) {
-    try { rmSync(parent, { recursive: true, force: true }) } catch { /* best-effort */ }
+    try { rmDirRobust(parent) } catch { /* best-effort */ }
     return null
   }
   return dir
@@ -152,7 +191,7 @@ export function removeWorktree(repoRoot: string, worktreePath: string): boolean 
   // защита от рекурсивного сноса чужого пути, если worktreePath не из addWorktree.
   const parent = dirname(worktreePath)
   if (parent.startsWith(tmpdir()) && /[\\/]verstak-wt-[^\\/]*$/.test(parent)) {
-    try { rmSync(parent, { recursive: true, force: true }) } catch { /* best-effort */ }
+    try { rmDirRobust(parent) } catch { /* best-effort */ }
   }
   return out != null
 }

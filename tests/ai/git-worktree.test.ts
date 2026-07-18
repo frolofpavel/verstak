@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync, chmodSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo, mergeWorktreeToMain, sweepStaleWorktrees } from '../../electron/ai/git-worktree'
+import { addWorktree, removeWorktree, listWorktrees, worktreeDiff, isGitRepo, mergeWorktreeToMain, sweepStaleWorktrees, rmDirRobust } from '../../electron/ai/git-worktree'
 
 // Реальные git-субпроцессы (init/commit/worktree add/remove) под полной параллельной
 // нагрузкой suite могут превысить дефолтный таймаут 5с → щедрый запас против флака.
@@ -143,5 +143,38 @@ describe('git-worktree (T1.2)', () => {
     removeWorktree(repo, join(safe, 'sub'))
     expect(existsSync(join(safe, 'sentinel.txt'))).toBe(true) // родитель цел
     rmSync(safe, { recursive: true, force: true })
+  })
+})
+
+// Флейк worktree-тестов на Windows: удаление temp-репо интермиттентно падало EPERM. Наводка
+// координатора «readonly git pack-файлов» проверена ДЕТЕРМИНИРОВАННО (readonly-файл ниже) и
+// НЕ подтвердилась на этой машине: fs.rm({force}) сносит readonly штатно → корень = транзиентный
+// лок (антивирус/индексатор/git-хендл), лечится bounded-retry в rmDirRobust (см. git-worktree.ts).
+// readonly-снятие оставлено защитно. Тесты фиксируют КОНТРАКТ хелпера (пользователи на том же Windows).
+describe('rmDirRobust — устойчивое удаление temp-репо на Windows', () => {
+  const makeRepoTree = (readonlyPack: boolean) => {
+    const root = mkdtempSync(join(tmpdir(), 'gg-rmrobust-'))
+    const packDir = join(root, '.git', 'objects', 'pack')
+    mkdirSync(packDir, { recursive: true })
+    const pack = join(packDir, 'pack-deadbeef.pack')
+    writeFileSync(pack, 'binary-pack-content')
+    if (readonlyPack) chmodSync(pack, 0o444) // как git помечает pack-файлы
+    return root
+  }
+
+  it('удаляет дерево с readonly pack-файлом (readonly не должен блокировать)', () => {
+    const root = makeRepoTree(true)
+    rmDirRobust(root)
+    expect(existsSync(root)).toBe(false)
+  })
+
+  it('удаляет обычное дерево репозитория', () => {
+    const root = makeRepoTree(false)
+    rmDirRobust(root)
+    expect(existsSync(root)).toBe(false)
+  })
+
+  it('на несуществующем пути — no-op, не кидает', () => {
+    expect(() => rmDirRobust(join(tmpdir(), 'gg-rmrobust-нет-такого-xyz-42'))).not.toThrow()
   })
 })

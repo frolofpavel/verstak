@@ -1,6 +1,6 @@
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import {
@@ -8,6 +8,7 @@ import {
   listWorktrees,
   removeWorktree,
   restoreWorktreeSnapshot,
+  rmDirRobust,
 } from '../../electron/ai/git-worktree'
 import {
   removeWorktreeLossless,
@@ -93,7 +94,8 @@ describe('worktree lifecycle snapshots', () => {
     } catch {
       // best-effort cleanup
     }
-    rmSync(root, { recursive: true, force: true })
+    // rmDirRobust: git метит pack-файлы read-only → обычный rmSync падает EPERM на Windows.
+    rmDirRobust(root)
   })
 
   it('refuses to remove dirty worktree without force', async () => {
