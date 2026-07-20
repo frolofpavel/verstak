@@ -52,4 +52,19 @@ describe('projectStore: one-shot promptRouteOverride', () => {
     expect(useProject.getState().promptRouteOverride, 'override должен обнулиться при переключении чата').toBeNull()
     await flush() // дать fire-and-forget IIFE (chats.list) завершиться ДО teardown window
   })
+
+  // 2.1.3-CD: one-shot может нести КОНКРЕТНЫЙ аккаунт. Store обязан сохранить форму
+  // объекта (accountId доезжает до ai:send как есть) и так же чистить его — one-shot
+  // не должен становиться постоянным ни в другом чате, ни после сброса.
+  it('override с accountId: set/clear/switch сохраняют и чистят форму', async () => {
+    const WITH_ACCOUNT: PromptRouteOverride = { providerId: 'claude-cli', model: 'auto', fallbackPolicy: 'strict', accountId: 42 }
+    useProject.getState().setPromptRouteOverride(WITH_ACCOUNT)
+    expect(useProject.getState().promptRouteOverride).toEqual(WITH_ACCOUNT)
+    useProject.getState().setPromptRouteOverride(null)
+    expect(useProject.getState().promptRouteOverride).toBeNull()
+    useProject.getState().setPromptRouteOverride(WITH_ACCOUNT)
+    await useProject.getState().switchChatSession(2)
+    expect(useProject.getState().promptRouteOverride, 'one-shot аккаунт не должен протекать в другой чат').toBeNull()
+    await flush()
+  })
 })

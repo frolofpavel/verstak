@@ -19,7 +19,9 @@ const ICONS: Record<string, string> = {
   list: '📂',
   write: '✏',
   command: '⚡',
-  blocked: '🚫'
+  blocked: '🚫',
+  // 2.1.3-CD: переключение маршрута (ротация аккаунта / model-fallback).
+  route: '⇄'
 }
 
 const MAX_VISIBLE = 14

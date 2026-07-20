@@ -3607,6 +3607,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
           customOpenaiModels={customOpenaiModels}
           setCustomOpenaiModels={setCustomOpenaiModels}
+          onGoToSubscriptions={() => setTab('subscriptions')}
         />
         )}
 
@@ -4140,6 +4141,8 @@ interface ProvidersPageProps {
   setCustomOpenaiBaseUrl: (v: string) => void
   customOpenaiModels: string
   setCustomOpenaiModels: (v: string) => void
+  /** 2.1.3-A/B: переход из карточки провайдера в единый центр «Подписки». */
+  onGoToSubscriptions: () => void
 }
 
 function statusBadge(
@@ -4178,7 +4181,7 @@ function ProvidersPage(props: ProvidersPageProps) {
   const { providers, keys, setKeys, activeProvider, setActiveProvider,
           enabledModels, setEnabledModels, models, setModels,
           customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
-          customOpenaiModels, setCustomOpenaiModels } = props
+          customOpenaiModels, setCustomOpenaiModels, onGoToSubscriptions } = props
   const [selectedProviderId, setSelectedProviderId] = useState<ProviderId | null>(null)
   const [filter, setFilter] = useState<ProviderFilter>('all')
   // toast — короткое сообщение о результате logout/relogin. null = ничего.
@@ -4627,11 +4630,8 @@ function ProvidersPage(props: ProvidersPageProps) {
                     setCustomOpenaiModels={setCustomOpenaiModels}
                     hint="После изменения нажми «Сохранить» внизу окна настроек"
                   />
-                  {p.id === 'claude-cli' && (
-                    <SubscriptionAccountsPanel providerId="claude-cli" secretLabel="OAuth-токен (claude setup-token)" />
-                  )}
-                  {p.id === 'codex-cli' && (
-                    <SubscriptionAccountsPanel providerId="codex-cli" mode="dir" />
+                  {(p.id === 'claude-cli' || p.id === 'codex-cli') && (
+                    <SubscriptionAccountsPanel onOpenSubscriptions={onGoToSubscriptions} />
                   )}
                 </section>
               )}

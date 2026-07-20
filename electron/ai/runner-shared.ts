@@ -6,6 +6,8 @@
 
 import type { ProviderId } from './registry'
 import type { ChatProvider } from './types'
+import type { SwitchResult } from '../storage/subscription-accounts'
+import type { CooldownReason } from '../../shared/contracts/subscription'
 
 export interface FallbackOpts {
   /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
@@ -17,8 +19,10 @@ export interface FallbackOpts {
   configuredProviders: Set<ProviderId>
   /** Уже попробованные провайдеры (мутируется по ходу). */
   triedProviders: Set<ProviderId>
-  /** 1.9.4: переключить активный аккаунт провайдера на лимите (пул подписок). */
-  switchAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
+  /** 1.9.4: переключить активный аккаунт провайдера на лимите (пул подписок).
+   *  2.1.3-CD: reason пишется в cooldown (честный UI кулдауна); результат несёт
+   *  безопасные labels аккаунтов для route-evidence. */
+  switchAccountOnLimit?: (providerId: string, resetEta: number | null, reason?: CooldownReason) => SwitchResult
   /** 1.9.7 ревью-фикс: счётчик выполненных account-switch за прогон (мутируется).
    *  Bounded MAX_ACCOUNT_SWITCHES — иначе при resetEta=null пул из ≥2 аккаунтов
    *  зацикливается навсегда (A→B→A→…), т.к. triedProviders на свитче не растёт. */

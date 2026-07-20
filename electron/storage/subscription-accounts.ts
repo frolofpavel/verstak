@@ -126,29 +126,38 @@ export function clearCooling(db: Database, id: number): void {
   ).run(id)
 }
 
-export interface SwitchResult { switched: boolean; newAccountId?: number }
+export interface SwitchResult {
+  switched: boolean
+  newAccountId?: number
+  /** 2.1.3-CD: безопасные labels аккаунтов ДО/ПОСЛЕ ротации — для route-evidence
+   *  (Timeline «аккаунт A → B»). Только label, никогда id/секреты. */
+  fromLabel?: string | null
+  toLabel?: string | null
+}
 
 /**
  * 1.9.4: активный аккаунт провайдера бьёт лимит → помечаем его cooling(coolingUntil) и
  * переключаем на другой ГОТОВЫЙ аккаунт того же провайдера (не cooling, либо cooling истёк).
  * Кандидат активируется и раскулдаунивается. Нет готового кандидата → switched:false
  * (пул исчерпан целиком — рантайм падёт на обычный provider-fallback).
+ * 2.1.3-CD: detail — причина остывания (quota/rate-limit) для честного UI кулдауна;
+ * возвращает labels аккаунтов для route-события.
  */
-export function switchActiveOnLimit(db: Database, providerId: string, coolingUntil: number | null, now = Date.now()): SwitchResult {
+export function switchActiveOnLimit(db: Database, providerId: string, coolingUntil: number | null, now = Date.now(), detail?: CooldownDetail): SwitchResult {
   const current = getActiveAccount(db, providerId)
   const tx = db.transaction((): SwitchResult => {
-    if (current) markAccountCooling(db, current.id, coolingUntil)
+    if (current) markAccountCooling(db, current.id, coolingUntil, detail)
     const candidate = db.prepare(
-      `SELECT id FROM subscription_accounts
+      `SELECT id, label FROM subscription_accounts
        WHERE provider_id = ? AND id != ?
          AND (state != 'cooling' OR cooling_until IS NULL OR cooling_until <= ?)
        ORDER BY (last_used_at IS NULL) DESC, last_used_at ASC, created_at DESC
        LIMIT 1`
-    ).get(providerId, current?.id ?? -1, now) as { id: number } | undefined
+    ).get(providerId, current?.id ?? -1, now) as { id: number; label: string } | undefined
     if (!candidate) return { switched: false }
     clearCooling(db, candidate.id)
     setActiveAccount(db, providerId, candidate.id)
-    return { switched: true, newAccountId: candidate.id }
+    return { switched: true, newAccountId: candidate.id, fromLabel: current?.label ?? null, toLabel: candidate.label }
   })
   return tx()
 }

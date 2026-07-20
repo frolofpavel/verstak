@@ -26,7 +26,9 @@ export interface PendingCommand {
 
 export interface ActivityEntry {
   id: string
-  kind: 'read' | 'list' | 'write' | 'command' | 'blocked'
+  // 2.1.3-CD: 'route' — видимая история переключений маршрута (ротация аккаунта /
+  // model-fallback), строится из структурного route-changed, не из текста логов.
+  kind: 'read' | 'list' | 'write' | 'command' | 'blocked' | 'route'
   label: string
   detail?: string
   status: 'pending' | 'ok' | 'rejected' | 'error' | 'blocked'

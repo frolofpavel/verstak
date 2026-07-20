@@ -90,7 +90,23 @@ export function shouldShowAccountBinding(
 export function accountStateLabel(a: SubscriptionAccountDTO): string {
   if (!a.hasCredential) return 'ключ не найден'
   if (a.state === 'ready') return 'готов'
-  if (a.state === 'cooling') return 'остывает'
+  if (a.state === 'cooling') {
+    // 2.1.3-CD: честная квота. Причину и срок называем ТОЛЬКО когда они реально
+    // известны: неизвестный срок — «срок неизвестен» (не молчание и не «безлимит»),
+    // неизвестная причина — просто не называется. Легаси-строка без cooldown-данных —
+    // прежнее «остывает».
+    const cd = a.cooldown
+    if (!cd) return 'остывает'
+    const reason = cd.reason === 'quota' ? 'квота исчерпана'
+      : cd.reason === 'rate-limit' ? 'лимит частоты'
+        : cd.reason === 'auth' ? 'ошибка авторизации'
+          : cd.reason === 'provider-unavailable' ? 'провайдер недоступен'
+            : null
+    const until = cd.until != null
+      ? `до ${new Date(cd.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : 'срок неизвестен'
+    return reason ? `остывает · ${reason} · ${until}` : `остывает · ${until}`
+  }
   if (a.state === 'login-required') return 'нужен вход'
   return 'ошибка'
 }

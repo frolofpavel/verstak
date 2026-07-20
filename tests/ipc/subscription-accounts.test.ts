@@ -2,12 +2,30 @@
 // ответ subscription-accounts:list НЕ содержит ни токена, ни credRef, ни OAuth-path, ни
 // configDir, ни baseUrl — ДАЖЕ при заполненной main-модели. Прежний toDto делал
 // `{ credRef, ...rest }` → configDir/baseUrl молча утекали в renderer. Здесь — whitelist.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import {
   toSubscriptionAccountDTO,
   isChatSubscriptionBinding,
   type SubscriptionAccountSource,
 } from '../../shared/contracts/subscription'
+
+// Мок electron.ipcMain для регистрации IPC-хендлеров (идиома tests/ipc/proof.test.ts).
+const handlers = new Map<string, (...args: unknown[]) => unknown>()
+vi.mock('electron', () => ({
+  ipcMain: { handle: (channel: string, fn: (...args: unknown[]) => unknown) => { handlers.set(channel, fn) } }
+}))
+
+const { openDb } = await import('../../electron/storage/db')
+const { registerSubscriptionAccountsIpc } = await import('../../electron/ipc/subscription-accounts')
+
+function invoke<T>(channel: string, ...args: unknown[]): T {
+  const fn = handlers.get(channel)
+  if (!fn) throw new Error(`no handler for ${channel}`)
+  return fn({} as unknown, ...args) as T
+}
 
 const T0 = 1_000_000_000_000
 
@@ -111,5 +129,101 @@ describe('isChatSubscriptionBinding — runtime validator IPC-входа', () =>
     expect(isChatSubscriptionBinding({ chatId: 1, providerId: 'НЕТ', mode: 'pinned', accountId: 1 })).toBe(false)
     expect(isChatSubscriptionBinding({ chatId: 1, providerId: 'claude-cli', mode: 'wrong', accountId: 1 })).toBe(false)
     expect(isChatSubscriptionBinding({ chatId: 'x', providerId: 'claude-cli', mode: 'auto', accountId: null })).toBe(false)
+  })
+})
+
+// ─── Срез 2.1.3-B: doctor IPC + честный hasCredential для config-dir аккаунтов ───
+// Реальная in-memory БД + мок electron.ipcMain (идиома proof.test.ts). auth.json —
+// только в temp-директориях; реальный ~/.codex тесты не читают никогда.
+describe('subscription-accounts IPC (2.1.3-B: doctor + честное состояние)', () => {
+  let dir: string
+  let db: ReturnType<typeof openDb>
+
+  beforeEach(() => {
+    handlers.clear()
+    dir = mkdtempSync(join(tmpdir(), 'gg-subacct-ipc-'))
+    db = openDb(join(dir, 'test.db'))
+  })
+  afterEach(() => { db.close(); rmSync(dir, { recursive: true, force: true }) })
+
+  const secrets = new Map<string, string>()
+  const settingsMock = {
+    getSecret: (k: string) => secrets.get(k) ?? null,
+    setSecret: (k: string, v: string) => { secrets.set(k, v) },
+  }
+  const register = () => registerSubscriptionAccountsIpc(db, settingsMock as never, join(dir, 'cli-accounts'))
+
+  it('doctor: аккаунта нет → ok:false, не падение', async () => {
+    register()
+    const res = await invoke<Promise<{ ok: boolean; error?: string }>>('subscription-accounts:doctor', 4242)
+    expect(res.ok).toBe(false)
+    expect(res.error).toBeTruthy()
+  })
+
+  it('doctor: token-аккаунт с секретом → ok-отчёт без секрета в JSON', async () => {
+    register()
+    secrets.set('subacct:test-1', 'LIVE_TOKEN_SECRET_777')
+    db.prepare(
+      "INSERT INTO subscription_accounts (provider_id, label, cred_ref, active, state, created_at) VALUES ('claude-cli', 'Max', 'subacct:test-1', 1, 'ready', 1)"
+    ).run()
+    const id = (db.prepare('SELECT id FROM subscription_accounts').get() as { id: number }).id
+    const res = await invoke<Promise<{ ok: boolean; report?: { accountId: number; overall: string } }>>('subscription-accounts:doctor', id)
+    expect(res.ok).toBe(true)
+    expect(res.report!.accountId).toBe(id)
+    expect(res.report!.overall).toBe('ok')
+    expect(JSON.stringify(res.report)).not.toContain('LIVE_TOKEN_SECRET_777')
+  })
+
+  it('doctor: config-dir аккаунт с валидным JWT auth.json → ready; без auth.json → нужен вход', async () => {
+    register()
+    const cfgDir = join(dir, 'cli-accounts', 'codex-x')
+    mkdirSync(cfgDir, { recursive: true })
+    db.prepare(
+      "INSERT INTO subscription_accounts (provider_id, label, cred_ref, config_dir, active, state, created_at) VALUES ('codex-cli', 'Work', '', ?, 1, 'ready', 1)"
+    ).run(cfgDir)
+    const id = (db.prepare('SELECT id FROM subscription_accounts').get() as { id: number }).id
+
+    const noAuth = await invoke<Promise<{ ok: boolean; report?: { overall: string; state: string } }>>('subscription-accounts:doctor', id)
+    expect(noAuth.report!.state).toBe('login-required')
+
+    // R1: expiry из JWT exp (как рантайм), а не из выдуманных полей.
+    const jwt = `hdr.${Buffer.from(JSON.stringify({ exp: Math.floor((Date.now() + 3_600_000) / 1000) })).toString('base64url')}.sig`
+    writeFileSync(join(cfgDir, 'auth.json'), JSON.stringify({ tokens: { access_token: jwt, refresh_token: 'R' } }))
+    const withAuth = await invoke<Promise<{ ok: boolean; report?: { overall: string; state: string } }>>('subscription-accounts:doctor', id)
+    expect(withAuth.report!.state).toBe('ready')
+    expect(withAuth.report!.overall).toBe('ok')
+  })
+
+  // R1 БЛОКЕР 1: list использует тот же probe, что Doctor — пустой/битый auth.json ≠ вход.
+  it('list DTO: `{}` и битый auth.json → hasCredential=false (login-required); валидный JWT → ready', async () => {
+    register()
+    const cfgDir = join(dir, 'cli-accounts', 'codex-y')
+    mkdirSync(cfgDir, { recursive: true })
+    db.prepare(
+      "INSERT INTO subscription_accounts (provider_id, label, cred_ref, config_dir, active, state, created_at) VALUES ('codex-cli', 'Work', '', ?, 1, 'ready', 1)"
+    ).run(cfgDir)
+
+    const noFile = await invoke<Promise<Array<{ state: string; hasCredential: boolean }>>>('subscription-accounts:list')
+    expect(noFile[0].hasCredential).toBe(false)
+    expect(noFile[0].state).toBe('login-required')
+
+    // Пустой объект — НЕ авторизация (раньше показывал «готов»).
+    writeFileSync(join(cfgDir, 'auth.json'), '{}')
+    const emptyObj = await invoke<Promise<Array<{ state: string; hasCredential: boolean }>>>('subscription-accounts:list')
+    expect(emptyObj[0].hasCredential).toBe(false)
+    expect(emptyObj[0].state).toBe('login-required')
+
+    // Битый JSON — тоже «нужен вход».
+    writeFileSync(join(cfgDir, 'auth.json'), '{это не json')
+    const broken = await invoke<Promise<Array<{ state: string; hasCredential: boolean }>>>('subscription-accounts:list')
+    expect(broken[0].hasCredential).toBe(false)
+    expect(broken[0].state).toBe('login-required')
+
+    // Непустой tokens.access_token — вход есть (значение токена из main не выходит).
+    const jwt = `hdr.${Buffer.from(JSON.stringify({ exp: Math.floor((Date.now() + 3_600_000) / 1000) })).toString('base64url')}.sig`
+    writeFileSync(join(cfgDir, 'auth.json'), JSON.stringify({ tokens: { access_token: jwt, refresh_token: 'R' } }))
+    const valid = await invoke<Promise<Array<{ state: string; hasCredential: boolean }>>>('subscription-accounts:list')
+    expect(valid[0].hasCredential).toBe(true)
+    expect(valid[0].state).toBe('ready')
   })
 })

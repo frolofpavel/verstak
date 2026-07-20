@@ -39,6 +39,7 @@ import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_AGENT_MODE, HELP_CHAT_SEND_OVERRIDES, HELP_PROJECT_PATH } from '../lib/help-scope'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
 import { formatDuration } from '../lib/format-duration'
+import { routeChangedActivity } from '../lib/route-activity'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import { resolveSkillOverride } from '../lib/skill-override'
@@ -1338,7 +1339,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }
 
   useEffect(() => {
-    const off = window.api.ai.onEvent(({ id, event, projectPath }) => {
+    const off = window.api.ai.onEvent(({ id, event, projectPath, chatId }) => {
       trackPersistedAssistantEvent(id, event as { type: string; text?: string })
       const store = useProject.getState()
       // Routing через единый sendOwners реестр (был двойной мап:
@@ -1474,6 +1475,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
           store.forgetSendOwner(id)
           void flushQueuedForOwner(owner)
+        }
+        return
+      }
+      // 2.1.3-CD: ранний маршрутный стоп. pin/one-shot на удалённый/остывающий/
+      // требующий входа аккаунт — main останавливает ai:send ДО старта прогона и шлёт
+      // причину с id=0 (sendId ещё нет → owner'а нет → обычный роутер такое дропал,
+      // и человек видел только общий «провайдер недоступен» без выхода из тупика).
+      // Активному чату — запоминаем: send() при sendId<=0 подхватит и покажет точную
+      // причину в тексте ответа. Фоновому — кладём событие в его snapshot (персист,
+      // причина будет видна при открытии чата и не прилипнет к активному).
+      if (!owner && id === 0 && event.type === 'error' && typeof chatId === 'number') {
+        const message = String((event as { message?: unknown }).message ?? '')
+        if (chatId === store.activeChatId) {
+          store.setEarlyRouteStop({ chatId, message, at: Date.now() })
+        } else {
+          store.applyEventToChat(chatId, {
+            ...(event as unknown as { type: string; [k: string]: unknown }),
+            chatId,
+          })
         }
         return
       }
@@ -1632,6 +1652,22 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           kind: 'read',
           label: event.text,
           detail: '',
+          status: 'ok',
+          timestamp: Date.now()
+        })
+      }
+      else if (event.type === 'route-changed') {
+        // 2.1.3-CD: видимая история переключений маршрута. Ротация аккаунта и
+        // model-fallback — два разных события; подпись строим из структурных полей
+        // (label'ы аккаунтов, resetAt только если известен), а не из текста логов.
+        // Персистная часть evidence — в agent_run_events (пишет main); здесь —
+        // эфемерная активность активного чата. Info-пилюлю main больше не дублирует.
+        const routeView = routeChangedActivity(event)
+        store.pushActivity({
+          id: `route-${Date.now()}`,
+          kind: 'route',
+          label: routeView.label,
+          detail: routeView.detail,
           status: 'ok',
           timestamp: Date.now()
         })
@@ -2958,10 +2994,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     if (oneShotRoute) useProject.getState().setPromptRouteOverride(null)
     currentSendIdRef.current = sendId
     if (sendId <= 0) {
-      const errorText = '\n\n[Ошибка: провайдер недоступен]'
+      // 2.1.3-CD: если причина — ранний маршрутный стоп (pin/one-shot на неготовый
+      // аккаунт), main уже прислал её событием id=0. Ждём тик, чтобы IPC успело
+      // дойти, и показываем ТОЧНУЮ причину с выходом из тупика вместо общего текста.
+      // Окно 10с и сверка chatId — чтобы вчерашний/чужой стоп не подменил причину.
+      await new Promise(r => setTimeout(r, 30))
+      const early = useProject.getState().earlyRouteStop
+      const earlyMatch = early && activeChatId != null && early.chatId === activeChatId && Date.now() - early.at < 10_000
+      const reason = earlyMatch ? early.message : null
+      if (earlyMatch) useProject.getState().setEarlyRouteStop(null)
+      const errorText = `\n\n[Ошибка: ${reason ?? 'провайдер недоступен'}]`
       updateLastAssistant(errorText)
       if (assistantRow) void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
-      useProject.getState().applyAgentProgressEvent({ type: 'error', message: 'Провайдер недоступен' })
+      useProject.getState().applyAgentProgressEvent({ type: 'error', message: reason ?? 'Провайдер недоступен' })
       setStreaming(false)
       currentSendIdRef.current = null
       return

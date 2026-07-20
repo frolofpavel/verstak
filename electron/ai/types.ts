@@ -132,8 +132,10 @@ export type ChatEvent =
   | { type: 'cross-verify'; result: string; provider: string; ok: boolean }
   /** 2.0.8-D: автоматическая смена маршрута прогона (ротация аккаунта / fallback провайдера /
    *  refresh токена). Structured — пользователь по Timeline объясняет КАЖДУЮ смену (инвариант 8).
-   *  Renderer-safe: только provider/model (без accountId и секретов). reason — код RouteReason. */
-  | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string } }
+   *  Renderer-safe: только provider/model + безопасные LABELS аккаунтов (без accountId/секретов).
+   *  reason — код RouteReason. resetAt — epoch ms восстановления лимита; null = неизвестно
+   *  (UI обязан показать «нет данных», НЕ выдуманное время/«безлимит»). */
+  | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
   | { type: 'done' }
   | { type: 'error'; message: string }
 

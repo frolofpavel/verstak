@@ -118,6 +118,47 @@ export function toSubscriptionAccountDTO(
   return dto
 }
 
+// ─── Срез 2.1.3-B: Subscription Doctor — renderer-safe отчёт диагностики ─────
+// Doctor (electron/ai/subscription-doctor.ts) проверяет аккаунт и возвращает ЧЕЛОВЕЧЕСКИЙ
+// отчёт: что работает, что требует входа и почему недоступен. Инвариант безопасности
+// тот же, что у SubscriptionAccountDTO: ни токена, ни refresh, ни credRef, ни путей
+// (configDir / имя файла авторизации) — только статусы и статический текст.
+
+export type SubscriptionDoctorCheckStatus = 'ok' | 'warn' | 'fail' | 'info'
+
+export type SubscriptionDoctorCheckId =
+  | 'config-dir'     // папка стейта аккаунта существует (только config-dir аккаунты)
+  | 'credential'     // авторизация присутствует (секрет в SafeStorage / непустой access_token)
+  | 'oauth-expiry'   // срок действия OAuth-доступа из JWT exp: valid / скоро / истёк / неизвестен
+  | 'refresh'        // есть ли refresh-токен для автообновления доступа
+  | 'models'         // каталог моделей провайдера известен (справочно, без запроса)
+  | 'cooldown'       // активное остывание: причина и время восстановления
+  | 'last-use'       // последняя ПОПЫТКА использования (lastUsedAt пишется до результата;
+                     // настоящий lastSuccessAt — осознанный долг, нужен touch после ответа)
+  | 'route'          // как прогон идёт в аккаунт (конфигурация маршрута, без запуска)
+
+export interface SubscriptionDoctorCheckDTO {
+  id: SubscriptionDoctorCheckId
+  status: SubscriptionDoctorCheckStatus
+  /** Человеческий однострочник. Статический текст — БЕЗ путей, токенов и credRef. */
+  label: string
+}
+
+export interface SubscriptionDoctorReportDTO {
+  accountId: number
+  providerId: ProviderId
+  /** Итоговое состояние по правилам DTO + честный login-required при истёкшем доступе. */
+  state: SubscriptionState
+  /** fail > warn > ok (info на итог не влияет). */
+  overall: 'ok' | 'warn' | 'fail'
+  checks: SubscriptionDoctorCheckDTO[]
+  /** Одна строка итога («Аккаунт готов к работе» / «Аккаунт недоступен: …»). */
+  summary: string
+  /** Следующий шаг человеку; null когда ничего делать не нужно. */
+  nextStep: string | null
+  checkedAt: number
+}
+
 /** Рантайм-валидатор IPC-входа (renderer не доверяем): привязка чата к аккаунту. */
 export function isChatSubscriptionBinding(v: unknown): v is ChatSubscriptionBindingDTO {
   if (typeof v !== 'object' || v === null) return false
