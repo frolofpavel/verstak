@@ -145,3 +145,102 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     })
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.1.3-CD: видимая история переключений маршрута + ранние маршрутные стопы.
+//
+// До CD main при ротации аккаунта слал эфемерную info-пилюлю (терялась при reload),
+// а ранний стоп (pin/one-shot на удалённый/остывающий/требующий входа аккаунт) шёл с
+// id=0 БЕЗ owner'а — роутер дропал его на `if (!owner) return`, и человек видел только
+// общий «провайдер недоступен» вместо настоящей причины и выхода из тупика.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('2.1.3-CD: route-changed и ранние маршрутные стопы', () => {
+  beforeEach(() => {
+    // earlyRouteStop живёт в глобальном zustand и протекает между тестами файла —
+    // внешний beforeEach его не знает (поле новое). Сбрасываем здесь.
+    useProject.setState({ earlyRouteStop: null, chatSnapshots: {} }, false)
+  })
+
+  it('route-changed (ротация аккаунта) → activity с именами аккаунтов и причиной', () => {
+    mountChat()
+    startRun(201, 7)
+    act(() => {
+      mock.aiEvents.emit({
+        id: 201,
+        event: {
+          type: 'route-changed', action: 'rotate-account', reason: 'quota', attempt: 1,
+          requested: { providerId: 'claude-cli', model: 'auto' },
+          actual: { providerId: 'claude-cli', model: 'auto' },
+          resetAt: null,
+          accounts: { fromLabel: 'Рабочий Max', toLabel: 'Личный Max' },
+        },
+      })
+    })
+    const a = useProject.getState().activity.at(-1)
+    expect(a?.kind).toBe('route')
+    expect(a?.label).toBe('⇄ Аккаунт Рабочий Max → Личный Max')
+    expect(a?.detail).toContain('квота исчерпана')
+    // внутренние id аккаунтов нигде не светятся
+    expect(a?.label).not.toMatch(/\bid\b/)
+  })
+
+  it('route-changed (model-fallback) → другая подпись: провайдеры, не аккаунты', () => {
+    mountChat()
+    startRun(202, 7)
+    act(() => {
+      mock.aiEvents.emit({
+        id: 202,
+        event: {
+          type: 'route-changed', action: 'model-fallback', reason: 'provider-unavailable', attempt: 2,
+          requested: { providerId: 'gemini-api', model: 'gemini-3-flash' },
+          actual: { providerId: 'claude', model: 'claude-sonnet' },
+          resetAt: null, accounts: null,
+        },
+      })
+    })
+    const a = useProject.getState().activity.at(-1)
+    expect(a?.kind).toBe('route')
+    expect(a?.label).toBe('⚡ gemini-api → claude')
+    expect(a?.detail).toContain('claude-sonnet')
+  })
+
+  it('ранний стоп АКТИВНОГО чата (id=0, owner нет) → причина сохраняется для send(), не дропается', () => {
+    mountChat()
+    act(() => {
+      mock.aiEvents.emit({
+        id: 0, chatId: 7,
+        event: { type: 'error', message: 'Аккаунт «Личный Max» остывает после лимита · срок неизвестен. Выберите другой аккаунт или Auto.' },
+      })
+    })
+    // send() подхватит точную причину вместо общего «провайдер недоступен»
+    expect(useProject.getState().earlyRouteStop).toMatchObject({ chatId: 7 })
+    expect(useProject.getState().earlyRouteStop?.message).toContain('Личный Max')
+    // в ленту активного чата при этом ничего не прилипло (её допишет сам send)
+    expect(useProject.getState().messages).toHaveLength(0)
+    expect(mock.aiEvents.lostEvents).toBe(0)
+  })
+
+  it('ранний стоп ФОНОВОГО чата → уходит в его snapshot (персист), активный не трогается', () => {
+    mountChat()
+    act(() => {
+      mock.aiEvents.emit({
+        id: 0, chatId: 9,
+        event: { type: 'error', message: 'Выбранный на один запрос аккаунт был удалён.' },
+      })
+    })
+    // активному чату (7) ничего не досталось
+    expect(useProject.getState().earlyRouteStop).toBeNull()
+    expect(useProject.getState().messages).toHaveLength(0)
+    // фоновый чат получил событие в snapshot — при открытии причина будет видна
+    const snap = useProject.getState().chatSnapshots[9]
+    expect(snap).toBeTruthy()
+    expect(snap.hasUnread).toBe(true)
+  })
+
+  it('error с id=0 БЕЗ chatId (легаси/непонятное) → по-прежнему дропается молча', () => {
+    mountChat()
+    act(() => { mock.aiEvents.emit({ id: 0, event: { type: 'error', message: 'странное' } }) })
+    expect(useProject.getState().earlyRouteStop).toBeNull()
+    expect(useProject.getState().messages).toHaveLength(0)
+  })
+})

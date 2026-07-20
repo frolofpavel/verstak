@@ -14,7 +14,9 @@ import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-br
 export type SendId = number
 
 export interface TaggedSender {
-  send: (channel: string, payload: { id: SendId; event: unknown }) => void
+  // chatId в обёртке — только у ранних маршрутных стопов (id=0, 2.1.3-CD): sendId ещё
+  // не выдан, и renderer'у нужен адресат, чтобы доставить причину в нужный чат.
+  send: (channel: string, payload: { id: SendId; event: unknown; chatId?: number | null }) => void
   exec: (code: string) => Promise<unknown>
 }
 

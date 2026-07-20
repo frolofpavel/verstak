@@ -125,6 +125,52 @@ describe('подписи состояний — по-русски, без жар
   })
 })
 
+// 2.1.3-CD: честные квоты. Остывающий аккаунт обязан назвать ПРИЧИНУ и СРОК — но
+// только если они реально известны. Неизвестный срок — «срок неизвестен», а не
+// молчание (иначе человек решит, что ждать минуту) и не «безлимит».
+describe('подпись остывания — причина и срок честно (2.1.3-CD)', () => {
+  const soon = Date.now() + 90 * 60_000
+
+  it('quota + известный срок → «остывает · квота исчерпана · до HH:MM»', () => {
+    const label = accountStateLabel(acc({
+      state: 'cooling',
+      cooldown: { scope: 'account', reason: 'quota', until: soon },
+    }))
+    expect(label).toMatch(/^остывает · квота исчерпана · до \d{2}:\d{2}$/)
+  })
+
+  it('rate-limit — другая причина, другая подпись', () => {
+    const label = accountStateLabel(acc({
+      state: 'cooling',
+      cooldown: { scope: 'account', reason: 'rate-limit', until: soon },
+    }))
+    expect(label).toContain('лимит частоты')
+    expect(label).not.toContain('квота')
+  })
+
+  it('срок неизвестен (until=null) → «срок неизвестен», без выдуманного времени', () => {
+    const label = accountStateLabel(acc({
+      state: 'cooling',
+      cooldown: { scope: 'account', reason: 'quota', until: null },
+    }))
+    expect(label).toBe('остывает · квота исчерпана · срок неизвестен')
+    expect(label).not.toContain('безлимит')
+  })
+
+  it('причина unknown → не сочиняем «квоту», просто остывает + срок', () => {
+    const label = accountStateLabel(acc({
+      state: 'cooling',
+      cooldown: { scope: 'account', reason: 'unknown', until: soon },
+    }))
+    expect(label).toMatch(/^остывает · до \d{2}:\d{2}$/)
+    expect(label).not.toContain('квота')
+  })
+
+  it('cooling БЕЗ cooldown-данных (легаси-строка) → прежнее «остывает»', () => {
+    expect(accountStateLabel(acc({ state: 'cooling' }))).toBe('остывает')
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // СТРАЖ ОТ ДРЕЙФА. Renderer и main — разные процессы, общей функции нет, поэтому
 // логика неизбежно продублирована. Дубли расходятся молча (2.0.7-C это уже ловил на

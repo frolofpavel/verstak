@@ -24,6 +24,8 @@ export interface AiEventPayload {
   id: number
   event: Record<string, unknown> & { type: string }
   projectPath?: string | null
+  /** 2.1.3-CD: ранние маршрутные стопы (id=0) несут chatId адресата. */
+  chatId?: number | null
 }
 
 export interface AiEventsControl {

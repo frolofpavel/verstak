@@ -53,6 +53,7 @@ import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
 import { getActiveAccount, getSubscriptionAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
 import { pickChatAccountId } from './ai/route-policy'
+import { createResolveSubscriptionAccount } from './ai/resolve-subscription-account'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
@@ -584,22 +585,16 @@ app.whenReady().then(() => {
     setSecret: (key, value) => settings.setSecret(key, value),
     getProviderId,
     getProviderModel,
-    // 1.9.3 мультиаккаунт: аккаунт подписки провайдера → секрет из SafeStorage по cred_ref +
-    // метаданные env-биндинга; touch last_used_at. 2.0.8-D2: chatId → per-chat pin (2.0.8-B).
-    resolveSubscriptionAccount: (providerId, chatId) => {
-      // pickChatAccountId — чистая спека (auto|pinned|unavailable + сверка провайдера), тест отдельно.
-      const decision = chatId == null
-        ? { kind: 'auto' as const }
-        : pickChatAccountId(providerId, chatSessions.getSubscriptionBinding(chatId), id => getSubscriptionAccount(db, id)?.providerId ?? null)
-      // pin на удалённый аккаунт → НЕ ротируем молча на глобально-активный (карточка B).
-      if (decision.kind === 'unavailable') return { unavailable: true }
-      const acct = decision.kind === 'pinned' ? getSubscriptionAccount(db, decision.accountId) : getActiveAccount(db, providerId)
-      if (!acct) return null
-      touchSubscriptionAccount(db, acct.id)
-      return { accountId: acct.id, secret: getSecret(acct.credRef), configDir: acct.configDir, baseUrl: acct.baseUrl, pinned: decision.kind === 'pinned' }
-    },
+    // 1.9.3 мультиаккаунт → 2.1.3-CD: единый резолвер (readiness pin/one-shot внутри,
+    // см. electron/ai/resolve-subscription-account.ts). Auto-путь не изменён.
+    resolveSubscriptionAccount: createResolveSubscriptionAccount(db, {
+      getSecret,
+      getSubscriptionBinding: (chatId) => chatSessions.getSubscriptionBinding(chatId),
+    }),
     // 1.9.4: лимит активного аккаунта → cooling + переключение на следующий готовый аккаунт пула.
-    switchSubscriptionAccountOnLimit: (providerId, resetEta) => switchActiveOnLimit(db, providerId, resetEta),
+    // CD: reason и labels прокидываются (cooldown-UI + route-evidence).
+    switchSubscriptionAccountOnLimit: (providerId, resetEta, reason) =>
+      switchActiveOnLimit(db, providerId, resetEta, undefined, reason ? { scope: 'account', reason } : undefined),
     getKnownRoots: knownRoots,
     recordWrite: (projectPath, filePath, before, after, provenance) => {
       // 2.0.11-E: провенанс (runId и т.д.) прокидывается в undo-запись для rewindCoverage.

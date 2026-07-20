@@ -230,6 +230,46 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(getNextProvider).not.toHaveBeenCalled()      // provider-fallback'а нет
   }, 15000)
 
+  // 2.1.3-CD: rotate-account на API-пути несёт то же структурное evidence, что CLI:
+  // labels аккаунтов + resetAt в событии; persisted ref — JSON для Timeline/Proof.
+  it('CD: rotate-account API-путь — accounts labels + resetAt + persisted JSON ref', async () => {
+    const runs = mockRuns()
+    const limited = provider('claude-cli', () => [{ type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' }])
+    const fresh = provider('claude-cli', () => [{ type: 'text', text: 'ок на B' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn((_p: string, _e: number | null) =>
+      ({ switched: true, newAccountId: 2, fromLabel: 'Аккаунт A', toLabel: 'Аккаунт B' }))
+    const sender = makeSender()
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => fresh,
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+    }
+    await runApiConversation(...(args(dir, {
+      provider: limited, providerId: 'claude-cli', model: 'claude-cli',
+      agentRuns: runs, runId: 'rCD', fallbackOpts, sender,
+    }) as Parameters<typeof runApiConversation>))
+    const evs = sender.send.mock.calls.map(c => (c[1] as { event: { type: string } }).event)
+    const rc = evs.find(e => e.type === 'route-changed') as {
+      action?: string; reason?: string; resetAt?: number | null
+      accounts?: { fromLabel: string | null; toLabel: string | null } | null
+    } | undefined
+    expect(rc).toBeTruthy()
+    expect(rc!.action).toBe('rotate-account')
+    expect(rc!.reason).toBe('quota')
+    expect(typeof rc!.resetAt).toBe('number')
+    expect(rc!.accounts).toEqual({ fromLabel: 'Аккаунт A', toLabel: 'Аккаунт B' })
+    const routeCall = runs.appendEvent.mock.calls.find(c => c[1] === 'route')
+    expect(routeCall).toBeTruthy()
+    const ref = JSON.parse(routeCall![2].ref) as Record<string, unknown>
+    expect(ref).toMatchObject({
+      kind: 'rotate-account', reason: 'quota',
+      fromAccountLabel: 'Аккаунт A', toAccountLabel: 'Аккаунт B',
+    })
+    expect(typeof ref.resetAt).toBe('number')
+  }, 15000)
+
   // 6.2 (ревью + конкурентный разбор): fallback ПОСЛЕ накопленной работы должен
   // получить currentMessages (с проделанными tool-результатами), а не initialMessages.
   // Иначе downstream-провайдер начинает с нуля → переделывает = повторно пишет файлы.

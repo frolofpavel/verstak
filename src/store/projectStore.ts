@@ -100,6 +100,12 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** 2.0.7-F: маршрут модели на ОДНУ следующую отправку (не меняет дефолт чата).
    *  Сбрасывается после отправки (one-shot) и при switchChatSession (не течёт между чатами). */
   promptRouteOverride: PromptRouteOverride | null
+  /** 2.1.3-CD: причина раннего маршрутного стопа (pin/one-shot на удалённый/остывающий/
+   *  требующий входа аккаунт). main шлёт её событием id=0 БЕЗ owner'а — до появления
+   *  sendId, поэтому обычный роутер событий её не несёт. Диспетчер кладёт сюда (только
+   *  для активного чата), send() забирает при sendId<=0 и показывает вместо общего
+   *  «провайдер недоступен». Эфемерно: живёт секунды, не персистится. */
+  earlyRouteStop: { chatId: number; message: string; at: number } | null
   /** Глобальный чат справки (kind=help) — отдельно от проектов. */
   helpChatId: number | null
   /** Пользователь смотрит экран справки, а не рабочий чат проекта. */
@@ -207,6 +213,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   switchChatSession: (id: number) => Promise<void>
   /** 2.0.7-F: задать/снять one-shot маршрут модели для следующей отправки. */
   setPromptRouteOverride: (route: PromptRouteOverride | null) => void
+  /** 2.1.3-CD: запомнить/снять причину раннего маршрутного стопа (см. earlyRouteStop). */
+  setEarlyRouteStop: (stop: { chatId: number; message: string; at: number } | null) => void
   /** Refresh the chat sessions list (after create/rename/delete). */
   refreshChatSessions: () => Promise<void>
   /** Optimistically update a chat-session row without refetching the list.
@@ -329,6 +337,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   chatSessions: [],
   activeChatId: null,
   promptRouteOverride: null,
+  earlyRouteStop: null,
   helpChatId: null,
   helpMode: false,
   help: freshSnapshot(),
@@ -741,6 +750,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { sessions: { ...s.sessions, [projectPath]: { ...existing, hasUnread: false } } }
   }),
   setPromptRouteOverride: (route) => set({ promptRouteOverride: route }),
+  setEarlyRouteStop: (stop) => set({ earlyRouteStop: stop }),
   switchChatSession: async (id) => {
     const myToken = ++switchChatSessionToken
     const s = get()

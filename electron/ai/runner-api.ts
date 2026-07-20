@@ -51,7 +51,7 @@ import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain
 import { trackToolForPatterns, type ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
 import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart-fallback'
-import { classifyRouteReason, routeChangedText } from './route-policy'
+import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
 import { detectSubscriptionLimit } from './subscription-limits'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from './smart-router'
@@ -452,23 +452,37 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // 2.0.8-D: структурное событие смены маршрута (инвариант 8) — пользователь по Timeline
   // объясняет КАЖДУЮ автоматическую смену. reason — код classifyRouteReason (единый со
   // спекой route-policy). Плюс запись в agent_run_events (kind='route') без миграции.
+  // 2.0.8-D: структурное событие смены маршрута (инвариант 8) — пользователь по Timeline
+  // объясняет КАЖДУЮ автоматическую смену. reason — код classifyRouteReason (единый со
+  // спекой route-policy). Плюс запись в agent_run_events (kind='route') без миграции.
+  // 2.1.3-CD: extras — labels аккаунтов (безопасные, не id) и resetAt (null = неизвестно);
+  // persisted ref — JSON, чтобы Timeline/Proof читали evidence без разбора свободного текста.
+  // Текстовая info-пилюля убрана: renderer строит пилюлю из структурного события (без дубля).
   const emitRouteChanged = (
     action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
     err: unknown,
     actual: { providerId: string; model: string },
     attempt: number,
+    extras?: { resetAt?: number | null; accounts?: { fromLabel: string | null; toLabel: string | null } | null },
   ): void => {
     const reason = classifyRouteReason(err)
     const requested = { providerId: providerId ?? '', model: model ?? '' }
-    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual } })
-    // Человекочитаемая пилюля для текущего UI. Диспетчер route-changed в Chat.tsx (рендер
-    // структурной пилюли в TimelineBar) — пост-Ilya UI-проводка (Chat.tsx вне allowlist D-core).
-    sender.send('ai:event', { id: sendId, event: { type: 'info', text: routeChangedText(action, requested, actual) } })
+    const resetAt = extras?.resetAt ?? null
+    const accounts = extras?.accounts ?? null
+    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual, resetAt, accounts } })
     if (agentRuns && runId) {
       try {
+        const acctText = accounts ? ` · аккаунт: ${accounts.fromLabel ?? '?'} → ${accounts.toLabel ?? '?'}` : ''
+        const resetText = resetAt != null ? ` · до ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }` : ''
         agentRuns.appendEvent(runId, 'route', {
           label: action,
-          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}`,
+          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}${acctText}${resetText}`,
+          ref: JSON.stringify({
+            kind: action, reason, attempt, requested, actual,
+            fromAccountLabel: accounts?.fromLabel ?? null,
+            toAccountLabel: accounts?.toLabel ?? null,
+            resetAt,
+          }),
           status: 'ok',
         })
       } catch { /* best-effort */ }
@@ -514,13 +528,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if ((fallbackOpts.accountSwitchCount ?? 0) >= MAX_ACCOUNT_SWITCHES) return null
     const hit = detectSubscriptionLimit(err)
     if (!hit.limited) return null
-    const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
+    const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
     if (!sw?.switched) return null
     fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
     const freshProvider = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
     if (!freshProvider) return null
-    // Ротация аккаунта: провайдер/модель те же, меняется аккаунт (accountId в событие не отдаём).
-    emitRouteChanged('rotate-account', err, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount)
+    // Ротация аккаунта: провайдер/модель те же, меняется аккаунт. CD: labels аккаунтов
+    // и resetAt идут в событие (Timeline «A → B · до HH:MM»); id аккаунтов не отдаём.
+    emitRouteChanged('rotate-account', err, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount, {
+      resetAt: hit.resetEta ?? null,
+      accounts: { fromLabel: sw.fromLabel ?? null, toLabel: sw.toLabel ?? null },
+    })
     handedOff = true
     const acctTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))

@@ -261,6 +261,7 @@ import type {
   SubscriptionCooldownDTO,
   SubscriptionAuthMode,
   SubscriptionState,
+  SubscriptionDoctorReportDTO,
 } from '../../shared/contracts/subscription'
 
 /**
@@ -279,6 +280,7 @@ export type {
   SubscriptionCooldownDTO,
   SubscriptionAuthMode,
   SubscriptionState,
+  SubscriptionDoctorReportDTO,
 }
 
 /**
@@ -394,7 +396,7 @@ export type ChatEvent =
   | { type: 'info'; text: string }
   | { type: 'cross-verify'; result: string; provider: string; ok: boolean }
   /** 2.0.8-D: автоматическая смена маршрута прогона. Зеркало electron/ai/types.ts (§5 анти-дрейф). */
-  | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string } }
+  | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
   | { type: 'done' }
   | { type: 'error'; message: string }
 
@@ -572,7 +574,7 @@ declare global {
           { ok: true; mode: 'deferred' } | { ok: false; fallback: 'invalid' | 'unavailable' }
         >
         countTokens: (text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => Promise<{ tokens: number; exact: boolean; providerId: string }>
-        onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
+        onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null; chatId?: number | null }) => void) => () => void
       }
       chatSessions: {
         list: (projectPath: string) => Promise<ChatSession[]>
@@ -712,6 +714,8 @@ declare global {
         createDir: (input: { providerId: string; label: string }) =>
           Promise<{ ok: true; account: SubscriptionAccountDto } | { ok: false; error: string }>
         login: (id: number) => Promise<{ ok: boolean; error?: string }>
+        /** 2.1.3-B: безопасная диагностика аккаунта — отчёт без секретов и путей. */
+        doctor: (id: number) => Promise<{ ok: true; report: SubscriptionDoctorReportDTO } | { ok: false; error: string }>
         setActive: (providerId: string, id: number) => Promise<{ ok: boolean }>
         rename: (id: number, label: string) => Promise<{ ok: boolean; error?: string }>
         remove: (id: number) => Promise<{ ok: boolean }>

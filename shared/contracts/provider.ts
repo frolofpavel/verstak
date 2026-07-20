@@ -204,11 +204,16 @@ export type SelectionSource = 'chat-default' | 'prompt-explicit' | 'automatic'
  *  · 'strict' — при сбое выбранного провайдера НЕ переезжать молча на другого (дефолт
  *    для explicit-выбора: пользователь выбрал модель осознанно);
  *  · 'allow'  — fallback разрешён, но обязан породить видимое structured route-событие.
+ * accountId (2.1.3-CD): конкретный подписочный аккаунт для этой отправки. Его присутствие
+ * форсит строгость сильнее fallbackPolicy: ни ротации аккаунта, ни provider-fallback —
+ * при неготовности аккаунта прогон честно останавливается с причиной (main, ai:send).
+ * null/undefined — аккаунт выбирается обычным путём (pin чата / Auto).
  */
 export interface PromptRouteOverride {
   providerId: ProviderId
   model: string
   fallbackPolicy: 'strict' | 'allow'
+  accountId?: number | null
 }
 
 export interface ResolvedRoute {

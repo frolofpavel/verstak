@@ -51,17 +51,18 @@ import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
 import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
+import type { SwitchResult } from '../storage/subscription-accounts'
+import type { CooldownReason } from '../../shared/contracts/subscription'
 import { expandOfficeAttachments } from '../ai/attachment-text'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 
 export type { ProviderId } from '../ai/registry'
 
-/** 2.0.8-D2: результат резолва подписочного аккаунта с учётом per-chat pin.
- *  success — аккаунт (pinned: закреплён за чатом → не ротировать авто);
- *  unavailable — pin на удалённый аккаунт → стоп-с-вопросом (без тихой ротации). */
-export type ResolvedSubscription =
-  | { accountId: number; secret: string | null; configDir: string | null; baseUrl: string | null; pinned: boolean }
-  | { unavailable: true }
+/** 2.0.8-D2/2.1.3-CD: результат резолва подписочного аккаунта. Реэкспорт из единого
+ *  резолвера (electron/ai/resolve-subscription-account.ts — логика readiness там;
+ *  тут остаётся публичный тип для runner'ов и deps). */
+export type { ResolvedSubscription } from '../ai/resolve-subscription-account'
+import type { ResolvedSubscription } from '../ai/resolve-subscription-account'
 
 // Экспортирован для runner-api.ts (распил #1, срез 4c): AgentRunContext ссылается
 // на AiDeps['...']-индексы. Type-only импорт в runner-api → без рантайм-цикла.
@@ -77,11 +78,16 @@ export interface AiDeps {
    *  null = нет заведённых аккаунтов (падаем на legacy-секрет).
    *  2.0.8-D2: chatId учитывает per-chat pin (2.0.8-B binding). pinned=true — аккаунт закреплён
    *  за чатом (рантайм НЕ ротирует его авто, инвариант 1). `{ unavailable: true }` — чат закреплён
-   *  на УДАЛЁННЫЙ аккаунт: НЕ тихая ротация — прогон обязан остановиться с вопросом (карточка B). */
-  resolveSubscriptionAccount?: (providerId: string, chatId?: number) => ResolvedSubscription | null
+   *  на УДАЛЁННЫЙ аккаунт: НЕ тихая ротация — прогон обязан остановиться с вопросом (карточка B).
+   *  2.1.3-CD: opts.accountId — явный one-shot выбор аккаунта. Явный выбор и pin проверяются
+   *  на готовность: `{ blocked: true, reason, resetAt, label }` — стоп с понятной причиной
+   *  (cooling / login-required) ДО старта прогона, вместо гарантированного фейла в рантайме. */
+  resolveSubscriptionAccount?: (providerId: string, chatId?: number, opts?: { accountId?: number | null }) => ResolvedSubscription | null
   /** 1.9.4: активный аккаунт провайдера исчерпал лимит → пометить cooling и переключить на
-   *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback). */
-  switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null) => { switched: boolean }
+   *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback).
+   *  2.1.3-CD: reason (quota/rate-limit) пишется в cooldown для честного UI; результат несёт
+   *  безопасные labels аккаунтов для route-evidence. */
+  switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null, reason?: CooldownReason) => SwitchResult
   /** Корни зарегистрированных проектов — для валидации projectPath из рендерера. */
   getKnownRoots: () => string[]
   /** Persist a write so the user can ↶ revert it later. */
@@ -384,8 +390,10 @@ export async function runScheduledHeadless(
 export function resolveCodexHome(
   providerId: string,
   // Структурный тип: берём только configDir. Явный union принимает и ResolvedSubscription
-  // (success с configDir | { unavailable }), и упрощённый resolve в тестах ({ configDir }).
-  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | null) | undefined,
+  // (success с configDir | { unavailable } | { blocked }), и упрощённый resolve в тестах
+  // ({ configDir }). blocked-вариант configDir не несёт → дефолтный путь; реальный стоп
+  // по blocked делает send-хендлер ДО этого вызова (2.1.3-CD).
+  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | { blocked: true } | null) | undefined,
   chatId?: number,
 ): string | null {
   if (!isCodexAuthProvider(providerId)) return null
@@ -453,12 +461,10 @@ export function registerAiIpc(deps: AiDeps): void {
     const isolatedRoot = chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null
     // 2.0.8-D2: числовой chatId для резолва per-chat pin аккаунта (2.0.8-B binding).
     const chatIdNum = chatId ? Number(chatId) : undefined
-    // Резолв аккаунта с учётом pin, суженный до success|null: unavailable отсекается ранним
-    // чеком unavailablePin ниже (стоп-с-вопросом), сюда прийти не должен → трактуем как null.
-    const resolveAcct = (pid: string): Exclude<ResolvedSubscription, { unavailable: true }> | null => {
-      const r = deps.resolveSubscriptionAccount?.(pid, chatIdNum)
-      return r && !('unavailable' in r) ? r : null
-    }
+    // 2.1.3-CD: явный one-shot аккаунт (promptRoute.accountId) — резолвится строго:
+    // именно он идёт в провайдер, без тихой ротации на активный. Объявлено здесь (до
+    // providerId), а сам resolveAcct — после providerId (он нужен для сверки).
+    const oneShotAccountId = overrides?.promptRoute?.accountId ?? null
     // 2.0.11-B: активный снапшот компакции → модель получает [summary + хвост] вместо
     // всей простыни. Видимая переписка при этом не трогается — сжатие живёт только здесь,
     // в сборке запроса. Снапшота нет → история как есть (поведение прежнее).
@@ -512,21 +518,46 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
     const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
-    // 2.0.8-D2: чат закреплён на УДАЛЁННЫЙ аккаунт → стоп-с-вопросом (карточка B: НЕ тихая
-    // ротация на глобально-активный). Проверяем ДО создания run/провайдера — чистый выход.
-    // chatPinned (аккаунт закреплён и жив) → ниже подавляет авто-свитч/fallback (инвариант 1).
-    const pinResolution = deps.resolveSubscriptionAccount?.(providerId, chatIdNum)
-    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && pinResolution.pinned)
-    if (pinResolution && 'unavailable' in pinResolution) {
-      // Зеркалим синхронный early-fail provider-create (ai.ts ниже): рендерер детектит сбой по
-      // `return 0` (sendId<=0 → показывает ошибку + гасит спиннер). Голый `return` дал бы undefined
-      // → `undefined <= 0` === false → спиннер висел бы ВЕЧНО (ревью Finding A, HIGH). id:0 как в
-      // прецеденте. Спец-текст «переоткрепите» рендерер на sendId<=0 пока не показывает (общий
-      // «провайдер недоступен»; Chat.tsx вне allowlist) — доставка спец-сообщения = follow-up.
-      taggedSender.send('ai:event', { id: 0, event: { type: 'error', message: 'Аккаунт, закреплённый за этим чатом, был удалён. Выберите аккаунт заново или снимите закрепление.' } })
+    // Резолв аккаунта с учётом pin/one-shot, суженный до success|null: unavailable/blocked
+    // отсекаются ранними стопами ниже, сюда прийти не должны → трактуем как null.
+    // Для основного провайдера one-shot accountId пробрасывается явно (строгий маршрут);
+    // fallback-провайдеры резолвятся обычным путём (одноразовый аккаунт на них не течёт).
+    const resolveAcct = (pid: string): Exclude<ResolvedSubscription, { unavailable: true } | { blocked: true }> | null => {
+      const explicit = pid === providerId && oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined
+      const r = deps.resolveSubscriptionAccount?.(pid, chatIdNum, explicit)
+      return r && !('unavailable' in r) && !('blocked' in r) ? r : null
+    }
+    // 2.0.8-D2 + 2.1.3-CD: ранние стопы маршрута ДО создания run/провайдера — чистый выход.
+    //  · unavailable: pin/one-shot на удалённый аккаунт → стоп-с-вопросом (НЕ тихая ротация).
+    //  · blocked: явно выбранный (one-shot) или закреплённый аккаунт не готов (cooling /
+    //    login-required) → стоп с понятной причиной вместо гарантированного фейла прогона.
+    // chatPinned (аккаунт закреплён/явно выбран и жив) → ниже подавляет авто-свитч/fallback.
+    const pinResolution = deps.resolveSubscriptionAccount?.(
+      providerId, chatIdNum, oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined)
+    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && pinResolution.pinned)
+    // Ранняя ошибка маршрута: id:0 (owner ещё не зарегистрирован) + chatId в обёртке —
+    // рендерер доставляет спец-текст в нужный чат (CD; раньше дропался роутером, и
+    // пользователь видел только общий «провайдер недоступен»).
+    const earlyRouteStop = (message: string): 0 => {
+      taggedSender.send('ai:event', { id: 0, chatId: chatIdNum ?? null, event: { type: 'error', message } })
       activeAborts.delete(sendId)
       clearRunTimeout()
       return 0
+    }
+    if (pinResolution && 'unavailable' in pinResolution) {
+      return earlyRouteStop(oneShotAccountId != null
+        ? 'Выбранный на один запрос аккаунт был удалён. Выберите другой аккаунт или режим Auto.'
+        : 'Аккаунт, закреплённый за этим чатом, был удалён. Выберите аккаунт заново или снимите закрепление.')
+    }
+    if (pinResolution && 'blocked' in pinResolution) {
+      const { reason, resetAt, label } = pinResolution
+      const suffix = oneShotAccountId != null
+        ? 'Выберите другой аккаунт или режим Auto.'
+        : 'Выберите другой аккаунт или снимите закрепление.'
+      const message = reason === 'cooling'
+        ? `Аккаунт «${label}» остывает после лимита · ${resetAt != null ? `восстановится в ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'время восстановления неизвестно'}. ${suffix}`
+        : `Аккаунт «${label}» требует входа. Выполните вход в Настройки → Подписки или выберите другой аккаунт.`
+      return earlyRouteStop(message)
     }
     // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Ставится ЗДЕСЬ — ПОСЛЕ
     // раннего выхода на удалённом pin'е и до любой длительной работы: прогон стартовал
@@ -976,7 +1007,12 @@ export function registerAiIpc(deps: AiDeps): void {
         : null
       // Codex мультиаккаунт (2.0.8-C): активный Codex-аккаунт → изолированный CODEX_HOME
       // для codex-cli И нативного openai-codex-oauth (единый резолвер, без мутации env).
-      const codexHome = resolveCodexHome(providerId, deps.resolveSubscriptionAccount, chatIdNum)
+      // CD: one-shot accountId пробрасываем явно — иначе CODEX_HOME взялся бы от активного
+      // аккаунта, а не от выбранного на один запрос (молчаливая подмена маршрута).
+      const codexHome = resolveCodexHome(
+        providerId,
+        (pid, cid) => deps.resolveSubscriptionAccount?.(pid, cid, oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined) ?? null,
+        chatIdNum)
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.
       let customBaseUrl: string | undefined
@@ -1103,6 +1139,17 @@ export function registerAiIpc(deps: AiDeps): void {
         generation: runGeneration
       })
       if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
+      // 2.1.3-CD: запрошенный one-shot аккаунт — первая запись route-evidence прогона.
+      // Timeline/Proof читают её без разбора логов; label — безопасное имя, не id.
+      if (oneShotAccountId != null && pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution)) {
+        try {
+          deps.agentRuns?.appendEvent(runId, 'route', {
+            label: 'requested-account',
+            detail: `Запрошен аккаунт «${pinResolution.label}» на один запрос (строго, без ротации и запасного провайдера)`,
+            status: 'info',
+          })
+        } catch { /* best-effort */ }
+      }
     } catch (err) {
       logRuntimeError('agent_runs.create.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
       console.warn('[agent-runs] create failed:', err instanceof Error ? err.message : err)
@@ -1163,7 +1210,10 @@ export function registerAiIpc(deps: AiDeps): void {
     // 2.0.7-F: explicit prompt-route по умолчанию strict — при сбое выбранного провайдера
     // НЕ переезжать молча на другого (пользователь выбрал модель осознанно). 'allow'
     // возвращает прежнее поведение smart-fallback. Нет promptRoute → fallback как раньше.
-    const routeFallbackAllowed = !promptRoute || promptRoute.fallbackPolicy === 'allow'
+    // 2.1.3-CD: выбран КОНКРЕТНЫЙ аккаунт → строго всегда: ни ротации аккаунта, ни
+    // provider-fallback, независимо от fallbackPolicy (иначе запрос молча уехал бы с
+    // осознанно выбранного аккаунта — главный сценарий карточки C).
+    const routeFallbackAllowed = (!promptRoute || promptRoute.fallbackPolicy === 'allow') && oneShotAccountId == null
     const smartFallbackEnabled = deps.getSecret('smart_fallback') !== 'false'
       && descriptor.transport === 'API'
       && !overrides?.providerId  // не задействуем fallback в Explicit Review

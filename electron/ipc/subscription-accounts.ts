@@ -11,6 +11,7 @@ import { join } from 'path'
 import type { Database } from 'better-sqlite3'
 import type { Settings } from '../storage/settings'
 import { reloginCli, isCliProvider } from '../ai/cli-auth'
+import { runSubscriptionDoctor, probeConfigDirAuth } from '../ai/subscription-doctor'
 import {
   createSubscriptionAccount,
   listSubscriptionAccounts,
@@ -32,9 +33,15 @@ const CONFIG_DIR_ENV: Record<string, string> = {
 export type { SubscriptionAccountDTO }
 
 export function registerSubscriptionAccountsIpc(db: Database, settings: Settings, accountsBaseDir: string): void {
+  // Честное присутствие креда (2.1.3-B R1): у config-dir аккаунтов credRef пуст по
+  // построению. Кред config-dir = ЕДИНЫЙ probe (тот же, что у Doctor): файл авторизации
+  // читается, JSON валиден, непустой tokens.access_token — как требует рантайм.
+  // Пустой `{}`/битый файл — «нужен вход», а не «готов».
+  const hasCredential = (a: SubscriptionAccount): boolean =>
+    a.configDir ? probeConfigDirAuth(a.configDir).credentialPresent : Boolean(a.credRef && settings.getSecret(a.credRef))
   // WHITELIST-сериализация: credRef/configDir/baseUrl физически не попадают в DTO.
   const toDto = (a: SubscriptionAccount): SubscriptionAccountDTO =>
-    toSubscriptionAccountDTO(a, { hasCredential: Boolean(settings.getSecret(a.credRef)), now: Date.now() })
+    toSubscriptionAccountDTO(a, { hasCredential: hasCredential(a), now: Date.now() })
 
   ipcMain.handle('subscription-accounts:list', (_e, providerId?: string) =>
     listSubscriptionAccounts(db, providerId).map(toDto))
@@ -82,6 +89,18 @@ export function registerSubscriptionAccountsIpc(db: Database, settings: Settings
     if (!isCliProvider(account.providerId)) return { ok: false as const, error: 'Не CLI-провайдер.' }
     const res = await reloginCli(account.providerId, { [envKey]: account.configDir })
     return res.ok ? { ok: true as const } : { ok: false as const, error: res.message }
+  })
+
+  // 2.1.3-B: безопасная диагностика аккаунта («Проверить» в разделе Подписки).
+  // Возвращает человеческий отчёт без секретов/путей; несуществующий id — ok:false,
+  // не исключение (renderer не должен ловить raw error).
+  ipcMain.handle('subscription-accounts:doctor', (_e, id: number) => {
+    const account = getSubscriptionAccount(db, Number(id))
+    if (!account) return { ok: false as const, error: 'Аккаунт не найден.' }
+    const report = runSubscriptionDoctor(account, {
+      hasCredential: credRef => Boolean(credRef && settings.getSecret(credRef)),
+    })
+    return { ok: true as const, report }
   })
 
   ipcMain.handle('subscription-accounts:set-active', (_e, providerId: string, id: number) => {

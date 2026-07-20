@@ -203,8 +203,8 @@ contextBridge.exposeInMainWorld('api', {
       >,
     countTokens: (text: string, projectPath: string | null, historyMessages?: unknown[]) =>
       ipcRenderer.invoke('ai:count-tokens', text, projectPath, historyMessages) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
-    onEvent: (cb: (data: { id: number; event: unknown; projectPath: string | null }) => void) => {
-      const handler = (_e: unknown, data: { id: number; event: unknown; projectPath: string | null }) => cb(data)
+    onEvent: (cb: (data: { id: number; event: unknown; projectPath: string | null; chatId?: number | null }) => void) => {
+      const handler = (_e: unknown, data: { id: number; event: unknown; projectPath: string | null; chatId?: number | null }) => cb(data)
       ipcRenderer.on('ai:event', handler)
       return () => { ipcRenderer.off('ai:event', handler) }
     }
@@ -325,6 +325,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('subscription-accounts:create', input),
     createDir: (input: { providerId: string; label: string }) => ipcRenderer.invoke('subscription-accounts:create-dir', input),
     login: (id: number) => ipcRenderer.invoke('subscription-accounts:login', id),
+    doctor: (id: number) => ipcRenderer.invoke('subscription-accounts:doctor', id),
     setActive: (providerId: string, id: number) => ipcRenderer.invoke('subscription-accounts:set-active', providerId, id),
     rename: (id: number, label: string) => ipcRenderer.invoke('subscription-accounts:rename', id, label),
     remove: (id: number) => ipcRenderer.invoke('subscription-accounts:delete', id)

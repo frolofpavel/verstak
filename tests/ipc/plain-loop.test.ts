@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ChatProvider, ChatEvent } from '../../electron/ai/types'
+import type { ProviderId } from '../../electron/ai/registry'
 
 /**
  * Тест-харнес CLI-пути (runPlainConversation) — 1.9.6 #5. Весь релиз 1.9.5
@@ -42,11 +43,11 @@ function sentEvents(sender: Sender): SentEvent[] {
 
 // Позиционный вызов runPlainConversation (sender, sendId, provider, projectPath,
 // messages, signal, recordJournal, costGuard?, providerId?, model?, fallbackOpts?, agentRuns?, runId?).
-function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown } = {}) {
+function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown; providerId?: ProviderId; model?: string } = {}) {
   return runPlainConversation(
     sender as never, 1, p, dir, [{ role: 'user', content: 'сделай' }],
     opts.signal ?? new AbortController().signal, vi.fn(),
-    undefined, 'claude-cli', 'auto', opts.fallbackOpts as never, opts.agentRuns as never, opts.runId
+    undefined, opts.providerId ?? 'claude-cli', opts.model ?? 'auto', opts.fallbackOpts as never, opts.agentRuns as never, opts.runId
   )
 }
 
@@ -210,5 +211,88 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     await run(dir, p, sender, { signal: ac.signal })
     expect(sentEvents(sender).some(e => e.type === 'done')).toBe(true)
     expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  // ─── 2.1.3-CD: структурное route-evidence ─────────────────────────────────
+  it('CD: rotate-account несёт accounts labels + resetAt; persisted ref — JSON с before/after/reason', async () => {
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' } },
+    }
+    const freshAccount = provider([{ type: 'text', text: 'ок на B' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn((_p: string, _e: number | null) =>
+      ({ switched: true, newAccountId: 2, fromLabel: 'Аккаунт A', toLabel: 'Аккаунт B' }))
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => freshAccount,
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+    }
+    const appendEvent = vi.fn()
+    const sender = makeSender()
+    await run(dir, limited, sender, { fallbackOpts, agentRuns: { appendEvent, finish: vi.fn() }, runId: 'rCD' })
+    const evs = sentEvents(sender)
+    const rc = evs.find(e => e.type === 'route-changed') as {
+      action?: string; reason?: string; resetAt?: number | null
+      accounts?: { fromLabel: string | null; toLabel: string | null } | null
+    } | undefined
+    expect(rc).toBeTruthy()
+    expect(rc!.action).toBe('rotate-account')
+    expect(rc!.reason).toBe('quota') // «usage limit» → quota (не generic)
+    // Время восстановления известно (спарсено «in 2 hours») — передаётся числом.
+    expect(typeof rc!.resetAt).toBe('number')
+    // Аккаунт A → B виден безопасными label'ами, не id.
+    expect(rc!.accounts).toEqual({ fromLabel: 'Аккаунт A', toLabel: 'Аккаунт B' })
+    // Persisted evidence: ref — структурный JSON (Timeline/Proof без разбора текста).
+    const routeCall = appendEvent.mock.calls.find(c => c[1] === 'route')
+    expect(routeCall).toBeTruthy()
+    const ref = JSON.parse(routeCall![2].ref) as Record<string, unknown>
+    expect(ref).toMatchObject({
+      kind: 'rotate-account', reason: 'quota',
+      fromAccountLabel: 'Аккаунт A', toAccountLabel: 'Аккаунт B',
+    })
+    expect(typeof ref.resetAt).toBe('number')
+    // detail остаётся человекочитаемым и тоже называет аккаунты.
+    expect(routeCall![2].detail).toContain('Аккаунт A')
+    expect(routeCall![2].detail).toContain('Аккаунт B')
+  })
+
+  it('CD: лимит БЕЗ известного срока → resetAt null (не выдумываем «безлимит»)', async () => {
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'quota exceeded for your plan' } }, // без ETA
+    }
+    const freshAccount = provider([{ type: 'text', text: 'ок' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn(() => ({ switched: true, newAccountId: 2, fromLabel: 'A', toLabel: 'B' }))
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => freshAccount, getProviderModel: () => 'auto',
+      configuredProviders: new Set(['claude-cli']), triedProviders: new Set(['claude-cli']), switchAccountOnLimit,
+    }
+    const sender = makeSender()
+    await run(dir, limited, sender, { fallbackOpts })
+    const rc = sentEvents(sender).find(e => e.type === 'route-changed') as { resetAt?: number | null } | undefined
+    expect(rc).toBeTruthy()
+    expect(rc!.resetAt).toBeNull()
+  })
+
+  it('CD: model-fallback на plain-пути обновляет ACTUAL провайдера прогона (паритет с API-loop)', async () => {
+    // Реальный сценарий ветки: API-провайдер в чате БЕЗ проекта (useToolsPath=false →
+    // plain loop, smartFallbackEnabled=true по transport='API'). У CLI-провайдеров
+    // цепочки fallback намеренно нет (smart-fallback.ts), поэтому стартуем с gemini-api.
+    const broken: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(): AsyncGenerator<ChatEvent> { throw new Error('HTTP 503 service unavailable') },
+    }
+    const fallback = provider([{ type: 'text', text: 'ок на запасном' }, { type: 'done' }])
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => fallback, getProviderModel: (_id: string) => 'claude-sonnet',
+      configuredProviders: new Set(['gemini-api', 'claude']), triedProviders: new Set(['gemini-api']),
+    }
+    const updateActual = vi.fn()
+    const sender = makeSender()
+    await run(dir, broken, sender, { providerId: 'gemini-api', model: 'gemini-3-flash', fallbackOpts, agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActual }, runId: 'rFB' })
+    // Раньше plain-путь НЕ обновлял actual: agent_run.provider_id врал про то, кто ответил.
+    expect(updateActual).toHaveBeenCalledWith('rFB', 'claude', 'claude-sonnet')
   })
 })

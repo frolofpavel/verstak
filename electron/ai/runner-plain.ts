@@ -24,7 +24,7 @@ import { logRuntime, logRuntimeError } from '../runtime-log'
 import { isAgentRunTimeoutAbort, exitReasonToAgentRunStatus } from './run-lifecycle'
 import { classifyProviderError } from './provider-error'
 import { shouldFallback, getNextFallback } from './smart-fallback'
-import { classifyRouteReason, routeChangedText } from './route-policy'
+import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
 
 export async function runPlainConversation(
   sender: TaggedSender,
@@ -139,21 +139,32 @@ export async function runPlainConversation(
 
   // 2.0.8-D: структурное событие смены маршрута (инвариант 8) + запись в agent_run_events.
   // Зеркалит runner-api emitRouteChanged (CLI-путь тоже объясним по Timeline).
+  // 2.1.3-CD: extras (labels аккаунтов + resetAt) и persisted JSON ref — как в runner-api.
   const emitRouteChanged = (
     action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
     err: unknown,
     actual: { providerId: string; model: string },
     attempt: number,
+    extras?: { resetAt?: number | null; accounts?: { fromLabel: string | null; toLabel: string | null } | null },
   ): void => {
     const reason = classifyRouteReason(err)
     const requested = { providerId: providerId ?? '', model: model ?? '' }
-    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual } })
-    sender.send('ai:event', { id: sendId, event: { type: 'info', text: routeChangedText(action, requested, actual) } })
+    const resetAt = extras?.resetAt ?? null
+    const accounts = extras?.accounts ?? null
+    sender.send('ai:event', { id: sendId, event: { type: 'route-changed', action, reason, attempt, requested, actual, resetAt, accounts } })
     if (agentRuns && runId) {
       try {
+        const acctText = accounts ? ` · аккаунт: ${accounts.fromLabel ?? '?'} → ${accounts.toLabel ?? '?'}` : ''
+        const resetText = resetAt != null ? ` · до ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }` : ''
         agentRuns.appendEvent(runId, 'route', {
           label: action,
-          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}`,
+          detail: `${requested.providerId}/${requested.model} → ${actual.providerId}/${actual.model} · reason=${reason} · attempt=${attempt}${acctText}${resetText}`,
+          ref: JSON.stringify({
+            kind: action, reason, attempt, requested, actual,
+            fromAccountLabel: accounts?.fromLabel ?? null,
+            toAccountLabel: accounts?.toLabel ?? null,
+            resetAt,
+          }),
           status: 'ok',
         })
       } catch { /* best-effort */ }
@@ -282,12 +293,15 @@ export async function runPlainConversation(
         if (fallbackOpts && !fallbackOpts.pinnedAccount && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
           const hit = detectSubscriptionLimit(roundErrorMessage)
           if (hit.limited) {
-            const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta)
+            const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
             if (sw?.switched) {
               fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
               const fresh = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
               if (fresh) {
-                emitRouteChanged('rotate-account', roundErrorMessage, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount)
+                emitRouteChanged('rotate-account', roundErrorMessage, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount, {
+                  resetAt: hit.resetEta ?? null,
+                  accounts: { fromLabel: sw.fromLabel ?? null, toLabel: sw.toLabel ?? null },
+                })
                 handedOff = true
                 return runPlainConversation(sender, sendId, fresh, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
               }
@@ -345,6 +359,12 @@ export async function runPlainConversation(
           // #7: модель fallback-провайдера, а не упавшего — для верного cost/журнала.
           const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
           emitRouteChanged('model-fallback', err, { providerId: nextId, model: nextModel ?? '' }, fallbackOpts.triedProviders.size)
+          // 2.1.3-CD паритет с API-путём: ACTUAL провайдер/модель прогона = запасной
+          // (requested_* остаётся исходным). Раньше CLI-путь этого не делал, и
+          // «actual vs requested» в agent_run врал именно в сценарии fallback.
+          if (agentRuns && runId) {
+            try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
+          }
           // #15: fallback-фрейм владеет финализацией (agentRuns/runId переданы).
           handedOff = true
           logRuntime('ai.fallback.handoff', {
