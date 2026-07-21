@@ -251,4 +251,42 @@ describe('scheduled headless проводит изолированный codexHo
 
     expect(createProviderSpy).toHaveBeenCalledWith('openai-codex-oauth', expect.objectContaining({ codexHome: null }))
   })
+
+  // EF S4: unattended проходит единый resolver — blocked/allBlocked останавливают ДО сети.
+  it('EF S4: аккаунт cooling (blocked) → честный стоп, createProvider НЕ вызван', async () => {
+    createProviderSpy.mockImplementation(() => { throw new Error('should-not-be-called') })
+    const deps = {
+      ...baseDeps(),
+      resolveSubscriptionAccount: () => ({ blocked: true, reason: 'cooling', resetAt: null, label: 'Макс A' }),
+    } as unknown as AiDeps
+
+    const res = await runScheduledHeadless(deps, {
+      projectPath: dirA, prompt: 'x', providerId: 'openai-codex-oauth', model: 'gpt-5.6-sol',
+      signal: new AbortController().signal,
+    })
+
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('Макс A')
+    expect(res.error).toContain('остывает')
+    expect(res.error).toContain('срок неизвестен')
+    expect(createProviderSpy).not.toHaveBeenCalled()
+  })
+
+  it('EF S4: все аккаунты неготовы (allBlocked) → стоп с числом, сети нет', async () => {
+    createProviderSpy.mockImplementation(() => { throw new Error('should-not-be-called') })
+    const deps = {
+      ...baseDeps(),
+      resolveSubscriptionAccount: () => ({ allBlocked: true, reason: 'login-required', resetAt: null, count: 2 }),
+    } as unknown as AiDeps
+
+    const res = await runScheduledHeadless(deps, {
+      projectPath: dirA, prompt: 'x', providerId: 'openai-codex-oauth', model: 'gpt-5.6-sol',
+      signal: new AbortController().signal,
+    })
+
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('требуют входа')
+    expect(res.error).toContain('(2)')
+    expect(createProviderSpy).not.toHaveBeenCalled()
+  })
 })

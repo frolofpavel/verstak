@@ -1222,6 +1222,25 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('before_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN before_hash TEXT')
       if (!has('after_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN after_hash TEXT')
     }
+  },
+  {
+    version: 54,
+    description: '2.1.3-EF: subscription_accounts.last_success_at — отделяем «попытку использования» (last_used_at, ставится ДО запроса) от реально успешного ответа. Nullable: legacy-аккаунты без успеха остаются NULL («нет данных», не выдуманный ноль). EF-R1 Б3: agent_runs.account_id — фактический аккаунт прогона (pre-flight/ротация), чтобы success/охлаждение привязывались к нему, а не к global active на момент финиша.',
+    run: (db: DB) => {
+      // Гард на существование таблиц (repair-сценарий: фикстуры со schema_version
+      // выше миграции, создавшей таблицу, прогоняют v54 без agent_runs/subscription_accounts —
+      // PRAGMA table_info вернёт пусто и голый ALTER упадёт «no such table»).
+      const hasTable = (name: string) =>
+        !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name)
+      if (hasTable('subscription_accounts')) {
+        const cols = (db.prepare('PRAGMA table_info(subscription_accounts)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!cols.includes('last_success_at')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN last_success_at INTEGER')
+      }
+      if (hasTable('agent_runs')) {
+        const runCols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!runCols.includes('account_id')) db.exec('ALTER TABLE agent_runs ADD COLUMN account_id INTEGER')
+      }
+    }
   }
 ]
 

@@ -51,9 +51,10 @@ import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
-import { getActiveAccount, getSubscriptionAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
+import { switchActiveOnLimit, markAccountSuccess } from './storage/subscription-accounts'
 import { pickChatAccountId } from './ai/route-policy'
 import { createResolveSubscriptionAccount } from './ai/resolve-subscription-account'
+import { markSuccessForRun, wrapFinishWithSuccess } from './ai/subscription-success'
 import { registerWorktreeIpc } from './ipc/worktree'
 import { createVerifications } from './storage/verifications'
 import { createDevTasks } from './storage/dev-tasks'
@@ -87,7 +88,7 @@ import { registerAutonomousIpc } from './ipc/autonomous'
 import { createConnectorRegistry } from './connectors/registry'
 import { PROVIDERS, createProvider, type ProviderId } from './ai/registry'
 import { registerContextCompactionIpc } from './ipc/context-compaction'
-import { pickSummaryProvider } from './ai/pick-summary-provider'
+import { pickSummaryProviderGated } from './ai/pick-summary-provider'
 import { activeSnapshot as activeContextSnapshot } from './storage/chat-context-snapshots'
 import { AGENT_MODES } from './ai/mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
@@ -422,7 +423,19 @@ app.whenReady().then(() => {
   logRuntime('startup.chat_storage.ready')
   // Multi-agent Manager (Фаза 2) — фундамент «задач» поверх run_id. ai.ts пишет
   // прогоны (create на старте / finish на завершении), панель Задач читает их.
-  const agentRuns = createAgentRuns(db)
+  const agentRunsBase = createAgentRuns(db)
+  // 2.1.3-EF S5 → EF-R1 Б3/Б4: last_success_at аккаунта — ТОЛЬКО на первом терминальном
+  // переходе со status='done' (поздний done после stopped — НЕ успех), и строго на
+  // аккаунт прогона (run.account_id), а не global active на момент финиша.
+  const agentRuns: typeof agentRunsBase = {
+    ...agentRunsBase,
+    finish: wrapFinishWithSuccess(agentRunsBase, (runId) => {
+      markSuccessForRun(db, {
+        getRun: (id) => agentRunsBase.get(id),
+        getSubscriptionBinding: (chatId) => chatSessions.getSubscriptionBinding(chatId),
+      }, runId)
+    }),
+  }
   logRuntime('startup.agent_runs.ready')
   // #5 worktree-lifecycle: персистентная изоляция чата в git-worktree.
   const worktreeSessions = createWorktreeSessions(db)
@@ -593,8 +606,11 @@ app.whenReady().then(() => {
     }),
     // 1.9.4: лимит активного аккаунта → cooling + переключение на следующий готовый аккаунт пула.
     // CD: reason и labels прокидываются (cooldown-UI + route-evidence).
-    switchSubscriptionAccountOnLimit: (providerId, resetEta, reason) =>
-      switchActiveOnLimit(db, providerId, resetEta, undefined, reason ? { scope: 'account', reason } : undefined),
+    // EF-R1 Б3: fromAccountId — аккаунт, на котором реально упал запрос (run.account_id).
+    switchSubscriptionAccountOnLimit: (providerId, resetEta, reason, fromAccountId) =>
+      switchActiveOnLimit(db, providerId, resetEta, undefined, reason ? { scope: 'account', reason } : undefined, fromAccountId),
+    // EF-R1 Б3: unattended-прогон (scheduled) отмечает успех аккаунта после result.ok.
+    markSubscriptionAccountSuccess: (accountId) => markAccountSuccess(db, accountId),
     getKnownRoots: knownRoots,
     recordWrite: (projectPath, filePath, before, after, provenance) => {
       // 2.0.11-E: провенанс (runId и т.д.) прокидывается в undo-запись для rewindCoverage.
@@ -766,14 +782,18 @@ app.whenReady().then(() => {
     db,
     chats,
     createSummaryProvider: () => {
-      const choice = pickSummaryProvider(getProviderId(), key => !!getSecret(key), getProviderModel)
-      if (!choice) return null
-      const apiKey = getSecret(choice.secretKey)
+      // EF-R2 Б3: Codex OAuth для компакции проходит через тот же canonical resolver,
+      // что и ai:send — codexHome аккаунта, а не молчаливый default ~/.codex. Парк
+      // неготов → gated-пикер уходит на другой настроенный API либо честно даёт null.
+      const gated = pickSummaryProviderGated(
+        getProviderId(), key => !!getSecret(key), getProviderModel, aiDeps.resolveSubscriptionAccount)
+      if (!gated) return null
+      const apiKey = getSecret(gated.secretKey)
       if (!apiKey) return null
       return {
-        provider: createProvider(choice.providerId, { apiKey, model: choice.model }),
-        providerId: choice.providerId,
-        model: choice.model,
+        provider: createProvider(gated.providerId, { apiKey, model: gated.model, codexHome: gated.codexHome }),
+        providerId: gated.providerId,
+        model: gated.model,
       }
     },
   })
@@ -836,7 +856,9 @@ app.whenReady().then(() => {
     recentWrites: (projectPath, limit) => {
       return undoStack.list(projectPath).slice(0, limit).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
     },
-    getActiveProject: () => getActiveProjectPath()
+    getActiveProject: () => getActiveProjectPath(),
+    // EF-R1 Б2: тот же resolver, что и ai:send/scheduled — никакого обхода.
+    resolveSubscriptionAccount: aiDeps.resolveSubscriptionAccount
   })
   // getKnownRoots — корни проектов пользователя для валидации cwd терминала
   // (см. resolveSafeTerminalCwd). Та же лямбда, что и для files/project-map.

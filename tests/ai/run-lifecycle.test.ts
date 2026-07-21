@@ -41,6 +41,7 @@ function run(status: AgentRunStatus, endedAt: number | null = null): AgentRun {
     lastToolName: null,
     lastCheckpointId: null,
     agentMode: 'ask',
+    accountId: null,
     updatedAt: 1,
     lastEventAt: null,
   }

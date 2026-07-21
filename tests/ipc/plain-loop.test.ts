@@ -296,3 +296,89 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(updateActual).toHaveBeenCalledWith('rFB', 'claude', 'claude-sonnet')
   })
 })
+
+
+// EF-R2 Б2: account lineage при handoff — durable run получает фактический аккаунт
+// попытки (или явный null при уходе на провайдер без managed-аккаунта).
+describe('EF-R2 Б2: account lineage при fallback (production-path)', () => {
+  let dir2: string
+  beforeEach(() => { dir2 = mkdtempSync(join(tmpdir(), 'plain-lineage-')) })
+  afterEach(() => { try { rmSync(dir2, { recursive: true, force: true }) } catch { /* win lock */ } })
+
+  it('same-provider rotation: accountId нового аккаунта доезжает до run (production getNextAttempt)', async () => {
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send() { yield { type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' } },
+    }
+    const freshAccount = provider([{ type: 'text', text: 'ок на B' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn(() => ({ switched: true, newAccountId: 7, fromLabel: 'A', toLabel: 'B' }))
+    // Production ai.ts передаёт getNextAttempt (не legacy getNextProvider).
+    const fallbackOpts = {
+      getNextAttempt: (_id: string) => ({ provider: freshAccount, accountId: 7 }),
+      getProviderModel: () => 'auto',
+      configuredProviders: new Set(['claude-cli']), triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+    }
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+    await run(dir2, limited, sender, { fallbackOpts, agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActualAccount }, runId: 'rROT' })
+    expect(updateActualAccount).toHaveBeenCalledWith('rROT', 7)
+    expect(sentEvents(sender).some(e => e.type === 'route-changed' && (e as { action?: string }).action === 'rotate-account')).toBe(true)
+  })
+
+  it('cross-provider: managed → API БЕЗ managed-аккаунта → run.account_id очищается до null', async () => {
+    const broken: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(): AsyncGenerator<ChatEvent> { throw new Error('HTTP 503 service unavailable') },
+    }
+    const fallback = provider([{ type: 'text', text: 'ок на запасном' }, { type: 'done' }])
+    const fallbackOpts = {
+      // У fallback-провайдера managed-аккаунта нет → attempt несёт ЯВНЫЙ null.
+      getNextAttempt: (_id: string) => ({ provider: fallback, accountId: null }),
+      getProviderModel: (_id: string) => 'claude-sonnet',
+      configuredProviders: new Set(['gemini-api', 'claude']), triedProviders: new Set(['gemini-api']),
+    }
+    const updateActual = vi.fn()
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+    await run(dir2, broken, sender, { providerId: 'gemini-api', model: 'gemini-3-flash', fallbackOpts, agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActual, updateActualAccount }, runId: 'rCLR' })
+    // account_id очищен — success/cooldown НЕ уйдут аккаунту упавшего провайдера.
+    expect(updateActualAccount).toHaveBeenCalledWith('rCLR', null)
+    expect(updateActual).toHaveBeenCalledWith('rCLR', 'claude', 'claude-sonnet')
+  })
+
+  it('cross-provider: API → managed-аккаунт B → run получает B ДО выполнения попытки', async () => {
+    const broken: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(): AsyncGenerator<ChatEvent> { throw new Error('HTTP 503 service unavailable') },
+    }
+    const fallback = provider([{ type: 'text', text: 'ок на codex B' }, { type: 'done' }])
+    const fallbackOpts = {
+      getNextAttempt: (_id: string) => ({ provider: fallback, accountId: 42 }),
+      getProviderModel: (_id: string) => 'claude-sonnet',
+      configuredProviders: new Set(['gemini-api', 'claude']), triedProviders: new Set(['gemini-api']),
+    }
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+    await run(dir2, broken, sender, { providerId: 'gemini-api', model: 'gemini-3-flash', fallbackOpts, agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActual: vi.fn(), updateActualAccount }, runId: 'rSET' })
+    expect(updateActualAccount).toHaveBeenCalledWith('rSET', 42)
+    expect(sentEvents(sender).some(e => e.type === 'text' && (e as { text?: string }).text?.includes('codex B'))).toBe(true)
+  })
+
+  it('legacy getNextProvider без lineage → accountId прогона НЕ трогается (обратная совместимость)', async () => {
+    const broken: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(): AsyncGenerator<ChatEvent> { throw new Error('HTTP 503 service unavailable') },
+    }
+    const fallback = provider([{ type: 'text', text: 'ок' }, { type: 'done' }])
+    const fallbackOpts = {
+      getNextProvider: (_id: string) => fallback, // legacy-вариант, как в старых тестах
+      getProviderModel: (_id: string) => 'claude-sonnet',
+      configuredProviders: new Set(['gemini-api', 'claude']), triedProviders: new Set(['gemini-api']),
+    }
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+    await run(dir2, broken, sender, { providerId: 'gemini-api', model: 'gemini-3-flash', fallbackOpts, agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActual: vi.fn(), updateActualAccount }, runId: 'rLEG' })
+    expect(updateActualAccount).not.toHaveBeenCalled()
+  })
+})

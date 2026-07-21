@@ -38,6 +38,7 @@ function acct(over: Partial<SubscriptionAccount> = {}): SubscriptionAccount {
     cooldownModel: null,
     createdAt: NOW - 1000,
     lastUsedAt: null,
+    lastSuccessAt: null,
     ...over,
   }
 }

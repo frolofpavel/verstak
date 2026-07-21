@@ -45,7 +45,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from './runner-shared'
+import { type FallbackOpts, type FallbackAttempt, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from './runner-shared'
 import { captureToolObservation } from './memory-hooks'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { trackToolForPatterns, type ToolEvent } from './procedural-memory'
@@ -171,6 +171,8 @@ export interface AgentRunContext {
   turnsBudget?: number
   skillRegistry?: AiDeps['skillRegistry']
   getSecretForDelegate?: AiDeps['getSecret']
+  /** EF-R1 Б2: единый resolver аккаунта для delegate_task внутри агентного цикла. */
+  resolveSubscriptionAccount?: AiDeps['resolveSubscriptionAccount']
   costGuard?: ReturnType<typeof createCostGuard>
   providerId?: ProviderId
   model?: string
@@ -212,6 +214,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
+    resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
     processRegistry = globalProcessRegistry,
@@ -489,6 +492,21 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
   }
 
+  // EF-R2 Б2: единая точка создания attempt — предпочтительно getNextAttempt (несёт
+  // accountId попытки); legacy getNextProvider → accountId=undefined («не трогать»).
+  const mkAttempt = (id: ProviderId): { provider: ChatProvider; accountId: number | null | undefined } | null => {
+    const viaAttempt = fallbackOpts?.getNextAttempt?.(id)
+    if (viaAttempt) return viaAttempt
+    const p = fallbackOpts?.getNextProvider?.(id)
+    return p ? { provider: p, accountId: undefined } : null
+  }
+  // Lineage аккаунта на handoff: attempt с известным accountId (вкл. null = очистить)
+  // фиксируется в durable run — success/cooldown уйдут фактическому аккаунту попытки.
+  const applyAttemptAccount = (accountId: number | null | undefined): void => {
+    if (accountId === undefined || !agentRuns || !runId) return
+    try { agentRuns.updateActualAccount(runId, accountId) } catch { /* best-effort */ }
+  }
+
   const attemptProviderFallback = (err: unknown, force = false): Promise<void> | null => {
     // 2.0.8-D2: pinned-чат — авто-смена провайдера запрещена (увела бы с закреплённого аккаунта).
     if (fallbackOpts?.pinnedAccount) return null
@@ -496,8 +514,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     fallbackOpts.triedProviders.add(providerId)
     if (!force && !shouldFallback(err)) return null
     const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-    const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
-    if (!nextProvider || !nextId) return null
+    const attempt = nextId ? mkAttempt(nextId) : null
+    if (!attempt || !nextId) return null
+    const nextProvider = attempt.provider
     console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
     fallbackOpts.triedProviders.add(nextId)
     // attempt считаем ПОСЛЕ add(nextId) — паритет с runner-plain (ревью #4): size включает
@@ -514,6 +533,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if (agentRuns && runId) {
       try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
     }
+    // EF-R2 Б2: lineage аккаунта — кросс-провайдерный handoff фиксирует аккаунт нового
+    // провайдера (или очищает до null, если у него нет managed-аккаунта).
+    applyAttemptAccount(attempt.accountId)
     handedOff = true
     return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel, nudgeBudgetUsed: plainReplyNudges })
   }
@@ -531,8 +553,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
     if (!sw?.switched) return null
     fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
-    const freshProvider = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
-    if (!freshProvider) return null
+    const freshAttempt = mkAttempt(providerId) // тот же id → новый активный аккаунт
+    if (!freshAttempt) return null
+    const freshProvider = freshAttempt.provider
+    // EF-R2 Б2: ротация фиксирует новый аккаунт в run (success уйдёт ему, а не упавшему).
+    applyAttemptAccount(freshAttempt.accountId)
     // Ротация аккаунта: провайдер/модель те же, меняется аккаунт. CD: labels аккаунтов
     // и resetAt идут в событие (Timeline «A → B · до HH:MM»); id аккаунтов не отдаём.
     emitRouteChanged('rotate-account', err, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount, {
@@ -1072,6 +1097,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
+      // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
+      resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.
       requestNewTask: (summary: string) => { pendingNewTask = summary },
       // ось 3 I: per-tool auto-approve — читаем тумблеры живо (как agentMode).

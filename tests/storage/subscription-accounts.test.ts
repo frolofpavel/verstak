@@ -137,6 +137,50 @@ describe('subscription accounts storage', () => {
     expect(getSubscriptionAccount(db, a.id)?.state).toBe('ready')
   })
 
+  it('switchActiveOnLimit: cooling с НЕИЗВЕСТНЫМ сроком (until=NULL) НЕ кандидат ротации (EF S3)', () => {
+    const now = 8_000_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' }) // active
+    const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    // B остывает с неизвестным сроком — честно недоступен, ротация на него = ложный ready
+    markAccountCooling(db, b.id, null, { scope: 'account', reason: 'quota' })
+    const res = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now)
+    expect(res.switched).toBe(false)
+    expect(getSubscriptionAccount(db, a.id)?.state).toBe('cooling')
+    expect(getSubscriptionAccount(db, b.id)?.active).toBe(false)
+  })
+
+  it('EF-R1 Б3: switchActiveOnLimit с fromAccountId охлаждает АККАУНТ ПРОГОНА, не global active', () => {
+    const now = 9_000_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    const c = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'C', credRef: 'r3' })
+    // Прогон стартовал на A, пользователь вручную переключил global active на B,
+    // затем прогон на A поймал quota → охлаждать A, B не трогаем.
+    setActiveAccount(db, 'claude-cli', b.id)
+    const res = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now, { scope: 'account', reason: 'quota' }, a.id)
+    expect(res.switched).toBe(true)
+    expect(res.fromLabel).toBe('A')
+    const aAfter = getSubscriptionAccount(db, a.id)!
+    expect(aAfter.state).toBe('cooling')
+    expect(aAfter.coolingUntil).toBe(now + 60_000)
+    // B не охлаждён — он не падал.
+    expect(getSubscriptionAccount(db, b.id)!.state).toBe('ready')
+    // Ротация ушла на готового кандидата (C), не на охлаждённый A.
+    expect(res.newAccountId).toBe(c.id)
+    expect(getActiveAccount(db, 'claude-cli')!.id).toBe(c.id)
+  })
+
+  it('EF-R1 Б3: fromAccountId чужого провайдера → fallback на active (защита от мусора)', () => {
+    const now = 9_500_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    const g = createSubscriptionAccount(db, { providerId: 'gemini-cli', label: 'G', credRef: 'r2' })
+    const res = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now, undefined, g.id)
+    // g не из claude-cli → охлаждён активный A (прежняя семантика).
+    expect(getSubscriptionAccount(db, a.id)!.state).toBe('cooling')
+    expect(getSubscriptionAccount(db, g.id)!.state).toBe('ready')
+    expect(res.switched).toBe(false) // других аккаунтов claude-cli нет
+  })
+
   it('delete removes account; if the active one is deleted, another becomes active', () => {
     const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
     const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
@@ -186,5 +230,29 @@ describe('subscription accounts storage', () => {
     expect(sessions.getSubscriptionBinding(chat.id)).toEqual({ accountId: a.id, mode: 'pinned' })
     // но сам аккаунт исчез → резолвер (2.0.8-D) детектит unavailable + требует решения юзера
     expect(getSubscriptionAccount(db, a.id)).toBeNull()
+  })
+
+  // EF-R1 Б1: canonical codex-семейства в switch-on-limit — прогон openai-codex-oauth
+  // обязан охладить/ротировать пул 'codex-cli' (аккаунты хранятся под canonical id).
+  it('EF-R1 Б1: switchActiveOnLimit канонизирует openai-codex-oauth → пул codex-cli', () => {
+    const a = createSubscriptionAccount(db, { providerId: 'codex-cli', label: 'Codex A', credRef: 'r1' })
+    const b = createSubscriptionAccount(db, { providerId: 'codex-cli', label: 'Codex B', credRef: 'r2' })
+    // Лимит поймал прогон oauth-провайдера на аккаунте A (run.account_id = a.id).
+    const res = switchActiveOnLimit(db, 'openai-codex-oauth', 2_000_000_000_000, Date.now(), undefined, a.id)
+    expect(res.switched).toBe(true)
+    expect(res.newAccountId).toBe(b.id)
+    // Охлаждён именно A (аккаунт прогона), активным стал B — в canonical-пуле codex-cli.
+    expect(getSubscriptionAccount(db, a.id)?.state).toBe('cooling')
+    expect(getActiveAccount(db, 'codex-cli')?.id).toBe(b.id)
+  })
+
+  it('EF-R1 Б1: canonical без fromAccountId — active ищется в codex-cli пуле, а не по raw id', () => {
+    const a = createSubscriptionAccount(db, { providerId: 'codex-cli', label: 'Codex A', credRef: 'r1' })
+    createSubscriptionAccount(db, { providerId: 'codex-cli', label: 'Codex B', credRef: 'r2' })
+    // legacy-вызов без fromAccountId: active должен найтись по canonical 'codex-cli'.
+    const res = switchActiveOnLimit(db, 'openai-codex-oauth', null)
+    expect(res.switched).toBe(true)
+    expect(getSubscriptionAccount(db, a.id)?.state).toBe('cooling') // until=null = срок неизвестен, но cooling честный
+    expect(res.fromLabel).toBe('Codex A')
   })
 })

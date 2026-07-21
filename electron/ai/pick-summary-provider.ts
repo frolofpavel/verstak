@@ -1,4 +1,4 @@
-import { PROVIDERS } from './registry'
+import { PROVIDERS, isCodexAuthProvider } from './registry'
 import type { ProviderId } from './registry'
 
 /**
@@ -32,8 +32,10 @@ export function pickSummaryProvider(
   activeId: ProviderId | null,
   hasKey: (secretKey: string) => boolean,
   getModel: (id: ProviderId) => string | null,
+  exclude?: ReadonlySet<string>,
 ): SummaryProviderChoice | null {
   const usable = (id: ProviderId): SummaryProviderChoice | null => {
+    if (exclude?.has(id)) return null
     const d = PROVIDERS[id]
     if (!d || d.transport !== 'API' || !d.secretKey) return null
     if (!hasKey(d.secretKey)) return null
@@ -56,4 +58,52 @@ export function pickSummaryProvider(
   }
 
   return null
+}
+
+
+// ─── EF-R2 Б3: gated-вариант для ручной компакции ────────────────────────────
+
+/** Упрощённый структурный срез ResolvedSubscription (полный тип — в
+ *  ai/resolve-subscription-account): нужны только configDir и маркеры стопа. */
+export type SummaryAccountResolution =
+  | { configDir?: string | null }
+  | { unavailable: true }
+  | { blocked: true }
+  | { allBlocked: true }
+  | null
+
+export interface GatedSummaryChoice extends SummaryProviderChoice {
+  /** codexHome для codex-oauth: configDir аккаунта из canonical resolver'а.
+   *  null — провайдер не codex ИЛИ парка нет (legacy: дефолтный ~/.codex допустим). */
+  codexHome: string | null
+}
+
+/**
+ * EF-R2 Б3: выбор summary-провайдера для ручной компакции С учётом подписочного
+ * парка. Codex OAuth — полноценный production entry point: если выбран он, аккаунт
+ * проходит через ТОТ ЖЕ canonical resolver, что и ai:send:
+ *  - success → codexHome = configDir аккаунта (изоляция мультиаккаунта);
+ *  - blocked/allBlocked/unavailable → НИКАКОГО default ~/.codex: безопасный fallback
+ *    на другой настроенный API-провайдер, либо null (явный нейтральный отказ);
+ *  - парка нет (resolver → null / не передан) → прежний legacy-путь.
+ */
+export function pickSummaryProviderGated(
+  activeId: ProviderId | null,
+  hasKey: (secretKey: string) => boolean,
+  getModel: (id: ProviderId) => string | null,
+  resolveAccount?: (providerId: string) => SummaryAccountResolution,
+): GatedSummaryChoice | null {
+  const choice = pickSummaryProvider(activeId, hasKey, getModel)
+  if (!choice) return null
+  if (!isCodexAuthProvider(choice.providerId)) return { ...choice, codexHome: null }
+
+  const sub = resolveAccount?.(choice.providerId) ?? null
+  if (sub && ('unavailable' in sub || 'blocked' in sub || 'allBlocked' in sub)) {
+    // Парк есть, но неготов — сеть через default credential ЗАПРЕЩЕНА. Ищем другой
+    // summary provider вне codex-семейства (оба id исключаем — у них общий парк).
+    const alt = pickSummaryProvider(activeId, hasKey, getModel, new Set(['codex-cli', 'openai-codex-oauth']))
+    return alt ? { ...alt, codexHome: null } : null
+  }
+  if (sub && 'configDir' in sub) return { ...choice, codexHome: sub.configDir || null }
+  return { ...choice, codexHome: null }
 }

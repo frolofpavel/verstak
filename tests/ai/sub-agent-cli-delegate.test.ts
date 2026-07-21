@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runSubAgentLoop } from '../../electron/ai/sub-agent-loop'
+import { delegateTaskHandler, buildSubCreateOptions } from '../../electron/ipc/tool-handlers/delegation'
 import type { ToolContext } from '../../electron/ipc/tool-handlers'
 import type { ChatProvider, ChatEvent, ChatMessage, ToolDefinition } from '../../electron/ai/types'
 
@@ -127,4 +128,52 @@ describe('delegate→CLI: транспорт Сценария Б (sub-agent-loop
     expect(result.exitReason).toBe('error')
     expect(result.error).toMatch(/cost cap/)
   }, 3000)
+})
+
+
+// EF-R1 Б2: delegate_task НЕ обходит единый resolver — заблокированный аккаунт
+// останавливает sub-agent ДО сети (человеческая карточка), default credential запрещён.
+describe('delegate_task: pre-flight аккаунта (EF-R1 Б2)', () => {
+  const call = { id: 'c1', name: 'delegate_task' }
+
+  it('claude-cli аккаунт cooling (blocked) → явный стоп, default env-токен НЕ используется', async () => {
+    const ac = new AbortController()
+    const ctx = makeCtx(ac.signal, {
+      resolveSubscriptionAccount: () => ({ blocked: true, reason: 'cooling', resetAt: null, label: 'Макс A' }),
+      getSecretForDelegate: () => 'sk-LEGACY-DEFAULT', // ловушка: не должна понадобиться
+    })
+    const res = await delegateTaskHandler.handle(
+      { ...call, args: { prompt: 'сделай', provider_id: 'claude-cli' } },
+      ctx,
+    )
+    expect(res.error ?? res.result).toContain('Макс A')
+    expect(res.error ?? res.result).toMatch(/остывает|остановлено/i)
+    expect(JSON.stringify(res)).not.toContain('sk-LEGACY-DEFAULT')
+  }, 3000)
+
+  it('claude-cli все аккаунты неготовы (allBlocked) → явный стоп с числом', async () => {
+    const ac = new AbortController()
+    const ctx = makeCtx(ac.signal, {
+      resolveSubscriptionAccount: () => ({ allBlocked: true, reason: 'login-required', resetAt: null, count: 2 }),
+    })
+    const res = await delegateTaskHandler.handle(
+      { ...call, args: { prompt: 'сделай', provider_id: 'claude-cli' } },
+      ctx,
+    )
+    expect(res.error ?? res.result).toMatch(/требуют входа|остановлено/i)
+    expect(res.error ?? res.result).toContain('2')
+  }, 3000)
+
+  it('парка нет (resolver → null) → прежний legacy env-путь (не стоп)', () => {
+    const ac = new AbortController()
+    const ctx = makeCtx(ac.signal, {
+      resolveSubscriptionAccount: () => null,
+      getSecretForDelegate: (k: string) => (k === 'claude_code_oauth_token' ? 'sk-env' : null),
+    })
+    // Гейт пропускает null → buildSubCreateOptions берёт legacy env-токен и НЕ бросает
+    // «Делегирование остановлено». Прямой unit-вызов: e2e через handle() уходит в
+    // реальный CLI spawn и не завершается в тестовой среде.
+    const opts = buildSubCreateOptions('claude-cli', null, 'claude-sonnet-4', ac.signal, ctx)
+    expect(opts.claudeOauthToken).toBe('sk-env')
+  })
 })

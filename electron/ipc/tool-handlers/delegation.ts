@@ -1,6 +1,7 @@
 // Delegation: delegate_task / delegate_parallel / orchestrate / swarm + хелперы. Вынесено при распиле.
 import type { ToolHandler, ToolContext } from './shared'
 import type { ProviderId, CreateOptions } from '../../ai/registry'
+import { isCodexAuthProvider } from '../../ai/registry'
 import { getRolePrompt } from '../../ai/agent-roles'
 import { findUserAgent } from '../../ai/user-agents'
 import { addWorktree, removeWorktree, worktreeDiff } from '../../ai/git-worktree'
@@ -35,7 +36,9 @@ const DEFAULT_BATCH_COST_CAP_CENTS = 300
  * главном ai.ts:405-427). Без этого суб на 4+ провайдерах падает «Folder ID
  * не задан / Client Secret не задан / Base URL не задан».
  */
-function buildSubCreateOptions(
+// export — для прямого unit-теста Б2-гейта (e2e через handle() уходит в реальный
+// CLI spawn и не завершается в тестовой среде).
+export function buildSubCreateOptions(
   providerId: ProviderId,
   apiKey: string | null,
   model: string,
@@ -52,12 +55,40 @@ function buildSubCreateOptions(
   } else if (providerId === 'verstak-gateway') {
     customBaseUrl = getSecret?.('verstak_gateway_baseurl') ?? undefined
   }
+  // EF-R1 Б2: sub-agent на подписочном провайдере идёт через ТОТ ЖЕ единый resolver,
+  // что и родительский прогон. Аккаунт заблокирован/все неготовы → явный стоп ДО сети
+  // (throw → человеческая карточка ошибки делегирования), а НЕ молчаливый default
+  // credential (legacy env-токен / ~/.codex). Парка нет (resolver → null) → legacy-путь.
+  let claudeOauthToken: string | null | undefined
+  let codexHome: string | null | undefined
+  if (providerId === 'claude-cli' || isCodexAuthProvider(providerId)) {
+    const sub = ctx.resolveSubscriptionAccount?.(providerId) ?? null
+    if (sub && 'unavailable' in sub) {
+      throw new Error(`Делегирование остановлено: аккаунт ${providerId} был удалён. Выберите другой аккаунт в Настройки → Подписки.`)
+    }
+    if (sub && 'blocked' in sub) {
+      throw new Error(sub.reason === 'cooling'
+        ? `Делегирование остановлено: аккаунт «${sub.label}» остывает после лимита.`
+        : `Делегирование остановлено: аккаунт «${sub.label}» требует входа.`)
+    }
+    if (sub && 'allBlocked' in sub) {
+      throw new Error(sub.reason === 'cooling'
+        ? `Делегирование остановлено: все аккаунты ${providerId} (${sub.count}) остывают после лимита.`
+        : `Делегирование остановлено: все аккаунты ${providerId} (${sub.count}) требуют входа.`)
+    }
+    if (providerId === 'claude-cli') {
+      claudeOauthToken = sub && 'secret' in sub ? sub.secret : (getSecret?.('claude_code_oauth_token') ?? null)
+    } else {
+      codexHome = sub && 'configDir' in sub ? (sub.configDir || null) : null
+    }
+  }
   return {
     apiKey,
     model,
     cwd: ctx.projectPath,
     signal,
-    claudeOauthToken: providerId === 'claude-cli' ? (getSecret?.('claude_code_oauth_token') ?? null) : undefined,
+    claudeOauthToken,
+    codexHome,
     customBaseUrl,
     customModels,
     yandexFolderId: providerId === 'yandex-gpt' ? (getSecret?.('yandex_folder_id') ?? undefined) : undefined,

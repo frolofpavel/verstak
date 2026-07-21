@@ -861,3 +861,50 @@ describe('agent-loop — провайдерские info-события дохо
     expect(infos.some(t => t.includes('не принимает изображения'))).toBe(true)
   }, 15000)
 })
+
+
+// EF-R2 Б2: account lineage на API-транспорте — тот же handoff-контракт, что у CLI.
+describe('EF-R2 Б2: account lineage при fallback (API-loop)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'agent-lineage-')) })
+  afterEach(() => { try { rmSync(dir, { recursive: true, force: true }) } catch { /* win lock */ } })
+
+  it('cross-provider: run получает accountId попытки; без managed-аккаунта — явный null', async () => {
+    const updateActual = vi.fn()
+    const updateActualAccount = vi.fn()
+    const runs = { ...mockRuns(), updateActual, updateActualAccount }
+    const failing = provider('gemini-api', () => [], new Error('503 Service Unavailable'))
+    const fallback = provider('claude', () => [{ type: 'text', text: 'ответ fallback' }, { type: 'done' }])
+    const fallbackOpts = {
+      getNextAttempt: (_id: string) => ({ provider: fallback, accountId: 42 }),
+      getProviderModel: (_id: string) => 'claude-opus-4-5',
+      configuredProviders: new Set(['gemini-api', 'claude']),
+      triedProviders: new Set(['gemini-api']),
+    }
+    await runApiConversation(...(args(dir, {
+      provider: failing, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'rAL', fallbackOpts,
+    }) as Parameters<typeof runApiConversation>))
+    expect(updateActual).toHaveBeenCalledWith('rAL', 'claude', 'claude-opus-4-5')
+    expect(updateActualAccount).toHaveBeenCalledWith('rAL', 42)
+    expect(runs.finish).toHaveBeenCalledWith('rAL', 'done', expect.anything())
+  }, 15000)
+
+  it('cross-provider на провайдер БЕЗ managed-аккаунта → accountId очищается до null', async () => {
+    const updateActualAccount = vi.fn()
+    const runs = { ...mockRuns(), updateActual: vi.fn(), updateActualAccount }
+    const failing = provider('gemini-api', () => [], new Error('503 Service Unavailable'))
+    const fallback = provider('claude', () => [{ type: 'text', text: 'ок' }, { type: 'done' }])
+    const fallbackOpts = {
+      getNextAttempt: (_id: string) => ({ provider: fallback, accountId: null }),
+      getProviderModel: (_id: string) => 'claude-opus-4-5',
+      configuredProviders: new Set(['gemini-api', 'claude']),
+      triedProviders: new Set(['gemini-api']),
+    }
+    await runApiConversation(...(args(dir, {
+      provider: failing, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'rAL2', fallbackOpts,
+    }) as Parameters<typeof runApiConversation>))
+    expect(updateActualAccount).toHaveBeenCalledWith('rAL2', null)
+  }, 15000)
+})

@@ -6,6 +6,7 @@
  */
 
 import type { Database } from 'better-sqlite3'
+import { canonicalAccountProvider } from '../../shared/contracts/subscription'
 
 export interface SubscriptionAccount {
   id: number
@@ -28,6 +29,8 @@ export interface SubscriptionAccount {
   cooldownModel: string | null
   createdAt: number
   lastUsedAt: number | null
+  /** 2.1.3-EF S5: последний РЕАЛЬНО успешный ответ через этот аккаунт (NULL = не было / нет данных). */
+  lastSuccessAt: number | null
 }
 
 interface Row extends Omit<SubscriptionAccount, 'active'> { active: number }
@@ -37,7 +40,7 @@ const SELECT = `
          config_dir as configDir, base_url as baseUrl, active, state,
          cooling_until as coolingUntil,
          cooldown_scope as cooldownScope, cooldown_reason as cooldownReason, cooldown_model as cooldownModel,
-         created_at as createdAt, last_used_at as lastUsedAt
+         created_at as createdAt, last_used_at as lastUsedAt, last_success_at as lastSuccessAt
   FROM subscription_accounts
 `
 
@@ -105,6 +108,14 @@ export function touchSubscriptionAccount(db: Database, id: number, when = Date.n
   db.prepare('UPDATE subscription_accounts SET last_used_at = ? WHERE id = ?').run(when, id)
 }
 
+/**
+ * 2.1.3-EF S5: фиксирует РЕАЛЬНО успешный ответ через аккаунт. Вызывать ТОЛЬКО после
+ * финиша прогона со статусом done — last_used_at (попытка) ставится раньше, до запроса.
+ */
+export function markAccountSuccess(db: Database, id: number, when = Date.now()): void {
+  db.prepare('UPDATE subscription_accounts SET last_success_at = ? WHERE id = ?').run(when, id)
+}
+
 /** Пометить аккаунт «остывающим» после лимита (до coolingUntil epoch ms). */
 /** 2.0.8-B: область и причина остывания для детерминированной маршрутизации. */
 export interface CooldownDetail {
@@ -143,14 +154,22 @@ export interface SwitchResult {
  * 2.1.3-CD: detail — причина остывания (quota/rate-limit) для честного UI кулдауна;
  * возвращает labels аккаунтов для route-события.
  */
-export function switchActiveOnLimit(db: Database, providerId: string, coolingUntil: number | null, now = Date.now(), detail?: CooldownDetail): SwitchResult {
-  const current = getActiveAccount(db, providerId)
+export function switchActiveOnLimit(db: Database, providerId: string, coolingUntil: number | null, now = Date.now(), detail?: CooldownDetail, fromAccountId?: number | null): SwitchResult {
+  // EF-R1 Б1: canonical codex-семейства — прогон openai-codex-oauth охлаждает/ротирует
+  // пул 'codex-cli' (аккаунты хранятся под canonical id). Без этого лимит на oauth-
+  // провайдере молча терялся: active/candidates искались по несуществующему provider_id.
+  providerId = canonicalAccountProvider(providerId)
+  // EF-R1 Б3: охлаждаем аккаунт, на котором РЕАЛЬНО упал запрос (из run.account_id),
+  // а не текущий global active — при параллельных прогонах/ручном переключении они
+  // могут различаться. fromAccountId без явного — прежнее поведение (active).
+  const from = fromAccountId != null ? getSubscriptionAccount(db, fromAccountId) : getActiveAccount(db, providerId)
+  const current = from && from.providerId === providerId ? from : getActiveAccount(db, providerId)
   const tx = db.transaction((): SwitchResult => {
     if (current) markAccountCooling(db, current.id, coolingUntil, detail)
     const candidate = db.prepare(
       `SELECT id, label FROM subscription_accounts
        WHERE provider_id = ? AND id != ?
-         AND (state != 'cooling' OR cooling_until IS NULL OR cooling_until <= ?)
+         AND (state != 'cooling' OR cooling_until <= ?)
        ORDER BY (last_used_at IS NULL) DESC, last_used_at ASC, created_at DESC
        LIMIT 1`
     ).get(providerId, current?.id ?? -1, now) as { id: number; label: string } | undefined

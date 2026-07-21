@@ -7,7 +7,7 @@
  */
 
 import type { ProviderId } from './registry'
-import { PROVIDERS, createProvider } from './registry'
+import { PROVIDERS, createProvider, isCodexAuthProvider } from './registry'
 
 export interface TurnChange {
   file: string
@@ -35,7 +35,10 @@ export function pickReviewProvider(current: ProviderId, configuredProviders: Pro
   // (claude/gemini/openai/grok) не сконфигурировано, берём ЛЮБОЙ другой
   // сконфигурированный API-провайдер — иначе cross-verify молча мёртв для
   // сетапов вроде «только DeepSeek/Qwen/Mistral» (все API, но не в priority).
-  return configuredProviders.find(p => p !== current) ?? null
+  // EF-R1 Б2: codex-auth провайдеры исключены — им нужен изолированный аккаунт
+  // (configDir), а cross-verify создаёт провайдера без resolver'а; молчаливый
+  // default ~/.codex недопустим.
+  return configuredProviders.find(p => p !== current && !isCodexAuthProvider(p)) ?? null
 }
 
 /**
@@ -72,6 +75,11 @@ export async function runCrossVerify(
   const descriptor = PROVIDERS[providerId]
   if (!descriptor) {
     return { provider: providerId, result: 'Cross-verify: провайдер не найден', ok: true }
+  }
+  // EF-R1 Б2: codex-auth требует изолированного аккаунта (configDir из resolver'а);
+  // здесь resolver'а нет — явный стоп ДО сети вместо молчаливого default ~/.codex.
+  if (isCodexAuthProvider(providerId)) {
+    return { provider: providerId, result: 'Cross-verify пропущен: аккаунт Codex требует изолированного запуска (default-вход не используем)', ok: true }
   }
 
   const apiKey = descriptor.secretKey ? getApiKey(descriptor.secretKey) : null
