@@ -52,7 +52,7 @@ vi.mock('../../electron/ai/runner-plain', async importOriginal => {
 })
 
 const { openDb } = await import('../../electron/storage/db')
-const { createSubscriptionAccount, markAccountCooling } = await import('../../electron/storage/subscription-accounts')
+const { createSubscriptionAccount, markAccountCooling, getActiveAccount, setActiveAccount } = await import('../../electron/storage/subscription-accounts')
 const { createResolveSubscriptionAccount } = await import('../../electron/ai/resolve-subscription-account')
 const { registerAiIpc } = await import('../../electron/ipc/ai')
 
@@ -224,5 +224,105 @@ describe('ai:send — one-shot маршрут с аккаунтом (CD)', () =>
     const sendId = await sendOnce()
     expect(sendId).toBeGreaterThan(0)
     expect(providerOpts!.claudeOauthToken).toBe('sk-legacy')
+  })
+
+  // ─── EF S1/S6: Auto pre-flight — без лишнего сетевого фейла, видимая ротация ───
+
+  it('EF-A: Auto — активный cooling → запрос СРАЗУ через готовый B, ротация видима (без 429 A)', async () => {
+    const a = addAccount('Аккаунт A', 'subacct:a')
+    const b = addAccount('Аккаунт B', 'subacct:b')
+    secrets['subacct:a'] = 'sk-A'
+    secrets['subacct:b'] = 'sk-B'
+    markAccountCooling(db, a.id, NOW + 3_600_000, { scope: 'account', reason: 'quota' })
+    const sendId = await sendOnce()
+    expect(sendId).toBeGreaterThan(0)
+    // Провайдер создан сразу с токеном B — A в сеть не уходил.
+    expect(providerOpts).toBeTruthy()
+    expect(providerOpts!.claudeOauthToken).toBe('sk-B')
+    // Active реально переключился на B (следующие запросы тоже через B).
+    expect(getActiveAccount(db, 'claude-cli')?.id).toBe(b.id)
+    // Timeline: route-событие ротации с machine-readable preflight-evidence.
+    const rot = agentRuns.appendEvent.mock.calls.find(c => c[1] === 'route' && (c[2] as { label?: string })?.label === 'rotate-account')
+    expect(rot).toBeTruthy()
+    const payload = rot![2] as { detail: string; ref: string }
+    expect(payload.detail).toContain('Аккаунт A')
+    expect(payload.detail).toContain('Аккаунт B')
+    const ref = JSON.parse(payload.ref) as Record<string, unknown>
+    expect(ref).toMatchObject({
+      kind: 'rotate-account', preflight: true, reason: 'cooling',
+      fromAccountLabel: 'Аккаунт A', toAccountLabel: 'Аккаунт B', resetAt: NOW + 3_600_000,
+    })
+    // Секреты нигде не светятся.
+    expect(JSON.stringify(payload)).not.toContain('sk-')
+    // Renderer получил route-changed для пилюли «⇄ Аккаунт A → B».
+    const rc = sent.find(p => p.event.type === 'route-changed')
+    expect(rc).toBeTruthy()
+    expect(rc!.event).toMatchObject({
+      action: 'rotate-account',
+      accounts: { fromLabel: 'Аккаунт A', toLabel: 'Аккаунт B' },
+      resetAt: NOW + 3_600_000,
+    })
+  })
+
+  it('EF-allBlocked: Auto, единственный аккаунт cooling → честный стоп ДО сети (не 429)', async () => {
+    const a = addAccount('Единственный', 'subacct:a')
+    secrets['subacct:a'] = 'sk-A'
+    markAccountCooling(db, a.id, NOW + 60_000, { scope: 'account', reason: 'quota' })
+    const sendId = await sendOnce()
+    expect(sendId).toBe(0)
+    expect(providerOpts, 'провайдер не создаётся — никакого сетевого запроса').toBeNull()
+    expect(agentRuns.create, 'run-строка не создаётся').not.toHaveBeenCalled()
+    const err = sent.find(p => p.event.type === 'error')
+    expect(err).toBeTruthy()
+    expect(err!.event.message).toContain('остывают')
+    expect(err!.event.message).toContain('(1)')
+    expect(err!.chatId, 'ошибка адресована чату').toBe(7)
+  })
+
+  it('EF-allBlocked: все аккаунты требуют входа → стоп «требуют входа», сети нет', async () => {
+    addAccount('Без входа 1', 'subacct:e1')
+    addAccount('Без входа 2', 'subacct:e2')
+    secrets['subacct:e1'] = null
+    secrets['subacct:e2'] = null
+    const sendId = await sendOnce()
+    expect(sendId).toBe(0)
+    expect(providerOpts).toBeNull()
+    const err = sent.find(p => p.event.type === 'error')
+    expect(err!.event.message).toContain('требуют входа')
+    expect(err!.event.message).toContain('(2)')
+  })
+
+  it('EF-R2 Б1: active сменился «во время await» — credentials и run.accountId из ОДНОГО resolve', async () => {
+    const a = addAccount('Аккаунт A', 'subacct:a') // активный (первый в пуле)
+    const b = addAccount('Аккаунт B', 'subacct:b')
+    secrets['subacct:a'] = 'sk-A'
+    secrets['subacct:b'] = 'sk-B'
+    expect(getActiveAccount(db, 'claude-cli')?.id).toBe(a.id)
+    // Гонка Б1: первый resolve отдаёт A; ЛЮБОЙ повторный resolve (после await
+    // подготовки контекста) уже видит B — раньше провайдер уходил на B при run.accountId=A.
+    let resolveCalls = 0
+    const realResolve = createResolveSubscriptionAccount(db, {
+      getSecret: (k: string) => secrets[k] ?? null,
+      getSubscriptionBinding: () => binding,
+      now: () => NOW,
+    })
+    handlers.clear()
+    const deps = makeDeps()
+    deps.resolveSubscriptionAccount = (pid: string, cid?: number, o?: { accountId?: number | null }) => {
+      resolveCalls++
+      if (resolveCalls > 1) setActiveAccount(db, 'claude-cli', b.id)
+      return realResolve(pid, cid, o)
+    }
+    registerAiIpc(deps)
+    const sendId = await sendOnce()
+    expect(sendId).toBeGreaterThan(0)
+    // Инвариант: ОДИН согласованный resolve на попытку — повторного чтения active нет.
+    expect(resolveCalls, 'повторный resolve после await — источник A/B race').toBe(1)
+    // Провайдер создан с токеном ТОГО ЖЕ аккаунта, что записан в run.accountId.
+    expect(providerOpts).toBeTruthy()
+    expect(providerOpts!.claudeOauthToken).toBe('sk-A')
+    expect(agentRuns.create).toHaveBeenCalledTimes(1)
+    expect(agentRuns.create.mock.calls[0][0]).toMatchObject({ accountId: a.id })
+    expect(agentRuns.create.mock.calls[0][0]).not.toMatchObject({ accountId: b.id })
   })
 })

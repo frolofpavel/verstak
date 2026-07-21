@@ -23,6 +23,9 @@ const REASON_LABELS: Record<string, string> = {
   'rate-limit': 'лимит частоты',
   auth: 'ошибка авторизации',
   'provider-unavailable': 'провайдер недоступен',
+  // EF S6: pre-flight ротация (ДО сети) — аккаунт пропущен resolver'ом, а не упал запросом.
+  cooling: 'аккаунт остывает после лимита',
+  'login-required': 'требуется вход',
 }
 
 function shortTime(ms: number): string {

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { pickSummaryProvider } from '../../electron/ai/pick-summary-provider'
+import { describe, it, expect, vi } from 'vitest'
+import { pickSummaryProvider, pickSummaryProviderGated } from '../../electron/ai/pick-summary-provider'
 import { PROVIDERS } from '../../electron/ai/registry'
 import type { ProviderId } from '../../electron/ai/registry'
 
@@ -66,5 +66,52 @@ describe('выбор провайдера для summary', () => {
 
   it('возвращает secretKey — вызывающему не нужно снова угадывать имя ключа', () => {
     expect(pickSummaryProvider('claude', keys('claude'), noModel)?.secretKey).toBe(PROVIDERS['claude'].secretKey)
+  })
+})
+
+
+// ─── EF-R2 Б3: compaction — Codex через canonical resolver, без default ~/.codex ───
+
+describe('EF-R2 Б3: gated summary provider (ручная компакция)', () => {
+  const codexKeys = (...extra: ProviderId[]) => keys('openai-codex-oauth', ...extra)
+
+  it('codex-oauth выбран + аккаунт готов → codexHome из resolver (configDir аккаунта)', () => {
+    const c = pickSummaryProviderGated('openai-codex-oauth', codexKeys(), noModel,
+      () => ({ configDir: '/home/user/.codex-acc-a' }))
+    expect(c?.providerId).toBe('openai-codex-oauth')
+    expect(c?.codexHome).toBe('/home/user/.codex-acc-a')
+  })
+
+  it('codex-oauth + allBlocked → fallback на ДРУГОЙ настроенный API (без codexHome)', () => {
+    const c = pickSummaryProviderGated('openai-codex-oauth', codexKeys('gemini-api'), noModel,
+      () => ({ allBlocked: true }))
+    expect(c?.providerId).toBe('gemini-api')
+    expect(c?.codexHome).toBeNull()
+  })
+
+  it('codex-oauth + blocked и других ключей нет → null (нейтральный отказ, НЕ default credential)', () => {
+    const c = pickSummaryProviderGated('openai-codex-oauth', codexKeys(), noModel,
+      () => ({ blocked: true }))
+    expect(c).toBeNull()
+  })
+
+  it('codex-oauth + unavailable (аккаунт удалён) → тоже не default ~/.codex', () => {
+    const c = pickSummaryProviderGated('openai-codex-oauth', codexKeys(), noModel,
+      () => ({ unavailable: true }))
+    expect(c).toBeNull()
+  })
+
+  it('codex-oauth + resolver вернул null (парка нет) → legacy-путь без codexHome', () => {
+    const c = pickSummaryProviderGated('openai-codex-oauth', codexKeys(), noModel, () => null)
+    expect(c?.providerId).toBe('openai-codex-oauth')
+    expect(c?.codexHome).toBeNull()
+  })
+
+  it('выбран НЕ codex → resolver вообще не вызывается', () => {
+    const resolve = vi.fn(() => ({ blocked: true }) as const)
+    const c = pickSummaryProviderGated('claude', keys('claude'), noModel, resolve)
+    expect(c?.providerId).toBe('claude')
+    expect(c?.codexHome).toBeNull()
+    expect(resolve).not.toHaveBeenCalled()
   })
 })

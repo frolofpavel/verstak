@@ -8,6 +8,7 @@ import type { SmartApproveContext, SmartApproveResult } from '../../ai/smart-app
 import type { ProcessRegistry } from '../../ai/process-registry'
 import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
+import type { ResolvedSubscription } from '../../ai/resolve-subscription-account'
 import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-brain'
 
 /** Stable identifier for an in-flight `ai:send` call. */
@@ -88,6 +89,9 @@ export interface ToolContext {
   /** Secret reader для delegate_task — нужен чтобы достать API key
    *  альтернативного провайдера. */
   getSecretForDelegate?: (key: string) => string | null
+  /** EF-R1 Б2: единый resolver подписочного аккаунта для delegate_task — sub-agent
+   *  обязан использовать подтверждённый аккаунт, а не молчаливый default credential. */
+  resolveSubscriptionAccount?: (providerId: string, chatId?: number) => ResolvedSubscription | null
   /** ID текущего провайдера чата — используется как fallback в delegate_task. */
   currentProviderId?: string
   /** MCP client для роутинга вызовов внешних MCP-инструментов. */

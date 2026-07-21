@@ -50,6 +50,11 @@ export interface AgentRun {
   lastToolName: string | null
   lastCheckpointId: number | null
   agentMode: string | null
+  /** 2.1.3-EF-R1 Б3: фактический аккаунт подписки, на котором СТАРТОВАЛ прогон
+   *  (обновляется при ротации через updateActualAccount). NULL = legacy-путь без
+   *  парка аккаунтов / прогоны до миграции v54. Success и охлаждение на лимите
+   *  привязываются к ЭТОМУ аккаунту, а не к global active на момент финиша. */
+  accountId: number | null
   updatedAt: number | null
   lastEventAt: number | null
 }
@@ -192,6 +197,8 @@ export interface AgentRuns {
     generation?: number
     /** Crash-resume: режим прогона (ask/accept-edits/plan/auto/bypass). */
     agentMode?: string | null
+    /** 2.1.3-EF-R1 Б3: аккаунт подписки, подтверждённый pre-flight для этого прогона. */
+    accountId?: number | null
   }) => number
   /**
    * Crash-resume: записать ЖИВОЙ прогресс прогона (на каждом turn агентного
@@ -217,20 +224,28 @@ export interface AgentRuns {
     ref?: string | null
     status?: string | null
   }) => void
-  /** Завершить прогон: status + ended_at=now + опциональные итоговые счётчики. */
+  /** Завершить прогон: status + ended_at=now + опциональные итоговые счётчики.
+   *  EF-R1 Б4: возвращает true, только если ИМЕННО ЭТОТ вызов совершил первый
+   *  терминальный переход (ended_at было NULL). Повторный finish (напр. поздний
+   *  'done' после stop) → false — побочные эффекты успеха на него вешать нельзя. */
   finish: (runId: string, status: AgentRunStatus, opts?: {
     costCents?: number
     toolCount?: number
     filesCount?: number
     agentsCount?: number
     error?: string | null
-  }) => void
+  }) => boolean
   /** Атомарно увеличить счётчик (field = field + by). */
   incr: (runId: string, field: AgentRunCounterField, by?: number) => void
   /** 2.0.7-F: обновить ACTUAL провайдера/модель прогона после smart-fallback (handoff
    *  на другого провайдера). requested_* остаётся исходным — так «actual vs requested»
    *  честно показывает, что запрос ушёл к запасному. Пишет только для ЖИВЫХ прогонов. */
   updateActual: (runId: string, providerId: string, model: string) => void
+  /** 2.1.3-EF-R1 Б3: аккаунт прогона после account-ротации (тот же провайдер, новый
+   *  аккаунт). Пишет только для ЖИВЫХ прогонов — завершённый не переписываем.
+   *  EF-R2 Б2: null — кросс-провайдерный handoff на провайдер БЕЗ managed-аккаунта:
+   *  account_id ЯВНО очищается (success/cooldown не должны уйти прежнему аккаунту). */
+  updateActualAccount: (runId: string, accountId: number | null) => void
   /** Прогоны проекта, новейшие первыми. Фильтры status/owner опциональны. */
   list: (projectPath: string, opts?: { status?: AgentRunStatus; owner?: AgentRunOwner; limit?: number }) => AgentRun[]
   get: (runId: string) => AgentRun | null
@@ -325,6 +340,7 @@ const SELECT_RUN = `
          error, started_at as startedAt, ended_at as endedAt,
          turn_index as turnIndex, last_tool_name as lastToolName,
          last_checkpoint_id as lastCheckpointId, agent_mode as agentMode,
+         account_id as accountId,
          updated_at as updatedAt,
          (SELECT MAX(created_at) FROM agent_run_events e WHERE e.run_id = agent_runs.run_id) as lastEventAt
   FROM agent_runs
@@ -353,8 +369,8 @@ export function createAgentRuns(db: Database): AgentRuns {
       db.prepare(
         `INSERT INTO agent_runs
           (run_id, project_path, chat_id, owner, title, status,
-           provider_id, model, requested_provider_id, requested_model, send_id, generation, agent_mode, turn_index, updated_at, started_at)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+           provider_id, model, requested_provider_id, requested_model, send_id, generation, agent_mode, account_id, turn_index, updated_at, started_at)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
       ).run(
         opts.runId,
         opts.projectPath,
@@ -368,6 +384,7 @@ export function createAgentRuns(db: Database): AgentRuns {
         opts.sendId ?? null,
         generation,
         opts.agentMode ?? null,
+        opts.accountId ?? null,
         now,
         now
       )
@@ -404,7 +421,8 @@ export function createAgentRuns(db: Database): AgentRuns {
     },
     finish(runId, status, opts) {
       const current = db.prepare('SELECT ended_at as endedAt FROM agent_runs WHERE run_id = ?').get(runId) as { endedAt: number | null } | undefined
-      if (!current || current.endedAt != null) return
+      // Б4: уже терминальный (или несуществующий) прогон — вызов НЕ совершает перехода.
+      if (!current || current.endedAt != null) return false
       db.prepare(
         `INSERT INTO agent_run_events (run_id, kind, label, detail, ref, status, created_at)
          VALUES (?, 'status', 'terminal', ?, NULL, ?, ?)`
@@ -421,8 +439,9 @@ export function createAgentRuns(db: Database): AgentRuns {
       // 'agent-runs:stop' пишет finish('stopped'), а затем естественный finally
       // runner'а тоже вызовет finish(...) по exitReason='aborted' → 'stopped'/
       // 'done'. Без guard'а второй вызов затёр бы stop-статус и счётчики первого.
-      // Первый дошедший finish фиксирует состояние; повторные — no-op.
+      // Первый дошедший finish фиксирует состояние; повторные — no-op (false).
       db.prepare(`UPDATE agent_runs SET ${sets.join(', ')} WHERE run_id = ? AND ended_at IS NULL`).run(...vals)
+      return true
     },
     incr(runId, field, by = 1) {
       // field — из фиксированного enum AgentRunCounterField, не пользовательский
@@ -433,6 +452,11 @@ export function createAgentRuns(db: Database): AgentRuns {
       // Только ЖИВОЙ прогон (ended_at IS NULL) — завершённый не переписываем.
       db.prepare('UPDATE agent_runs SET provider_id = ?, model = ? WHERE run_id = ? AND ended_at IS NULL')
         .run(providerId, model, runId)
+    },
+    updateActualAccount(runId, accountId) {
+      // Только ЖИВОЙ прогон — как updateActual. null = очистка (EF-R2 Б2).
+      db.prepare('UPDATE agent_runs SET account_id = ? WHERE run_id = ? AND ended_at IS NULL')
+        .run(accountId, runId)
     },
     list(projectPath, opts) {
       const where: string[] = ['project_path = ?']

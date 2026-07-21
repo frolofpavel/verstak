@@ -85,7 +85,10 @@ export function toSubscriptionAccountDTO(
   src: SubscriptionAccountSource,
   opts: { hasCredential: boolean; now: number },
 ): SubscriptionAccountDTO {
-  const cooling = typeof src.coolingUntil === 'number' && src.coolingUntil > opts.now
+  // Колонка state авторитетна и согласована с pre-flight resolver'ом: markAccountCooling
+  // всегда пишет state='cooling' вместе с cooling_until. until=NULL — «срок неизвестен»:
+  // аккаунт остаётся cooling и НЕ становится ready автоматически (EF S3).
+  const cooling = src.state === 'cooling' && (src.coolingUntil == null || src.coolingUntil > opts.now)
   const state: SubscriptionState =
     src.state === 'invalid' ? 'invalid'
       : !opts.hasCredential ? 'login-required'
@@ -167,4 +170,12 @@ export function isChatSubscriptionBinding(v: unknown): v is ChatSubscriptionBind
     && isKnownProviderId(b.providerId)
     && (b.mode === 'auto' || b.mode === 'pinned')
     && (b.accountId === null || typeof b.accountId === 'number')
+}
+
+/** Аккаунты Codex общие для codex-cli и нативного openai-codex-oauth (реестр 'codex-cli').
+ *  Канонизация обязательна во ВСЕХ обращениях к парку аккаунтов (resolver, switch-on-limit,
+ *  success): иначе для oauth-провайдера пул codex-cli невидим — охлаждение/выбор молча
+ *  теряются. Живёт в contracts: импортируют и ai-слой, и storage (storage → ai нельзя). */
+export function canonicalAccountProvider(providerId: string): string {
+  return providerId === 'openai-codex-oauth' ? 'codex-cli' : providerId
 }

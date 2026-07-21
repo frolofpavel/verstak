@@ -16,6 +16,7 @@ import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import { prepareSystemContext } from '../ai/compose-system'
 import { systemForProvider } from '../ai/compose-prompt'
 import type { ChatMessage } from '../ai/types'
+import type { ResolvedSubscription } from '../ai/resolve-subscription-account'
 
 export interface AutonomousDeps {
   getSecret: (key: string) => string | null
@@ -26,6 +27,8 @@ export interface AutonomousDeps {
   recentWrites: (projectPath: string, limit: number) => Array<{ filePath: string; createdAt: number }>
   /** Currently-active project path. The loop only operates on this. */
   getActiveProject: () => string | null
+  /** EF-R1 Б2: единый резолвер подписочного аккаунта (как в ai:send/scheduled). */
+  resolveSubscriptionAccount?: (providerId: string, chatId?: number) => ResolvedSubscription | null
 }
 
 export interface AutonomousStatus {
@@ -112,11 +115,32 @@ async function runCycle(deps: AutonomousDeps): Promise<void> {
     status.lastRunError = `No API key for ${providerId}`
     return
   }
+  // EF-R1 Б2: autonomous проходит тот же единый resolver, что и ai:send/scheduled.
+  // Заблокированный/отсутствующий аккаунт → человеческий стоп ДО сети; молчаливый
+  // default credential (~/.codex) запрещён. Парка нет (null) → прежний путь.
+  const sub = deps.resolveSubscriptionAccount?.(providerId) ?? null
+  if (sub && 'unavailable' in sub) {
+    status.lastRunError = 'Закреплённый аккаунт провайдера удалён — автономный прогон отменён'
+    return
+  }
+  if (sub && 'blocked' in sub) {
+    status.lastRunError = sub.reason === 'cooling'
+      ? `Аккаунт «${sub.label}» остывает после лимита — автономный прогон отменён`
+      : `Аккаунт «${sub.label}» требует входа — автономный прогон отменён`
+    return
+  }
+  if (sub && 'allBlocked' in sub) {
+    status.lastRunError = sub.reason === 'cooling'
+      ? `Все аккаунты провайдера (${sub.count}) остывают — автономный прогон отменён`
+      : `Все аккаунты провайдера (${sub.count}) требуют входа — автономный прогон отменён`
+    return
+  }
+  const codexHome = sub && 'configDir' in sub ? (sub.configDir || null) : null
 
   const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
   const ctrl = new AbortController()
   try {
-    const provider = createProvider(providerId, { apiKey, model, cwd: projectPath, signal: ctrl.signal })
+    const provider = createProvider(providerId, { apiKey, model, cwd: projectPath, signal: ctrl.signal, codexHome })
     const messages: ChatMessage[] = [{ role: 'user', content: PROMPT }]
     // Wrap with system + context pack just like a normal ai:send
     const composed = await prepareSystemContext({

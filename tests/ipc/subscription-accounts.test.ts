@@ -82,8 +82,9 @@ describe('toSubscriptionAccountDTO — acceptance: ноль запрещённы
   })
 
   it('cooling_until в будущем → state cooling + cooldown scope/reason/until', () => {
+    // state:'cooling' — как пишет реальный markAccountCooling (state и until всегда вместе).
     const src: SubscriptionAccountSource = {
-      ...FILLED, coolingUntil: T0 + 60_000, cooldownScope: 'model', cooldownReason: 'quota', cooldownModel: 'claude-sonnet-4-6',
+      ...FILLED, state: 'cooling', coolingUntil: T0 + 60_000, cooldownScope: 'model', cooldownReason: 'quota', cooldownModel: 'claude-sonnet-4-6',
     }
     const dto = toSubscriptionAccountDTO(src, { hasCredential: true, now: T0 })
     expect(dto.state).toBe('cooling')
@@ -97,9 +98,29 @@ describe('toSubscriptionAccountDTO — acceptance: ноль запрещённы
   })
 
   it('невалидные cooldown scope/reason → безопасные дефолты (account/unknown), не краш', () => {
-    const dto = toSubscriptionAccountDTO({ ...FILLED, coolingUntil: T0 + 1, cooldownScope: 'МУСОР', cooldownReason: 'xxx' }, { hasCredential: true, now: T0 })
+    const dto = toSubscriptionAccountDTO({ ...FILLED, state: 'cooling', coolingUntil: T0 + 1, cooldownScope: 'МУСОР', cooldownReason: 'xxx' }, { hasCredential: true, now: T0 })
     expect(dto.cooldown?.scope).toBe('account')
     expect(dto.cooldown?.reason).toBe('unknown')
+  })
+
+  // EF S3: cooling без известного срока (until=NULL) — честный «остывает · срок неизвестен»,
+  // НЕ ready. Колонка state авторитетна и согласована с resolver'ом pre-flight.
+  it('state=cooling + until=NULL (срок неизвестен) → cooling, НЕ ready; cooldown.until=null', () => {
+    const dto = toSubscriptionAccountDTO(
+      { ...FILLED, state: 'cooling', coolingUntil: null, cooldownScope: 'account', cooldownReason: 'quota' },
+      { hasCredential: true, now: T0 },
+    )
+    expect(dto.state).toBe('cooling')
+    expect(dto.cooldown).toEqual({ scope: 'account', reason: 'quota', until: null })
+  })
+
+  it('state=cooling + истёкший until → восстановился: ready, cooldown отсутствует', () => {
+    const dto = toSubscriptionAccountDTO(
+      { ...FILLED, state: 'cooling', coolingUntil: T0 - 1 },
+      { hasCredential: true, now: T0 },
+    )
+    expect(dto.state).toBe('ready')
+    expect(dto.cooldown).toBeUndefined()
   })
 
   // INFO-3 (ревью 2.0.8-B): invalid/login-required перебивают cooling по приоритету state.

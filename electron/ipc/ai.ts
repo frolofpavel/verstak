@@ -32,7 +32,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
-import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun, type FallbackAttempt } from '../ai/runner-shared'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -86,8 +86,12 @@ export interface AiDeps {
   /** 1.9.4: активный аккаунт провайдера исчерпал лимит → пометить cooling и переключить на
    *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback).
    *  2.1.3-CD: reason (quota/rate-limit) пишется в cooldown для честного UI; результат несёт
-   *  безопасные labels аккаунтов для route-evidence. */
-  switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null, reason?: CooldownReason) => SwitchResult
+   *  безопасные labels аккаунтов для route-evidence.
+   *  EF-R1 Б3: fromAccountId — аккаунт, на котором реально упал запрос (run.account_id);
+   *  без него охлаждается текущий global active (прежнее поведение). */
+  switchSubscriptionAccountOnLimit?: (providerId: string, resetEta: number | null, reason?: CooldownReason, fromAccountId?: number | null) => SwitchResult
+  /** EF-R1 Б3: scheduled-прогон подтверждает успешный ответ аккаунта после result.ok. */
+  markSubscriptionAccountSuccess?: (accountId: number) => void
   /** Корни зарегистрированных проектов — для валидации projectPath из рендерера. */
   getKnownRoots: () => string[]
   /** Persist a write so the user can ↶ revert it later. */
@@ -329,6 +333,26 @@ export async function runScheduledHeadless(
   }
   const apiKey = deps.getSecret(descriptor.secretKey)
   if (!apiKey) return { ok: false, text: '', error: `Нет API-ключа для ${opts.providerId}` }
+  // 2.1.3-EF S4: unattended-прогон проходит ТОТ ЖЕ единый resolver, что и ai:send.
+  // Auto pre-flight промоутит готовый аккаунт вместо cooling-активного (resolver сам
+  // делает setActiveAccount/clearCooling), а явные стопы честно отменяют прогон ДО сети.
+  const sub = deps.resolveSubscriptionAccount?.(opts.providerId)
+  if (sub && 'unavailable' in sub) {
+    return { ok: false, text: '', error: 'Закреплённый аккаунт провайдера удалён — прогон отменён' }
+  }
+  if (sub && 'blocked' in sub) {
+    const resetTxt = sub.resetAt != null
+      ? ` до ${new Date(sub.resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : ' (срок неизвестен)'
+    return { ok: false, text: '', error: sub.reason === 'cooling'
+      ? `Аккаунт «${sub.label}» остывает после лимита${resetTxt} — прогон отменён`
+      : `Аккаунт «${sub.label}» требует входа — прогон отменён` }
+  }
+  if (sub && 'allBlocked' in sub) {
+    return { ok: false, text: '', error: sub.reason === 'cooling'
+      ? `Все аккаунты провайдера (${sub.count}) остывают — прогон отменён`
+      : `Все аккаунты провайдера (${sub.count}) требуют входа — прогон отменён` }
+  }
   const model = opts.model ?? descriptor.defaultModel
 
   try {
@@ -357,6 +381,7 @@ export async function runScheduledHeadless(
       searchMemories: deps.searchMemories, searchConversations: deps.searchConversations, connectors: deps.connectors,
       pendingAttachments: [], pendingWrites: new Map(), pendingCommands: new Map(), scopedKey,
       agentMode: 'auto', readOnlyConnectors: true, skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
       permissionRules: loadPermissionRules(opts.projectPath),
       currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
       subCostGuard: createCostGuard(null), parentChatId: null,
@@ -368,6 +393,13 @@ export async function runScheduledHeadless(
       signal: opts.signal, role: 'scheduled',
     })
     if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error }
+    // EF-R1 Б3: успех подтверждён реальным ответом — отмечаем аккаунт, выбранный
+    // pre-flight (у scheduled нет agent_run, accountId взят из resolver'а напрямую).
+    if (sub && !('blocked' in sub) && !('allBlocked' in sub) && !('unavailable' in sub)) {
+      try {
+        deps.markSubscriptionAccountSuccess?.(sub.accountId)
+      } catch { /* best-effort */ }
+    }
     return { ok: true, text: result.text }
   } catch (err) {
     return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) }
@@ -393,7 +425,7 @@ export function resolveCodexHome(
   // (success с configDir | { unavailable } | { blocked }), и упрощённый resolve в тестах
   // ({ configDir }). blocked-вариант configDir не несёт → дефолтный путь; реальный стоп
   // по blocked делает send-хендлер ДО этого вызова (2.1.3-CD).
-  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | { blocked: true } | null) | undefined,
+  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | { blocked: true } | { allBlocked: true } | null) | undefined,
   chatId?: number,
 ): string | null {
   if (!isCodexAuthProvider(providerId)) return null
@@ -518,15 +550,6 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
     const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
-    // Резолв аккаунта с учётом pin/one-shot, суженный до success|null: unavailable/blocked
-    // отсекаются ранними стопами ниже, сюда прийти не должны → трактуем как null.
-    // Для основного провайдера one-shot accountId пробрасывается явно (строгий маршрут);
-    // fallback-провайдеры резолвятся обычным путём (одноразовый аккаунт на них не течёт).
-    const resolveAcct = (pid: string): Exclude<ResolvedSubscription, { unavailable: true } | { blocked: true }> | null => {
-      const explicit = pid === providerId && oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined
-      const r = deps.resolveSubscriptionAccount?.(pid, chatIdNum, explicit)
-      return r && !('unavailable' in r) && !('blocked' in r) ? r : null
-    }
     // 2.0.8-D2 + 2.1.3-CD: ранние стопы маршрута ДО создания run/провайдера — чистый выход.
     //  · unavailable: pin/one-shot на удалённый аккаунт → стоп-с-вопросом (НЕ тихая ротация).
     //  · blocked: явно выбранный (one-shot) или закреплённый аккаунт не готов (cooling /
@@ -534,7 +557,13 @@ export function registerAiIpc(deps: AiDeps): void {
     // chatPinned (аккаунт закреплён/явно выбран и жив) → ниже подавляет авто-свитч/fallback.
     const pinResolution = deps.resolveSubscriptionAccount?.(
       providerId, chatIdNum, oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined)
-    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && pinResolution.pinned)
+    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution) && pinResolution.pinned)
+    // EF-R1 Б3: аккаунт, подтверждённый pre-flight для ЭТОГО прогона — фиксируется в
+    // agent_runs.account_id. Success/охлаждение привязываются к нему, а не к global
+    // active на момент финиша (параллельные прогоны / ручное переключение).
+    const runAccountId = pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution)
+      ? pinResolution.accountId
+      : null
     // Ранняя ошибка маршрута: id:0 (owner ещё не зарегистрирован) + chatId в обёртке —
     // рендерер доставляет спец-текст в нужный чат (CD; раньше дропался роутером, и
     // пользователь видел только общий «провайдер недоступен»).
@@ -559,6 +588,23 @@ export function registerAiIpc(deps: AiDeps): void {
         : `Аккаунт «${label}» требует входа. Выполните вход в Настройки → Подписки или выберите другой аккаунт.`
       return earlyRouteStop(message)
     }
+    // EF S1: Auto pre-flight исчерпал пул — ВСЕ аккаунты провайдера неготовы. Честный
+    // стоп ДО сети (вместо гарантированного 429 активного): ближайший известный resetAt,
+    // until=NULL у всех → «сроки неизвестны» (не превращаем в ложный ready).
+    if (pinResolution && 'allBlocked' in pinResolution) {
+      const { reason, resetAt, count } = pinResolution
+      const message = reason === 'cooling'
+        ? `Все аккаунты провайдера (${count}) остывают после лимита · ${resetAt != null ? `ближайшее восстановление в ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'сроки восстановления неизвестны'}. Дождитесь сброса лимита или проверьте аккаунты в Настройки → Подписки.`
+        : `Все аккаунты провайдера (${count}) требуют входа. Выполните вход в Настройки → Подписки.`
+      return earlyRouteStop(message)
+    }
+    // EF-R2 Б1: ЕДИНЫЙ resolved account context попытки. После ранних стопов здесь
+    // pinResolution ∈ {success, null, undefined}. Между этой точкой и createProvider —
+    // await'ы (attachments/context/CLI-prompt): повторный resolve после них мог прочитать
+    // УЖЕ сменившийся active/pin → провайдер пошёл бы через B при run.accountId=A.
+    // Credentials/codexHome у createProvider берутся ТОЛЬКО из этого объекта (тот же,
+    // что дал runAccountId) — смена active/pin во время подготовки расхождения не создаёт.
+    const mainAcct = pinResolution ?? null
     // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Ставится ЗДЕСЬ — ПОСЛЕ
     // раннего выхода на удалённом pin'е и до любой длительной работы: прогон стартовал
     // по-настоящему. Раньше стояло рядом с activeAborts.set, и ранний выход оставлял чат
@@ -999,20 +1045,19 @@ export function registerAiIpc(deps: AiDeps): void {
     let provider: ChatProvider
     try {
       // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
-      // 1.9.3 мультиаккаунт: если заведён активный claude-cli аккаунт — берём его токен
-      // (пул Claude Max, ротация лимита); иначе падаем на legacy-одиночный токен settings.
-      const claudeAccount = providerId === 'claude-cli' ? resolveAcct('claude-cli') : null
+      // 1.9.3 мультиаккаунт: токен ИМЕННО аккаунта прогона (mainAcct — единый resolve
+      // EF-R2 Б1, тот же, что дал run.accountId); парка нет → legacy-одиночный токен settings.
       const claudeOauthToken = providerId === 'claude-cli'
-        ? (claudeAccount?.secret ?? deps.getSecret('claude_code_oauth_token'))
+        ? (mainAcct?.secret ?? deps.getSecret('claude_code_oauth_token'))
         : null
-      // Codex мультиаккаунт (2.0.8-C): активный Codex-аккаунт → изолированный CODEX_HOME
-      // для codex-cli И нативного openai-codex-oauth (единый резолвер, без мутации env).
-      // CD: one-shot accountId пробрасываем явно — иначе CODEX_HOME взялся бы от активного
-      // аккаунта, а не от выбранного на один запрос (молчаливая подмена маршрута).
-      const codexHome = resolveCodexHome(
-        providerId,
-        (pid, cid) => deps.resolveSubscriptionAccount?.(pid, cid, oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined) ?? null,
-        chatIdNum)
+      // Codex мультиаккаунт (2.0.8-C): CODEX_HOME аккаунта прогона (тот же mainAcct —
+      // никакого повторного resolve после await, EF-R2 Б1). Парка нет (mainAcct=null) →
+      // прежний legacy-путь resolveCodexHome (дефолтный ~/.codex вне управляемого парка).
+      const codexHome = isCodexAuthProvider(providerId)
+        ? (mainAcct
+            ? (mainAcct.configDir || null)
+            : resolveCodexHome(providerId, deps.resolveSubscriptionAccount, chatIdNum))
+        : null
       // custom-openai: baseUrl + список моделей задаются юзером в Settings.
       // models приходят как comma-separated string; парсим в массив.
       let customBaseUrl: string | undefined
@@ -1123,7 +1168,9 @@ export function registerAiIpc(deps: AiDeps): void {
         sendId,
         // Crash-resume: режим прогона — гард деструктива в баннере возобновления
         // (auto/bypass → авто-resume запрещён).
-        agentMode
+        agentMode,
+        // EF-R1 Б3: фактический аккаунт прогона (pre-flight подтверждённый).
+        accountId: runAccountId
       })
       // Timeline: исходный запрос пользователя первым событием — чтобы лента
       // читалась как нарратив (запрос → действия → итог), а не только механика.
@@ -1141,7 +1188,7 @@ export function registerAiIpc(deps: AiDeps): void {
       if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
       // 2.1.3-CD: запрошенный one-shot аккаунт — первая запись route-evidence прогона.
       // Timeline/Proof читают её без разбора логов; label — безопасное имя, не id.
-      if (oneShotAccountId != null && pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution)) {
+      if (oneShotAccountId != null && pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution)) {
         try {
           deps.agentRuns?.appendEvent(runId, 'route', {
             label: 'requested-account',
@@ -1149,6 +1196,47 @@ export function registerAiIpc(deps: AiDeps): void {
             status: 'info',
           })
         } catch { /* best-effort */ }
+      }
+      // EF S1+S6: Auto pre-flight выбрал следующий готовый аккаунт ДО сетевого запроса.
+      // Фиксируем ротацию в route-evidence (Timeline/Proof читают без разбора логов) и
+      // шлём route-changed — пилюля «⇄ Аккаунт A → B» появляется сразу, а не после 429.
+      // Только label'ы: никаких id/credRef/configDir наружу.
+      if (pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution) && pinResolution.skipped) {
+        const skipped = pinResolution.skipped
+        const reasonTxt = skipped.reason === 'cooling' ? 'остывает' : 'требует входа'
+        const resetTxt = skipped.resetAt != null
+          ? ` до ${new Date(skipped.resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+          : ', срок неизвестен'
+        try {
+          deps.agentRuns?.appendEvent(runId, 'route', {
+            label: 'rotate-account',
+            detail: `Auto: аккаунт «${skipped.fromLabel}» пропущен (${reasonTxt}${resetTxt}) → выбран «${pinResolution.label}»`,
+            ref: JSON.stringify({
+              kind: 'rotate-account',
+              preflight: true,
+              reason: skipped.reason,
+              fromAccountLabel: skipped.fromLabel,
+              toAccountLabel: pinResolution.label,
+              resetAt: skipped.resetAt,
+              requested: { providerId, model: model ?? null },
+              actual: { providerId, model: model ?? null },
+            }),
+            status: 'ok',
+          })
+        } catch { /* best-effort */ }
+        taggedSender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'route-changed',
+            action: 'rotate-account',
+            reason: skipped.reason,
+            attempt: 0,
+            requested: { providerId, model: model ?? '' },
+            actual: { providerId, model: model ?? '' },
+            resetAt: skipped.resetAt,
+            accounts: { fromLabel: skipped.fromLabel, toLabel: pinResolution.label },
+          },
+        })
       }
     } catch (err) {
       logRuntimeError('agent_runs.create.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
@@ -1219,21 +1307,31 @@ export function registerAiIpc(deps: AiDeps): void {
       && !overrides?.providerId  // не задействуем fallback в Explicit Review
       && routeFallbackAllowed    // strict prompt-route отключает fallback
 
-    /** Создаёт провайдера для fallback-кандидата с теми же опциями. */
-    function makeFallbackProvider(fallbackId: ProviderId): ChatProvider | null {
+    /** Создаёт fallback-attempt (провайдер + аккаунт попытки) для кандидата с теми же опциями.
+     *  EF-R2 Б2: возвращает FallbackAttempt — lineage аккаунта доезжает до runner'а,
+     *  который фиксирует/очищает run.account_id ДО выполнения попытки. */
+    function makeFallbackAttempt(fallbackId: ProviderId): FallbackAttempt | null {
       const fallbackDesc = PROVIDERS[fallbackId]
       if (!fallbackDesc) return null
       const fallbackKey = fallbackDesc.secretKey ? deps.getSecret(fallbackDesc.secretKey) : null
       if (fallbackDesc.secretKey && !fallbackKey) return null
       const fallbackModel = deps.getProviderModel(fallbackId) ?? fallbackDesc.defaultModel
+      // EF-R1 Б2: pre-flight НЕПОСРЕДСТВЕННО перед созданием fallback-attempt. Парк
+      // аккаунтов есть, но выбор unavailable/blocked/allBlocked → НЕ подменяем молча
+      // default credential (legacy env-токен / ~/.codex) — fallback-кандидата просто нет.
+      // Парка нет (resolver → null) → прежний legacy-путь, accountId=null (очистка).
+      const fbRes = deps.resolveSubscriptionAccount?.(fallbackId, chatIdNum) ?? null
+      if (fbRes && ('unavailable' in fbRes || 'blocked' in fbRes || 'allBlocked' in fbRes)) return null
       // 1.9.3/1.9.4: при пересоздании CLI-провайдера резолвим активный аккаунт ЗАНОВО —
       // для account-switch на лимите берётся новый токен/CODEX_HOME переключённого аккаунта.
       const fbClaudeToken = fallbackId === 'claude-cli'
-        ? (resolveAcct('claude-cli')?.secret ?? deps.getSecret('claude_code_oauth_token'))
+        ? (fbRes && 'secret' in fbRes ? fbRes.secret : deps.getSecret('claude_code_oauth_token'))
         : null
-      const fbCodexHome = resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount, chatIdNum)
+      const fbCodexHome = fbRes && 'configDir' in fbRes
+        ? (fbRes.configDir || null)
+        : resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount, chatIdNum)
       try {
-        return createProvider(fallbackId, {
+        const provider = createProvider(fallbackId, {
           apiKey: fallbackKey,
           model: fallbackModel,
           cwd: projectPath ?? process.cwd(),
@@ -1245,9 +1343,24 @@ export function registerAiIpc(deps: AiDeps): void {
           claudeOauthToken: fbClaudeToken,
           codexHome: fbCodexHome
         })
+        // EF-R2 Б2: аккаунт, закреплённый за ЭТОЙ попыткой. Resolver вернул success →
+        // его accountId; парка нет → null (handoff явно очистит run.account_id).
+        const accountId = fbRes && 'accountId' in fbRes ? fbRes.accountId : null
+        return { provider, accountId }
       } catch {
         return null
       }
+    }
+
+    /** EF-R1 Б3: охлаждаем аккаунт, на котором РЕАЛЬНО упал запрос (run.account_id),
+     *  а не текущий global active. EF-R2 Б2: accountId нового attempt фиксирует runner
+     *  через handoff-envelope (getNextAttempt) — здесь только охлаждение. */
+    const switchAccountOnLimitForRun = (pid: string, eta: number | null, reason?: CooldownReason): SwitchResult => {
+      let fromAccountId: number | null = null
+      try {
+        fromAccountId = deps.agentRuns?.get(runId)?.accountId ?? null
+      } catch { /* best-effort */ }
+      return deps.switchSubscriptionAccountOnLimit?.(pid, eta, reason, fromAccountId) ?? { switched: false }
     }
 
     if (useToolsPath) {
@@ -1296,8 +1409,9 @@ export function registerAiIpc(deps: AiDeps): void {
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
         connectors: deps.connectors, agentMode, turnsBudget,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
+        resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
         providerId, model,
-        fallbackOpts: smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit, pinnedAccount: chatPinned } : undefined,
+        fallbackOpts: smartFallbackEnabled ? { getNextAttempt: makeFallbackAttempt, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: switchAccountOnLimitForRun, pinnedAccount: chatPinned } : undefined,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
@@ -1322,7 +1436,7 @@ export function registerAiIpc(deps: AiDeps): void {
         status: 'running'
       })
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: deps.switchSubscriptionAccountOnLimit, pinnedAccount: chatPinned } : undefined,
+        smartFallbackEnabled ? { getNextAttempt: makeFallbackAttempt, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: switchAccountOnLimitForRun, pinnedAccount: chatPinned } : undefined,
         deps.agentRuns,
         runId
       ).finally(cleanup)

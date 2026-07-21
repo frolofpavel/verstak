@@ -9,9 +9,24 @@ import type { ChatProvider } from './types'
 import type { SwitchResult } from '../storage/subscription-accounts'
 import type { CooldownReason } from '../../shared/contracts/subscription'
 
+/** EF-R2 Б2: fallback-attempt — провайдер + аккаунт, закреплённый за попыткой.
+ *  accountId: number — managed-аккаунт нового провайдера; null — managed-аккаунта
+ *  нет (run.account_id очищается); undefined внутри runner'а — legacy getNextProvider
+ *  без lineage (accountId прогона не трогаем). */
+export interface FallbackAttempt {
+  provider: ChatProvider
+  accountId: number | null
+}
+
 export interface FallbackOpts {
-  /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
-  getNextProvider: (id: ProviderId) => ChatProvider | null
+  /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа).
+   *  Legacy-вариант без account-lineage: run.account_id при handoff не меняется.
+   *  EF-R2 Б2: production-путь использует getNextAttempt (attempt несёт аккаунт). */
+  getNextProvider?: (id: ProviderId) => ChatProvider | null
+  /** EF-R2 Б2: предпочтительный вариант — attempt несёт аккаунт, закреплённый за
+   *  попыткой. accountId=null — у провайдера нет managed-аккаунта → run.account_id
+   *  ЯВНО очищается (success/cooldown не должны уйти аккаунту упавшего провайдера). */
+  getNextAttempt?: (id: ProviderId) => FallbackAttempt | null
   /** Модель fallback-кандидата — чтобы cost-guard/журнал прогона считались по
    *  РЕАЛЬНОЙ модели fallback'а, а не по модели упавшего провайдера (#7). */
   getProviderModel: (id: ProviderId) => string | null

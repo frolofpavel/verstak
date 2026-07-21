@@ -161,6 +161,36 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
+  // EF-R1 Б4: finish сообщает, совершил ли ИМЕННО ЭТОТ вызов первый терминальный
+  // переход — обёртка успеха (last_success_at) вешается только на transitioned=true.
+  it('Б4: finish возвращает true на первом терминальном переходе, false на повторном', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A' })
+    expect(runs.finish('r1', 'stopped', {})).toBe(true)
+    expect(runs.finish('r1', 'done', {})).toBe(false)   // поздний done — НЕ переход
+    expect(runs.finish('r1', 'done', {})).toBe(false)
+    expect(runs.finish('missing-run', 'done', {})).toBe(false)
+    expect(runs.get('r1')!.status).toBe('stopped')
+    db.close()
+  })
+
+  // EF-R1 Б3: account_id фиксируется при create и обновляется ротацией (только живой).
+  it('Б3: create сохраняет accountId; updateActualAccount обновляет ТОЛЬКО живой прогон', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A', accountId: 11 })
+    runs.create({ runId: 'r2', projectPath: '/p', title: 'B' }) // legacy: account_id NULL
+    expect(runs.get('r1')!.accountId).toBe(11)
+    expect(runs.get('r2')!.accountId).toBeNull()
+    runs.updateActualAccount('r1', 22) // ротация аккаунта внутри прогона
+    expect(runs.get('r1')!.accountId).toBe(22)
+    runs.finish('r1', 'done', {})
+    runs.updateActualAccount('r1', 33) // завершённый не переписываем
+    expect(runs.get('r1')!.accountId).toBe(22)
+    db.close()
+  })
+
   it('finish(timed_out) round-trip для runtime watchdog', () => {
     const db = openDb(join(dir, 'test.db'))
     const runs = createAgentRuns(db)

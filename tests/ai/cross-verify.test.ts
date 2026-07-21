@@ -19,6 +19,23 @@ describe('pickReviewProvider — выбор ДРУГОГО провайдера 
   it('текущий-CLI + priority сконфигурирован → priority', () => {
     expect(pickReviewProvider('claude-cli' as ProviderId, ['claude', 'gemini-api'])).toBe('claude')
   })
+  it('EF-R1 Б2: codex-auth НЕ выбирается ревьюером даже fallback-веткой (default ~/.codex запрещён)', () => {
+    const got = pickReviewProvider('deepseek' as ProviderId, ['deepseek', 'openai-codex-oauth', 'qwen'] as ProviderId[])
+    expect(got).toBe('qwen')
+    // codex — единственная альтернатива → null, а не молчаливый default-вход.
+    const only = pickReviewProvider('deepseek' as ProviderId, ['deepseek', 'openai-codex-oauth'] as ProviderId[])
+    expect(only).toBeNull()
+  })
+})
+
+describe('runCrossVerify — EF-R1 Б2: codex-auth стоп ДО сети', () => {
+  it('openai-codex-oauth → явный пропуск без createProvider и без default ~/.codex', async () => {
+    const { runCrossVerify } = await import('../../electron/ai/cross-verify')
+    const res = await runCrossVerify('openai-codex-oauth' as ProviderId, 'prompt', () => 'sk-any')
+    expect(res.ok).toBe(true) // never-scary контракт cross-verify
+    expect(res.result).toContain('изолированного запуска')
+    expect(res.result).not.toContain('sk-any')
+  })
 })
 
 describe('buildCrossVerifyPrompt — сборка промпта ревью', () => {

@@ -11,7 +11,7 @@ import { PROVIDERS, type ProviderId } from './registry'
 import type { InputAccounting } from '../../shared/contracts/usage'
 import type { AgentRuns } from '../storage/agent-runs'
 import { usageHash } from '../storage/agent-run-usage'
-import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from './runner-shared'
+import { type FallbackOpts, type FallbackAttempt, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from './runner-shared'
 import { type ExitReason, writeSessionJournal } from './session-journal'
 import { createCostGuard } from './cost-guard'
 import { captureControlCheckpoint, buildRunProvenance, serializeEnvelope, anchorStash, pruneEnvelopeStashes } from './control-envelope'
@@ -25,6 +25,22 @@ import { isAgentRunTimeoutAbort, exitReasonToAgentRunStatus } from './run-lifecy
 import { classifyProviderError } from './provider-error'
 import { shouldFallback, getNextFallback } from './smart-fallback'
 import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
+
+// EF-R2 Б2: единая точка создания attempt — предпочтительно getNextAttempt (несёт
+// accountId попытки); legacy getNextProvider → accountId=undefined («не трогать»).
+function mkPlainAttempt(fallbackOpts: FallbackOpts, id: ProviderId): { provider: ChatProvider; accountId: number | null | undefined } | null {
+  const viaAttempt: FallbackAttempt | null = fallbackOpts.getNextAttempt?.(id) ?? null
+  if (viaAttempt) return viaAttempt
+  const p = fallbackOpts.getNextProvider?.(id)
+  return p ? { provider: p, accountId: undefined } : null
+}
+
+/** Lineage аккаунта на handoff: attempt с известным accountId (вкл. null = очистить)
+ *  фиксируется в durable run — success/cooldown уйдут фактическому аккаунту попытки. */
+function applyPlainAttemptAccount(agentRuns: AgentRuns | undefined, runId: string | undefined, accountId: number | null | undefined): void {
+  if (accountId === undefined || !agentRuns || !runId) return
+  try { agentRuns.updateActualAccount(runId, accountId) } catch { /* best-effort */ }
+}
 
 export async function runPlainConversation(
   sender: TaggedSender,
@@ -296,14 +312,16 @@ export async function runPlainConversation(
             const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
             if (sw?.switched) {
               fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
-              const fresh = fallbackOpts.getNextProvider(providerId) // тот же id → новый активный аккаунт
-              if (fresh) {
+              const freshAttempt = mkPlainAttempt(fallbackOpts, providerId) // тот же id → новый активный аккаунт
+              if (freshAttempt) {
+                // EF-R2 Б2: ротация фиксирует новый аккаунт в run (success уйдёт ему).
+                applyPlainAttemptAccount(agentRuns, runId, freshAttempt.accountId)
                 emitRouteChanged('rotate-account', roundErrorMessage, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount, {
                   resetAt: hit.resetEta ?? null,
                   accounts: { fromLabel: sw.fromLabel ?? null, toLabel: sw.toLabel ?? null },
                 })
                 handedOff = true
-                return runPlainConversation(sender, sendId, fresh, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
+                return runPlainConversation(sender, sendId, freshAttempt.provider, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
               }
             }
           }
@@ -352,8 +370,9 @@ export async function runPlainConversation(
       fallbackOpts.triedProviders.add(providerId)
       if (shouldFallback(err)) {
         const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
-        if (nextProvider && nextId) {
+        const attempt = nextId ? mkPlainAttempt(fallbackOpts, nextId) : null
+        if (attempt && nextId) {
+          const nextProvider = attempt.provider
           console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
           fallbackOpts.triedProviders.add(nextId)
           // #7: модель fallback-провайдера, а не упавшего — для верного cost/журнала.
@@ -365,6 +384,9 @@ export async function runPlainConversation(
           if (agentRuns && runId) {
             try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
           }
+          // EF-R2 Б2: lineage аккаунта — кросс-провайдерный handoff фиксирует аккаунт
+          // нового провайдера (или очищает до null, если managed-аккаунта у него нет).
+          applyPlainAttemptAccount(agentRuns, runId, attempt.accountId)
           // #15: fallback-фрейм владеет финализацией (agentRuns/runId переданы).
           handedOff = true
           logRuntime('ai.fallback.handoff', {
