@@ -506,7 +506,7 @@ function PickerRow({
             <span className={`gg-mp-badge is-muted is-${badge.tone}`} title={badge.hint}>{badge.label}</span>
           )}
           {policy && !isCli && (
-            <span className={`gg-mp-badge gg-mp-row-policy is-${policy.tone}`} title={policy.title}>{policy.label}</span>
+            <span className={`gg-mp-badge gg-mp-row-policy is-${policy.tone}`} title={policy.title}>Gym · {policy.label}</span>
           )}
         </span>
       )}

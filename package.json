@@ -39,7 +39,8 @@
     "sync:shortcuts": "node scripts/sync-windows-shortcuts.cjs",
     "sync:changelog": "node scripts/sync-verstak-changelog.cjs",
     "generate:icon": "node scripts/generate-app-icon.mjs",
-    "eval:models": "node scripts/eval/index.mjs"
+    "eval:models": "node scripts/eval/index.mjs",
+    "eval:policy": "node scripts/eval/policy.mjs"
   },
   "build": {
     "afterPack": "scripts/patch-exe-icon.cjs",

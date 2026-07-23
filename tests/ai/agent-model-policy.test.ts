@@ -37,4 +37,15 @@ describe('agent model policy', () => {
     expect(canonicalAgentModel('moonshotai-kimi-k2')).toBe('kimi-k2.7-code')
     expect(canonicalAgentModel('qwen/qwen3-coder')).toBe('qwen3-coder')
   })
+
+  it('routes all Model Gym roles through current approved defaults', () => {
+    expect(recommendAgentModel('executor')).toBe('kimi-k2.7-code')
+    expect(recommendAgentModel('verifier')).toBe('kimi-k2.7-code')
+    expect(recommendAgentModel('cheap-read')).toBe('deepseek-chat')
+    expect(recommendAgentModel('fallback')).toBe('deepseek-chat')
+  })
+
+  it('keeps an explicit user pin above measured recommendations', () => {
+    expect(recommendAgentModel('executor', { userPinnedModel: 'qwen/qwen3-coder' })).toBe('qwen3-coder')
+  })
 })

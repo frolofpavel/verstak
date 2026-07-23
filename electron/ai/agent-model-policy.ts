@@ -1,7 +1,7 @@
 import policyData from './agent-model-policy.json'
 
 export type AgentModelMode = 'recommended' | 'allowed' | 'fallback' | 'not_recommended'
-export type AgentModelRole = 'coding' | 'planner' | 'reviewer' | 'fast-edit' | 'fallback'
+export type AgentModelRole = 'coding' | 'planner' | 'reviewer' | 'fast-edit' | 'fallback' | 'executor' | 'verifier' | 'cheap-read'
 export type AgentRecipeId = 'small-edit' | 'bugfix' | 'test-fix' | 'typescript-error' | 'review-before-commit'
 export type AgentToolMode = 'native' | 'json'
 
@@ -62,12 +62,15 @@ export function recommendedGatewayPresetTarget(model: string | null | undefined)
 
 export function recommendAgentModel(
   role: AgentModelRole = 'coding',
-  opts: { recipe?: AgentRecipeId; fallback?: boolean } = {}
+  opts: { recipe?: AgentRecipeId; fallback?: boolean; userPinnedModel?: string | null } = {}
 ): string {
+  const pinned = canonicalAgentModel(opts.userPinnedModel)
+  if (pinned) return pinned
   if (opts.fallback) return DEFAULT_AGENT_FALLBACK_MODEL
+  if (role === 'fallback') return DEFAULT_AGENT_FALLBACK_MODEL
   if (role === 'planner') return DEFAULT_AGENT_PLANNER_MODEL
-  if (role === 'reviewer') return DEFAULT_AGENT_REVIEWER_MODEL
-  if (role === 'fast-edit') return DEFAULT_AGENT_FAST_EDIT_MODEL
+  if (role === 'reviewer' || role === 'verifier') return DEFAULT_AGENT_REVIEWER_MODEL
+  if (role === 'fast-edit' || role === 'cheap-read') return DEFAULT_AGENT_FAST_EDIT_MODEL
 
   if (opts.recipe) {
     const hit = AGENT_MODEL_POLICIES.find(p =>
