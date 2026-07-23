@@ -11382,6 +11382,15 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
+/* Proof-B: fallback ВИДИМО (не в tooltip) — прогон стартовал с одного провайдера/модели,
+   доработал другой. Янтарный, как «частично» в паспорте. */
+.gg-run-fallback {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: #d98a2b;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 /* Честный tier-бейдж прогона (срез 3): CLI-прогон не был «полным контролем». */
 .gg-run-tier {
   display: inline-flex;

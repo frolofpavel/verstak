@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
-import type { AuditEntry, DebugPacket, EnvelopeRestorePreview, EnvelopeRestoreResult } from '../types/api'
+import type { AgentRun, AuditEntry, DebugPacket, EnvelopeRestorePreview, EnvelopeRestoreResult } from '../types/api'
 import { computeContextBudget } from '../lib/context-budget'
 import { diffSections, diffLines, sectionMap, type SectionDiff, type SectionDiffStatus } from '../lib/context-diff'
 import { runtimeCapability, secretProtectionLevel } from '../lib/runtime-capability'
@@ -44,28 +44,55 @@ const ACTION_LABEL: Record<string, string> = {
   session_end: 'ответ завершён'
 }
 
-interface Run {
+export interface Run {
   key: string
   runId: string | null
   entries: AuditEntry[]
   start: number
   end: number
+  /** ACTUAL — кто реально завершил прогон. SSOT = agent_runs.provider_id/model
+   *  (updateActual при fallback); audit — только best-effort fallback. */
   providerId: string | null
   model: string | null
+  /** REQUESTED — что запросили. SSOT = agent_runs.requested_*; null там ⇒ стартовый
+   *  маршрут из audit. Отличается от actual ⇒ был fallback (показываем ВИДИМО). */
+  requestedProvider: string | null
+  requestedModel: string | null
 }
 
 // Собрать Run из набора записей (общий хвост для обеих веток группировки).
-function buildRun(entries: AuditEntry[], key: string): Run {
+// persistedRun — строка agent_runs, соединённая строго по runId (Proof-B).
+export function buildRun(entries: AuditEntry[], key: string, persistedRun?: AgentRun | null): Run {
   const first = entries[0]
   const last = entries[entries.length - 1]
-  // Provider/model: take the last non-null seen in the run (reflects the
-  // provider actually doing the work after any switch).
-  let providerId: string | null = first.providerId
-  let model: string | null = first.model
+  // Audit-эвристика (best-effort): requested = ПЕРВЫЙ ненулевой провайдер/модель
+  // (старт прогона = запрос); actual = ПОСЛЕДНИЙ ненулевой.
+  let auditRequestedProvider: string | null = null
+  let auditRequestedModel: string | null = null
+  let auditProvider: string | null = first.providerId
+  let auditModel: string | null = first.model
   for (const e of entries) {
-    if (e.providerId) providerId = e.providerId
-    if (e.model) model = e.model
+    if (e.providerId) {
+      if (auditRequestedProvider == null) auditRequestedProvider = e.providerId
+      auditProvider = e.providerId
+    }
+    if (e.model) {
+      if (auditRequestedModel == null) auditRequestedModel = e.model
+      auditModel = e.model
+    }
   }
+  // Proof-B: agent_runs — SSOT маршрута. auditFn замыкает СТАРТОВЫЕ provider/model,
+  // и рекурсивный fallback продолжает писать их в audit_log — audit нельзя считать
+  // источником фактического маршрута. Непустые persisted-поля всегда в приоритете
+  // над audit-эвристикой; audit — только fallback для null-полей и legacy-записей.
+  // ACTUAL = кто фактически завершил прогон (updateActual при smart-fallback).
+  const providerId = persistedRun?.providerId ?? auditProvider
+  const model = persistedRun?.model ?? auditModel
+  // REQUESTED = что запросили. persisted requested_* заполнен при явном route-override;
+  // null ⇒ запрошенное == дефолт чата ⇒ берём стартовый маршрут из audit; если и там
+  // пусто — actual, чтобы не рисовать ложный fallback.
+  const requestedProvider = persistedRun?.requestedProviderId ?? auditRequestedProvider ?? providerId
+  const requestedModel = persistedRun?.requestedModel ?? auditRequestedModel ?? model
   return {
     key,
     runId: entries[0].runId ?? null,
@@ -73,7 +100,9 @@ function buildRun(entries: AuditEntry[], key: string): Run {
     start: first.timestamp,
     end: last.timestamp,
     providerId,
-    model
+    model,
+    requestedProvider,
+    requestedModel
   }
 }
 
@@ -83,13 +112,14 @@ function buildRun(entries: AuditEntry[], key: string): Run {
  * группируются прежней эвристикой: сортировка по времени, разрыв при gap >
  * RUN_GAP_MS, смене chatId или маркере session_start.
  */
-function groupRuns(entries: AuditEntry[]): Run[] {
+function groupRuns(entries: AuditEntry[], persistedByRunId?: Map<string, AgentRun>): Run[] {
   const withRunId = entries.filter(e => e.runId)
   const legacy = entries.filter(e => !e.runId)
 
   const runs: Run[] = []
 
   // Ветка с явным runId — группируем по нему, внутри run'а сортируем по времени.
+  // Join с agent_runs — СТРОГО по runId (не по времени/chatId/позиции).
   const byRunId = new Map<string, AuditEntry[]>()
   for (const e of withRunId) {
     const list = byRunId.get(e.runId!) ?? []
@@ -98,7 +128,7 @@ function groupRuns(entries: AuditEntry[]): Run[] {
   }
   for (const [rid, list] of byRunId) {
     const sorted = [...list].sort((a, b) => a.timestamp - b.timestamp)
-    runs.push(buildRun(sorted, `run-${rid}`))
+    runs.push(buildRun(sorted, `run-${rid}`, persistedByRunId?.get(rid) ?? null))
   }
 
   // Легаси-ветка — прежняя эвристика для строк до миграции 9.
@@ -295,6 +325,14 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           <span className="gg-run-caret">{open ? '▾' : '▸'}</span>
           <span className="gg-run-provider">{run.providerId ?? 'неизвестно'}</span>
           {run.model && <span className="gg-run-model">{run.model}</span>}
+          {((run.requestedProvider && run.requestedProvider !== run.providerId) ||
+            (run.requestedModel && run.requestedModel !== run.model)) && (
+            /* Proof-B: fallback ВИДИМО (не в tooltip) — что запросили vs что реально отработало. */
+            <span className="gg-run-fallback">
+              ⇄ запрошен {run.requestedProvider ?? run.providerId ?? '?'}
+              {run.requestedModel && run.requestedModel !== run.model ? ` · ${run.requestedModel}` : ''}
+            </span>
+          )}
           {tierBadge && <span className={`gg-run-tier is-${cap.tier}`} title={tierBadge.hint}>{tierBadge.label}</span>}
           {secBadge && <span className={`gg-run-tier is-sec-${secBadge.tone}`} title={secBadge.hint}>{secBadge.label}</span>}
           <span className="gg-run-time">{formatTime(run.start)}</span>
@@ -305,12 +343,14 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
           <button
             className="gg-run-packet-btn"
             title="Откатить правки этого CLI-прогона к git-якорю (контрольная точка перед прогоном)"
-            onClick={async () => {
-              setRestore({ phase: 'busy' })
-              try {
-                const p = await window.api.agentRuns.envelopePreview(run.runId!)
-                setRestore({ phase: 'preview', preview: p })
-              } catch { setRestore({ phase: 'idle' }) }
+            onClick={() => {
+              void (async () => {
+                setRestore({ phase: 'busy' })
+                try {
+                  const p = await window.api.agentRuns.envelopePreview(run.runId!)
+                  setRestore({ phase: 'preview', preview: p })
+                } catch { setRestore({ phase: 'idle' }) }
+              })()
             }}
           >↩︎ Откатить</button>
         )}
@@ -326,12 +366,14 @@ function RunCard({ run, onShowPacket }: { run: Run; onShowPacket: (runId: string
         <EnvelopeRestorePanel
           runId={run.runId!}
           state={restore}
-          onConfirm={async () => {
-            setRestore(s => ({ ...s, phase: 'busy' }))
-            try {
-              const r = await window.api.agentRuns.envelopeRestore(run.runId!)
-              setRestore(s => ({ phase: 'done', preview: s.preview, result: r }))
-            } catch { setRestore(s => ({ ...s, phase: 'preview' })) }
+          onConfirm={() => {
+            void (async () => {
+              setRestore(s => ({ ...s, phase: 'busy' }))
+              try {
+                const r = await window.api.agentRuns.envelopeRestore(run.runId!)
+                setRestore(s => ({ phase: 'done', preview: s.preview, result: r }))
+              } catch { setRestore(s => ({ ...s, phase: 'preview' })) }
+            })()
           }}
           onClose={() => setRestore({ phase: 'idle' })}
         />
@@ -541,6 +583,7 @@ function RunDiffView({ packet, runs }: { packet: DebugPacket; runs: Run[] }) {
 export function AgentRunInspector() {
   const { path } = useProject()
   const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([])
   const [loading, setLoading] = useState(false)
   const [csv, setCsv] = useState<string | null>(null)
   const [packet, setPacket] = useState<DebugPacket | null>(null)
@@ -549,8 +592,15 @@ export function AgentRunInspector() {
     if (!path) return
     setLoading(true)
     try {
-      const list = await window.api.audit.query(path, { limit: 500 })
+      // Proof-B: audit (последовательность действий) + agent_runs (persisted
+      // requested/actual маршрут) грузим параллельно. Деградация безопасна:
+      // падение agentRuns.list не роняет экран — остаёмся на audit-эвристике.
+      const [list, runsList] = await Promise.all([
+        window.api.audit.query(path, { limit: 500 }),
+        window.api.agentRuns.list(path, { limit: 500 }).catch(() => [] as AgentRun[])
+      ])
       setEntries(list)
+      setAgentRuns(runsList)
     } finally {
       setLoading(false)
     }
@@ -558,7 +608,9 @@ export function AgentRunInspector() {
 
   useEffect(() => { void refresh() }, [path])
 
-  const runs = useMemo(() => groupRuns(entries), [entries])
+  // Join audit-run'ов с persisted agent_runs — СТРОГО по runId.
+  const persistedByRunId = useMemo(() => new Map(agentRuns.map(r => [r.runId, r])), [agentRuns])
+  const runs = useMemo(() => groupRuns(entries, persistedByRunId), [entries, persistedByRunId])
 
   if (!path) {
     return (
