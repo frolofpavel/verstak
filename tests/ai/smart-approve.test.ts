@@ -93,4 +93,22 @@ describe('smart approve', () => {
     expect(result.verdict).toBe('escalate')
     expect(result.reason).toContain('network down')
   })
+
+  it('escalates after the bounded timeout when the guard never answers', async () => {
+    vi.useFakeTimers()
+    try {
+      const pending = smartApprove(
+        baseCtx,
+        { callLlm: () => new Promise(() => {}) },
+        new AbortController().signal
+      )
+      await vi.advanceTimersByTimeAsync(3_500)
+      const result = await pending
+
+      expect(result.verdict).toBe('escalate')
+      expect(result.reason).toContain('timeout')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

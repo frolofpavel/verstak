@@ -142,8 +142,16 @@ export async function smartApprove(
   }
 
   const prompt = buildSmartApprovePrompt(ctx)
+
+  // Добавлен явный таймаут 3500мс как в планах (раньше был только catch на сигнале).
+  const TIMEOUT_MS = 3500
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('smart-approve timeout')), TIMEOUT_MS)
+  )
+
   try {
-    const raw = await deps.callLlm(prompt.system, prompt.user, signal)
+    const llmPromise = deps.callLlm(prompt.system, prompt.user, signal)
+    const raw = await Promise.race([llmPromise, timeoutPromise])
     const parsed = parseSmartApproveResponse(raw)
     return { ...parsed, model: model.model, durationMs: Date.now() - started }
   } catch (err) {
