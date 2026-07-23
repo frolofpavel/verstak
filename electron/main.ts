@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu } from 'electron'
+import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu, ipcMain } from 'electron'
 import { pathToFileURL } from 'url'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -698,9 +698,16 @@ app.whenReady().then(() => {
   registerAiIpc(aiDeps)
   const mobileRelayUrl = process.env.VERSTAK_MOBILE_RELAY_URL?.trim()
   const mobileRelayToken = process.env.VERSTAK_MOBILE_RELAY_TOKEN?.trim()
+  let mobileBridge: ReturnType<typeof startMobileBridge> | null = null
+  ipcMain.removeHandler('mobile:run-event')
+  ipcMain.handle('mobile:run-event', async (_event, sendId: number, event: unknown) => {
+    if (!mobileBridge || !Number.isInteger(sendId) || sendId <= 0) return false
+    await mobileBridge.emit('run.event', { runId: String(sendId), event })
+    return true
+  })
   if (mobileRelayUrl && mobileRelayToken) {
     const startRun = registerMobileRunProxy(mainWindow)
-    startMobileBridge({
+    mobileBridge = startMobileBridge({
       config: {
         relayUrl: mobileRelayUrl,
         token: mobileRelayToken,

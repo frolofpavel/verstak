@@ -22,4 +22,16 @@ describe('mobile relay router', () => {
     expect(() => router.route(envelope)).toThrow('replayed envelope')
     expect(router.audit()).toEqual([{ id: 'same', accountId: 'a', deviceId: 'd', kind: 'roots.list', delivered: 0 }])
   })
+
+  it('routes live run events from desktop to the matching mobile stream', () => {
+    const router = createRelayRouter()
+    const mobile = vi.fn()
+    const desktop = vi.fn()
+    router.registerConnection({ accountId: 'a', deviceId: 'd', role: 'mobile' }, mobile)
+    router.registerConnection({ accountId: 'a', deviceId: 'd', role: 'desktop' }, desktop)
+    const result = router.route(createEnvelope({ id: 'evt-1', accountId: 'a', deviceId: 'd', kind: 'run.event', payload: { runId: '42', event: { type: 'text', text: 'hi' } } }))
+    expect(result).toEqual({ delivered: 1 })
+    expect(mobile).toHaveBeenCalledOnce()
+    expect(desktop).not.toHaveBeenCalled()
+  })
 })

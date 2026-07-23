@@ -76,6 +76,8 @@
 - отправка мобильной задачи в существующий desktop `ai:send`;
 - чтение истории и polling ответа;
 - команда остановки на уровне протокола и desktop adapter;
+- начальный live-stream desktop `ai:event` на телефон через `run.event`;
+- мобильный live-блок ответа, журнал событий выполнения и кнопка `Стоп`;
 - idempotency-cache против повторного запуска одной команды;
 - защита от path traversal и forbidden paths;
 - pairing primitives с одноразовым кодом и TTL 10 минут;
@@ -94,6 +96,11 @@
 - `npm run mobile:build` проходит;
 - `npm run mobile:relay:build` проходит;
 - локальный relay отвечает на `/health`;
+- 2026-07-18 `tests/mobile`: 17 тестов проходят;
+- 2026-07-18 `npm run type` проходит;
+- 2026-07-18 `npm run mobile:build` проходит;
+- 2026-07-18 `npm run mobile:relay:build` проходит;
+- 2026-07-18 `git diff --check` чистый;
 - 2026-07-12 выполнен сквозной transport-smoke: `roots.list` прошёл через relay в живой desktop bridge и вернулся как `command.result` с совпавшим request ID;
 - `git diff --check` чистый.
 
@@ -109,7 +116,7 @@
 
 1. Завершить реальный smoke на телефоне: транспорт desktop уже подтверждён, осталось зарегистрировать тестовый проект в изолированном dev-профиле и пройти UI-сценарий по `mobile/README.md`.
 2. Исправления по результатам smoke: сеть, reconnect, UX и синхронизация истории.
-3. Живой push `ai:event` на телефон вместо polling истории.
+3. Довести живой push `ai:event` до полноценной замены polling истории: начальный `run.event` уже протянут, polling пока остаётся fallback.
 4. Мобильные approval cards для write/command/plan confirmations.
 5. Мобильный read-only просмотр changes и unified diff.
 6. Полная загрузка attachments: телефон -> staging -> выбранный `rootId` -> подтверждённый путь.
@@ -135,7 +142,7 @@
 
 ### Этап B — закрыть mobile control loop
 
-- заменить polling на поток desktop `ai:event`;
+- довести поток desktop `ai:event` до полноценной замены polling;
 - добавить approvals;
 - добавить changes/diff;
 - завершить attachment upload;

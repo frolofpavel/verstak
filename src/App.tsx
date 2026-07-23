@@ -110,6 +110,7 @@ export function App() {
   const [sideChatWidth, setSideChatWidth] = useState<number>(readSideChatWidth)
   const sideChatByProjectRef = useRef<Record<string, number | null>>({})
   const sideChatResizeRef = useRef<{ startX: number; startW: number; lastW: number } | null>(null)
+  const mobileRunIdsRef = useRef<Set<number>>(new Set())
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [lang, setLang] = useState<Lang>('ru')
 
@@ -118,10 +119,17 @@ export function App() {
       const stored = await window.api.chats.list(payload.chatId)
       const messages = stored.map(message => ({ role: message.role, content: message.content }))
       const sendId = await window.api.ai.send(messages, payload.projectPath, String(payload.chatId))
+      mobileRunIdsRef.current.add(sendId)
       await window.api.mobile.completeRunRequest(payload.requestId, sendId)
     } catch (error) {
       await window.api.mobile.completeRunRequest(payload.requestId, 0, error instanceof Error ? error.message : 'Не удалось запустить задачу')
     }
+  }), [])
+
+  useEffect(() => window.api.ai.onEvent(({ id, event }) => {
+    if (!mobileRunIdsRef.current.has(id)) return
+    void window.api.mobile.sendRunEvent(id, event).catch(() => {})
+    if (event.type === 'done' || event.type === 'error') mobileRunIdsRef.current.delete(id)
   }), [])
 
   useEffect(() => {

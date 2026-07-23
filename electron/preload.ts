@@ -213,6 +213,7 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.off('mobile:run-request', handler)
     },
     completeRunRequest: (requestId: string, sendId: number, error?: string) => ipcRenderer.invoke('mobile:run-started', requestId, sendId, error),
+    sendRunEvent: (sendId: number, event: unknown) => ipcRenderer.invoke('mobile:run-event', sendId, event) as Promise<boolean>,
   },
   handoff: {
     generate: (sessionId: number, parentId?: string | null) =>
