@@ -10,9 +10,9 @@
  */
 import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
-import { mkdtempSync, rmSync, realpathSync, chmodSync, lstatSync, readdirSync } from 'fs'
+import { mkdtempSync, rmSync, realpathSync, chmodSync, lstatSync, readdirSync, existsSync, rmdirSync } from 'fs'
 import { tmpdir } from 'os'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 
 /**
  * Устойчивое удаление каталога на Windows. Два режима сбоя temp-репо/worktree:
@@ -51,6 +51,61 @@ function clearReadonlyRecursive(target: string): void {
     for (const name of names) clearReadonlyRecursive(join(target, name))
   }
   try { chmodSync(target, 0o666) } catch { /* best-effort — символические ссылки и т.п. */ }
+}
+
+/** Синхронный сон (Atomics.wait) для backoff между заходами. Блокирует поток, но платится
+ *  ТОЛЬКО при сбое операции (happy-path не спит). SAB недоступен → просто без паузы. */
+function sleepSync(ms: number): void {
+  if (ms <= 0) return
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } catch { /* SAB off — без backoff */ }
+}
+
+/**
+ * Bounded-retry транзиентно-падающей операции — тот же принцип, что rmDirRobust, но для
+ * git-ПОДКОМАНДЫ (не файловой системы). Под ВНЕШНЕЙ нагрузкой (Codex/сборка/антивирус) git
+ * возвращает non-zero на удалении/prune worktree, хотя повтор через сотни мс проходит.
+ * op() → true при успехе; isGone() — доп. критерий (worktree уже исчез, даже если git ошибся →
+ * идемпотентно). Linear backoff. Латентность платится ТОЛЬКО при сбое: happy-path выходит на
+ * первой попытке без пауз.
+ *
+ * Параметры НОРМАЛИЗУЮТСЯ до цикла (защита main-процесса: синхронный цикл с Atomics.wait
+ * нельзя прервать извне — attempts: Infinity с падающим op повесил бы процесс навсегда,
+ * baseDelayMs: Infinity — вечный сон):
+ *  — attempts: default 6; non-finite → 0; finite → целое, clamp 0..10;
+ *  — baseDelayMs: default 150; non-finite/отрицательная → 0; конечная ограничена 1000 мс.
+ */
+const RETRY_MAX_ATTEMPTS = 10
+const RETRY_MAX_DELAY_MS = 1000
+
+function normAttempts(value: number | undefined, dflt: number): number {
+  if (value === undefined) return dflt
+  if (!Number.isFinite(value)) return 0
+  return Math.min(RETRY_MAX_ATTEMPTS, Math.max(0, Math.trunc(value)))
+}
+
+function normDelayMs(value: number | undefined, dflt: number): number {
+  if (value === undefined) return dflt
+  if (!Number.isFinite(value) || value < 0) return 0
+  return Math.min(RETRY_MAX_DELAY_MS, value)
+}
+
+export function retryTransient(
+  op: () => boolean,
+  opts: { attempts?: number; baseDelayMs?: number; isGone?: () => boolean } = {},
+): boolean {
+  const attempts = normAttempts(opts.attempts, 6)
+  const base = normDelayMs(opts.baseDelayMs, 150)
+  for (let i = 0; i < attempts; i++) {
+    // Исключение из op/isGone — программная ошибка, НЕ транзиент git'а: заход засчитываем
+    // неудачным (bounded), но никогда не превращаем в успех и не вешаем процесс.
+    try { if (op()) return true } catch { /* неудачный заход */ }
+    try { if (opts.isGone?.()) return true } catch { /* отсутствие не доказано */ }
+    // Cap применяется к ФАКТИЧЕСКОМУ timeout каждого сна, а не только к base: иначе linear
+    // backoff base*(i+1) при attempts=10 давал бы паузы до 10 с (суммарно десятки секунд
+    // блокировки main process). Любой сон ≤ RETRY_MAX_DELAY_MS.
+    if (i < attempts - 1) sleepSync(Math.min(RETRY_MAX_DELAY_MS, base * (i + 1)))
+  }
+  return false
 }
 
 /** Канонический путь для сравнения: realpath (git нормализует), без хвостовых слэшей,
@@ -180,31 +235,76 @@ export function restoreWorktreeSnapshot(repoRoot: string, snapshotRef: string, b
   return { ok: true, worktreePath }
 }
 
-/**
- * Удалить worktree (--force: даже с незакоммиченными правками) + prune + почистить
- * tmp-родителя. true — git remove прошёл.
- */
-export function removeWorktree(repoRoot: string, worktreePath: string): boolean {
-  const out = git(repoRoot, ['worktree', 'remove', '--force', worktreePath])
-  git(repoRoot, ['worktree', 'prune'])
-  // Чистим tmp-родителя ТОЛЬКО если это наш verstak-wt- каталог под tmpdir() —
-  // защита от рекурсивного сноса чужого пути, если worktreePath не из addWorktree.
-  const parent = dirname(worktreePath)
-  if (parent.startsWith(tmpdir()) && /[\\/]verstak-wt-[^\\/]*$/.test(parent)) {
-    try { rmDirRobust(parent) } catch { /* best-effort */ }
-  }
-  return out != null
+/** Tri-state регистрации пути как worktree репозитория (canon-сравнение).
+ *  'absent' — отсутствие ПОДТВЕРЖДЕНО успешным `git worktree list`;
+ *  'unknown' — сама git-проверка упала: это НЕ «отсутствует» (защита от ложного успеха). */
+function worktreeRegistration(repoRoot: string, worktreePath: string): 'registered' | 'absent' | 'unknown' {
+  const list = listWorktreesRaw(repoRoot)
+  if (list == null) return 'unknown'
+  const target = canonPath(worktreePath)
+  return list.some(wt => canonPath(wt) === target) ? 'registered' : 'absent'
 }
 
-/** Список путей worktree'ов репозитория (включая основной). [] — не git. */
-export function listWorktrees(repoRoot: string): string[] {
+/**
+ * Удалить worktree (--force: даже с незакоммиченными правками) + prune + почистить
+ * tmp-родителя. true — git remove прошёл ЛИБО worktree уже исчез (идемпотентно).
+ *
+ * Раньше был ОДИН заход git worktree remove: под внешней git-нагрузкой (Codex/антивирус держат
+ * хендл файла в дереве) команда транзиентно падала → false, хотя повтор проходит. Теперь
+ * retryTransient повторяет подкоманду (как rmDirRobust для каталога), а isGone() ловит случай,
+ * когда worktree уже снят (повторный вызов / частичный успех) — тогда тоже true. «Уже снят»
+ * засчитывается ТОЛЬКО при доказанном успешным git list отсутствии регистрации: упавший
+ * `git worktree list` ('unknown') не равен «worktree нет».
+ */
+export function removeWorktree(repoRoot: string, worktreePath: string): boolean {
+  const ok = retryTransient(
+    () => {
+      const out = git(repoRoot, ['worktree', 'remove', '--force', worktreePath])
+      if (out == null) git(repoRoot, ['worktree', 'prune']) // частично снятую регистрацию — чистим перед проверкой isGone
+      return out != null
+    },
+    { isGone: () => worktreeRegistration(repoRoot, worktreePath) === 'absent' && !existsSync(worktreePath) },
+  )
+  git(repoRoot, ['worktree', 'prune'])
+  // АТОМАРНЫЙ cleanup tmp-родителя — только при выполнении ВСЕХ условий (защита от сноса
+  // чужого пути, если worktreePath не из addWorktree):
+  //  (1) remove удался (ok) — при ПРОВАЛЕ сносить родителя тем более нельзя;
+  //  (2) parent по lstat — НАСТОЯЩИЙ каталог, не symlink/junction (по ссылке не переходим:
+  //      junction verstak-wt-* → внешний каталог не трогаем ни по цели, ни по самой ссылке);
+  //  (3) канонический parent — НЕПОСРЕДСТВЕННЫЙ ребёнок канонического tmpdir() и его basename
+  //      соответствует verstak-wt-* (строковый startsWith — не доказательство containment);
+  //  (4) удаление — ТОЛЬКО атомарный rmdirSync (без recursive): между проверкой и удалением
+  //      нет окна TOCTOU — непустой/чужой каталог rmdir не тронет, ошибка = оставляем
+  //      temp-хвост (лучше хвост, чем удалить чужое содержимое). rmDirRobust здесь не нужен.
+  if (ok) {
+    try {
+      const parent = dirname(worktreePath)
+      const st = lstatSync(parent)
+      const canon = canonPath(parent)
+      const isTmpContainer =
+        st.isDirectory() && !st.isSymbolicLink() &&
+        canonPath(dirname(canon)) === canonPath(tmpdir()) &&
+        /^verstak-wt-[^\\/]*$/.test(basename(canon))
+      if (isTmpContainer) rmdirSync(parent)
+    } catch { /* best-effort: ENOTEMPTY/EPERM/ENOENT — хвост добьёт teardown-свип */ }
+  }
+  return ok
+}
+
+/** Сырые пути worktree'ов ИЛИ null, если сам `git worktree list` упал (ошибка ≠ пустой список). */
+function listWorktreesRaw(repoRoot: string): string[] | null {
   const out = git(repoRoot, ['worktree', 'list', '--porcelain'])
-  if (out == null) return []
+  if (out == null) return null
   const prefix = 'worktree '
   return out.split('\n')
     .filter(l => l.startsWith(prefix))
     .map(l => l.slice(prefix.length).trim())
     .filter(Boolean)
+}
+
+/** Список путей worktree'ов репозитория (включая основной). [] — не git / ошибка git. */
+export function listWorktrees(repoRoot: string): string[] {
+  return listWorktreesRaw(repoRoot) ?? []
 }
 
 /**

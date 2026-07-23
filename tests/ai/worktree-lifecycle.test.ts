@@ -152,6 +152,23 @@ describe('worktree lifecycle snapshots', () => {
     expect(existsSync(wt)).toBe(false)
   })
 
+  it('removeWorktree идемпотентен: повторный вызов на уже снятом worktree → true (транзиент-устойчивость)', () => {
+    // Раньше второй заход git worktree remove на исчезнувшем пути → null → false (тот же класс,
+    // что транзиентный сбой под нагрузкой). Теперь isGone() ловит «worktree уже нет» → true.
+    const wt = addWorktree(repo, 'twice')!
+    expect(removeWorktree(repo, wt)).toBe(true)
+    expect(existsSync(wt)).toBe(false)
+    expect(removeWorktree(repo, wt)).toBe(true) // git ошибётся (пути нет), но isGone → true
+  })
+
+  it('removeWorktree на основном дереве репозитория → false, дерево остаётся целым', () => {
+    // Защита от сноса main worktree: git отказывает («is a main working tree») на каждой
+    // попытке, регистрация остаётся → permanent failure обязан остаться failure.
+    expect(removeWorktree(repo, repo)).toBe(false)
+    expect(existsSync(join(repo, 'a.txt'))).toBe(true)
+    expect(listWorktrees(repo).some(p => samePath(p, repo))).toBe(true)
+  })
+
   it('gcWorktrees removes idle clean ended sessions, keeps active/fresh/dirty (WT-05)', async () => {
     const DAY = 24 * 60 * 60 * 1000
     const T = 1_000_000_000_000
