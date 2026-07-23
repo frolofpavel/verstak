@@ -413,6 +413,29 @@ export function mergeProviderCatalog(
     .sort((a, b) => (PROVIDER_UI_META[a.id]?.order ?? 999) - (PROVIDER_UI_META[b.id]?.order ?? 999))
 }
 
+/**
+ * Подмешивает пользовательский список моделей в custom-openai.
+ *
+ * В main-реестре у этого провайдера models=[] намеренно: список задаёт пользователь
+ * в Settings. Страница «Модели» при этом фильтрует пустые каталоги, поэтому без
+ * проекции сохранённая custom-модель исчезает из UI, хотя рантайм уже умеет её запускать.
+ */
+export function withCustomOpenAiModels(
+  providers: ReadonlyArray<CatalogProvider>,
+  rawModels: string,
+): CatalogProvider[] {
+  const models = [...new Set(rawModels.split(',').map(model => model.trim()).filter(Boolean))]
+  if (models.length === 0) return [...providers]
+
+  return providers.map(provider => provider.id === 'custom-openai'
+    ? {
+        ...provider,
+        models,
+        defaultModel: models.includes(provider.defaultModel) ? provider.defaultModel : models[0],
+      }
+    : provider)
+}
+
 /** Доступность сохранённой модели относительно живого каталога провайдера. */
 export function resolveModelAvailability(
   catalogModels: string[],

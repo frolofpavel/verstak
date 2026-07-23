@@ -27,6 +27,7 @@ import {
   modelSearchText,
   providerAuthLink,
   resolveModelAvailability,
+  withCustomOpenAiModels,
   type CatalogProvider,
   type CatalogSource,
   type CliAuthId,
@@ -1518,6 +1519,10 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   // Сохраняется в settings.custom_openai_baseurl / custom_openai_models.
   const [customOpenaiBaseUrl, setCustomOpenaiBaseUrl] = useState('')
   const [customOpenaiModels, setCustomOpenaiModels] = useState('')
+  const providersWithCustomModels = useMemo(
+    () => withCustomOpenAiModels(providers, customOpenaiModels),
+    [providers, customOpenaiModels]
+  )
   const [currentLang, setCurrentLang] = useState('en')
   const { theme, setTheme } = useTheme()
   const { uiScalePercent, setUiScalePercent } = useUiScale()
@@ -3594,7 +3599,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
 
         {tab === 'providers' && (
         <ProvidersPage
-          providers={providers}
+          providers={providersWithCustomModels}
           keys={keys}
           setKeys={setKeys}
           enabledModels={enabledModels}
@@ -3615,7 +3620,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         <>
         {renderCostCapCard()}
         <ModelsPage
-          providers={providers}
+          providers={providersWithCustomModels}
           enabledModels={enabledModels}
           setEnabledModels={setEnabledModels}
           models={models}

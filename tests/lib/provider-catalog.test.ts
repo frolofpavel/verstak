@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest'
 import {
   mergeProviderCatalog,
   resolveModelAvailability,
+  withCustomOpenAiModels,
   PROVIDER_UI_META,
   BUNDLED_PROVIDERS,
 } from '../../src/lib/model-catalog'
@@ -117,6 +118,22 @@ describe('resolveModelAvailability — сохранённая модель vs ж
     // Пустой каталог = пользователь задаёт модели сам; не флагуем как unavailable.
     expect(resolveModelAvailability([], 'что-угодно')).toBe('ok')
     expect(resolveModelAvailability([], null)).toBe('unset')
+  })
+})
+
+describe('withCustomOpenAiModels — пользовательский каталог', () => {
+  it('показывает custom-openai с моделями из Settings и первой моделью по умолчанию', () => {
+    const providers = mergeProviderCatalog([
+      dto({ id: 'custom-openai', models: [], defaultModel: '' }),
+      dto({ id: 'claude', models: ['claude-sonnet-4-6'], defaultModel: 'claude-sonnet-4-6' }),
+    ])
+
+    const result = withCustomOpenAiModels(providers, ' claude-opus-4-8, claude-sonnet-4-6, claude-opus-4-8 ')
+    const custom = result.find(provider => provider.id === 'custom-openai')
+
+    expect(custom?.models).toEqual(['claude-opus-4-8', 'claude-sonnet-4-6'])
+    expect(custom?.defaultModel).toBe('claude-opus-4-8')
+    expect(result.find(provider => provider.id === 'claude')?.models).toEqual(['claude-sonnet-4-6'])
   })
 })
 
