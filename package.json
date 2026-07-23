@@ -62,6 +62,23 @@
       {
         "from": "scripts/verstak-auto-update-helper.cjs",
         "to": "verstak-auto-update-helper.cjs"
+      },
+      {
+        "from": "electron/ai/browser/bridge/host-runtime.mjs",
+        "to": "browser-bridge/host.mjs"
+      },
+      {
+        "from": "resources/browser-bridge/host.cmd",
+        "to": "browser-bridge/host.cmd"
+      },
+      {
+        "from": "resources/browser-bridge/ru.verstak.browser_bridge.json",
+        "to": "browser-bridge/ru.verstak.browser_bridge.json"
+      },
+      {
+        "from": "browser-extension",
+        "to": "browser-extension",
+        "filter": ["**/*", "!**/*.md"]
       }
     ],
     "files": [

@@ -28,11 +28,15 @@ import { loadPermissionRules } from '../ai/permission-rules'
 import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
+// EXT-B0/R2: browser handler configuration (controller wiring + policy seed).
+import { BROWSER_APPROVAL_TIMEOUT_MS, configureBrowserHandler } from './tool-handlers/browser'
+import { webviewB0Capability } from '../ai/browser/capability'
+import { localWebviewDataPolicy } from '../ai/browser/data-policy'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
-import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, pendingBrowserActions, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -142,6 +146,21 @@ export interface AiDeps {
   /** Фасад Multi-agent Manager (Фаза 1) — agent_runs. Прокинут заранее; запись
    *  прогонов (create/finish/recordRunEvent) подключит Фаза 2 — здесь НЕ используется. */
   agentRuns?: AgentRuns
+  /**
+   * EXT-B0/R1 Browser Employee — единый controller. Если передан (production),
+   * все browser_* tool calls проходят через controller dispatch с R0-R4 policy.
+   * Если НЕ передан — browser handler fail-closed блокирует вызов (legacy path
+   * удалён в R1, см. tool-handlers/browser.ts).
+   */
+  browserController?: import('../ai/browser/controller').BrowserController
+  /** EXT-B0/R1 durable storage для browser tasks (для ensureTask перед dispatch). */
+  browserTasks?: import('../storage/browser-tasks').BrowserTasks
+  /** EXT-B0/R1 setter — обновляет exec webview-адаптера под актуальный WebContents. */
+  setWebviewAdapterExec?: (exec: (code: string) => Promise<unknown>) => void
+  /** EXT-B0/R1 map: chatId (string) → task tab ref. */
+  browserTaskTabs?: Map<string, string>
+  /** EXT-B1 Connected Eyes: обновить lineage на bridge (без auto-continue actions). */
+  setBrowserBridgeLineage?: (browserTaskId: string | null, runId: string | null) => void
   /** #5 worktree-lifecycle: ре-рут file-тулзов на persistent worktree изолированного чата. */
   worktreeSessions?: import('../storage/worktree-sessions').WorktreeSessions
   /** Фасад истории Verification Artifact (Фаза 3) — attest_verification пишет
@@ -257,6 +276,8 @@ export function abortSend(sendId: number): boolean {
     for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
     for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
     for (const [k, p] of pendingPlans) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+    // EXT-B0: abort Также сбрасывает pending browser-action approvals (reject).
+    for (const [k, p] of pendingBrowserActions) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
     logRuntime('ai.abort.all')
     return true
   }
@@ -278,6 +299,10 @@ export function abortSend(sendId: number): boolean {
   }
   for (const [k, p] of pendingPlans) {
     if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+  }
+  // EXT-B0: reject только этого send'а pending browser actions.
+  for (const [k, p] of pendingBrowserActions) {
+    if (p.sendId === sendId) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
   }
   logRuntime('ai.abort.ok', { sendId })
   return true
@@ -395,7 +420,99 @@ export function resolveCodexHome(
   return (r && 'configDir' in r ? r.configDir : null) || null
 }
 
-export function registerAiIpc(deps: AiDeps): void {
+export interface AiIpcGateway {
+  sendFromBrowser: (
+    sender: Electron.WebContents,
+    incomingMessages: ChatMessage[],
+    projectPath: string | null,
+    chatId: string,
+  ) => Promise<number>
+  resolveBrowserAction: (
+    actionId: string,
+    approvalDigest: string,
+    browserTaskId: string,
+    runId: string,
+    approved: boolean,
+    sendId: number,
+  ) => void
+}
+
+export function registerAiIpc(deps: AiDeps): AiIpcGateway {
+  // EXT-B0/R1: configure browser handler с controller'ом. Handler берёт
+  // controller/storage/scopedKey/pendingBrowserActions из module-scope deps.
+  // Без controller (не передан в AiDeps) handler fail-closed блокирует все
+  // browser_* вызовы (см. tool-handlers/browser.ts).
+  configureBrowserHandler({
+    controller: deps.browserController,
+    resolveTaskId: (ctx) => {
+      // bt-${chatId} — stable per chat; fallback bt-run-${runId} (без chatId).
+      const parentChat = ctx.parentChatId
+      if (typeof parentChat === 'number') return `bt-${parentChat}`
+      return ctx.runId ? `bt-run-${ctx.runId}` : `bt-send-${ctx.sendId}`
+    },
+    emitPendingBrowserAction: (ctx, payload) => {
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: {
+          type: 'pending-browser-action',
+          callId: payload.callId,
+          actionId: payload.actionId,
+          browserTaskId: payload.browserTaskId,
+          runId: payload.runId,
+          risk: payload.risk,
+          approvalDigest: payload.approvalDigest,
+          snapshot: payload.snapshot,
+          reason: payload.reason,
+        },
+      })
+    },
+    awaitBrowserApproval: (ctx, actionId, abortSignal) => {
+      // Строгий scoped resolver: pendingBrowserActions хранит {expectedDigest,
+      // browserTaskId, runId}. resolve-browser-action сверяет все поля.
+      return new Promise<{ approved: boolean; approvalDigest: string }>(resolve => {
+        const controller = deps.browserController
+        if (!controller) {
+          resolve({ approved: false, approvalDigest: '' })
+          return
+        }
+        // Получим ожидаемый digest из storage — это canonical digest action'а.
+        const action = deps.browserTasks?.getAction(actionId)
+        const expectedDigest = action?.approvalDigest ?? ''
+        const browserTaskId = action?.browserTaskId ?? ''
+        const runId = action?.runId ?? ''
+        if (!expectedDigest || !browserTaskId || !runId) {
+          resolve({ approved: false, approvalDigest: '' })
+          return
+        }
+        const key = scopedKey(ctx.sendId, actionId)
+        let settled = false
+        let timeout: ReturnType<typeof setTimeout> | null = null
+        const finish = (r: { approved: boolean; approvalDigest: string }) => {
+          if (settled) return
+          settled = true
+          pendingBrowserActions.delete(key)
+          abortSignal.removeEventListener('abort', onAbort)
+          if (timeout) clearTimeout(timeout)
+          resolve(r)
+        }
+        const onAbort = () => finish({ approved: false, approvalDigest: expectedDigest })
+        pendingBrowserActions.set(key, {
+          sendId: ctx.sendId,
+          browserTaskId,
+          runId,
+          expectedDigest,
+          resolve: finish,
+        })
+        if (abortSignal.aborted) { onAbort(); return }
+        abortSignal.addEventListener('abort', onAbort, { once: true })
+        timeout = setTimeout(
+          () => finish({ approved: false, approvalDigest: expectedDigest }),
+          BROWSER_APPROVAL_TIMEOUT_MS,
+        )
+      })
+    },
+  })
+
   /**
    * Optional overrides for ai:send. Used by Explicit Review feature: the
    * reviewer needs a DIFFERENT provider from the chat's main provider, must
@@ -438,7 +555,7 @@ export function registerAiIpc(deps: AiDeps): void {
     promptRoute?: PromptRouteOverride
   }
 
-  ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
+  const sendHandler = async (e: { sender: Electron.WebContents }, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
     // Безопасность: projectPath приходит из рендерера. Без проверки агент мог бы
     // получить файловый + shell доступ к произвольной системной папке (C:\Windows,
     // C:\Users\Pavel). Гейтим так же, как files/terminal IPC (isWithinKnownRoots).
@@ -512,6 +629,64 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
     const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
+
+    // EXT-B0/R1: привязываем webview adapter к актуальному WebContents этого
+    // ai:send. Controller будет дёргать verstakBrowser именно в этом рендерере.
+    if (deps.setWebviewAdapterExec) {
+      deps.setWebviewAdapterExec(taggedSender.exec)
+    }
+    // EXT-B0/R2: stable browserTaskId = bt-${chatId}. Сидируем persisted policy
+    // (caps/dataPolicy/mode) чтобы getCapability/getDataPolicy в main.ts читали
+    // durable state, а не DEFAULT_DATA_POLICY.ask (который блокировал весь path).
+    // attachRun идемпотентен. chatId нет → bt-run (CLI/headless, без handoff).
+    const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
+    if (deps.browserController && deps.browserTasks) {
+      try {
+        const seedCaps = webviewB0Capability()
+        const seedPolicy = localWebviewDataPolicy(providerId)
+        const existing = deps.browserTasks.get(browserTaskId)
+        if (!existing) {
+          deps.browserController.ensureTask({
+            browserTaskId,
+            projectPath: projectPath ?? '',
+            chatId: chatIdNum ?? null,
+            runId,
+            providerId,
+            // execute: R3 идёт в approval UI; R4/plan-mode всё ещё block.
+            browserMode: 'execute',
+            caps: seedCaps,
+            dataPolicy: seedPolicy,
+          })
+        } else {
+          deps.browserController.attachRun({
+            browserTaskId, runId, providerId,
+            handoffReason: 'new_send',
+          })
+          // R2: upgrade legacy tasks without durable policy (пустой caps_json).
+          const capsEmpty = !existing.caps || Object.keys(existing.caps).length === 0
+          const policyEmpty = !existing.dataPolicy || Object.keys(existing.dataPolicy).length === 0
+          if (capsEmpty || policyEmpty) {
+            deps.browserController.ensureTask({
+              browserTaskId,
+              projectPath: existing.projectPath || projectPath || '',
+              chatId: existing.chatId ?? chatIdNum ?? null,
+              runId,
+              providerId,
+              browserMode: existing.browserMode === 'watch' && capsEmpty ? 'execute' : existing.browserMode,
+              caps: capsEmpty ? seedCaps : undefined,
+              dataPolicy: policyEmpty ? seedPolicy : undefined,
+            })
+          }
+        }
+        // EXT-B1: pairing lineage для extension observe → этот run (не auto-continue actions).
+        try {
+          deps.setBrowserBridgeLineage?.(browserTaskId, runId)
+        } catch { /* best-effort */ }
+      } catch (err) {
+        logRuntimeError('browser.attach_run.fail', err)
+        // Не блокируем основной прогон — browser tool позже упадёт с понятной ошибкой.
+      }
+    }
     // 2.0.8-D2: чат закреплён на УДАЛЁННЫЙ аккаунт → стоп-с-вопросом (карточка B: НЕ тихая
     // ротация на глобально-активный). Проверяем ДО создания run/провайдера — чистый выход.
     // chatPinned (аккаунт закреплён и жив) → ниже подавляет авто-свитч/fallback (инвариант 1).
@@ -571,6 +746,10 @@ export function registerAiIpc(deps: AiDeps): void {
       }
       for (const [k, p] of pendingPlans) {
         if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+      }
+      // EXT-B0: drain pending browser-action approvals этого send'а (reject).
+      for (const [k, p] of pendingBrowserActions) {
+        if (p.sendId === sendId) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
       }
       // #4 suspend: чистим suspendedSends здесь — cleanup идёт для ОБОИХ путей (API+CLI)
       // и любого выхода, иначе CLI-приостановки и race suspend-после-finish копились бы.
@@ -1278,7 +1457,8 @@ export function registerAiIpc(deps: AiDeps): void {
       ).finally(cleanup)
     }
     return sendId
-  })
+  }
+  ipcMain.handle('ai:send', sendHandler)
 
   ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
 
@@ -1409,6 +1589,54 @@ export function registerAiIpc(deps: AiDeps): void {
       }
     }
   })
+
+  /**
+   * EXT-B0 (BR-017): строгий scoped browser-action approval resolver.
+   *
+   * КОНТРАСТ с ai:resolve-write/command/plan выше:
+   *   • payload = { actionId, approvalDigest, browserTaskId, runId, approved, sendId }
+   *     — НЕ boolean-only. approvalDigest — sha256 всех полей action snapshot.
+   *   • resolver СТРОГО сверяет (sendId, actionId, browserTaskId, runId) и digest.
+   *     Несовпадение любого поля → резолвер не находит entry → controller получит
+   *     reject (по умолчанию). Без endsWith-suffix fallback.
+   *   • Fail-closed: если UI прислал resolve без ожидаемого digest — отбрасываем.
+   */
+  const resolveBrowserAction = (
+    actionId: string,
+    approvalDigest: string,
+    browserTaskId: string,
+    runId: string,
+    approved: boolean,
+    sendId?: number,
+  ) => {
+      if (typeof sendId !== 'number' || sendId <= 0) return // fail-closed
+      if (!actionId || !approvalDigest || !browserTaskId || !runId) return // fail-closed
+      const key = scopedKey(sendId, actionId)
+      const entry = pendingBrowserActions.get(key)
+      if (!entry) return // fail-closed: нет такого ожидаемого action
+      // СТРОГИЙ scope check: все поля должны совпадать с тем, что controller
+      // положил в Map. Любое несовпадение → отвергаем resolve (return).
+      if (entry.browserTaskId !== browserTaskId) return
+      if (entry.runId !== runId) return
+      if (entry.expectedDigest !== approvalDigest) return
+      // Идемпотентное потребление: delete ДО resolve, чтобы второй resolve того
+      // же actionId ничего не нашёл.
+      pendingBrowserActions.delete(key)
+      entry.resolve({ approved, approvalDigest })
+  }
+  ipcMain.handle(
+    'ai:resolve-browser-action',
+    (_e, actionId: string, approvalDigest: string, browserTaskId: string, runId: string, approved: boolean, sendId?: number) => {
+      resolveBrowserAction(actionId, approvalDigest, browserTaskId, runId, approved, sendId)
+    },
+  )
+
+  return {
+    sendFromBrowser: (sender, incomingMessages, projectPath, chatId) =>
+      sendHandler({ sender }, incomingMessages, projectPath, undefined, undefined, chatId),
+    resolveBrowserAction: (actionId, approvalDigest, browserTaskId, runId, approved, sendId) =>
+      resolveBrowserAction(actionId, approvalDigest, browserTaskId, runId, approved, sendId),
+  }
 }
 
 // Type re-exports for renderer (api.d.ts)

@@ -67,6 +67,28 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   streamStartedAt: number | null
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
+  /** EXT-B0/R1: browser action, ожидающий одноразового approval (foreground-only). */
+  pendingBrowserAction: {
+    callId: string
+    actionId: string
+    browserTaskId: string
+    runId: string
+    risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+    approvalDigest: string
+    snapshot: {
+      browserTaskId: string
+      runId: string
+      clientId?: string | null
+      scope: Record<string, unknown>
+      actionType: string
+      payload: Record<string, unknown>
+      preconditions: Record<string, unknown>
+      expectedPostcondition?: Record<string, unknown> | null
+      risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+    }
+    reason: string
+    sendId?: number
+  } | null
   /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
   pendingPlan: { callId: string; title: string; stepCount: number; sendId?: number } | null
   activity: ActivityEntry[]
@@ -148,6 +170,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
+  /** EXT-B0/R1: установить/снять pending browser action (foreground-only). */
+  setPendingBrowserAction: (a: ProjectState['pendingBrowserAction']) => void
   setPendingPlan: (p: { callId: string; title: string; stepCount: number; sendId?: number } | null) => void
   /** T1.3 Inbox: снять pendingCommand конкретного чата (активного или фонового
    *  снапшота) — резолв approval из общего Inbox, не заходя в чат. */
@@ -313,6 +337,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   streamStartedAt: null,
   pendingWrites: [],
   pendingCommand: null,
+  pendingBrowserAction: null,
   pendingPlan: null,
   activity: [],
   agentProgress: [],
@@ -648,6 +673,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => set({ pendingWrites: [] }),
   setPendingCommand: (c) => set({ pendingCommand: c }),
+  setPendingBrowserAction: (a) => set({ pendingBrowserAction: a }),
   setPendingPlan: (p) => set({ pendingPlan: p }),
   clearChatPendingCommand: (chatId) => set(s => {
     const patch: Partial<ProjectState> = {}

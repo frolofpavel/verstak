@@ -102,6 +102,35 @@ const MUTATING_TOOLS = new Set<string>([
   'delegate_parallel'
 ])
 
+/**
+ * Browser action tool names, которые считаются мутациями в смысле crash-resume
+ * (EXT-B0 п.6). observe/read/screenshot не входят — это R0.
+ * Источник: electron/ai/browser/policy.ts:BROWSER_MUTATION_TOOL_NAMES.
+ * Дублируется строками здесь (а не импортом), чтобы storage-слой не зависел от
+ * ai/ browser-модуля — так уже сложилось для других tool names.
+ */
+const BROWSER_MUTATING_TOOLS = new Set<string>([
+  'browser_navigate',
+  'browser_click',
+  'browser_type_text',
+  'browser_clear_field',
+  'browser_select_option',
+  'browser_toggle',
+  'browser_press_key',
+  'browser_back',
+  'browser_forward',
+  'browser_reload',
+  'browser_scroll',
+  'browser_focus',
+  // browser_wait_for НЕ включаем (R0 — состояние не меняет).
+])
+const BROWSER_NON_MUTATING_TOOLS = new Set<string>([
+  'browser_screenshot',
+  'browser_read_page',
+  'browser_observe',
+  'browser_wait_for',
+])
+
 /** Режимы, в которых мог пройти незаметный деструктив без подтверждения. */
 const UNSAFE_MODES = new Set<string>(['auto', 'bypass'])
 
@@ -110,10 +139,26 @@ const UNSAFE_MODES = new Set<string>(['auto', 'bypass'])
  * Любой connector-* трактуем как потенциально мутирующий (1С запись, Telegram
  * send и т.п.) — точную read/write-классификацию не вводим, безопаснее не
  * доигрывать.
+ *
+ * EXT-B0 (план §9 п.6): расширяем классификатор всеми browser actions. R1–R3
+ * не считаются безопасными только потому, что их нет в старом MUTATING_TOOLS.
+ * browser_observe / browser_read_page / browser_screenshot / browser_wait_for
+ * — не мутации (R0), явно исключены.
  */
 export function isMutatingTool(name: string | null | undefined): boolean {
   if (!name) return false
-  return MUTATING_TOOLS.has(name) || name.startsWith('connector')
+  if (MUTATING_TOOLS.has(name)) return true
+  if (name.startsWith('connector')) return true
+  // browser_* tool names: mutation iff в BROWSER_MUTATING_TOOLS (R1+). observe/
+  // screenshot/read/wait — нет.
+  if (name.startsWith('browser_')) {
+    if (BROWSER_NON_MUTATING_TOOLS.has(name)) return false
+    if (BROWSER_MUTATING_TOOLS.has(name)) return true
+    // unknown browser_* tool — fail-closed, считаем мутацией (см. policy.ts
+    // classifyRisk, который тоже fail-closed для unknown actionType).
+    return true
+  }
+  return false
 }
 
 /**

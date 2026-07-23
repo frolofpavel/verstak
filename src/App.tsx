@@ -21,6 +21,8 @@ import { DecisionsPanel } from './components/DecisionsPanel'
 import { BrainPanel } from './components/BrainPanel'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
+import { BrowserActionApproval } from './components/BrowserActionApproval'
+import { BrowserBridgeCard } from './components/BrowserBridgeCard'
 import { PlanConfirm } from './components/PlanConfirm'
 import { InboxApprovals } from './components/InboxApprovals'
 
@@ -555,6 +557,8 @@ export function App() {
       <TerminalErrorToast />
       <DiffView />
       <CommandConfirm />
+      <BrowserActionApproval />
+      {activeView === 'chat' && <BrowserBridgeCard />}
       <PlanConfirm />
       <InboxApprovals />
       <UpdateReadyToast />

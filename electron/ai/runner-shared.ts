@@ -52,6 +52,20 @@ export const pendingCommands = new Map<string, PendingCommand>()
 export interface PendingPlan { sendId: number; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }
 export const pendingPlans = new Map<string, PendingPlan>()
 
+// ── EXT-B0 (BR-017): pending browser-action approvals ────────────────────────
+// Контраст с PendingWrite/PendingCommand: payload НЕ boolean-only. Resolve
+// несёт { approved, approvalDigest }, controller сверяет digest с тем, под
+// которым UI показал approval. Keyed by `${sendId}::${actionId}` — СТРОГИЙ
+// lookup, без endsWith-suffix fallback (см. ipc/ai.ts:ai:resolve-browser-action).
+export interface PendingBrowserAction {
+  sendId: number
+  browserTaskId: string
+  runId: string
+  expectedDigest: string
+  resolve: (r: { approved: boolean; approvalDigest: string }) => void
+}
+export const pendingBrowserActions = new Map<string, PendingBrowserAction>()
+
 // #4 suspend: sendId'ы, прерванные как ПРИОСТАНОВКА (не Stop) — finally помечает
 // прогон 'suspended' для ↻ Продолжить. Общий для ai:suspend (ai.ts) и finally (runner).
 export const suspendedSends = new Set<number>()

@@ -1441,10 +1441,37 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         store.setPendingPlan({ callId: event.callId, title: String(event.title ?? 'План'), stepCount: Number(event.stepCount ?? 0), sendId: id })
         return
       }
+      // Browser approval также глобален: если прогон ушёл в фон, ранний return
+      // ниже не должен проглотить единственный UI, иначе main будет ждать зря.
+      if (event.type === 'pending-browser-action') {
+        store.setPendingBrowserAction({
+          callId: event.callId,
+          actionId: event.actionId,
+          browserTaskId: event.browserTaskId,
+          runId: event.runId,
+          risk: event.risk,
+          approvalDigest: event.approvalDigest,
+          snapshot: event.snapshot,
+          reason: event.reason,
+          sendId: id,
+        })
+        store.pushActivity({
+          id: event.callId,
+          kind: 'command',
+          label: `browser_${event.snapshot.actionType}`,
+          detail: `risk ${event.risk} — ждёт подтверждения`,
+          status: 'pending',
+          timestamp: Date.now(),
+        })
+        return
+      }
       // #3 plan-gate: прогон завершился/упал (gate был сдренен в main как reject) —
       // снимаем модалку плана, чтобы не висела ghost поверх завершённого прогона.
       if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
         store.setPendingPlan(null)
+      }
+      if ((event.type === 'done' || event.type === 'error') && store.pendingBrowserAction?.sendId === id) {
+        store.setPendingBrowserAction(null)
       }
       // Фоновый чат: другая ветка, экран справки ИЛИ другой проект (стрим начатый до
       // смены проекта). Персистим в БД по sessionId (applyEventToChat), атрибутируем
@@ -1514,6 +1541,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           label: 'run_command',
           detail: event.command,
           status: 'pending',
+          timestamp: Date.now()
+        })
+      }
+      else if (event.type === 'browser-action-result') {
+        // Очистка pending + activity update по факту consume.
+        if (store.pendingBrowserAction?.callId === event.callId) {
+          store.setPendingBrowserAction(null)
+        }
+        store.pushActivity({
+          id: event.callId,
+          kind: 'command',
+          label: 'browser_action',
+          detail: `${event.status}: ${event.detail}`,
+          status: event.status === 'verified' ? 'ok' : event.status === 'blocked' || event.status === 'failed' ? 'error' : 'pending',
           timestamp: Date.now()
         })
       }
@@ -3117,6 +3158,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // мог дропнуться (owner забыт выше) → модалка осталась бы (ревью 24.06).
     const cur = useProject.getState()
     if (cur.pendingCommand?.sendId === id) cur.setPendingCommand(null)
+    if (cur.pendingBrowserAction?.sendId === id) cur.setPendingBrowserAction(null) // EXT-B0/R1: browser approval cleanup
     if (cur.pendingPlan?.sendId === id) cur.setPendingPlan(null) // #3 plan-gate: снять модалку плана при Stop
     currentSendIdRef.current = null
     flushQueueRef.current()

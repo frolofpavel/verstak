@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verstak AI — Браузерный сотрудник</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body class="vsk-app">
+  <!-- Header: App Name & Active Page Bar -->
+  <header class="vsk-header">
+    <div class="vsk-brand">
+      <div class="vsk-logo">V</div>
+      <div class="vsk-brand-info">
+        <span class="vsk-title">Verstak AI</span>
+        <span id="vsk-status-pill" class="vsk-pill is-connecting">● Подключение...</span>
+      </div>
+    </div>
+
+    <div id="vsk-page-bar" class="vsk-page-bar">
+      <span class="vsk-page-icon">🌐</span>
+      <div class="vsk-page-info">
+        <span id="vsk-page-title" class="vsk-page-title">Загрузка страницы...</span>
+        <span id="vsk-page-domain" class="vsk-page-domain">localhost</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Feed: Messages, Steps & Approvals -->
+  <main id="vsk-chat-feed" class="vsk-feed">
+    <div class="vsk-msg is-system">
+      <div class="vsk-avatar">🤖</div>
+      <div class="vsk-bubble">
+        <p><strong>Привет! Я браузерный AI-сотрудник Verstak.</strong></p>
+        <p class="vsk-subtext">Просто напишите, что сделать на этой странице (прочитать данные, нажать кнопку, заполнить форму).</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Approval Card Container -->
+  <div id="vsk-approval-area" class="vsk-approval-area vsk-hidden">
+    <div class="vsk-approval-card">
+      <div class="vsk-approval-header">
+        <span class="vsk-icon">⚠️</span>
+        <span class="vsk-approval-title">Подтвердите действие</span>
+      </div>
+      <div id="vsk-approval-desc" class="vsk-approval-desc">
+        Нажатие кнопки на текущей странице
+      </div>
+      <div id="vsk-approval-change" class="vsk-approval-change">
+        Изменится состояние страницы
+      </div>
+      <div class="vsk-approval-actions">
+        <button id="vsk-approve-btn" type="button" class="vsk-btn vsk-btn-primary">Подтвердить</button>
+        <button id="vsk-reject-btn" type="button" class="vsk-btn vsk-btn-danger">Отклонить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt Input & Controls Bar -->
+  <footer class="vsk-input-footer">
+    <form id="vsk-form" class="vsk-form">
+      <div class="vsk-input-wrap">
+        <textarea id="vsk-prompt-input" class="vsk-input" rows="2" placeholder="Что сделать на этой странице?" required></textarea>
+        <button id="vsk-send-btn" type="submit" class="vsk-send-btn" title="Отправить">➔</button>
+      </div>
+      <div class="vsk-footer-bar">
+        <span id="vsk-status" class="vsk-footer-status">Готов к работе</span>
+        <button id="vsk-stop-btn" type="button" class="vsk-stop-btn vsk-hidden">⏹ Стоп</button>
+      </div>
+    </form>
+
+    <!-- Technical / Debug Drawer (Collapsible & Hidden by default) -->
+    <details class="vsk-dev-drawer">
+      <summary class="vsk-dev-summary">⚙️ Отладка & Трассировка</summary>
+      <div class="vsk-dev-content">
+        <div class="vsk-conn-row"><span class="vsk-meta-k">Связь:</span> <span id="vsk-conn-state">offline</span></div>
+        <div class="vsk-conn-row"><span class="vsk-meta-k">Задача:</span> <span id="vsk-conn-task">—</span></div>
+        <div class="vsk-conn-row"><span class="vsk-meta-k">Run:</span> <span id="vsk-conn-run">—</span></div>
+        <div class="vsk-conn-row"><span class="vsk-meta-k">Вкладка:</span> <span id="vsk-conn-tab">не прикреплена</span></div>
+        <input id="vsk-pair-code" type="hidden" />
+        <div class="vsk-dev-btns">
+          <button id="vsk-pair" type="button" class="vsk-btn">Pair</button>
+          <button id="vsk-attach" type="button" class="vsk-btn">Attach</button>
+          <button id="vsk-detach" type="button" class="vsk-btn">Detach</button>
+          <button id="vsk-observe" type="button" class="vsk-btn">Observe</button>
+          <button id="vsk-capture" type="button" class="vsk-btn">Capture</button>
+          <button id="vsk-copy-verstak" type="button" class="vsk-btn" disabled>Copy</button>
+          <button id="vsk-copy-json" type="button" class="vsk-btn" disabled>JSON</button>
+        </div>
+        <div id="vsk-meta" class="vsk-meta vsk-hidden">
+          <span id="vsk-meta-source"></span>
+          <span id="vsk-meta-textlen"></span>
+          <span id="vsk-meta-tables"></span>
+          <span id="vsk-meta-trunc-wrap" class="vsk-hidden"><span id="vsk-meta-trunc"></span></span>
+          <span id="vsk-meta-omissions-wrap" class="vsk-hidden"><span id="vsk-meta-omissions"></span></span>
+        </div>
+        <textarea id="vsk-output" class="vsk-output" rows="4" readonly></textarea>
+      </div>
+    </details>
+  </footer>
+
+  <script type="module" src="sidepanel.mjs"></script>
+</body>
+</html>

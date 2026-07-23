@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verstak C1 — счётчик</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 420px;
+      margin: 48px auto;
+      padding: 24px;
+      background: #0f1115;
+      color: #e8eaed;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 16px; }
+    #counter {
+      font-size: 1.5rem;
+      margin: 16px 0 24px;
+      padding: 12px 16px;
+      background: #1a1d24;
+      border-radius: 8px;
+      border: 1px solid #2a2f3a;
+    }
+    button {
+      font-size: 1rem;
+      padding: 10px 18px;
+      border-radius: 8px;
+      border: none;
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background: #2563eb; }
+    .note { margin-top: 24px; color: #8b93a7; font-size: 0.85rem; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <h1>Fixture: первая рука (click)</h1>
+  <div id="counter" data-testid="counter">Счётчик: 0</div>
+  <button type="button" id="inc" data-testid="inc">Увеличить</button>
+  <p class="note">
+    Безопасная localhost-страница для live-приёмки EXT-C1.
+    Один click по «Увеличить» → «Счётчик: 1». Replay не должен давать 2 без нового approve.
+  </p>
+  <script>
+    let n = 0
+    const el = document.getElementById('counter')
+    document.getElementById('inc').addEventListener('click', () => {
+      n += 1
+      el.textContent = 'Счётчик: ' + n
+    })
+  </script>
+</body>
+</html>

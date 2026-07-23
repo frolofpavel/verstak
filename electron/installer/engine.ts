@@ -155,6 +155,9 @@ if (Test-Path -LiteralPath $dir) {
   Remove-Item -LiteralPath $dir -Recurse -Force
 }
 Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ru.verstak.ide' -Recurse -Force -ErrorAction SilentlyContinue
+# EXT-B1 Connected Eyes: native messaging host cleanup
+Remove-Item -Path 'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\ru.verstak.browser_bridge' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\ru.verstak.browser_bridge' -Recurse -Force -ErrorAction SilentlyContinue
 `
 }
 

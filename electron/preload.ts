@@ -193,6 +193,21 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ai:resolve-command', callId, accept, sendId),
     resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-plan', callId, decision, feedback, sendId),
+    /**
+     * EXT-B0 (BR-017): строгий scoped browser-action approval transport.
+     * В отличие от resolveCommand/resolveWrite — payload содержит полный scope
+     * (actionId + digest + browserTaskId + runId), без endsWith-suffix fallback.
+     * Resolver сверяет digest с тем, под которым UI показал approval.
+     */
+    resolveBrowserAction: (
+      actionId: string,
+      approvalDigest: string,
+      browserTaskId: string,
+      runId: string,
+      approved: boolean,
+      sendId?: number
+    ) =>
+      ipcRenderer.invoke('ai:resolve-browser-action', actionId, approvalDigest, browserTaskId, runId, approved, sendId),
     stop: (sendId: number) => ipcRenderer.invoke('ai:stop', sendId),
     wait: (runId: string, opts?: { timeoutMs?: number; pollMs?: number }) =>
       ipcRenderer.invoke('ai:wait', runId, opts),
@@ -399,6 +414,14 @@ contextBridge.exposeInMainWorld('api', {
   },
   verify: {
     exec: (command: string) => ipcRenderer.invoke('verify:exec', command) as Promise<{ exitCode: number; stdout: string; stderr: string }>
+  },
+  /** EXT-B1/C1: Browser bridge card — host, pairing, attach status. */
+  browserBridge: {
+    getState: () => ipcRenderer.invoke('browser-bridge:get-state'),
+    issuePairingCode: () => ipcRenderer.invoke('browser-bridge:issue-pairing-code'),
+    installHost: () => ipcRenderer.invoke('browser-bridge:install-host'),
+    uninstallHost: () => ipcRenderer.invoke('browser-bridge:uninstall-host'),
+    extensionDir: () => ipcRenderer.invoke('browser-bridge:extension-dir'),
   },
   // Git READ + WRITE (Dev Task Flow). READ: status/diff/log. WRITE (Фаза 3,
   // argv-форма + денилист push/force/reset): branchCreate/checkout/add/commit.

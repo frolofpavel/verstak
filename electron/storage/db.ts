@@ -1212,7 +1212,7 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
   },
   {
     version: 53,
-    description: '2.0.11-E провенанс отката файлов: file_undo обогащается run_id/chat_id/message_id (КТО менял) + before_hash/after_hash (не переписал ли файл кто-то ПОСЛЕ). Append-only: все колонки nullable — legacy-записи и записи без контекста остаются валидными «непротрассированными» (по ним rewindCoverage не даст complete).',
+    description: '2.0.11-E провенанс отката файлов: file_undo обогащается run_id/chat_id/message_id (КТО менял) + before_hash/after_hash (не переписал ли файл кто-то ПОСЛЕ). Append-only: все колонки nullable — legacy-записии и записи без контекста остаются валидными «непротрассированными» (по ним rewindCoverage не даст complete).',
     run: (db: DB) => {
       const cols = (db.prepare('PRAGMA table_info(file_undo)').all() as Array<{ name: string }>).map(c => c.name)
       const has = (c: string) => cols.includes(c)
@@ -1221,6 +1221,155 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!has('message_id')) db.exec('ALTER TABLE file_undo ADD COLUMN message_id INTEGER')
       if (!has('before_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN before_hash TEXT')
       if (!has('after_hash')) db.exec('ALTER TABLE file_undo ADD COLUMN after_hash TEXT')
+    }
+  },
+  {
+    version: 54,
+    description: 'EXT-B0 Browser Employee durable state. Append-only: stable browserTaskId, run lineage, action ledger и redacted Proof refs. Survives restart, Pause/Resume, provider handoff. НИКАКИХ raw cookie/token/session — только redacted refs (BR-013, BR-015, BR-016, BR-017).',
+    run: (db: DB) => {
+      // ВНИМАНИЕ: эта миграция использует db.exec(`...`) с многострочным SQL.
+      // Комментарии внутри SQL — через `--`, НЕ через `//` или em-dash.
+      // ── browser_tasks ───────────────────────────────────────────────────────
+      // Stable durable id одного браузерного поручения. Переживает Pause/Resume,
+      // restart, смену модели. current_run_id → указывает на «голову» lineage
+      // (browser_task_runs). observation_version инкрементируется на каждый
+      // observe — ref'ы элементов привязаны к версии (после navigation невалидны).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_tasks (
+          browser_task_id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          client_id TEXT,
+          current_run_id TEXT,
+          browser_mode TEXT NOT NULL DEFAULT 'watch'
+            CHECK(browser_mode IN ('watch','prepare','execute')),
+          observation_version INTEGER NOT NULL DEFAULT 0,
+          observation_id TEXT,
+          task_tab_ref TEXT,
+          allowed_domains_json TEXT NOT NULL DEFAULT '[]',
+          caps_json TEXT NOT NULL DEFAULT '{}',
+          data_policy_json TEXT NOT NULL DEFAULT '{}',
+          last_result_status TEXT,
+          last_result_detail TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          ended_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_project ON browser_tasks(project_path, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_chat ON browser_tasks(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_active ON browser_tasks(project_path, ended_at) WHERE ended_at IS NULL;
+
+        -- browser_task_runs — ordered run lineage (BR-015).
+        -- Один поручение → N запусков модели. ord = порядок, handoff_reason —
+        -- почему сменили run (provider_switch / pause_resume / new_send / forced).
+        CREATE TABLE IF NOT EXISTS browser_task_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          provider_id TEXT,
+          model TEXT,
+          ord INTEGER NOT NULL,
+          handoff_reason TEXT NOT NULL DEFAULT 'new_send',
+          started_at INTEGER NOT NULL,
+          ended_at INTEGER,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_task_runs_unique ON browser_task_runs(browser_task_id, run_id);
+        CREATE INDEX IF NOT EXISTS idx_browser_task_runs_task ON browser_task_runs(browser_task_id, ord);
+
+        -- browser_actions — durable action ledger (BR-013).
+        -- Append-only для переходов состояния (каждый transition = INSERT new
+        -- event-like row через log_action_event); сама строка «текущее состояние
+        -- действия» мутирует через UPDATE только на финал — pattern agent_runs.
+        -- Состояние executing после crash → reconcileStaleActions() ставит
+        -- uncertain; автоповтор запрещён.
+        CREATE TABLE IF NOT EXISTS browser_actions (
+          action_id TEXT PRIMARY KEY,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL DEFAULT 1,
+          action_type TEXT NOT NULL,
+          risk_level TEXT NOT NULL CHECK(risk_level IN ('R0','R1','R2','R3','R4')),
+          scope_json TEXT NOT NULL DEFAULT '{}',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          preconditions_json TEXT NOT NULL DEFAULT '{}',
+          expected_postcondition_json TEXT,
+          approval_digest TEXT,
+          approval_consumed_at INTEGER,
+          status TEXT NOT NULL DEFAULT 'proposed'
+            CHECK(status IN ('proposed','approved','executing','verified','uncertain','failed','blocked','rejected','cancelled')),
+          attempt_id TEXT,
+          result_status TEXT,
+          result_detail TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          finalized_at INTEGER,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_task ON browser_actions(browser_task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_status ON browser_actions(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_executing ON browser_actions(status) WHERE status = 'executing';
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_pending ON browser_actions(browser_task_id, status)
+          WHERE status IN ('proposed','approved');
+
+        -- browser_action_events — append-only transition log (BR-013).
+        -- Каждое изменение состояния действия = новая строка. Аудит-трейл для
+        -- "как мы дошли до verified/uncertain/failed", не mutable state.
+        CREATE TABLE IF NOT EXISTS browser_action_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT NOT NULL,
+          from_status TEXT,
+          to_status TEXT NOT NULL,
+          reason TEXT,
+          detail_json TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (action_id) REFERENCES browser_actions(action_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_action_events_action ON browser_action_events(action_id, id);
+
+        -- browser_proof_refs — redacted before/after Proof references (BR-016).
+        -- НИКАКИХ raw cookie/token/session. Только redacted refs: путь к файлу
+        -- screenshot на диске (в userData, bounded retention) + digest + метаданные.
+        -- screenshot_data_url НЕ хранится (может содержать sensitive pixels).
+        CREATE TABLE IF NOT EXISTS browser_proof_refs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT,
+          kind TEXT NOT NULL CHECK(kind IN ('before','after','observe','action')),
+          artifact_path TEXT,
+          artifact_digest TEXT,
+          origin TEXT,
+          url TEXT,
+          redacted_summary TEXT,
+          omissions_json TEXT NOT NULL DEFAULT '[]',
+          retention_until INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (action_id) REFERENCES browser_actions(action_id) ON DELETE SET NULL,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_proof_refs_task ON browser_proof_refs(browser_task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_proof_refs_action ON browser_proof_refs(action_id);
+        CREATE INDEX IF NOT EXISTS idx_browser_proof_refs_retention ON browser_proof_refs(retention_until) WHERE retention_until IS NOT NULL;
+      `)
+    }
+  },
+  {
+    version: 55,
+    description: 'EXT-B0-R1 Browser action approval TTL (BR-017 п.7 «Approval имеет короткий TTL»). approval_expires_at — момент, после которого approval в статусе proposed/approved считается просроченным и не может быть потреблён. Append-only ALTER к существующей browser_actions; legacy-строки получают NULL (без TTL — обратно-совместимы, но controller всегда ставит TTL при propose R3). reconcileStaleActions расширится: executing→uncertain по-прежнему + proposed/approved с истёкшим TTL→rejected (не uncertain — action не начался).',
+    run: (db: DB) => {
+      const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='browser_actions'").get()
+      if (!hasTable) return // repair-сценарий: B0 миграция не применилась — v55 no-op
+      const cols = (db.prepare('PRAGMA table_info(browser_actions)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('approval_expires_at')) {
+        db.exec('ALTER TABLE browser_actions ADD COLUMN approval_expires_at INTEGER')
+      }
+      // Индекс под reconcileStaleActions: ищем proposed/approved с истекшим TTL.
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_browser_actions_approval_ttl " +
+        "ON browser_actions(status, approval_expires_at) " +
+        "WHERE status IN ('proposed','approved') AND approval_expires_at IS NOT NULL"
+      )
     }
   }
 ]

@@ -377,6 +377,34 @@ export type ChatEvent =
   | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
   | { type: 'pending-command'; callId: string; command: string }
+  /**
+   * EXT-B0 (BR-017): pending browser action — строгий scoped payload.
+   * Renderer показывает approval modal с snapshot'ом (actionType, payload, scope,
+   * risk, expected postcondition). Resolve через resolveBrowserAction с тем же
+   * approvalDigest — controller сверит scope/digest перед consume.
+   */
+  | {
+      type: 'pending-browser-action'
+      callId: string
+      actionId: string
+      browserTaskId: string
+      runId: string
+      risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+      approvalDigest: string
+      snapshot: {
+        browserTaskId: string
+        runId: string
+        clientId?: string | null
+        scope: Record<string, unknown>
+        actionType: string
+        payload: Record<string, unknown>
+        preconditions: Record<string, unknown>
+        expectedPostcondition?: Record<string, unknown> | null
+        risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+      }
+      reason: string
+    }
+  | { type: 'browser-action-result'; callId: string; actionId: string; status: 'verified' | 'uncertain' | 'failed' | 'blocked'; finalUrl?: string | null; detail: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
   | { type: 'turns-exhausted'; used: number; maxBudget: number; canContinue: boolean; suggestedAdd: number }
@@ -564,6 +592,20 @@ declare global {
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => Promise<void>
+        /**
+         * EXT-B0 (BR-017): scoped browser-action approval resolver. Renderer
+         * возвращает тот же approvalDigest, что controller выдал в snapshot —
+         * не boolean only. Scoped payload (actionId/browserTaskId/runId/digest)
+         * проверяется строго, без suffix fallback.
+         */
+        resolveBrowserAction: (
+          actionId: string,
+          approvalDigest: string,
+          browserTaskId: string,
+          runId: string,
+          approved: boolean,
+          sendId?: number
+        ) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
         wait: (runId: string, opts?: { timeoutMs?: number; pollMs?: number }) => Promise<RunWaitResult>
         suspend: (sendId: number) => Promise<boolean>
@@ -771,6 +813,24 @@ declare global {
       }
       verify: {
         exec: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+      }
+      /** EXT-B1/C1 Browser bridge card. */
+      browserBridge: {
+        getState: () => Promise<BrowserBridgeStateDTO>
+        issuePairingCode: () => Promise<
+          { ok: true; code: string; expiresAt: number } | { ok: false; error: string }
+        >
+        installHost: () => Promise<{
+          ok: boolean
+          hostName: string
+          manifestPath: string
+          hostLauncherPath: string
+          registryKeys: string[]
+          error?: string
+          readback?: BrowserBridgeStateDTO['host']
+        }>
+        uninstallHost: () => Promise<{ ok: boolean; error?: string }>
+        extensionDir: () => Promise<{ path: string; extensionId: string }>
       }
       // Git READ + WRITE (Dev Task Flow). WRITE (Фаза 3) — argv-форма + денилист.
       git: {
@@ -986,6 +1046,35 @@ export interface AutonomousStatus {
   lastRunSuggestions: number
   lastRunError: string | null
   nextRunAt: number | null
+}
+
+/** EXT-B1/C1 Browser bridge public state (renderer). */
+export interface BrowserBridgeStateDTO {
+  ui: string
+  desktopOnline: boolean
+  connected: boolean
+  authenticated: boolean
+  sessionId: string | null
+  browserTaskId: string | null
+  runId: string | null
+  attachedTab: {
+    tabRef: string
+    url: string
+    title: string
+    origin: string
+  } | null
+  lastError: string | null
+  host: {
+    installed: boolean
+    needsRepair: boolean
+    hostName: string
+    extensionId: string
+    registryOk: boolean
+    manifestPath: string | null
+  }
+  extensionDir: string
+  activePairingCode: string | null
+  activePairingExpiresAt: number | null
 }
 
 /** Обнаруженный CLI-инструмент на компьютере пользователя. */

@@ -179,6 +179,9 @@ export interface AgentRunContext {
   appendAuditFn?: (action: string, detail: string) => void
   trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
   parentChatId?: number | null
+  /** EXT-B0/R1: resolver browserTaskId для текущего прогона. По умолчанию
+   *  bt-${parentChatId}; без chatId = null (browser run не активен). */
+  browserTaskIdResolver?: (input: { parentChatId?: number | null; runId?: string }) => string | null
   subSessions?: AiDeps['subSessions']
   sessionTodos?: AiDeps['sessionTodos']
   agentRuns?: AgentRuns
@@ -213,7 +216,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+    parentChatId, browserTaskIdResolver, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
     processRegistry = globalProcessRegistry,
     isFallbackFrame,
   } = ctx
@@ -1084,6 +1087,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // appendEvent. Хендлеры дёргают ctx.recordRunEvent рядом с существующими
       // ai:event-эмиттерами; ошибка storage не ломает agent loop (try/catch).
       runId,
+      // EXT-B0/R1: browserTaskId — задан когда прогон работает с browser.
+      // Источник: browserTaskIdResolver или автоматическое bt-${chatId}
+      // если parentChatId есть. Когда задан — tool-dispatch блокирует
+      // forbiddenCrossTools (см. цикл выше).
+      browserTaskId: browserTaskIdResolver
+        ? browserTaskIdResolver({ parentChatId, runId })
+        : (typeof parentChatId === 'number' ? `bt-${parentChatId}` : null),
       recordRunEvent: (kind, p) => {
         if (!agentRuns || !runId) return
         try { agentRuns.appendEvent(runId, kind, p) } catch { /* best-effort */ }
@@ -1114,11 +1124,35 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
+    // EXT-B0/R1 Block 5: Capability Envelope — forbiddenCrossTools. Если у этого
+    // прогона есть browserTaskId (browser run активен), контент страницы не может
+    // расширить capability на опасные cross-tool мутации: run_command/write_file/
+    // connector_query/delegate_*/execute_code/spawn_process/memory_save/new_task.
+    // Контракт (план §5.3 инвариант 13 + §10.5 security regression pack).
+    const BROWSER_RUN_FORBIDDEN_CROSS_TOOLS = new Set([
+      'run_command', 'execute_code',
+      'write_file', 'apply_patch', 'edit_file', 'create_file', 'edit_spreadsheet',
+      'delegate_task', 'delegate_parallel', 'delegate_orchestrate', 'delegate_swarm',
+      'connector_query', 'connector_send',
+      'spawn_process', 'stop_process',
+      'memory_save', 'new_task',
+    ])
+    const browserRunActive = !!ctx.browserTaskId
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       // F1: заблокированный PreToolUse-хуком вызов не исполняем — отдаём error модели.
       if (preBlocked.has(i)) {
         const reason = preBlocked.get(i)!
+        toolResults[i] = { id: call.id, name: call.name, result: '', error: reason }
+        sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: call.id, name: call.name, command: '', reason } })
+        continue
+      }
+      // EXT-B0/R1: browser run cross-tool guard. Page content (DOM, screenshot,
+      // observation text) не может заставить агент вызвать cross-tool мутацию.
+      if (browserRunActive && BROWSER_RUN_FORBIDDEN_CROSS_TOOLS.has(call.name)) {
+        const reason = `Browser run активен — cross-tool "${call.name}" заблокирован capability envelope. ` +
+          `Контент страницы не может инициировать ${call.name}. ` +
+          `Выйдите из browser-режима или явно переключите задачу.`
         toolResults[i] = { id: call.id, name: call.name, result: '', error: reason }
         sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: call.id, name: call.name, command: '', reason } })
         continue

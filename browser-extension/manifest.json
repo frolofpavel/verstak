@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "114",
+  "name": "Verstak — Connected Eyes",
+  "version": "0.2.0",
+  "description": "Глаза Verstak: pair с desktop, attach вкладки, observe страницы в текущий run без clipboard.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoQwehRHbRAo1R/m4zqMkD2tXkp0GaAvw1c01Peqc2Biv4YaI+knqjuWUCjo8tFzMozKcIbzzlWk/OtfntnEdVJYkY5kKqzrZvd8pUyTJ/yhhiPxH7U7AqqDsaEpwWY2ImU7vn305SQu317Hfdt5HCoigHx+IzKKogl6cs2Ng51Y/H3kJk2w9HVgPjjDRzNQZslzeBrpmPlP8ZcXmBlRdmQu+9ebfNf/F6g959/K2FlAaVICkDpTVf9NwdojXWqZCIgBD6yIm49xHoRZKVcaJdZnGXbAUuzH1FIu8Ham/4JAwJzipUJe5Ux5i4sd5IvB36pHEA9LR5Sbbdo5M4FYgMwIDAQAB",
+  "permissions": ["activeTab", "scripting", "sidePanel", "nativeMessaging", "storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_title": "Verstak — глаза браузера",
+    "default_popup": "sidepanel.html"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.mjs",
+    "type": "module"
+  }
+}

@@ -29,7 +29,7 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
 import { registerSubscriptionAccountsIpc } from './ipc/subscription-accounts'
-import { registerAiIpc, abortSend, runScheduledHeadless } from './ipc/ai'
+import { registerAiIpc, abortSend, runScheduledHeadless, type AiIpcGateway } from './ipc/ai'
 import { globalProcessRegistry } from './ai/process-registry'
 import { registerSchedulerIpc } from './ipc/scheduler'
 import { registerChatsIpc } from './ipc/chats'
@@ -51,6 +51,22 @@ import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
+// EXT-B0/R1 Browser Employee — единый controller + durable storage.
+import { createBrowserTasks } from './storage/browser-tasks'
+import { createBrowserController } from './ai/browser/controller'
+import type { BrowserController } from './ai/browser/controller'
+import { createWebviewAdapter } from './ai/browser/adapters/webview'
+import { createExtensionAdapter } from './ai/browser/adapters/extension'
+import { parseCapabilityEnvelope, webviewB0Capability } from './ai/browser/capability'
+import { localWebviewDataPolicy, parseClientDataPolicy } from './ai/browser/data-policy'
+import type { BrowserAdapter, CapabilityEnvelope, ClientDataPolicy } from './ai/browser/types'
+import {
+  createBridgeServer,
+  installNativeHost,
+  resolveDevHostInstallDir,
+  type BridgeServer,
+} from './ai/browser/bridge'
+import { readFileSync, existsSync as fsExistsSync } from 'fs'
 import { getActiveAccount, getSubscriptionAccount, touchSubscriptionAccount, switchActiveOnLimit } from './storage/subscription-accounts'
 import { pickChatAccountId } from './ai/route-policy'
 import { registerWorktreeIpc } from './ipc/worktree'
@@ -115,6 +131,7 @@ import { bindReminderToastActions, initNotificationWindow, registerNotificationW
 import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
+import { registerBrowserBridgeIpc } from './ipc/browser-bridge'
 import { bindUiScaleToWindow } from './ui-scale'
 import {
   mainWindowConstructorOptions,
@@ -423,6 +440,10 @@ app.whenReady().then(() => {
   // прогоны (create на старте / finish на завершении), панель Задач читает их.
   const agentRuns = createAgentRuns(db)
   logRuntime('startup.agent_runs.ready')
+
+  // EXT-B0/R1 Browser Employee — durable storage для browser tasks/actions.
+  const browserTasks = createBrowserTasks(db)
+  logRuntime('startup.browser_tasks.ready')
   // #5 worktree-lifecycle: персистентная изоляция чата в git-worktree.
   const worktreeSessions = createWorktreeSessions(db)
   logRuntime('startup.worktree_sessions.ready')
@@ -448,6 +469,254 @@ app.whenReady().then(() => {
     console.warn('[agent-runs] reconcileStale failed:', err instanceof Error ? err.message : err)
   }
   logRuntime('startup.agent_runs.reconciled')
+
+  // EXT-B0/R1: reconcile stale browser actions (executing → uncertain).
+  // Те же crash-recovery гарантии, что и agent_runs: прерванные на execute
+  // действия НЕ повторяются автоматически, только fresh observe решает.
+  try {
+    const browserStaleCount = browserTasks.reconcileStaleActions()
+    if (browserStaleCount > 0) {
+      console.log(`[browser-tasks] reconciled ${browserStaleCount} stale action(s) → uncertain`)
+      logRuntime('browser_tasks.reconcile_stale', { browserStaleCount })
+    }
+  } catch (err) {
+    logRuntimeError('browser_tasks.reconcile_stale.fail', err)
+    console.warn('[browser-tasks] reconcileStaleActions failed:', err instanceof Error ? err.message : err)
+  }
+  logRuntime('startup.browser_tasks.reconciled')
+
+  // EXT-B0/R2: единый BrowserController. Capability/dataPolicy/mode — из
+  // durable browser_tasks (persisted policy), не из module-level defaults.
+  // ensureTask (ipc/ai.ts) сидирует webview B0 policy; get* читает storage.
+  const browserTaskTabs = new Map<string, string /* tabRef */>() // chatId → task tab
+  const browserGetCapability = (browserTaskId: string): CapabilityEnvelope => {
+    const t = browserTasks.get(browserTaskId)
+    const parsed = t ? parseCapabilityEnvelope(t.caps) : null
+    if (parsed) return parsed
+    // Fallback до первого ensureTask: B0 webview seed (не голый default без click).
+    return webviewB0Capability(t?.allowedDomains ?? [])
+  }
+  const browserGetDataPolicy = (browserTaskId: string): ClientDataPolicy => {
+    const t = browserTasks.get(browserTaskId)
+    const parsed = t ? parseClientDataPolicy(t.dataPolicy) : null
+    if (parsed) return parsed
+    // Local webview B0: allow browser context (DEFAULT_DATA_POLICY.ask блокировал
+    // бы весь production-path до явного grant — R2 fix).
+    return localWebviewDataPolicy()
+  }
+  // EXT-B1 Connected Eyes: bridge server + chrome-extension adapter.
+  // Prefer extension when paired+attached; иначе webview (local QA).
+  let browserBridge: BridgeServer | null = null
+  let aiGateway: AiIpcGateway | null = null
+  const extensionAdapter: BrowserAdapter = createExtensionAdapter({
+    getBridge: () => browserBridge,
+  })
+  // resolveAdapter: chrome-extension (live) → webview (local).
+  const browserResolveAdapter = (preferred?: 'electron-webview' | 'chrome-extension'): BrowserAdapter | null => {
+    if (preferred === 'chrome-extension') {
+      return extensionAdapter.available() ? extensionAdapter : null
+    }
+    if (preferred === 'electron-webview') return cachedWebviewAdapter
+    if (extensionAdapter.available()) return extensionAdapter
+    return cachedWebviewAdapter
+  }
+  let cachedWebviewAdapter: BrowserAdapter = createWebviewAdapter({
+    // Placeholder exec — будет переопределён в configureBrowserHandler при
+    // первом реальном вызове. Если controller вызван до настройки — throws
+    // «verstakBrowser not available» (что и нужно для fail-closed).
+    exec: async () => { throw new Error('webview adapter: exec не сконфигурирован (configureBrowserHandler не вызван)') },
+  })
+  const browserController: BrowserController = createBrowserController({
+    storage: browserTasks,
+    resolveAdapter: browserResolveAdapter,
+    getBrowserMode: (btId) => {
+      // R2: mode из durable task. ensureTask сидирует 'execute' для webview B0
+      // (R3 → approval UI). Fallback watch — fail-closed observe-only.
+      const t = browserTasks.get(btId)
+      return t?.browserMode ?? 'watch'
+    },
+    getAgentMode: () => getAgentMode() as 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass',
+    getCapability: browserGetCapability,
+    getDataPolicy: browserGetDataPolicy,
+    getProviderId: (btId) => browserTasks.currentRun(btId)?.providerId ?? getProviderId(),
+  })
+  logRuntime('startup.browser_controller.ready')
+
+  // EXT-B1: Native Messaging bridge endpoint + HKCU host install/repair.
+  try {
+    browserBridge = createBridgeServer({
+      stateDir: dir,
+      getActiveBrowserTaskId: () => {
+        // Prefer lineage from last ai:send (setActiveLineage), then attached tabs map.
+        try {
+          const st = browserBridge?.getPublicState()
+          if (st?.browserTaskId) return st.browserTaskId
+        } catch { /* ignore */ }
+        for (const [btId, tabRef] of browserTaskTabs) {
+          if (tabRef) return btId.startsWith('bt-') ? btId : `bt-${btId}`
+        }
+        return null
+      },
+      getActiveRunId: () => {
+        try {
+          const st = browserBridge?.getPublicState()
+          if (st?.runId) return st.runId
+        } catch { /* ignore */ }
+        return null
+      },
+      onAttach: (browserTaskId, tab) => {
+        browserTasks.setTaskTab(browserTaskId, tab.tabRef)
+        browserTaskTabs.set(browserTaskId, tab.tabRef)
+        // Pin domain into task + caps so extension click (R3) is not fail-closed on empty allowlist.
+        try {
+          const host = new URL(tab.url).host
+          if (host) {
+            const t = browserTasks.get(browserTaskId)
+            const domains = t?.allowedDomains?.length ? [...t.allowedDomains] : []
+            if (!domains.includes(host)) domains.push(host)
+            browserTasks.setAllowedDomains(browserTaskId, domains)
+            // Merge into capability envelope (controller reads caps.allowedDomains).
+            const caps = browserGetCapability(browserTaskId)
+            const nextCaps = {
+              ...caps,
+              allowedDomains: Array.from(new Set([...(caps.allowedDomains || []), ...domains])),
+              allowedActionTypes: caps.allowedActionTypes.includes('click')
+                ? caps.allowedActionTypes
+                : [...caps.allowedActionTypes, 'click' as const],
+            }
+            browserTasks.setCaps(browserTaskId, nextCaps as unknown as Record<string, unknown>)
+          }
+        } catch { /* ignore */ }
+        logRuntime('browser_bridge.attach', { browserTaskId, tabRef: tab.tabRef })
+      },
+      onDetach: (browserTaskId) => {
+        browserTasks.setTaskTab(browserTaskId, null)
+        browserTaskTabs.delete(browserTaskId)
+        logRuntime('browser_bridge.detach', { browserTaskId })
+      },
+      onTaskSubmit: async (prompt) => {
+        if (!aiGateway) throw new Error('Verstak AI ещё запускается')
+        const projectPath = getActiveProjectPath()
+        if (!projectPath) throw new Error('Откройте проект в Verstak')
+        const state = browserBridge?.getPublicState()
+        if (!state?.attachedTab) throw new Error('Текущая вкладка не прикреплена')
+
+        const priorTask = state.browserTaskId ? browserTasks.get(state.browserTaskId) : null
+        const priorChat = priorTask?.chatId ? chatSessions.get(priorTask.chatId) : null
+        const chat = priorChat?.projectPath === projectPath
+          ? priorChat
+          : chatSessions.create(projectPath, { title: 'Браузер' })
+        const browserTaskId = `bt-${chat.id}`
+        browserBridge?.setActiveLineage(browserTaskId, null)
+        browserTaskTabs.set(browserTaskId, state.attachedTab.tabRef)
+
+        chats.appendToSession(chat.id, projectPath, 'user', prompt)
+        const messages = chats.listBySession(chat.id).map((m) => ({ role: m.role, content: m.content }))
+        let assistantText = ''
+        let persisted = false
+        const sender = {
+          send: (_channel: string, payload: { id: number; event: unknown }) => {
+            const event = payload?.event as { type?: string; text?: string } | undefined
+            if (event?.type === 'text' && typeof event.text === 'string') assistantText += event.text
+            if (!persisted && (event?.type === 'done' || event?.type === 'error')) {
+              persisted = true
+              if (assistantText.trim()) chats.appendToSession(chat.id, projectPath, 'assistant', assistantText)
+            }
+            browserBridge?.pushTaskEvent({
+              requestId: `task-${payload.id}`,
+              sendId: payload.id,
+              event: payload.event,
+            })
+          },
+          executeJavaScript: async () => {
+            throw new Error('Browser task uses chrome-extension adapter')
+          },
+        } as unknown as Electron.WebContents
+        const sendId = await aiGateway.sendFromBrowser(sender, messages, projectPath, String(chat.id))
+        browserTasks.setTaskTab(browserTaskId, state.attachedTab.tabRef)
+        return { sendId, browserTaskId, chatId: chat.id }
+      },
+      onTaskApproval: (input) => {
+        aiGateway?.resolveBrowserAction(
+          input.actionId,
+          input.approvalDigest,
+          input.browserTaskId,
+          input.runId,
+          input.approved,
+          input.sendId,
+        )
+      },
+      onTaskCancel: (sendId) => { abortSend(sendId) },
+      log: (event, detail) => logRuntime(event, detail ?? {}),
+    })
+    void browserBridge.start().then((endpoint) => {
+      logRuntime('browser_bridge.started', { endpoint })
+    }).catch((err) => {
+      logRuntimeError('browser_bridge.start.fail', err)
+      browserBridge = null
+    })
+
+    // Install/repair native host (HKCU) — dev + packaged.
+    const hostScriptCandidates = [
+      join(process.resourcesPath || '', 'browser-bridge', 'host.mjs'),
+      join(app.getAppPath(), 'electron', 'ai', 'browser', 'bridge', 'host-runtime.mjs'),
+      join(HERE, 'ai', 'browser', 'bridge', 'host-runtime.mjs'),
+    ]
+    let hostSrc = ''
+    for (const p of hostScriptCandidates) {
+      try {
+        if (fsExistsSync(p)) {
+          hostSrc = readFileSync(p, 'utf8')
+          break
+        }
+      } catch { /* next */ }
+    }
+    if (hostSrc) {
+      // Packaged layout: <app>/Verstak.exe + <app>/resources/browser-bridge/*
+      // Relative from host.cmd → ../../Verstak.exe. Absolute bake = primary.
+      const hostInstallDir = process.resourcesPath && app.isPackaged
+        ? join(process.resourcesPath, 'browser-bridge')
+        : resolveDevHostInstallDir(app.getPath('userData'))
+      const result = installNativeHost({
+        installDir: hostInstallDir,
+        hostScriptSource: hostSrc,
+        electronExeAbsolute: process.execPath,
+        electronExeRelative: app.isPackaged ? '..\\..\\Verstak.exe' : undefined,
+        // Dev: allow system node when running under electron.exe without Verstak name.
+        // Packaged: fail-closed without Verstak.exe (no system Node dependency).
+        allowNodeFallback: !app.isPackaged,
+        force: true,
+      })
+      logRuntime(result.ok ? 'browser_bridge.host_installed' : 'browser_bridge.host_install_fail', {
+        ok: result.ok,
+        manifestPath: result.manifestPath,
+        error: result.error ?? null,
+      })
+    } else {
+      logRuntime('browser_bridge.host_script_missing', {})
+    }
+  } catch (err) {
+    logRuntimeError('browser_bridge.init.fail', err)
+    browserBridge = null
+  }
+  // Browser card IPC: pairing code, host install/repair, status (EXT-B1/C1).
+  registerBrowserBridgeIpc({
+    getBridge: () => browserBridge,
+    getStateDir: () => dir,
+    getHostScriptSource: () => {
+      const candidates = [
+        join(process.resourcesPath || '', 'browser-bridge', 'host.mjs'),
+        join(app.getAppPath(), 'electron', 'ai', 'browser', 'bridge', 'host-runtime.mjs'),
+        join(HERE, 'ai', 'browser', 'bridge', 'host-runtime.mjs'),
+      ]
+      for (const p of candidates) {
+        try {
+          if (fsExistsSync(p)) return readFileSync(p, 'utf8')
+        } catch { /* next */ }
+      }
+      return null
+    },
+  })
   // Verification Artifact (Фаза 3) — история DoD поверх файла-артефакта.
   // attest_verification пишет строку, Review подтягивает latest по чату.
   const verifications = createVerifications(db)
@@ -698,6 +967,19 @@ app.whenReady().then(() => {
     // пока НЕ используется: запись прогонов (create/finish/recordRunEvent) включит
     // Фаза 2. Здесь только делаем фундамент доступным для следующих фаз.
     agentRuns,
+    // EXT-B0/R1 Browser Employee — единый controller + durable storage.
+    browserController,
+    browserTasks,
+    // Сеттер webview-adapter'а: вызывается в ipc/ai.ts на каждом ai:send,
+    // чтобы привязать exec к актуальному sender (WebContents) этого чата.
+    setWebviewAdapterExec: (exec) => {
+      cachedWebviewAdapter = createWebviewAdapter({ exec })
+    },
+    // Map chatId → task tab ref (B0/R1: tabRef = «current webview», B1 — реальная Chrome tab).
+    browserTaskTabs,
+    setBrowserBridgeLineage: (btId, rId) => {
+      try { browserBridge?.setActiveLineage(btId, rId) } catch { /* ignore */ }
+    },
     // #5 worktree-lifecycle: ре-рут file-тулзов на worktree изолированного чата.
     worktreeSessions,
     // Verification Artifact (Фаза 3) — attest_verification пишет строку истории
@@ -718,7 +1000,7 @@ app.whenReady().then(() => {
       return snap ? { summary: snap.summary, throughMessageId: snap.throughMessageId } : null
     }
   }
-  registerAiIpc(aiDeps)
+  aiGateway = registerAiIpc(aiDeps)
   // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
   registerSchedulerIpc(db, {
     getSecret,

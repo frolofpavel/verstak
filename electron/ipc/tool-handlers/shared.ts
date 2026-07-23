@@ -128,6 +128,11 @@ export interface ToolContext {
   }
   /** ID агентного прогона этого ai:send (Multi-agent Manager, Фаза 4). */
   runId?: string
+  /** EXT-B0/R1: stable browserTaskId для этого чата (bt-${chatId}). Когда
+   *  задан — tool-dispatch loop блокирует forbiddenCrossTools (run_command,
+   *  write_file, connector_query, delegate_*, execute_code, ...) — контент
+   *  страницы не может заставить browser run вызвать cross-tool мутацию. */
+  browserTaskId?: string | null
   /** Этап 6 P1: авто-снятый baseline verify active recipe (до первой правки).
    *  review_before_commit берёт его, если модель не передала baseline аргументом.
    *  undefined → baseline не снимался (нет recipe/verify) → гейт строгий. */
