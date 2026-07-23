@@ -603,6 +603,11 @@ declare global {
         updateMessage: (messageId: number, content: string) => Promise<boolean>
         updateThinking: (messageId: number, thinking: string) => Promise<boolean>
       }
+      mobile: {
+        onRunRequest: (cb: (payload: { requestId: string; chatId: number; projectPath: string; text: string }) => void) => () => void
+        completeRunRequest: (requestId: string, sendId: number, error?: string) => Promise<void>
+        sendRunEvent: (sendId: number, event: ChatEvent) => Promise<boolean>
+      }
       handoff: {
         generate: (sessionId: number, parentId?: string | null) => Promise<string>
         saveToDownloads: (sessionId: number, parentId?: string | null) => Promise<

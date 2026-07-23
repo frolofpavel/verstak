@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu } from 'electron'
+import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu, ipcMain } from 'electron'
 import { pathToFileURL } from 'url'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -117,6 +117,8 @@ import { bindReminderToastActions, initNotificationWindow, registerNotificationW
 import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
+import { registerMobileRunProxy } from './mobile-bridge/run-proxy'
+import { startMobileBridge } from './mobile-bridge/bootstrap'
 import { bindUiScaleToWindow } from './ui-scale'
 import {
   mainWindowConstructorOptions,
@@ -270,6 +272,9 @@ installGlobalQuitHandlers()
 // память/whisper-модель осели в dev-папке) и создавало пустую. setName ДО whenReady и
 // первого getPath('userData'). Держать до любого обращения к путям приложения.
 app.setName('verstak')
+if (!app.isPackaged && process.env.VERSTAK_DEV_USER_DATA_DIR?.trim()) {
+  app.setPath('userData', process.env.VERSTAK_DEV_USER_DATA_DIR.trim())
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
@@ -732,6 +737,31 @@ app.whenReady().then(() => {
     }
   }
   registerAiIpc(aiDeps)
+  const mobileRelayUrl = process.env.VERSTAK_MOBILE_RELAY_URL?.trim()
+  const mobileRelayToken = process.env.VERSTAK_MOBILE_RELAY_TOKEN?.trim()
+  let mobileBridge: ReturnType<typeof startMobileBridge> | null = null
+  ipcMain.removeHandler('mobile:run-event')
+  ipcMain.handle('mobile:run-event', async (_event, sendId: number, event: unknown) => {
+    if (!mobileBridge || !Number.isInteger(sendId) || sendId <= 0) return false
+    await mobileBridge.emit('run.event', { runId: String(sendId), event })
+    return true
+  })
+  if (mobileRelayUrl && mobileRelayToken) {
+    const startRun = registerMobileRunProxy(mainWindow)
+    mobileBridge = startMobileBridge({
+      config: {
+        relayUrl: mobileRelayUrl,
+        token: mobileRelayToken,
+        accountId: process.env.VERSTAK_MOBILE_ACCOUNT_ID?.trim() || 'local',
+        deviceId: process.env.VERSTAK_MOBILE_DEVICE_ID?.trim() || 'desktop',
+      },
+      projects,
+      sessions: chatSessions,
+      chats,
+      startRun,
+      stopRun: async runId => abortSend(Number(runId)),
+    })
+  }
   // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
   registerSchedulerIpc(db, {
     getSecret,
