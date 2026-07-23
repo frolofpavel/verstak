@@ -10,6 +10,8 @@
  * без БД/Electron.
  */
 import { scanText } from './secret-scanner'
+import { CLI_FREE, ZERO_COST_PROVIDERS } from './cost-guard'
+import type { ProviderId } from './registry'
 
 export type ProofVerificationOverall = 'passed' | 'failed' | 'partial' | 'not_run'
 
@@ -42,6 +44,19 @@ export interface ProofPackInput {
   events: Array<{ kind: string; label: string | null; detail: string | null; status: string | null; createdAt: number }>
   /** Записи audit_log этого прогона (override-решения и т.п.). */
   audit: Array<{ action: string; detail: string; timestamp: number }>
+  /**
+   * VSK-PROOF-A1: честность стоимости из agent_run_usage (терминальная нога после fallback).
+   * null = строки usage нет. R1: у заведомо бесплатного провайдера (CLI_FREE/ZERO_COST —
+   * runner не пишет строку без token telemetry) это known $0, а у платного — legacy.
+   * Число известной стоимости берётся из run.costCents (cumulative ВСЕГО прогона):
+   * cost_amount — только терминальная нога, её нельзя выдавать за полную сумму.
+   */
+  usage: { pricingKnown: 0 | 1; costAmount: number | null } | null
+  /**
+   * VSK-PROOF-A1-R1: ошибка ЧТЕНИЯ usage (БД залочена/упала) — НЕ то же, что отсутствие
+   * строки. true → unknown + «данные usage недоступны», НЕ legacy.
+   */
+  usageError?: boolean
 }
 
 export interface ProofPack {
@@ -59,7 +74,15 @@ export interface ProofPack {
     toolCount: number
     filesCount: number
     agentsCount: number
-    costUsd: number
+    /** VSK-PROOF-A1: null = стоимость неизвестна (НЕ ноль). Число только при costStatus='known'. */
+    costUsd: number | null
+    /** known = цена подтверждена agent_run_usage; unknown = показывать число нельзя. */
+    costStatus: 'known' | 'unknown'
+    /**
+     * R1: tri-state источника стоимости. ok = строка usage прочитана; missing = строки нет
+     * (legacy у платного, known $0 у заведомо бесплатного); unavailable = ошибка чтения.
+     */
+    costDataStatus: 'ok' | 'missing' | 'unavailable'
     turnIndex: number
     error: string | null
   }
@@ -78,11 +101,64 @@ export interface ProofPack {
   reviewGate: { status: 'passed' | 'failed' | 'missing'; detail: string | null; at: number | null }
   /** Финальный ответ агента (последнее assistant_msg-событие). */
   result: string | null
+  /** true = прогон до учёта расхода: строки agent_run_usage нет, стоимость не выдумываем. */
+  legacyIncomplete: boolean
 }
 
 function redact(s: string | null | undefined): string | null {
   if (s == null) return null
   return scanText(String(s)).redacted
+}
+
+/**
+ * R1: заведомо бесплатный провайдер — ТОЛЬКО через CLI_FREE / ZERO_COST_PROVIDERS из
+ * cost-guard (единый источник с persist-слоем), без эвристик по суффиксу строки.
+ * У таких прогонов runner может не писать usage-строку (нет token telemetry) — и это
+ * НЕ legacy: бесплатность известна по определению провайдера.
+ */
+function isKnownFreeProvider(providerId: string | null): boolean {
+  if (providerId == null) return false
+  const pid = providerId as ProviderId
+  return CLI_FREE.has(pid) || ZERO_COST_PROVIDERS.has(pid)
+}
+
+/** Результат честной стоимости — единая точка всех ветвей (сложность вне assemble). */
+interface CostResolution {
+  costUsd: number | null
+  costStatus: 'known' | 'unknown'
+  costDataStatus: 'ok' | 'missing' | 'unavailable'
+  legacyIncomplete: boolean
+}
+
+/**
+ * VSK-PROOF-A1: ноль имеет ТРИ значения — бесплатный CLI / цена неизвестна / legacy без
+ * строки usage. usage определяет ЧЕСТНОСТЬ состояния; число известной стоимости — всегда
+ * из agent_runs.costCents (cumulative прогона), НЕ из cost_amount терминальной ноги.
+ * Защита от противоречия: pricingKnown=1 при costAmount=null — это НЕ «ноль», а unknown.
+ * R1: разделены ТРИ состояния источника — строка есть / строки нет / ошибка чтения.
+ * Отсутствие строки у заведомо бесплатного провайдера (CLI без token telemetry) — known $0,
+ * НЕ legacy; ошибка чтения — unknown + unavailable, тоже НЕ legacy.
+ */
+function resolveCost(input: ProofPackInput): CostResolution {
+  const usageError = input.usageError === true
+  if (usageError) {
+    return { costUsd: null, costStatus: 'unknown', costDataStatus: 'unavailable', legacyIncomplete: false }
+  }
+  if (input.usage != null) {
+    const known = input.usage.pricingKnown === 1 && input.usage.costAmount != null
+    return {
+      costUsd: known ? Math.round(input.run.costCents) / 100 : null,
+      costStatus: known ? 'known' : 'unknown',
+      costDataStatus: 'ok',
+      legacyIncomplete: false,
+    }
+  }
+  if (isKnownFreeProvider(input.run.providerId)) {
+    // CLI/zero-cost без token telemetry: строки нет, но бесплатность известна → $0.00.
+    return { costUsd: Math.round(input.run.costCents) / 100, costStatus: 'known', costDataStatus: 'missing', legacyIncomplete: false }
+  }
+  // Платный/неизвестный провайдер без строки — legacy/incomplete, стоимость не выдумываем.
+  return { costUsd: null, costStatus: 'unknown', costDataStatus: 'missing', legacyIncomplete: true }
 }
 
 /** Чистая сборка Proof Pack из сырых данных источников. */
@@ -116,6 +192,8 @@ export function assembleProofPack(input: ProofPackInput): ProofPack {
       }
     : { status: 'missing', detail: null, at: null }
 
+  const cost = resolveCost(input)
+
   return {
     generatedAt: input.generatedAt,
     run: {
@@ -131,7 +209,9 @@ export function assembleProofPack(input: ProofPackInput): ProofPack {
       toolCount: run.toolCount,
       filesCount: run.filesCount,
       agentsCount: run.agentsCount,
-      costUsd: Math.round(run.costCents) / 100,
+      costUsd: cost.costUsd,
+      costStatus: cost.costStatus,
+      costDataStatus: cost.costDataStatus,
       turnIndex: run.turnIndex,
       error: redact(run.error)
     },
@@ -142,7 +222,8 @@ export function assembleProofPack(input: ProofPackInput): ProofPack {
     decisions: decisions.map(d => ({ ...d, action: redact(d.action) ?? d.action, detail: redact(d.detail) ?? '' })),
     timeline,
     reviewGate,
-    result: redact(result)
+    result: redact(result),
+    legacyIncomplete: cost.legacyIncomplete
   }
 }
 
@@ -171,6 +252,18 @@ function fmtDuration(ms: number | null): string {
   if (s < 60) return `${s}с`
   const m = Math.floor(s / 60)
   return `${m}м ${s % 60}с`
+}
+
+/**
+ * VSK-PROOF-A1: подпись стоимости. known → $N.NN (известный ноль CLI остаётся $0.00);
+ * unknown с современной usage-строкой → «неизвестно»; legacy без строки → честная пометка.
+ * R1: ошибка чтения usage — «данные usage недоступны», НЕ legacy.
+ * Единое место — HTML, Markdown и PDF (строится из Markdown) не расходятся.
+ */
+function costLabel(pack: ProofPack): string {
+  if (pack.run.costStatus === 'known' && pack.run.costUsd != null) return `$${pack.run.costUsd.toFixed(2)}`
+  if (pack.run.costDataStatus === 'unavailable') return 'неизвестно · данные usage недоступны'
+  return pack.legacyIncomplete ? 'неизвестно · неполные legacy-данные' : 'неизвестно'
 }
 
 /** Чистый рендер Proof Pack → автономный HTML (inline-стили, без зависимостей). */
@@ -216,7 +309,7 @@ export function renderProofPackHtml(pack: ProofPack): string {
     <tr><td style="padding:3px 8px;color:#57606a">Статус</td><td style="padding:3px 8px">${esc(meta.status)}${meta.error ? ` — ${esc(meta.error)}` : ''}</td></tr>
     <tr><td style="padding:3px 8px;color:#57606a">Длительность</td><td style="padding:3px 8px">${fmtDuration(meta.durationMs)}</td></tr>
     <tr><td style="padding:3px 8px;color:#57606a">Инструментов / файлов / агентов</td><td style="padding:3px 8px">${meta.toolCount} / ${meta.filesCount} / ${meta.agentsCount}</td></tr>
-    <tr><td style="padding:3px 8px;color:#57606a">Стоимость</td><td style="padding:3px 8px">$${meta.costUsd.toFixed(2)}</td></tr>
+    <tr><td style="padding:3px 8px;color:#57606a">Стоимость</td><td style="padding:3px 8px">${esc(costLabel(pack))}</td></tr>
   </table>
 
   <h2 style="font-size:15px;border-bottom:1px solid #e1e4e8;padding-bottom:4px;margin-top:20px">Изменённые файлы (${pack.changedFiles.length})</h2>
@@ -271,7 +364,7 @@ export function renderProofPackMarkdown(pack: ProofPack): string {
     `- Status: ${pack.run.status}${pack.run.error ? ` (${pack.run.error})` : ''}`,
     `- Duration: ${fmtDuration(pack.run.durationMs)}`,
     `- Tools/files/agents: ${pack.run.toolCount}/${pack.run.filesCount}/${pack.run.agentsCount}`,
-    `- Cost: $${pack.run.costUsd.toFixed(2)}`,
+    `- Cost: ${costLabel(pack)}`,
     '',
     '## Verification',
     '',

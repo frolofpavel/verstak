@@ -574,6 +574,8 @@ app.whenReady().then(() => {
     verifications,
     getProjectRoot: getActiveProjectPath,
     queryAuditForRun: (runId: string) => queryAudit(db, getActiveProjectPath() ?? '', { runId }).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp })),
+    // VSK-PROOF-A1: честность стоимости Proof Pack — точный lookup по runId (2.0.8-F).
+    getRunUsage: (runId: string) => runUsage.get(runId),
     getSecret
   }
   const proofService = createProofService(proofDeps)

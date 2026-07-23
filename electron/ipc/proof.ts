@@ -8,6 +8,7 @@ import { createTelegramConnector } from '../connectors/telegram'
 import { readDiffStat } from './git'
 import type { AgentRun, AgentRunEvent, AgentRuns } from '../storage/agent-runs'
 import type { Verifications } from '../storage/verifications'
+import type { RunUsageRow } from '../storage/agent-run-usage'
 
 /**
  * Proof Pack IPC — собирает доказательство выполнения прогона в пару файлов
@@ -21,6 +22,12 @@ export interface ProofDeps {
   getProjectRoot: () => string | null
   /** Записи audit_log этого прогона (action/detail/timestamp). */
   queryAuditForRun: (runId: string) => Array<{ action: string; detail: string; timestamp: number }>
+  /**
+   * VSK-PROOF-A1: usage СТРОГО этого прогона (agent_run_usage по run_id) — источник
+   * честности стоимости. null = строки нет: у платного провайдера это legacy, у заведомо
+   * бесплатного (CLI без token telemetry) — known $0 (разруливает resolveCost).
+   */
+  getRunUsage: (runId: string) => RunUsageRow | null
   getSecret?: (key: string) => string | null
 }
 
@@ -100,6 +107,13 @@ export function createProofService(deps: ProofDeps): ProofService {
     let audit: Array<{ action: string; detail: string; timestamp: number }> = []
     try { audit = deps.queryAuditForRun(runId) } catch { /* audit best-effort */ }
 
+    // VSK-PROOF-A1: честность стоимости — строго по runId. R1: ошибка чтения usage —
+    // ОТДЕЛЬНОЕ состояние от чистого отсутствия строки: не роняем генерацию, но и не
+    // называем это legacy — маркируем usageError → «данные usage недоступны».
+    let usageRow: RunUsageRow | null = null
+    let usageError = false
+    try { usageRow = deps.getRunUsage(runId) } catch { usageError = true }
+
     const pack = assembleProofPack({
       generatedAt: Date.now(),
       run: {
@@ -111,7 +125,9 @@ export function createProofService(deps: ProofDeps): ProofService {
       changedFiles,
       verification,
       events: proofEvents.map(e => ({ kind: e.kind, label: e.label, detail: e.detail, status: e.status, createdAt: e.createdAt })),
-      audit
+      audit,
+      usage: usageRow ? { pricingKnown: usageRow.pricingKnown, costAmount: usageRow.costAmount } : null,
+      usageError
     })
 
     const html = renderProofPackHtml(pack)

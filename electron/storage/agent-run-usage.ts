@@ -167,6 +167,15 @@ export function listRunUsage(db: Database, opts?: { sinceMs?: number; limit?: nu
 }
 
 /**
+ * VSK-PROOF-A1: точная строка usage СТРОГО по run_id (PRIMARY KEY) — источник честности
+ * стоимости для Proof Pack. Отсутствие строки → null (legacy/incomplete), НЕ «ноль».
+ * Никакого list().find() по времени/chatId/provider — чужой прогон подхватить нельзя.
+ */
+export function getRunUsage(db: Database, runId: string): RunUsageRow | null {
+  return (db.prepare(`${SELECT} WHERE run_id = ?`).get(runId) as RunUsageRow | undefined) ?? null
+}
+
+/**
  * Полный размер промпта строки — ЗНАМЕНАТЕЛЬ доли кэша. Зависит от семантики провайдера
  * (ревью P0: без этого доля врала). Это тот же дефект B, но в знаменателе:
  *  · exclusive (Claude) — reported input НЕ содержит кэш. У Claude промпт разложен на ТРИ
@@ -227,12 +236,15 @@ export function usageSummary(db: Database, sinceMs: number): UsageSummaryGroup[]
 
 /** Read-поверхность usage для IPC (зеркалит идиому createFeedback/createPlans). */
 export interface RunUsage {
+  /** Точный lookup по runId (VSK-PROOF-A1): строка есть → RunUsageRow, нет → null. */
+  get: (runId: string) => RunUsageRow | null
   list: (opts?: { sinceMs?: number; limit?: number }) => RunUsageRow[]
   summary: (sinceMs: number) => UsageSummaryGroup[]
 }
 
 export function createRunUsage(db: Database): RunUsage {
   return {
+    get: (runId) => getRunUsage(db, runId),
     list: (opts) => listRunUsage(db, opts),
     summary: (sinceMs) => usageSummary(db, sinceMs),
   }

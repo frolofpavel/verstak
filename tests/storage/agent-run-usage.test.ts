@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
-import { persistRunUsage, computeRunCost, listRunUsage, usageSummary, usageHash } from '../../electron/storage/agent-run-usage'
+import { persistRunUsage, computeRunCost, listRunUsage, usageSummary, usageHash, createRunUsage } from '../../electron/storage/agent-run-usage'
 import { normalizedUsage } from '../../shared/contracts/usage'
 
 describe('agent_run_usage persistence (2.0.8-F)', () => {
@@ -234,6 +234,34 @@ describe('agent_run_usage persistence (2.0.8-F)', () => {
       expect(usageHash('abc')).toBe(usageHash('abc'))
       expect(usageHash('abc')).not.toBe(usageHash('abd'))
       expect(usageHash('abc')).not.toContain('abc')
+    })
+  })
+
+  // VSK-PROOF-A1: Proof Pack читает честность стоимости СТРОГО по своему runId —
+  // точечный SQL WHERE run_id = ?, без list().find() по времени/chatId/provider.
+  describe('RunUsage.get — точный lookup по runId (VSK-PROOF-A1)', () => {
+    it('get(runId): строка есть → RunUsageRow; отсутствует → null', () => {
+      const ru = createRunUsage(db)
+      persistRunUsage(db, input({ runId: 'r-get' }), 1000)
+      const row = ru.get('r-get')
+      expect(row).not.toBeNull()
+      expect(row!.runId).toBe('r-get')
+      expect(row!.pricingKnown).toBe(1)
+      expect(row!.costAmount).not.toBeNull()
+      expect(ru.get('no-such-run')).toBeNull()
+    })
+
+    it('точный join: две строки разных runId не смешивают pricingKnown', () => {
+      const ru = createRunUsage(db)
+      // priced — claude-sonnet-4-6 (есть в PRICES), unpriced — модель вне таблицы цен.
+      persistRunUsage(db, input({ runId: 'priced' }), 1000)
+      persistRunUsage(db, input({ runId: 'unpriced', providerId: 'openai', model: 'gpt-НЕИЗВЕСТНАЯ', usage: usage({ inputAccounting: 'inclusive' }) }), 2000)
+      expect(ru.get('priced')!.pricingKnown).toBe(1)
+      expect(ru.get('priced')!.costAmount).not.toBeNull()
+      expect(ru.get('unpriced')!.pricingKnown).toBe(0)
+      expect(ru.get('unpriced')!.costAmount).toBeNull()
+      // и обратная проверка: priced НЕ подхватил unknown от соседа
+      expect(ru.get('priced')!.pricingKnown).not.toBe(ru.get('unpriced')!.pricingKnown)
     })
   })
 })
