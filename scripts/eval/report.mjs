@@ -105,12 +105,12 @@ export function renderMarkdown(rows, recommendations, meta) {
     '',
     '## Fixture Manifest',
     '',
-    '| fixture | recipe | hash | expected | unrelated | verify | review |',
-    '|---|---|---|---|---|---|---|',
+    '| fixture | category | recipe | hash | expected | unrelated | verify | review |',
+    '|---|---|---|---|---|---|---|---|',
   ]
   for (const fixture of meta.fixtureManifest) {
     lines.push(
-      `| ${esc(fixture.id)} | ${esc(fixture.recipe)} | ${fixture.fixtureHash.slice(0, 12)} | ${esc(fixture.expectedFiles.join(', ') || 'none')} | ${esc(fixture.unrelatedFiles.join(', ') || 'none')} | ${esc(fixture.verify.join('; '))} | ${fixture.requiresReview ? 'required' : 'no'} |`,
+      `| ${esc(fixture.id)} | ${esc(fixture.category)} | ${esc(fixture.recipe)} | ${fixture.fixtureHash.slice(0, 12)} | ${esc(fixture.expectedFiles.join(', ') || 'none')} | ${esc(fixture.unrelatedFiles.join(', ') || 'none')} | ${esc(fixture.verify.join('; '))} | ${fixture.requiresReview ? 'required' : 'no'} |`,
     )
   }
 

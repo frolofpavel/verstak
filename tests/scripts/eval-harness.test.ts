@@ -59,7 +59,43 @@ describe('modular model eval harness', () => {
         runDate: '2026-07-17T00:00:00.000Z',
       })
       expect(parsed.meta.verstakCommit).toMatch(/^[a-f0-9]{40}$/)
-      expect(parsed.rows).toHaveLength(30)
+      expect(parsed.meta.fixtureManifest).toHaveLength(30)
+      expect(parsed.rows).toHaveLength(180)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { id: string }) => fixture.id)).size).toBe(30)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).size).toBe(30)
+      expect(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).toEqual([
+        'small-edit',
+        'bugfix',
+        'typescript-error',
+        'test-fix',
+        'review-gate',
+        'task-refinement',
+        'plan-grounding',
+        'dependency-dag-correctness',
+        'tool-discipline',
+        'scope-discipline',
+        'failed-verify-recovery',
+        'assumption-invalidation-replan',
+        'long-context-compaction',
+        'crash-resume-fixture',
+        'multi-agent-decomposition',
+        'conflict-aware-write-scheduling',
+        'secret-safety',
+        'codex-oauth-mock-contract',
+        'cache-accounting-fixture',
+        'lsp-navigation',
+        'onec-read-only-connector-fixture',
+        'bitrix24-fixture',
+        'yandex-ozon-wb-schema-fixture',
+        'russian-language-task',
+        'ambiguous-non-programmer-task',
+        'high-risk-rollback-plan',
+        'unknown-model-recovery',
+        'rate-limit-account-rotation-simulation',
+        'proof-completeness',
+        'unrelated-change-resistance',
+      ])
+      expect(readFileSync(join(dir, 'report.md'), 'utf8')).toContain('| fixture | category | recipe |')
 
       for (const row of parsed.rows) {
         expect(row.provider).toBe('verstak-gateway')
@@ -127,6 +163,8 @@ describe('modular model eval harness', () => {
       expect(readFileSync(join(legacyDir, 'report.md'), 'utf8')).toBe(
         readFileSync(join(modularDir, 'report.md'), 'utf8'),
       )
+      const parsed = JSON.parse(readFileSync(join(modularDir, 'report.json'), 'utf8'))
+      expect(parsed.rows.map((row: { fixtureId: string }) => row.fixtureId)).toEqual(['small-edit', 'bugfix'])
     } finally {
       rmSync(legacyDir, { recursive: true, force: true })
       rmSync(modularDir, { recursive: true, force: true })

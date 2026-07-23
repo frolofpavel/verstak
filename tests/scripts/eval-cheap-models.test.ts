@@ -28,6 +28,8 @@ describe('cheap model eval runner', () => {
       const jsonPath = join(dir, 'report.json')
       const out = runEval([
         '--dry-run',
+        '--suite',
+        'v0',
         '--models',
         'deepseek-chat',
         '--tasks',
@@ -85,6 +87,8 @@ describe('cheap model eval V0 contract', () => {
       const jsonPath = join(dir, 'report.json')
       const out = runEval([
         '--dry-run',
+        '--suite',
+        'v0',
         '--models',
         'deepseek-chat',
         '--run-date',
@@ -100,6 +104,7 @@ describe('cheap model eval V0 contract', () => {
       expect(parsed.meta.fixtureManifest).toEqual([
         {
           id: 'small-edit',
+          category: 'small-edit',
           recipe: 'small-edit',
           expectedFiles: ['README.md'],
           unrelatedFiles: ['unrelated.md'],
@@ -109,6 +114,7 @@ describe('cheap model eval V0 contract', () => {
         },
         {
           id: 'bugfix',
+          category: 'bugfix',
           recipe: 'bugfix',
           expectedFiles: ['calc.mjs'],
           unrelatedFiles: ['unrelated.mjs'],
@@ -118,6 +124,7 @@ describe('cheap model eval V0 contract', () => {
         },
         {
           id: 'typescript-error',
+          category: 'typescript-error',
           recipe: 'typescript-error',
           expectedFiles: ['src/value.ts'],
           unrelatedFiles: ['src/unrelated.ts'],
@@ -127,6 +134,7 @@ describe('cheap model eval V0 contract', () => {
         },
         {
           id: 'test-fix',
+          category: 'test-fix',
           recipe: 'test-fix',
           expectedFiles: ['math.mjs'],
           unrelatedFiles: ['math.test.mjs', 'unrelated.mjs'],
@@ -136,6 +144,7 @@ describe('cheap model eval V0 contract', () => {
         },
         {
           id: 'review-before-commit',
+          category: 'review-gate',
           recipe: 'review-before-commit',
           expectedFiles: [],
           unrelatedFiles: ['unrelated.mjs'],

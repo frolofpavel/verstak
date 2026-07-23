@@ -23,8 +23,10 @@ node scripts/eval-cheap-models.mjs --dry-run --models deepseek-chat
 Modular harness:
 
 ```text
-npm run eval:models -- --dry-run --suite core --models a,b --repeat 3
+npm run eval:models -- --dry-run --suite v0 --models a,b --repeat 3
 ```
+
+`v0` keeps these five frozen fixtures byte-stable. The default `core` suite extends them to 30 deterministic task categories for Model Gym 2.1.4-C; use fixture ids with `--tasks` to run a narrow slice.
 
 `--dry-run` does not probe or invoke providers and does not require provider credentials. Add a fixed `--run-date` to produce byte-identical JSON and Markdown reports for the same commit and command.
 

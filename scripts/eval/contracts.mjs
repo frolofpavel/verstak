@@ -129,6 +129,7 @@ export function fixtureHash(fixture) {
 export function fixtureManifestEntry(fixture) {
   return {
     id: fixture.id,
+    category: fixture.category,
     recipe: fixture.recipe,
     expectedFiles: [...fixture.expectedFiles],
     unrelatedFiles: [...fixture.unrelatedFiles],
