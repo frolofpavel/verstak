@@ -45,13 +45,23 @@ export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent):
     return { ...baseSnap, pendingCommand: null }
   }
   if (t === 'usage' && event.usage && typeof event.usage === 'object') {
-    const u = event.usage as { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
+    const u = event.usage as {
+      inputTokens?: number
+      outputTokens?: number
+      cachedInputTokens?: number
+      cacheReadTokens?: number
+      cacheWriteTokens?: number
+      cacheCreationInputTokens?: number
+      inputAccounting?: SessionSnapshot['sessionUsage']['inputAccounting']
+    }
     return {
       ...baseSnap,
       sessionUsage: {
         inputTokens: baseSnap.sessionUsage.inputTokens + (u.inputTokens ?? 0),
         outputTokens: baseSnap.sessionUsage.outputTokens + (u.outputTokens ?? 0),
-        cachedInputTokens: baseSnap.sessionUsage.cachedInputTokens + (u.cachedInputTokens ?? 0),
+        cachedInputTokens: baseSnap.sessionUsage.cachedInputTokens + (u.cacheReadTokens ?? u.cachedInputTokens ?? 0),
+        cacheWriteTokens: (baseSnap.sessionUsage.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? u.cacheCreationInputTokens ?? 0),
+        inputAccounting: u.inputAccounting ?? baseSnap.sessionUsage.inputAccounting,
       },
     }
   }

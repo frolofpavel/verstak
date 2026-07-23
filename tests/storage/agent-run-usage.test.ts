@@ -8,6 +8,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
 import { persistRunUsage, computeRunCost, listRunUsage, usageSummary, usageHash, createRunUsage } from '../../electron/storage/agent-run-usage'
+import { createSubscriptionAccount } from '../../electron/storage/subscription-accounts'
 import { normalizedUsage } from '../../shared/contracts/usage'
 
 describe('agent_run_usage persistence (2.0.8-F)', () => {
@@ -108,6 +109,35 @@ describe('agent_run_usage persistence (2.0.8-F)', () => {
     const g = usageSummary(db, 0)[0]
     // промпт = 500 + 0 + 40000 = 40500; из кэша прочитано 0 → доля 0, а НЕ 0/500.
     expect(g.cacheHitShare).toBe(0)
+  })
+
+  it('read-side добавляет только renderer-safe label аккаунта и группирует маршруты раздельно', () => {
+    const account = createSubscriptionAccount(db, {
+      providerId: 'claude-cli', label: 'Рабочий Max', credRef: 'private-ref',
+    })
+    persistRunUsage(db, input({ runId: 'managed', accountId: account.id }), 1000)
+    persistRunUsage(db, input({ runId: 'unmanaged', accountId: null }), 2000)
+    const rows = listRunUsage(db, {})
+    const managed = rows.find(row => row.runId === 'managed')!
+    expect(managed.accountLabel).toBe('Рабочий Max')
+    expect(JSON.stringify(managed)).not.toContain('private-ref')
+    expect(usageSummary(db, 0)).toHaveLength(2)
+  })
+
+  it('Claude cache write входит в persisted cost, а не теряется как раньше', () => {
+    persistRunUsage(db, input({
+      runId: 'priced-warm',
+      usage: normalizedUsage({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 1_000_000,
+        cacheReadTokens: 0,
+        inputAccounting: 'exclusive',
+      }),
+    }), 1000)
+    const row = listRunUsage(db, {})[0]
+    expect(row.costAmount).toBeCloseTo(3.75, 6)
+    expect(row.cacheWriteTokens).toBe(1_000_000)
   })
 
   it('exclusive: прогрев + попадание → честная доля промпта, а не завышенная', () => {

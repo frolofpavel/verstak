@@ -119,6 +119,15 @@ describe('createCostGuard', () => {
     expect(excl.cents).toBeGreaterThan(incl.cents)
   })
 
+  it('учитывает запись Claude prompt cache по тарифу 5m cache write', () => {
+    const g = createCostGuard(null)
+    const check = g.recordAndCheck(
+      'claude', 'claude-sonnet-4-6', 0, 0, 0, 'exclusive', 1_000_000,
+    )
+    // Anthropic 5m cache write = 1.25x base input: Sonnet $3/M -> $3.75/M.
+    expect(check.cents).toBe(375)
+  })
+
   it('inclusive (OpenAI-семейство) — прежнее вычитание сохранено (характеризация)', () => {
     const g = createCostGuard(null)
     // openai: input=1M включает cached=900K → billable=100K. Поведение как до E.

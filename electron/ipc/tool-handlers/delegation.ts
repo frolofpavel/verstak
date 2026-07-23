@@ -720,7 +720,7 @@ export async function decomposeGoal(
       if (guard) {
         // 2.0.8-E commit 2 (ревью-находка): decomposeGoal — 5-й денежный потребитель, карточка его
         // пропустила. Без inputAccounting дефект B жил бы здесь для Claude (planner на exclusive).
-        guard.recordAndCheck(providerId, model, event.usage.inputTokens ?? null, event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null, event.usage.inputAccounting)
+        guard.recordAndCheck(providerId, model, event.usage.inputTokens ?? null, event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null, event.usage.inputAccounting, event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? null)
       }
     }
     else if (event.type === 'error') throw new Error(event.message)

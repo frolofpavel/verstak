@@ -850,7 +850,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           const check = costGuard.recordAndCheck(
             providerId, model ?? '', event.usage.inputTokens ?? null,
             event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null,
-            event.usage.inputAccounting // 2.0.8-E: exclusive (Claude) → billable НЕ вычитает cached (фикс B)
+            event.usage.inputAccounting, // 2.0.8-E: exclusive (Claude) → billable НЕ вычитает cached (фикс B)
+            event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? null,
           )
           if (check.exceeded) {
             exitReason = 'error'
@@ -1412,7 +1413,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             sessionUsage.outputTokens += ev.usage.outputTokens ?? 0
             sessionUsage.cachedInputTokens += ev.usage.cachedInputTokens ?? 0
             if (costGuard && providerId) {
-              costGuard.recordAndCheck(providerId, model ?? '', ev.usage.inputTokens ?? null, ev.usage.outputTokens ?? null, ev.usage.cacheReadTokens ?? ev.usage.cachedInputTokens ?? null, ev.usage.inputAccounting)
+              costGuard.recordAndCheck(providerId, model ?? '', ev.usage.inputTokens ?? null, ev.usage.outputTokens ?? null, ev.usage.cacheReadTokens ?? ev.usage.cachedInputTokens ?? null, ev.usage.inputAccounting, ev.usage.cacheWriteTokens ?? ev.usage.cacheCreationInputTokens ?? null)
             }
           }
           else if (ev.type === 'done') { summaryDone = true; break }

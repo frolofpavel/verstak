@@ -71,14 +71,11 @@ export function computeRunCost(providerId: string, model: string, usage: Normali
   const output = usage.outputTokens ?? 0
   const inputCost = (billable / 1_000_000) * price.input
   const cachedCost = price.cached ? (cacheRead / 1_000_000) * price.cached : 0
+  const cacheWriteCost = price.cacheWrite
+    ? ((usage.cacheWriteTokens ?? 0) / 1_000_000) * price.cacheWrite
+    : 0
   const outputCost = (output / 1_000_000) * price.output
-  // ЗНАЕМЫЙ СИСТЕМНЫЙ ПРОБЕЛ (не F-регрессия): cacheWriteTokens ПЕРСИСТИТСЯ (колонка
-  // cache_write_tokens), но в стоимость НЕ входит — как и в live cost-guard.recordAndCheck
-  // (ModelPrice не имеет цены записи кэша). У Claude cache-creation тарифицируется ~1.25×input,
-  // поэтому cost занижен на cache-heavy первом ходе. Сознательно держим ОДИНАКОВО с cost-guard
-  // (иначе persisted-cost разойдётся с денежным CAP). Тарификация cacheWrite = отдельный срез
-  // (ModelPrice.cacheWrite + оба места: cost-guard + здесь) — деферрал для аудита 2.0.10-G.
-  return { costAmount: inputCost + cachedCost + outputCost, currency: 'USD', pricingKnown: 1 }
+  return { costAmount: inputCost + cachedCost + cacheWriteCost + outputCost, currency: 'USD', pricingKnown: 1 }
 }
 
 /**
@@ -151,19 +148,22 @@ export function persistRunUsage(db: Database, input: RunUsageInput, now: number)
 }
 
 const SELECT = `
-  SELECT run_id as runId, provider_id as providerId, model, transport, account_id as accountId,
-         input_tokens as inputTokens, output_tokens as outputTokens,
-         cache_read_tokens as cacheReadTokens, cache_write_tokens as cacheWriteTokens,
-         input_accounting as inputAccounting, cost_amount as costAmount, currency,
-         pricing_known as pricingKnown, cache_diagnostic_code as cacheDiagnosticCode, created_at as createdAt
-  FROM agent_run_usage
+  SELECT u.run_id as runId, u.provider_id as providerId, u.model, u.transport,
+         u.account_id as accountId, sa.label as accountLabel,
+         u.input_tokens as inputTokens, u.output_tokens as outputTokens,
+         u.cache_read_tokens as cacheReadTokens, u.cache_write_tokens as cacheWriteTokens,
+         u.input_accounting as inputAccounting, u.cost_amount as costAmount, u.currency,
+         u.pricing_known as pricingKnown, u.cache_diagnostic_code as cacheDiagnosticCode,
+         u.created_at as createdAt
+  FROM agent_run_usage u
+  LEFT JOIN subscription_accounts sa ON sa.id = u.account_id
 `
 
 /** Строки usage за период (createdAt >= sinceMs), новейшие первыми. */
 export function listRunUsage(db: Database, opts?: { sinceMs?: number; limit?: number }): RunUsageRow[] {
   const since = opts?.sinceMs ?? 0
   const limit = opts?.limit ?? 1000
-  return db.prepare(`${SELECT} WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?`).all(since, limit) as RunUsageRow[]
+  return db.prepare(`${SELECT} WHERE u.created_at >= ? ORDER BY u.created_at DESC LIMIT ?`).all(since, limit) as RunUsageRow[]
 }
 
 /**
@@ -209,10 +209,10 @@ export function usageSummary(db: Database, sinceMs: number): UsageSummaryGroup[]
   const rows = listRunUsage(db, { sinceMs, limit: 100_000 })
   const groups = new Map<string, UsageSummaryGroup & { _inputKnown: number; _cacheKnown: number }>()
   for (const r of rows) {
-    const key = `${r.providerId}|${r.model}|${r.transport ?? ''}`
+    const key = `${r.providerId}|${r.model}|${r.transport ?? ''}|${r.accountId ?? ''}`
     let g = groups.get(key)
     if (!g) {
-      g = { providerId: r.providerId, model: r.model, transport: r.transport, runs: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costAmount: 0, unknownCostRuns: 0, cacheHitShare: null, _inputKnown: 0, _cacheKnown: 0 }
+      g = { providerId: r.providerId, model: r.model, transport: r.transport, accountId: r.accountId, accountLabel: r.accountLabel, runs: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costAmount: 0, unknownCostRuns: 0, cacheHitShare: null, _inputKnown: 0, _cacheKnown: 0 }
       groups.set(key, g)
     }
     g.runs++

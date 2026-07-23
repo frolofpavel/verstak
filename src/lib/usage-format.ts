@@ -38,6 +38,25 @@ export function cacheLabel(share: number | null): string {
   return `${Math.round(share * 100)}%`
 }
 
+export interface UsagePeriodTotals {
+  runs: number
+  knownCost: number
+  unknownCostRuns: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
+
+/** Сводка периода для двух видимых карточек 7/30; unknown не превращается в ноль. */
+export function usagePeriodTotals(groups: UsageSummaryGroup[]): UsagePeriodTotals {
+  return groups.reduce<UsagePeriodTotals>((total, group) => ({
+    runs: total.runs + group.runs,
+    knownCost: total.knownCost + group.costAmount,
+    unknownCostRuns: total.unknownCostRuns + group.unknownCostRuns,
+    cacheReadTokens: total.cacheReadTokens + group.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens + group.cacheWriteTokens,
+  }), { runs: 0, knownCost: 0, unknownCostRuns: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+}
+
 /**
  * Человеческий ярлык cache-диагностики. В БД лежит машинный код — пользователю показываем
  * ПО-РУССКИ и без жаргона (Павел — маркетолог, «system-prompt-changed» ему ничего не говорит).

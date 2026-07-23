@@ -26,6 +26,14 @@ describe('estimateCost', () => {
     expect(c.cents).toBe(165)  // $1.65
   })
 
+  it('Claude cache creation показывается и входит в live estimate', () => {
+    const c = estimateCost('claude', 'claude-sonnet-4-6', 0, 0, 0, 'exclusive', 1_000_000)
+    expect(c.cents).toBe(375)
+    const breakdown = costBreakdown('claude', 'claude-sonnet-4-6', 0, 0, 0, 'exclusive', 1_000_000)
+    expect(breakdown).toMatch(/cache write: 1[,.\s]?000[,.\s]?000/)
+    expect(breakdown).toMatch(/\$3\.75/)
+  })
+
   it('Маленькая стоимость показывается как <$0.01', () => {
     const c = estimateCost('claude', 'claude-haiku-4-5', 100, 50, 0)
     expect(c.usd).toBe('<$0.01')

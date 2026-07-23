@@ -317,7 +317,7 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
     const st = useProject.getState()
     expect(st.openedReviewId).toBeNull()
     expect(st.previewArtifactId).toBeNull()
-    expect(st.sessionUsage).toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 })
+    expect(st.sessionUsage).toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 })
   })
 
   it('гасит isStreaming уходящего чата когда send НЕ in-flight (анти-фантом стрима)', async () => {
