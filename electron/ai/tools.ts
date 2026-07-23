@@ -399,6 +399,58 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'submit_task_contract',
+    description: 'Зафиксировать улучшенную постановку Outcome-задачи после чтения релевантного кода. Доступен только на server-owned фазе refine.',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'Один проверяемый результат.' },
+        successCriteria: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              text: { type: 'string' },
+              evidence: { type: 'string', enum: ['command', 'diff', 'screenshot', 'manual'] },
+              verify: { type: 'string' },
+            },
+            required: ['id', 'text', 'evidence'],
+          },
+        },
+        constraints: { type: 'array', items: { type: 'string' } },
+        nonGoals: { type: 'array', items: { type: 'string' } },
+        assumptions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              status: { type: 'string', enum: ['confirmed', 'unconfirmed', 'invalidated'] },
+            },
+            required: ['text', 'status'],
+          },
+        },
+        blockingQuestions: { type: 'array', items: { type: 'string' } },
+        repoEvidence: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              symbol: { type: 'string' },
+              why: { type: 'string' },
+            },
+            required: ['path', 'why'],
+          },
+        },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+        planningMode: { type: 'string', enum: ['quick', 'controlled', 'deep'] },
+      },
+      required: ['goal', 'successCriteria', 'constraints', 'nonGoals', 'assumptions', 'blockingQuestions', 'repoEvidence', 'risk', 'planningMode'],
+    },
+  },
+  {
     name: 'create_plan',
     description: 'Создать структурированный план многошаговой задачи. Используй когда задача требует 3+ шагов или явного согласования с пользователем. План отобразится во вкладке Plan; пользователь сможет выполнять шаги по одному.',
     parameters: {
@@ -412,7 +464,30 @@ export const TOOL_DEFS: ToolDefinition[] = [
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Конкретное действие (одна забота на шаг).' },
-              detail: { type: 'string', description: 'ТЗ шага — его исполнит отдельный LLM-агент (возможно дешёвая модель), пиши для агента, не для человека: точные файлы/пути, что именно сделать (функции/эндпоинты/поля), критерий готовности («сделано» = как проверить). 3–10 конкретных строк, без общих фраз «улучшить»/«оптимизировать».' }
+              detail: { type: 'string', description: 'ТЗ шага — точные файлы/пути, действие и критерий готовности.' },
+              spec: {
+                type: 'object',
+                description: 'Обязательный исполнимый контракт шага для Outcome plan; legacy-планы могут не передавать.',
+                properties: {
+                  key: { type: 'string' },
+                  title: { type: 'string' },
+                  intent: { type: 'string' },
+                  files: { type: 'array', items: { type: 'string' } },
+                  symbols: { type: 'array', items: { type: 'string' } },
+                  actions: { type: 'array', items: { type: 'string' } },
+                  dependsOn: { type: 'array', items: { type: 'string' } },
+                  readScope: { type: 'array', items: { type: 'string' } },
+                  writeScope: { type: 'array', items: { type: 'string' } },
+                  acceptanceCriterionIds: { type: 'array', items: { type: 'string' } },
+                  verification: { type: 'array', items: { type: 'string' } },
+                  expectedEvidence: { type: 'array', items: { type: 'string' } },
+                  rollback: { type: 'string' },
+                  role: { type: 'string', enum: ['researcher', 'executor', 'verifier', 'critic', 'planner'] },
+                  execution: { type: 'string', enum: ['main', 'delegate', 'parallel-candidate'] },
+                  risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+                },
+                required: ['key', 'title', 'intent', 'files', 'symbols', 'actions', 'dependsOn', 'readScope', 'writeScope', 'acceptanceCriterionIds', 'verification', 'expectedEvidence', 'rollback', 'role', 'execution', 'risk'],
+              },
             },
             required: ['title']
           }

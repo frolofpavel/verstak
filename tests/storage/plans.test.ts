@@ -4,6 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
 import { createPlans } from '../../electron/storage/plans'
+import type { PlanQualityV1, PlanStepSpecV1 } from '../../shared/contracts/outcome'
 
 describe('plans execution-trace fields', () => {
   let dir: string
@@ -48,6 +49,49 @@ describe('plans execution-trace fields', () => {
     const step = plans.get(plan.id)!.steps[0]
     expect(step.runId).toBe('run-xyz')
     expect(step.status).toBe('done')
+    db.close()
+  })
+
+  it('structured Outcome plan roundtrips revisions, quality and step spec', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const plans = createPlans(db)
+    const spec: PlanStepSpecV1 = {
+      key: 'auth-fix',
+      title: 'Fix auth',
+      intent: 'Fix session creation',
+      files: ['src/auth.ts'],
+      symbols: ['login'],
+      actions: ['Change session branch'],
+      dependsOn: [],
+      readScope: ['src'],
+      writeScope: ['src/auth.ts'],
+      acceptanceCriterionIds: ['auth-green'],
+      verification: ['npm test -- auth'],
+      expectedEvidence: ['command:npm test -- auth'],
+      rollback: 'git revert',
+      role: 'executor',
+      execution: 'main',
+      risk: 'medium',
+    }
+    const quality: PlanQualityV1 = {
+      score: 92,
+      status: 'pass',
+      hardErrors: [],
+      warnings: [],
+      checkedAt: 123,
+    }
+    const created = plans.create('/proj', 'Outcome', [{ title: 'Fix auth', spec }], {
+      contractRevision: 3,
+      planRevision: 2,
+      quality,
+    })
+    const reloaded = plans.get(created.id)
+    expect(reloaded?.contractRevision).toBe(3)
+    expect(reloaded?.planRevision).toBe(2)
+    expect(reloaded?.quality).toEqual(quality)
+    expect(reloaded?.steps[0].spec).toEqual(spec)
+    expect(reloaded).not.toHaveProperty('qualityJson')
+    expect(reloaded?.steps[0]).not.toHaveProperty('specJson')
     db.close()
   })
 })

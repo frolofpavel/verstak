@@ -1,4 +1,10 @@
 import type { Database } from 'better-sqlite3'
+import {
+  parseTaskContract,
+  parseTaskContractJson,
+  type OutcomeDiagnostic,
+  type TaskContractV1,
+} from '../../shared/contracts/outcome'
 
 /**
  * Pipeline Brief→Proof (спек verstak-pipeline-brief-to-proof-spec.md) — тонкий
@@ -18,6 +24,7 @@ export type PipelineMode = 'dev' | 'agency'
 
 export type PipelineStep =
   | 'brief'
+  | 'refine'
   | 'plan'
   | 'execute'
   | 'verify'
@@ -48,6 +55,9 @@ export interface PipelineRun {
   step: PipelineStep
   brief: PipelineBrief
   planId: number | null
+  taskContract: TaskContractV1 | null
+  contractRevision: number
+  contractDiagnostics: OutcomeDiagnostic[]
   /** v3 verify-gate: сколько раз прогоняли verify (для лимита авто-починок). */
   verifyAttempts: number
   createdAt: number
@@ -78,6 +88,7 @@ export interface PipelineRuns {
   /** Последний НЕтерминальный прогон проекта (для resume-баннера). */
   getActive(projectPath: string): PipelineRun | null
   advance(id: number, patch: AdvancePipelinePatch): PipelineRun | null
+  saveContract(id: number, contract: TaskContractV1): PipelineRun
   cancel(id: number): void
 }
 
@@ -91,6 +102,8 @@ interface PipelineRow {
   step: string
   brief_json: string
   plan_id: number | null
+  task_contract_json: string | null
+  contract_revision: number
   verify_attempts: number
   created_at: number
   updated_at: number
@@ -106,6 +119,7 @@ function safeBrief(json: string): PipelineBrief {
 }
 
 function mapRow(row: PipelineRow): PipelineRun {
+  const parsed = parseTaskContractJson(row.task_contract_json)
   return {
     id: row.id,
     projectPath: row.project_path,
@@ -116,6 +130,9 @@ function mapRow(row: PipelineRow): PipelineRun {
     step: row.step as PipelineStep,
     brief: safeBrief(row.brief_json),
     planId: row.plan_id,
+    taskContract: parsed.value,
+    contractRevision: row.contract_revision ?? 0,
+    contractDiagnostics: parsed.diagnostics,
     verifyAttempts: row.verify_attempts ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -123,7 +140,8 @@ function mapRow(row: PipelineRow): PipelineRun {
 }
 
 const SELECT = `SELECT id, project_path, chat_id, agent_run_id, mode, workflow_id,
-  step, brief_json, plan_id, verify_attempts, created_at, updated_at FROM pipeline_runs`
+  step, brief_json, plan_id, task_contract_json, contract_revision,
+  verify_attempts, created_at, updated_at FROM pipeline_runs`
 
 export function createPipelineRuns(db: Database): PipelineRuns {
   return {
@@ -170,6 +188,21 @@ export function createPipelineRuns(db: Database): PipelineRuns {
       vals.push(id)
       db.prepare(`UPDATE pipeline_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
       return this.get(id)
+    },
+    saveContract(id, contract) {
+      const current = this.get(id)
+      if (!current) throw new Error(`pipeline ${id} not found`)
+      const parsed = parseTaskContract(contract)
+      if (!parsed.value) throw new Error(parsed.diagnostics.map(d => d.message).join('; '))
+      if (contract.revision !== current.contractRevision + 1) {
+        throw new Error(`contract revision must be ${current.contractRevision + 1}`)
+      }
+      db.prepare(
+        'UPDATE pipeline_runs SET task_contract_json = ?, contract_revision = ?, updated_at = ? WHERE id = ?'
+      ).run(JSON.stringify(parsed.value), parsed.value.revision, Date.now(), id)
+      const updated = this.get(id)
+      if (!updated) throw new Error(`pipeline ${id} disappeared`)
+      return updated
     },
     cancel(id) {
       db.prepare('UPDATE pipeline_runs SET step = ?, updated_at = ? WHERE id = ?')

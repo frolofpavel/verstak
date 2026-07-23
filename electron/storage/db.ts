@@ -1241,6 +1241,29 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         if (!runCols.includes('account_id')) db.exec('ALTER TABLE agent_runs ADD COLUMN account_id INTEGER')
       }
     }
+  },
+  {
+    version: 55,
+    description: '2.1.0 Outcome Engine: durable Task Contract, compiled plan revisions and step specs',
+    run: (db: DB) => {
+      const hasTable = (name: string) =>
+        !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name)
+      if (hasTable('pipeline_runs')) {
+        const cols = (db.prepare('PRAGMA table_info(pipeline_runs)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!cols.includes('task_contract_json')) db.exec('ALTER TABLE pipeline_runs ADD COLUMN task_contract_json TEXT')
+        if (!cols.includes('contract_revision')) db.exec('ALTER TABLE pipeline_runs ADD COLUMN contract_revision INTEGER NOT NULL DEFAULT 0')
+      }
+      if (hasTable('plans')) {
+        const cols = (db.prepare('PRAGMA table_info(plans)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!cols.includes('contract_revision')) db.exec('ALTER TABLE plans ADD COLUMN contract_revision INTEGER')
+        if (!cols.includes('plan_revision')) db.exec('ALTER TABLE plans ADD COLUMN plan_revision INTEGER NOT NULL DEFAULT 1')
+        if (!cols.includes('quality_json')) db.exec('ALTER TABLE plans ADD COLUMN quality_json TEXT')
+      }
+      if (hasTable('plan_steps')) {
+        const cols = (db.prepare('PRAGMA table_info(plan_steps)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!cols.includes('spec_json')) db.exec('ALTER TABLE plan_steps ADD COLUMN spec_json TEXT')
+      }
+    }
   }
 ]
 

@@ -58,6 +58,32 @@ import { logRuntime, logRuntimeError } from '../runtime-log'
 
 export type { ProviderId } from '../ai/registry'
 
+const OUTCOME_READ_TOOLS = [
+  'read_file',
+  'list_directory',
+  'search_project',
+  'find_files',
+  'find_definition',
+  'find_references',
+  'get_project_map',
+  'read_journal',
+  'memory_search',
+  'conversation_search',
+  'check_diagnostics',
+] as const
+
+/** Main-process capability ceiling: renderer/prompt cannot widen Outcome phases. */
+export function toolsForOutcomePhase(
+  phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan',
+): string[] | undefined {
+  if (phase === 'refine') return [...OUTCOME_READ_TOOLS, 'submit_task_contract']
+  if (phase === 'plan' || phase === 'replan') {
+    return [...OUTCOME_READ_TOOLS, 'delegate_task', 'delegate_parallel', 'create_plan']
+  }
+  if (phase === 'verify') return [...OUTCOME_READ_TOOLS, 'run_command', 'attest_verification']
+  return undefined
+}
+
 /** 2.0.8-D2/2.1.3-CD: результат резолва подписочного аккаунта. Реэкспорт из единого
  *  резолвера (electron/ai/resolve-subscription-account.ts — логика readiness там;
  *  тут остаётся публичный тип для runner'ов и deps). */
@@ -102,7 +128,10 @@ export interface AiDeps {
   /** Project Brain (Итер.4): прогретый ContextPack под задачу. null если не прогрет. */
   getBrainContext?: (projectPath: string, lastUserMessage: string) => { content: string; packType: string; tokenEstimate?: number | null } | null
   /** Persist a plan emitted by the AI. */
-  recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
+  recordPlan: ToolContext['recordPlan']
+  getPlan?: ToolContext['getPlan']
+  /** 2.1.0: durable Task Contract facade shared by IPC and tool handlers. */
+  pipelineRuns?: ToolContext['pipelineRuns']
   /** Auto-append a brief entry to the dev journal (file write, command, plan, session summary). */
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   /** Read recent journal entries — exposed to the AI as the read_journal tool. */
@@ -476,6 +505,8 @@ export function registerAiIpc(deps: AiDeps): void {
      *  Когда задан — побеждает дефолт чата, requested пишется в agent_run, а strict
      *  отключает smart-fallback (не переезжать молча на другого провайдера). */
     promptRoute?: PromptRouteOverride
+    /** Server validates this against durable pipeline state before exposing it to tools. */
+    outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' }
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -484,6 +515,14 @@ export function registerAiIpc(deps: AiDeps): void {
     // C:\Users\Pavel). Гейтим так же, как files/terminal IPC (isWithinKnownRoots).
     if (projectPath && !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
+    }
+    const outcome = overrides?.outcome
+    if (outcome) {
+      const pipeline = deps.pipelineRuns?.get(outcome.pipelineId)
+      const phases = new Set(['refine', 'plan', 'execute-step', 'verify', 'replan'])
+      if (!Number.isInteger(outcome.pipelineId) || !phases.has(outcome.phase) || !pipeline || !projectPath || pipeline.projectPath !== projectPath) {
+        throw new Error('OUTCOME_CONTEXT_INVALID: pipeline/phase не подтверждены main process')
+      }
     }
     // #5 worktree-lifecycle: изолированный чат работает ЦЕЛИКОМ на своём worktree —
     // tools + контекст + recordWrite/undo (effRoot ниже). Иначе undo бил бы по main
@@ -535,7 +574,9 @@ export function registerAiIpc(deps: AiDeps): void {
     const providerId = promptRoute?.providerId ?? overrides?.providerId ?? resumedProvider ?? deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const sendId = ++currentSendId
-    const agentMode: AgentMode = overrides?.agentMode ?? deps.getAgentMode()
+    const planningOutcome = outcome?.phase === 'refine' || outcome?.phase === 'plan' || outcome?.phase === 'replan'
+    const agentMode: AgentMode = planningOutcome ? 'plan' : (overrides?.agentMode ?? deps.getAgentMode())
+    const outcomeToolsAllow = outcome ? toolsForOutcomePhase(outcome.phase) : undefined
     // runId — стабильный идентификатор этого агентного запуска (один ai:send =
     // один run). Штампуется на audit-записи, чтобы инспектор группировал run'ы
     // явно, а не по эвристике (gap/chatId). Закладка под Debug Packet / Workflow.
@@ -1291,6 +1332,14 @@ export function registerAiIpc(deps: AiDeps): void {
 
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
+    if (outcome && !useToolsPath) {
+      const message = 'OUTCOME_TRANSPORT_UNSUPPORTED: выбранный CLI/tunnel transport не гарантирует Task Contract и Proof. Используй API provider.'
+      taggedSender.send('ai:event', { id: sendId, event: { type: 'error', message } })
+      taggedSender.send('ai:event', { id: sendId, event: { type: 'done' } })
+      try { deps.agentRuns?.finish(runId, 'failed', { error: message }) } catch { /* best-effort */ }
+      cleanup()
+      return sendId
+    }
 
     // Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера.
     // Только если smart_fallback не отключён явно, только для API-провайдеров,
@@ -1403,7 +1452,7 @@ export function registerAiIpc(deps: AiDeps): void {
       void runApiConversation({
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
-        recordWrite: deps.recordWrite, recordPlan: deps.recordPlan,
+        recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, getPlan: deps.getPlan,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
@@ -1416,8 +1465,10 @@ export function registerAiIpc(deps: AiDeps): void {
         parentChatId: chatId ? Number(chatId) : null,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
-        toolsAllow: overrides?.toolsAllow ?? null,
+        toolsAllow: outcomeToolsAllow ?? overrides?.toolsAllow ?? null,
         recipe: overrides?.recipe,
+        outcome,
+        pipelineRuns: deps.pipelineRuns,
       }).finally(cleanup)
     } else {
       logRuntime('ai.runner.start', {

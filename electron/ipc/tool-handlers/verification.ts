@@ -5,6 +5,8 @@ import { planSpecFeedback } from '../../ai/task-spec-check'
 import { resolvePlanGate, type PlanDecision } from '../../ai/plan-gate'
 import { scanText } from '../../ai/secret-scanner'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../../ai/verification'
+import { scorePlanQuality } from '../../ai/plan-quality'
+import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contracts/outcome'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
 // способ прогнать 50 команд разом. Ручные проверки сверх лимита не режем.
@@ -193,24 +195,98 @@ export const createPlanHandler: ToolHandler = {
       const steps = rawSteps
         .filter((s: unknown): s is Record<string, unknown> => typeof s === 'object' && s !== null)
         .map((s) => ({
-          title: String((s as Record<string, unknown>).title ?? ''),
-          detail: (s as Record<string, unknown>).detail != null
-            ? String((s as Record<string, unknown>).detail)
-            : null
+          title: String(s.title ?? ''),
+          detail: s.detail != null ? String(s.detail) : null,
+          rawSpec: s.spec,
         }))
         .filter(s => s.title.length > 0)
       if (steps.length === 0) {
         return { id: call.id, name: call.name, result: '', error: 'create_plan: пустой список шагов' }
       }
-      const plan = ctx.recordPlan(ctx.projectPath, title, steps)
+
+      // Legacy и Outcome проходят quality ДО persistence/approval. Это закрывает
+      // исторический bypass: plan-mode раньше возвращался из approval раньше feedback.
+      const specFeedback = planSpecFeedback(steps)
+      if (!ctx.outcome && specFeedback) {
+        return { id: call.id, name: call.name, result: `План не сохранён: требуется доработка.${specFeedback}` }
+      }
+
+      let quality: ReturnType<typeof scorePlanQuality> | null = null
+      let specs: PlanStepSpecV1[] = []
+      let contractRevision: number | null = null
+      let planRevision = 1
+      if (ctx.outcome) {
+        if (ctx.outcome.phase !== 'plan' || !ctx.pipelineRuns) {
+          return { id: call.id, name: call.name, result: '', error: 'OUTCOME_PHASE_REQUIRED: create_plan требует phase=plan' }
+        }
+        const pipeline = ctx.pipelineRuns.get(ctx.outcome.pipelineId)
+        if (!pipeline || pipeline.projectPath !== ctx.projectPath || !pipeline.taskContract) {
+          return { id: call.id, name: call.name, result: '', error: 'OUTCOME_CONTRACT_REQUIRED' }
+        }
+        const parsedSpecs = steps.map((step, index) => {
+          const parsed = parsePlanStepSpec(step.rawSpec)
+          return { index, parsed }
+        })
+        const diagnostics = parsedSpecs.flatMap(item =>
+          item.parsed.diagnostics.map(d => `steps.${item.index}.spec.${d.path}: ${d.message}`)
+        )
+        specs = parsedSpecs.flatMap(item => item.parsed.value ? [item.parsed.value] : [])
+        if (diagnostics.length > 0 || specs.length !== steps.length) {
+          return { id: call.id, name: call.name, result: `План не сохранён: structured spec невалиден.\n- ${diagnostics.join('\n- ')}` }
+        }
+        quality = scorePlanQuality(pipeline.taskContract, specs)
+        if (quality.hardErrors.length > 0) {
+          return { id: call.id, name: call.name, result: `План не сохранён: deterministic gate требует revise.\n- ${quality.hardErrors.join('\n- ')}` }
+        }
+        contractRevision = pipeline.contractRevision
+        planRevision = pipeline.planId
+          ? (ctx.getPlan?.(pipeline.planId)?.planRevision ?? 1) + 1
+          : 1
+      }
+
+      const requiresApproval = ctx.outcome?.phase === 'plan'
+        || (ctx.agentMode === 'plan' && ctx.getSecretForDelegate?.('plan_approval_gate') === 'true')
+      if (requiresApproval && !ctx.pendingPlans) {
+        return { id: call.id, name: call.name, result: '', error: 'PLAN_APPROVAL_UNAVAILABLE: approval channel is not registered' }
+      }
+
+      const plan = ctx.recordPlan(
+        ctx.projectPath,
+        title,
+        steps.map((step, index) => ({
+          title: step.title,
+          detail: step.detail,
+          ...(specs[index] ? { spec: specs[index] } : {}),
+        })),
+        quality ? { contractRevision, planRevision, quality } : undefined,
+      )
       try { ctx.recordJournal(ctx.projectPath, 'note', `План: ${title}`, `${steps.length} шагов`) } catch { /* journal not critical */ }
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'plan-created', planId: plan.id, title, stepCount: steps.length } })
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: {
+          type: 'plan-created',
+          planId: plan.id,
+          title,
+          stepCount: steps.length,
+          ...(quality ? { quality: { score: quality.score, status: quality.status, warnings: quality.warnings } } : {}),
+        },
+      })
       // #3 plan-gate: в режиме планирования БЛОКИРУЕМ-И-ЖДЁМ явного решения юзера
       // (Approve/Revise/Reject), а не просто пишем план и полагаемся на ручное
       // переключение. approve → выполнение в этом же прогоне (мутируем ctx.agentMode —
       // decide() читает его живо на каждом tool-call).
-      if (ctx.agentMode === 'plan' && ctx.pendingPlans && ctx.getSecretForDelegate?.('plan_approval_gate') === 'true') {
-        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'plan-approval', callId: call.id, planId: plan.id, title, stepCount: steps.length } })
+      if (requiresApproval && ctx.pendingPlans) {
+        ctx.sender.send('ai:event', {
+          id: ctx.sendId,
+          event: {
+            type: 'plan-approval',
+            callId: call.id,
+            planId: plan.id,
+            title,
+            stepCount: steps.length,
+            ...(quality ? { quality: { score: quality.score, status: quality.status, warnings: quality.warnings } } : {}),
+          },
+        })
         const pending = ctx.pendingPlans
         const key = ctx.scopedKey(ctx.sendId, call.id)
         const decision = await new Promise<{ decision: PlanDecision; feedback?: string }>(resolve => {
@@ -225,9 +301,6 @@ export const createPlanHandler: ToolHandler = {
         if (outcome.newMode) { if (ctx.setAgentMode) ctx.setAgentMode(outcome.newMode); else ctx.agentMode = outcome.newMode }
         return { id: call.id, name: call.name, result: outcome.result }
       }
-      // v3 Шаг B (enforcement): фидбэк по тонким ТЗ-шагам — модель уточнит, чтобы
-      // дешёвая модель-исполнитель получила точную инструкцию, а не «улучшить X».
-      const specFeedback = planSpecFeedback(steps)
       return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.${specFeedback}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }

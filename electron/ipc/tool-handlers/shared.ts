@@ -10,6 +10,8 @@ import type { McpClient } from '../../mcp/client'
 import type { ProviderId } from '../../ai/registry'
 import type { ResolvedSubscription } from '../../ai/resolve-subscription-account'
 import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-brain'
+import type { PipelineRuns } from '../../storage/pipeline-runs'
+import type { CreatePlanMeta, NewStep } from '../../storage/plans'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -36,7 +38,11 @@ export interface ToolContext {
   // 2.0.11-E: provenance опционален — не ломает существующие 4-арг реализации (совместимо
   // с типом в runner-api.ts), но file-ops прокидывает runId прогона для честного отката.
   recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) => void
-  recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
+  recordPlan: (projectPath: string, title: string, steps: NewStep[], meta?: CreatePlanMeta) => { id: number }
+  getPlan?: (id: number) => { planRevision: number } | null
+  /** Server-owned Outcome context: pipelineId никогда не берётся из args модели. */
+  outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' }
+  pipelineRuns?: PipelineRuns
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   /** Read recent journal entries — used by the `read_journal` AI tool for self-reflection. */
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>

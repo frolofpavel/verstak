@@ -155,7 +155,8 @@ export interface AgentRunContext {
   initialMessages: ChatMessage[]
   signal: AbortSignal
   recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
-  recordPlan: (projectPath: string, title: string, steps: Array<{ title: string; detail?: string | null }>) => { id: number }
+  recordPlan: ToolContext['recordPlan']
+  getPlan?: ToolContext['getPlan']
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   saveMemory: AiDeps['saveMemory']
@@ -206,18 +207,20 @@ export interface AgentRunContext {
    *  накопленный счётчик сюда, иначе frame-local бюджет обнулялся в новом кадре и
    *  nudge выдавался повторно (симптом «Задача выполнена.» ×N). */
   nudgeBudgetUsed?: number
+  outcome?: ToolContext['outcome']
+  pipelineRuns?: ToolContext['pipelineRuns']
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
+    recordWrite, recordPlan, getPlan, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
-    processRegistry = globalProcessRegistry,
+    processRegistry = globalProcessRegistry, outcome, pipelineRuns,
     isFallbackFrame,
   } = ctx
   const startedAt = Date.now()
@@ -345,6 +348,24 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       return true
     }
     return false
+  }
+  let outcomeContractSubmitted = false
+  let outcomeRefineNudges = 0
+  const enforceOutcomeRefine = (): 'pass' | 'retry' | 'stop' => {
+    if (outcome?.phase !== 'refine' || outcomeContractSubmitted) return 'pass'
+    if (outcomeRefineNudges < 1) {
+      outcomeRefineNudges++
+      currentMessages.push({
+        role: 'user',
+        content: 'Outcome refine не завершён: вызови submit_task_contract с конкретной целью, criteria, границами, repoEvidence и честными blockingQuestions. Не отвечай финалом без tool.',
+      })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'tool-blocked', callId: 'outcome-refine-nudge', name: 'submit_task_contract', reason: 'Task Contract обязателен перед завершением refine.' },
+      })
+      return 'retry'
+    }
+    return 'stop'
   }
   // Loop detection: per-signature occurrence counter across the whole agent
   // loop. We block when a single tool+args combination has been called 3 times
@@ -880,6 +901,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             continue turnLoop
           }
           if (drainProcessCompletionsForRun()) { assistantText = ''; continue turnLoop }
+          const outcomeGate = enforceOutcomeRefine()
+          if (outcomeGate === 'retry') { assistantText = ''; continue turnLoop }
+          if (outcomeGate === 'stop') {
+            exitReason = 'error'
+            sender.send('ai:event', { id: sendId, event: { type: 'error', message: 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
+            sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+            return
+          }
           // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
           const esc = maybeEscalateNoTools()
           if (esc) return esc
@@ -964,6 +993,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       if (drainProcessCompletionsForRun()) {
         assistantText = ''
         continue
+      }
+      const outcomeGate = enforceOutcomeRefine()
+      if (outcomeGate === 'retry') { assistantText = ''; continue }
+      if (outcomeGate === 'stop') {
+        exitReason = 'error'
+        sender.send('ai:event', { id: sendId, event: { type: 'error', message: 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
+        sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+        return
       }
       // Этап 2: nudge исчерпан, модель так и не вызвала инструмент → JSON-режим / fallback.
       const esc = maybeEscalateNoTools()
@@ -1094,7 +1131,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-      recordWrite, recordPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+      recordWrite, recordPlan, getPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+      outcome, pipelineRuns,
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
@@ -1254,6 +1292,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         if (cmd) commandsRun.push(cmd)
       } else if (call.name === 'attest_verification' && !result.error) {
         attestedThisRun = true  // DoD-принуждение (аудит P1 #8)
+      } else if (call.name === 'submit_task_contract' && !result.error) {
+        outcomeContractSubmitted = true
       }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(

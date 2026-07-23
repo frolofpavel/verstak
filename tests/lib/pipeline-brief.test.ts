@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { EMPTY_BRIEF, SAMPLE_BRIEF, isBriefReady, buildPlanPrompt, buildExecutePrompt, pipelineStepIndex, buildPipelineSend, verifyState, resolveProofRunId, resolvePipelineRunId, resolveReviewCandidateRunIds, reviewGateState } from '../../src/lib/pipeline-brief'
+import { EMPTY_BRIEF, SAMPLE_BRIEF, isBriefReady, buildRefinePrompt, buildPlanningProtocol, buildPlanPrompt, buildExecutePrompt, pipelineStepIndex, buildPipelineSend, verifyState, resolveProofRunId, resolvePipelineRunId, resolveReviewCandidateRunIds, reviewGateState } from '../../src/lib/pipeline-brief'
+import { validContract } from '../contracts/outcome-contract.test'
 
 describe('pipeline-brief', () => {
   it('EMPTY_BRIEF не готов', () => {
@@ -15,7 +16,7 @@ describe('pipeline-brief', () => {
   })
 
   it('не готов без DoD или без цели', () => {
-    expect(isBriefReady({ goal: 'fix', constraints: '', dod: '' })).toBe(false)
+    expect(isBriefReady({ goal: 'fix', constraints: '', dod: '' })).toBe(true)
     expect(isBriefReady({ goal: '', constraints: 'x', dod: 'test' })).toBe(false)
     expect(isBriefReady({ goal: '   ', constraints: '', dod: '  ' })).toBe(false)
   })
@@ -47,14 +48,45 @@ describe('pipeline-brief', () => {
   })
 
   it('pipelineStepIndex: plan=2/6 … proof=6/6', () => {
-    expect(pipelineStepIndex('plan')).toEqual({ index: 2, total: 6 })
-    expect(pipelineStepIndex('execute')).toEqual({ index: 3, total: 6 })
-    expect(pipelineStepIndex('verify')).toEqual({ index: 4, total: 6 })
-    expect(pipelineStepIndex('review')).toEqual({ index: 5, total: 6 })
-    expect(pipelineStepIndex('proof')).toEqual({ index: 6, total: 6 })
+    expect(pipelineStepIndex('refine')).toEqual({ index: 2, total: 7 })
+    expect(pipelineStepIndex('plan')).toEqual({ index: 3, total: 7 })
+    expect(pipelineStepIndex('execute')).toEqual({ index: 4, total: 7 })
+    expect(pipelineStepIndex('verify')).toEqual({ index: 5, total: 7 })
+    expect(pipelineStepIndex('review')).toEqual({ index: 6, total: 7 })
+    expect(pipelineStepIndex('proof')).toEqual({ index: 7, total: 7 })
   })
 
   const brief = { goal: 'fix', constraints: '', dod: 'npm test' }
+
+  it('buildPipelineSend refine creates a read-only Task Contract turn', () => {
+    const s = buildPipelineSend('refine', brief, null)
+    expect(s?.mode).toBe('plan')
+    expect(s?.outcomePhase).toBe('refine')
+    expect(s?.text).toContain('submit_task_contract')
+    expect(buildRefinePrompt(brief)).toContain('submit_task_contract')
+  })
+
+  it('controlled planning requires an independent critic before final create_plan', () => {
+    const protocol = buildPlanningProtocol({ ...validContract, planningMode: 'controlled' })
+    expect(protocol).toContain('delegate_task')
+    expect(protocol).toContain('role=critic')
+    expect(protocol).toContain('create_plan ровно один раз')
+  })
+
+  it('deep planning uses explorers, two candidates and critic for multi-zone risk', () => {
+    const protocol = buildPlanningProtocol({
+      ...validContract,
+      planningMode: 'deep',
+      risk: 'high',
+      repoEvidence: [
+        ...validContract.repoEvidence,
+        { path: 'src/ui.tsx', why: 'UI flow' },
+      ],
+    })
+    expect(protocol).toContain('до трёх role=researcher')
+    expect(protocol).toContain('ровно два независимых role=planner')
+    expect(protocol).toContain('role=critic')
+  })
 
   it('buildPipelineSend plan → planPrompt + mode plan', () => {
     const s = buildPipelineSend('plan', brief, null)

@@ -20,6 +20,7 @@ import { ResumeBanner } from './ResumeBanner'
 import { WorktreeBar } from './WorktreeBar'
 import { PipelineWizard } from './PipelineWizard'
 import { PipelineBanner } from './PipelineBanner'
+import { TaskContractReview } from './TaskContractReview'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
@@ -47,7 +48,7 @@ import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveRevi
 import { decidePipelineGate, type VerifyOutcome } from '../lib/pipeline-gate'
 import { isCliProvider } from '../lib/model-catalog'
 import { toProjectAbsPath } from '../lib/project-path'
-import type { PipelineRun, PipelineStep, PipelineBrief, PipelineMode } from '../types/api'
+import type { PipelineRun, PipelineStep, PipelineBrief, PipelineMode, TaskContractV1 } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import {
   formatChatDateDivider,
@@ -1138,16 +1139,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // Pipeline (спек D5): авто-send шага. Держит желаемый режим — авто-send
   // срабатывает только когда agentMode реально применился (без race).
   const pipelineSendModeRef = useRef<'plan' | 'accept-edits' | null>(null)
-  /** Шаг pipeline, для которого сейчас идёт авто-send (plan | execute). */
-  const pipelineAutoSendStepRef = useRef<'plan' | 'execute' | null>(null)
+  const pipelineOutcomeRef = useRef<{ pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' } | null>(null)
+  /** Шаг pipeline, для которого сейчас идёт авто-send. */
+  const pipelineAutoSendStepRef = useRef<'refine' | 'plan' | 'execute' | null>(null)
   /** sendId Execute-шага — для точной привязки agentRunId. */
   const pipelineExecuteSendIdRef = useRef<number | null>(null)
   const [pipelineWizardOpen, setPipelineWizardOpen] = useState(false)
   const [pipelineInitialBrief, setPipelineInitialBrief] = useState<PipelineBrief | undefined>(undefined)
   const [pipelineWizardMode, setPipelineWizardMode] = useState<PipelineMode>('agency')
+  const [taskContractReview, setTaskContractReview] = useState<TaskContractV1 | null>(null)
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false)
   const composerSettingsRef = useRef<HTMLDivElement | null>(null)
   const activePipeline = useProject(s => s.activePipeline)
+  useEffect(() => {
+    if (activePipeline?.step === 'refine' && activePipeline.taskContract) {
+      setTaskContractReview(activePipeline.taskContract)
+    }
+  }, [activePipeline])
   const [undoCount, setUndoCount] = useState(0)
   // Cross-verify: результат авто-ревью другим провайдером после изменения файлов.
   // null = ещё не было; object = последний результат (сбрасывается при новом send).
@@ -1439,7 +1447,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // если прогон в фоновом чате — иначе агент висит в await навсегда (нет UI для
       // resolve → тихий дедлок). Решение маршрутизируется по sendId в нужный прогон.
       if (event.type === 'plan-approval') {
-        store.setPendingPlan({ callId: event.callId, title: String(event.title ?? 'План'), stepCount: Number(event.stepCount ?? 0), sendId: id })
+        store.setPendingPlan({
+          callId: event.callId,
+          planId: event.planId,
+          title: String(event.title ?? 'План'),
+          stepCount: Number(event.stepCount ?? 0),
+          sendId: id,
+          quality: event.quality,
+        })
+        return
+      }
+      if (event.type === 'task-contract-created') {
+        const active = useProject.getState().activePipeline
+        if (active?.id === event.pipelineId) {
+          setTaskContractReview(event.contract)
+        }
         return
       }
       // #3 plan-gate: прогон завершился/упал (gate был сдренен в main как reject) —
@@ -1750,7 +1772,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           store.setRunningPlanStep(null)
         }
         const pendingPipelineStep = pipelineAutoSendStepRef.current
-        if (pendingPipelineStep === 'plan' || pendingPipelineStep === 'execute') {
+        if (pendingPipelineStep === 'refine' || pendingPipelineStep === 'plan' || pendingPipelineStep === 'execute') {
           pipelineAutoSendStepRef.current = null
         }
         if (pendingPipelineStep === 'execute') {
@@ -1784,7 +1806,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           void window.api.journal.append(store.path, 'note', 'AI-ошибка',
             ('message' in event ? event.message : '').slice(0, 600))
         }
-        if (pipelineAutoSendStepRef.current === 'plan' || pipelineAutoSendStepRef.current === 'execute') {
+        if (pipelineAutoSendStepRef.current === 'refine' || pipelineAutoSendStepRef.current === 'plan' || pipelineAutoSendStepRef.current === 'execute') {
           pipelineAutoSendStepRef.current = null
           pipelineExecuteSendIdRef.current = null
         }
@@ -2091,12 +2113,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // взводим ref; авто-send ниже ждёт, пока agentMode реально станет нужным.
   useEffect(() => {
     function onPipelineSend(e: Event) {
-      const ev = e as CustomEvent<{ text: string; mode: 'plan' | 'accept-edits' }>
+      const ev = e as CustomEvent<{ text: string; mode: 'plan' | 'accept-edits'; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' } }>
       const d = ev.detail
       if (d && typeof d.text === 'string' && d.text.trim()) {
         void setAgentMode(d.mode)
         setInput(d.text)
         pipelineSendModeRef.current = d.mode
+        pipelineOutcomeRef.current = d.outcome ?? null
       }
     }
     window.addEventListener('gg-pipeline-send', onPipelineSend)
@@ -2120,12 +2143,32 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // Pipeline-оркестрация (спек D5): запуск из визарда → активируем прогон + шлём
   // Plan-промпт; «План OK» в баннере → двигаем шаг + шлём Execute-промпт.
   function dispatchPipelineSend(step: PipelineStep, brief: PipelineRun['brief'], planId: number | null) {
-    const mode = useProject.getState().activePipeline?.mode ?? 'dev'
-    const params = buildPipelineSend(step, brief, planId, { requireReviewGate: mode === 'agency' })
+    const pipeline = useProject.getState().activePipeline
+    const mode = pipeline?.mode ?? 'dev'
+    const params = buildPipelineSend(step, brief, planId, {
+      requireReviewGate: mode === 'agency',
+      taskContract: pipeline?.taskContract,
+    })
     if (!params) return
-    if (step === 'plan' || step === 'execute') pipelineAutoSendStepRef.current = step
-    window.dispatchEvent(new CustomEvent('gg-pipeline-send', { detail: params }))
+    if (step === 'refine' || step === 'plan' || step === 'execute') pipelineAutoSendStepRef.current = step
+    window.dispatchEvent(new CustomEvent('gg-pipeline-send', {
+      detail: {
+        ...params,
+        ...(pipeline && params.outcomePhase ? { outcome: { pipelineId: pipeline.id, phase: params.outcomePhase } } : {}),
+      },
+    }))
   }
+
+  useEffect(() => {
+    const onApproved = () => {
+      const pipeline = useProject.getState().activePipeline
+      if (pipeline?.step === 'execute') {
+        dispatchPipelineSend('execute', pipeline.brief, pipeline.planId)
+      }
+    }
+    window.addEventListener('gg-pipeline-plan-approved', onApproved)
+    return () => window.removeEventListener('gg-pipeline-plan-approved', onApproved)
+  })
 
   async function finalizePipelineExecute(store: ReturnType<typeof useProject.getState>, sendId: number | null) {
     const pipeline = store.activePipeline
@@ -2143,7 +2186,34 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }
   function onPipelineStarted(run: PipelineRun) {
     useProject.getState().startPipeline(run)
-    dispatchPipelineSend('plan', run.brief, run.planId)
+    dispatchPipelineSend('refine', run.brief, run.planId)
+  }
+
+  async function approveTaskContract() {
+    const pipeline = useProject.getState().activePipeline
+    if (!pipeline || !taskContractReview || taskContractReview.blockingQuestions.length > 0) return
+    const next = await window.api.pipeline.advance(pipeline.id, { step: 'plan' })
+    if (!next) return
+    useProject.getState().startPipeline(next)
+    setTaskContractReview(null)
+    dispatchPipelineSend('plan', next.brief, next.planId)
+  }
+
+  function refineTaskContract() {
+    const pipeline = useProject.getState().activePipeline
+    if (!pipeline) return
+    setTaskContractReview(null)
+    dispatchPipelineSend('refine', pipeline.brief, pipeline.planId)
+  }
+
+  async function editTaskContractSource() {
+    const pipeline = useProject.getState().activePipeline
+    if (!pipeline) return
+    setTaskContractReview(null)
+    setPipelineInitialBrief({ ...pipeline.brief, goal: taskContractReview?.rawRequest ?? pipeline.brief.goal })
+    setPipelineWizardMode(pipeline.mode)
+    await useProject.getState().cancelPipeline()
+    setPipelineWizardOpen(true)
   }
   async function onPipelinePrimary(step: PipelineStep) {
     const store = useProject.getState()
@@ -2941,6 +3011,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // СРАЗУ снимаем после отправки (one-shot). requested пишется в agent_run (main).
     const oneShotRoute = useProject.getState().promptRouteOverride
     const routeOverride = oneShotRoute ? { promptRoute: oneShotRoute } : {}
+    const pipelineOutcome = pipelineOutcomeRef.current
+    pipelineOutcomeRef.current = null
+    const outcomeOverride = pipelineOutcome ? { outcome: pipelineOutcome } : {}
     // Хвост ревью 2.0.11-B: chatId ОБЯЗАН доехать до ai:send. От него в main зависят три
     // вещи разом: компакция контекста (2.0.11-B), закреплённый за чатом аккаунт (2.0.8-D2)
     // и изоляция worktree. Фоновые пути его передавали, главный — забывал, и все три
@@ -2971,6 +3044,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         effortLevel: useProject.getState().effortLevel,
         agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {}),
+        ...outcomeOverride,
         ...routeOverride
       }, sendChatId)
     } else if (resumeFromRunId) {
@@ -2980,6 +3054,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         resumeFromRunId,
         agentMode: sendAgentMode,
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+        ...outcomeOverride,
         ...routeOverride
       }, sendChatId)
     } else {
@@ -2987,6 +3062,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
         agentMode: sendAgentMode,
+        ...outcomeOverride,
         ...routeOverride
       }, sendChatId)
     }
@@ -3804,6 +3880,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       <TimelineBar />
       <ReviewPanel />
       <PipelineBanner onPrimary={step => { void onPipelinePrimary(step) }} />
+      {taskContractReview && (
+        <TaskContractReview
+          contract={taskContractReview}
+          onApprove={() => void approveTaskContract()}
+          onRefine={refineTaskContract}
+          onEdit={() => void editTaskContractSource()}
+        />
+      )}
       {pipelineWizardOpen && (
         <PipelineWizard
           mode={pipelineWizardMode}

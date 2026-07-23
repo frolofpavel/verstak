@@ -1,4 +1,4 @@
-import type { AgentRunEvent, PipelineBrief, PipelineStep, VerificationOverall } from '../types/api'
+import type { AgentRunEvent, PipelineBrief, PipelineStep, TaskContractV1, VerificationOverall } from '../types/api'
 import { TASK_SPEC_CONTRACT } from './task-spec'
 
 /** Тон Verify-шага + можно ли переходить к Proof. passed → зелёный путь;
@@ -12,14 +12,14 @@ export function verifyState(overall: VerificationOverall | null | undefined): {
   return { tone: 'warn', canProof: false } // partial / not_run / null
 }
 
-/** Шаги «N/6» для баннера: brief(1) собирается в визарде, дальше plan→proof. */
+/** Шаги Outcome pipeline: raw brief → refine contract → compiled plan → proof. */
 const STEP_ORDER: Record<PipelineStep, number> = {
-  brief: 1, plan: 2, execute: 3, verify: 4, review: 5, proof: 6, completed: 6, cancelled: 6, blocked: 6,
+  brief: 1, refine: 2, plan: 3, execute: 4, verify: 5, review: 6, proof: 7, completed: 7, cancelled: 7, blocked: 7,
 }
 
 /** {index 1-based, total} шага для баннера «Pipeline · N/6». */
 export function pipelineStepIndex(step: PipelineStep): { index: number; total: number } {
-  return { index: STEP_ORDER[step] ?? 1, total: 6 }
+  return { index: STEP_ORDER[step] ?? 1, total: 7 }
 }
 
 /** Пустой бриф для инициализации формы визарда. */
@@ -37,22 +37,75 @@ export const SAMPLE_BRIEF: PipelineBrief = {
  * Границы (constraints) опциональны — не каждая задача их требует.
  */
 export function isBriefReady(brief: PipelineBrief): boolean {
-  return brief.goal.trim().length > 0 && brief.dod.trim().length > 0
+  return brief.goal.trim().length > 0
+}
+
+export function buildRefinePrompt(brief: PipelineBrief): string {
+  return [
+    `Исходная задача пользователя: ${brief.goal.trim()}`,
+    `Предварительные ограничения: ${brief.constraints.trim() || 'не заданы'}`,
+    `Предварительный DoD: ${brief.dod.trim() || 'не задан — выведи из задачи или задай blocking question'}`,
+    '',
+    'Это фаза Outcome refine. Только читай релевантный код и факты проекта; ничего не изменяй.',
+    'После исследования ОБЯЗАТЕЛЬНО вызови submit_task_contract.',
+    'Не выдумывай repoEvidence: указывай только реально прочитанные пути и символы.',
+    'Если без ответа пользователя опасно продолжать — сохрани вопрос в blockingQuestions.',
+  ].join('\n')
+}
+
+export function buildPlanningProtocol(contract: TaskContractV1): string {
+  if (contract.planningMode === 'quick') {
+    return [
+      'Planning protocol QUICK: один planner, только релевантные файлы, один финальный plan.',
+      'После самостоятельной проверки вызови create_plan ровно один раз.',
+    ].join('\n')
+  }
+  const contractInstruction = 'Каждый critic/planner обязан сверять вывод с Task Contract и оставаться read-only.'
+  if (contract.planningMode === 'controlled' || (contract.risk === 'low' && contract.repoEvidence.length <= 1)) {
+    return [
+      'Planning protocol CONTROLLED: подготовь черновик, затем вызови delegate_task с role=critic.',
+      'Передай критику полный черновик и Task Contract; учти замечания, затем вызови create_plan ровно один раз.',
+      contractInstruction,
+      contract.planningMode === 'deep'
+        ? 'Deep tournament сокращён до controlled: задача low-risk и затрагивает одну repo-зону.'
+        : '',
+    ].filter(Boolean).join('\n')
+  }
+  return [
+    'Planning protocol DEEP:',
+    '1. Вызови delegate_parallel: до трёх role=researcher, каждому дай отдельную repo-зону.',
+    '2. По находкам вызови delegate_parallel: ровно два независимых role=planner с общей rubric Task Contract.',
+    '3. Вызови delegate_task role=critic для сравнения двух candidates по coverage, dependencies, risks и verification.',
+    '4. Сам синтезируй один structured plan и вызови create_plan ровно один раз.',
+    contractInstruction,
+  ].join('\n')
 }
 
 /**
  * Промпт Plan-шага (спек §3.2). Read-only: модель составляет план и вызывает
  * create_plan, НЕ трогая файлы.
  */
-export function buildPlanPrompt(brief: PipelineBrief): string {
+export function buildPlanPrompt(brief: PipelineBrief, contract?: TaskContractV1 | null): string {
   const constraints = brief.constraints.trim() || '—'
+  const contractBlock = contract
+    ? [
+        `Task Contract revision: ${contract.revision}`,
+        `Уточнённая цель: ${contract.goal}`,
+        `Критерии: ${contract.successCriteria.map(item => `${item.id}: ${item.text}`).join('; ')}`,
+        `Repo evidence: ${contract.repoEvidence.map(item => `${item.path}${item.symbol ? `#${item.symbol}` : ''}`).join(', ') || '—'}`,
+        `Planning mode: ${contract.planningMode}`,
+        buildPlanningProtocol(contract),
+      ]
+    : []
   return [
     `Задача: ${brief.goal.trim()}`,
     `Не трогать: ${constraints}`,
     `DoD: ${brief.dod.trim()}`,
+    ...contractBlock,
     '',
-    'Составь план из 3–7 шагов. НЕ вноси изменений в файлы.',
-    'Вызови create_plan. В конце — риски и список файлов которые затронешь.',
+    'Составь исполнимый structured plan из 1–7 шагов. НЕ вноси изменений в файлы.',
+    'Для каждого шага заполни spec: key, intent, files/symbols/actions, dependsOn, readScope/writeScope, acceptanceCriterionIds, verification, expectedEvidence, rollback, role, execution, risk.',
+    'Вызови create_plan один раз только с финальной версией.',
     '',
     TASK_SPEC_CONTRACT,
   ].join('\n')
@@ -114,6 +167,7 @@ export type PipelineSendMode = 'plan' | 'accept-edits'
 
 export interface PipelineSendOptions {
   requireReviewGate?: boolean
+  taskContract?: TaskContractV1 | null
 }
 
 /**
@@ -127,9 +181,10 @@ export function buildPipelineSend(
   brief: PipelineBrief,
   planId: number | null,
   opts: PipelineSendOptions = {},
-): { text: string; mode: PipelineSendMode } | null {
-  if (step === 'plan') return { text: buildPlanPrompt(brief), mode: 'plan' }
-  if (step === 'execute') return { text: buildExecutePrompt(brief, planId ?? 0, opts.requireReviewGate === true), mode: 'accept-edits' }
+): { text: string; mode: PipelineSendMode; outcomePhase?: 'refine' | 'plan' | 'execute-step' } | null {
+  if (step === 'refine') return { text: buildRefinePrompt(brief), mode: 'plan', outcomePhase: 'refine' }
+  if (step === 'plan') return { text: buildPlanPrompt(brief, opts.taskContract), mode: 'plan', outcomePhase: 'plan' }
+  if (step === 'execute') return { text: buildExecutePrompt(brief, planId ?? 0, opts.requireReviewGate === true), mode: 'accept-edits', outcomePhase: 'execute-step' }
   return null
 }
 

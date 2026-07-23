@@ -14,6 +14,7 @@ function run(over: Partial<PipelineRun> = {}): PipelineRun {
   return {
     id: 1, projectPath: 'C:/proj', chatId: null, agentRunId: null, mode: 'dev',
     workflowId: null, step: 'plan', brief: { goal: 'g', constraints: '', dod: 'd' },
+    taskContract: null, contractRevision: 0, contractDiagnostics: [],
     planId: null, verifyAttempts: 0, createdAt: 1, updatedAt: 1, ...over,
   }
 }

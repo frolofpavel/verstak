@@ -78,29 +78,32 @@ export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, on
             />
           </label>
 
-          <label className="gg-create-client-field">
-            <span className="gg-create-client-label">{t.pipeline.constraintsLabel}</span>
-            <textarea
-              className="gg-input gg-pipeline-textarea"
-              value={brief.constraints}
-              onChange={e => patch('constraints', e.target.value)}
-              placeholder={t.pipeline.constraintsPlaceholder}
-              rows={2}
-              disabled={busy}
-            />
-          </label>
+          <details className="gg-pipeline-advanced">
+            <summary>{t.pipeline.advanced}</summary>
+            <label className="gg-create-client-field">
+              <span className="gg-create-client-label">{t.pipeline.constraintsLabel}</span>
+              <textarea
+                className="gg-input gg-pipeline-textarea"
+                value={brief.constraints}
+                onChange={e => patch('constraints', e.target.value)}
+                placeholder={t.pipeline.constraintsPlaceholder}
+                rows={2}
+                disabled={busy}
+              />
+            </label>
 
-          <label className="gg-create-client-field">
-            <span className="gg-create-client-label">{t.pipeline.dodLabel}</span>
-            <textarea
-              className="gg-input gg-pipeline-textarea"
-              value={brief.dod}
-              onChange={e => patch('dod', e.target.value)}
-              placeholder={t.pipeline.dodPlaceholder}
-              rows={2}
-              disabled={busy}
-            />
-          </label>
+            <label className="gg-create-client-field">
+              <span className="gg-create-client-label">{t.pipeline.dodLabel}</span>
+              <textarea
+                className="gg-input gg-pipeline-textarea"
+                value={brief.dod}
+                onChange={e => patch('dod', e.target.value)}
+                placeholder={t.pipeline.dodPlaceholder}
+                rows={2}
+                disabled={busy}
+              />
+            </label>
+          </details>
         </div>
 
         <div className="gg-modal-footer">

@@ -19954,6 +19954,17 @@ html[data-theme="light"] .gg-policy {
   margin-bottom: 14px;
 }
 .gg-pipeline-textarea { resize: vertical; min-height: 38px; font: inherit; }
+.gg-pipeline-advanced {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.gg-pipeline-advanced summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.gg-pipeline-advanced[open] summary { margin-bottom: 12px; }
 
 /* ── Pipeline баннер (sticky, шаги Plan→Proof) ─────────────────────── */
 .gg-pipeline-banner {
@@ -21626,3 +21637,20 @@ html[data-theme="light"] .gg-connectors-page {
     flex: 1 1 auto;
   }
 }
+.gg-task-contract-review { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+.gg-task-contract-body { overflow: auto; display: grid; gap: 16px; }
+.gg-task-contract-body h3 { margin: 0 0 7px; font-size: var(--text-sm); }
+.gg-outcome-raw { padding: 10px 12px; border-radius: 8px; background: var(--bg-tertiary); white-space: pre-wrap; }
+.gg-outcome-list { margin: 0; padding-left: 20px; display: grid; gap: 5px; }
+.gg-outcome-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.gg-outcome-blocked { padding: 12px; border: 1px solid var(--danger); border-radius: 10px; background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.gg-outcome-risk { color: var(--text-secondary); font-size: var(--text-sm); }
+@media (max-width: 700px) { .gg-outcome-columns { grid-template-columns: 1fr; } }
+.gg-plan-confirm-full { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+.gg-plan-quality { padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; background: var(--bg-tertiary); }
+.gg-plan-quality.is-pass { border-left: 3px solid var(--success); }
+.gg-plan-quality.is-block { border-left: 3px solid var(--danger); }
+.gg-plan-confirm-step { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.gg-plan-confirm-step dl { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; margin: 0; font-size: var(--text-xs); }
+.gg-plan-confirm-step dt { color: var(--text-tertiary); }
+.gg-plan-confirm-step dd { margin: 0; }

@@ -47,7 +47,7 @@ describe('pipeline ipc (D2)', () => {
   it('start создаёт прогон для активного проекта (step=plan)', () => {
     const run = invoke<PipelineRun | null>('pipeline:start', { mode: 'dev', brief, chatId: 3 })
     expect(run).not.toBeNull()
-    expect(run!.step).toBe('plan')
+    expect(run!.step).toBe('refine')
     expect(run!.mode).toBe('dev')
     expect(run!.projectPath).toBe(dir)
     expect(run!.brief).toEqual(brief)
@@ -74,7 +74,9 @@ describe('pipeline ipc (D2)', () => {
 
   it('полный цикл: start → plan→execute→verify→proof→completed, бриф/planId/runId выживают', () => {
     const run = invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief, chatId: 2 })
-    expect(run.step).toBe('plan')
+    expect(run.step).toBe('refine')
+
+    invoke('pipeline:advance', run.id, { step: 'plan' })
 
     // План создан во время Plan-шага → привязка planId (шаг остаётся plan).
     invoke('pipeline:advance', run.id, { planId: 31 })

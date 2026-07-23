@@ -477,7 +477,8 @@ app.whenReady().then(() => {
   logRuntime('startup.dev_tasks.ready')
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
-  registerPipelineIpc({ pipeline: createPipelineRuns(db), getProjectRoot: getActiveProjectPath })
+  const pipelineRuns = createPipelineRuns(db)
+  registerPipelineIpc({ pipeline: pipelineRuns, getProjectRoot: getActiveProjectPath })
   const brainStore = createProjectBrainStore(db)
   registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
@@ -631,10 +632,12 @@ app.whenReady().then(() => {
       const pack = brainStore.getContextPack(projectPath, type) ?? brainStore.getContextPack(projectPath, 'short')
       return pack ? { content: pack.content, packType: pack.type, tokenEstimate: pack.tokenEstimate } : null
     },
-    recordPlan: (projectPath, title, steps) => {
-      const plan = plans.create(projectPath, title, steps)
+    recordPlan: (projectPath, title, steps, meta) => {
+      const plan = plans.create(projectPath, title, steps, meta)
       return { id: plan.id }
     },
+    getPlan: (id) => plans.get(id),
+    pipelineRuns,
     recordJournal: (projectPath, kind, title, detail) => {
       journal.append(projectPath, kind, title, detail ?? null)
     },

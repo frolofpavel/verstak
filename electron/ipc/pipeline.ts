@@ -36,6 +36,7 @@ export function registerPipelineIpc(deps: PipelineDeps): void {
         brief: opts.brief,
         chatId: opts.chatId ?? null,
         workflowId: opts.workflowId ?? null,
+        step: 'refine',
       })
     },
   )

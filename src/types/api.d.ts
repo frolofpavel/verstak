@@ -111,8 +111,31 @@ export interface Reminder {
 export interface UndoEntry { id: number; filePath: string; beforeContent: string | null; afterContent: string | null; createdAt: number }
 export type PlanStatus = 'draft' | 'running' | 'done' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
-export interface PlanStep { id: number; planId: number; idx: number; title: string; detail: string | null; status: StepStatus; result: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }
-export interface Plan { id: number; title: string; status: PlanStatus; createdAt: number; completedAt: number | null; steps: PlanStep[] }
+export interface PlanStep { id: number; planId: number; idx: number; title: string; detail: string | null; status: StepStatus; result: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null; spec?: PlanStepSpecV1 | null }
+export interface TaskContractV1 {
+  schemaVersion: 1
+  revision: number
+  rawRequest: string
+  goal: string
+  successCriteria: Array<{ id: string; text: string; evidence: 'command' | 'diff' | 'screenshot' | 'manual'; verify?: string }>
+  constraints: string[]
+  nonGoals: string[]
+  assumptions: Array<{ text: string; status: 'confirmed' | 'unconfirmed' | 'invalidated' }>
+  blockingQuestions: string[]
+  repoEvidence: Array<{ path: string; symbol?: string; why: string }>
+  risk: 'low' | 'medium' | 'high'
+  planningMode: 'quick' | 'controlled' | 'deep'
+}
+export interface PlanStepSpecV1 {
+  key: string; title: string; intent: string; files: string[]; symbols: string[]; actions: string[]
+  dependsOn: string[]; readScope: string[]; writeScope: string[]; acceptanceCriterionIds: string[]
+  verification: string[]; expectedEvidence: string[]; rollback: string
+  role: 'researcher' | 'executor' | 'verifier' | 'critic' | 'planner'
+  execution: 'main' | 'delegate' | 'parallel-candidate'
+  risk: 'low' | 'medium' | 'high'
+}
+export interface PlanQualityV1 { score: number; status: 'pass' | 'revise' | 'block'; hardErrors: string[]; warnings: string[]; checkedAt: number }
+export interface Plan { id: number; title: string; status: PlanStatus; createdAt: number; completedAt: number | null; contractRevision?: number | null; planRevision?: number; quality?: PlanQualityV1 | null; steps: PlanStep[] }
 
 /** Agency Workflows — каталожная карточка workflow'а. */
 export interface WorkflowSummary { id: string; name: string; description: string; icon: string | null; stepCount: number }
@@ -383,8 +406,9 @@ export type ChatEvent =
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
   | { type: 'turns-exhausted'; used: number; maxBudget: number; canContinue: boolean; suggestedAdd: number }
   | { type: 'tool-activity'; callId: string; name: string; label: string; detail: string; status: 'ok' | 'error' }
-  | { type: 'plan-created'; planId: number; title: string; stepCount: number }
-  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number }
+  | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+  | { type: 'task-contract-created'; pipelineId: number; revision: number; contract: TaskContractV1 }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
   | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
@@ -560,7 +584,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride },
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' } },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
@@ -1344,7 +1368,7 @@ export interface DevTaskDetail {
 /** Pipeline Brief→Proof (спек). Зеркало типов electron/storage/pipeline-runs.ts —
  *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
 export type PipelineMode = 'dev' | 'agency'
-export type PipelineStep = 'brief' | 'plan' | 'execute' | 'verify' | 'review' | 'proof' | 'completed' | 'cancelled' | 'blocked'
+export type PipelineStep = 'brief' | 'refine' | 'plan' | 'execute' | 'verify' | 'review' | 'proof' | 'completed' | 'cancelled' | 'blocked'
 
 // Project Brain (зеркало electron/storage/project-brain.ts — renderer без main).
 export interface ProjectBrain {
@@ -1395,6 +1419,9 @@ export interface PipelineRun {
   step: PipelineStep
   brief: PipelineBrief
   planId: number | null
+  taskContract: TaskContractV1 | null
+  contractRevision: number
+  contractDiagnostics: Array<{ code: string; path: string; message: string }>
   verifyAttempts: number
   createdAt: number
   updatedAt: number

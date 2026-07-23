@@ -50,7 +50,17 @@ describe('plan-gate: createPlanHandler (block-and-wait)', () => {
       ...over,
     } as never
   }
-  const call = { id: 'c1', name: 'create_plan', args: { title: 'Рефактор', steps: [{ title: 'шаг 1' }] } } as never
+  const call = {
+    id: 'c1',
+    name: 'create_plan',
+    args: {
+      title: 'Рефактор',
+      steps: [{
+        title: 'Исправить auth',
+        detail: 'В src/auth/login.ts исправить создание сессии. Критерий готовности: npm test -- auth проходит.',
+      }],
+    },
+  } as never
 
   it('approve → setAgentMode(accept-edits) (одобренный план выполняется в прогоне)', async () => {
     const ctx = makeCtx()

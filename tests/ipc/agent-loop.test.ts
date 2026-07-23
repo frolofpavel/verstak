@@ -47,6 +47,8 @@ type Overrides = {
   agentMode?: string
   sendId?: number
   processRegistry?: unknown
+  outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' }
+  pipelineRuns?: unknown
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -69,6 +71,8 @@ function args(dir: string, o: Overrides): unknown[] {
     parentChatId: null, subSessions: undefined, sessionTodos: undefined,
     agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: null,
     processRegistry: o.processRegistry,
+    outcome: o.outcome,
+    pipelineRuns: o.pipelineRuns,
   }
   return [ctx]
 }
@@ -143,6 +147,31 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
     expect(runs.finish).toHaveBeenCalledTimes(1)
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  })
+
+  it('Outcome refine gives one corrective turn, then fails closed without Task Contract', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    let turns = 0
+    const p = provider('p1', () => {
+      turns++
+      return [{ type: 'text', text: 'Готово без контракта' }, { type: 'done' }]
+    })
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      costGuard: createCostGuard(100),
+      agentRuns: runs,
+      runId: 'r-outcome',
+      sender,
+      outcome: { pipelineId: 7, phase: 'refine' },
+    }) as Parameters<typeof runApiConversation>))
+    expect(turns).toBe(2)
+    expect(sender.send).toHaveBeenCalledWith('ai:event', expect.objectContaining({
+      event: expect.objectContaining({ type: 'error', message: expect.stringContaining('OUTCOME_REFINE_BLOCKED') }),
+    }))
+    expect(runs.finish).toHaveBeenCalledWith('r-outcome', 'failed', expect.anything())
   })
 
   // 2.0.8-F каветат #1 (best-effort, симметрично plain-loop): сбой persistUsage НЕ

@@ -68,7 +68,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
   /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
-  pendingPlan: { callId: string; title: string; stepCount: number; sendId?: number } | null
+  pendingPlan: { callId: string; planId: number; title: string; stepCount: number; sendId?: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } } | null
   activity: ActivityEntry[]
   agentProgress: AgentProgressEntry[]
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
@@ -154,7 +154,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
-  setPendingPlan: (p: { callId: string; title: string; stepCount: number; sendId?: number } | null) => void
+  setPendingPlan: (p: ProjectState['pendingPlan']) => void
   /** T1.3 Inbox: снять pendingCommand конкретного чата (активного или фонового
    *  снапшота) — резолв approval из общего Inbox, не заходя в чат. */
   clearChatPendingCommand: (chatId: number) => void

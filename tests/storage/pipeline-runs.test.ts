@@ -4,6 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { openDb } from '../../electron/storage/db'
 import { createPipelineRuns } from '../../electron/storage/pipeline-runs'
+import { validContract } from '../contracts/outcome-contract.test'
 
 /**
  * Storage Pipeline Brief→Proof (миграция 22). Падает по ABI вместе с остальными
@@ -70,6 +71,22 @@ describe('pipeline-runs (migration 22)', () => {
     const pr = createPipelineRuns(db)
     pr.create({ projectPath: 'C:/a', mode: 'dev', brief })
     expect(pr.getActive('C:/b')).toBeNull()
+    db.close()
+  })
+
+  it('Task Contract переживает reopen и revision нельзя уменьшить', () => {
+    const path = join(dir, 'test.db')
+    let db = openDb(path)
+    let pr = createPipelineRuns(db)
+    const run = pr.create({ projectPath: 'C:/proj', mode: 'dev', brief })
+    pr.saveContract(run.id, validContract)
+    db.close()
+
+    db = openDb(path)
+    pr = createPipelineRuns(db)
+    expect(pr.get(run.id)?.taskContract).toEqual(validContract)
+    expect(pr.get(run.id)?.contractRevision).toBe(1)
+    expect(() => pr.saveContract(run.id, validContract)).toThrow('revision must be 2')
     db.close()
   })
 })

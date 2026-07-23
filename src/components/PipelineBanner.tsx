@@ -62,6 +62,7 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
 
   const { index, total } = pipelineStepIndex(step)
   const stepLabel: Record<string, string> = {
+    refine: 'Уточнение задачи',
     plan: t.pipeline.stepPlan,
     execute: t.pipeline.stepExecute,
     verify: t.pipeline.stepVerify,
