@@ -832,6 +832,8 @@ function extractErrorSignatures(output) {
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
+    if (/\b(fail|failed|error|errors|exception)s?\s*0\b/i.test(trimmed)) continue
+    if (/\b0\s*(fail|failed|error|errors|exception)s?\b/i.test(trimmed)) continue
     if (/error TS\d+:/i.test(trimmed)) sigs.push(trimmed.replace(/\d+:\d+/g, 'N:N'))
     else if (/\b(fail|failed|error|exception|syntaxerror|typeerror|assertionerror)\b/i.test(trimmed)) sigs.push(trimmed.slice(0, 300))
   }
@@ -1559,10 +1561,10 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
           continue
         }
         trace.finalStatus = 'failed'
-        trace.failureReason = REVIEW_GATE_STOP_MESSAGE
+        trace.failureReason = trace.failureReason || REVIEW_GATE_STOP_MESSAGE
         trace.lifecycleEvents.push({ type: 'end', status: 'failed', at: Date.now(), detail: trace.failureReason })
         trace.durationMs = Date.now() - startedAt
-        const err = new Error(REVIEW_GATE_STOP_MESSAGE)
+        const err = new Error(trace.failureReason)
         err.trace = trace
         throw err
       }
@@ -1610,7 +1612,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
 
   if (recipe?.reviewer?.required && !reviewGatePassed) {
     trace.finalStatus = 'failed'
-    trace.failureReason = 'max-turns reached before review_before_commit passed'
+    trace.failureReason = trace.failureReason || 'max-turns reached before review_before_commit passed'
     trace.lifecycleEvents.push({ type: 'end', status: 'failed', at: Date.now(), detail: trace.failureReason })
     trace.durationMs = Date.now() - startedAt
     const err = new Error(trace.failureReason)

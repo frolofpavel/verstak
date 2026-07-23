@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import http from 'node:http'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -23,6 +23,26 @@ let recipeDangerReqCount = 0
 
 function sse(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`
+}
+
+function runCliAsync(args: string[], timeoutMs: number): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('node', [CLI, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (c) => { stdout += c.toString() })
+    child.stderr.on('data', (c) => { stderr += c.toString() })
+
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve({ status: null, stdout, stderr })
+    }, timeoutMs)
+
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({ status: code, stdout, stderr })
+    })
+  })
 }
 
 beforeAll(async () => {
@@ -106,15 +126,15 @@ afterAll(() => {
 })
 
 describe('verstak-cli streaming tool-call name aggregation', () => {
-  it('записывает имя tool-call без удвоения когда provider шлёт имя в каждом delta', () => {
+  it('записывает имя tool-call без удвоения когда provider шлёт имя в каждом delta', async () => {
     if (!canBind) {
       // Порт 11434 занят (напр. запущен реальный ollama) — пропускаем.
       return
     }
-    const out = spawnSync('node', [
-      CLI, '-p', 'ollama', '-m', 'llama3.2', '--json', '--mode', 'auto',
+    const out = await runCliAsync([
+      '-p', 'ollama', '-m', 'llama3.2', '--json', '--mode', 'auto',
       '--project', projectDir, 'прочитай sample.txt'
-    ], { encoding: 'utf8', timeout: 30000 })
+    ], 30000)
 
     const stdout = out.stdout || ''
     const start = stdout.indexOf('{')
@@ -130,13 +150,13 @@ describe('verstak-cli streaming tool-call name aggregation', () => {
 })
 
 describe('verstak-cli headless recipe enforcement', () => {
-  it('fail-closes reviewer.required recipe when the model finishes without review_before_commit', () => {
+  it('fail-closes reviewer.required recipe when the model finishes without review_before_commit', async () => {
     if (!canBind) return
-    const out = spawnSync('node', [
-      CLI, 'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
+    const out = await runCliAsync([
+      'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
       '--json', '--mode', 'auto', '--max-turns', '3',
       '--project', projectDir, '--task', 'recipe-fail: pretend to fix without gate'
-    ], { encoding: 'utf8', timeout: 30000 })
+    ], 30000)
 
     expect(out.status).toBe(1)
     const parsed = JSON.parse(out.stderr)
@@ -146,15 +166,15 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(parsed.trace.toolCalls.some((c: any) => c.name === 'review-gate-nudge')).toBe(true)
   })
 
-  it('takes baseline before first mutation and allows final only after review gate pass', () => {
+  it('takes baseline before first mutation and allows final only after review gate pass', async () => {
     if (!canBind) return
     writeFileSync(join(projectDir, 'sum.mjs'), 'export function sum(a, b) { return a - b }\n', 'utf8')
 
-    const out = spawnSync('node', [
-      CLI, 'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
+    const out = await runCliAsync([
+      'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
       '--json', '--trace-json', '--mode', 'auto', '--max-turns', '6',
       '--project', projectDir, '--task', 'recipe-pass: fix sum implementation'
-    ], { encoding: 'utf8', timeout: 120000 })
+    ], 120000)
 
     expect(out.status).toBe(0)
     const parsed = JSON.parse(out.stdout)
@@ -166,15 +186,15 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(readFileSync(join(projectDir, 'sum.mjs'), 'utf8')).toContain('return a + b')
   })
 
-  it('blocks dangerous verify commands inside review_before_commit', () => {
+  it('blocks dangerous verify commands inside review_before_commit', async () => {
     if (!canBind) return
     const badFile = join(projectDir, 'should-not-delete.txt')
     writeFileSync(badFile, 'keep', 'utf8')
-    const out = spawnSync('node', [
-      CLI, 'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
+    const out = await runCliAsync([
+      'recipe', 'run', '--recipe', 'bugfix', '-p', 'ollama', '-m', 'llama3.2',
       '--json', '--mode', 'auto', '--max-turns', '4',
       '--project', projectDir, '--task', 'recipe-danger: call review gate with rm'
-    ], { encoding: 'utf8', timeout: 120000 })
+    ], 120000)
 
     expect(out.status).toBe(1)
     const parsed = JSON.parse(out.stderr)
