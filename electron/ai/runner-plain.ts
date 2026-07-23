@@ -261,7 +261,8 @@ export async function runPlainConversation(
             const check = costGuard.recordAndCheck(
               providerId, model ?? '', event.usage.inputTokens ?? null,
               event.usage.outputTokens ?? null, event.usage.cacheReadTokens ?? event.usage.cachedInputTokens ?? null,
-              event.usage.inputAccounting // 2.0.8-E: exclusive → billable без вычитания cached (фикс B)
+              event.usage.inputAccounting, // 2.0.8-E: exclusive → billable без вычитания cached (фикс B)
+              event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? null,
             )
             if (check.exceeded) {
               exitReason = 'error'

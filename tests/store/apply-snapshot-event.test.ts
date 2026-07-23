@@ -40,8 +40,17 @@ describe('applySnapshotEvent — общее ядро роутинга стрим
 
   it('usage: аккумулирует поверх существующего', () => {
     const s = snap([], { sessionUsage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } })
-    const r = applySnapshotEvent(s, { type: 'usage', usage: { inputTokens: 3, outputTokens: 4 } })
-    expect(r.sessionUsage).toEqual({ inputTokens: 13, outputTokens: 9, cachedInputTokens: 2 })
+    const r = applySnapshotEvent(s, {
+      type: 'usage',
+      usage: { inputTokens: 3, outputTokens: 4, cacheReadTokens: 5, cacheWriteTokens: 7, inputAccounting: 'exclusive' },
+    })
+    expect(r.sessionUsage).toEqual({
+      inputTokens: 13,
+      outputTokens: 9,
+      cachedInputTokens: 7,
+      cacheWriteTokens: 7,
+      inputAccounting: 'exclusive',
+    })
   })
 
   it('done: гасит стрим + штампует длительность последнего assistant', () => {

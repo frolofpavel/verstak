@@ -182,7 +182,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   refreshDevTask: () => Promise<void>
   /** Сбросить активную задачу (снимок + id). Вкладку не переключает. */
   closeDevTask: () => void
-  addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; inputAccounting?: InputAccounting }) => void
+  addUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; cacheCreationInputTokens?: number; inputAccounting?: InputAccounting }) => void
   resetUsage: () => void
   setRunningPlanStep: (s: RunningPlanStep | null) => void
   /** Apply an ai:event to a background session (used when projectPath !== current). */
@@ -245,7 +245,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pushHelpActivity: (entry: ActivityEntry) => void
   setHelpAgentProgress: (entries: AgentProgressEntry[]) => void
   pushHelpAgentProgress: (entry: AgentProgressEntry) => void
-  addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }) => void
+  addHelpUsage: (delta: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; cacheCreationInputTokens?: number; inputAccounting?: InputAccounting }) => void
   /** Зарегистрировать сгенерированный артефакт (для Timeline pill). */
   recordArtifact: (a: { kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number; overall?: 'passed' | 'failed' | 'partial' | 'not_run'; checksPassed?: number; checksTotal?: number }) => void
   /** Прикрепить DoD-бейдж (overall/N/M) к последнему verification-артефакту. */
@@ -331,7 +331,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   activeDevTaskId: null,
   devTask: null,
   activeView: 'chat',
-  sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+  sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
   runningPlanStep: null,
   projectList: [],
   chatSessions: [],
@@ -561,7 +561,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     agentProgress: [],
     preflights: [],
     subagentRuns: [],
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
     runningPlanStep: null,
     activeChatId: null,
     chatSessions: [],
@@ -716,13 +716,14 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     sessionUsage: {
       inputTokens: s.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
       outputTokens: s.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
-      cachedInputTokens: s.sessionUsage.cachedInputTokens + (delta.cachedInputTokens ?? 0),
+      cachedInputTokens: s.sessionUsage.cachedInputTokens + (delta.cacheReadTokens ?? delta.cachedInputTokens ?? 0),
+      cacheWriteTokens: (s.sessionUsage.cacheWriteTokens ?? 0) + (delta.cacheWriteTokens ?? delta.cacheCreationInputTokens ?? 0),
       // 2.0.8-E хвост: держим семантику фактического провайдера (последнее событие
       // побеждает — как в runner'ах). Без неё ценник занижал Claude (дефект B).
       inputAccounting: delta.inputAccounting ?? s.sessionUsage.inputAccounting
     }
   })),
-  resetUsage: () => set({ sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }),
+  resetUsage: () => set({ sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 } }),
   setRunningPlanStep: (s) => set({ runningPlanStep: s }),
   applyEventToSession: (projectPath, event) => set(s => {
     const existing = s.sessions[projectPath] ?? freshSnapshot()
@@ -800,7 +801,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         pendingCommand: null,
         activity: [],
         agentProgress: [],
-        sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+        sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
         runningPlanStep: null,
         chatSnapshots: nextSnapshots,
         openedReviewId: null,
@@ -992,7 +993,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       // счётчик стоимости прошлого чата протекали в новый (компаундинг cost).
       openedReviewId: null,
       previewArtifactId: null,
-      sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+      sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
       // Эфемерные карточки активности уходящего чата — не тащим в новый (finding 3).
       preflights: [],
       subagentRuns: []
@@ -1128,7 +1129,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       sessionUsage: {
         inputTokens: s.help.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
         outputTokens: s.help.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
-        cachedInputTokens: s.help.sessionUsage.cachedInputTokens + (delta.cachedInputTokens ?? 0)
+        cachedInputTokens: s.help.sessionUsage.cachedInputTokens + (delta.cacheReadTokens ?? delta.cachedInputTokens ?? 0),
+        cacheWriteTokens: (s.help.sessionUsage.cacheWriteTokens ?? 0) + (delta.cacheWriteTokens ?? delta.cacheCreationInputTokens ?? 0),
+        inputAccounting: delta.inputAccounting ?? s.help.sessionUsage.inputAccounting,
       }
     }
   })),

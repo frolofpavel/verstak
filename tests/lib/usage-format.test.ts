@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { costLabel, cacheLabel, runCostLabel, formatCost, cacheDiagnosticLabel } from '../../src/lib/usage-format'
+import { costLabel, cacheLabel, runCostLabel, formatCost, cacheDiagnosticLabel, usagePeriodTotals } from '../../src/lib/usage-format'
 
 /**
  * Срез 2.0.8-F, каветат #2: «неизвестно» НЕЛЬЗЯ показывать как ноль, а известный ноль —
@@ -102,6 +102,24 @@ describe('usage-format — три честных состояния (2.0.8-F)', 
     })
     it('обычная сумма — 2 знака', () => {
       expect(formatCost(12.345)).toBe('$12.35')
+    })
+  })
+
+  it('сводка 7/30 сохраняет разницу cache write/read и неизвестную цену', () => {
+    const totals = usagePeriodTotals([
+      {
+        providerId: 'claude', model: 'sonnet', transport: 'API', accountId: 1,
+        accountLabel: 'Рабочий', runs: 2, inputTokens: 10, outputTokens: 5,
+        cacheReadTokens: 700, cacheWriteTokens: 300, costAmount: 1.25,
+        unknownCostRuns: 1, cacheHitShare: 0.5,
+      },
+    ])
+    expect(totals).toEqual({
+      runs: 2,
+      knownCost: 1.25,
+      unknownCostRuns: 1,
+      cacheReadTokens: 700,
+      cacheWriteTokens: 300,
     })
   })
 })

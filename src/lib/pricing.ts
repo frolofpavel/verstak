@@ -15,14 +15,15 @@ interface ModelPrice {
   input: number   // $ per 1M input tokens
   output: number  // $ per 1M output tokens
   cached?: number // $ per 1M cached input tokens (when provider supports caching)
+  cacheWrite?: number // $ per 1M 5-minute cache creation tokens
 }
 
 const PRICES: Record<string, ModelPrice> = {
   // Anthropic — anthropic.com/pricing
-  'claude-sonnet-4-6':  { input: 3.0,  output: 15.0,  cached: 0.3 },
-  'claude-opus-4-5':    { input: 15.0, output: 75.0,  cached: 1.5 },
-  'claude-sonnet-4-5':  { input: 3.0,  output: 15.0,  cached: 0.3 },
-  'claude-haiku-4-5':   { input: 1.0,  output: 5.0,   cached: 0.1 },
+  'claude-sonnet-4-6':  { input: 3.0,  output: 15.0,  cached: 0.3, cacheWrite: 3.75 },
+  'claude-opus-4-5':    { input: 15.0, output: 75.0,  cached: 1.5, cacheWrite: 18.75 },
+  'claude-sonnet-4-5':  { input: 3.0,  output: 15.0,  cached: 0.3, cacheWrite: 3.75 },
+  'claude-haiku-4-5':   { input: 1.0,  output: 5.0,   cached: 0.1, cacheWrite: 1.25 },
   // Google — ai.google.dev/pricing
   'gemini-3-pro':                { input: 2.50, output: 15.0 },   // Gemini 3 Pro
   'gemini-3.5-flash':            { input: 0.30, output: 2.50 },   // Gemini 3.5 Flash (2026-05 release)
@@ -119,7 +120,8 @@ export function estimateCost(
   cachedInputTokens: number,
   // 2.0.8-E: default 'inclusive' сохраняет прежнее поведение для вызовов без флага (Chat.tsx —
   // вне allowlist E, покажет корректную Claude-стоимость после проброса inputAccounting пост-Ilya).
-  inputAccounting: InputAccounting = 'inclusive'
+  inputAccounting: InputAccounting = 'inclusive',
+  cacheWriteTokens = 0,
 ): CostEstimate {
   if (CLI_FREE.has(providerId)) return { usd: null, cents: 0 }
   const price = PRICES[normalizeModelId(providerId, model)]
@@ -127,8 +129,9 @@ export function estimateCost(
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
   const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
+  const cacheWriteCost = price.cacheWrite ? (cacheWriteTokens / 1_000_000) * price.cacheWrite : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
-  const total = inputCost + cachedCost + outputCost
+  const total = inputCost + cachedCost + cacheWriteCost + outputCost
   const cents = Math.round(total * 100)
   let usd: string
   if (total < 0.01) usd = '<$0.01'
@@ -162,7 +165,8 @@ export function costBreakdown(
   inputTokens: number,
   outputTokens: number,
   cachedInputTokens: number,
-  inputAccounting: InputAccounting = 'inclusive'
+  inputAccounting: InputAccounting = 'inclusive',
+  cacheWriteTokens = 0,
 ): string {
   if (CLI_FREE.has(providerId)) {
     return `Провайдер: ${providerId} (CLI, подписка — стоимость = $0)\nТокены input: ${inputTokens}\nТокены output: ${outputTokens}`
@@ -174,15 +178,19 @@ export function costBreakdown(
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
   const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
+  const cacheWriteCost = price.cacheWrite ? (cacheWriteTokens / 1_000_000) * price.cacheWrite : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
-  const total = inputCost + cachedCost + outputCost
+  const total = inputCost + cachedCost + cacheWriteCost + outputCost
   const lines = [
     `Модель: ${model}`,
-    `Цена: $${price.input}/M input, $${price.output}/M output${price.cached ? `, $${price.cached}/M cached` : ''}`,
+    `Цена: $${price.input}/M input, $${price.output}/M output${price.cached ? `, $${price.cached}/M cache read` : ''}${price.cacheWrite ? `, $${price.cacheWrite}/M cache write` : ''}`,
     '',
     `↑ input: ${billableInput.toLocaleString()} × $${price.input}/M = $${inputCost.toFixed(4)}`,
     ...(cachedInputTokens > 0 && price.cached
       ? [`⟲ cached: ${cachedInputTokens.toLocaleString()} × $${price.cached}/M = $${cachedCost.toFixed(4)}`]
+      : []),
+    ...(cacheWriteTokens > 0 && price.cacheWrite
+      ? [`⇧ cache write: ${cacheWriteTokens.toLocaleString()} × $${price.cacheWrite}/M = $${cacheWriteCost.toFixed(4)}`]
       : []),
     `↓ output: ${outputTokens.toLocaleString()} × $${price.output}/M = $${outputCost.toFixed(4)}`,
     `─────`,

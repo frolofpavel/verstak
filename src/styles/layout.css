@@ -9687,6 +9687,40 @@ html[data-theme="light"] .gg-mp-row-hidden-pill {
   font-weight: 400;
 }
 .gg-usage-pill.is-alert .gg-usage-cost { color: var(--error); }
+
+/* Subscription Switchboard 2.1.3-E — сравнение расхода 7/30 дней. */
+.gg-usage-period-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gg-usage-period-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  text-align: left;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.gg-usage-period-card:hover,
+.gg-usage-period-card.is-active {
+  border-color: var(--accent);
+}
+
+.gg-usage-period-card strong {
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .gg-usage-period-compare { grid-template-columns: 1fr; }
+}
 .gg-terminal-toggle {
   background: transparent;
   border: 1px solid transparent;

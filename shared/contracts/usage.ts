@@ -87,6 +87,8 @@ export interface RunUsageRow {
   model: string
   transport: string | null
   accountId: number | null
+  /** Renderer-safe display label; null если аккаунт удалён или прогон был без managed account. */
+  accountLabel?: string | null
   inputTokens: number | null
   outputTokens: number | null
   cacheReadTokens: number | null
@@ -105,6 +107,8 @@ export interface UsageSummaryGroup {
   providerId: string
   model: string
   transport: string | null
+  accountId: number | null
+  accountLabel?: string | null
   runs: number
   inputTokens: number
   outputTokens: number

@@ -42,6 +42,8 @@ export interface SessionUsage {
   inputTokens: number
   outputTokens: number
   cachedInputTokens: number
+  /** Токены, записанные в prompt cache (Claude cache_creation). */
+  cacheWriteTokens?: number
   /**
    * 2.0.8-E хвост: семантика reported input ФАКТИЧЕСКОГО провайдера (последнее usage-событие).
    * Без неё ценник чата считал по дефолту 'inclusive' и вычитал кэш из input у Claude
@@ -150,7 +152,7 @@ export function freshSnapshot(): SessionSnapshot {
     pendingCommand: null,
     activity: [],
     agentProgress: [],
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
     runningPlanStep: null,
     checkpointId: null,
     checkpointMessageId: null,

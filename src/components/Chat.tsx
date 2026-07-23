@@ -4203,9 +4203,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
                 // 2.0.8-E хвост: передаём семантику провайдера — иначе у Claude (exclusive)
                 // из input повторно вычитался кэш и ценник занижал реальную стоимость (дефект B).
-                const cost = estimateCost(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting)
+                const cost = estimateCost(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting, sessionUsage.cacheWriteTokens ?? 0)
                 const severity = costSeverity(cost.cents)
-                const breakdown = costBreakdown(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting)
+                const breakdown = costBreakdown(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting, sessionUsage.cacheWriteTokens ?? 0)
                 return (
                   <span className={`gg-usage-pill ${severity}`} title={breakdown}>
                     <span>↑{formatTokens(sessionUsage.inputTokens)}</span>
@@ -4216,6 +4216,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                         <span className="gg-usage-sep">·</span>
                         <span title="Cached input">⟲{formatTokens(sessionUsage.cachedInputTokens)}</span>
                       </>
+                    )}
+                    {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
+                      <span title="Записано в prompt cache">⇧{formatTokens(sessionUsage.cacheWriteTokens ?? 0)}</span>
                     )}
                     {cost.usd && (
                       <>

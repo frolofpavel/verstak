@@ -16,15 +16,17 @@ export interface ModelPrice {
   input: number
   output: number
   cached?: number
+  /** Anthropic 5-minute prompt-cache creation price, USD / 1M tokens. */
+  cacheWrite?: number
 }
 
 // Цены в $ per 1M tokens. Должны быть синхронизированы с src/lib/pricing.ts.
 // Дубликат сознательный — renderer и main не имеют shared modules.
 export const PRICES: Record<string, ModelPrice> = {
-  'claude-opus-4-5':       { input: 15.0, output: 75.0, cached: 1.5 },
-  'claude-sonnet-4-6':     { input: 3.0,  output: 15.0, cached: 0.3 },
-  'claude-sonnet-4-5':     { input: 3.0,  output: 15.0, cached: 0.3 },
-  'claude-haiku-4-5':      { input: 1.0,  output: 5.0,  cached: 0.1 },
+  'claude-opus-4-5':       { input: 15.0, output: 75.0, cached: 1.5, cacheWrite: 18.75 },
+  'claude-sonnet-4-6':     { input: 3.0,  output: 15.0, cached: 0.3, cacheWrite: 3.75 },
+  'claude-sonnet-4-5':     { input: 3.0,  output: 15.0, cached: 0.3, cacheWrite: 3.75 },
+  'claude-haiku-4-5':      { input: 1.0,  output: 5.0,  cached: 0.1, cacheWrite: 1.25 },
   'gemini-3-pro':          { input: 2.50, output: 15.0 },
   'gemini-3.5-flash':      { input: 0.30, output: 2.50 },
   'gemini-3-flash':        { input: 0.30, output: 2.50 },
@@ -121,6 +123,7 @@ export interface CostGuard {
     providerId: ProviderId, model: string,
     input: number | null, output: number | null, cached: number | null,
     inputAccounting?: InputAccounting,
+    cacheWrite?: number | null,
   ): {
     exceeded: boolean
     cents: number
@@ -152,7 +155,7 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
   const reportDailyCents = () => options.onDailyCentsChange?.(Math.round(totalCents()))
 
   return {
-    recordAndCheck(providerId, model, input, output, cached, inputAccounting) {
+    recordAndCheck(providerId, model, input, output, cached, inputAccounting, cacheWrite) {
       if (CLI_FREE.has(providerId)) {
         // CLI = подписка, $0
         return { exceeded: false, cents: Math.round(cumulativeCents), capCents }
@@ -164,7 +167,7 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
       // 2.0.8-E: billable-input через ЕДИНЫЙ helper (фикс дефекта B: exclusive НЕ вычитает cached).
       const billable = billableInputTokens({ inputTokens: input, cacheReadTokens: cached, inputAccounting: inputAccounting ?? 'inclusive' })
       // Каветат #4: usage целиком не сообщён (null) → «нет данных»: НЕ считаем $0 и НЕ блокируем.
-      if (billable == null && output == null && cached == null) {
+      if (billable == null && output == null && cached == null && cacheWrite == null) {
         return { exceeded: false, cents: Math.round(cumulativeCents), capCents }
       }
       const lookup = normalizeModelId(providerId, model)
@@ -180,8 +183,9 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
       }
       const inputCost = ((billable ?? 0) / 1_000_000) * price.input
       const cachedCost = price.cached ? ((cached ?? 0) / 1_000_000) * price.cached : 0
+      const cacheWriteCost = price.cacheWrite ? ((cacheWrite ?? 0) / 1_000_000) * price.cacheWrite : 0
       const outputCost = ((output ?? 0) / 1_000_000) * price.output
-      const total = inputCost + cachedCost + outputCost
+      const total = inputCost + cachedCost + cacheWriteCost + outputCost
       cumulativeCents += total * 100
       reportDailyCents()
 
