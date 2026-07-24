@@ -323,6 +323,13 @@ export function worktreeDiff(worktreePath: string): string {
   return stat && stat.trim() ? `[diff слишком большой для показа целиком — сводка изменений]\n${stat}` : ''
 }
 
+/** Относительные пути применимых файлов в diff worktree (без удалений). */
+export function worktreeChangedFiles(worktreePath: string): string[] {
+  git(worktreePath, ['add', '-A'])
+  const out = git(worktreePath, ['diff', '--cached', '--name-only', '--diff-filter=ACMRT'])
+  return out == null ? [] : out.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+}
+
 /**
  * #5 reconcile: удалить наши (verstak-wt) worktree'ы репозитория, которых НЕТ в
  * keepPaths (активные сессии). Чистит осиротевшие — merged/dismissed, не удалённые

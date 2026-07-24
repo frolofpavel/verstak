@@ -611,6 +611,14 @@ contextBridge.exposeInMainWorld('api', {
     envelopeRestore: (runId: string) => ipcRenderer.invoke('control-envelope:restore', runId)
   },
   // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
+  agentJobs: {
+    list: (projectPath: string) => ipcRenderer.invoke('agent-jobs:list', projectPath),
+    get: (jobId: string) => ipcRenderer.invoke('agent-jobs:get', jobId),
+    cancel: (jobId: string) => ipcRenderer.invoke('agent-jobs:cancel', jobId),
+    approveResume: (jobId: string) => ipcRenderer.invoke('agent-jobs:approve-resume', jobId),
+    chooseVariant: (jobId: string) => ipcRenderer.invoke('agent-jobs:choose-variant', jobId),
+    rejectVariant: (jobId: string) => ipcRenderer.invoke('agent-jobs:reject-variant', jobId)
+  },
   worktree: {
     isolate: (chatId: number, projectPath: string) => ipcRenderer.invoke('worktree:isolate', chatId, projectPath),
     list: (projectPath: string) => ipcRenderer.invoke('worktree:list', projectPath),

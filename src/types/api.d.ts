@@ -412,7 +412,8 @@ export type ChatEvent =
     | { type: 'step-outcome-reported'; planId: number; stepId: number; status: 'succeeded' | 'failed' | 'blocked' | 'diverged'; decision: { action: 'continue' | 'retry' | 'replan' | 'ask-user' | 'block'; reason: string; failureSignature: string | null; requiresApproval: boolean }; attempt: number }
     | { type: 'plan-replanned'; planId: number; revision: number; reason: string; preservedSteps: number }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
-  | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
+  | { type: 'subagent-run'; callId: string; jobId?: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
+  | { type: 'agent-job-finished'; jobId: string; parentCallId: string | null; status: AgentJobStatus; summary: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
   | { type: 'verification-attested'; callId: string; overall: 'passed' | 'failed' | 'partial' | 'not_run'; checksTotal: number; checksPassed: number; changedFilesCount: number }
   | { type: 'usage'; usage: UsageDelta }
@@ -956,6 +957,14 @@ declare global {
         envelopeRestore(runId: string): Promise<EnvelopeRestoreResult>
       }
       // #5 worktree-lifecycle: изоляция чата в git-worktree + локальный merge/discard.
+      agentJobs: {
+        list(projectPath: string): Promise<AgentJob[]>
+        get(jobId: string): Promise<{ job: AgentJob | null; children: AgentJob[] }>
+        cancel(jobId: string): Promise<number>
+        approveResume(jobId: string): Promise<AgentJob | null>
+        chooseVariant(jobId: string): Promise<{ ok: boolean; files?: string[]; cleanupOk?: boolean; warning?: string | null; error?: string }>
+        rejectVariant(jobId: string): Promise<{ ok: boolean; removed: boolean; error?: string }>
+      }
       worktree: {
         isolate(chatId: number, projectPath: string): Promise<{ ok: true; worktreePath: string } | { ok: false; error: string }>
         list(projectPath: string): Promise<WorktreeSessionDTO[]>
@@ -1226,6 +1235,74 @@ export interface AgentRunDetail {
   events: AgentRunEvent[]
   subs: SubSession[]
   todos: SessionTodo[]
+}
+
+export type AgentJobStatus =
+  | 'queued'
+  | 'ready'
+  | 'running'
+  | 'waiting-approval'
+  | 'interrupted'
+  | 'succeeded'
+  | 'failed'
+  | 'blocked'
+  | 'cancelled'
+
+export type AgentJobKind =
+  | 'delegate'
+  | 'parallel-member'
+  | 'orchestrate-member'
+  | 'swarm-member'
+  | 'swarm-arbiter'
+  | 'outcome-step'
+
+export interface AgentJobOutcome {
+  status: 'succeeded' | 'failed' | 'blocked' | 'diverged'
+  summary: string
+  observations: string[]
+  changedFiles: string[]
+  checks: Array<{ command: string | null; status: 'passed' | 'failed' | 'not_run'; exitCode?: number }>
+  evidence: string[]
+  assumptionFailures: string[]
+  recommendedAction: 'continue' | 'retry' | 'replan' | 'ask-user' | 'rollback'
+}
+
+export interface AgentJob {
+  schemaVersion: 1
+  id: string
+  projectPath: string
+  chatId: number | null
+  pipelineId: number | null
+  planId: number | null
+  planStepId: number | null
+  parentJobId: string | null
+  groupId: string | null
+  kind: AgentJobKind
+  role: string
+  goal: string
+  status: AgentJobStatus
+  dependsOn: string[]
+  readScope: string[]
+  writeScope: string[]
+  providerId: string
+  model: string
+  accountId: number | null
+  attempt: number
+  maxAttempts: number
+  callId: string | null
+  subSessionId: number | null
+  runId: string | null
+  worktreePath: string | null
+  costCapCents: number | null
+  costUsedCents: number
+  interruptionReason: string | null
+  waitingReason: string | null
+  result: AgentJobOutcome | null
+  outcomeRowId: number | null
+  createdAt: number
+  updatedAt: number
+  startedAt: number | null
+  finishedAt: number | null
 }
 
 /**

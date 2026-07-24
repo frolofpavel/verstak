@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
 import type { Translations } from '../i18n'
-import type { AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO } from '../types/api'
+import type { AgentJob, AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO } from '../types/api'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
 import { summarizeAgentRunPipeline } from '../lib/agent-run-pipeline'
 import { EmptyState } from './EmptyState'
@@ -328,8 +328,9 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   )
 }
 
-function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
+function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onResume }: {
   run: AgentRun
+  jobCount: number
   providerLabel: (id: string | null) => string
   expanded: boolean
   onToggle: () => void
@@ -354,6 +355,7 @@ function RunCard({ run, providerLabel, expanded, onToggle, onStop, onResume }: {
         <span className="gg-run-card-provider">{providerLabel(run.providerId)}{run.model ? ` · ${run.model}` : ''}</span>
         <span className="gg-run-card-meta">
           {run.agentsCount > 0 && <span className="gg-run-stat" title="sub-agents">🤖{run.agentsCount}</span>}
+          {jobCount > 0 && <span className="gg-run-stat" title="durable agent jobs">Jobs:{jobCount}</span>}
           {run.toolCount > 0 && <span className="gg-run-stat" title="tools">🔧{run.toolCount}</span>}
           {run.filesCount > 0 && <span className="gg-run-stat" title="files">📄{run.filesCount}</span>}
           {cost && <span className="gg-run-stat gg-run-stat-cost">{cost}</span>}
@@ -412,6 +414,7 @@ export function AgentRunsPanel() {
   const switchChatSession = useProject(s => s.switchChatSession)
   const setActiveView = useProject(s => s.setActiveView)
   const [runs, setRuns] = useState<AgentRun[]>([])
+  const [jobs, setJobs] = useState<AgentJob[]>([])
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [ownerFilter, setOwnerFilter] = useState<string>('')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -434,8 +437,12 @@ export function AgentRunsPanel() {
   const refresh = useCallback(async () => {
     if (!path) return
     try {
-      const list = await window.api.agentRuns.list(path, { limit: visibleLimit })
+      const [list, jobList] = await Promise.all([
+        window.api.agentRuns.list(path, { limit: visibleLimit }),
+        window.api.agentJobs.list(path),
+      ])
       setRuns(list)
+      setJobs(jobList)
     } catch { /* IPC недоступен в dev */ }
   }, [path, visibleLimit])
 
@@ -494,6 +501,13 @@ export function AgentRunsPanel() {
   ), [runs, statusFilter, ownerFilter])
 
   const activeCount = runs.filter(r => r.status === 'running' || r.status === 'queued').length
+  const jobsByRun = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const job of jobs) {
+      if (job.runId) counts.set(job.runId, (counts.get(job.runId) ?? 0) + 1)
+    }
+    return counts
+  }, [jobs])
 
   if (!path) {
     return (
@@ -539,6 +553,7 @@ export function AgentRunsPanel() {
               <RunCard
                 key={r.runId}
                 run={r}
+                jobCount={jobsByRun.get(r.runId) ?? 0}
                 providerLabel={providerLabel}
                 expanded={expanded === r.runId}
                 onToggle={() => setExpanded(prev => prev === r.runId ? null : r.runId)}

@@ -49,6 +49,9 @@ import { createChatSessions } from './storage/chat-sessions'
 import { createSubSessions } from './storage/sub-sessions'
 import { createSessionTodos } from './storage/session-todos'
 import { createAgentRuns } from './storage/agent-runs'
+import { createAgentJobs } from './storage/agent-jobs'
+import { AgentJobScheduler } from './ai/agent-job-scheduler'
+import { subAgentQueue } from './ai/sub-queue'
 import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
 import { switchActiveOnLimit, markAccountSuccess } from './storage/subscription-accounts'
@@ -67,6 +70,7 @@ import { createProjectBrainStore } from './storage/project-brain'
 import { pickPackType } from './ai/project-brain/warmup'
 import { registerAgentsIpc } from './ipc/agents'
 import { registerAgentRunsIpc } from './ipc/agent-runs'
+import { registerAgentJobsIpc } from './ipc/agent-jobs'
 import { registerVerificationsIpc } from './ipc/verifications'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
@@ -440,6 +444,15 @@ app.whenReady().then(() => {
     }),
   }
   logRuntime('startup.agent_runs.ready')
+  const agentJobs = createAgentJobs(db)
+  const agentJobScheduler = new AgentJobScheduler({ jobs: agentJobs, queue: subAgentQueue })
+  try {
+    const interrupted = agentJobs.reconcileRunning('app-restart')
+    if (interrupted > 0) logRuntime('agent_jobs.reconcile_running', { interrupted })
+  } catch (err) {
+    logRuntimeError('agent_jobs.reconcile_running.fail', err)
+  }
+  logRuntime('startup.agent_jobs.ready')
   // #5 worktree-lifecycle: персистентная изоляция чата в git-worktree.
   const worktreeSessions = createWorktreeSessions(db)
   logRuntime('startup.worktree_sessions.ready')
@@ -721,6 +734,8 @@ app.whenReady().then(() => {
     // Фаза 2. Здесь только делаем фундамент доступным для следующих фаз.
     agentRuns,
     // #5 worktree-lifecycle: ре-рут file-тулзов на worktree изолированного чата.
+    agentJobs,
+    agentJobScheduler,
     worktreeSessions,
     // Verification Artifact (Фаза 3) — attest_verification пишет строку истории
     // после writeVerificationArtifact (best-effort). Только insert нужен в ctx.
@@ -782,6 +797,7 @@ app.whenReady().then(() => {
   // (Crash-resume): findResumable отбирает прогоны, помеченные failed ИМЕННО на
   // этом старте.
   registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend, agentRunsReconciledAt)
+  registerAgentJobsIpc(agentJobs, undoStack, agentJobScheduler)
   registerWorktreeIpc(worktreeSessions)
   // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
   registerVerificationsIpc(verifications)

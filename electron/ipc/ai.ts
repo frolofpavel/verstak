@@ -135,6 +135,8 @@ export interface AiDeps {
   getPlan?: ToolContext['getPlan']
   plans?: ToolContext['plans']
   planOutcomes?: ToolContext['planOutcomes']
+  agentJobs?: ToolContext['agentJobs']
+  agentJobScheduler?: ToolContext['agentJobScheduler']
   /** 2.1.0: durable Task Contract facade shared by IPC and tool handlers. */
   pipelineRuns?: ToolContext['pipelineRuns']
   /** Auto-append a brief entry to the dev journal (file write, command, plan, session summary). */
@@ -420,6 +422,7 @@ export async function runScheduledHeadless(
       currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
       subCostGuard: createCostGuard(null), parentChatId: null,
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),
+      agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,
     }
     const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
     const result = await runSubAgentLoop({
@@ -1488,6 +1491,7 @@ export function registerAiIpc(deps: AiDeps): void {
         initialMessages: messagesWithSystem, signal: ctrl.signal,
         recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, getPlan: deps.getPlan,
         plans: deps.plans, planOutcomes: deps.planOutcomes,
+        agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,

@@ -13,6 +13,8 @@ import type { NewDecisionRecord, DecisionRecord } from '../../storage/project-br
 import type { PipelineRuns } from '../../storage/pipeline-runs'
 import type { CreatePlanMeta, NewStep, Plan, Plans } from '../../storage/plans'
 import type { PlanOutcomes } from '../../storage/plan-outcomes'
+import type { AgentJobs } from '../../storage/agent-jobs'
+import type { AgentJobScheduler } from '../../ai/agent-job-scheduler'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -43,6 +45,11 @@ export interface ToolContext {
   getPlan?: (id: number) => Plan | null
   plans?: Plans
   planOutcomes?: PlanOutcomes
+  /** Durable execution truth for delegate/parallel/orchestrate/swarm. */
+  agentJobs?: AgentJobs
+  agentJobScheduler?: AgentJobScheduler
+  /** Parent durable job for nested delegation. */
+  parentJobId?: string | null
   /** Server-owned Outcome context: pipelineId никогда не берётся из args модели. */
   outcome?: {
     pipelineId: number
@@ -105,7 +112,7 @@ export interface ToolContext {
   getSecretForDelegate?: (key: string) => string | null
   /** EF-R1 Б2: единый resolver подписочного аккаунта для delegate_task — sub-agent
    *  обязан использовать подтверждённый аккаунт, а не молчаливый default credential. */
-  resolveSubscriptionAccount?: (providerId: string, chatId?: number) => ResolvedSubscription | null
+  resolveSubscriptionAccount?: (providerId: string, chatId?: number, opts?: { accountId?: number | null }) => ResolvedSubscription | null
   /** ID текущего провайдера чата — используется как fallback в delegate_task. */
   currentProviderId?: string
   /** MCP client для роутинга вызовов внешних MCP-инструментов. */

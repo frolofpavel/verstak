@@ -1297,6 +1297,57 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         );
       `)
     }
+  },
+  {
+    version: 57,
+    description: '2.1.2 Durable Agent Control Plane: persistent agent_jobs execution truth with lineage, dependencies, scopes and attempt history',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_jobs (
+          id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          pipeline_id INTEGER,
+          plan_id INTEGER,
+          plan_step_id INTEGER,
+          parent_job_id TEXT,
+          group_id TEXT,
+          kind TEXT NOT NULL,
+          role TEXT NOT NULL,
+          goal TEXT NOT NULL,
+          status TEXT NOT NULL,
+          depends_on_json TEXT NOT NULL DEFAULT '[]',
+          read_scope_json TEXT NOT NULL DEFAULT '[]',
+          write_scope_json TEXT NOT NULL DEFAULT '[]',
+          provider_id TEXT NOT NULL,
+          model TEXT NOT NULL,
+          account_id INTEGER,
+          attempt INTEGER NOT NULL DEFAULT 1,
+          max_attempts INTEGER NOT NULL DEFAULT 1,
+          call_id TEXT,
+          sub_session_id INTEGER,
+          run_id TEXT,
+          worktree_path TEXT,
+          cost_cap_cents INTEGER,
+          interruption_reason TEXT,
+          waiting_reason TEXT,
+          result_json TEXT,
+          outcome_row_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_jobs_project_status
+          ON agent_jobs(project_path, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_jobs_group
+          ON agent_jobs(group_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_jobs_parent
+          ON agent_jobs(parent_job_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_jobs_run
+          ON agent_jobs(run_id);
+      `)
+    }
   }
 ]
 

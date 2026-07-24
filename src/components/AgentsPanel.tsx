@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
-import type { SubSession, SessionTodo, StoredChatMessage, ProviderDescriptorDTO } from '../types/api'
+import type { AgentJob, SubSession, SessionTodo, StoredChatMessage, ProviderDescriptorDTO } from '../types/api'
 import { Markdown } from './Markdown'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
@@ -23,7 +23,14 @@ import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
  */
 
 const STATUS_LABEL: Record<string, string> = {
+  queued: 'в очереди',
+  ready: 'готов к старту',
   running: 'идёт',
+  'waiting-approval': 'ждёт решения',
+  interrupted: 'прерван',
+  succeeded: 'готово',
+  failed: 'ошибка',
+  blocked: 'заблокирован',
   done: 'готово',
   error: 'ошибка',
   cancelled: 'отменён'
@@ -105,12 +112,14 @@ export function AgentsPanel() {
   const path = useProject(s => s.path)
   const setActiveView = useProject(s => s.setActiveView)
   const [subs, setSubs] = useState<SubSession[]>([])
+  const [jobs, setJobs] = useState<AgentJob[]>([])
   const [todos, setTodos] = useState<SessionTodo[]>([])
   const [queue, setQueue] = useState<{ inFlight: number; queued: number; tracked: number } | null>(null)
   const [viewing, setViewing] = useState<SubSession | null>(null)
   const [roleFilter, setRoleFilter] = useState<string>('')
   const [providerFilter, setProviderFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [jobActionMessage, setJobActionMessage] = useState<string>('')
   // Свёрнутые родительские узлы дерева (по sub.id). По умолчанию всё развёрнуто.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   // Карта id провайдера → читаемый лейбл (shortLabel/name всех провайдеров).
@@ -132,14 +141,16 @@ export function AgentsPanel() {
   const refresh = useCallback(async () => {
     if (!path) return
     try {
-      const [list, stats, todoList] = await Promise.all([
+      const [list, stats, todoList, jobList] = await Promise.all([
         window.api.agents.list(path),
         window.api.agents.queueStats(),
-        window.api.agents.todos(path)
+        window.api.agents.todos(path),
+        window.api.agentJobs.list(path)
       ])
       setSubs(list)
       setQueue(stats)
       setTodos(todoList)
+      setJobs(jobList)
     } catch { /* IPC может быть недоступен в dev — панель просто пустая */ }
   }, [path])
 
@@ -222,6 +233,38 @@ export function AgentsPanel() {
     void refresh()
   }
 
+  async function actOnJob(job: AgentJob, action: 'cancel' | 'resume' | 'choose' | 'reject') {
+    setJobActionMessage('')
+    try {
+      if (action === 'cancel') {
+        const count = await window.api.agentJobs.cancel(job.id)
+        setJobActionMessage(count > 0 ? 'Задача и её незавершённые дочерние задачи отменены.' : 'Задача уже завершена.')
+      }
+      if (action === 'resume') {
+        const resumed = await window.api.agentJobs.approveResume(job.id)
+        setJobActionMessage(resumed
+          ? 'Повтор разрешён. Задача вернулась в очередь.'
+          : 'Повтор не разрешён: задача уже изменила состояние.')
+      }
+      if (action === 'choose') {
+        const result = await window.api.agentJobs.chooseVariant(job.id)
+        setJobActionMessage(result.ok
+          ? (result.warning ?? `Вариант применён: ${result.files?.length ?? 0} файлов.`)
+          : (result.error ?? 'Не удалось применить вариант.'))
+      }
+      if (action === 'reject') {
+        const result = await window.api.agentJobs.rejectVariant(job.id)
+        setJobActionMessage(result.ok
+          ? (result.removed ? 'Вариант отклонён и рабочая копия удалена.' : 'Вариант отклонён.')
+          : (result.error ?? 'Не удалось удалить рабочую копию варианта.'))
+      }
+    } catch (error) {
+      setJobActionMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      void refresh()
+    }
+  }
+
   if (!path) {
     return (
       <div className="gg-panel">
@@ -239,6 +282,7 @@ export function AgentsPanel() {
           {queue && ` · очередь: ${queue.inFlight} в работе / ${queue.queued} ждут`}
         </div>
       </div>
+      {jobActionMessage && <div className="gg-notice">{jobActionMessage}</div>}
 
       <div className="gg-inspector-toolbar gg-agents-toolbar">
         <select className="gg-input gg-agents-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
@@ -263,6 +307,57 @@ export function AgentsPanel() {
       </div>
 
       <div className="gg-panel-body">
+        {jobs.length > 0 && (
+          <section className="gg-todogate" aria-label="Durable Agent Jobs">
+            <div className="gg-todogate-head">
+              <span className="gg-todogate-title">Agent Jobs · управление выполнением</span>
+              <span className="gg-todogate-progress">{jobs.filter(job => job.status === 'running').length} активно / {jobs.length}</span>
+            </div>
+            <div className="gg-run-list">
+              {jobs.map(job => (
+                <div key={job.id} className={`gg-agent-card is-${job.status}`}>
+                  <div className="gg-agent-card-main">
+                    <span className={`gg-agent-status-dot is-${job.status}`} />
+                    <span className="gg-agent-role">{job.role} · {job.kind}</span>
+                    <span className="gg-agent-provider">{providerLabel(job.providerId)} · {job.model}</span>
+                    <span className="gg-agent-task" title={job.goal}>{job.goal}</span>
+                    <span className="gg-agent-meta">
+                      {STATUS_LABEL[job.status] ?? job.status} · попытка {job.attempt}/{job.maxAttempts}
+                      {job.waitingReason && ` · ${job.waitingReason}`}
+                      {job.interruptionReason && ` · ${job.interruptionReason}`}
+                    </span>
+                  </div>
+                  <div className="gg-subviewer-actions">
+                    {!['succeeded', 'failed', 'blocked', 'cancelled'].includes(job.status) && (
+                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'cancel')}>Отменить</button>
+                    )}
+                    {job.status === 'interrupted' && (
+                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'resume')}>Разрешить повтор</button>
+                    )}
+                    {job.status === 'succeeded' && job.worktreePath && (
+                      <>
+                        <button className="gg-btn" onClick={() => void actOnJob(job, 'choose')}>Применить вариант</button>
+                        <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'reject')}>Отклонить</button>
+                      </>
+                    )}
+                  </div>
+                  <details>
+                    <summary>Scope, зависимости и результат</summary>
+                    <pre className="gg-subviewer-pre">{JSON.stringify({
+                      dependsOn: job.dependsOn,
+                      readScope: job.readScope,
+                      writeScope: job.writeScope,
+                      accountId: job.accountId,
+                      worktreePath: job.worktreePath,
+                      checks: job.result?.checks ?? [],
+                      summary: job.result?.summary ?? null,
+                    }, null, 2)}</pre>
+                  </details>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         {todos.length > 0 && (() => {
           const doneCount = todos.filter(t => t.status === 'done').length
           const pct = todos.length > 0 ? Math.round((doneCount / todos.length) * 100) : 0

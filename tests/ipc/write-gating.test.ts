@@ -136,4 +136,32 @@ describe('write_file gating (diffConfirmWrite)', () => {
     expect(h.writes.length).toBe(0)
     expect(res.error).toBe('User rejected')
   })
+
+  it('Agent Job writeScope блокирует out-of-scope даже в bypass', async () => {
+    const h = harness(dir, 'bypass')
+    h.ctx.parentJobId = 'job-1'
+    const transitionCalls: unknown[] = []
+    h.ctx.agentJobs = {
+      get: () => ({ id: 'job-1', status: 'running', writeScope: ['src/**'] }),
+      transition: (_id: string, input: unknown) => {
+        transitionCalls.push(input)
+        return { id: 'job-1', status: 'waiting-approval', writeScope: ['src/**'] }
+      },
+    } as unknown as NonNullable<ToolContext['agentJobs']>
+    const res = await writeFileHandler.handle(call('electron/main.ts'), h.ctx)
+    expect(h.writes).toEqual([])
+    expect(res.error).toContain('вне разрешённой области')
+    expect(transitionCalls).toEqual([expect.objectContaining({ status: 'waiting-approval' })])
+  })
+
+  it('Agent Job writeScope пропускает разрешённый файл', async () => {
+    const h = harness(dir, 'bypass')
+    h.ctx.parentJobId = 'job-1'
+    h.ctx.agentJobs = {
+      get: () => ({ id: 'job-1', status: 'running', writeScope: ['src/**'] }),
+    } as unknown as NonNullable<ToolContext['agentJobs']>
+    const res = await writeFileHandler.handle(call('src/allowed.ts'), h.ctx)
+    expect(res.error).toBeFalsy()
+    expect(h.writes).toHaveLength(1)
+  })
 })

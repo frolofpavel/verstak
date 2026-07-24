@@ -1,11 +1,12 @@
 // Command-хендлер: run_command. Вынесено при распиле.
 import type { ToolHandler } from './shared'
-import { emitActivity, awaitCommandConfirm } from './shared'
+import { awaitCommandConfirm } from './shared'
 import { scanText } from '../../ai/secret-scanner'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 import { hashCommandForAudit, type SmartApproveResult } from '../../ai/smart-approve'
+import { isVerifierCommand } from '../../ai/command-policy'
 
 export function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
   return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
@@ -79,6 +80,19 @@ export const runCommandHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     const command = String(call.args.command ?? '')
+    if (ctx.parentJobId && ctx.agentJobs) {
+      const job = ctx.agentJobs.get(ctx.parentJobId)
+      if (!job) {
+        return { id: call.id, name: call.name, result: '', error: 'Agent Job не найдена: команда безопасно остановлена.' }
+      }
+      const unrestrictedWriter = job.writeScope.includes('**')
+      if (!unrestrictedWriter && !isVerifierCommand(command)) {
+        const reason = job.writeScope.length === 0
+          ? 'Read-only Agent Job может запускать только проверочные команды.'
+          : 'Команда может писать вне ограниченного write scope; используй write_file/apply_patch или расширь scope через решение пользователя.'
+        return { id: call.id, name: call.name, result: '', error: reason }
+      }
+    }
     const verdict = ctx.tools.classifyCommand(command)
     if (!verdict.allowed) {
       ctx.sender.send('ai:event', {

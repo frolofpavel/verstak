@@ -675,7 +675,9 @@ export const TOOL_DEFS: ToolDefinition[] = [
         group: {
           type: 'string',
           description: 'Опционально — тег/группа для массовой отмены субагентов через панель Agents.'
-        }
+        },
+        read_scope: { type: 'array', items: { type: 'string' }, description: 'Разрешённые пути чтения относительно корня проекта.' },
+        write_scope: { type: 'array', items: { type: 'string' }, description: 'Разрешённые пути записи. Executor без значения получает весь проект; остальные роли read-only.' }
       },
       required: ['prompt']
     }
@@ -699,7 +701,10 @@ export const TOOL_DEFS: ToolDefinition[] = [
                 type: 'string',
                 enum: ['planner', 'critic', 'executor', 'verifier', 'researcher'],
                 description: 'Роль субагента — определяет его поведение и фокус (опц.)'
-              }
+              },
+              read_scope: { type: 'array', items: { type: 'string' }, description: 'Разрешённые пути чтения.' },
+              write_scope: { type: 'array', items: { type: 'string' }, description: 'Разрешённые пути записи.' },
+              depends_on: { type: 'array', items: { type: 'string' }, description: 'ID задач батча, которые должны успешно завершиться раньше.' }
             },
             required: ['id', 'prompt']
           },
@@ -771,7 +776,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
         size: { type: 'number', description: 'Опционально — сколько агентов в рое (по умолчанию 4, потолок 8). Арбитр идёт сверх этого числа.' },
         strategy: { type: 'string', description: 'Опционально — подсказка стратегии роя (например "сделай упор на безопасность и edge cases"). Раздаётся агентам как доп. контекст.' },
         cost_cap_usd: { type: 'number', description: 'Опционально — лимит $ на весь рой включая арбитра (по умолчанию $3).' },
-        isolate: { type: 'boolean', description: 'Опционально (по умолчанию false). Если true — каждый executor-вариант роя ПРАВИТ ФАЙЛЫ в своём изолированном git-worktree, а не в общем рабочем дереве. Их параллельные правки не клобберят друг друга; к варианту прикладывается git diff worktree, арбитр выбирает лучший, а ТЫ (главный агент) применяешь выбранные изменения в основном дереве сам. Включай когда цель подразумевает реальные правки кода несколькими вариантами параллельно. Требует git-репозиторий.' }
+        isolate: { type: 'boolean', description: 'Опционально. Для двух и более executor-вариантов изоляция в отдельных git-worktree включена по умолчанию; false оставляет старое поведение только по явному запросу.' }
       },
       required: ['goal']
     }

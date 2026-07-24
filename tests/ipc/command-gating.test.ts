@@ -199,4 +199,29 @@ describe('run_command gating', () => {
     const res = await third
     expect(res.error).toBe('User rejected')
   })
+
+  it('read-only Agent Job пропускает verify, но блокирует произвольную команду даже в bypass', async () => {
+    const h = harness('bypass')
+    h.ctx.parentJobId = 'job'
+    h.ctx.agentJobs = {
+      get: () => ({ id: 'job', writeScope: [], status: 'running' }),
+    } as unknown as NonNullable<ToolContext['agentJobs']>
+    const blocked = await runCommandHandler.handle(call('node mutate.js'), h.ctx)
+    expect(blocked.error).toContain('Read-only Agent Job')
+    expect(h.runs).toEqual([])
+    const verify = await runCommandHandler.handle(call('npm run type'), h.ctx)
+    expect(verify.error).toBeFalsy()
+    expect(h.runs).toEqual(['npm run type'])
+  })
+
+  it('ограниченный writer не выполняет shell-команду, которая может обойти scope', async () => {
+    const h = harness('bypass')
+    h.ctx.parentJobId = 'job'
+    h.ctx.agentJobs = {
+      get: () => ({ id: 'job', writeScope: ['src/**'], status: 'running' }),
+    } as unknown as NonNullable<ToolContext['agentJobs']>
+    const res = await runCommandHandler.handle(call('node mutate.js'), h.ctx)
+    expect(res.error).toContain('вне ограниченного write scope')
+    expect(h.runs).toEqual([])
+  })
 })

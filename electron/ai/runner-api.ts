@@ -159,6 +159,8 @@ export interface AgentRunContext {
   getPlan?: ToolContext['getPlan']
   plans?: ToolContext['plans']
   planOutcomes?: ToolContext['planOutcomes']
+  agentJobs?: ToolContext['agentJobs']
+  agentJobScheduler?: ToolContext['agentJobScheduler']
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   saveMemory: AiDeps['saveMemory']
@@ -216,7 +218,7 @@ export interface AgentRunContext {
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, getPlan, plans, planOutcomes, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
+    recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
@@ -1156,7 +1158,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-        recordWrite, recordPlan, getPlan, plans, planOutcomes, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+        recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns,
         runChecks: () => Array.from(executedChecks, ([command, exitCode]) => ({ command, exitCode })),
       invalidateMemory,

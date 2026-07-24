@@ -9,6 +9,7 @@ import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { applySearchReplaceBlocks } from '../../ai/tools'
 import { markFileDirty } from '../../ai/project-map'
+import { decideWriteScope } from '../../ai/write-scope'
 
 export const readHandler: ToolHandler = {
   mode: 'parallel-read',
@@ -50,6 +51,24 @@ export const unknownToolHandler: ToolHandler = {
 // ============================================================================
 
 async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string, permissionName?: string): Promise<ToolResult> {
+  // Durable Agent Job scope — серверный инвариант поверх режима и permission rules.
+  // Даже bypass/auto-accept не может записать за пределы job.writeScope.
+  if (ctx.parentJobId && ctx.agentJobs) {
+    const job = ctx.agentJobs.get(ctx.parentJobId)
+    if (!job) {
+      return { id: call.id, name: call.name, result: '', error: 'Agent Job не найдена: запись безопасно остановлена.' }
+    }
+    const scope = decideWriteScope(path, job.writeScope)
+    if (!scope.allowed) {
+      try {
+        ctx.agentJobs.transition(job.id, {
+          status: 'waiting-approval',
+          waitingReason: scope.reason ?? 'write-scope-expansion',
+        })
+      } catch { /* late/cancelled job: сам write всё равно блокируется */ }
+      return { id: call.id, name: call.name, result: '', error: scope.reason ?? 'Запись вне write scope.' }
+    }
+  }
   // permissionName — ИСХОДНОЕ имя тула для permission-правил. propose_edits фанит
   // правки в синтетические write_file-subCall'ы; без этого deny/ask на Edit/
   // propose_edits молча игнорировались бы (ревью: правило обходится). Исполнение

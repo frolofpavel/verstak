@@ -5,6 +5,10 @@ import { isCodexAuthProvider } from '../../ai/registry'
 import { getRolePrompt } from '../../ai/agent-roles'
 import { findUserAgent } from '../../ai/user-agents'
 import { addWorktree, removeWorktree, worktreeDiff } from '../../ai/git-worktree'
+import type { AgentJobV1 } from '../../../shared/contracts/agent-job'
+import { acquireDurableJob, finishDurableJob, linkDurableJob, markDurableJobRunning, roleWriteScope, scopesFromArgs, startDurableJob } from './delegation/job-runtime'
+import { randomUUID } from 'node:crypto'
+import { decideSwarmRubric } from '../../ai/swarm-rubric'
 
 // T1.2 — кап на размер diff изолированного worktree в выдаче арбитру (символы).
 const MAX_WORKTREE_DIFF_CHARS = 6000
@@ -62,7 +66,14 @@ export function buildSubCreateOptions(
   let claudeOauthToken: string | null | undefined
   let codexHome: string | null | undefined
   if (providerId === 'claude-cli' || isCodexAuthProvider(providerId)) {
-    const sub = ctx.resolveSubscriptionAccount?.(providerId) ?? null
+    const durableAccountId = ctx.parentJobId && ctx.agentJobs
+      ? ctx.agentJobs.get(ctx.parentJobId)?.accountId ?? null
+      : null
+    const sub = ctx.resolveSubscriptionAccount?.(
+      providerId,
+      ctx.parentChatId ?? undefined,
+      durableAccountId == null ? undefined : { accountId: durableAccountId },
+    ) ?? null
     if (sub && 'unavailable' in sub) {
       throw new Error(`Делегирование остановлено: аккаунт ${providerId} был удалён. Выберите другой аккаунт в Настройки → Подписки.`)
     }
@@ -125,6 +136,7 @@ export function dedupeTaskIds(items: Array<{ id: string }>, prefix = 'task'): vo
 export const delegateTaskHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
+    let durableJob: AgentJobV1 | null = null
     try {
       const skillId = call.args.skill_id ? String(call.args.skill_id) : null
       const providerOverride = call.args.provider_id ? String(call.args.provider_id) : null
@@ -194,6 +206,7 @@ export const delegateTaskHandler: ToolHandler = {
           event: {
             type: 'subagent-run',
             callId: call.id,
+            jobId: durableJob?.id,
             label: subLabel,
             provider: subProvider ?? undefined,
             skill: skillId ?? undefined,
@@ -205,8 +218,6 @@ export const delegateTaskHandler: ToolHandler = {
           }
         })
       }
-      emitSubagent('running')
-
       // Персистентная суб-сессия (Фаза 2, Идея 1): создаём строку kind='subagent',
       // привязанную к главному чату. Промпт суба сохраняем как первое сообщение.
       // Без subSessions фасада — работает как прежде (только эфемерная карточка).
@@ -259,6 +270,22 @@ export const delegateTaskHandler: ToolHandler = {
 
       // Per-task signal: проброс родительского abort + таймаут на весь loop.
       // 180с (было 60с для one-shot) — loop с tool-вызовами требует больше времени.
+      const resolvedModel = subModel ?? descriptor.defaultModel
+      const scopes = scopesFromArgs(call.args)
+      durableJob = startDurableJob(ctx, {
+        kind: 'delegate',
+        role: role ?? 'executor',
+        goal: prompt,
+        providerId: fallbackProvider,
+        model: resolvedModel,
+        callId: call.id,
+        groupId: call.args.group ? String(call.args.group) : null,
+        readScope: scopes.readScope,
+        writeScope: roleWriteScope(role, scopes.writeScope),
+      })
+      durableJob = linkDurableJob(ctx, durableJob, { subSessionId })
+      emitSubagent('running')
+
       const taskAc = new AbortController()
       const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
       const parentAbortHandler = () => taskAc.abort()
@@ -269,19 +296,25 @@ export const delegateTaskHandler: ToolHandler = {
       const { subAgentQueue } = await import('../../ai/sub-queue')
       const groupTag = call.args.group ? String(call.args.group) : null
       let queueSlot: { release: () => void; ticketId: number } | null = null
+      let jobLease: Awaited<ReturnType<typeof acquireDurableJob>> = null
       try {
-        queueSlot = await subAgentQueue.enter({ group: groupTag, role, abort: () => taskAc.abort() }, taskAc.signal)
+        jobLease = await acquireDurableJob(ctx, durableJob, taskAc.signal, () => taskAc.abort())
+        if (jobLease) durableJob = jobLease.job
+        else {
+          queueSlot = await subAgentQueue.enter({ group: groupTag, role, abort: () => taskAc.abort() }, taskAc.signal)
+          durableJob = markDurableJobRunning(ctx, durableJob)
+        }
       } catch {
         clearTimeout(timeoutId)
         ctx.signal.removeEventListener('abort', parentAbortHandler)
         ctx.agentCounter?.release(1)  // суб не стартовал — возвращаем слот
         emitSubagent('error', 'отменён в очереди')
         finalizeSub('cancelled')
+        finishDurableJob(ctx, durableJob, 'cancelled', 'cancelled in queue')
         return { id: call.id, name: call.name, result: '', error: 'delegate_task: задача отменена в очереди' }
       }
 
       try {
-        const resolvedModel = subModel ?? descriptor.defaultModel
         const provider = createProvider(
           fallbackProvider as ProviderId,
           buildSubCreateOptions(fallbackProvider as ProviderId, apiKey, resolvedModel, taskAc.signal, ctx)
@@ -302,7 +335,8 @@ export const delegateTaskHandler: ToolHandler = {
           subModel: resolvedModel,
           // Дерево делегирования: суб глубже на 1, его родитель — этот вызов.
           delegationDepth: depth + 1,
-          parentCallId: call.id
+          parentCallId: call.id,
+          parentJobId: durableJob?.id ?? ctx.parentJobId ?? null
         }
         const messages = [
           { role: 'system' as const, content: systemPrompt },
@@ -316,6 +350,7 @@ export const delegateTaskHandler: ToolHandler = {
         if (res.exitReason === 'error') {
           emitSubagent('error', res.error)
           finalizeSub('error', res.text.trim() || undefined)
+          finishDurableJob(ctx, durableJob, 'failed', res.error ?? 'delegate_task error')
           // Timeline задачи (Фаза 4): делегирование завершилось ошибкой.
           try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: res.error, ref: call.id, status: 'error' }) } catch { /* best-effort */ }
           return { id: call.id, name: call.name, result: '', error: `delegate_task error: ${res.error}` }
@@ -324,11 +359,26 @@ export const delegateTaskHandler: ToolHandler = {
         if (!trimmed) {
           emitSubagent('error', 'sub-agent вернул пустой ответ')
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'failed', 'sub-agent returned an empty response')
           try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: 'пустой ответ', ref: call.id, status: 'error' }) } catch { /* best-effort */ }
           return { id: call.id, name: call.name, result: '', error: 'delegate_task: sub-agent вернул пустой ответ' }
         }
         emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
         finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
+        finishDurableJob(
+          ctx,
+          durableJob,
+          res.exitReason === 'aborted' ? 'cancelled' : 'succeeded',
+          trimmed,
+          {
+            changedFiles: subCtx.runFilesTouched?.() ?? [],
+            checks: (subCtx.runChecks?.() ?? []).map(check => ({
+              command: check.command,
+              status: check.exitCode === 0 ? 'passed' : 'failed',
+              exitCode: check.exitCode,
+            })),
+          },
+        )
         // Timeline задачи (Фаза 4): делегирование завершено. label=роль/скилл/
         // провайдер суба, ref=callId, detail — число tool-вызовов суба.
         try { ctx.recordRunEvent?.('delegate', { label: subLabel, detail: `${res.toolCallCount} tools via ${subProvider ?? fallbackProvider}`, ref: call.id, status: 'ok' }) } catch { /* best-effort */ }
@@ -341,9 +391,11 @@ export const delegateTaskHandler: ToolHandler = {
       } finally {
         clearTimeout(timeoutId)
         ctx.signal.removeEventListener('abort', parentAbortHandler)
+        jobLease?.release()
         queueSlot?.release()
       }
     } catch (err) {
+      finishDurableJob(ctx, durableJob, 'failed', err instanceof Error ? err.message : String(err))
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
   }
@@ -399,7 +451,16 @@ export const delegateParallelHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
-      const tasks = call.args.tasks as Array<{ id: string; prompt: string; provider_id?: string; model?: string; role?: string }> | undefined
+      const tasks = call.args.tasks as Array<{
+        id: string
+        prompt: string
+        provider_id?: string
+        model?: string
+        role?: string
+        read_scope?: string[]
+        write_scope?: string[]
+        depends_on?: string[]
+      }> | undefined
       if (!Array.isArray(tasks) || tasks.length === 0) {
         return { id: call.id, name: call.name, result: '', error: 'delegate_parallel: tasks обязателен и не должен быть пустым' }
       }
@@ -460,6 +521,31 @@ export const delegateParallelHandler: ToolHandler = {
 
       const { runSubAgentLoop } = await import('../../ai/sub-agent-loop')
       const { getRoleToolset } = await import('../../ai/role-tools')
+      const { createToolsForProject } = await import('../../ai/tools')
+      const parallelWriterCount = tasks.filter(task =>
+        roleWriteScope(task.role, task.write_scope).length > 0
+      ).length
+      const parallelIsolation = parallelWriterCount >= 2
+      const parallelJobIds = new Map(tasks.map(task => [task.id, randomUUID()]))
+      const parallelJobs = new Map<string, AgentJobV1 | null>()
+      for (const task of tasks) {
+        const providerId = task.provider_id ?? ctx.currentProviderId ?? 'gemini-api'
+        const descriptor = PROVIDERS[providerId as keyof typeof PROVIDERS]
+        parallelJobs.set(task.id, startDurableJob(ctx, {
+          id: parallelJobIds.get(task.id),
+          kind: 'parallel-member',
+          role: task.role ?? 'executor',
+          goal: task.prompt,
+          providerId,
+          model: task.model ?? descriptor?.defaultModel ?? '',
+          callId: `${call.id}:${task.id}`,
+          groupId: groupTag,
+          dependsOn: (task.depends_on ?? []).map(id => parallelJobIds.get(id)).filter(Boolean) as string[],
+          readScope: task.read_scope ?? [],
+          writeScope: roleWriteScope(task.role, task.write_scope),
+          costCapCents: batchCapCents,
+        }))
+      }
 
       // Запускаем ВСЕ задачи сразу — глобальный семафор сам ограничит реальную
       // одновременность. Это даёт честную очередь (а не локальные батчи по 4).
@@ -474,12 +560,14 @@ export const delegateParallelHandler: ToolHandler = {
         // → upsert по callId, обновление status running → done/error в месте.
         const subCallId = `${call.id}:${task.id}`
         let toolCount = 0
+        let durableJob: AgentJobV1 | null = parallelJobs.get(task.id) ?? null
         const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
           ctx.sender.send('ai:event', {
             id: ctx.sendId,
             event: {
               type: 'subagent-run',
               callId: subCallId,
+              jobId: durableJob?.id,
               label: task.role ?? task.id,
               provider: providerId,
               role: task.role,
@@ -490,8 +578,6 @@ export const delegateParallelHandler: ToolHandler = {
             }
           })
         }
-        emitSubagent('running')
-
         // Персистентная суб-сессия (Идея 1). Каждая задача батча — своя сессия.
         let subSessionId: number | null = null
         if (ctx.subSessions) {
@@ -519,6 +605,7 @@ export const delegateParallelHandler: ToolHandler = {
           ctx.agentCounter?.release(1)  // суб не стартовал — возвращаем слот
           emitSubagent('error', `неизвестный provider ${providerId}`)
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'failed', `unknown provider ${providerId}`)
           throw new Error(`неизвестный provider ${providerId}`)
         }
         const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
@@ -526,11 +613,16 @@ export const delegateParallelHandler: ToolHandler = {
           ctx.agentCounter?.release(1)
           emitSubagent('error', `нет API key для ${providerId}`)
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'blocked', `missing API key for ${providerId}`)
           throw new Error(`нет API key для ${providerId}`)
         }
 
         // Per-task AbortController. Таймаут поднят с 60с до 180с — субагент
         // теперь крутит tool-loop. Родительский signal прерывает подзадачу.
+        const subModel = task.model ?? descriptor.defaultModel
+        durableJob = linkDurableJob(ctx, durableJob, { subSessionId })
+        emitSubagent('running')
+
         const taskAc = new AbortController()
         const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
         const parentAbortHandler = () => taskAc.abort()
@@ -539,31 +631,51 @@ export const delegateParallelHandler: ToolHandler = {
         // Глобальная очередь: ждём слот. Если батч уже превысил cost-cap пока
         // мы стояли в очереди — не стартуем (экономим деньги).
         let queueSlot: { release: () => void; ticketId: number } | null = null
+        let jobLease: Awaited<ReturnType<typeof acquireDurableJob>> = null
+        let worktree: string | null = null
         try {
-          queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role ?? null, abort: () => taskAc.abort() }, taskAc.signal)
+          jobLease = await acquireDurableJob(ctx, durableJob, taskAc.signal, () => taskAc.abort())
+          if (jobLease) durableJob = jobLease.job
+          else {
+            queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role ?? null, abort: () => taskAc.abort() }, taskAc.signal)
+            durableJob = markDurableJobRunning(ctx, durableJob)
+          }
         } catch {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
           ctx.agentCounter?.release(1)  // суб не стартовал — возвращаем слот
           emitSubagent('error', 'отменён в очереди')
           finalizeSub('cancelled')
+          finishDurableJob(ctx, durableJob, 'cancelled', 'cancelled in queue')
           throw new Error('отменён в очереди')
         }
         if (batchCapped) {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
-          queueSlot.release()
+          jobLease?.release()
+          queueSlot?.release()
           ctx.agentCounter?.release(1)  // суб не стартовал — возвращаем слот
           emitSubagent('error', 'батч остановлен по cost-cap')
           finalizeSub('cancelled')
+          finishDurableJob(ctx, durableJob, 'blocked', 'batch cost cap exhausted', {
+            recommendedAction: 'replan',
+          })
           throw new Error('батч остановлен по cost-cap')
         }
 
         try {
-          const subModel = task.model ?? descriptor.defaultModel
+          let taskRoot = ctx.projectPath
+          let taskTools = ctx.tools
+          if (parallelIsolation && (durableJob?.writeScope.length ?? 0) > 0) {
+            worktree = addWorktree(ctx.projectPath, `job-${task.id}`)
+            if (!worktree) throw new Error('не удалось создать обязательный worktree для parallel writer')
+            durableJob = linkDurableJob(ctx, durableJob, { worktreePath: worktree })
+            taskRoot = worktree
+            taskTools = createToolsForProject(taskRoot, taskAc.signal)
+          }
           const provider = createProvider(
             providerId as ProviderId,
-            buildSubCreateOptions(providerId as ProviderId, apiKey, subModel, taskAc.signal, ctx)
+            buildSubCreateOptions(providerId as ProviderId, apiKey, subModel, taskAc.signal, { ...ctx, projectPath: taskRoot })
           )
           const rolePrompt = task.role ? getRolePrompt(task.role) : null
           // Идея 8 (handoff): просим суб дать СТРУКТУРИРОВАННЫЙ итог, чтобы при
@@ -581,11 +693,14 @@ export const delegateParallelHandler: ToolHandler = {
           const allowedTools = getRoleToolset(task.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
             ...ctx,
+            projectPath: taskRoot,
+            tools: taskTools,
             signal: taskAc.signal,
             subProviderId: providerId as ProviderId,
             subModel,
             delegationDepth: depth + 1,
-            parentCallId: subCallId
+            parentCallId: subCallId,
+            parentJobId: durableJob?.id ?? ctx.parentJobId ?? null
           }
           const res = await runSubAgentLoop({
             provider, messages, allowedToolNames: allowedTools, ctx: subCtx,
@@ -606,17 +721,29 @@ export const delegateParallelHandler: ToolHandler = {
           if (!trimmed) { finalizeSub('error'); throw new Error('sub-agent вернул пустой ответ') }
           emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
           finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
-          return { id: task.id, result: trimmed }
+          let result = trimmed
+          if (worktree) {
+            const diff = worktreeDiff(worktree)
+            result = `${trimmed}\n\n--- ИЗМЕНЕНИЯ В ИЗОЛИРОВАННОМ WORKTREE ---\n${diff || '(изменений нет)'}`
+          }
+          finishDurableJob(ctx, durableJob, res.exitReason === 'aborted' ? 'cancelled' : 'succeeded', result)
+          return { id: task.id, result }
         } catch (taskErr) {
           // Любой неожиданный throw (createProvider, abort/timeout) — карточка
           // не должна застрять на 'running'. Rethrow → Promise.allSettled reject.
           emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'failed', taskErr instanceof Error ? taskErr.message : String(taskErr))
           throw taskErr
         } finally {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
+          jobLease?.release()
           queueSlot?.release()
+          const finalJob = durableJob && ctx.agentJobs ? ctx.agentJobs.get(durableJob.id) : null
+          if (worktree && finalJob?.status !== 'succeeded') {
+            try { removeWorktree(ctx.projectPath, worktree) } catch { /* cleanup best-effort */ }
+          }
         }
       }))
 
@@ -748,6 +875,7 @@ export const orchestrateHandler: ToolHandler = {
       const { getRoleToolset } = await import('../../ai/role-tools')
       const { getRolePrompt } = await import('../../ai/agent-roles')
       const { subAgentQueue } = await import('../../ai/sub-queue')
+      const { createToolsForProject } = await import('../../ai/tools')
 
       const baseProviderId = (ctx.currentProviderId ?? 'gemini-api') as ProviderId
       const descriptor = PROVIDERS[baseProviderId]
@@ -770,6 +898,7 @@ export const orchestrateHandler: ToolHandler = {
       // Дедуп id подзадач — планировщик-модель может выдать одинаковые id, а
       // subCallId = `${call.id}:${task.id}` должен быть уникальным (см. dedupeTaskIds).
       dedupeTaskIds(subtasks)
+      const isolateWriters = subtasks.filter(task => roleWriteScope(task.role, undefined).length > 0).length >= 2
 
       // 2) Создаём todo-лист из подзадач (TodoGate, Идея 2 — связь).
       if (ctx.sessionTodos) {
@@ -806,14 +935,13 @@ export const orchestrateHandler: ToolHandler = {
 
         const subCallId = `${call.id}:${task.id}`
         let toolCount = 0
+        let durableJob: AgentJobV1 | null = null
         const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
           ctx.sender.send('ai:event', {
             id: ctx.sendId,
-            event: { type: 'subagent-run', callId: subCallId, label: `${task.role} (${complexity})`, provider: baseProviderId, role: task.role, toolCount, task: task.prompt, status, result }
+            event: { type: 'subagent-run', callId: subCallId, jobId: durableJob?.id, label: `${task.role} (${complexity})`, provider: baseProviderId, role: task.role, toolCount, task: task.prompt, status, result }
           })
         }
-        emitSubagent('running')
-
         let subSessionId: number | null = null
         if (ctx.subSessions) {
           try {
@@ -834,14 +962,36 @@ export const orchestrateHandler: ToolHandler = {
           } catch { /* persist не критично */ }
         }
 
+        durableJob = startDurableJob(ctx, {
+          kind: 'orchestrate-member',
+          role: task.role,
+          goal: task.prompt,
+          providerId: baseProviderId,
+          model: subModel,
+          callId: subCallId,
+          groupId: groupTag,
+          readScope: ['**'],
+          writeScope: roleWriteScope(task.role, undefined),
+          costCapCents: batchCapCents,
+        })
+        durableJob = linkDurableJob(ctx, durableJob, { subSessionId })
+        emitSubagent('running')
+
         const taskAc = new AbortController()
         const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
         const parentAbortHandler = () => taskAc.abort()
         ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
 
         let queueSlot: { release: () => void; ticketId: number } | null = null
+        let jobLease: Awaited<ReturnType<typeof acquireDurableJob>> = null
+        let worktree: string | null = null
         try {
-          queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role, abort: () => taskAc.abort() }, taskAc.signal)
+          jobLease = await acquireDurableJob(ctx, durableJob, taskAc.signal, () => taskAc.abort())
+          if (jobLease) durableJob = jobLease.job
+          else {
+            queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role, abort: () => taskAc.abort() }, taskAc.signal)
+            durableJob = markDurableJobRunning(ctx, durableJob)
+          }
         } catch {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
@@ -853,7 +1003,8 @@ export const orchestrateHandler: ToolHandler = {
         if (batchCapped) {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
-          queueSlot.release()
+          jobLease?.release()
+          queueSlot?.release()
           ctx.agentCounter?.release(1)  // суб не стартовал — возвращаем слот
           emitSubagent('error', 'остановлен по cost-cap')
           finalizeSub('cancelled')
@@ -861,9 +1012,18 @@ export const orchestrateHandler: ToolHandler = {
         }
 
         try {
+          let taskRoot = ctx.projectPath
+          let taskTools = ctx.tools
+          if (isolateWriters && (durableJob?.writeScope.length ?? 0) > 0) {
+            worktree = addWorktree(ctx.projectPath, `orchestrate-${task.id}`)
+            if (!worktree) throw new Error('не удалось создать обязательный worktree для orchestrate writer')
+            durableJob = linkDurableJob(ctx, durableJob, { worktreePath: worktree })
+            taskRoot = worktree
+            taskTools = createToolsForProject(taskRoot, taskAc.signal)
+          }
           const provider = createProvider(
             baseProviderId,
-            buildSubCreateOptions(baseProviderId, apiKey, subModel, taskAc.signal, ctx)
+            buildSubCreateOptions(baseProviderId, apiKey, subModel, taskAc.signal, { ...ctx, projectPath: taskRoot })
           )
           // Идея 8: просим суб выдать СТРУКТУРИРОВАННЫЙ итог (handoff-формат), чтобы
           // главный агент получал сжатые выводы, а не простыни при 20+ субах.
@@ -871,10 +1031,11 @@ export const orchestrateHandler: ToolHandler = {
           const systemContent = `${rolePrompt}\n\nВ финале дай СТРУКТУРИРОВАННЫЙ итог тремя короткими блоками:\nСДЕЛАЛ: ...\nНАШЁЛ: ...\nРЕКОМЕНДУЮ: ...\nКлючевые находки сохраняй через memory_save (если доступен).`
           const allowedTools = getRoleToolset(task.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
-            ...ctx, signal: taskAc.signal,
+            ...ctx, projectPath: taskRoot, tools: taskTools, signal: taskAc.signal,
             subProviderId: baseProviderId, subModel,
             delegationDepth: depth + 1,
-            parentCallId: subCallId
+            parentCallId: subCallId,
+            parentJobId: durableJob?.id ?? ctx.parentJobId ?? null
           }
           const res = await runSubAgentLoop({
             provider, messages: [
@@ -895,15 +1056,27 @@ export const orchestrateHandler: ToolHandler = {
           if (!trimmed) { finalizeSub('error'); throw new Error('sub-agent вернул пустой ответ') }
           emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
           finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
-          return { id: task.id, role: task.role, model: subModel, result: trimmed }
+          let result = trimmed
+          if (worktree) {
+            const diff = worktreeDiff(worktree)
+            result = `${trimmed}\n\n--- ИЗМЕНЕНИЯ В ИЗОЛИРОВАННОМ WORKTREE ---\n${diff || '(изменений нет)'}`
+          }
+          finishDurableJob(ctx, durableJob, res.exitReason === 'aborted' ? 'cancelled' : 'succeeded', result)
+          return { id: task.id, role: task.role, model: subModel, result }
         } catch (taskErr) {
           emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'failed', taskErr instanceof Error ? taskErr.message : String(taskErr))
           throw taskErr
         } finally {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
+          jobLease?.release()
           queueSlot?.release()
+          const finalJob = durableJob && ctx.agentJobs ? ctx.agentJobs.get(durableJob.id) : null
+          if (worktree && finalJob?.status !== 'succeeded') {
+            try { removeWorktree(ctx.projectPath, worktree) } catch { /* cleanup best-effort */ }
+          }
         }
       }))
 
@@ -982,8 +1155,8 @@ export const swarmHandler: ToolHandler = {
       const strategy = call.args.strategy ? String(call.args.strategy).trim() : ''
       // T1.2: opt-in изоляция executor'ов в отдельных git-worktree, чтобы их
       // параллельные правки не клобберили друг друга на диске. По умолчанию OFF.
-      const isolate = call.args.isolate === true
       const roster = buildSwarmRoster(typeof call.args.size === 'number' ? call.args.size : 4)
+      const isolate = call.args.isolate === true || roster.filter(member => member.role === 'executor').length >= 2
       // Дедуп id членов роя — buildSwarmRoster даёт уникальные id по построению,
       // но subCallId = `${call.id}:${m.id}` требует гарантии (см. dedupeTaskIds).
       dedupeTaskIds(roster, 'member')
@@ -1032,14 +1205,26 @@ export const swarmHandler: ToolHandler = {
       const runMember = async (m: SwarmMember) => {
         const subCallId = `${call.id}:${m.id}`
         let toolCount = 0
+        let durableJob: AgentJobV1 | null = null
+        durableJob = startDurableJob(ctx, {
+          kind: 'swarm-member',
+          role: m.role,
+          goal,
+          providerId: baseProviderId,
+          model: descriptor.defaultModel,
+          callId: subCallId,
+          groupId: groupTag,
+          readScope: ['**'],
+          writeScope: m.role === 'executor' ? ['**'] : [],
+          costCapCents: batchCapCents,
+        })
         const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
           ctx.sender.send('ai:event', {
             id: ctx.sendId,
-            event: { type: 'subagent-run', callId: subCallId, label: `🐝 ${m.role}/${m.id}`, provider: baseProviderId, role: m.role, swarm: groupTag, toolCount, task: goal, status, result }
+            event: { type: 'subagent-run', callId: subCallId, jobId: durableJob?.id, label: `🐝 ${m.role}/${m.id}`, provider: baseProviderId, role: m.role, swarm: groupTag, toolCount, task: goal, status, result }
           })
         }
         emitSubagent('running')
-
         let subSessionId: number | null = null
         if (ctx.subSessions) {
           try {
@@ -1052,6 +1237,7 @@ export const swarmHandler: ToolHandler = {
             ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', goal)
           } catch { /* persist не критично */ }
         }
+        durableJob = linkDurableJob(ctx, durableJob, { subSessionId })
         const finalizeSub = (status: string, assistant?: string) => {
           if (subSessionId == null || !ctx.subSessions) return
           try {
@@ -1066,8 +1252,14 @@ export const swarmHandler: ToolHandler = {
         ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
 
         let queueSlot: { release: () => void; ticketId: number } | null = null
+        let jobLease: Awaited<ReturnType<typeof acquireDurableJob>> = null
         try {
-          queueSlot = await subAgentQueue.enter({ group: groupTag, role: m.role, abort: () => taskAc.abort() }, taskAc.signal)
+          jobLease = await acquireDurableJob(ctx, durableJob, taskAc.signal, () => taskAc.abort())
+          if (jobLease) durableJob = jobLease.job
+          else {
+            queueSlot = await subAgentQueue.enter({ group: groupTag, role: m.role, abort: () => taskAc.abort() }, taskAc.signal)
+            durableJob = markDurableJobRunning(ctx, durableJob)
+          }
         } catch {
           clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler)
           ctx.agentCounter?.release(1)  // член роя не стартовал — возвращаем слот
@@ -1075,7 +1267,7 @@ export const swarmHandler: ToolHandler = {
           throw new Error('отменён в очереди')
         }
         if (batchCapped) {
-          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); queueSlot.release()
+          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); jobLease?.release(); queueSlot?.release()
           ctx.agentCounter?.release(1)  // член роя не стартовал — возвращаем слот
           emitSubagent('error', 'остановлен по cost-cap'); finalizeSub('cancelled')
           throw new Error('остановлен по cost-cap')
@@ -1090,6 +1282,7 @@ export const swarmHandler: ToolHandler = {
           worktree = addWorktree(ctx.projectPath, m.id)
           if (worktree) {
             memberRoot = worktree
+            durableJob = linkDurableJob(ctx, durableJob, { worktreePath: worktree })
             // КЛЮЧЕВОЕ: пере-рутим FileTools на worktree — иначе write_file/apply_patch/
             // run_command субагента шли бы в ГЛАВНОЕ дерево и изоляция была бы инертна
             // (executor'ы клобберили бы один main-файл, а diff читался бы из пустого wt).
@@ -1109,7 +1302,8 @@ export const swarmHandler: ToolHandler = {
           const subCtx: ToolContext = {
             ...ctx, projectPath: memberRoot, tools: memberTools, signal: taskAc.signal,
             subProviderId: baseProviderId, subModel: descriptor.defaultModel,
-            delegationDepth: depth + 1, parentCallId: subCallId
+            delegationDepth: depth + 1, parentCallId: subCallId,
+            parentJobId: durableJob?.id ?? ctx.parentJobId ?? null
           }
           const res = await runSubAgentLoop({
             provider, messages: [
@@ -1136,15 +1330,20 @@ export const swarmHandler: ToolHandler = {
           }
           emitSubagent('done', result.length > 1200 ? result.slice(0, 1200) + '…' : result)
           finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', result)
+          finishDurableJob(ctx, durableJob, res.exitReason === 'aborted' ? 'cancelled' : 'succeeded', result)
           return { id: m.id, role: m.role, angle: m.angle, result }
         } catch (taskErr) {
           emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
           finalizeSub('error')
+          finishDurableJob(ctx, durableJob, 'failed', taskErr instanceof Error ? taskErr.message : String(taskErr))
           throw taskErr
         } finally {
-          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); queueSlot?.release()
-          // T1.2: cleanup worktree (diff уже снят в result). best-effort.
-          if (worktree) { try { removeWorktree(ctx.projectPath, worktree) } catch { /* best-effort */ } }
+          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); jobLease?.release(); queueSlot?.release()
+          // Успешный вариант сохраняется до явного выбора/отклонения пользователем.
+          const finalJob = durableJob && ctx.agentJobs ? ctx.agentJobs.get(durableJob.id) : null
+          if (worktree && finalJob?.status !== 'succeeded') {
+            try { removeWorktree(ctx.projectPath, worktree) } catch { /* best-effort */ }
+          }
         }
       }
 
@@ -1168,17 +1367,29 @@ export const swarmHandler: ToolHandler = {
       const variantsBlock = variants
         .map((v, i) => `### Вариант ${i + 1} — ${v.role}/${v.id} (угол: ${v.angle})\n${v.result}`)
         .join('\n\n')
+      const rubric = decideSwarmRubric(variants.map(variant => ({ id: variant.id, result: variant.result })))
+      const rubricBlock = JSON.stringify(rubric, null, 2)
       const arbiterSystem = isolate
         ? 'Ты — АРБИТР роя агентов. Каждый вариант содержит решение + git diff изменений в изолированном worktree. Оцени варианты, выбери ЛУЧШИЙ (или укажи какие части каких вариантов объединить). Верни: 1) ВЫБОР — какой вариант (по id) применить и какие именно файлы/правки взять из его diff; 2) ОБОСНОВАНИЕ (1-3 строки). Главный агент применит выбранные изменения в основном дереве сам — будь конкретен.'
         : 'Ты — АРБИТР роя агентов. Тебе дают несколько независимых вариантов решения ОДНОЙ цели. Твоя задача: оценить их, выбрать лучший ИЛИ синтезировать консенсус из сильных сторон нескольких. Верни: 1) КОНСЕНСУС — итоговое лучшее решение цели (готовое к использованию); 2) ОБОСНОВАНИЕ — на каких вариантах оно основано и почему (1-3 строки). Будь решительным: один чёткий результат, а не пересказ всех.'
-      const arbiterUser = `Цель: ${goal}\n\nВарианты роя (${variants.length}):\n\n${variantsBlock}\n\nВыбери/синтезируй лучший консенсусный результат.`
+      const arbiterUser = `Цель: ${goal}\n\nВарианты роя (${variants.length}):\n\n${variantsBlock}\n\nSTRUCTURED RUBRIC:\n${rubricBlock}\n\nВыбери/синтезируй лучший консенсусный результат. Не скрывай objections и uncertainty.`
 
       let consensus = ''
       let arbiterOk = false
       const arbiterCallId = `${call.id}:arbiter`
+      let arbiterJob = startDurableJob(ctx, {
+        kind: 'swarm-arbiter',
+        role: 'critic',
+        goal: `Арбитраж ${variants.length} вариантов: ${goal}`,
+        providerId: baseProviderId,
+        model: descriptor.defaultModel,
+        callId: arbiterCallId,
+        groupId: groupTag,
+        readScope: ['**'],
+      })
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
-        event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: `консенсус из ${variants.length} вариантов`, status: 'running' }
+        event: { type: 'subagent-run', callId: arbiterCallId, jobId: arbiterJob?.id, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: `консенсус из ${variants.length} вариантов`, status: 'running' }
       })
       let arbiterSessionId: number | null = null
       if (ctx.subSessions) {
@@ -1192,6 +1403,7 @@ export const swarmHandler: ToolHandler = {
           ctx.subSessions.appendMessage(arbiterSessionId, ctx.projectPath, 'user', arbiterUser)
         } catch { /* persist не критично */ }
       }
+      arbiterJob = linkDurableJob(ctx, arbiterJob, { subSessionId: arbiterSessionId })
       // Per-task таймаут арбитра — тот же паттерн, что у членов роя (runMember).
       // Без него зависший арбитрский провайдер вешал swarm до ручной отмены
       // всего ai:send: signal === ctx.signal не обрывается по таймауту.
@@ -1199,7 +1411,15 @@ export const swarmHandler: ToolHandler = {
       const arbTimeoutId = setTimeout(() => arbAc.abort(), SUB_TASK_TIMEOUT_MS)
       const arbAbortHandler = () => arbAc.abort()
       ctx.signal.addEventListener('abort', arbAbortHandler, { once: true })
+      let arbiterLease: Awaited<ReturnType<typeof acquireDurableJob>> = null
+      let arbiterQueueSlot: { release: () => void; ticketId: number } | null = null
       try {
+        arbiterLease = await acquireDurableJob(ctx, arbiterJob, arbAc.signal, () => arbAc.abort())
+        if (arbiterLease) arbiterJob = arbiterLease.job
+        else {
+          arbiterQueueSlot = await subAgentQueue.enter({ group: groupTag, role: 'critic', abort: () => arbAc.abort() }, arbAc.signal)
+          arbiterJob = markDurableJobRunning(ctx, arbiterJob)
+        }
         const arbiterProvider = createProvider(
           baseProviderId,
           buildSubCreateOptions(baseProviderId, apiKey, descriptor.defaultModel, arbAc.signal, ctx)
@@ -1209,11 +1429,12 @@ export const swarmHandler: ToolHandler = {
           provider: arbiterProvider,
           messages: [{ role: 'system', content: arbiterSystem }, { role: 'user', content: arbiterUser }],
           allowedToolNames: getRoleToolset('critic', { depth: depth + 1 }),
-          ctx: { ...ctx, subProviderId: baseProviderId, subModel: descriptor.defaultModel, delegationDepth: depth + 1, parentCallId: arbiterCallId },
+          ctx: { ...ctx, subProviderId: baseProviderId, subModel: descriptor.defaultModel, delegationDepth: depth + 1, parentCallId: arbiterCallId, parentJobId: arbiterJob?.id ?? ctx.parentJobId ?? null },
           signal: arbAc.signal, role: 'critic'
         })
         consensus = res.text.trim()
         arbiterOk = res.exitReason !== 'error' && consensus.length > 0
+        finishDurableJob(ctx, arbiterJob, arbiterOk ? 'succeeded' : 'failed', consensus || res.error || 'arbiter returned an empty response')
         ctx.sender.send('ai:event', {
           id: ctx.sendId,
           event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: `консенсус из ${variants.length} вариантов`, status: arbiterOk ? 'done' : 'error', result: consensus.slice(0, 1200) } })
@@ -1224,6 +1445,7 @@ export const swarmHandler: ToolHandler = {
           } catch { /* persist не критично */ }
         }
       } catch (arbErr) {
+        finishDurableJob(ctx, arbiterJob, 'failed', arbErr instanceof Error ? arbErr.message : String(arbErr))
         ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: 'консенсус', status: 'error', result: arbErr instanceof Error ? arbErr.message : String(arbErr) } })
         if (arbiterSessionId != null && ctx.subSessions) {
           try { ctx.subSessions.update(arbiterSessionId, { status: 'error', endedAt: Date.now() }) } catch { /* */ }
@@ -1231,6 +1453,8 @@ export const swarmHandler: ToolHandler = {
       } finally {
         clearTimeout(arbTimeoutId)
         ctx.signal.removeEventListener('abort', arbAbortHandler)
+        arbiterLease?.release()
+        arbiterQueueSlot?.release()
       }
 
       try {
@@ -1241,7 +1465,10 @@ export const swarmHandler: ToolHandler = {
 
       const capNote = batchCapped ? `\n\n⚠️ Рой остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)}.` : ''
       if (arbiterOk) {
-        return { id: call.id, name: call.name, result: `🐝 Рой из ${variants.length} агентов → консенсус арбитра:\n\n${consensus}${capNote}` }
+        const decisionNote = rubric.needsUserDecision
+          ? `\n\n⚠️ НУЖНО РЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ: ${rubric.reason}\n${rubricBlock}`
+          : `\n\n✅ Rubric рекомендует вариант ${rubric.recommendedId}.\n${rubricBlock}`
+        return { id: call.id, name: call.name, result: `🐝 Рой из ${variants.length} агентов → консенсус арбитра:\n\n${consensus}${decisionNote}${capNote}` }
       }
       // Фоллбэк: арбитр не справился — отдаём главному все варианты, пусть решит сам.
       return { id: call.id, name: call.name, result: `🐝 Рой дал ${variants.length} вариантов (арбитр не синтезировал консенсус — выбери лучший сам):\n\n${variantsBlock}${capNote}` }
