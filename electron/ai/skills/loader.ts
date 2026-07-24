@@ -206,6 +206,7 @@ export function parseSkillFile(
   source: Skill['source'],
   folderId?: string
 ): Skill | null {
+  if (typeof raw !== 'string') return null
   const normalizedRaw = raw.replace(/^\uFEFF/, '')
   const fileId = basename(sourceRef.includes('#') ? sourceRef.slice(sourceRef.lastIndexOf('#') + 1) : sourceRef, extname(sourceRef))
     .replace(/[^a-z0-9_-]+/gi, '-')
