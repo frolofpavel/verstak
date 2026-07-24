@@ -92,6 +92,21 @@ if (check('узнали последний опубликованный рели
 const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8')
 check('CHANGELOG описывает эту версию', changelog.includes(`## ${version}`), `## ${version}`)
 
+// package-lock обязан идти синком с package.json: реальный инцидент — lock остался на 2.0.8
+// при package.json 2.0.11 (npm version бампит оба, но ручной bump package.json — нет).
+// Рассинхрон = в релиз уезжает дерево зависимостей, собранное под другую версию.
+const lockPath = join(ROOT, 'package-lock.json')
+if (check('package-lock.json существует', existsSync(lockPath))) {
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+  const lockVersion = lock.version
+  const lockRootVersion = lock.packages?.['']?.version
+  check(
+    'package-lock синком с package.json (version + packages[""])',
+    lockVersion === version && lockRootVersion === version,
+    `lock: ${lockVersion}/${lockRootVersion} vs package.json: ${version}`,
+  )
+}
+
 // ─── 3. Артефакты и целостность latest.yml ───────────────────────────────────
 console.log('\n[3] Артефакты')
 const setup = join(ROOT, 'release', `Verstak-Setup-${version}-x64.exe`)
