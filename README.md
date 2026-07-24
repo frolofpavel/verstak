@@ -114,10 +114,13 @@ Each is hand-written over the official API (no scraping), read-only by default. 
 ```bash
 git clone https://github.com/frolofpavel/verstak.git
 cd verstak
-npm install --legacy-peer-deps
+npm install
 npm run electron-rebuild
 npm run dev
 ```
+
+`legacy-peer-deps` уже зафиксирован в `.npmrc` (vite 8 поверх electron-vite 5) — флаг вручную не нужен.
+Если npm 11+ предупреждает про `allow-scripts` и блокирует postinstall (electron, esbuild, sharp, onnxruntime-node) — одобрить один раз: `npm approve-scripts --allow-scripts-pending`, затем повторить `npm install`.
 
 Then open Settings (⚙), pick a provider, paste your API key — or select a CLI provider if the binary is on your PATH and already logged in.
 
