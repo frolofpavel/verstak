@@ -106,7 +106,13 @@ export function registerExactRewindIpc(deps: ExactRewindIpcDeps): void {
     if (!enabled()) return { disabled: true }
     const root = deps.getProjectRoot()
     if (!root) return { ok: false, error: 'нет проекта' }
-    await unrevert(backups, fsFor(root))
-    return { ok: true }
+    // unrevert best-effort: что смог — вернул; сбойные файлы приходят текстом ошибки,
+    // а не непойманным исключением в renderer (Windows-smoke: readonly-файл).
+    try {
+      await unrevert(backups, fsFor(root))
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 }

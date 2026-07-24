@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
+import { runExactRewindFlow } from '../lib/exact-rewind-flow'
 import { MULTI_AGENT_LIST } from '../lib/multi-agent-templates'
 import { ContextMeter } from './ContextMeter'
 import { useProvider } from '../hooks/useProvider'
@@ -196,9 +197,58 @@ export function ComposerToolsMenu({
     setOpen(false)
   }
 
-  // Откат файлов (per-file undo до чекпоинта). Возвращает успех.
-  async function revertFilesOnly(): Promise<boolean> {
-    if (!path || checkpointId === null) return false
+  // Откат файлов до чекпоинта. Возвращает 'ok' | 'failed' | 'cancelled'.
+  // Exact Rewind (флаг exact_rewind_enabled): превью покрытия → точный откат с бэкапами →
+  // unrevert при частичном сбое. Флаг выключен (disabled) → обычный per-file undo.
+  // fallbackConfirm — текст подтверждения обычного пути (точный сам показывает превью).
+  async function revertFilesOnly(fallbackConfirm: string): Promise<'ok' | 'failed' | 'cancelled'> {
+    if (!path || checkpointId === null) return 'failed'
+
+    const flow = await runExactRewindFlow(checkpointId, {
+      preflight: window.api.exactRewind.preflight,
+      execute: window.api.exactRewind.execute,
+      unrevert: window.api.exactRewind.unrevert,
+      confirm: message => window.confirm(message),
+    })
+    if (flow.kind !== 'disabled') {
+      // Дерево обновляем только когда файлы реально менялись (откат или возврат из бэкапов).
+      if (flow.kind === 'done' || flow.kind === 'done-with-failures' || flow.kind === 'reverted-back') {
+        const tree = await window.api.files.tree(path)
+        useProject.setState({ tree })
+      }
+      if (flow.kind === 'done' || flow.kind === 'done-with-failures') {
+        pushActivity({
+          id: `revert-exact-${Date.now()}`, kind: 'write',
+          label: `↶ Точный откат: ${flow.restored} файлов`,
+          detail: flow.kind === 'done-with-failures'
+            ? `не удалось: ${flow.failed} — частичный результат оставлен по твоему выбору`
+            : 'покрытие показано в превью до отката',
+          status: 'ok', timestamp: Date.now(),
+        })
+        return 'ok'
+      }
+      if (flow.kind === 'reverted-back') {
+        pushActivity({
+          id: `revert-exact-back-${Date.now()}`, kind: 'write',
+          label: '↶ Точный откат отменён',
+          detail: `не удалось ${flow.failed} файлов — всё возвращено как было до отката`,
+          status: 'error', timestamp: Date.now(),
+        })
+        return 'failed'
+      }
+      if (flow.kind === 'error') {
+        pushActivity({
+          id: `revert-exact-err-${Date.now()}`, kind: 'write',
+          label: '↶ Точный откат не удался',
+          detail: flow.message, status: 'error', timestamp: Date.now(),
+        })
+        return 'failed'
+      }
+      // nothing — откатывать нечего (чекпоинт «пустой», как ok); cancelled — пользователь отказался.
+      return flow.kind === 'nothing' ? 'ok' : 'cancelled'
+    }
+
+    if (!window.confirm(fallbackConfirm)) return 'cancelled'
     const result = await window.api.undo.revertToCheckpoint(path, checkpointId)
     if (result.ok) {
       const tree = await window.api.files.tree(path)
@@ -208,9 +258,9 @@ export function ComposerToolsMenu({
         detail: result.restored.slice(0, 4).join(', ') + (result.restored.length > 4 ? ` …+${result.restored.length - 4}` : ''),
         status: 'ok', timestamp: Date.now(),
       })
-      return true
+      return 'ok'
     }
-    return false
+    return 'failed'
   }
 
   // Откат задачи: truncate диалога к чекпоинту (файлы не трогаем).
@@ -245,8 +295,7 @@ export function ComposerToolsMenu({
   // undo-floor) — гейтим (ревью кросс-фич: HIGH порча истории чата мид-стрим).
   async function revertFiles() {
     if (isStreaming) return
-    if (!window.confirm('Откатить ВСЕ файловые правки после чекпоинта? Файлы вернутся к состоянию на момент чекпоинта.')) return
-    if (await revertFilesOnly()) setCheckpoint(null)
+    if (await revertFilesOnly('Откатить ВСЕ файловые правки после чекпоинта? Файлы вернутся к состоянию на момент чекпоинта.') === 'ok') setCheckpoint(null)
     setOpen(false)
   }
   async function revertTask() {
@@ -256,8 +305,10 @@ export function ComposerToolsMenu({
   }
   async function revertBoth() {
     if (isStreaming) return
-    if (!window.confirm('Откатить и ФАЙЛЫ, и ДИАЛОГ к чекпоинту? Действие не отменить.')) return
-    await revertFilesOnly(); await revertTaskOnly(); setCheckpoint(null); setOpen(false)
+    // Отказ на подтверждении файлов (или превью Exact Rewind) = отмена всего сценария.
+    // Исполненный (даже неудачный) файловый шаг не блокирует откат диалога — как раньше.
+    if (await revertFilesOnly('Откатить и ФАЙЛЫ, и ДИАЛОГ к чекпоинту? Действие не отменить.') === 'cancelled') { setOpen(false); return }
+    await revertTaskOnly(); setCheckpoint(null); setOpen(false)
   }
 
   async function runReview(providerId: string) {

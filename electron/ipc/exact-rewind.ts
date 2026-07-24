@@ -150,12 +150,22 @@ export async function executeRewind(items: RewindPlanItem[], fs: RewindFsDeps): 
   return { restored, failed, backups }
 }
 
-/** Отменить откат: вернуть файлы к состоянию из бэкапов (null → файла не было → удалить). */
+/** Отменить откат: вернуть файлы к состоянию из бэкапов (null → файла не было → удалить).
+ *  Сбой одного файла НЕ роняет остальные (Windows-smoke 25.07: readonly-файл EPERM'ом
+ *  убивал unrevert на первой же записи — остальные оставались в откаченном состоянии).
+ *  Возвращаем всё, что можем; если что-то не вернулось — кидаем ОДНУ ошибку со списком
+ *  ПОСЛЕ прохода по всем файлам. */
 export async function unrevert(backups: RewindBackups, fs: RewindFsDeps): Promise<void> {
+  const failed: string[] = []
   for (const [filePath, content] of Object.entries(backups)) {
-    if (content === null) await fs.deleteFile(filePath)
-    else await fs.writeFile(filePath, content)
+    try {
+      if (content === null) await fs.deleteFile(filePath)
+      else await fs.writeFile(filePath, content)
+    } catch {
+      failed.push(filePath)
+    }
   }
+  if (failed.length > 0) throw new Error(`unrevert: не удалось вернуть ${failed.length} файл(ов): ${failed.join(', ')}`)
 }
 
 /** assessRewind поверх реальных записей + инъекция хешей. */
