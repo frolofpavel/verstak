@@ -37,7 +37,8 @@ import type { AppliedSkillRef, Attachment, ChatEvent, ChatMessage, Reminder, Ski
 import { useT } from '../i18n'
 import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
-import { HELP_AGENT_MODE, HELP_CHAT_SEND_OVERRIDES, HELP_PROJECT_PATH } from '../lib/help-scope'
+import { HELP_AGENT_MODE, HELP_PROJECT_PATH } from '../lib/help-scope'
+import { sendHelpMessage } from './chat/send-help-message'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
 import { formatDuration } from '../lib/format-duration'
 import { routeChangedActivity } from '../lib/route-activity'
@@ -2806,83 +2807,30 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       : []
 
     if (store.helpMode) {
-      const helpChatId = store.helpChatId
-      if (helpChatId == null) return
-      if (!opts?.fromQueue && store.hasActiveChatLane(helpChatId, true)) {
-        queueFollowUp(text)
-        return
-      }
-      const userAttachments = attachments
-      store.clearHelpActivity()
-      store.setHelpAgentProgress(buildInitialAgentProgress(displayText || text || 'Новый запрос', provider.label))
-      setExhausted(null)
-      setCrossVerify(null)
-      if (!opts?.text) {
-        resetComposerAfterSend()
-      }
-      const summary = userAttachments.length > 0
-        ? `${text}${text ? '\n\n' : ''}📎 ${userAttachments.map(a => a.name).join(', ')}`
-        : text
-      let enrichedText = text
-      const activeSkillForLoad = useSkillsStore.getState().activeSkillId
-        ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
-        : null
-      if (activeSkillForLoad?.context_loaders?.length) {
-        try {
-          const loaded = await window.api.skills.runLoaders(activeSkillForLoad.id, {
-            trigger: !store.help.messages.some(m => m.role === 'user') ? 'chat_open' : 'slash_arg',
-            projectPath: null,
-          arg: modelText.split(/\s+/)[0]
-          })
-          if (loaded.context) enrichedText = `${loaded.context}\n\n---\n\n${text}`
-        } catch (err) {
-          console.warn('[help] skill loaders failed:', err)
+      // Режим справки: вся оркестрация вынесена в chat/send-help-message.ts
+      // (фаза 5, срез 1). Харнес: tests/components/send-help-message.test.ts.
+      await sendHelpMessage(
+        { text, modelText, displayText, attachments, providerLabel: provider.label, opts },
+        {
+          getProjectState: () => useProject.getState(),
+          getSkillsState: () => useSkillsStore.getState(),
+          api: {
+            chatsAppend: (chatId, projectPath, role, content) => window.api.chats.append(chatId, projectPath, role, content),
+            chatsUpdateMessage: (messageId, content) => window.api.chats.updateMessage(messageId, content),
+            runLoaders: (skillId, o) => window.api.skills.runLoaders(skillId, o),
+            getSetting: (key) => window.api.settings.getKey(key),
+            sendWithOverrides: (messages, projectPath, overrides, chatId) => window.api.ai.sendWithOverrides(messages, projectPath, overrides, chatId),
+          },
+          queueFollowUp,
+          resetComposerAfterSend,
+          armAutoScrollForOutgoing,
+          registerChatSendOwner,
+          registerPersistedAssistant,
+          setCurrentSendId: (id) => { currentSendIdRef.current = id },
+          setExhausted,
+          setCrossVerify,
         }
-      }
-      armAutoScrollForOutgoing()
-      addHelpMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
-      await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'user', summary)
-      const assistantRow = await window.api.chats.append(helpChatId, HELP_PROJECT_PATH, 'assistant', '')
-      addHelpMessage({ role: 'assistant', content: '', dbId: assistantRow.id })
-      setHelpStreaming(true)
-      setHelpAgentProgress(activateModelProgress(useProject.getState().help.agentProgress, provider.label))
-      const allMessages = [...useProject.getState().help.messages].slice(0, -1)
-      const activeSkill = useSkillsStore.getState().activeSkillId
-        ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
-        : null
-      let sendId: number
-      const antiStallNudge = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
-      const helpOverrides: Parameters<typeof window.api.ai.sendWithOverrides>[2] = {
-        ...HELP_CHAT_SEND_OVERRIDES,
-      }
-      if (activeSkill) {
-        const currentProvider = await window.api.settings.getKey('provider')
-        const { providerId: overrideProvider, model: overrideModel } = resolveSkillOverride(activeSkill, currentProvider)
-        Object.assign(helpOverrides, {
-          systemPrompt: activeSkill.systemPrompt + antiStallNudge,
-          ...(overrideProvider ? { providerId: overrideProvider } : {}),
-          ...(overrideModel ? { model: overrideModel } : {}),
-          ...(activeSkill.tools_allow?.length ? { toolsAllow: activeSkill.tools_allow } : {}),
-          ...(activeSkill.recipe ? { recipe: activeSkill.recipe } : {}),
-          effortLevel: store.effortLevel,
-        })
-      } else if (store.effortLevel !== 'standard') {
-        helpOverrides.effortLevel = store.effortLevel
-      }
-      sendId = await window.api.ai.sendWithOverrides(allMessages, null, helpOverrides, String(helpChatId))
-      currentSendIdRef.current = sendId
-      if (sendId <= 0) {
-        const errorText = '\n\n[Ошибка: провайдер недоступен]'
-        updateHelpLastAssistant(errorText)
-        void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
-        useProject.getState().applyEventToHelp({ type: 'error', message: 'Провайдер недоступен' })
-        setHelpStreaming(false)
-        currentSendIdRef.current = null
-        return
-      }
-      useProject.getState().setHelpAgentProgress(activateModelProgress(useProject.getState().help.agentProgress ?? [], provider.label))
-      registerChatSendOwner(sendId, helpChatId, true, null)
-      if (sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
+      )
       return
     }
 
