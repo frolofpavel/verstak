@@ -285,7 +285,7 @@ export function createYandexGptProvider(opts: YandexGptOptions): ChatProvider {
         // через write_file, два чтения) — ключ по name+args сохраняет их, но всё
         // ещё гасит точные дубли из накопленного NDJSON-стрима.
         for (const tc of pendingToolCalls) {
-          const dedupKey = `${tc.name} ${JSON.stringify(tc.args)}`
+          const dedupKey = `${tc.name}\u001F${JSON.stringify(tc.args)}`
           if (!toolCallsSeen.has(dedupKey)) {
             toolCallsSeen.add(dedupKey)
             yield {
