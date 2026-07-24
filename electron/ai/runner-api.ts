@@ -157,6 +157,8 @@ export interface AgentRunContext {
   recordWrite: (projectPath: string, filePath: string, before: string | null, after: string) => void
   recordPlan: ToolContext['recordPlan']
   getPlan?: ToolContext['getPlan']
+  plans?: ToolContext['plans']
+  planOutcomes?: ToolContext['planOutcomes']
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   saveMemory: AiDeps['saveMemory']
@@ -214,7 +216,7 @@ export interface AgentRunContext {
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, getPlan, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
+    recordWrite, recordPlan, getPlan, plans, planOutcomes, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
@@ -351,6 +353,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   }
   let outcomeContractSubmitted = false
   let outcomeRefineNudges = 0
+  let stepOutcomeReported = false
+  let stepOutcomeNudges = 0
+  const executedChecks = new Map<string, number>()
   const enforceOutcomeRefine = (): 'pass' | 'retry' | 'stop' => {
     if (outcome?.phase !== 'refine' || outcomeContractSubmitted) return 'pass'
     if (outcomeRefineNudges < 1) {
@@ -366,6 +371,26 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       return 'retry'
     }
     return 'stop'
+  }
+  const enforceStepOutcome = (): 'pass' | 'retry' | 'stop' => {
+    if (outcome?.phase !== 'execute-step' || stepOutcomeReported) return 'pass'
+    if (stepOutcomeNudges < 1) {
+      stepOutcomeNudges++
+      currentMessages.push({
+        role: 'user',
+        content: 'Execute-step не завершён: вызови report_step_outcome. Укажи фактические writes, проверки, evidence и честный status. Финальный текст без outcome запрещён.',
+      })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'tool-blocked', callId: 'step-outcome-nudge', name: 'report_step_outcome', reason: 'Step Outcome обязателен перед завершением execute-step.' },
+      })
+      return 'retry'
+    }
+    return 'stop'
+  }
+  const enforceOutcomeFinal = (): 'pass' | 'retry' | 'stop' => {
+    const refine = enforceOutcomeRefine()
+    return refine === 'pass' ? enforceStepOutcome() : refine
   }
   // Loop detection: per-signature occurrence counter across the whole agent
   // loop. We block when a single tool+args combination has been called 3 times
@@ -901,11 +926,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             continue turnLoop
           }
           if (drainProcessCompletionsForRun()) { assistantText = ''; continue turnLoop }
-          const outcomeGate = enforceOutcomeRefine()
+          const outcomeGate = enforceOutcomeFinal()
           if (outcomeGate === 'retry') { assistantText = ''; continue turnLoop }
           if (outcomeGate === 'stop') {
             exitReason = 'error'
-            sender.send('ai:event', { id: sendId, event: { type: 'error', message: 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
+            sender.send('ai:event', { id: sendId, event: { type: 'error', message: outcome?.phase === 'execute-step' ? 'OUTCOME_STEP_BLOCKED: модель не создала Step Outcome после корректирующей попытки.' : 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
             sender.send('ai:event', { id: sendId, event: { type: 'done' } })
             return
           }
@@ -994,11 +1019,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         assistantText = ''
         continue
       }
-      const outcomeGate = enforceOutcomeRefine()
+      const outcomeGate = enforceOutcomeFinal()
       if (outcomeGate === 'retry') { assistantText = ''; continue }
       if (outcomeGate === 'stop') {
         exitReason = 'error'
-        sender.send('ai:event', { id: sendId, event: { type: 'error', message: 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
+        sender.send('ai:event', { id: sendId, event: { type: 'error', message: outcome?.phase === 'execute-step' ? 'OUTCOME_STEP_BLOCKED: модель не создала Step Outcome после корректирующей попытки.' : 'OUTCOME_REFINE_BLOCKED: модель не создала Task Contract после корректирующей попытки.' } })
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
@@ -1131,8 +1156,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-      recordWrite, recordPlan, getPlan, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
-      outcome, pipelineRuns,
+        recordWrite, recordPlan, getPlan, plans, planOutcomes, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+        outcome, pipelineRuns,
+        runChecks: () => Array.from(executedChecks, ([command, exitCode]) => ({ command, exitCode })),
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
@@ -1294,7 +1320,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         attestedThisRun = true  // DoD-принуждение (аудит P1 #8)
       } else if (call.name === 'submit_task_contract' && !result.error) {
         outcomeContractSubmitted = true
-      }
+        } else if (call.name === 'report_step_outcome' && !result.error) {
+          stepOutcomeReported = true
+        }
+        if ((call.name === 'run_command' || call.name === 'run_until_green') && !result.error) {
+          const exitCode = (result.result as { exitCode?: unknown } | null)?.exitCode
+          const command = typeof call.args.command === 'string' ? call.args.command.trim() : ''
+          if (command && typeof exitCode === 'number') executedChecks.set(command, exitCode)
+        }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(
         saveMemory,

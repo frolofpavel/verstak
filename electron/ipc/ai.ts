@@ -77,8 +77,11 @@ export function toolsForOutcomePhase(
   phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan',
 ): string[] | undefined {
   if (phase === 'refine') return [...OUTCOME_READ_TOOLS, 'submit_task_contract']
-  if (phase === 'plan' || phase === 'replan') {
+  if (phase === 'plan') {
     return [...OUTCOME_READ_TOOLS, 'delegate_task', 'delegate_parallel', 'create_plan']
+  }
+  if (phase === 'replan') {
+    return [...OUTCOME_READ_TOOLS, 'delegate_task', 'delegate_parallel', 'replan_plan']
   }
   if (phase === 'verify') return [...OUTCOME_READ_TOOLS, 'run_command', 'attest_verification']
   return undefined
@@ -130,6 +133,8 @@ export interface AiDeps {
   /** Persist a plan emitted by the AI. */
   recordPlan: ToolContext['recordPlan']
   getPlan?: ToolContext['getPlan']
+  plans?: ToolContext['plans']
+  planOutcomes?: ToolContext['planOutcomes']
   /** 2.1.0: durable Task Contract facade shared by IPC and tool handlers. */
   pipelineRuns?: ToolContext['pipelineRuns']
   /** Auto-append a brief entry to the dev journal (file write, command, plan, session summary). */
@@ -506,7 +511,12 @@ export function registerAiIpc(deps: AiDeps): void {
      *  отключает smart-fallback (не переезжать молча на другого провайдера). */
     promptRoute?: PromptRouteOverride
     /** Server validates this against durable pipeline state before exposing it to tools. */
-    outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' }
+    outcome?: {
+      pipelineId: number
+      phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'
+      planStepId?: number
+      attempt?: number
+    }
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -516,12 +526,35 @@ export function registerAiIpc(deps: AiDeps): void {
     if (projectPath && !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
     }
-    const outcome = overrides?.outcome
+    let outcome = overrides?.outcome
+    let outcomeStepInstruction: string | null = null
     if (outcome) {
       const pipeline = deps.pipelineRuns?.get(outcome.pipelineId)
       const phases = new Set(['refine', 'plan', 'execute-step', 'verify', 'replan'])
       if (!Number.isInteger(outcome.pipelineId) || !phases.has(outcome.phase) || !pipeline || !projectPath || pipeline.projectPath !== projectPath) {
         throw new Error('OUTCOME_CONTEXT_INVALID: pipeline/phase не подтверждены main process')
+      }
+      if (outcome.phase === 'execute-step') {
+        const plan = pipeline.planId ? deps.plans?.get(pipeline.planId) : null
+        const requestedStepId = outcome.planStepId
+        const step = requestedStepId
+          ? plan?.steps.find(item => item.id === requestedStepId)
+          : plan?.steps.find(item => item.status !== 'done')
+        if (step && !outcome.planStepId) {
+          const attempts = deps.planOutcomes?.list(plan?.id ?? 0)
+            .filter(item => item.stepId === step.id).length ?? 0
+          outcome = { ...outcome, planStepId: step.id, attempt: attempts + 1 }
+        }
+        if (!step || step.planId !== pipeline.planId || step.status === 'done') {
+          throw new Error('OUTCOME_STEP_CONTEXT_INVALID: step не принадлежит активному плану или уже завершён')
+        }
+        outcomeStepInstruction = [
+          'SERVER OUTCOME STEP: execute exactly this one plan step, not the whole plan.',
+          `Step id=${step.id}: ${step.title}`,
+          step.detail ? `Detail: ${step.detail}` : '',
+          step.spec ? `Structured spec: ${JSON.stringify(step.spec)}` : '',
+          'Before the final answer call report_step_outcome with actual changed files, mandatory checks and evidence.',
+        ].filter(Boolean).join('\n')
       }
     }
     // #5 worktree-lifecycle: изолированный чат работает ЦЕЛИКОМ на своём worktree —
@@ -543,6 +576,7 @@ export function registerAiIpc(deps: AiDeps): void {
     // чекпойнта, которая уже полная).
     const contextSnapshot = chatIdNum ? (deps.getContextSnapshot?.(chatIdNum) ?? null) : null
     const messages = prepareHistoryForModel(await expandOfficeAttachments(incomingMessages), contextSnapshot)
+    if (outcomeStepInstruction) messages.push({ role: 'user', content: outcomeStepInstruction })
     // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
     // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
     // (она уже содержит system + все turn'ы), минуя пере-сборку system ниже.
@@ -1453,6 +1487,7 @@ export function registerAiIpc(deps: AiDeps): void {
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
         recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, getPlan: deps.getPlan,
+        plans: deps.plans, planOutcomes: deps.planOutcomes,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,

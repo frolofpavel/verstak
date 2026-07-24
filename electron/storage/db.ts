@@ -1264,6 +1264,39 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         if (!cols.includes('spec_json')) db.exec('ALTER TABLE plan_steps ADD COLUMN spec_json TEXT')
       }
     }
+  },
+  {
+    version: 56,
+    description: '2.1.1 Adaptive Executor: append-only step outcomes and plan revision snapshots',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plan_step_outcomes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plan_id INTEGER NOT NULL,
+          step_id INTEGER NOT NULL,
+          plan_revision INTEGER NOT NULL,
+          run_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          outcome_json TEXT NOT NULL,
+          failure_signature TEXT,
+          decision_json TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE(step_id, run_id, attempt)
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_step_outcomes_plan
+          ON plan_step_outcomes(plan_id, plan_revision, step_id, created_at);
+        CREATE TABLE IF NOT EXISTS plan_revisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plan_id INTEGER NOT NULL,
+          revision INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(plan_id, revision)
+        );
+      `)
+    }
   }
 ]
 

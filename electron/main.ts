@@ -77,6 +77,7 @@ import { createUndoStack } from './storage/undo'
 import { registerUndoIpc } from './ipc/undo'
 import { registerExactRewindIpc } from './ipc/exact-rewind-ipc'
 import { createPlans } from './storage/plans'
+import { createPlanOutcomes } from './storage/plan-outcomes'
 import { registerPlansIpc } from './ipc/plans'
 import { registerWorkflowsIpc } from './ipc/workflows'
 import { createFeedback } from './storage/feedback'
@@ -475,10 +476,12 @@ app.whenReady().then(() => {
   // (ветки/commit) придёт в Фазах 3-5.
   const devTasks = createDevTasks(db)
   logRuntime('startup.dev_tasks.ready')
+  const plans = createPlans(db)
+  const planOutcomes = createPlanOutcomes(db)
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
   const pipelineRuns = createPipelineRuns(db)
-  registerPipelineIpc({ pipeline: pipelineRuns, getProjectRoot: getActiveProjectPath })
+  registerPipelineIpc({ pipeline: pipelineRuns, planOutcomes, plans, getProjectRoot: getActiveProjectPath })
   const brainStore = createProjectBrainStore(db)
   registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
@@ -514,7 +517,6 @@ app.whenReady().then(() => {
   const projects = createProjects(db)
   const projectGroups = createProjectGroups(db)
   const undoStack = createUndoStack(db)
-  const plans = createPlans(db)
   const feedback = createFeedback(db)
   const runUsage = createRunUsage(db) // 2.0.8-F: read-поверхность persistence usage
   const connectorRegistry = createConnectorRegistry()
@@ -637,6 +639,8 @@ app.whenReady().then(() => {
       return { id: plan.id }
     },
     getPlan: (id) => plans.get(id),
+    plans,
+    planOutcomes,
     pipelineRuns,
     recordJournal: (projectPath, kind, title, detail) => {
       journal.append(projectPath, kind, title, detail ?? null)

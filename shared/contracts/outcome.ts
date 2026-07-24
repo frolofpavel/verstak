@@ -65,6 +65,34 @@ export interface PlanQualityV1 {
   checkedAt: number
 }
 
+export type StepOutcomeStatus = 'succeeded' | 'failed' | 'blocked' | 'diverged'
+export type StepCheckStatus = 'passed' | 'failed' | 'not_run'
+export type StepRecommendedAction = 'continue' | 'retry' | 'replan' | 'ask-user' | 'rollback'
+
+export interface StepOutcomeV1 {
+  status: StepOutcomeStatus
+  summary: string
+  observations: string[]
+  changedFiles: string[]
+  checks: Array<{
+    command: string | null
+    status: StepCheckStatus
+    exitCode?: number
+  }>
+  evidence: string[]
+  assumptionFailures: string[]
+  recommendedAction: StepRecommendedAction
+}
+
+export type AdaptiveAction = 'continue' | 'retry' | 'replan' | 'ask-user' | 'block'
+
+export interface AdaptiveDecisionV1 {
+  action: AdaptiveAction
+  reason: string
+  failureSignature: string | null
+  requiresApproval: boolean
+}
+
 export type OutcomeContractErrorCode =
   | 'invalid-json'
   | 'invalid-shape'
@@ -255,5 +283,48 @@ export function parsePlanQualityJson(json: string | null | undefined): PlanQuali
     }
   } catch {
     return null
+  }
+}
+
+export function parseStepOutcome(input: unknown): ParseOutcome<StepOutcomeV1> {
+  if (!isRecord(input)) {
+    return { value: null, diagnostics: [{ code: 'invalid-shape', path: '$', message: 'Step Outcome должен быть объектом' }] }
+  }
+  const diagnostics: OutcomeDiagnostic[] = []
+  const checks: StepOutcomeV1['checks'] = []
+  if (!Array.isArray(input.checks)) {
+    diagnostics.push({ code: 'invalid-shape', path: 'checks', message: 'checks: требуется массив' })
+  } else {
+    input.checks.forEach((raw, index) => {
+      if (!isRecord(raw)) {
+        diagnostics.push({ code: 'invalid-shape', path: `checks.${index}`, message: 'Проверка должна быть объектом' })
+        return
+      }
+      checks.push({
+        command: raw.command === null ? null : typeof raw.command === 'string' ? raw.command.trim() || null : null,
+        status: enumValue(raw, 'status', ['passed', 'failed', 'not_run'] as const, diagnostics),
+        ...(Number.isInteger(raw.exitCode) ? { exitCode: Number(raw.exitCode) } : {}),
+      })
+    })
+  }
+  const value: StepOutcomeV1 = {
+    status: enumValue(input, 'status', ['succeeded', 'failed', 'blocked', 'diverged'] as const, diagnostics),
+    summary: stringValue(input, 'summary', diagnostics),
+    observations: stringArray(input, 'observations', diagnostics),
+    changedFiles: stringArray(input, 'changedFiles', diagnostics),
+    checks,
+    evidence: stringArray(input, 'evidence', diagnostics),
+    assumptionFailures: stringArray(input, 'assumptionFailures', diagnostics),
+    recommendedAction: enumValue(input, 'recommendedAction', ['continue', 'retry', 'replan', 'ask-user', 'rollback'] as const, diagnostics),
+  }
+  return { value: diagnostics.length === 0 ? value : null, diagnostics }
+}
+
+export function parseStepOutcomeJson(json: string | null | undefined): ParseOutcome<StepOutcomeV1> {
+  if (!json) return { value: null, diagnostics: [] }
+  try {
+    return parseStepOutcome(JSON.parse(json))
+  } catch {
+    return { value: null, diagnostics: [{ code: 'invalid-json', path: '$', message: 'Step Outcome содержит невалидный JSON' }] }
   }
 }

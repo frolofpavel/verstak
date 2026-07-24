@@ -51,7 +51,7 @@ import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 // Реэкспорт типов для внешних импортов (sub-agent-loop импортит ToolContext отсюда).
 export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler }
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
-import { submitTaskContractHandler } from './tool-handlers/outcome'
+import { replanPlanHandler, reportStepOutcomeHandler, submitTaskContractHandler } from './tool-handlers/outcome'
 
 // Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
 // write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
@@ -77,6 +77,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'connector_query': connectorQueryHandler,
   'create_plan': createPlanHandler,
   'submit_task_contract': submitTaskContractHandler,
+  'report_step_outcome': reportStepOutcomeHandler,
+  'replan_plan': replanPlanHandler,
   // TodoGate (Фаза 3) — оркестрационный todo-лист сессии
   'todo_create': todoCreateHandler,
   'todo_update': todoUpdateHandler,

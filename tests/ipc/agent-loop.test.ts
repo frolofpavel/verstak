@@ -47,7 +47,7 @@ type Overrides = {
   agentMode?: string
   sendId?: number
   processRegistry?: unknown
-  outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' }
+  outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }
   pipelineRuns?: unknown
 }
 
@@ -172,6 +172,30 @@ describe('agent-loop (runApiConversation) — харнес', () => {
       event: expect.objectContaining({ type: 'error', message: expect.stringContaining('OUTCOME_REFINE_BLOCKED') }),
     }))
     expect(runs.finish).toHaveBeenCalledWith('r-outcome', 'failed', expect.anything())
+  })
+
+  it('execute-step gives one corrective turn, then fails closed without Step Outcome', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    let turns = 0
+    const p = provider('p1', () => {
+      turns++
+      return [{ type: 'text', text: 'done without outcome' }, { type: 'done' }]
+    })
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      agentRuns: runs,
+      runId: 'r-step',
+      sender,
+      outcome: { pipelineId: 7, phase: 'execute-step', planStepId: 11, attempt: 1 },
+    }) as Parameters<typeof runApiConversation>))
+    expect(turns).toBe(2)
+    expect(sender.send).toHaveBeenCalledWith('ai:event', expect.objectContaining({
+      event: expect.objectContaining({ type: 'error', message: expect.stringContaining('OUTCOME_STEP_BLOCKED') }),
+    }))
+    expect(runs.finish).toHaveBeenCalledWith('r-step', 'failed', expect.anything())
   })
 
   // 2.0.8-F каветат #1 (best-effort, симметрично plain-loop): сбой persistUsage НЕ

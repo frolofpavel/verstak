@@ -406,9 +406,11 @@ export type ChatEvent =
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
   | { type: 'turns-exhausted'; used: number; maxBudget: number; canContinue: boolean; suggestedAdd: number }
   | { type: 'tool-activity'; callId: string; name: string; label: string; detail: string; status: 'ok' | 'error' }
-  | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
-  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
-  | { type: 'task-contract-created'; pipelineId: number; revision: number; contract: TaskContractV1 }
+    | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+    | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+    | { type: 'task-contract-created'; pipelineId: number; revision: number; contract: TaskContractV1 }
+    | { type: 'step-outcome-reported'; planId: number; stepId: number; status: 'succeeded' | 'failed' | 'blocked' | 'diverged'; decision: { action: 'continue' | 'retry' | 'replan' | 'ask-user' | 'block'; reason: string; failureSignature: string | null; requiresApproval: boolean }; attempt: number }
+    | { type: 'plan-replanned'; planId: number; revision: number; reason: string; preservedSteps: number }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
   | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
@@ -584,7 +586,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' } },
+          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
@@ -852,6 +854,8 @@ declare global {
         getActive(projectPath: string): Promise<PipelineRun | null>
         /** Отменить прогон (step='cancelled'). */
         cancel(id: number): Promise<void>
+        listStepOutcomes(planId: number): Promise<StoredStepOutcome[]>
+        listRevisions(planId: number): Promise<PlanRevisionSnapshot[]>
       }
       /** Project Brain — мозг проекта (warmup, состояние, решения). */
       brain: {
@@ -1367,6 +1371,38 @@ export interface DevTaskDetail {
 
 /** Pipeline Brief→Proof (спек). Зеркало типов electron/storage/pipeline-runs.ts —
  *  renderer не может импортить из electron/, поэтому держим декларации здесь. */
+export interface StoredStepOutcome {
+  id: number
+  planId: number
+  stepId: number
+  planRevision: number
+  runId: string
+  attempt: number
+  status: 'succeeded' | 'failed' | 'blocked' | 'diverged'
+  outcome: {
+    status: 'succeeded' | 'failed' | 'blocked' | 'diverged'
+    summary: string
+    observations: string[]
+    changedFiles: string[]
+    checks: Array<{ command: string | null; status: 'passed' | 'failed' | 'not_run'; exitCode?: number }>
+    evidence: string[]
+    assumptionFailures: string[]
+    recommendedAction: 'continue' | 'retry' | 'replan' | 'ask-user' | 'rollback'
+  }
+  failureSignature: string | null
+  decision: { action: 'continue' | 'retry' | 'replan' | 'ask-user' | 'block'; reason: string; failureSignature: string | null; requiresApproval: boolean } | null
+  createdAt: number
+}
+
+export interface PlanRevisionSnapshot {
+  id: number
+  planId: number
+  revision: number
+  reason: string
+  snapshot: unknown
+  createdAt: number
+}
+
 export type PipelineMode = 'dev' | 'agency'
 export type PipelineStep = 'brief' | 'refine' | 'plan' | 'execute' | 'verify' | 'review' | 'proof' | 'completed' | 'cancelled' | 'blocked'
 

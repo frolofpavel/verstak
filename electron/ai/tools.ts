@@ -451,6 +451,58 @@ export const TOOL_DEFS: ToolDefinition[] = [
     },
   },
   {
+    name: 'report_step_outcome',
+    description: 'Завершить текущую server-owned execute-step попытку фактическим результатом, проверками и evidence. planId/stepId/runId/attempt задаёт main process.',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['succeeded', 'failed', 'blocked', 'diverged'] },
+        summary: { type: 'string' },
+        observations: { type: 'array', items: { type: 'string' } },
+        changedFiles: { type: 'array', items: { type: 'string' } },
+        checks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              command: { type: ['string', 'null'] },
+              status: { type: 'string', enum: ['passed', 'failed', 'not_run'] },
+              exitCode: { type: 'integer' },
+            },
+            required: ['command', 'status'],
+          },
+        },
+        evidence: { type: 'array', items: { type: 'string' } },
+        assumptionFailures: { type: 'array', items: { type: 'string' } },
+        recommendedAction: { type: 'string', enum: ['continue', 'retry', 'replan', 'ask-user', 'rollback'] },
+      },
+      required: ['status', 'summary', 'observations', 'changedFiles', 'checks', 'evidence', 'assumptionFailures', 'recommendedAction'],
+    },
+  },
+  {
+    name: 'replan_plan',
+    description: 'Заменить только незавершённую часть текущего Outcome-плана. Выполненные шаги и evidence immutable.',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              detail: { type: 'string' },
+              spec: { type: 'object' },
+            },
+            required: ['title', 'spec'],
+          },
+        },
+      },
+      required: ['reason', 'steps'],
+    },
+  },
+  {
     name: 'create_plan',
     description: 'Создать структурированный план многошаговой задачи. Используй когда задача требует 3+ шагов или явного согласования с пользователем. План отобразится во вкладке Plan; пользователь сможет выполнять шаги по одному.',
     parameters: {

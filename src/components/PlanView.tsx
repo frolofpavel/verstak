@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
-import type { Plan, PlanStep, StepStatus, ChatMessage } from '../types/api'
+import type { Plan, PlanStep, StepStatus, ChatMessage, StoredStepOutcome } from '../types/api'
 
 const STEP_LABEL: Record<StepStatus, string> = {
   pending: 'ждёт',
@@ -19,8 +19,9 @@ const STEP_COLOR: Record<StepStatus, string> = {
 }
 
 export function PlanView() {
-  const { path, setActiveView, addMessage, setStreaming, setRunningPlanStep, runningPlanStep, isStreaming } = useProject()
+  const { path, setActiveView, addMessage, setStreaming, setRunningPlanStep, runningPlanStep, isStreaming, activePipeline } = useProject()
   const [plans, setPlans] = useState<Plan[]>([])
+  const [outcomes, setOutcomes] = useState<StoredStepOutcome[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [composer, setComposer] = useState<{ title: string; rawSteps: string }>({ title: '', rawSteps: '' })
   const [autopilot, setAutopilot] = useState({ enabled: false, maxSteps: 5, verifyCmd: '' })
@@ -32,9 +33,11 @@ export function PlanView() {
     if (!path) return
     const list = await window.api.plans.list(path)
     setPlans(list)
-    if (list.length > 0 && (activeId === null || !list.some(p => p.id === activeId))) {
-      setActiveId(list[0].id)
-    }
+    const selectedId = activeId !== null && list.some(p => p.id === activeId)
+      ? activeId
+      : list[0]?.id ?? null
+    setActiveId(selectedId)
+    setOutcomes(selectedId ? await window.api.pipeline.listStepOutcomes(selectedId) : [])
   }
 
   useEffect(() => { void refresh() }, [path])
@@ -168,8 +171,9 @@ export function PlanView() {
     if (!path || isStreaming) return
     // 1) DB: mark step running
     await window.api.plans.updateStep(step.id, { status: 'running', result: null })
-    // 2) Store: remember which step is being executed so Chat can finalize on 'done'
-    setRunningPlanStep({ planId: plan.id, stepId: step.id, title: step.title })
+    const outcomePipeline = activePipeline?.planId === plan.id && Boolean(activePipeline.taskContract)
+    // Legacy plans still finish from Chat. Outcome plans are finalized only by report_step_outcome.
+    if (!outcomePipeline) setRunningPlanStep({ planId: plan.id, stepId: step.id, title: step.title })
     // 3) Build a focused prompt and send via the regular AI pipeline
     const remaining = plan.steps.filter(s => s.status !== 'done').slice(0, 4).map((s, i) => `${i + 1}. ${s.title}`).join('\n')
     const prompt = `Выполни ОДИН шаг плана и больше ничего.
@@ -190,7 +194,17 @@ ${remaining || '— нет —'}
     const allMessages = [...useProject.getState().messages].slice(0, -1) as ChatMessage[]
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Страж: tests/contracts/chat-send-chatid-contract.
-    await window.api.ai.send(allMessages, path, activeChatId != null ? String(activeChatId) : undefined)
+    if (outcomePipeline && activePipeline) {
+      const attempt = outcomes.filter(item => item.stepId === step.id).length + 1
+      await window.api.ai.sendWithOverrides(
+        allMessages,
+        path,
+        { outcome: { pipelineId: activePipeline.id, phase: 'execute-step', planStepId: step.id, attempt } },
+        activeChatId != null ? String(activeChatId) : undefined,
+      )
+    } else {
+      await window.api.ai.send(allMessages, path, activeChatId != null ? String(activeChatId) : undefined)
+    }
     // refresh on next paint cycle so user sees the step go to 'running'
     void refresh()
   }
@@ -244,7 +258,10 @@ ${remaining || '— нет —'}
                 <button
                   key={p.id}
                   className={`gg-plan-list-item ${activeId === p.id ? 'is-active' : ''}`}
-                  onClick={() => setActiveId(p.id)}
+                  onClick={() => {
+                    setActiveId(p.id)
+                    void window.api.pipeline.listStepOutcomes(p.id).then(setOutcomes).catch(() => setOutcomes([]))
+                  }}
                 >
                   <div className="gg-plan-list-title">{p.title}</div>
                   <div className="gg-plan-list-meta">
@@ -261,7 +278,7 @@ ${remaining || '— нет —'}
                 <div className="gg-plan-detail-header">
                   <div className="gg-plan-detail-title">{active.title}</div>
                   <div className="gg-plan-detail-meta">
-                    {doneCount} / {totalCount} шагов · {active.status}
+                    {doneCount} / {totalCount} шагов · {active.status} · revision {active.planRevision}
                   </div>
                   {active.steps.some(s => s.status === 'pending' || s.status === 'failed') && (
                     <button
@@ -328,6 +345,7 @@ ${remaining || '— нет —'}
                   {active.steps.map(step => {
                     const isRunningThisOne = runningPlanStep?.stepId === step.id
                     const canRun = step.status === 'pending' || step.status === 'failed'
+                    const latestOutcome = outcomes.filter(item => item.stepId === step.id).at(-1)
                     return (
                       <div key={step.id} className={`gg-plan-step is-${step.status}`}>
                         <button
@@ -341,6 +359,13 @@ ${remaining || '— нет —'}
                           <div className="gg-plan-step-title">{step.title}</div>
                           {step.detail && <div className="gg-plan-step-detail">{step.detail}</div>}
                           {step.result && <div className="gg-plan-step-result">{step.result}</div>}
+                          {latestOutcome?.decision && (
+                            <div className="gg-plan-step-result">
+                              Expected: {step.spec?.intent ?? step.title}<br />
+                              Observed: {latestOutcome.outcome.summary}<br />
+                              Adaptive attempt {latestOutcome.attempt}: {latestOutcome.decision.action} — {latestOutcome.decision.reason}
+                            </div>
+                          )}
                         </div>
                         <div className="gg-plan-step-actions">
                           {canRun && (

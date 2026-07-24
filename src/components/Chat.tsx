@@ -2181,7 +2181,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         pipeline.chatId ?? store.activeChatId,
         runs,
       )
-      await store.advancePipeline({ step: 'verify', agentRunId: runId })
+      const fresh = await window.api.pipeline.getActive(store.path)
+      if (!fresh || fresh.id !== pipeline.id) return
+      const updated = await window.api.pipeline.advance(fresh.id, { agentRunId: runId })
+      if (updated) store.startPipeline(updated)
     } catch { /* best-effort */ }
   }
   function onPipelineStarted(run: PipelineRun) {

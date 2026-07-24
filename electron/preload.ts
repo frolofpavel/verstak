@@ -184,7 +184,7 @@ contextBridge.exposeInMainWorld('api', {
     sendWithOverrides: (
       messages: unknown[],
       projectPath: string | null,
-      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec; resumeFromRunId?: string; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan' } },
+      overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec; resumeFromRunId?: string; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
       chatId?: string
     ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>
@@ -442,7 +442,9 @@ contextBridge.exposeInMainWorld('api', {
     advance: (id: number, patch: { step?: string; planId?: number | null; agentRunId?: string | null; chatId?: number | null }) =>
       ipcRenderer.invoke('pipeline:advance', id, patch),
     getActive: (projectPath: string) => ipcRenderer.invoke('pipeline:getActive', projectPath),
-    cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id)
+    cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id),
+    listStepOutcomes: (planId: number) => ipcRenderer.invoke('pipeline:list-step-outcomes', planId),
+    listRevisions: (planId: number) => ipcRenderer.invoke('pipeline:list-revisions', planId)
   },
   brain: {
     warmup: () => ipcRenderer.invoke('brain:warmup'),

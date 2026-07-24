@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
 import { pipelineStepIndex, resolveReviewCandidateRunIds, reviewGateState, verifyState, type ReviewGateState } from '../lib/pipeline-brief'
-import type { PipelineStep, VerificationRow } from '../types/api'
+import type { PipelineStep, StoredStepOutcome, VerificationRow } from '../types/api'
 
 interface PipelineBannerProps {
   /** Действие первичной кнопки шага (advance + оркестрация send). */
@@ -20,11 +20,22 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
   const cancelPipeline = useProject(s => s.cancelPipeline)
   const [verify, setVerify] = useState<VerificationRow | null>(null)
   const [review, setReview] = useState<{ state: ReviewGateState; detail: string | null } | null>(null)
+  const [adaptive, setAdaptive] = useState<StoredStepOutcome | null>(null)
 
   const step = pipeline?.step
   const projectPath = pipeline?.projectPath
   const chatId = pipeline?.chatId ?? null
   const agentRunId = pipeline?.agentRunId ?? null
+  const planId = pipeline?.planId ?? null
+
+  useEffect(() => {
+    if (!planId) { setAdaptive(null); return }
+    let cancelled = false
+    void window.api.pipeline.listStepOutcomes(planId)
+      .then(items => { if (!cancelled) setAdaptive(items.at(-1) ?? null) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [planId, step])
 
   // На Verify-шаге подтягиваем свежайшую верификацию проекта/чата.
   useEffect(() => {
@@ -97,6 +108,11 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
       <span className="gg-pipeline-banner-tag">{t.pipeline.banner}</span>
       <span className="gg-pipeline-banner-step">{index}/{total} · {stepLabel[step] ?? step}</span>
       <span className="gg-pipeline-banner-goal" title={pipeline.brief.goal}>{pipeline.brief.goal}</span>
+      {adaptive?.decision && (step === 'execute' || step === 'blocked') && (
+        <span className={`gg-pipeline-verify is-${step === 'blocked' ? 'fail' : 'warn'}`} title={adaptive.outcome.summary}>
+          attempt {adaptive.attempt} · {adaptive.decision.action}: {adaptive.decision.reason}
+        </span>
+      )}
       {step === 'verify' && (
         <span className={`gg-pipeline-verify is-${vs.tone}`}>
           {verifyLabel}{verify ? ` ${verify.checksPassed}/${verify.checksTotal}` : ''}

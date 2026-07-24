@@ -54,6 +54,7 @@ export interface Plans {
   create: (projectPath: string, title: string, steps: NewStep[], meta?: CreatePlanMeta) => Plan
   updatePlanStatus: (id: number, status: PlanStatus) => void
   updateStep: (id: number, patch: { status?: StepStatus; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) => void
+  replacePending: (id: number, steps: NewStep[], meta: { planRevision: number; quality: PlanQualityV1 }) => Plan
   remove: (id: number) => void
 }
 
@@ -174,6 +175,32 @@ export function createPlans(db: Database): Plans {
       if (fields.length === 0) return
       params.push(id)
       db.prepare(`UPDATE plan_steps SET ${fields.join(', ')} WHERE id = ?`).run(...params)
+    },
+    replacePending(id, steps, meta) {
+      const tx = db.transaction(() => {
+        const current = this.get(id)
+        if (!current) throw new Error(`plan ${id} not found`)
+        if (meta.planRevision !== current.planRevision + 1) {
+          throw new Error(`plan revision must advance from ${current.planRevision} to ${current.planRevision + 1}`)
+        }
+        db.prepare(`DELETE FROM plan_steps WHERE plan_id = ? AND status != 'done'`).run(id)
+        const maxDoneIdx = current.steps
+          .filter(step => step.status === 'done')
+          .reduce((max, step) => Math.max(max, step.idx), -1)
+        const insert = db.prepare(
+          'INSERT INTO plan_steps (plan_id, idx, title, detail, status, spec_json) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        steps.forEach((step, index) => {
+          insert.run(id, maxDoneIdx + index + 1, step.title, step.detail ?? null, 'pending', step.spec ? JSON.stringify(step.spec) : null)
+        })
+        db.prepare(
+          `UPDATE plans SET plan_revision=?, quality_json=?, status='draft', completed_at=NULL WHERE id=?`,
+        ).run(meta.planRevision, JSON.stringify(meta.quality), id)
+      })
+      tx()
+      const updated = this.get(id)
+      if (!updated) throw new Error(`plan ${id} disappeared`)
+      return updated
     },
     remove(id) {
       db.prepare('DELETE FROM plan_steps WHERE plan_id = ?').run(id)

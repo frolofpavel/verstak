@@ -109,9 +109,11 @@ export type ChatEvent =
   | { type: 'pending-command'; callId: string; command: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
-  | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
-  | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
-  | { type: 'task-contract-created'; pipelineId: number; revision: number; contract: import('../../shared/contracts/outcome').TaskContractV1 }
+    | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+    | { type: 'plan-approval'; callId: string; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }
+    | { type: 'task-contract-created'; pipelineId: number; revision: number; contract: import('../../shared/contracts/outcome').TaskContractV1 }
+    | { type: 'step-outcome-reported'; planId: number; stepId: number; status: import('../../shared/contracts/outcome').StepOutcomeStatus; decision: import('../../shared/contracts/outcome').AdaptiveDecisionV1; attempt: number }
+    | { type: 'plan-replanned'; planId: number; revision: number; reason: string; preservedSteps: number }
   /** Preflight: агент объявил план перед сложной/деструктивной задачей.
    *  Эфемерное — карточка в чате, в БД не пишется. */
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }

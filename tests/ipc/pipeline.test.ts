@@ -17,6 +17,8 @@ vi.mock('electron', () => ({
 
 const { openDb } = await import('../../electron/storage/db')
 const { createPipelineRuns } = await import('../../electron/storage/pipeline-runs')
+const { createPlanOutcomes } = await import('../../electron/storage/plan-outcomes')
+const { createPlans } = await import('../../electron/storage/plans')
 const { registerPipelineIpc } = await import('../../electron/ipc/pipeline')
 import type { PipelineRun } from '../../electron/storage/pipeline-runs'
 
@@ -37,7 +39,12 @@ describe('pipeline ipc (D2)', () => {
     dir = mkdtempSync(join(tmpdir(), 'gg-pipeline-ipc-'))
     db = openDb(join(dir, 'test.db'))
     projectRoot = dir
-    registerPipelineIpc({ pipeline: createPipelineRuns(db), getProjectRoot: () => projectRoot })
+    registerPipelineIpc({
+      pipeline: createPipelineRuns(db),
+      planOutcomes: createPlanOutcomes(db),
+      plans: createPlans(db),
+      getProjectRoot: () => projectRoot,
+    })
   })
   afterEach(() => {
     db.close()
@@ -70,6 +77,38 @@ describe('pipeline ipc (D2)', () => {
     const run = invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief })
     invoke('pipeline:cancel', run.id)
     expect(invoke('pipeline:getActive', dir)).toBeNull()
+  })
+
+  it('getActive reconciles a persisted outcome after crash before UI advance', () => {
+    const plans = createPlans(db)
+    const plan = plans.create(dir, 'P', [{ title: 'step' }])
+    plans.updateStep(plan.steps[0].id, { status: 'running' })
+    const run = invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief })
+    invoke('pipeline:advance', run.id, { step: 'execute', planId: plan.id })
+    createPlanOutcomes(db).finalize({
+      planId: plan.id,
+      stepId: plan.steps[0].id,
+      planRevision: 1,
+      runId: 'run-crash',
+      attempt: 1,
+      status: 'succeeded',
+      outcome: {
+        status: 'succeeded',
+        summary: 'persisted before crash',
+        observations: [],
+        changedFiles: [],
+        checks: [{ command: 'npm test', status: 'passed', exitCode: 0 }],
+        evidence: ['command:npm test'],
+        assumptionFailures: [],
+        recommendedAction: 'continue',
+      },
+      failureSignature: null,
+      decision: { action: 'continue', reason: 'verified', failureSignature: null, requiresApproval: false },
+    })
+    const active = invoke<PipelineRun>('pipeline:getActive', dir)
+    expect(active.step).toBe('verify')
+    expect(active.agentRunId).toBe('run-crash')
+    expect(plans.get(plan.id)?.steps[0]).toMatchObject({ status: 'done', result: 'persisted before crash' })
   })
 
   it('полный цикл: start → plan→execute→verify→proof→completed, бриф/planId/runId выживают', () => {

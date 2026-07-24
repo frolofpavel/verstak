@@ -27,4 +27,11 @@ describe('Outcome phase capability ceiling', () => {
   it('execute-step keeps the normal execution contract', () => {
     expect(toolsForOutcomePhase('execute-step')).toBeUndefined()
   })
+
+  it('replan can replace the remainder but cannot create a second plan', () => {
+    const tools = toolsForOutcomePhase('replan') ?? []
+    expect(tools).toContain('replan_plan')
+    expect(tools).not.toContain('create_plan')
+    expect(tools).not.toContain('write_file')
+  })
 })
