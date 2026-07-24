@@ -34,8 +34,8 @@ import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-mo
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
 import type { AppliedSkillRef, Attachment, ChatEvent, ChatMessage, Reminder, Skill, Suggestion } from '../types/api'
-import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
+import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_AGENT_MODE, HELP_CHAT_SEND_OVERRIDES, HELP_PROJECT_PATH } from '../lib/help-scope'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
@@ -1162,6 +1162,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const [crossVerify, setCrossVerify] = useState<{ result: string; provider: string; ok: boolean } | null>(null)
   const [cvExpanded, setCvExpanded] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [homeAgentId, setHomeAgentId] = useState<string | null>(null)
+  useEffect(() => {
+    setHomeAgentId(null)
+  }, [activeChatId])
 
   function flashWarning(msg: string) {
     setWarning(msg)
@@ -3265,11 +3269,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
 
   const hasMessages = messages.length > 0
   const canSend = !isStreaming && (input.trim().length > 0 || attachments.length > 0)
+  const isHome = !hasMessages && !isHelpChat
 
   return (
     <div
       ref={chatRootRef}
-      className={`gg-chat ${dragOver ? 'is-drag-over' : ''}`}
+      className={`gg-chat ${dragOver ? 'is-drag-over' : ''} ${isHome ? 'is-home' : ''}`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -3411,98 +3416,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           </div>
         )}
         {!hasMessages && !isHelpChat && (
-          <div className="gg-chat-empty">
-            <img src={iconUrl} alt="Verstak" className="gg-chat-empty-mark-img" />
-            <div className="gg-chat-empty-title">Готов к работе</div>
-            <div className="gg-chat-empty-hint">
-              Открой проект слева и напиши задачу. Можно прикрепить файл, бросить скриншот через Ctrl+V или drag-and-drop.
-            </div>
-            <div className="gg-chat-empty-modes">
-              <div className="gg-chat-empty-modes-title">5 режимов агента — переключаются цифрами 1-5</div>
-              <div className="gg-chat-empty-modes-row">
-                <span><b>1</b> 🛡 Запрос — каждый шаг через подтверждение</span>
-                <span><b>2</b> ✏ Принимать правки — файлы авто, команды спрашивает</span>
-                <span><b>3</b> 📋 План — только чтение и план, без правок</span>
-                <span><b>4</b> ⚡ Авто — всё авто-принимается</span>
-                <span><b>5</b> 🚀 Без подтверждения — для CI / опытных</span>
-              </div>
-              <div className="gg-chat-empty-modes-tip">
-                <b>Shift+Esc</b> — экстренный стоп всех сессий. Кнопка <b>📍 Чекпоинт</b> внизу — запомнить состояние файлов и откатить одним кликом.
-              </div>
-            </div>
-            {activePath && (
-              <div className="gg-chat-empty-quick">
-                <button
-                  className="gg-quick-action"
-                  onClick={() => { setPipelineWizardMode('agency'); setPipelineWizardOpen(true) }}
-                  disabled={isCliProvider(provider.id)}
-                  title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
-                >
-                  ▶ Agency task
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput('/code-review')}
-                  title="Запустить скилл «Code Review» — анализ изменений, поиск багов и регрессий"
-                >
-                  🔍 {t.chat.codeReview}
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput('/git-summary')}
-                  title="Запустить скилл «Git Summary» — краткая сводка последних коммитов"
-                >
-                  📝 {t.chat.gitSummary}
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput('/explain')}
-                  title="Запустить скилл «Explain Code» — объяснение выбранного кода"
-                >
-                  💡 {t.chat.explainCode}
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput(GOAL_CYCLE_PROMPT)}
-                  title="AI прочитает журнал работы, карту проекта и предложит 3 конкретных улучшения с планом"
-                >
-                  💡 {t.chat.whatToImprove}
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput('Сделай аудит последних изменений за вчера-сегодня: вызови read_journal с kind="session" на 10 записей, выдели риски и регрессии.')}
-                  title="AI прочитает свежие сессии и поищет регрессии"
-                >
-                  🔍 Аудит изменений
-                </button>
-                <button
-                  className="gg-quick-action"
-                  onClick={() => setInput('Покажи карту проекта: вызови get_project_map с format=text.')}
-                  title="Быстрый обзор структуры проекта"
-                >
-                  🗺 Карта проекта
-                </button>
-                {/* Мультиагент (orchestrate/swarm) — НЕ кнопки. Агент сам решает
-                    разбить многогранную задачу на параллельные подзадачи и
-                    вызывает delegate_parallel/orchestrate/swarm (см. промпт-правило
-                    fan-out в compose-system). Юзер описывает результат, не стратегию. */}
-              </div>
-            )}
-            {suggestions.length > 0 && (
-              <div className="gg-suggestions">
-                <div className="gg-suggestions-title">💡 Suggestions</div>
-                {suggestions.map((s, i) => (
-                  <button key={i} className="gg-suggestion-card" onClick={() => setInput(s.title)}>
-                    <span className="gg-suggestion-priority" data-priority={s.priority} />
-                    <div>
-                      <div className="gg-suggestion-title">{s.title}</div>
-                      {s.description && <div className="gg-suggestion-desc">{s.description}</div>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <ChatHome
+            selectedId={homeAgentId}
+            onSelect={(agent: HomeAgent | null) => setHomeAgentId(agent?.id ?? null)}
+            recentTitle={t.chat.homeRecent}
+            suggestedTitle={t.chat.homeSuggested}
+          />
         )}
         {hasOlderMessages && (
           <div className="gg-chat-history-more">
@@ -3914,6 +3833,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         </div>
       )}
 
+      {isHome && (
+        <ChatHomeAside
+          selectedId={homeAgentId}
+          onUsePrompt={prompt => setInput(prompt)}
+          asideEmpty={t.chat.homeAsideEmpty}
+          asideStart={t.chat.homeAsideStart}
+        />
+      )}
+
       <div className="gg-composer">
         <WorktreeBar />
         {attachments.length > 0 && (
@@ -4170,7 +4098,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                 void stop()
               }
             }}
-            placeholder={isStreaming ? `${provider.label} ${t.chat.streamingPlaceholder}` : t.chat.placeholder}
+            placeholder={
+              isStreaming
+                ? `${provider.label} ${t.chat.streamingPlaceholder}`
+                : isHome
+                  ? t.chat.homePlaceholder
+                  : t.chat.placeholder
+            }
           />
           <div className="gg-composer-actions">
             <button
