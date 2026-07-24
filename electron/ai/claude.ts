@@ -153,10 +153,9 @@ export function createClaudeProvider(opts: ClaudeOptions): ChatProvider {
         : {}
 
       try {
-        // pre-existing baseline (lint-baseline): SDK stream() «thenable»-подобен, но не Promise. E
-        // обязан менять claude.ts → error всплыл; реальный фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
-        // eslint-disable-next-line @typescript-eslint/await-thenable
-        const stream = await client.messages.stream({
+        // SDK stream() возвращает MessageStream СИНХРОННО (не Promise, не thenable —
+        // см. messages.d.ts) → await был no-op, снят (ledger 2.0.10-G, Фаза 3.2).
+        const stream = client.messages.stream({
           model,
           max_tokens: maxTokens,
           system: systemParam,

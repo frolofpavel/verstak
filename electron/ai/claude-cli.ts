@@ -43,9 +43,6 @@ export const CLAUDE_CLI_MODELS = [
  *   plan → plan · bypass → bypassPermissions.
  */
 export function claudePermissionMode(mode: AgentMode | undefined): string {
-  // pre-existing baseline (undefined-case через default ниже). E обязан менять claude-cli.ts → error
-  // всплыл; фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
-  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (mode) {
     case 'accept-edits':
     case 'auto':
@@ -55,6 +52,7 @@ export function claudePermissionMode(mode: AgentMode | undefined): string {
     case 'plan':
       return 'plan'
     case 'ask':
+    case undefined: // режим не выбран → самый строгий (ledger 2.0.10-G, Фаза 3.2)
     default:
       return 'default'
   }

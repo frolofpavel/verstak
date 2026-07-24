@@ -44,15 +44,13 @@ export function sandboxArgsForMode(
     return ['--dangerously-bypass-approvals-and-sandbox']
   }
   const winFix = isWindows ? ['-c', 'windows.sandbox=unelevated'] : []
-  // pre-existing baseline (undefined-case через default ниже). E обязан менять codex-cli.ts → error
-  // всплыл; фикс — lint-cleanup (ledger 2.0.10-G). Деферрал.
-  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (mode) {
     case 'auto':
     case 'accept-edits':
       return [...winFix, '-s', 'workspace-write']
     case 'plan':
     case 'ask':
+    case undefined: // режим не выбран → read-only (ledger 2.0.10-G, Фаза 3.2)
     default:
       return [...winFix, '-s', 'read-only']
   }

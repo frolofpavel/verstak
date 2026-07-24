@@ -302,11 +302,8 @@ app.on('second-instance', () => {
   win.focus()
 })
 
-// pre-existing bootstrap-промис (lint-baseline «кандидат A»). НЕ фиксим здесь: реальный фикс
-// (обработка ошибок bootstrap, не тривиальный void) — в его собственном срезе. D2 обязан менять
-// main.ts → lint:changed линтит весь файл → legacy-error всплыл; suppress разблокирует хук без
-// вторжения в чужой срез (реверсивно).
-// eslint-disable-next-line @typescript-eslint/no-floating-promises
+// Bootstrap обёрнут в .catch ниже — падение запуска логируется и завершает процесс
+// осмысленно, а не молчаливым unhandled rejection (ledger 2.0.10-G, Фаза 3.2).
 app.whenReady().then(() => {
   logRuntime('app.ready', { userData: app.getPath('userData') })
   if (!gotSingleInstanceLock) return // вторая копия — ранний выход до операций с БД
@@ -917,5 +914,13 @@ app.whenReady().then(() => {
   }
 
   setImmediate(registerDeferredIpc)
+}).catch((err: unknown) => {
+  // Bootstrap упал (reject whenReady или синхронный throw в колбэке выше). Раньше это
+  // был unhandled rejection: окно молча не поднималось, диагностировать нечего (ledger
+  // 2.0.10-G «кандидат A», Фаза 3.2). Честный финал: лог + диалог + ненулевой выход.
+  console.error('[main] bootstrap failed:', err)
+  try { logRuntimeError('app.bootstrap', err) } catch { /* ранний краш — логгер мог не подняться */ }
+  try { dialog.showErrorBox('Verstak — ошибка запуска', err instanceof Error ? err.message : String(err)) } catch { /* dialog недоступен на раннем краше */ }
+  app.exit(1)
 })
 
