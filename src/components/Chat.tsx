@@ -1705,7 +1705,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           cachedInputTokens: event.usage.cachedInputTokens,
           // 2.0.8-E хвост: без семантики ценник считал по 'inclusive' и вычитал кэш
           // из input у Claude (exclusive) → занижал стоимость на больших cache-hit.
-          inputAccounting: event.usage.inputAccounting
+          inputAccounting: event.usage.inputAccounting,
+          // Фаза 2.2: cache write тоже стоит денег (у Claude ~1.25× input). Без проброса
+          // pill считал его нулём и занижал стоимость сессии (red-first: chat-usage-cost).
+          cacheWriteTokens: event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens,
         })
       }
       else if (event.type === 'plan-created') {
