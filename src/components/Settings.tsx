@@ -3839,12 +3839,12 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             <div className="gg-notify-section-head">
               <div>
                 <div className="gg-notify-title">События</div>
-                <p className="gg-notify-desc">Настрой, какие сигналы показывать по каждому типу события</p>
+                <p className="gg-notify-desc">Как сообщать, когда ответ готов (остальные сигналы — в разработке)</p>
               </div>
             </div>
 
             <div className="gg-notify-channel-help" aria-label="Что означают каналы уведомлений">
-              {NOTIFY_CHANNEL_OPTIONS.map(channel => (
+              {NOTIFY_CHANNEL_OPTIONS.filter(c => c.id !== 'project').map(channel => (
                 <div className="gg-notify-channel-help-item" key={channel.id}>
                   <span>{channel.label}</span>
                   <p>{channel.description}</p>
@@ -3853,14 +3853,17 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
             </div>
 
             <div className="gg-notify-events">
-              {NOTIFY_EVENT_OPTIONS.map(event => (
+              {/* Решение Павла (24.07): матрица была мёртвым UI — исполнение (response-notify)
+                  читает только «Ответ готов» → звук/всплывашка. Остальные события и канал
+                  «Проект» нигде не читаются → не показываем как готовую функцию. */}
+              {NOTIFY_EVENT_OPTIONS.filter(e => e.id === 'assistant').map(event => (
                 <div className="gg-notify-event" key={event.id}>
                   <div className="gg-notify-event-meta">
                     <div className="gg-notify-event-title">{event.title}</div>
                     <div className="gg-notify-event-desc">{event.description}</div>
                   </div>
                   <div className="gg-notify-channel-grid" role="group" aria-label={`Каналы: ${event.title}`}>
-                    {NOTIFY_CHANNEL_OPTIONS.map(channel => (
+                    {NOTIFY_CHANNEL_OPTIONS.filter(c => c.id !== 'project').map(channel => (
                       <button
                         key={channel.id}
                         type="button"
