@@ -142,6 +142,10 @@ export function selectInboxApprovals(state: {
   return out
 }
 
+export function emptySessionUsage(): SessionUsage {
+  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 }
+}
+
 export function freshSnapshot(): SessionSnapshot {
   return {
     chatId: null,
@@ -152,7 +156,7 @@ export function freshSnapshot(): SessionSnapshot {
     pendingCommand: null,
     activity: [],
     agentProgress: [],
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
+    sessionUsage: emptySessionUsage(),
     runningPlanStep: null,
     checkpointId: null,
     checkpointMessageId: null,

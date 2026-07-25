@@ -9,7 +9,6 @@ import { useSkills } from './skillStore'
 import {
   freshSnapshot,
   captureBundle,
-  restoreBundle,
   keepStreamingOnlyWhenInflight,
   leaveChat,
   TOUCH_PRIORITY,
@@ -24,6 +23,14 @@ import {
   type SubagentRunCard
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
+import {
+  buildCloseProjectPatch,
+  buildFreshSwitchPatch,
+  buildLeaveHelpRestorePatch,
+  buildNewChatPatch,
+  buildRestoredSwitchPatch,
+  buildSetProjectPatch,
+} from './chat-lifecycle'
 import { appendThinkingToLastAssistant, appendToLastAssistant } from '../lib/chat-messages'
 import { reduceAgentProgress, upsertAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
 import { createPipelineSlice, type PipelineSlice } from './pipeline-slice'
@@ -415,38 +422,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
 
     const optimisticChatId = target.chatId ?? null
     const optimisticMessages = existing ? target.messages : []
-    set({
+    // Единая форма патча двух фаз setProject — chat-lifecycle.ts (срез 3).
+    set(buildSetProjectPatch({
       path,
-      tree: [],
+      target,
+      sessions: nextSessions,
       messages: optimisticMessages,
-      chatHasMoreBefore: false,
-      chatTotalCount: optimisticMessages.length,
-      isStreaming: target.isStreaming,
-      streamStartedAt: target.streamStartedAt,
-      pendingWrites: target.pendingWrites,
-      pendingCommand: target.pendingCommand,
-      activity: target.activity,
-      agentProgress: target.agentProgress ?? [],
-      sessionUsage: target.sessionUsage,
-      runningPlanStep: target.runningPlanStep,
-      checkpointId: target.checkpointId, checkpointMessageId: target.checkpointMessageId,
-      preflights: target.preflights,
-      subagentRuns: target.subagentRuns,
-      activeView: 'chat',
       chatSessions: [],
       activeChatId: optimisticChatId,
-      sessions: nextSessions,
-      touchedFiles: {},
-      activeDevTaskId: null,
-      devTask: null,
-      chatSnapshots: {},
-      reviews: {},
-      openedReviewId: null,
-      artifacts: [],
-      resumableRuns: [],
-      activePipeline: null,
-      helpMode: false,
-    })
+    }))
 
     void window.api.projects.list().then(projectList => {
       if (myToken !== setProjectToken) return
@@ -474,50 +458,16 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const initialMessages = needsDbHydrate ? [] : target.messages
 
     if (myToken !== setProjectToken) return
-    set({
+    // checkpointId/preflights/subagentRuns — per-chat в bundle: восстанавливаем
+    // сохранённое для активного чата нового проекта (finding 2/3).
+    set(buildSetProjectPatch({
       path,
-      tree: [],
+      target,
+      sessions: nextSessions,
       messages: initialMessages,
-      chatHasMoreBefore: false,
-      chatTotalCount: initialMessages.length,
-      isStreaming: target.isStreaming,
-      streamStartedAt: target.streamStartedAt,
-      pendingWrites: target.pendingWrites,
-      pendingCommand: target.pendingCommand,
-      activity: target.activity,
-      agentProgress: target.agentProgress ?? [],
-      sessionUsage: target.sessionUsage,
-      runningPlanStep: target.runningPlanStep,
-      // checkpointId/preflights/subagentRuns теперь per-chat в bundle —
-      // восстанавливаем сохранённое для активного чата нового проекта (finding 2/3).
-      checkpointId: target.checkpointId, checkpointMessageId: target.checkpointMessageId,
-      preflights: target.preflights,
-      subagentRuns: target.subagentRuns,
-      activeView: 'chat',
       chatSessions,
       activeChatId,
-      sessions: nextSessions,
-      // touchedFiles/artifacts НЕ в bundle — сбрасываем при смене проекта
-      // (scoped to active conversation, не к проекту).
-      touchedFiles: {},
-      // Dev Task Flow (Фаза 2): активная задача привязана к чату/проекту —
-      // сбрасываем при смене проекта (бейдж переразрешит её для нового контекста).
-      activeDevTaskId: null,
-      devTask: null,
-      // Сбрасываем chatSnapshots — при смене проекта снапшоты предыдущего
-      // проекта не должны просачиваться если SQLite autoincrement ID пересекутся.
-      chatSnapshots: {},
-      // Сбрасываем reviews из памяти — для нового проекта подгружаем заново
-      // через refreshReviewsFor (ниже).
-      reviews: {},
-      openedReviewId: null,
-      artifacts: [],
-      // Crash-resume: сбрасываем баннер предыдущего проекта; перезагрузим ниже.
-      resumableRuns: [],
-      // Pipeline: не тащим прогон другого проекта; подгрузим активный для path.
-      activePipeline: null,
-      helpMode: false,
-    })
+    }))
     if (needsDbHydrate && activeChatId != null) {
       const hydrateChatId = activeChatId
       void (async () => {
@@ -542,44 +492,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     void get().reconcileStreamingState(path)
     void get().loadActivePipeline(path)
   },
-  closeProject: () => set({
-    // 5.3 (review P0): нет проекта = чистый лист. Раньше сбрасывалась лишь часть
-    // полей → sendOwners/helpMode/sessions/snapshots/preflights/subagentRuns/
-    // reviews утекали в следующий открытый проект. Полный сброс эфемерного
-    // состояния сессии/чата (projectList/composerDrafts — кросс-проектные, не трогаем).
-    path: null,
-    tree: [],
-    messages: [],
-    chatHasMoreBefore: false,
-    chatTotalCount: 0,
-    isStreaming: false,
-    streamStartedAt: null,
-    pendingWrites: [],
-    pendingCommand: null,
-    pendingPlan: null, // #3 plan-gate: проект закрыт → снять модалку плана
-    activity: [],
-    agentProgress: [],
-    preflights: [],
-    subagentRuns: [],
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
-    runningPlanStep: null,
-    activeChatId: null,
-    chatSessions: [],
-    chatSnapshots: {},
-    sessions: {},
-    sendOwners: {},
-    chatLaneGenerations: {},
-    reviews: {},
-    openedReviewId: null,
-    touchedFiles: {},
-    checkpointId: null, checkpointMessageId: null,
-    artifacts: [],
-    resumableRuns: [],
-    activePipeline: null,
-    activeDevTaskId: null,
-    devTask: null,
-    helpMode: false,
-  }),
+  // 5.3 (review P0): нет проекта = чистый лист. Полный сброс эфемерного
+  // состояния сессии/чата — единая форма в chat-lifecycle.ts (срез 3).
+  // projectList/composerDrafts — кросс-проектные, не трогаем.
+  closeProject: () => set(buildCloseProjectPatch()),
   refreshProjectList: async () => {
     const projectList = await window.api.projects.list()
     set({ projectList })
@@ -774,44 +690,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         restored,
         hasInflightChatSend(s.sendOwners, id, false, s.chatLaneGenerations)
       )
-      set({
-        ...restoreBundle(restoredSafe),
-        activeChatId: id,
-        chatSnapshots: nextSnapshots,
-        openedReviewId: null,
-        // Эти поля НЕ входят в bundle (top-level стора) — без явного сброса они
-        // утекают от предыдущего активного чата (артефакты/маркеры/checkpoint/preview).
-        // touchedFiles/artifacts/previewArtifactId НЕ входят в bundle — сбрасываем
-        // явно, иначе утекут от уходящего чата. А checkpointId/preflights/
-        // subagentRuns теперь в bundle (restoreBundle выше) → восстанавливаются
-        // per-chat, чужие не утекают (finding 2/3, ревью Verstak 23.06).
-        touchedFiles: {},
-        artifacts: [],
-        previewArtifactId: null
-      })
+      set(buildRestoredSwitchPatch({ activeChatId: id, restored: restoredSafe, chatSnapshots: nextSnapshots }))
     } else {
-      set({
-        activeChatId: id,
-        messages: [],
-        chatHasMoreBefore: false,
-        chatTotalCount: 0,
-        isStreaming: false,
-        streamStartedAt: null,
-        pendingWrites: [],
-        pendingCommand: null,
-        activity: [],
-        agentProgress: [],
-        sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
-        runningPlanStep: null,
-        chatSnapshots: nextSnapshots,
-        openedReviewId: null,
-        touchedFiles: {},
-        checkpointId: null, checkpointMessageId: null,
-        artifacts: [],
-        previewArtifactId: null,
-        preflights: [],
-        subagentRuns: []
-      })
+      set(buildFreshSwitchPatch({ activeChatId: id, chatSnapshots: nextSnapshots }))
       void (async () => {
         const history = await window.api.chats.listWindow(id, { limit: 50 })
         if (myToken !== switchChatSessionToken) return
@@ -973,31 +854,11 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       s.chatSnapshots, s.activeChatId, created.id, s,
       s.activeChatId != null && hasInflightChatSend(s.sendOwners, s.activeChatId, false, s.chatLaneGenerations)
     )
-    set({
-      chatSessions: list,
-      activeChatId: created.id,
-      chatSnapshots: nextSnapshots,
-      messages: [],
-      activity: [],
-      agentProgress: [],
-      pendingWrites: [],
-      pendingCommand: null,
-      runningPlanStep: null,
-      isStreaming: false,
-      streamStartedAt: null,
-      touchedFiles: {},
-      checkpointId: null, checkpointMessageId: null,
-      artifacts: [],
-      // 2.0.1 bug (+ ре-ревью): switchChatSession сбрасывает openedReviewId/
-      // previewArtifactId/sessionUsage, а newChatSession — нет → ревью/превью и
-      // счётчик стоимости прошлого чата протекали в новый (компаундинг cost).
-      openedReviewId: null,
-      previewArtifactId: null,
-      sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
-      // Эфемерные карточки активности уходящего чата — не тащим в новый (finding 3).
-      preflights: [],
-      subagentRuns: []
-    })
+    // 2.0.1 bug (+ ре-ревью): патч нового чата сбрасывает openedReviewId/
+    // previewArtifactId/sessionUsage/preflights/subagentRuns — иначе ревью/превью и
+    // счётчик стоимости прошлого чата протекают в новый (компаундинг cost).
+    // Единая форма — chat-lifecycle.ts (срез 3).
+    set(buildNewChatPatch({ activeChatId: created.id, chatSnapshots: nextSnapshots, chatSessions: list }))
     return created
   },
   forkChat: async (sourceId) => {
@@ -1069,16 +930,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const nextSnapshots = { ...s.chatSnapshots }
       delete nextSnapshots[chatId]
       const inflight = hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)
-      set({
-        helpMode: false,
-        // restoreBundle — единая форма восстановления (вкл. checkpointId/preflights/
-        // subagentRuns per-chat). Стрим переопределяем ниже: восстанавливаем только
-        // если он реально ещё в полёте (иначе залипает баннер «отвечает»).
-        ...restoreBundle(snap),
-        isStreaming: inflight && snap.isStreaming,
-        streamStartedAt: inflight && snap.isStreaming ? snap.streamStartedAt : null,
-        chatSnapshots: nextSnapshots,
-      })
+      // restoreBundle — единая форма восстановления (вкл. checkpointId/preflights/
+      // subagentRuns per-chat). Стрим — только если реально ещё в полёте.
+      set(buildLeaveHelpRestorePatch({ snap, chatSnapshots: nextSnapshots, inflight }))
       return
     }
     set({ helpMode: false, isStreaming: false, streamStartedAt: null })
