@@ -64,9 +64,3 @@ export function decideWriteScope(path: string, writeScope: string[]): WriteScope
       : `Запись «${normalizedPath}» вне разрешённой области Agent Job.`,
   }
 }
-
-export function assertWriteScope(path: string, writeScope: string[]): string {
-  const decision = decideWriteScope(path, writeScope)
-  if (!decision.allowed || !decision.normalizedPath) throw new Error(decision.reason ?? 'Запись вне write scope.')
-  return decision.normalizedPath
-}

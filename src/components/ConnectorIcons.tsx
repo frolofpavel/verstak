@@ -335,13 +335,3 @@ export function IconTrello({ size = 18 }: IconProps) {
     </svg>
   )
 }
-
-export function IconPlug({ size = 18 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 2v4M12 2v4" />
-      <path d="M5 6h8a1 1 0 0 1 1 1v2a5 5 0 0 1-10 0V7a1 1 0 0 1 1-1z" />
-      <line x1="9" y1="13" x2="9" y2="16" />
-    </svg>
-  )
-}
