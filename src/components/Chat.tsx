@@ -26,7 +26,6 @@ import { EffortPicker } from './EffortPicker'
 import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { MentionPopup } from './MentionPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
-import { extractMentions } from '../lib/mentions'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestManyFromIndex, suggestScoredFromIndex } from '../lib/skill-suggest'
 import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
@@ -39,12 +38,13 @@ import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_AGENT_MODE, HELP_PROJECT_PATH } from '../lib/help-scope'
 import { sendHelpMessage } from './chat/send-help-message'
+import { sendChatMessage } from './chat/send-chat-message'
+import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, skillDisplayName, toAppliedSkillRef } from './chat/skill-prompts'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
 import { formatDuration } from '../lib/format-duration'
 import { routeChangedActivity } from '../lib/route-activity'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
-import { resolveSkillOverride } from '../lib/skill-override'
 import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveReviewCandidateRunIds, reviewGateState, SAMPLE_BRIEF } from '../lib/pipeline-brief'
 import { decidePipelineGate, type VerifyOutcome } from '../lib/pipeline-gate'
 import { isCliProvider } from '../lib/model-catalog'
@@ -72,7 +72,7 @@ import {
   CHAT_FILE_ACCEPT,
   isLegacyDoc,
 } from '../lib/chat-attachments'
-import { activateModelProgress, buildInitialAgentProgress, reduceAgentProgress, type AgentProgressEntry } from '../lib/agent-progress'
+import { type AgentProgressEntry } from '../lib/agent-progress'
 
 interface ComposerPendingState {
   queuedMessages: QueuedComposerMessage[]
@@ -294,256 +294,6 @@ const GOAL_CYCLE_PROMPT = `Запусти цикл self-improvement по это�
 5. Спроси какое из 3 запустить — я выберу одно, и ты создашь по нему create_plan.
 
 Out of scope: общие best practices, рефакторинги ради красоты, изменения без обоснования в журнале.`
-
-const SKILL_ANTI_STALL_NUDGE = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
-
-function skillDisplayName(skill: Pick<Skill, 'id' | 'name'> | AppliedSkillRef): string {
-  return skill.name?.trim() || skill.id
-}
-
-function escapePromptAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-function toAppliedSkillRef(skill: Skill): AppliedSkillRef {
-  return {
-    id: skill.id,
-    ...(skill.name?.trim() ? { name: skill.name.trim() } : {}),
-    ...(skill.icon?.trim() ? { icon: skill.icon.trim() } : {}),
-    ...(skill.description?.trim() ? { description: skill.description.trim() } : {}),
-  }
-}
-
-function resolveAppliedSkillDetails(applied: AppliedSkillRef[], skills: Skill[]): Skill[] {
-  const byId = new Map(skills.map(skill => [skill.id, skill]))
-  return applied.flatMap(ref => {
-    const skill = byId.get(ref.id)
-    return skill ? [skill] : []
-  })
-}
-
-function uniqueSkills(skills: Array<Skill | null | undefined>): Skill[] {
-  const seen = new Set<string>()
-  const result: Skill[] = []
-  for (const skill of skills) {
-    if (!skill || seen.has(skill.id)) continue
-    seen.add(skill.id)
-    result.push(skill)
-  }
-  return result
-}
-
-function mergeToolAllow(skills: Array<Skill | null | undefined>): string[] | undefined {
-  const merged = new Set<string>()
-  for (const skill of skills) {
-    for (const tool of skill?.tools_allow ?? []) {
-      if (tool.trim()) merged.add(tool.trim())
-    }
-  }
-  return merged.size ? [...merged] : undefined
-}
-
-function firstRecipe(skills: Array<Skill | null | undefined>) {
-  return skills.find(skill => skill?.recipe)?.recipe
-}
-
-function buildAppliedSkillsSystemPrompt(appliedSkills: Skill[], userText: string): string {
-  if (appliedSkills.length === 0) return ''
-  const lines: string[] = [
-    '## Скиллы, применённые к текущему пользовательскому сообщению',
-    '',
-    'Пользователь явно применил эти скиллы к последнему сообщению. Это не отдельные задачи и не глобальный режим чата.',
-    'Используй инструкции скиллов строго для релевантных частей текущего запроса. Остальные части запроса не игнорируй: выполни их обычным способом или подбери подходящий общий подход.',
-    'Если конкретный скилл не подходит к части запроса, коротко объясни почему и продолжай выполнять остальные части.',
-    '',
-    '<current_user_request>',
-    userText.trim(),
-    '</current_user_request>',
-  ]
-
-  appliedSkills.forEach((skill, index) => {
-    lines.push(
-      '',
-      `<applied_skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
-      skill.description ? `Назначение: ${skill.description}` : 'Назначение: пользователь применил этот скилл к текущему сообщению.',
-      'Инструкция: применяй этот регламент к той части пользовательского запроса, которая соответствует назначению скилла.',
-      '<skill_instructions>',
-      skill.systemPrompt.trim(),
-      '</skill_instructions>',
-      '</applied_skill>'
-    )
-  })
-
-  return lines.join('\n')
-}
-
-const AUTO_BOUND_SKILL_MIN_SCORE = 14
-
-function buildAutoBoundSkillsSystemPrompt(autoSkills: Skill[], userText: string): string {
-  if (autoSkills.length === 0) return ''
-  const lines: string[] = [
-    '## Автоматически подобранные скиллы для текущего запроса',
-    '',
-    'Verstak уверенно сопоставил части текущего пользовательского запроса с этими скиллами. Это не справка и не рекомендация: для релевантных частей задачи считай эти скиллы обязательным рабочим протоколом.',
-    'Если пользователь явно задал конкретный параметр (порог, период, список кампаний, формат, исключение), этот параметр пользователя сильнее дефолтного значения из скилла.',
-    'Дефолты скилла используй только там, где пользователь не дал своё значение. Запреты и проверки безопасности из скилла не обходи молча: если пользователь просит нарушить запрет, сначала явно уточни/подтверди.',
-    'Если в запросе несколько операций, сопоставь каждую операцию с подходящим auto-bound skill. Операции без подходящего скилла выполни обычным способом, не игнорируй их.',
-    'Перед финальным ответом проверь: применимые обязательные пункты каждого auto-bound skill выполнены, пользовательские параметры учтены как overrides, пропусков без блокера нет.',
-    '',
-    '<current_user_request>',
-    userText.trim(),
-    '</current_user_request>',
-  ]
-
-  autoSkills.forEach((skill, index) => {
-    lines.push(
-      '',
-      `<auto_bound_skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
-      skill.description ? `Назначение: ${skill.description}` : 'Назначение: Verstak автоматически сопоставил этот скилл с текущим запросом.',
-      'Инструкция: применяй этот регламент к релевантной части пользовательского запроса как обязательный протокол.',
-      '<skill_instructions>',
-      skill.systemPrompt.trim(),
-      '</skill_instructions>',
-      '</auto_bound_skill>'
-    )
-  })
-
-  return lines.join('\n')
-}
-
-function appliedSkillNames(appliedRefs: AppliedSkillRef[], detailedSkills: Skill[]): string {
-  const byId = new Map(detailedSkills.map(skill => [skill.id, skill]))
-  return appliedRefs
-    .map(ref => {
-      const skill = byId.get(ref.id)
-      return skill ? skillDisplayName(skill) : skillDisplayName(ref)
-    })
-    .join(', ')
-}
-
-function buildAppliedSkillsTaskContract(
-  appliedRefs: AppliedSkillRef[],
-  detailedSkills: Skill[],
-  currentMessage: boolean
-): string {
-  if (appliedRefs.length === 0) return ''
-  const byId = new Map(detailedSkills.map(skill => [skill.id, skill]))
-  const names = appliedSkillNames(appliedRefs, detailedSkills)
-  if (!currentMessage) {
-    return [
-      '<historical_task_contract source="verstak_applied_skills">',
-      `К предыдущему пользовательскому сообщению были применены скиллы: ${names}.`,
-      'Это относится только к тому сообщению и помогает понять историю выполнения, но не включает эти скиллы как новый глобальный режим.',
-      '</historical_task_contract>',
-    ].join('\n')
-  }
-
-  const lines: string[] = [
-    '<current_task_contract source="verstak_applied_skills" priority="required">',
-    'ВАЖНО: это не справочный контекст и не внешняя заметка. Это часть текущего пользовательского запроса, созданная интерфейсом Verstak после явного нажатия пользователем "Применить скилл".',
-    `Пользователь применил к текущему сообщению скиллы: ${names}.`,
-    `Считай это эквивалентом прямой фразы пользователя: "Выполни текущую задачу с применением скиллов: ${names}".`,
-    'Если пользователь просит сказать, что ты увидел в сообщении, обязательно назови эти применённые скиллы как часть задания.',
-    'Не отвечай, что скиллы не указаны в сообщении или подключены "только через контекст". Они указаны через UI Verstak и являются обязательным регламентом для релевантных частей текущей задачи.',
-    'Если в одном сообщении несколько операций, сопоставь каждую операцию с подходящим применённым скиллом; операции без подходящего скилла выполни обычным способом.',
-    '<applied_skill_refs>',
-  ]
-  appliedRefs.forEach((ref, index) => {
-    const skill = byId.get(ref.id)
-    const name = skill ? skillDisplayName(skill) : skillDisplayName(ref)
-    const description = skill?.description ?? ref.description ?? ''
-    lines.push(
-      `<skill index="${index + 1}" id="${escapePromptAttr(ref.id)}" name="${escapePromptAttr(name)}">`,
-      description ? `Назначение: ${description}` : 'Назначение: пользователь применил этот скилл к текущему сообщению.',
-      skill
-        ? 'Полная инструкция этого скилла также передана в системном слое <skill_layer>.'
-        : 'Полная инструкция скилла недоступна в текущем renderer-cache; ориентируйся на название и назначение.',
-      '</skill>'
-    )
-  })
-  lines.push('</applied_skill_refs>', '</current_task_contract>')
-  return lines.join('\n')
-}
-
-function buildAutoBoundSkillsTaskContract(autoSkills: Skill[], userText: string): string {
-  if (autoSkills.length === 0) return ''
-  const names = autoSkills.map(skill => skillDisplayName(skill)).join(', ')
-  const lines: string[] = [
-    '<current_task_contract source="verstak_auto_bound_skills" priority="required">',
-    `Verstak автоматически и с высокой уверенностью привязал к текущему запросу скиллы: ${names}.`,
-    'Эти скиллы обязательны для тех частей текущей задачи, к которым они относятся. Не считай их необязательными подсказками.',
-    'Раздели пользовательский запрос на операции и сопоставь каждую релевантную операцию с подходящим скиллом из списка.',
-    'Явные параметры пользователя имеют приоритет над дефолтными параметрами скилла: суммы, периоды, списки, пороги, исключения и формат ответа бери из текущего запроса.',
-    'Если параметр пользователя отличается от дефолта скилла, используй параметр пользователя и считай его override. Не возвращайся к дефолту скилла без причины.',
-    'Обязательные проверки, запреты и критерии завершения из скилла не пропускай. Если выполнить пункт невозможно из-за доступа/данных/инструментов, назови это блокером.',
-    'Перед финальным ответом сделай self-check по применимым пунктам auto-bound skills. Если что-то пропущено, сначала доделай или честно сообщи блокер.',
-    '<current_user_request>',
-    userText.trim(),
-    '</current_user_request>',
-    '<auto_bound_skill_refs>',
-  ]
-  autoSkills.forEach((skill, index) => {
-    lines.push(
-      `<skill index="${index + 1}" id="${escapePromptAttr(skill.id)}" name="${escapePromptAttr(skillDisplayName(skill))}">`,
-      skill.description ? `Назначение: ${skill.description}` : 'Назначение: скилл автоматически выбран по смыслу текущего запроса.',
-      'Полная инструкция этого скилла также передана в системном слое <skill_layer>.',
-      '</skill>'
-    )
-  })
-  lines.push('</auto_bound_skill_refs>', '</current_task_contract>')
-  return lines.join('\n')
-}
-
-function buildSkillBindingProgressDetail(manualSkills: Skill[], autoSkills: Skill[]): string | undefined {
-  const manualNames = manualSkills.map(skillDisplayName)
-  const autoNames = autoSkills.map(skillDisplayName)
-  const parts: string[] = []
-  if (manualNames.length) {
-    parts.push(`пользователь применил: ${manualNames.join(', ')}`)
-  }
-  if (autoNames.length) {
-    parts.push(`Verstak подключил автоматически: ${autoNames.join(', ')}`)
-  }
-  if (parts.length === 0) return undefined
-  return `К задаче подключены скиллы — ${parts.join('; ')}. Они будут использованы как рабочий протокол для подходящих частей запроса.`
-}
-
-function withAppliedSkillContextForModel(messages: ChatMessage[], skills: Skill[], autoBoundSkills: Skill[] = []): ChatMessage[] {
-  const lastUserIndex = messages.map(message => message.role).lastIndexOf('user')
-  return messages.map((message, index) => {
-    if (message.role !== 'user') return message
-    if (message.content.includes('<current_task_contract') || message.content.includes('<historical_task_contract')) return message
-    const isCurrent = index === lastUserIndex
-    const payloads: string[] = []
-    if (message.appliedSkills?.length) {
-      const detailedSkills = resolveAppliedSkillDetails(message.appliedSkills, skills)
-      payloads.push(buildAppliedSkillsTaskContract(message.appliedSkills, detailedSkills, isCurrent))
-    }
-    if (isCurrent && autoBoundSkills.length) {
-      payloads.push(buildAutoBoundSkillsTaskContract(autoBoundSkills, message.content))
-    }
-    const payload = payloads.filter(Boolean).join('\n\n')
-    if (!payload) return message
-    return {
-      ...message,
-      content: `${message.content}\n\n---\n\n${payload}`,
-    }
-  })
-}
-
-function composeSkillSystemPrompt(activeSkill: Skill | null, appliedSkills: Skill[], userText: string, autoBoundSkills: Skill[] = []): string | undefined {
-  const parts = [
-    activeSkill ? activeSkill.systemPrompt : '',
-    buildAppliedSkillsSystemPrompt(appliedSkills, userText),
-    buildAutoBoundSkillsSystemPrompt(autoBoundSkills, userText),
-  ].filter(part => part.trim())
-  if (parts.length > 0) parts.push(SKILL_ANTI_STALL_NUDGE)
-  return parts.length ? parts.join('\n\n---\n\n') : undefined
-}
 
 export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSettingsOpen = false, onOpenSideChat, onOpenFilePreview }: ChatProps) {
   const t = useT()
@@ -2834,228 +2584,38 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       return
     }
 
-    const ctx = await ensureProjectForChat()
-    if (!ctx) {
-      flashWarning('Сначала открой папку проекта слева — без неё переписка не сохраняется.')
-      return
-    }
-    const path = ctx.path
-    const userAttachments = attachments
-    if (!opts?.fromQueue && ctx.activeChatId != null && store.hasActiveChatLane(ctx.activeChatId, false)) {
-      queueFollowUp(text)
-      return
-    }
-    store.clearActivity()
-    store.setAgentProgress(buildInitialAgentProgress(displayText || text || 'Новый запрос', provider.label))
-    const skillBindingProgressDetail = buildSkillBindingProgressDetail(messageAppliedSkillDetails, autoBoundSkillDetails)
-    if (skillBindingProgressDetail) {
-      setAgentProgress(reduceAgentProgress(useProject.getState().agentProgress, {
-        type: 'agent-progress',
-        id: 'skills-bound',
-        phase: 'context',
-        title: 'Подключаю скиллы',
-        detail: skillBindingProgressDetail,
-        status: 'done'
-      }))
-    }
-    setExhausted(null)  // new send wipes any pending continue state
-    setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify
-    if (!opts?.text || opts?.modelText) {
-      resetComposerAfterSend()
-    }
-    const summary = userAttachments.length > 0
-      ? `${text}${text ? '\n\n' : ''}📎 ${userAttachments.map(a => a.name).join(', ')}`
-      : text
-    // Context loaders: если активен скилл с frontmatter context_loaders —
-    // запускаем их и подмешиваем результат в content user-message ПЕРЕД
-    // отправкой. Это делает скиллы реально мощными — скилл может подгрузить
-    // нужные данные (карточку, отчёт, контекст) автоматически.
-    let enrichedText = modelText
-    const activeSkillForLoad = activeSkillIdForSend
-      ? useSkillsStore.getState().skills.find(s => s.id === activeSkillIdForSend)
-      : null
-    const loaderSkill = uniqueSkills([activeSkillForLoad, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
-      .find(skill => skill.context_loaders?.length)
-    if (loaderSkill?.context_loaders?.length) {
-      const isFirstUserMsg = !useProject.getState().messages.some(m => m.role === 'user')
-      const trigger: 'chat_open' | 'slash_arg' = isFirstUserMsg ? 'chat_open' : 'slash_arg'
-      try {
-        const loaded = await window.api.skills.runLoaders(loaderSkill.id, {
-          trigger,
-          projectPath: path,
-          arg: text.split(/\s+/)[0]  // первое слово как arg (для /dossier alfa-development)
-        })
-        if (loaded.context) {
-          enrichedText = `${loaded.context}\n\n---\n\n${modelText}`
-        }
-      } catch (err) {
-        console.warn('[chat] skill loaders failed:', loaderSkill.id, err)
+    // Основной путь отправки вынесен в chat/send-chat-message.ts (фаза 5, срез 2).
+    // Харнес: tests/components/send-chat-message.test.ts.
+    await sendChatMessage(
+      { text, modelText, displayText, attachments, providerLabel: provider.label, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
+      {
+        getProjectState: () => useProject.getState(),
+        getSkillsState: () => useSkillsStore.getState(),
+        api: {
+          runLoaders: (skillId, o) => window.api.skills.runLoaders(skillId, o),
+          resolveMentions: (projectPath, paths) => window.api.files.resolveMentions(projectPath, paths),
+          chatsAppend: (chatId, projectPath, role, content, meta) => window.api.chats.append(chatId, projectPath, role, content, meta),
+          chatsUpdateMessage: (messageId, content) => window.api.chats.updateMessage(messageId, content),
+          getSetting: (key) => window.api.settings.getKey(key),
+          sendWithOverrides: (messages, projectPath, overrides, chatId) => window.api.ai.sendWithOverrides(messages, projectPath, overrides, chatId),
+        },
+        ensureProjectForChat,
+        flashWarning,
+        queueFollowUp,
+        resetComposerAfterSend,
+        armAutoScrollForOutgoing,
+        readAgentMode,
+        registerChatSendOwner,
+        registerPersistedAssistant,
+        setCurrentSendId: (id) => { currentSendIdRef.current = id },
+        setExhausted,
+        setCrossVerify,
+        consumeResumeFromRunId: () => { const v = resumeFromRunIdRef.current; resumeFromRunIdRef.current = null; return v },
+        consumePipelineOutcome: () => { const v = pipelineOutcomeRef.current; pipelineOutcomeRef.current = null; return v },
+        getPipelineAutoSendStep: () => pipelineAutoSendStepRef.current,
+        setPipelineExecuteSendId: (id) => { pipelineExecuteSendIdRef.current = id },
       }
-    }
-    // F6: @-mentions — пользователь явно подмешал файлы (@path). Читаем их (бэкенд:
-    // path-policy + redaction) и префиксим к контексту агента. БД хранит оригинал.
-    try {
-      const mentions = extractMentions(text)
-      if (mentions.length && path) {
-        const block = await window.api.files.resolveMentions(path, mentions)
-        if (block) enrichedText = `${block}\n\n---\n\n${enrichedText}`
-      }
-    } catch (err) {
-      console.warn('[chat] @-mentions resolve failed:', err)
-    }
-    const isFirstUserMessage = !store.messages.some(m => m.role === 'user')
-    armAutoScrollForOutgoing()
-    if (!opts?.internalResume) {
-      addMessage({
-        role: 'user',
-        content: opts?.modelText ? displayText : enrichedText,
-        attachments: userAttachments,
-        ...(messageAppliedSkills.length ? { appliedSkills: messageAppliedSkills } : {})
-      })
-    }
-    const activeChatId = ctx.activeChatId
-    if (path && activeChatId && !opts?.internalResume) {
-      // В БД сохраняем оригинальный text пользователя (без loader-контекста),
-      // чтобы при reload UI не показывал жирный системный блок.
-      await window.api.chats.append(
-        activeChatId,
-        path,
-        'user',
-        summary,
-        messageAppliedSkills.length ? { appliedSkills: messageAppliedSkills } : undefined
-      )
-      if (isFirstUserMessage) {
-        void store.autoTitleChatSession(activeChatId, text || summary)
-      }
-    }
-    const assistantRow = path && activeChatId
-      ? await window.api.chats.append(activeChatId, path, 'assistant', '')
-      : null
-    addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
-    setStreaming(true)
-    setAgentProgress(activateModelProgress(useProject.getState().agentProgress, provider.label))
-    const allMessages = [...useProject.getState().messages].slice(0, -1)
-    if (opts?.internalResume) {
-      while (allMessages.length > 0 && allMessages[allMessages.length - 1].role === 'assistant') {
-        allMessages.pop()
-      }
-      allMessages.push({ role: 'user', content: enrichedText })
-    } else if (opts?.modelText) {
-      const lastUserIndex = allMessages.map(m => m.role).lastIndexOf('user')
-      if (lastUserIndex >= 0) {
-        allMessages[lastUserIndex] = { ...allMessages[lastUserIndex], content: enrichedText }
-      }
-    }
-    const modelMessages = withAppliedSkillContextForModel(allMessages, skillCatalog, autoBoundSkillDetails)
-    const sendAgentMode = await readAgentMode(activeChatId, false)
-    // Skill override: если активен скилл — system prompt берётся из его тела.
-    // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
-    // несовместим с тем что предлагает скилл. Например: скилл говорит 'claude'
-    // (API), пользователь выбрал 'claude-cli' (CLI/подписка) — оба = Claude,
-    // НЕ переключаем. Это сохраняет выбор пользователя по подписке/API.
-    const activeSkill = activeSkillIdForSend
-      ? useSkillsStore.getState().skills.find(s => s.id === activeSkillIdForSend)
-      : null
-    const skillSystemPrompt = composeSkillSystemPrompt(activeSkill ?? null, messageAppliedSkillDetails, modelText, autoBoundSkillDetails)
-    const toolsAllow = mergeToolAllow([activeSkill, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
-    const recipe = firstRecipe([activeSkill, ...messageAppliedSkillDetails, ...autoBoundSkillDetails])
-    let sendId: number
-    // Crash-resume Фаза 2: re-send прерванного прогона → прокидываем runId, чтобы
-    // ai:send продолжил с накопленным контекстом из чекпойнта. Консьюмим ref однократно.
-    const resumeFromRunId = resumeFromRunIdRef.current
-    resumeFromRunIdRef.current = null
-    // 2.0.7-F: маршрут модели на ОДИН prompt. Берём из store, наслаиваем на overrides всех
-    // веток (побеждает дефолт чата и skill-override — самый явный выбор пользователя), и
-    // СРАЗУ снимаем после отправки (one-shot). requested пишется в agent_run (main).
-    const oneShotRoute = useProject.getState().promptRouteOverride
-    const routeOverride = oneShotRoute ? { promptRoute: oneShotRoute } : {}
-    const pipelineOutcome = pipelineOutcomeRef.current
-    pipelineOutcomeRef.current = null
-    const outcomeOverride = pipelineOutcome ? { outcome: pipelineOutcome } : {}
-    // Хвост ревью 2.0.11-B: chatId ОБЯЗАН доехать до ai:send. От него в main зависят три
-    // вещи разом: компакция контекста (2.0.11-B), закреплённый за чатом аккаунт (2.0.8-D2)
-    // и изоляция worktree. Фоновые пути его передавали, главный — забывал, и все три
-    // молча не работали в основном чате. Страж: tests/contracts/chat-send-chatid-contract.
-    const sendChatId = activeChatId != null ? String(activeChatId) : undefined
-    if (activeSkill || skillSystemPrompt) {
-      // Узнаём текущий provider пользователя — чтобы решить override или нет
-      const currentProvider = activeSkill ? await window.api.settings.getKey('provider') : null
-      // Provider/model override скилла (B5). Провайдер — только при разном
-      // семействе (сохраняем выбор API/CLI). Модель — и при том же семействе.
-      const { providerId: overrideProvider, model: overrideModel } = activeSkill
-        ? resolveSkillOverride(activeSkill, currentProvider)
-        : { providerId: undefined, model: undefined }
-      // Anti-stall guard: некоторые скиллы — оркестраторы/штабы (los-hq, bos-hq,
-      // навигаторы) с протоколом «жди пакет задачи / маршрутизируй / ✋ СТОП».
-      // Базовый system-layer теперь НАСЛАИВАЕТСЯ под скилл (ipc/ai.ts передаёт
-      // skillPrompt в prepareSystemContext — см. <skill_layer>), так что протокол
-      // выполнения восстановлен. Но тело таких скиллов всё равно может сильно
-      // давить «жди ТЗ»; nudge — дешёвое подкрепление: ясный запрос = действуй.
-      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
-        ...(skillSystemPrompt ? { systemPrompt: skillSystemPrompt } : {}),
-        ...(overrideProvider ? { providerId: overrideProvider } : {}),
-        ...(overrideModel ? { model: overrideModel } : {}),
-        // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
-        ...(toolsAllow?.length ? { toolsAllow } : {}),
-        // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
-        ...(recipe ? { recipe } : {}),
-        effortLevel: useProject.getState().effortLevel,
-        agentMode: sendAgentMode,
-        ...(resumeFromRunId ? { resumeFromRunId } : {}),
-        ...outcomeOverride,
-        ...routeOverride
-      }, sendChatId)
-    } else if (resumeFromRunId) {
-      // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
-      const effort = useProject.getState().effortLevel
-      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
-        resumeFromRunId,
-        agentMode: sendAgentMode,
-        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
-        ...outcomeOverride,
-        ...routeOverride
-      }, sendChatId)
-    } else {
-      const effort = useProject.getState().effortLevel
-      sendId = await window.api.ai.sendWithOverrides(modelMessages, path, {
-        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
-        agentMode: sendAgentMode,
-        ...outcomeOverride,
-        ...routeOverride
-      }, sendChatId)
-    }
-    // one-shot: маршрут действовал только на эту отправку — снимаем.
-    if (oneShotRoute) useProject.getState().setPromptRouteOverride(null)
-    currentSendIdRef.current = sendId
-    if (sendId <= 0) {
-      // 2.1.3-CD: если причина — ранний маршрутный стоп (pin/one-shot на неготовый
-      // аккаунт), main уже прислал её событием id=0. Ждём тик, чтобы IPC успело
-      // дойти, и показываем ТОЧНУЮ причину с выходом из тупика вместо общего текста.
-      // Окно 10с и сверка chatId — чтобы вчерашний/чужой стоп не подменил причину.
-      await new Promise(r => setTimeout(r, 30))
-      const early = useProject.getState().earlyRouteStop
-      const earlyMatch = early && activeChatId != null && early.chatId === activeChatId && Date.now() - early.at < 10_000
-      const reason = earlyMatch ? early.message : null
-      if (earlyMatch) useProject.getState().setEarlyRouteStop(null)
-      const errorText = `\n\n[Ошибка: ${reason ?? 'провайдер недоступен'}]`
-      updateLastAssistant(errorText)
-      if (assistantRow) void window.api.chats.updateMessage(assistantRow.id, errorText).catch(() => {})
-      useProject.getState().applyAgentProgressEvent({ type: 'error', message: reason ?? 'Провайдер недоступен' })
-      setStreaming(false)
-      currentSendIdRef.current = null
-      return
-    }
-    if (pipelineAutoSendStepRef.current === 'execute') {
-      pipelineExecuteSendIdRef.current = sendId
-    }
-    useProject.getState().setAgentProgress(activateModelProgress(useProject.getState().agentProgress ?? [], provider.label))
-    // Bind this send to the chat that initiated it — if user switches to
-    // another chat mid-stream, the event handler will route events into
-    // chatSnapshots[activeChatId] rather than corrupting the new active chat.
-    if (activeChatId != null) {
-      registerChatSendOwner(sendId, activeChatId, false, path)
-      if (assistantRow && sendId > 0) registerPersistedAssistant(sendId, assistantRow.id)
-    }
+    )
   }
 
   useEffect(() => {

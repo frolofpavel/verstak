@@ -138,8 +138,11 @@ describe('sendHelpMessage — characterization бывшей help-ветки send
     expect(idx.every(i => i >= 0)).toBe(true)
     expect(idx).toEqual([...idx].sort((a, b) => a - b))
 
-    // Начальный прогресс — тот же что строила inline-ветка.
-    expect(h.state.setHelpAgentProgress).toHaveBeenNthCalledWith(1, buildInitialAgentProgress('привет', 'Gemini'))
+    // Начальный прогресс — тот же что строила inline-ветка. Таймстампы не сравниваем:
+    // buildInitialAgentProgress штампует Date.now() — под нагрузкой уходит на ±1мс.
+    const stripTs = (entries: Array<Record<string, unknown>>) => entries.map(({ timestamp: _t, ...rest }) => rest)
+    const firstProgress = (h.state.setHelpAgentProgress as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(stripTs(firstProgress)).toEqual(stripTs(buildInitialAgentProgress('привет', 'Gemini') as unknown as Array<Record<string, unknown>>))
 
     // Сообщение пользователя в UI — enrichedText (= text без скилла), в БД — summary.
     expect(h.state.help.messages[0]).toMatchObject({ role: 'user', content: 'привет', attachments: [] })
