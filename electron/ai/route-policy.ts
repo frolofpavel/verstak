@@ -103,9 +103,10 @@ export function routeChangedText(
 /** 2.1.3-CD: маппинг детектора подписочного лимита в причину cooldown (единый для обоих
  *  runner'ов). usage/quota — исчерпание пула → 'quota'; rate — транзиентная частота →
  *  'rate-limit'. Согласовано с classifyRouteReason (там «usage limit» → 'quota'). */
-export function cooldownReasonForLimitKind(kind: 'usage' | 'rate' | 'quota' | null): CooldownReason | undefined {
+export function cooldownReasonForLimitKind(kind: 'usage' | 'rate' | 'quota' | 'auth' | null): CooldownReason | undefined {
   if (kind === 'usage' || kind === 'quota') return 'quota'
   if (kind === 'rate') return 'rate-limit'
+  if (kind === 'auth') return 'auth'
   return undefined
 }
 

@@ -125,9 +125,10 @@ export interface CooldownDetail {
 }
 
 export function markAccountCooling(db: Database, id: number, coolingUntil: number | null, detail?: CooldownDetail): void {
+  const state = detail?.reason === 'auth' && coolingUntil == null ? 'invalid' : 'cooling'
   db.prepare(
-    "UPDATE subscription_accounts SET state = 'cooling', cooling_until = ?, cooldown_scope = ?, cooldown_reason = ?, cooldown_model = ? WHERE id = ?"
-  ).run(coolingUntil, detail?.scope ?? null, detail?.reason ?? null, detail?.model ?? null, id)
+    'UPDATE subscription_accounts SET state = ?, cooling_until = ?, cooldown_scope = ?, cooldown_reason = ?, cooldown_model = ? WHERE id = ?'
+  ).run(state, coolingUntil, detail?.scope ?? null, detail?.reason ?? null, detail?.model ?? null, id)
 }
 
 /** Вернуть аккаунт в готовое состояние (лимит сброшен / вручную). Чистит и scoped-поля. */
@@ -169,7 +170,7 @@ export function switchActiveOnLimit(db: Database, providerId: string, coolingUnt
     const candidate = db.prepare(
       `SELECT id, label FROM subscription_accounts
        WHERE provider_id = ? AND id != ?
-         AND (state != 'cooling' OR cooling_until <= ?)
+         AND (state = 'ready' OR (state = 'cooling' AND cooling_until <= ?))
        ORDER BY (last_used_at IS NULL) DESC, last_used_at ASC, created_at DESC
        LIMIT 1`
     ).get(providerId, current?.id ?? -1, now) as { id: number; label: string } | undefined

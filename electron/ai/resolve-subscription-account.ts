@@ -67,6 +67,7 @@ export function createResolveSubscriptionAccount(db: Database, deps: ResolveSubs
    *  срок неизвестен → тоже НЕ готов (EF: неизвестный срок не делает аккаунт ready);
    *  истёкшее остывание (until <= now) — аккаунт снова годится. */
   function blockReason(acct: SubscriptionAccount, now: number): { reason: 'cooling' | 'login-required'; resetAt: number | null } | null {
+    if (acct.state === 'invalid') return { reason: 'login-required', resetAt: null }
     if (acct.state === 'cooling' && (acct.coolingUntil == null || acct.coolingUntil > now)) {
       return { reason: 'cooling', resetAt: acct.coolingUntil ?? null }
     }

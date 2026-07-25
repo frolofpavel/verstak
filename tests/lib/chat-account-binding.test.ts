@@ -117,7 +117,7 @@ describe('подписи состояний — по-русски, без жар
     expect(accountStateLabel(acc({ state: 'ready' }))).toBe('готов')
     expect(accountStateLabel(acc({ state: 'cooling' }))).toBe('остывает')
     expect(accountStateLabel(acc({ state: 'login-required' }))).toBe('нужен вход')
-    expect(accountStateLabel(acc({ state: 'invalid' }))).toBe('ошибка')
+    expect(accountStateLabel(acc({ state: 'invalid' }))).toBe('нужен повторный вход')
   })
 
   it('отсутствие ключа важнее статуса (иначе «готов» без ключа врал бы)', () => {

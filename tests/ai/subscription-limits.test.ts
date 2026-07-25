@@ -50,4 +50,23 @@ describe('detectSubscriptionLimit', () => {
     const err = Object.assign(new Error('too many requests'), { status: 429 })
     expect(detectSubscriptionLimit(err).limited).toBe(true)
   })
+
+  it('marks permanent OAuth failure as auth without an automatic retry time', () => {
+    const hit = detectSubscriptionLimit('invalid_grant: refresh token revoked', 1_000)
+    expect(hit).toMatchObject({ limited: true, kind: 'auth', resetEta: null })
+  })
+
+  it('gives a generic 401 a short recoverable cooldown', () => {
+    const now = 1_000
+    const hit = detectSubscriptionLimit(Object.assign(new Error('401 Unauthorized'), { status: 401 }), now)
+    expect(hit).toMatchObject({ limited: true, kind: 'auth', resetEta: now + 5 * 60_000 })
+  })
+
+  it('parses combined reset durations and fractional seconds', () => {
+    const now = 10_000
+    expect(detectSubscriptionLimit('rate limit, resets in 4hr 5min', now).resetEta)
+      .toBe(now + (4 * 60 + 5) * 60_000)
+    expect(detectSubscriptionLimit('rate limit, try again in 1.5 seconds', now).resetEta)
+      .toBe(now + 1_500)
+  })
 })

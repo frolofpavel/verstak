@@ -242,6 +242,12 @@ function verdict(f: DoctorFacts, overall: SubscriptionDoctorReportDTO['overall']
       nextStep: 'Переключись на другой аккаунт этого провайдера или дождись конца остывания.',
     }
   }
+  if (f.state === 'invalid') {
+    return {
+      summary: 'Учётные данные отклонены и сами не восстановятся.',
+      nextStep: 'Нажми «Войти» и пройди авторизацию заново. До этого Verstak не будет повторять запросы через этот аккаунт.',
+    }
+  }
   if (f.state === 'login-required') {
     return {
       summary: 'Аккаунт недоступен: требуется вход.',

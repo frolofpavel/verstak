@@ -182,6 +182,25 @@ describe('runner-attempt — policy и bounded rotation', () => {
     expect(c.runFallbackFrame).toHaveBeenCalledTimes(1)
   })
 
+  it('permanent auth инвалидирует аккаунт без временного cooldown', async () => {
+    const switchAccountOnLimit = vi.fn(() => ({ switched: false }))
+    const c = controller({
+      fallbackOpts: fallbackOpts({ switchAccountOnLimit }),
+    })
+
+    expect(
+      c.api.attemptAccountSwitch(
+        new Error('invalid_grant: refresh token revoked')
+      )
+    ).toBeNull()
+    expect(switchAccountOnLimit).toHaveBeenCalledWith(
+      'gemini-api',
+      null,
+      'auth'
+    )
+    expect(c.runFallbackFrame).not.toHaveBeenCalled()
+  })
+
   it('обычная ошибка не меняет провайдера без force', async () => {
     const c = controller()
 

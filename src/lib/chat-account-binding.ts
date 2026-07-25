@@ -108,6 +108,7 @@ export function accountStateLabel(a: SubscriptionAccountDTO): string {
     return reason ? `остывает · ${reason} · ${until}` : `остывает · ${until}`
   }
   if (a.state === 'login-required') return 'нужен вход'
+  if (a.state === 'invalid') return 'нужен повторный вход'
   return 'ошибка'
 }
 

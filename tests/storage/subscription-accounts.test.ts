@@ -149,6 +149,24 @@ describe('subscription accounts storage', () => {
     expect(getSubscriptionAccount(db, b.id)?.active).toBe(false)
   })
 
+  it('permanent auth failure marks account invalid and never rotates back to it', () => {
+    const now = 8_500_000_000_000
+    const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
+    const b = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'B', credRef: 'r2' })
+    const c = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'C', credRef: 'r3' })
+
+    setActiveAccount(db, 'claude-cli', a.id)
+    const first = switchActiveOnLimit(db, 'claude-cli', null, now, { scope: 'account', reason: 'auth' }, a.id)
+    expect(first.switched).toBe(true)
+    expect(getSubscriptionAccount(db, a.id)?.state).toBe('invalid')
+
+    // B теперь падает по квоте. A нельзя возвращать в ротацию: его OAuth требует login.
+    setActiveAccount(db, 'claude-cli', b.id)
+    const second = switchActiveOnLimit(db, 'claude-cli', now + 60_000, now, { scope: 'account', reason: 'quota' }, b.id)
+    expect(second.newAccountId).toBe(c.id)
+    expect(getSubscriptionAccount(db, a.id)?.active).toBe(false)
+  })
+
   it('EF-R1 Б3: switchActiveOnLimit с fromAccountId охлаждает АККАУНТ ПРОГОНА, не global active', () => {
     const now = 9_000_000_000_000
     const a = createSubscriptionAccount(db, { providerId: 'claude-cli', label: 'A', credRef: 'r1' })
