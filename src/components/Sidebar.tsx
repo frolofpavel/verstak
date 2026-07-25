@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject, type ViewId } from '../store/projectStore'
 import { ModelPicker } from './ModelPicker'
 import { CreateClientModal } from './CreateClientModal'
@@ -21,7 +22,20 @@ function clampChatMenuPos(x: number, y: number): { left: number; top: number } {
 
 function ChatNavSection() {
   const t = useT()
-  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, forkChat, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject()
+  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, forkChat, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject(useShallow(s => ({
+    path: s.path,
+    chatSessions: s.chatSessions,
+    activeChatId: s.activeChatId,
+    activeView: s.activeView,
+    setActiveView: s.setActiveView,
+    switchChatSession: s.switchChatSession,
+    newChatSession: s.newChatSession,
+    forkChat: s.forkChat,
+    refreshChatSessions: s.refreshChatSessions,
+    chatSnapshots: s.chatSnapshots,
+    patchChatSession: s.patchChatSession,
+    cleanupReviewsFor: s.cleanupReviewsFor,
+  })))
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -539,7 +553,14 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarProps) {
-  const { path, projectList, setProject, activeView, setActiveView, refreshProjectList } = useProject()
+  const { path, projectList, setProject, activeView, setActiveView, refreshProjectList } = useProject(useShallow(s => ({
+    path: s.path,
+    projectList: s.projectList,
+    setProject: s.setProject,
+    activeView: s.activeView,
+    setActiveView: s.setActiveView,
+    refreshProjectList: s.refreshProjectList,
+  })))
   const t = useT()
   const [showCreateClient, setShowCreateClient] = useState(false)
 

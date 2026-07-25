@@ -1,24 +1,11 @@
 import { Suspense, lazy, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { I18nContext, getTranslations, type Lang } from './i18n'
 import { ProjectRail } from './components/ProjectRail'
 
-import { ProjectSettings } from './components/ProjectSettings'
 import type { ProjectMeta } from './types/api'
 import { Sidebar } from './components/Sidebar'
 import { Chat } from './components/Chat'
-import { TasksView } from './components/TasksView'
-import { FilesView } from './components/FilesView'
-import { JournalView } from './components/JournalView'
-import { ScheduledTasksView } from './components/ScheduledTasksView'
-import { RemindersView } from './components/RemindersView'
-import { PlanView } from './components/PlanView'
-import { FeedbackView } from './components/FeedbackView'
-import { AgentsPanel } from './components/AgentsPanel'
-import { AgentRunsPanel } from './components/AgentRunsPanel'
-import { DevTaskPanel } from './components/DevTaskPanel'
-import { ProjectMapPanel } from './components/ProjectMapPanel'
-import { DecisionsPanel } from './components/DecisionsPanel'
-import { BrainPanel } from './components/BrainPanel'
 import { DiffView } from './components/DiffView'
 import { CommandConfirm } from './components/CommandConfirm'
 import { PlanConfirm } from './components/PlanConfirm'
@@ -26,8 +13,6 @@ import { InboxApprovals } from './components/InboxApprovals'
 
 import { UpdateReadyToast } from './components/UpdateReadyToast'
 import { WhatsNewModal } from './components/WhatsNewModal'
-import { SideChat } from './components/SideChat'
-import { FilePreviewPanel } from './components/FilePreviewPanel'
 import { prefetchDetectedClis } from './lib/prefetch-cli'
 import { ModelRequiredPrompt } from './components/ModelRequiredPrompt'
 import { WindowShell } from './components/TitleBar'
@@ -42,9 +27,25 @@ import { readAgentMode, writeAgentMode } from './hooks/useAgentMode'
 const AUTH_CACHE_KEY = 'gg.auth_completed'
 
 const AuthScreen = lazy(() => import('./components/AuthScreen').then(m => ({ default: m.AuthScreen })))
+const ProjectSettings = lazy(() => import('./components/ProjectSettings').then(m => ({ default: m.ProjectSettings })))
 const settingsImport = () => import('./components/Settings')
 const Settings = lazy(() => settingsImport().then(m => ({ default: m.Settings })))
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
+const SideChat = lazy(() => import('./components/SideChat').then(m => ({ default: m.SideChat })))
+const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then(m => ({ default: m.FilePreviewPanel })))
+const TasksView = lazy(() => import('./components/TasksView').then(m => ({ default: m.TasksView })))
+const FilesView = lazy(() => import('./components/FilesView').then(m => ({ default: m.FilesView })))
+const JournalView = lazy(() => import('./components/JournalView').then(m => ({ default: m.JournalView })))
+const ScheduledTasksView = lazy(() => import('./components/ScheduledTasksView').then(m => ({ default: m.ScheduledTasksView })))
+const RemindersView = lazy(() => import('./components/RemindersView').then(m => ({ default: m.RemindersView })))
+const PlanView = lazy(() => import('./components/PlanView').then(m => ({ default: m.PlanView })))
+const FeedbackView = lazy(() => import('./components/FeedbackView').then(m => ({ default: m.FeedbackView })))
+const AgentsPanel = lazy(() => import('./components/AgentsPanel').then(m => ({ default: m.AgentsPanel })))
+const AgentRunsPanel = lazy(() => import('./components/AgentRunsPanel').then(m => ({ default: m.AgentRunsPanel })))
+const DevTaskPanel = lazy(() => import('./components/DevTaskPanel').then(m => ({ default: m.DevTaskPanel })))
+const ProjectMapPanel = lazy(() => import('./components/ProjectMapPanel').then(m => ({ default: m.ProjectMapPanel })))
+const DecisionsPanel = lazy(() => import('./components/DecisionsPanel').then(m => ({ default: m.DecisionsPanel })))
+const BrainPanel = lazy(() => import('./components/BrainPanel').then(m => ({ default: m.BrainPanel })))
 const BrowserView = lazy(() => import('./components/BrowserView').then(m => ({ default: m.BrowserView })))
 const DesignView = lazy(() => import('./components/DesignView').then(m => ({ default: m.DesignView })))
 const SkillsView = lazy(() => import('./components/SkillsView').then(m => ({ default: m.SkillsView })))
@@ -209,7 +210,16 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject()
+  const { path, activeView, setActiveView, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject(useShallow(s => ({
+    path: s.path,
+    activeView: s.activeView,
+    setActiveView: s.setActiveView,
+    setStreaming: s.setStreaming,
+    clearPendingWrites: s.clearPendingWrites,
+    setPendingCommand: s.setPendingCommand,
+    setPendingPlan: s.setPendingPlan,
+    setProject: s.setProject,
+  })))
   // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const chatSessions = useProject(s => s.chatSessions)
@@ -478,45 +488,49 @@ export function App() {
               </div>
             )}
             {effectiveRightPanel === 'sidechat' && (
-              <SideChat
-                sideChatId={sideChatId}
-                width={sideChatWidth}
-                onResizeStart={startSideChatResize}
-                onSessionCreated={rememberSideChatId}
-                onSessionSelected={rememberSideChatId}
-                onClose={() => setRightPanel('none')}
-              />
+              <Suspense fallback={<ViewFallback />}>
+                <SideChat
+                  sideChatId={sideChatId}
+                  width={sideChatWidth}
+                  onResizeStart={startSideChatResize}
+                  onSessionCreated={rememberSideChatId}
+                  onSessionSelected={rememberSideChatId}
+                  onClose={() => setRightPanel('none')}
+                />
+              </Suspense>
             )}
             {effectiveRightPanel === 'file-preview' && (
-              <FilePreviewPanel
-                path={previewFilePath}
-                width={sideChatWidth}
-                onResizeStart={startSideChatResize}
-                onClose={() => setRightPanel('none')}
-              />
+              <Suspense fallback={<ViewFallback />}>
+                <FilePreviewPanel
+                  path={previewFilePath}
+                  width={sideChatWidth}
+                  onResizeStart={startSideChatResize}
+                  onClose={() => setRightPanel('none')}
+                />
+              </Suspense>
             )}
         </div>
-        {activeView === 'tasks' && <TasksView />}
-        {activeView === 'journal' && <JournalView />}
-        {activeView === 'reminders' && <RemindersView />}
+        {activeView === 'tasks' && <Suspense fallback={<ViewFallback />}><TasksView /></Suspense>}
+        {activeView === 'journal' && <Suspense fallback={<ViewFallback />}><JournalView /></Suspense>}
+        {activeView === 'reminders' && <Suspense fallback={<ViewFallback />}><RemindersView /></Suspense>}
         {activeView === 'inspector' && (
           <Suspense fallback={<ViewFallback />}><AgentRunInspector /></Suspense>
         )}
         {activeView === 'project-rules' && (
           <Suspense fallback={<ViewFallback />}><ProjectRulesView /></Suspense>
         )}
-        {activeView === 'agents' && <AgentsPanel />}
-        {activeView === 'tasks-manager' && <AgentRunsPanel />}
-        {activeView === 'task' && <DevTaskPanel />}
-        {activeView === 'project-map' && <ProjectMapPanel />}
-        {activeView === 'decisions' && <DecisionsPanel />}
-        {activeView === 'brain' && <BrainPanel />}
-        {activeView === 'files' && <FilesView />}
+        {activeView === 'agents' && <Suspense fallback={<ViewFallback />}><AgentsPanel /></Suspense>}
+        {activeView === 'tasks-manager' && <Suspense fallback={<ViewFallback />}><AgentRunsPanel /></Suspense>}
+        {activeView === 'task' && <Suspense fallback={<ViewFallback />}><DevTaskPanel /></Suspense>}
+        {activeView === 'project-map' && <Suspense fallback={<ViewFallback />}><ProjectMapPanel /></Suspense>}
+        {activeView === 'decisions' && <Suspense fallback={<ViewFallback />}><DecisionsPanel /></Suspense>}
+        {activeView === 'brain' && <Suspense fallback={<ViewFallback />}><BrainPanel /></Suspense>}
+        {activeView === 'files' && <Suspense fallback={<ViewFallback />}><FilesView /></Suspense>}
         {activeView === 'memory-gov' && (
           <Suspense fallback={<ViewFallback />}><MemoryGovernance /></Suspense>
         )}
-        {activeView === 'plan' && <PlanView />}
-        {activeView === 'scheduler' && <ScheduledTasksView />}
+        {activeView === 'plan' && <Suspense fallback={<ViewFallback />}><PlanView /></Suspense>}
+        {activeView === 'scheduler' && <Suspense fallback={<ViewFallback />}><ScheduledTasksView /></Suspense>}
         {activeView === 'workflow' && (
           <div className="gg-workflow-scroll">
             <Suspense fallback={<ViewFallback />}>
@@ -525,7 +539,7 @@ export function App() {
             </Suspense>
           </div>
         )}
-        {activeView === 'feedback' && <FeedbackView />}
+        {activeView === 'feedback' && <Suspense fallback={<ViewFallback />}><FeedbackView /></Suspense>}
         {activeView === 'browser' && (
           <Suspense fallback={<ViewFallback />}><BrowserView /></Suspense>
         )}
@@ -568,11 +582,13 @@ export function App() {
         }}
       />
       {projectSettingsTarget && (
-        <ProjectSettings
-          project={projectSettingsTarget}
-          onClose={() => setProjectSettingsTarget(null)}
-          onProjectUpdated={setProjectSettingsTarget}
-        />
+        <Suspense fallback={<SettingsFallback />}>
+          <ProjectSettings
+            project={projectSettingsTarget}
+            onClose={() => setProjectSettingsTarget(null)}
+            onProjectUpdated={setProjectSettingsTarget}
+          />
+        </Suspense>
       )}
 
       <ArtifactPreviewContainer />

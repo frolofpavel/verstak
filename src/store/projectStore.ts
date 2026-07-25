@@ -159,6 +159,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** Вставить сообщение перед последним (обычно — перед стримящим assistant). */
   insertMessageBeforeLast: (msg: ChatMessage) => void
   updateLastAssistant: (text: string) => void
+  /** 2.2: one immutable bundle update for all text/thought deltas collected in a frame. */
+  appendChatStreamDelta: (chatId: number, text: string, thought: string) => void
   /** Append chain-of-thought text to the last assistant message. Rendered as
    *  a collapsible block, not as part of the visible answer. */
   appendLastAssistantThinking: (text: string) => void
@@ -580,6 +582,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { messages: msgs }
   }),
   updateLastAssistant: (text) => get().updateChatBundle(get().activeChatId, b => ({ messages: appendToLastAssistant(b.messages, text) })),
+  appendChatStreamDelta: (chatId, text, thought) => get().updateChatBundle(chatId, b => {
+    let messages = b.messages
+    if (thought) messages = appendThinkingToLastAssistant(messages, thought)
+    if (text) messages = appendToLastAssistant(messages, text)
+    return { messages }
+  }),
   appendLastAssistantThinking: (text) => get().updateChatBundle(get().activeChatId, b => ({ messages: appendThinkingToLastAssistant(b.messages, text) })),
   setStreaming: (v) => get().updateChatBundle(get().activeChatId, b => ({
     isStreaming: v,
@@ -607,9 +615,11 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] })),
   setAgentProgress: (entries) => get().updateChatBundle(get().activeChatId, () => ({ agentProgress: entries })),
   pushAgentProgress: (entry) => get().updateChatBundle(get().activeChatId, b => ({ agentProgress: upsertAgentProgress(b.agentProgress ?? [], entry) })),
-  applyAgentProgressEvent: (event) => get().updateChatBundle(get().activeChatId, b => ({
-    agentProgress: reduceAgentProgress(b.agentProgress ?? [], event)
-  })),
+  applyAgentProgressEvent: (event) => get().updateChatBundle(get().activeChatId, b => {
+    const current = b.agentProgress ?? []
+    const next = reduceAgentProgress(current, event)
+    return next === current ? null : { agentProgress: next }
+  }),
   pushPreflight: (card) => get().updateChatBundle(get().activeChatId, b => ({ preflights: [...b.preflights, card] })),
   upsertSubagentRun: (card) => get().updateChatBundle(get().activeChatId, b => {
     const idx = b.subagentRuns.findIndex(r => r.callId === card.callId)
@@ -767,7 +777,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     delete next[sendId]
     return { sendOwners: next }
   }),
-  updateChatBundle: (chatId, updater) => set(s => applyBundleUpdate(s, chatId, updater)),
+  updateChatBundle: (chatId, updater) => {
+    const patch = applyBundleUpdate(get(), chatId, updater)
+    // Zustand publishes even when an updater returns an empty object. Avoid a
+    // global subscriber wake-up for repeated stream progress deltas/no-ops.
+    if (Object.keys(patch).length > 0) set(patch)
+  },
   applyEventToChat: (chatId, event) => get().updateChatBundle(chatId, b => {
     let next = applySnapshotEvent({ ...b, hasUnread: true }, event)
     // 5.1 (review P0): pending-write/command фонового чата — в его snapshot (как

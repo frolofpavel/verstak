@@ -1,4 +1,5 @@
 import { useProject } from '../store/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { selectInboxApprovals } from '../store/session-snapshot'
 
@@ -10,7 +11,12 @@ import { selectInboxApprovals } from '../store/session-snapshot'
  */
 export function InboxApprovals() {
   // 4.3: pendingCommand активного — из chats (SSOT), фоновые — из chatSnapshots (вьюха).
-  const { activeChatId, chatSnapshots, switchChatSession, clearChatPendingCommand } = useProject()
+  const { activeChatId, chatSnapshots, switchChatSession, clearChatPendingCommand } = useProject(useShallow(s => ({
+    activeChatId: s.activeChatId,
+    chatSnapshots: s.chatSnapshots,
+    switchChatSession: s.switchChatSession,
+    clearChatPendingCommand: s.clearChatPendingCommand,
+  })))
   const pendingCommand = useActiveChatField('pendingCommand') ?? null
   const background = selectInboxApprovals({ activeChatId, pendingCommand, chatSnapshots })
     .filter(a => a.chatId !== activeChatId)

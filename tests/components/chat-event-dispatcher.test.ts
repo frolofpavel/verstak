@@ -62,7 +62,8 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     expect(mock.aiEvents.handlers).toHaveLength(1)
   })
 
-  // BASELINE TRACE: текст → текст → done. Фиксирует, что реально делает роутер сегодня.
+  // 2.2 TRACE: text-deltas коалесцируются до animation frame, а terminal event
+  // синхронно сбрасывает хвост перед закрытием стрима.
   it('трасса text→text→done: текст склеивается, стрим закрывается', () => {
     mountChat()
     startRun(101, 7)
@@ -71,9 +72,10 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
       mock.aiEvents.emit({ id: 101, event: { type: 'text', text: 'Привет' } })
       mock.aiEvents.emit({ id: 101, event: { type: 'text', text: ', Павел' } })
     })
-    expect(useProject.getState().messages.at(-1)?.content).toBe('Привет, Павел')
+    expect(useProject.getState().messages.at(-1)?.content).toBe('')
 
     act(() => { mock.aiEvents.emit({ id: 101, event: { type: 'done' } }) })
+    expect(useProject.getState().messages.at(-1)?.content).toBe('Привет, Павел')
     expect(useProject.getState().isStreaming).toBe(false)
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
@@ -91,6 +93,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     startRun(103, 7)
     act(() => { mock.aiEvents.emit({ id: 103, event: { type: 'text', text: 'моё' } }) })
     act(() => { mock.aiEvents.emit({ id: 999, event: { type: 'text', text: 'ЧУЖОЕ' } }) })
+    act(() => { mock.aiEvents.emit({ id: 103, event: { type: 'done' } }) })
     expect(useProject.getState().messages.at(-1)?.content).toBe('моё')
   })
 

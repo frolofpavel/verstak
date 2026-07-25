@@ -114,6 +114,7 @@ interface GrokCliOptions {
    * Инъекция из ipc/ai.ts (loadLiveCatalog + checkModelAvailable). Нет колбэка → нет гейта.
    */
   checkModel?: (model: string) => ModelGateResult
+  onPromptBuilt?: (payload: string) => void
 }
 
 export const GROK_CLI_MODELS = [
@@ -235,6 +236,7 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
             memories: opts.memories,
             agentMode: opts.agentMode
           })
+          try { opts.onPromptBuilt?.(payload) } catch { /* telemetry must not block the run */ }
         } catch (err) {
           yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
           return

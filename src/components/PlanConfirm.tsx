@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
 import type { Plan } from '../types/api'
 
@@ -8,7 +9,10 @@ import type { Plan } from '../types/api'
  * замечаниями) / Отклонить. «Высокий контроль»: человек одобряет план ДО старта.
  */
 export function PlanConfirm() {
-  const { pendingPlan, setPendingPlan } = useProject()
+  const { pendingPlan, setPendingPlan } = useProject(useShallow(s => ({
+    pendingPlan: s.pendingPlan,
+    setPendingPlan: s.setPendingPlan,
+  })))
   const [feedback, setFeedback] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
   const planId = pendingPlan?.planId ?? null

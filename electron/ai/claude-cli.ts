@@ -24,6 +24,7 @@ interface ClaudeCliOptions {
   oauthToken?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
   agentMode?: AgentMode
+  onPromptBuilt?: (payload: string) => void
 }
 
 export const CLAUDE_CLI_MODELS = [
@@ -173,6 +174,7 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           memories: opts.memories,
           agentMode: opts.agentMode
         })
+        try { opts.onPromptBuilt?.(payload) } catch { /* telemetry must not block the run */ }
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
         return

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { useProvider } from '../hooks/useProvider'
@@ -12,7 +13,11 @@ import { isolationIneffectiveWarning } from '../lib/worktree-honesty'
 type Status = { active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }
 
 export function WorktreeBar() {
-  const { activeChatId, path, helpMode } = useProject()
+  const { activeChatId, path, helpMode } = useProject(useShallow(s => ({
+    activeChatId: s.activeChatId,
+    path: s.path,
+    helpMode: s.helpMode,
+  })))
   // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const provider = useProvider()

@@ -31,6 +31,7 @@ interface GeminiCliOptions {
   skillPrompt?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
   agentMode?: AgentMode
+  onPromptBuilt?: (payload: string) => void
 }
 
 // CLI distinguishes between alias names it actually knows and what we expose
@@ -104,6 +105,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
           memories: opts.memories,
           agentMode: opts.agentMode
         })
+        try { opts.onPromptBuilt?.(userMessage) } catch { /* telemetry must not block the run */ }
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
         return

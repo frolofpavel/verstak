@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import type { ProjectGroup, ProjectMeta, ProjectStatus } from '../types/api'
@@ -439,7 +440,16 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     helpMode,
     help,
     resumableRuns,
-  } = useProject()
+  } = useProject(useShallow(s => ({
+    path: s.path,
+    projectList: s.projectList,
+    sessions: s.sessions,
+    setProject: s.setProject,
+    refreshProjectList: s.refreshProjectList,
+    helpMode: s.helpMode,
+    help: s.help,
+    resumableRuns: s.resumableRuns,
+  })))
   // 4.3: bundle-поля активного чата — из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const [startupInterruptedPaths, setStartupInterruptedPaths] = useState<Set<string>>(() => new Set())

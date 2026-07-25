@@ -255,6 +255,9 @@ export interface CreateOptions {
   /** 2.0.7-E: гейт живого каталога (пока grok-cli). Блокирует запрошенную модель ДО
    *  child-процесса, если аутентифицированный свежий каталог подтверждает её отсутствие. */
   checkModel?: (model: string) => ModelGateResult
+  /** Фактический CLI payload после единственной сборки внутри провайдера.
+   *  Нужен Debug Packet без второго полного прохода context-pack до первого токена. */
+  onPromptBuilt?: (payload: string) => void
 }
 
 export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvider {
@@ -264,7 +267,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
       return createGeminiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'gemini-cli':
-      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode })
+      return createGeminiCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, onPromptBuilt: opts.onPromptBuilt })
     case 'claude': {
       if (!opts.apiKey) throw new Error('Anthropic API key not set')
       return createClaudeProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
@@ -278,20 +281,21 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
         skillPrompt: opts.skillPrompt,
         oauthToken: opts.claudeOauthToken,
         memories: opts.memories,
-        agentMode: opts.agentMode
+        agentMode: opts.agentMode,
+        onPromptBuilt: opts.onPromptBuilt
       })
     case 'grok': {
       if (!opts.apiKey) throw new Error('xAI (Grok) API key not set')
       return createGrokProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'grok-cli':
-      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, checkModel: opts.checkModel })
+      return createGrokCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, checkModel: opts.checkModel, onPromptBuilt: opts.onPromptBuilt })
     case 'openai': {
       if (!opts.apiKey) throw new Error('OpenAI API key not set')
       return createOpenAiProvider({ apiKey: opts.apiKey, model: opts.model, effortLevel: opts.effortLevel })
     }
     case 'codex-cli':
-      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, codexHome: opts.codexHome ?? undefined })
+      return createCodexCliProvider({ cwd: opts.cwd, signal: opts.signal, model: opts.model, projectSystemPrompt: opts.projectSystemPrompt, skillPrompt: opts.skillPrompt, memories: opts.memories, agentMode: opts.agentMode, codexHome: opts.codexHome ?? undefined, onPromptBuilt: opts.onPromptBuilt })
     case 'openai-codex-oauth':
       // direct-OAuth: наш loop на подписке. codexHome (мультиаккаунт) пробрасываем.
       return createCodexOAuthProvider({ model: opts.model ?? 'gpt-5.6-sol', appVersion: APP_VERSION, codexHome: opts.codexHome ?? null })

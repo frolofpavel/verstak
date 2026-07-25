@@ -23,6 +23,7 @@ interface CodexCliOptions {
   /** 1.9.3 мультиаккаунт: изолированный CODEX_HOME активного аккаунта (auth/config/history
    *  Codex живут относительно него). undefined = дефолт ~/.codex. */
   codexHome?: string
+  onPromptBuilt?: (payload: string) => void
 }
 
 /**
@@ -137,6 +138,7 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
           memories: opts.memories,
           agentMode: opts.agentMode
         })
+        try { opts.onPromptBuilt?.(payload) } catch { /* telemetry must not block the run */ }
       } catch (err) {
         yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
         return

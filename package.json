@@ -1,6 +1,6 @@
 {
   "name": "verstak",
-  "version": "2.0.12",
+  "version": "2.2.0",
   "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
   "main": "out/main/main.mjs",
   "scripts": {
@@ -8,6 +8,7 @@
     "precommit": "node scripts/precommit.cjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "check:performance": "node scripts/check-performance-budget.mjs",
     "mobile:dev": "vite --config mobile/app/vite.config.ts",
     "mobile:build": "vite build --config mobile/app/vite.config.ts",
     "mobile:relay:build": "vite build --config mobile/relay/vite.config.ts",

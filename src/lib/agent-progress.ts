@@ -219,6 +219,10 @@ export function reduceAgentProgress(
   }
 
   if (event.type === 'thought') {
+    // Provider может присылать десятки reasoning-delta в секунду. Для панели
+    // достаточно первого перехода в фазу; последующие дельты не должны
+    // перерисовывать весь chat bundle.
+    if (progress.some(item => item.id === 'reasoning' && item.status === 'running')) return progress
     const next = markAgentProgress(progress, ['model'], 'done')
     return upsertAgentProgress(next, {
       id: 'reasoning',
@@ -231,6 +235,7 @@ export function reduceAgentProgress(
   }
 
   if (event.type === 'text') {
+    if (progress.some(item => item.id === 'final' && item.status === 'running')) return progress
     const next = markAgentProgress(progress, ['context', 'model', 'reasoning'], 'done')
     return upsertAgentProgress(next, {
       id: 'final',

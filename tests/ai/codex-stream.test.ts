@@ -63,6 +63,41 @@ describe('codex-cli stream parsing — chat-response regression', () => {
     expect(events.some(e => e.type === 'done')).toBe(true)
   })
 
+  it('отдаёт фактический CLI payload для Debug Packet без второй сборки', async () => {
+    const bin = makeFakeCodex(dir, [
+      JSON.stringify({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'ok' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } })
+    ])
+    const payloads: string[] = []
+    const provider = createCodexCliProvider({
+      binary: bin,
+      cwd: dir,
+      onPromptBuilt: payload => payloads.push(payload)
+    })
+
+    await drain(provider)
+
+    expect(payloads).toHaveLength(1)
+    expect(payloads[0]).toContain('третий вопрос')
+  })
+
+  it('ошибка telemetry callback не блокирует CLI run', async () => {
+    const bin = makeFakeCodex(dir, [
+      JSON.stringify({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'still works' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } })
+    ])
+    const provider = createCodexCliProvider({
+      binary: bin,
+      cwd: dir,
+      onPromptBuilt: () => { throw new Error('debug storage unavailable') }
+    })
+
+    const events = await drain(provider)
+
+    expect(events.filter(e => e.type === 'text').map(e => (e as { text: string }).text).join('')).toBe('still works')
+    expect(events.filter(e => e.type === 'done')).toHaveLength(1)
+  })
+
   it('reasoning item before agent_message does not swallow the answer', async () => {
     const bin = makeFakeCodex(dir, [
       JSON.stringify({ type: 'thread.started', thread_id: 'thr_1' }),

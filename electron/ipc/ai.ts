@@ -14,7 +14,6 @@ import { prepareHistoryForModel } from '../ai/history-preparation'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
 import type { RecipeSpec } from '../ai/skills/types'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
-import { buildCliPrompt, type CliProviderId } from '../ai/cli-prompt'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
 import { createLegacyMemoryProvider } from '../ai/memory/provider'
 import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemories } from '../ai/memory/run-snapshot'
@@ -1082,38 +1081,26 @@ export function registerAiIpc(deps: AiDeps): void {
     // ревьюер работает в изоляции. Уже содержит anti-stall nudge (Chat.tsx).
     const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (skillLayerPrompt ?? null)
 
-    // Debug Packet для CLI-провайдеров. API-путь снапшотит composedSystem выше;
-    // CLI строит свой stdin-payload внутри buildCliPrompt и раньше ничего не
-    // сохранял — Debug Packet был «слепым» для claude-cli/codex-cli/grok-cli/
-    // gemini-cli. Здесь вызываем buildCliPrompt ВТОРОЙ раз ровно с теми же опциями,
-    // что использует сам CLI-провайдер (см. *-cli.ts: projectPath=cwd, без
-    // recentWrites, projectSystemPrompt/skillPrompt/memories пробрасываются),
-    // чтобы сохранённый промпт совпадал с реально отправленным. Лишний вызов —
-    // приемлемая цена ради отладочной фичи; никогда не блокирует run (try/catch).
-    if (descriptor.transport !== 'API' && deps.saveRunInput) {  // CLI + Tunnel (2.0.4)
-      const lastUser = [...messages].reverse().find(m => m.role === 'user')
-      try {
-        const cliPayload = await buildCliPrompt({
-          providerId: providerId as CliProviderId,
-          projectPath: projectPath ?? process.cwd(),
-          messages,
-          projectSystemPrompt: projectSystemPromptForProvider,
-          skillPrompt: skillPromptForProvider,
-          memories,
-          consolidationHint: consolidationHint ?? undefined
-        })
-        deps.saveRunInput({
-          runId,
-          projectPath,
-          chatId: chatId ? Number(chatId) : null,
-          timestamp: Date.now(),
-          providerId,
-          model: model ?? null,
-          systemPrompt: cliPayload,
-          userMessage: lastUser?.content ?? ''
-        })
-      } catch { /* snapshot not critical — CLI run continues unaffected */ }
-    }
+    // 2.2 speed: Debug Packet получает ФАКТИЧЕСКИЙ payload через callback самого
+    // CLI-провайдера. Раньше здесь синхронно строился второй полный context-pack,
+    // удваивая локальную подготовку до первого токена.
+    const onCliPromptBuilt = descriptor.transport !== 'API' && deps.saveRunInput
+      ? (cliPayload: string) => {
+          const lastUser = [...messages].reverse().find(m => m.role === 'user')
+          try {
+            deps.saveRunInput?.({
+              runId,
+              projectPath,
+              chatId: chatId ? Number(chatId) : null,
+              timestamp: Date.now(),
+              providerId,
+              model: model ?? null,
+              systemPrompt: cliPayload,
+              userMessage: lastUser?.content ?? ''
+            })
+          } catch { /* snapshot not critical — CLI run continues unaffected */ }
+        }
+      : undefined
 
     emitAgentProgress(taggedSender, sendId, {
       id: 'provider-create',
@@ -1188,7 +1175,8 @@ export function registerAiIpc(deps: AiDeps): void {
         memories: descriptor.transport !== 'API' ? memories : undefined,  // CLI + Tunnel (2.0.4)
         effortLevel: resolvedEffort,
         agentMode,
-        checkModel
+        checkModel,
+        onPromptBuilt: onCliPromptBuilt
       })
       logRuntime('ai.provider.created', { sendId, runId, providerId, model, transport: descriptor.transport })
       emitAgentProgress(taggedSender, sendId, {

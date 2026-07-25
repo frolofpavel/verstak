@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { diffLines, type Change } from 'diff'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 
@@ -23,7 +24,11 @@ function computeDiff(before: string, after: string): FileDiffStats {
 export function DiffView() {
   // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const pendingWrites = useActiveChatField('pendingWrites') ?? []
-  const { resolvePendingWrite, updateActivity, path } = useProject()
+  const { resolvePendingWrite, updateActivity, path } = useProject(useShallow(s => ({
+    resolvePendingWrite: s.resolvePendingWrite,
+    updateActivity: s.updateActivity,
+    path: s.path,
+  })))
   const [activeCallId, setActiveCallId] = useState<string | null>(null)
 
   // Whenever the queue changes, keep activeCallId pointing at something valid

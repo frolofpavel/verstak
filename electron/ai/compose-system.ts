@@ -86,7 +86,37 @@ export async function prepareSystemContext(input: PrepareSystemInput): Promise<C
  */
 export async function prepareParts(input: PrepareSystemInput): Promise<PreparedParts> {
   const { projectPath, messages, recentWrites, projectSystemPrompt, memories, coreMemory } = input
-  let userLayer = projectPath ? await loadUserLayer(projectPath) : { path: null, content: '' }
+  const lastUser = messages.filter(m => m.role === 'user').at(-1)
+  const isFirstTurn = !messages.some(m => m.role === 'assistant')
+
+  // 2.2 speed: независимые чтения запускаются одновременно. Раньше каждый await
+  // добавлял свою задержку до старта модели.
+  const userLayerPromise = projectPath
+    ? loadUserLayer(projectPath)
+    : Promise.resolve<UserLayer>({ path: null, content: '' })
+  const fileRulesPromise = projectPath
+    ? loadFileScopedRules(projectPath).catch(err => {
+        console.warn('[prepareSystemContext] file-rules failed:', err instanceof Error ? err.message : err)
+        return []
+      })
+    : Promise.resolve([])
+  const contextPackPromise = projectPath
+    ? buildContextPack({
+        projectPath,
+        recentWrites,
+        latestUserMessage: lastUser?.content ?? '',
+        isFirstTurn,
+        memories,
+        consolidationHint: input.consolidationHint,
+        coreMemory,
+        brainContext: input.brainContext
+      }).catch(err => {
+        console.warn('[prepareSystemContext] buildContextPack failed:', err instanceof Error ? err.message : err)
+        return ''
+      })
+    : Promise.resolve('')
+
+  let userLayer = await userLayerPromise
 
   // Project Settings — пользователь может задать промпт через UI шестерёнки
   // в Project Rail. Он сохраняется в settings ключом `system_prompt_${path}`.
@@ -130,22 +160,18 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
   // префикс). Иначе кэш-мисс каждый ход, когда агент пишет файлы под разные globs.
   let fileRulesBlock = ''
   if (projectPath) {
-    try {
-      const rules = await loadFileScopedRules(projectPath)
-      if (rules.length) {
-        const activeFiles = recentWrites.map(w =>
-          (isAbsolute(w.filePath) ? relative(projectPath, w.filePath) : w.filePath).replace(/\\/g, '/'))
-        const active = selectActiveRules(rules, activeFiles)
-        if (active.length) {
-          // Cap как у user-layer (MAX_BYTES): не раздуваем промпт большими .mdc на каждом ходу.
-          const MAX_RULES_CHARS = 8000
-          let block = active.map(r => r.body).join('\n\n')
-          if (block.length > MAX_RULES_CHARS) block = block.slice(0, MAX_RULES_CHARS) + '\n…[file-scoped правила обрезаны по лимиту]'
-          fileRulesBlock = `<!-- file_scoped_rules -->\n${block}`
-        }
+    const rules = await fileRulesPromise
+    if (rules.length) {
+      const activeFiles = recentWrites.map(w =>
+        (isAbsolute(w.filePath) ? relative(projectPath, w.filePath) : w.filePath).replace(/\\/g, '/'))
+      const active = selectActiveRules(rules, activeFiles)
+      if (active.length) {
+        // Cap как у user-layer (MAX_BYTES): не раздуваем промпт большими .mdc на каждом ходу.
+        const MAX_RULES_CHARS = 8000
+        let block = active.map(r => r.body).join('\n\n')
+        if (block.length > MAX_RULES_CHARS) block = block.slice(0, MAX_RULES_CHARS) + '\n…[file-scoped правила обрезаны по лимиту]'
+        fileRulesBlock = `<!-- file_scoped_rules -->\n${block}`
       }
-    } catch (err) {
-      console.warn('[prepareSystemContext] file-rules failed:', err instanceof Error ? err.message : err)
     }
   }
 
@@ -180,26 +206,7 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
     userLayer = { path: userLayer.path, content: `${userLayer.content}\n\n${modePreset}` }
   }
 
-  let contextPack = ''
-  if (projectPath) {
-    const lastUser = messages.filter(m => m.role === 'user').at(-1)
-    const isFirstTurn = !messages.some(m => m.role === 'assistant')
-    try {
-      contextPack = await buildContextPack({
-        projectPath,
-        recentWrites,
-        latestUserMessage: lastUser?.content ?? '',
-        isFirstTurn,
-        memories,
-        consolidationHint: input.consolidationHint,
-        coreMemory,
-        brainContext: input.brainContext
-      })
-    } catch (err) {
-      // Visible failure — previously this was silent and made debugging hard.
-      console.warn('[prepareSystemContext] buildContextPack failed:', err instanceof Error ? err.message : err)
-    }
-  }
+  let contextPack = await contextPackPromise
 
   // file-scoped правила — в ХВОСТ context-pack (volatile), после кэш-маркера.
   if (fileRulesBlock) {

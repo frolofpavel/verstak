@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useActiveChatBundle, getActiveChatBundle } from '../hooks/useActiveChatBundle'
 import { emptySessionUsage } from '../store/session-snapshot'
@@ -77,6 +78,7 @@ import {
   isLegacyDoc,
 } from '../lib/chat-attachments'
 import { type AgentProgressEntry } from '../lib/agent-progress'
+import { createStreamDeltaBatcher } from '../lib/stream-delta-batcher'
 
 interface ComposerPendingState {
   queuedMessages: QueuedComposerMessage[]
@@ -296,7 +298,27 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setComposerDraft,
     clearComposerDraft,
     setActiveView,
-  } = useProject()
+  } = useProject(useShallow(s => ({
+    helpMode: s.helpMode,
+    help: s.help,
+    helpChatId: s.helpChatId,
+    addMessage: s.addMessage,
+    insertMessageBeforeLast: s.insertMessageBeforeLast,
+    updateLastAssistant: s.updateLastAssistant,
+    setStreaming: s.setStreaming,
+    path: s.path,
+    chatSessions: s.chatSessions,
+    activeChatId: s.activeChatId,
+    resumableRuns: s.resumableRuns,
+    chatHasMoreBefore: s.chatHasMoreBefore,
+    chatTotalCount: s.chatTotalCount,
+    loadOlderMessages: s.loadOlderMessages,
+    addHelpMessage: s.addHelpMessage,
+    setHelpStreaming: s.setHelpStreaming,
+    setComposerDraft: s.setComposerDraft,
+    clearComposerDraft: s.clearComposerDraft,
+    setActiveView: s.setActiveView,
+  })))
   // 4.3: bundle активного чата — из chats (SSOT), не из top-level проекции.
   // Chat.tsx и так подписан на весь store — гранулярность рендера не меняется.
   const activeBundle = useActiveChatBundle()
@@ -743,6 +765,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const exportNoticeTimer = useRef<number | null>(null)
   const contextCompactTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
+  const streamDeltaBatcherRef = useRef<ReturnType<typeof createStreamDeltaBatcher> | null>(null)
+  if (streamDeltaBatcherRef.current == null) {
+    streamDeltaBatcherRef.current = createStreamDeltaBatcher(({ chatId, text, thought }) => {
+      useProject.getState().appendChatStreamDelta(chatId, text, thought)
+    })
+  }
+  useEffect(() => () => streamDeltaBatcherRef.current?.dispose(), [])
   const persistedAssistantBySendIdRef = useRef(new Map<number, {
     messageId: number
     content: string
@@ -1330,9 +1359,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // новый стрим активного чата (#17). registerSendOwner ставится синхронно
       // до событий, так что у живого активного send'а owner всегда есть.
       if (!owner) return
+      if (event.type === 'done' || event.type === 'error') {
+        streamDeltaBatcherRef.current?.flush(id)
+      }
       store.applyAgentProgressEvent(event as unknown as { type: string; [k: string]: unknown })
-      if (event.type === 'text') updateLastAssistant(event.text)
-      else if (event.type === 'thought') store.appendLastAssistantThinking(event.text)
+      if (event.type === 'text') streamDeltaBatcherRef.current?.enqueue(id, owner.chatId, 'text', event.text)
+      else if (event.type === 'thought') streamDeltaBatcherRef.current?.enqueue(id, owner.chatId, 'thought', event.text)
       else if (event.type === 'pending-write') {
         store.addPendingWrite({
           callId: event.callId,

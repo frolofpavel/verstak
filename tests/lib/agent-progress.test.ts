@@ -61,3 +61,21 @@ describe('agent progress', () => {
     expect(active.find(item => item.id === 'model')?.title).toBe('Grok Build · grok-4.5 начал работу')
   })
 })
+
+describe('agent progress stream performance', () => {
+  it('не создаёт новое состояние на каждую text-delta после старта финала', () => {
+    const initial = buildInitialAgentProgress('ускорить ответ')
+    const started = reduceAgentProgress(initial, { type: 'text', text: 'первый' })
+    const repeated = reduceAgentProgress(started, { type: 'text', text: 'второй' })
+
+    expect(repeated).toBe(started)
+  })
+
+  it('не создаёт новое состояние на каждую thought-delta', () => {
+    const initial = buildInitialAgentProgress('ускорить ответ')
+    const started = reduceAgentProgress(initial, { type: 'thought', text: 'первый' })
+    const repeated = reduceAgentProgress(started, { type: 'thought', text: 'второй' })
+
+    expect(repeated).toBe(started)
+  })
+})
