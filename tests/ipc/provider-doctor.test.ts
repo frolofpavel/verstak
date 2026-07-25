@@ -17,8 +17,8 @@ const T0 = 1_000_000_000_000 // фиксируем «сейчас» — дете
 describe('model-catalog-service: кеш только id+timestamp, TTL 24ч', () => {
   it('save → load возвращает id/дефолт/источник/authenticated, срок = now+24ч', () => {
     const s = memStore()
-    const e = saveLiveCatalog(s, 'grok-cli', { models: ['grok-4.5', 'grok-composer-2.5-fast'], defaultModel: 'grok-4.5', authenticated: true }, T0)
-    expect(e.ids).toEqual(['grok-4.5', 'grok-composer-2.5-fast'])
+    const e = saveLiveCatalog(s, 'grok-cli', { models: ['grok-4.5'], defaultModel: 'grok-4.5', authenticated: true }, T0)
+    expect(e.ids).toEqual(['grok-4.5'])
     expect(e.defaultModel).toBe('grok-4.5')
     expect(e.source).toBe('cli-live')
     expect(e.authenticated).toBe(true)
@@ -57,13 +57,13 @@ describe('model-catalog-service: кеш только id+timestamp, TTL 24ч', ()
 })
 
 describe('checkModelAvailable — гейт перед child-процессом (шаг 6)', () => {
-  const fresh = { providerId: 'grok-cli', source: 'cli-live' as const, ids: ['grok-4.5', 'grok-composer-2.5-fast'], defaultModel: 'grok-4.5', authenticated: true, fetchedAt: T0, expiresAt: T0 + CATALOG_TTL_MS }
+  const fresh = { providerId: 'grok-cli', source: 'cli-live' as const, ids: ['grok-4.5'], defaultModel: 'grok-4.5', authenticated: true, fetchedAt: T0, expiresAt: T0 + CATALOG_TTL_MS }
 
   it('ACCEPTANCE: сохранённый grok-build отсутствует в живом каталоге → блок + варианты', () => {
     const g = checkModelAvailable(fresh, 'grok-build', T0)
     expect(g.ok).toBe(false)
     expect(g.reasonCode).toBe('MODEL_UNAVAILABLE')
-    expect(g.available).toEqual(['grok-4.5', 'grok-composer-2.5-fast'])
+    expect(g.available).toEqual(['grok-4.5'])
     expect(g.suggested).toBe('grok-4.5') // one-click repair — дефолт живого каталога
   })
 

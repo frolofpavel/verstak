@@ -63,4 +63,19 @@ describe('selectAllowedToolDefs (M4 — enforce skill tools_allow)', () => {
     expect(names).toEqual(['mcp_fetch'])
     expect(names).not.toContain('write_file') // ключевое: ограничение держится
   })
+
+  it('псевдо-имена раскрываются только в нужные реальные инструменты', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const names = selectAllowedToolDefs(BASE, MCP, [
+      'yandex_wordstat',
+      'connector_query',
+      'files',
+    ]).map(d => d.name)
+    expect(names).toEqual(['read_file', 'search_project', 'get_project_map', 'connector_query'])
+    expect(names).toContain('read_file')
+    expect(names).not.toContain('write_file')
+    expect(names).not.toContain('run_command')
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })

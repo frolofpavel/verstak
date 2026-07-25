@@ -146,6 +146,41 @@ export interface ProviderDescriptorDTO {
 
 // ─── Чистые выводимые функции (одна правда для обеих сторон) ────────────────
 
+export const STALE_GROK_MODEL_IDS = new Set(['grok-composer-2.5-fast', 'grok-composer-2.5', 'grok-build'])
+export const CURRENT_GROK_BUILD_MODEL = 'grok-4.5'
+const STALE_GROK_MODEL_TEXT_RE = /\b(?:grok-composer-2\.5-fast|grok-composer-2\.5|grok-build)\b/gi
+
+export function isStaleModelId(model: string | null | undefined): boolean {
+  const normalized = typeof model === 'string' ? model.trim().toLowerCase() : ''
+  return normalized.length > 0 && STALE_GROK_MODEL_IDS.has(normalized)
+}
+
+export function normalizeSelectedModel(
+  model: string | null | undefined,
+  catalog: { models?: readonly string[] | null; defaultModel: string },
+): string {
+  const raw = typeof model === 'string' ? model.trim() : ''
+  const models = catalog.models ?? []
+  if (isStaleModelId(raw)) return catalog.defaultModel
+  if (!raw) return catalog.defaultModel
+  if (models.length === 0) return raw
+  return models.includes(raw) ? raw : catalog.defaultModel
+}
+
+export function formatModelProgressLabel(
+  providerName: string | null | undefined,
+  model: string | null | undefined,
+): string {
+  const label = typeof providerName === 'string' ? providerName.trim() : ''
+  const cleanModel = isStaleModelId(model) ? '' : (typeof model === 'string' ? model.trim() : '')
+  return [label, cleanModel].filter(Boolean).join(' · ') || 'модель'
+}
+
+export function sanitizeStaleModelText(text: string, replacement = CURRENT_GROK_BUILD_MODEL): string {
+  const cleanReplacement = isStaleModelId(replacement) ? CURRENT_GROK_BUILD_MODEL : replacement.trim()
+  return text.replace(STALE_GROK_MODEL_TEXT_RE, cleanReplacement || CURRENT_GROK_BUILD_MODEL)
+}
+
 /** CLI и Tunnel — оба subprocess: движок вне нашего loop'а. */
 export function isSubprocessTransport(t: ProviderTransport): boolean {
   return t === 'CLI' || t === 'Tunnel'

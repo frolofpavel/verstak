@@ -88,6 +88,7 @@ export interface SendChatMessageInput {
   displayText: string
   attachments: Attachment[]
   providerLabel: string
+  selectedRoute?: { selectedProviderId?: string; selectedModel?: string }
   opts?: { text?: string; modelText?: string; internalResume?: boolean; fromQueue?: boolean }
   messageAppliedSkills: AppliedSkillRef[]
   messageAppliedSkillDetails: Skill[]
@@ -103,7 +104,7 @@ export type ChatSendResult =
   | { kind: 'send-failed' }
 
 export async function sendChatMessage(input: SendChatMessageInput, deps: SendChatMessageDeps): Promise<ChatSendResult> {
-  const { text, modelText, displayText, attachments, providerLabel, opts } = input
+  const { text, modelText, displayText, attachments, providerLabel, selectedRoute = {}, opts } = input
   const { messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails } = input
   const { api } = deps
   const store = deps.getProjectState()
@@ -273,6 +274,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
       effortLevel: deps.getProjectState().effortLevel,
       agentMode: sendAgentMode,
       ...(resumeFromRunId ? { resumeFromRunId } : {}),
+      ...selectedRoute,
       ...outcomeOverride,
       ...routeOverride
     }, sendChatId)
@@ -283,6 +285,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
       resumeFromRunId,
       agentMode: sendAgentMode,
       ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+      ...selectedRoute,
       ...outcomeOverride,
       ...routeOverride
     }, sendChatId)
@@ -291,6 +294,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
     sendId = await api.sendWithOverrides(modelMessages, path, {
       ...(effort !== 'standard' ? { effortLevel: effort } : {}),
       agentMode: sendAgentMode,
+      ...selectedRoute,
       ...outcomeOverride,
       ...routeOverride
     }, sendChatId)

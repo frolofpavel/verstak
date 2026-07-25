@@ -60,6 +60,7 @@ export interface SendHelpMessageInput {
   displayText: string
   attachments: Attachment[]
   providerLabel: string
+  selectedRoute?: { selectedProviderId?: string; selectedModel?: string }
   /** Из send(): важны только text (своя отправка vs программная) и fromQueue. */
   opts?: { text?: string; fromQueue?: boolean }
 }
@@ -75,7 +76,7 @@ export type HelpSendResult =
 const ANTI_STALL_NUDGE = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
 
 export async function sendHelpMessage(input: SendHelpMessageInput, deps: SendHelpMessageDeps): Promise<HelpSendResult> {
-  const { text, modelText, displayText, attachments, providerLabel, opts } = input
+  const { text, modelText, displayText, attachments, providerLabel, selectedRoute = {}, opts } = input
   const { api } = deps
   const store = deps.getProjectState()
   const helpChatId = store.helpChatId
@@ -130,6 +131,7 @@ export async function sendHelpMessage(input: SendHelpMessageInput, deps: SendHel
     : null
   const helpOverrides: HelpSendOverrides = {
     ...HELP_CHAT_SEND_OVERRIDES,
+    ...selectedRoute,
   }
   if (activeSkill) {
     // Provider override — только при смене семейства (API↔CLI сохраняется);

@@ -295,7 +295,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'connector_query',
-    description: 'Выполнить запрос к внешнему коннектору. Сначала вызови list_connectors и используй id из списка. Для Wordstat: id="yandex_wordstat", op="get_top_requests", phrase + optional regions/num_phrases или op="get_wordstat", phrases[]. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
+    description: 'Выполнить запрос к внешнему коннектору. id — id коннектора (НЕ имя tool). Для Wordstat сразу вызывай id="yandex_wordstat", op="get_top_requests" (phrase, regions?, num_phrases?) или op="get_wordstat" (phrases[]). list_connectors опционален: не пиши «Wordstat недоступен» без live-ответа connector_query. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
     parameters: {
       type: 'object',
       properties: {

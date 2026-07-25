@@ -63,6 +63,7 @@ export function ComposerToolsMenu({
   const lastRefreshAt = useSkills(s => s.lastRefreshAt)
   const serverReachable = useSkills(s => s.serverReachable)
   const setActiveSkill = useSkills(s => s.setActiveSkill)
+  const queueDraftSkill = useSkills(s => s.queueDraftSkill)
   const refresh = useSkills(s => s.refresh)
 
   const [open, setOpen] = useState(false)
@@ -355,7 +356,8 @@ export function ComposerToolsMenu({
   }
 
   function pickSkill(id: string | null) {
-    setActiveSkill(id)
+    if (id) queueDraftSkill(id)
+    else setActiveSkill(null)
     setOpen(false)
   }
 

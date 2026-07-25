@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInitialAgentProgress, reduceAgentProgress } from '../../src/lib/agent-progress'
+import { activateModelProgress, buildInitialAgentProgress, reduceAgentProgress } from '../../src/lib/agent-progress'
 import { applySnapshotEvent } from '../../src/store/apply-snapshot-event'
 import { freshSnapshot } from '../../src/store/session-snapshot'
 
@@ -51,5 +51,13 @@ describe('agent progress', () => {
     })
     const reasoning = next.find(item => item.id === 'reasoning')
     expect(reasoning?.detail).toContain('Проверь рекламу')
+  })
+
+  it('не показывает снятые Grok model ids во frontend progress', () => {
+    const stale = 'Grok Build · grok-composer-2.5-fast'
+    const initial = buildInitialAgentProgress('Проверь модель', stale)
+    expect(initial.find(item => item.id === 'model')?.title).toBe('Готовлю запуск Grok Build · grok-4.5')
+    const active = activateModelProgress(initial, stale)
+    expect(active.find(item => item.id === 'model')?.title).toBe('Grok Build · grok-4.5 начал работу')
   })
 })

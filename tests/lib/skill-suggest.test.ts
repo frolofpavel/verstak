@@ -285,4 +285,25 @@ describe('suggestSkill', () => {
   it('порог экспортируется и равен 3', () => {
     expect(SUGGEST_THRESHOLD).toBe(3)
   })
+
+  it('учитывает ручные теги скилла в рекомендациях', () => {
+    const customSkill = mk({
+      id: 'custom-minusation',
+      name: 'custom-minusation',
+      description: 'Внутренний рабочий скилл',
+      suggested_prompts: [],
+      user_tags: ['проминусовать площадки', 'чистка РСЯ'],
+    })
+    const otherSkill = mk({
+      id: 'general-helper',
+      name: 'general-helper',
+      description: 'Общий помощник',
+      suggested_prompts: [],
+    })
+    expect(suggestSkill(
+      'Нужно проминусовать площадки в РСЯ по расходам',
+      [otherSkill, customSkill],
+      null,
+    )?.id).toBe('custom-minusation')
+  })
 })

@@ -1,3 +1,5 @@
+import { sanitizeStaleModelText } from '../../shared/contracts/provider'
+
 export type AgentProgressPhase =
   | 'understand'
   | 'context'
@@ -44,7 +46,8 @@ function compact(text: unknown, max = 180): string | undefined {
     .replace(/\s+/g, ' ')
     .trim()
   if (!clean) return undefined
-  return clean.length > max ? clean.slice(0, max - 1) + '...' : clean
+  const sanitized = sanitizeStaleModelText(clean)
+  return sanitized.length > max ? sanitized.slice(0, max - 1) + '...' : sanitized
 }
 
 function hasCyrillic(text: string): boolean {
@@ -148,6 +151,7 @@ export function markAgentProgress(
 export function buildInitialAgentProgress(taskText: string, providerLabel?: string): AgentProgressEntry[] {
   const ts = now()
   const focus = compact(taskText, 240) ?? 'Новый запрос пользователя'
+  const cleanProviderLabel = providerLabel ? sanitizeStaleModelText(providerLabel) : undefined
   return [
     {
       id: TASK_FOCUS_ID,
@@ -168,7 +172,7 @@ export function buildInitialAgentProgress(taskText: string, providerLabel?: stri
     {
       id: 'model',
       phase: 'model',
-      title: providerLabel ? `Готовлю запуск ${providerLabel}` : 'Готовлю запуск модели',
+      title: cleanProviderLabel ? `Готовлю запуск ${cleanProviderLabel}` : 'Готовлю запуск модели',
       detail: 'Собираю запрос для модели с учётом текущего режима и выбранного провайдера.',
       status: 'pending',
       timestamp: ts + 2
@@ -179,11 +183,12 @@ export function buildInitialAgentProgress(taskText: string, providerLabel?: stri
 export function activateModelProgress(progress: AgentProgressEntry[], providerLabel?: string): AgentProgressEntry[] {
   const ts = now()
   const focus = taskFocus(progress)
+  const cleanProviderLabel = providerLabel ? sanitizeStaleModelText(providerLabel) : undefined
   let next = markAgentProgress(progress, ['context'], 'done')
   next = upsertAgentProgress(next, {
     id: 'model',
     phase: 'model',
-    title: providerLabel ? `${providerLabel} начал работу` : 'Модель начала работу',
+    title: cleanProviderLabel ? `${cleanProviderLabel} начал работу` : 'Модель начала работу',
     detail: focus
       ? `Передал задачу модели. Жду первые признаки работы по запросу: ${focus}`
       : 'Передал задачу модели. Жду рассуждение, инструмент или видимый текст ответа.',
@@ -206,7 +211,7 @@ export function reduceAgentProgress(
     return upsertAgentProgress(progress, {
       id: payload.id ?? `${payload.phase}-${payload.title}`,
       phase: payload.phase,
-      title: payload.title,
+      title: sanitizeStaleModelText(payload.title),
       detail: compact(payload.detail, 220),
       status: payload.status ?? 'running',
       timestamp: ts

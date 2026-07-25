@@ -17,7 +17,7 @@ describe('skillStore setActiveSkill', () => {
     vi.stubGlobal('window', windowStub)
     setKey.mockClear()
     recordUse.mockClear()
-    useSkills.setState({ activeSkillId: null, skills: [] }, false)
+    useSkills.setState({ activeSkillId: null, pendingDraftSkillId: null, skills: [] }, false)
   })
 
   it('скилл с default_mode не пишет глобальный agent_mode', () => {
@@ -39,5 +39,13 @@ describe('skillStore setActiveSkill', () => {
     useSkills.getState().setActiveSkill(null)
     expect(setKey).not.toHaveBeenCalled()
     expect(recordUse).not.toHaveBeenCalled()
+  })
+
+  it('queueDraftSkill хранит одноразовый скилл текущего черновика', () => {
+    useSkills.getState().queueDraftSkill('plain')
+    expect(useSkills.getState().pendingDraftSkillId).toBe('plain')
+    expect(useSkills.getState().consumeDraftSkill()).toBe('plain')
+    expect(useSkills.getState().pendingDraftSkillId).toBeNull()
+    expect(recordUse).toHaveBeenCalledWith('plain')
   })
 })

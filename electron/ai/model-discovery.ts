@@ -36,7 +36,6 @@ export interface DiscoveryResult {
  *            Default model: grok-4.5
  *            Available models:
  *              * grok-4.5 (default)
- *              - grok-composer-2.5-fast
  *
  * ВАЖНО: unauth-состояние отдаёт каталог и exit 0 БЕЗ ошибки — баннер «not authenticated»
  * НЕ ошибка, парсер его переживает. Маркер строки модели — `*` (дефолт) или `-`; id =

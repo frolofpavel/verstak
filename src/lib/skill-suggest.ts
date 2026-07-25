@@ -23,6 +23,7 @@ export const SUGGEST_THRESHOLD = 3
 export interface SkillTokenIndex {
   skill: Skill
   promptTokens: Set<string>
+  tagTokens: Set<string>
   metaTokens: Set<string>
   autoSuggestable: boolean
   domain: 'client-marketing' | 'client-account' | 'wordstat' | 'metrika' | 'direct-search-minusation' | 'direct-rsya-sites-minusation' | 'direct-semantics' | 'direct-cross-minusation' | 'metrika-conversions-audit' | 'direct-campaign-setup' | 'client-weekly-report' | null
@@ -84,6 +85,23 @@ function hasAnyNeedle(haystack: string, needles: readonly string[]): boolean {
   return needles.some(needle => haystack.includes(needle))
 }
 
+function hasKeywordCollectionIntent(draft: string): boolean {
+  const text = draft.toLowerCase()
+  const hasCollectionAction = hasAnyNeedle(text, [
+    'собери', 'собрать', 'сбор', 'подбери', 'подберите', 'подобрать', 'подбор',
+    'найди', 'найти', 'подготовь', 'подготовить',
+  ])
+  const hasKeywordNoun = hasAnyNeedle(text, [
+    'ключ', 'ключев', 'ключевые слова', 'ключевых слов', 'ключевые фразы',
+    'ключевых фраз', 'ключевые запросы', 'ключевых запросов',
+  ])
+  const hasPhraseCollection = hasAnyNeedle(text, [
+    'собери фраз', 'собрать фраз', 'сбор фраз', 'подбери фраз',
+    'подберите фраз', 'подобрать фраз', 'подбор фраз',
+  ])
+  return (hasCollectionAction && hasKeywordNoun) || hasPhraseCollection
+}
+
 function marketingIntentScore(draft: string, draftTokens: Set<string>): number {
   const text = draft.toLowerCase()
   let score = 0
@@ -100,6 +118,7 @@ function wordstatIntentScore(draft: string): number {
   const text = draft.toLowerCase()
   let score = 0
   if (hasAnyNeedle(text, ['вордстат', 'wordstat', 'toprequests', 'dynamics'])) score += 6
+  if (hasKeywordCollectionIntent(draft)) score += 8
   if (hasAnyNeedle(text, ['частотност', 'частота'])) score += 4
   if (hasAnyNeedle(text, ['семантик', 'семантическ'])) score += 4
   if (hasAnyNeedle(text, ['подбор фраз', 'подобрать фраз', 'собрать фраз'])) score += 3
@@ -110,7 +129,7 @@ function wordstatIntentScore(draft: string): number {
 
 function hasExplicitWordstatIntent(draft: string): boolean {
   const text = draft.toLowerCase()
-  return hasAnyNeedle(text, ['вордстат', 'wordstat', 'toprequests', 'dynamics', 'частотност', 'частота'])
+  return hasKeywordCollectionIntent(draft) || hasAnyNeedle(text, ['вордстат', 'wordstat', 'toprequests', 'dynamics', 'частотност', 'частота'])
 }
 
 function metrikaIntentScore(draft: string): number {
@@ -166,7 +185,11 @@ function operationIntentScore(domain: SkillTokenIndex['domain'], draft: string):
       if (hasAnyNeedle(text, ['отчёт', 'отчет', 'сводк', 'что было сделано'])) score += 5
       if (hasAnyNeedle(text, ['недел', 'период', 'клиент', 'руководител'])) score += 3
       break
-    default:
+    case 'client-marketing':
+    case 'client-account':
+    case 'wordstat':
+    case 'metrika':
+    case null:
       break
   }
   return score
@@ -191,7 +214,13 @@ function scoreSkillEntry(
   metrikaScore: number
 ): number {
   let score = 0
+  const text = draft.toLowerCase()
+  for (const tag of entry.skill.user_tags ?? []) {
+    const normalizedTag = tag.trim().toLowerCase()
+    if (normalizedTag.length >= 3 && text.includes(normalizedTag)) score += 8
+  }
   for (const t of draftTokens) {
+    if (entry.tagTokens.has(t)) score += 5
     if (entry.promptTokens.has(t)) score += 2
     else if (entry.metaTokens.has(t)) score += 1
   }
@@ -228,6 +257,7 @@ export function buildSkillIndex(skills: Skill[]): SkillTokenIndex[] {
   return skills.map(sk => ({
     skill: sk,
     promptTokens: new Set((sk.suggested_prompts ?? []).flatMap(tokenize)),
+    tagTokens: new Set((sk.user_tags ?? []).flatMap(tokenize)),
     metaTokens: new Set([...tokenize(sk.name ?? ''), ...tokenize(sk.description ?? '')]),
     autoSuggestable: isAutoSuggestableSkill(sk),
     domain: skillDomain(sk),

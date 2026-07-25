@@ -53,6 +53,7 @@ import { isCliProvider } from '../lib/model-catalog'
 import { toProjectAbsPath } from '../lib/project-path'
 import type { PipelineRun, PipelineStep, PipelineBrief, PipelineMode, TaskContractV1 } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
+import { isStaleModelId, normalizeSelectedModel } from '../../shared/contracts/provider'
 import {
   formatChatDateDivider,
   formatMessageClock,
@@ -505,10 +506,58 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }, [activeChatId, isStreaming, helpMode])
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode(activeChatId, helpMode)
   const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
+  const activeChatSession = !isHelpChat
+    ? chatSessions.find(s => s.id === activeChatId) ?? null
+    : null
   const activeChatTitle = isHelpChat
     ? t.help.emptyTitle
-    : (chatSessions.find(s => s.id === activeChatId)?.title ?? null)
+    : (activeChatSession?.title ?? null)
   const provider = useProvider()
+  const agentModelLabel = useMemo(() => {
+    const sameProvider = !activeChatSession?.providerId || activeChatSession.providerId === provider.id
+    const rawModel = sameProvider ? (activeChatSession?.model || provider.model) : provider.model
+    const model = normalizeSelectedModel(rawModel, {
+      models: provider.models,
+      defaultModel: provider.defaultModel || provider.model,
+    })
+    return model && model !== provider.label ? `${provider.label} · ${model}` : provider.label
+  }, [
+    activeChatSession?.providerId,
+    activeChatSession?.model,
+    provider.id,
+    provider.label,
+    provider.model,
+    provider.defaultModel,
+    provider.models,
+  ])
+  const selectedRoute = useMemo(() => ({
+    selectedProviderId: provider.id,
+    selectedModel: provider.model || provider.defaultModel,
+  }), [provider.id, provider.model, provider.defaultModel])
+  useEffect(() => {
+    if (isHelpChat || activeChatId == null) return
+    if (!activeChatSession?.model || activeChatSession.providerId !== provider.id) return
+    const savedModel = activeChatSession.model.trim()
+    const unavailable = provider.models.length > 0 && !provider.models.includes(savedModel)
+    if (!isStaleModelId(savedModel) && !unavailable) return
+    const replacement = normalizeSelectedModel(provider.model, {
+      models: provider.models,
+      defaultModel: provider.defaultModel,
+    })
+    if (!replacement || replacement === savedModel) return
+    void window.api.chatSessions.setModel(activeChatId, provider.id, replacement)
+      .then(() => useProject.getState().refreshChatSessions())
+      .catch(() => {})
+  }, [
+    isHelpChat,
+    activeChatId,
+    activeChatSession?.providerId,
+    activeChatSession?.model,
+    provider.id,
+    provider.model,
+    provider.defaultModel,
+    provider.models,
+  ])
   // ось 3 A: смена режима свопит модель по привязке mode_models_<provider> (plan →
   // reasoning-модель, act/auto → дешёвый кодер). Идёт через onChange ModePicker —
   // ловит И клики, И клавиши 1-5. Нет привязки для режима → модель не трогаем.
@@ -539,10 +588,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // Авто-предложение скилла: матчим черновик к скиллам, предлагаем активацию (с апрувом).
   const allSkills = useSkillsStore(s => s.skills)
   const activeSkillId = useSkillsStore(s => s.activeSkillId)
+  const pendingDraftSkillId = useSkillsStore(s => s.pendingDraftSkillId)
   const activeSkillForComposer = useMemo(() => {
     if (!activeSkillId) return null
     return allSkills.find(skill => skill.id === activeSkillId) ?? null
   }, [activeSkillId, allSkills])
+  useEffect(() => {
+    if (!pendingDraftSkillId) return
+    const skill = allSkills.find(item => item.id === pendingDraftSkillId)
+    if (!skill) {
+      void useSkillsStore.getState().refresh().catch(() => {})
+      return
+    }
+    applySkillToCurrentMessage(skill)
+    useSkillsStore.getState().consumeDraftSkill()
+  }, [pendingDraftSkillId, allSkills])
   const [dismissedSuggestIds, setDismissedSuggestIds] = useState<Set<string>>(() => new Set())
   // Индекс токенов скиллов — пересобирается только при смене списка скиллов (не на keystroke).
   const skillIndex = useMemo(() => buildSkillIndex(allSkills), [allSkills])
@@ -2313,8 +2373,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         [...history, userMsg],
         projectPath,
         {
-          ...(targetSession?.providerId ? { providerId: targetSession.providerId } : {}),
-          ...(targetSession?.model ? { model: targetSession.model } : {}),
+          ...(targetSession?.providerId ? { selectedProviderId: targetSession.providerId } : {}),
+          ...(targetSession?.model ? { selectedModel: targetSession.model } : {}),
           ...(effort !== 'standard' ? { effortLevel: effort } : {}),
           agentMode: await readAgentMode(chatId, false)
         },
@@ -2558,7 +2618,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       : []
     const skillCatalog = useSkillsStore.getState().skills
     const messageAppliedSkillDetails = resolveAppliedSkillDetails(messageAppliedSkills, skillCatalog)
-    const activeSkillIdForSend = useSkillsStore.getState().activeSkillId
+    const activeSkillIdForSend: string | null = null
     const autoBoundSkillDetails = !opts?.internalResume
       ? suggestScoredFromIndex(
           modelText,
@@ -2575,7 +2635,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // Режим справки: вся оркестрация вынесена в chat/send-help-message.ts
       // (фаза 5, срез 1). Харнес: tests/components/send-help-message.test.ts.
       await sendHelpMessage(
-        { text, modelText, displayText, attachments, providerLabel: provider.label, opts },
+        { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, opts },
         {
           getProjectState: () => useProject.getState(),
           getSkillsState: () => useSkillsStore.getState(),
@@ -2602,7 +2662,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // Основной путь отправки вынесен в chat/send-chat-message.ts (фаза 5, срез 2).
     // Харнес: tests/components/send-chat-message.test.ts.
     await sendChatMessage(
-      { text, modelText, displayText, attachments, providerLabel: provider.label, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
+      { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
       {
         getProjectState: () => useProject.getState(),
         getSkillsState: () => useSkillsStore.getState(),

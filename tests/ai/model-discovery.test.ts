@@ -1,7 +1,7 @@
 // Срез 2.0.7-E: живое обнаружение моделей (первый адаптер — grok models).
 //
 // Фикстуры построены на РЕАЛЬНОМ обезличенном stdout `~/.grok/bin/grok.exe models`
-// (захвачен 15.07 на залогиненном grok — см. scratchpad/grok-models-real-output.txt).
+// Обновлены по live read-only `grok models` 25.07: текущий каталог содержит grok-4.5.
 // Формат plain-text (JSON grok models НЕ отдаёт). Парсер НЕ угадан — сверен с фактом.
 import { describe, it, expect } from 'vitest'
 import { parseGrokModels } from '../../electron/ai/model-discovery'
@@ -13,7 +13,6 @@ Default model: grok-4.5
 
 Available models:
   * grok-4.5 (default)
-  - grok-composer-2.5-fast
 `
 
 // === UNAUTH: реальный вывод в НЕзалогиненном состоянии (дословно от координатора).
@@ -25,7 +24,6 @@ Default model: grok-4.5
 
 Available models:
   * grok-4.5 (default)
-  - grok-composer-2.5-fast
 `
 
 // === EMPTY: структурно-защитный (секция есть, строк нет) — НЕ заявляем как подтверждённый
@@ -39,7 +37,7 @@ describe('parseGrokModels — реальный формат grok models (auth + 
   it('AUTH: извлекает модели/дефолт, authenticated=true', () => {
     const r = parseGrokModels(REAL_AUTH, 0)
     expect(r.status).toBe('available')
-    expect(r.models).toEqual(['grok-4.5', 'grok-composer-2.5-fast'])
+    expect(r.models).toEqual(['grok-4.5'])
     expect(r.defaultModel).toBe('grok-4.5')
     expect(r.authenticated).toBe(true)
     expect(r.reasonCode).toBeUndefined()
@@ -48,7 +46,7 @@ describe('parseGrokModels — реальный формат grok models (auth + 
   it('UNAUTH: баннер «not authenticated» ПЕРЕЖИТ — каталог отдаётся, authenticated=false', () => {
     const r = parseGrokModels(REAL_UNAUTH, 0)
     expect(r.status).toBe('available') // НЕ error — команда вернула каталог
-    expect(r.models).toEqual(['grok-4.5', 'grok-composer-2.5-fast'])
+    expect(r.models).toEqual(['grok-4.5'])
     expect(r.defaultModel).toBe('grok-4.5')
     expect(r.authenticated).toBe(false) // но каталог может быть неполным → гейт не блокирует
   })

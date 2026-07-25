@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Skill } from '../types/api'
+import { withSkillsUserTags } from '../lib/skill-user-tags'
 
 /**
  * Стор скиллов — отделён от projectStore чтобы не раздувать его дальше.
@@ -11,11 +12,14 @@ import type { Skill } from '../types/api'
 interface SkillState {
   skills: Skill[]
   activeSkillId: string | null
+  pendingDraftSkillId: string | null
   loading: boolean
   lastRefreshAt: number | null
   serverReachable: boolean
   refresh: () => Promise<void>
   setActiveSkill: (id: string | null) => void
+  queueDraftSkill: (id: string | null) => void
+  consumeDraftSkill: () => string | null
   /** Find skill by either id or slash trigger (без `/`). */
   resolve: (idOrSlash: string) => Skill | null
 }
@@ -23,6 +27,7 @@ interface SkillState {
 export const useSkills = create<SkillState>((set, get) => ({
   skills: [],
   activeSkillId: null,
+  pendingDraftSkillId: null,
   loading: false,
   lastRefreshAt: null,
   serverReachable: false,
@@ -33,7 +38,7 @@ export const useSkills = create<SkillState>((set, get) => ({
       const list = await window.api.skills.list()
       const status = await window.api.skills.status()
       set({
-        skills: Array.isArray(list) ? list : [],
+        skills: Array.isArray(list) ? withSkillsUserTags(list) : [],
         loading: false,
         lastRefreshAt: status.lastRefreshAt,
         serverReachable: status.serverReachable
@@ -50,6 +55,19 @@ export const useSkills = create<SkillState>((set, get) => ({
         console.warn('[skills] record use failed:', err)
       })
     }
+  },
+  queueDraftSkill(id) {
+    set({ pendingDraftSkillId: id })
+    if (id) {
+      void window.api.skills.recordUse(id).catch(err => {
+        console.warn('[skills] record use failed:', err)
+      })
+    }
+  },
+  consumeDraftSkill() {
+    const id = get().pendingDraftSkillId
+    if (id) set({ pendingDraftSkillId: null })
+    return id
   },
   resolve(idOrSlash) {
     const s = get().skills

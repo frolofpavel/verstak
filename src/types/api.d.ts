@@ -248,6 +248,8 @@ export interface Skill {
   slash?: string
   tools_allow?: string[]
   suggested_prompts?: string[]
+  /** Локальные пользовательские теги для поиска и рекомендаций скилла. */
+  user_tags?: string[]
   context_loaders?: Array<{ id: string; impl: string; runs_on: 'chat_open' | 'slash_arg'; args?: Record<string, unknown> }>
   systemPrompt: string
   source: 'server' | 'user' | 'built-in'
@@ -587,7 +589,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
+          overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>

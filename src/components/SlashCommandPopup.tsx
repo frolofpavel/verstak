@@ -42,7 +42,7 @@ interface Props {
 
 export function SlashCommandPopup({ text, onClear, onInject, systemCommands = [], projectPath = null, helpScope = false }: Props) {
   const skills = useSkills(s => s.skills)
-  const setActiveSkill = useSkills(s => s.setActiveSkill)
+  const queueDraftSkill = useSkills(s => s.queueDraftSkill)
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [userCommands, setUserCommands] = useState<UserCommand[]>([])
 
@@ -127,7 +127,7 @@ export function SlashCommandPopup({ text, onClear, onInject, systemCommands = []
 
   function execute(cmd: SlashCommand) {
     if (cmd.kind === 'skill') {
-      setActiveSkill(cmd.skillId)
+      queueDraftSkill(cmd.skillId)
       onClear()
     } else if (cmd.kind === 'system') {
       cmd.action()

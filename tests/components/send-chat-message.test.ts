@@ -185,6 +185,19 @@ describe('sendChatMessage — characterization бывшего основного
     expect(h.sentCalls[0].overrides).toEqual({ agentMode: 'auto' })
   })
 
+  it('фиксирует выбранный UI-маршрут на весь async send без strict one-shot', async () => {
+    const h = makeHarness()
+    await sendChatMessage({
+      ...baseInput,
+      selectedRoute: { selectedProviderId: 'grok-cli', selectedModel: 'grok-4.5' },
+    }, h.deps)
+    expect(h.sentCalls[0].overrides).toMatchObject({
+      selectedProviderId: 'grok-cli',
+      selectedModel: 'grok-4.5',
+    })
+    expect(h.sentCalls[0].overrides.promptRoute).toBeUndefined()
+  })
+
   it('не первое user-сообщение → autoTitle НЕ зовём', async () => {
     const h = makeHarness({ messages: [{ role: 'user', content: 'было' }, { role: 'assistant', content: 'ответ' }] })
     await sendChatMessage(baseInput, h.deps)

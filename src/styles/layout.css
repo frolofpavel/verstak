@@ -21864,3 +21864,37 @@ html[data-theme="light"] .gg-connectors-page {
 .gg-plan-confirm-step dl { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; margin: 0; font-size: var(--text-xs); }
 .gg-plan-confirm-step dt { color: var(--text-tertiary); }
 .gg-plan-confirm-step dd { margin: 0; }
+
+/* Skills: локальные теги для поиска и рекомендаций */
+.gg-skill-card-tags,
+.gg-skill-detail-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.gg-skill-card-tags span,
+.gg-skill-detail-tag-list span {
+  padding: 2px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: var(--text-xs);
+}
+
+.gg-skill-tags-editor {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.gg-skill-tags-editor .gg-input {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 700px) {
+  .gg-skill-tags-editor { flex-direction: column; }
+}

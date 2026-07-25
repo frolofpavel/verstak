@@ -533,10 +533,10 @@ export function App() {
           <Suspense fallback={<ViewFallback />}>
           <SkillsView
             onActivateSkill={slash => {
-              // Активируем скилл по slash-имени, затем переходим в чат
               const skills = useSkillsStore.getState().skills
               const skill = skills.find(s => s.slash === slash || s.id === slash)
-              if (skill) useSkillsStore.getState().setActiveSkill(skill.id)
+              useSkillsStore.getState().queueDraftSkill(skill?.id ?? slash)
+              if (!skill) void useSkillsStore.getState().refresh().catch(() => {})
               setActiveView('chat')
             }}
           />

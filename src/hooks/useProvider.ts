@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import type { ProviderDescriptorDTO } from '../types/api'
 import {
   DEFAULT_PROVIDER_ID,
+  normalizeSelectedModel,
   resolveStoredProviderId,
   type ProviderId,
   type ProviderTransport,
@@ -23,6 +24,7 @@ export interface ProviderInfo {
   transport: ProviderTransport
   /** All available models user can switch to */
   models: string[]
+  defaultModel: string
   /** Whether this provider has function calling in our app right now */
   supportsTools: boolean
   /**
@@ -96,9 +98,7 @@ function getDefaultModel(id: string): string {
  */
 export function normalizeStoredModel(meta: ProviderMeta | undefined, model: string | null): string {
   if (!meta) return model ?? ''
-  if (!model) return meta.defaultModel
-  if (meta.models.length === 0) return model
-  return meta.models.includes(model) ? model : meta.defaultModel
+  return normalizeSelectedModel(model, meta)
 }
 
 /** Проверка валидности модели для провайдера (используется в projectStore). */
@@ -172,5 +172,5 @@ export function useProvider(): UseProviderResult {
   }, [])
 
   const meta = getMeta(id)
-  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, supportsTools: meta.supportsTools, unavailableProviderId, setModel, setProviderModel, setProviderId }
+  return { id, label: meta.label, model, transport: meta.transport, models: meta.models, defaultModel: meta.defaultModel, supportsTools: meta.supportsTools, unavailableProviderId, setModel, setProviderModel, setProviderId }
 }
