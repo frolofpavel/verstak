@@ -20223,6 +20223,16 @@ html[data-theme="light"] .gg-policy {
 .gg-outcome-run-row-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
 .gg-outcome-run-row-main strong,
 .gg-outcome-run-row-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gg-outcome-interventions {
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+}
+.gg-outcome-interventions h3 { margin: 0 0 3px; font-size: 13px; }
+.gg-outcome-intervention-row { display: flex; align-items: center; gap: 10px; }
+.gg-outcome-intervention-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 @media (max-width: 720px) {
   .gg-outcome-effort,
   .gg-outcome-run-grid { grid-template-columns: 1fr; }
