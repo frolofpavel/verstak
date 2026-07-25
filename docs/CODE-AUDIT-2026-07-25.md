@@ -101,6 +101,15 @@
 - основной метод сокращён на 64 строки, complexity 335 → 306 без изменения IPC;
 - следующий срез B: provider attempt + account/fallback lifecycle.
 
+Срез B выполнен 2026-07-25:
+
+- provider fallback и подписочная account rotation вынесены в `runner-attempt.ts`;
+- в одном контроллере закреплены pinned-policy, bounded attempts, выбор модели,
+  перенос истории, route evidence и durable account lineage;
+- legacy `getNextProvider` сохранён без ложной перезаписи accountId;
+- основной метод сокращён ещё на 35 строк, три сложных вложенных callback удалены;
+- следующий срез C: tool-turn dispatch и verification phase.
+
 ### 2.1.11 — Декомпозиция renderer (P1)
 
 Проблема:

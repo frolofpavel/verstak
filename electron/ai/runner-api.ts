@@ -32,13 +32,12 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
+import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
 import { captureToolObservation } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
-import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart-fallback'
-import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
-import { detectSubscriptionLimit } from './subscription-limits'
+import { classifyFallbackReason } from './smart-fallback'
+import { classifyRouteReason } from './route-policy'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint } from './session-journal'
 import {
@@ -54,6 +53,7 @@ import type { AgentRuns } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { finalizeApiRun, type RunnerSessionUsage } from './runner-finalize'
+import { createApiFallbackController } from './runner-attempt'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -517,84 +517,27 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
   }
 
-  // EF-R2 Б2: единая точка создания attempt — предпочтительно getNextAttempt (несёт
-  // accountId попытки); legacy getNextProvider → accountId=undefined («не трогать»).
-  const mkAttempt = (id: ProviderId): { provider: ChatProvider; accountId: number | null | undefined } | null => {
-    const viaAttempt = fallbackOpts?.getNextAttempt?.(id)
-    if (viaAttempt) return viaAttempt
-    const p = fallbackOpts?.getNextProvider?.(id)
-    return p ? { provider: p, accountId: undefined } : null
-  }
-  // Lineage аккаунта на handoff: attempt с известным accountId (вкл. null = очистить)
-  // фиксируется в durable run — success/cooldown уйдут фактическому аккаунту попытки.
-  const applyAttemptAccount = (accountId: number | null | undefined): void => {
-    if (accountId === undefined || !agentRuns || !runId) return
-    try { agentRuns.updateActualAccount(runId, accountId) } catch { /* best-effort */ }
-  }
-
-  const attemptProviderFallback = (err: unknown, force = false): Promise<void> | null => {
-    // 2.0.8-D2: pinned-чат — авто-смена провайдера запрещена (увела бы с закреплённого аккаунта).
-    if (fallbackOpts?.pinnedAccount) return null
-    if (!(fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS)) return null
-    fallbackOpts.triedProviders.add(providerId)
-    if (!force && !shouldFallback(err)) return null
-    const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-    const attempt = nextId ? mkAttempt(nextId) : null
-    if (!attempt || !nextId) return null
-    const nextProvider = attempt.provider
-    console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-    fallbackOpts.triedProviders.add(nextId)
-    // attempt считаем ПОСЛЕ add(nextId) — паритет с runner-plain (ревью #4): size включает
-    // новый провайдер → порядковый номер маршрута совпадает по транспортам API↔CLI.
-    const nextModelForEvent = fallbackOpts.getProviderModel(nextId) ?? model ?? ''
-    emitRouteChanged('model-fallback', err, { providerId: nextId, model: nextModelForEvent }, fallbackOpts.triedProviders.size)
-    const fallbackTools = createToolsForProject(projectPath, signal, {
-      allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
-    })
-    const nextModel = fallbackOpts.getProviderModel(nextId) ?? model
-    // 2.0.7-F: actual провайдер/модель прогона теперь = запасной (requested_* остаётся
-    // исходным). Иначе agent_run.provider_id показывал бы упавшего провайдера, а «actual
-    // vs requested» врал бы именно в сценарии fallback.
-    if (agentRuns && runId) {
-      try { agentRuns.updateActual(runId, nextId, nextModel ?? '') } catch { /* best-effort */ }
-    }
-    // EF-R2 Б2: lineage аккаунта — кросс-провайдерный handoff фиксирует аккаунт нового
-    // провайдера (или очищает до null, если у него нет managed-аккаунта).
-    applyAttemptAccount(attempt.accountId)
-    handedOff = true
-    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: nextProvider, tools: fallbackTools, initialMessages: currentMessages, providerId: nextId, model: nextModel, nudgeBudgetUsed: plainReplyNudges })
-  }
-
-  // 1.9.4: подписочный лимит активного аккаунта → переключаемся на ДРУГОЙ аккаунт пула
-  // того же провайдера (пересоздаём тот же провайдер — он резолвит новый активный аккаунт),
-  // не теряя накопленную историю. Пул исчерпан → null (дальше обычный provider-fallback).
-  const attemptAccountSwitch = (err: unknown): Promise<void> | null => {
-    // 2.0.8-D2: pinned-чат — ротация аккаунта на лимите запрещена (инвариант 1).
-    if (!fallbackOpts || !providerId || fallbackOpts.pinnedAccount) return null
-    // Ревью-фикс: bounded — иначе resetEta=null + пул ≥2 зацикливается навсегда.
-    if ((fallbackOpts.accountSwitchCount ?? 0) >= MAX_ACCOUNT_SWITCHES) return null
-    const hit = detectSubscriptionLimit(err)
-    if (!hit.limited) return null
-    const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
-    if (!sw?.switched) return null
-    fallbackOpts.accountSwitchCount = (fallbackOpts.accountSwitchCount ?? 0) + 1
-    const freshAttempt = mkAttempt(providerId) // тот же id → новый активный аккаунт
-    if (!freshAttempt) return null
-    const freshProvider = freshAttempt.provider
-    // EF-R2 Б2: ротация фиксирует новый аккаунт в run (success уйдёт ему, а не упавшему).
-    applyAttemptAccount(freshAttempt.accountId)
-    // Ротация аккаунта: провайдер/модель те же, меняется аккаунт. CD: labels аккаунтов
-    // и resetAt идут в событие (Timeline «A → B · до HH:MM»); id аккаунтов не отдаём.
-    emitRouteChanged('rotate-account', err, { providerId, model: model ?? '' }, fallbackOpts.accountSwitchCount, {
-      resetAt: hit.resetEta ?? null,
-      accounts: { fromLabel: sw.fromLabel ?? null, toLabel: sw.toLabel ?? null },
-    })
-    handedOff = true
-    const acctTools = createToolsForProject(projectPath, signal, {
-      allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
-    })
-    return runApiConversation({ ...ctx, isFallbackFrame: true, provider: freshProvider, tools: acctTools, initialMessages: currentMessages, providerId, model, nudgeBudgetUsed: plainReplyNudges })
-  }
+  const fallbackController = createApiFallbackController({
+    providerId,
+    model,
+    fallbackOpts,
+    agentRuns,
+    runId,
+    currentMessages,
+    createTools: () =>
+      createToolsForProject(projectPath, signal, {
+        allowedWriteRoots: parseAllowedWriteRoots(
+          getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY)
+        ),
+      }),
+    getNudgeBudgetUsed: () => plainReplyNudges,
+    emitRouteChanged,
+    onHandedOff: () => {
+      handedOff = true
+    },
+    runFallbackFrame: patch => runApiConversation({ ...ctx, ...patch }),
+  })
+  const { attemptProviderFallback, attemptAccountSwitch } = fallbackController
 
   // Этап 2: эскалация native→JSON tool mode на ТОЙ ЖЕ модели (bounded, 1 раз за прогон).
   // Тот же провайдер/модель перезапускается с forceToolMode='json' → инъекция JSON-
