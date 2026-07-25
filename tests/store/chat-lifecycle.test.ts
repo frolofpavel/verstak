@@ -88,7 +88,7 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
     expect(patch).not.toHaveProperty('hasUnread')
   })
 
-  it('buildNewChatPatch = newChatSession. ПИН ДРЕЙФА: chatHasMoreBefore/chatTotalCount НЕ сбрасываются (как inline)', () => {
+  it('buildNewChatPatch = newChatSession (после VSK-FIX: пагинация истории сбрасывается)', () => {
     const snapshots = { 1: freshSnapshot() }
     const patch = buildNewChatPatch({ activeChatId: 3, chatSnapshots: snapshots, chatSessions: [chat(3)] })
     expect(patch).toEqual({
@@ -96,6 +96,8 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       activeChatId: 3,
       chatSnapshots: snapshots,
       messages: [],
+      chatHasMoreBefore: false,
+      chatTotalCount: 0,
       activity: [],
       agentProgress: [],
       pendingWrites: [],
@@ -113,10 +115,6 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       preflights: [],
       subagentRuns: [],
     })
-    // Известный дрейф inline-версии (кандидат на отдельный фикс, НЕ в рефакторе):
-    // новый чат наследует пагинацию истории уходящего чата.
-    expect(patch).not.toHaveProperty('chatHasMoreBefore')
-    expect(patch).not.toHaveProperty('chatTotalCount')
   })
 
   it('buildLeaveHelpRestorePatch: стрим восстанавливается только при реальном inflight', () => {

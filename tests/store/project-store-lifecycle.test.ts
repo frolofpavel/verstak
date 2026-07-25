@@ -335,6 +335,23 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
     expect(snap.isStreaming).toBe(false)      // висячий флаг снят
     expect(snap.streamStartedAt).toBeNull()
   })
+
+  // VSK-FIX (дрейф найден в срезе 3 фазы 5): newChatSession не сбрасывал
+  // chatHasMoreBefore/chatTotalCount — кнопка «загрузить старое» показывалась
+  // в пустом новом чате, а счётчик сообщений врал про историю уходящего чата.
+  it('новый чат сбрасывает пагинацию истории уходящего чата (chatHasMoreBefore/chatTotalCount)', async () => {
+    useProject.setState({
+      activeChatId: 1,
+      chatHasMoreBefore: true,
+      chatTotalCount: 137,
+    }, false)
+
+    await useProject.getState().newChatSession('new one')
+
+    const st = useProject.getState()
+    expect(st.chatHasMoreBefore).toBe(false)
+    expect(st.chatTotalCount).toBe(0)
+  })
 })
 
 describe('switchChatSession — provider/model preservation (#3)', () => {

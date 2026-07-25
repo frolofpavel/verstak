@@ -55,9 +55,9 @@ export function buildRestoredSwitchPatch(opts: {
   }
 }
 
-/** Вход в новосозданный чат (newChatSession). ВНИМАНИЕ (известный дрейф):
- *  как и inline-версия, НЕ сбрасывает chatHasMoreBefore/chatTotalCount —
- *  кандидат на отдельный фикс, в рефактор не входит (пинится тестом). */
+/** Вход в новосозданный чат (newChatSession). VSK-FIX: chatHasMoreBefore/
+ *  chatTotalCount сбрасываем — раньше новый чат наследовал пагинацию истории
+ *  уходящего (кнопка «загрузить старое» в пустом чате + врущий счётчик). */
 export function buildNewChatPatch(opts: {
   activeChatId: number
   chatSnapshots: Record<number, SessionSnapshot>
@@ -65,6 +65,8 @@ export function buildNewChatPatch(opts: {
 }) {
   return {
     ...restoreBundle(freshSnapshot()),
+    chatHasMoreBefore: false,
+    chatTotalCount: 0,
     chatSessions: opts.chatSessions,
     activeChatId: opts.activeChatId,
     chatSnapshots: opts.chatSnapshots,
