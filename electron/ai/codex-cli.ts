@@ -251,7 +251,10 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
             }
           }
           flushReasoningFallback()
-          pushDone()
+          // Не завершаем provider раньше `close`: на Windows дочерний Codex
+          // после turn.completed ещё короткое время удерживает cwd worktree.
+          // Ранний done позволял UI применить/отклонить вариант, но git не мог
+          // удалить занятую рабочую копию. Терминальный done эмитит close-handler.
           wake()
         } else if (ev.type === 'error') {
           queue.push({ type: 'error', message: ev.error ?? 'Codex CLI вернул error' })

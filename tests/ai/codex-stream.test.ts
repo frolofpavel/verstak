@@ -8,7 +8,7 @@ import type { ChatEvent } from '../../electron/ai/types'
 
 // Fake codex binary: a node script that ignores stdin and prints a fixed
 // JSONL stream to stdout, exit 0. Drives the REAL provider parser.
-function makeFakeCodex(dir: string, lines: string[]): string {
+function makeFakeCodex(dir: string, lines: string[], exitDelayMs = 0): string {
   const isWin = platform() === 'win32'
   const scriptJs = join(dir, 'fake-codex.js')
   // Read all of stdin then emit the canned stream.
@@ -18,7 +18,7 @@ process.stdin.on('data', d => { buf += d })
 process.stdin.on('end', () => {
   const out = ${JSON.stringify(lines)}
   for (const l of out) process.stdout.write(l + '\\n')
-  process.exit(0)
+  setTimeout(() => process.exit(0), ${exitDelayMs})
 })
 `
   writeFileSync(scriptJs, body, 'utf8')
@@ -75,6 +75,20 @@ describe('codex-cli stream parsing — chat-response regression', () => {
     const text = events.filter(e => e.type === 'text').map(e => (e as { text: string }).text).join('')
     expect(text).toBe('финальный ответ')
     expect(events.some(e => e.type === 'done')).toBe(true)
+  })
+
+  it('не завершает provider до закрытия CLI-процесса', async () => {
+    // turn.completed означает «модель закончила ход», но дочерний процесс ещё
+    // может удерживать cwd worktree. Ранний done запускал apply/reject, пока
+    // Windows не давал удалить рабочую копию.
+    const bin = makeFakeCodex(dir, [
+      JSON.stringify({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'готово' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }),
+    ], 150)
+    const startedAt = Date.now()
+    const events = await drain(createCodexCliProvider({ binary: bin, cwd: dir }))
+    expect(events.filter(e => e.type === 'done')).toHaveLength(1)
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100)
   })
 
   it('stream ends WITHOUT turn.completed still emits done (some codex versions)', async () => {

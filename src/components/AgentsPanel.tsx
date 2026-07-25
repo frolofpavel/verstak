@@ -4,6 +4,7 @@ import type { AgentJob, SubSession, SessionTodo, StoredChatMessage, ProviderDesc
 import { Markdown } from './Markdown'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
+import { useT } from '../i18n'
 
 /**
  * Панель Agents (Фаза 2, Идея 7) — Inspector 2.0 для суб-агентов.
@@ -109,6 +110,7 @@ function SubSessionViewer({ sub, providerLabel, onClose, onBring }: { sub: SubSe
 }
 
 export function AgentsPanel() {
+  const t = useT()
   const path = useProject(s => s.path)
   const setActiveView = useProject(s => s.setActiveView)
   const [subs, setSubs] = useState<SubSession[]>([])
@@ -208,6 +210,17 @@ export function AgentsPanel() {
   }
 
   const runningCount = subs.filter(s => s.status === 'running').length
+  const jobStatusLabels: Record<string, string> = {
+    queued: t.agentJobs.status.queued,
+    ready: t.agentJobs.status.ready,
+    running: t.agentJobs.status.running,
+    'waiting-approval': t.agentJobs.status.waitingApproval,
+    interrupted: t.agentJobs.status.interrupted,
+    succeeded: t.agentJobs.status.succeeded,
+    failed: t.agentJobs.status.failed,
+    blocked: t.agentJobs.status.blocked,
+    cancelled: t.agentJobs.status.cancelled,
+  }
 
   // Инжект в композер основного чата + переход на вкладку Chat.
   // Используется empty-state кнопками быстрого старта оркестрации/роя.
@@ -238,25 +251,25 @@ export function AgentsPanel() {
     try {
       if (action === 'cancel') {
         const count = await window.api.agentJobs.cancel(job.id)
-        setJobActionMessage(count > 0 ? 'Задача и её незавершённые дочерние задачи отменены.' : 'Задача уже завершена.')
+        setJobActionMessage(count > 0 ? t.agentJobs.cancelled : t.agentJobs.alreadyFinal)
       }
       if (action === 'resume') {
         const resumed = await window.api.agentJobs.approveResume(job.id)
         setJobActionMessage(resumed
-          ? 'Повтор разрешён. Задача вернулась в очередь.'
-          : 'Повтор не разрешён: задача уже изменила состояние.')
+          ? t.agentJobs.retryQueued
+          : t.agentJobs.retryChanged)
       }
       if (action === 'choose') {
         const result = await window.api.agentJobs.chooseVariant(job.id)
         setJobActionMessage(result.ok
-          ? (result.warning ?? `Вариант применён: ${result.files?.length ?? 0} файлов.`)
-          : (result.error ?? 'Не удалось применить вариант.'))
+          ? (result.warning ?? t.agentJobs.applied.replace('{count}', String(result.files?.length ?? 0)))
+          : (result.error ?? t.agentJobs.applyFailed))
       }
       if (action === 'reject') {
         const result = await window.api.agentJobs.rejectVariant(job.id)
         setJobActionMessage(result.ok
-          ? (result.removed ? 'Вариант отклонён и рабочая копия удалена.' : 'Вариант отклонён.')
-          : (result.error ?? 'Не удалось удалить рабочую копию варианта.'))
+          ? (result.removed ? t.agentJobs.rejectedRemoved : t.agentJobs.rejected)
+          : (result.error ?? t.agentJobs.rejectFailed))
       }
     } catch (error) {
       setJobActionMessage(error instanceof Error ? error.message : String(error))
@@ -310,8 +323,10 @@ export function AgentsPanel() {
         {jobs.length > 0 && (
           <section className="gg-todogate" aria-label="Durable Agent Jobs">
             <div className="gg-todogate-head">
-              <span className="gg-todogate-title">Agent Jobs · управление выполнением</span>
-              <span className="gg-todogate-progress">{jobs.filter(job => job.status === 'running').length} активно / {jobs.length}</span>
+              <span className="gg-todogate-title">{t.agentJobs.title}</span>
+              <span className="gg-todogate-progress">{t.agentJobs.activeSummary
+                .replace('{active}', String(jobs.filter(job => job.status === 'running').length))
+                .replace('{total}', String(jobs.length))}</span>
             </div>
             <div className="gg-run-list">
               {jobs.map(job => (
@@ -322,27 +337,29 @@ export function AgentsPanel() {
                     <span className="gg-agent-provider">{providerLabel(job.providerId)} · {job.model}</span>
                     <span className="gg-agent-task" title={job.goal}>{job.goal}</span>
                     <span className="gg-agent-meta">
-                      {STATUS_LABEL[job.status] ?? job.status} · попытка {job.attempt}/{job.maxAttempts}
+                      {jobStatusLabels[job.status] ?? job.status} · {t.agentJobs.attempt
+                        .replace('{current}', String(job.attempt))
+                        .replace('{max}', String(job.maxAttempts))}
                       {job.waitingReason && ` · ${job.waitingReason}`}
                       {job.interruptionReason && ` · ${job.interruptionReason}`}
                     </span>
                   </div>
                   <div className="gg-subviewer-actions">
                     {!['succeeded', 'failed', 'blocked', 'cancelled'].includes(job.status) && (
-                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'cancel')}>Отменить</button>
+                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'cancel')}>{t.agentJobs.cancel}</button>
                     )}
                     {job.status === 'interrupted' && (
-                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'resume')}>Разрешить повтор</button>
+                      <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'resume')}>{t.agentJobs.allowRetry}</button>
                     )}
                     {job.status === 'succeeded' && job.worktreePath && (
                       <>
-                        <button className="gg-btn" onClick={() => void actOnJob(job, 'choose')}>Применить вариант</button>
-                        <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'reject')}>Отклонить</button>
+                        <button className="gg-btn" onClick={() => void actOnJob(job, 'choose')}>{t.agentJobs.applyVariant}</button>
+                        <button className="gg-btn gg-btn-ghost" onClick={() => void actOnJob(job, 'reject')}>{t.agentJobs.rejectVariant}</button>
                       </>
                     )}
                   </div>
                   <details>
-                    <summary>Scope, зависимости и результат</summary>
+                    <summary>{t.agentJobs.details}</summary>
                     <pre className="gg-subviewer-pre">{JSON.stringify({
                       dependsOn: job.dependsOn,
                       readScope: job.readScope,
