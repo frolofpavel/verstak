@@ -41,14 +41,21 @@ function sentEvents(sender: Sender): SentEvent[] {
   return sender.send.mock.calls.map(c => (c[1] as { event: SentEvent }).event)
 }
 
-// Позиционный вызов runPlainConversation (sender, sendId, provider, projectPath,
-// messages, signal, recordJournal, costGuard?, providerId?, model?, fallbackOpts?, agentRuns?, runId?).
 function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown; providerId?: ProviderId; model?: string } = {}) {
-  return runPlainConversation(
-    sender as never, 1, p, dir, [{ role: 'user', content: 'сделай' }],
-    opts.signal ?? new AbortController().signal, vi.fn(),
-    undefined, opts.providerId ?? 'claude-cli', opts.model ?? 'auto', opts.fallbackOpts as never, opts.agentRuns as never, opts.runId
-  )
+  return runPlainConversation({
+    sender: sender as never,
+    sendId: 1,
+    provider: p,
+    projectPath: dir,
+    messages: [{ role: 'user', content: 'сделай' }],
+    signal: opts.signal ?? new AbortController().signal,
+    recordJournal: vi.fn(),
+    providerId: opts.providerId ?? 'claude-cli',
+    model: opts.model ?? 'auto',
+    fallbackOpts: opts.fallbackOpts as never,
+    agentRuns: opts.agentRuns as never,
+    runId: opts.runId,
+  })
 }
 
 describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {

@@ -42,21 +42,38 @@ function applyPlainAttemptAccount(agentRuns: AgentRuns | undefined, runId: strin
   try { agentRuns.updateActualAccount(runId, accountId) } catch { /* best-effort */ }
 }
 
-export async function runPlainConversation(
-  sender: TaggedSender,
-  sendId: number,
-  provider: ChatProvider,
-  projectPath: string | null,
-  messages: ChatMessage[],
-  signal: AbortSignal,
-  recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void,
-  costGuard?: ReturnType<typeof createCostGuard>,
-  providerId?: ProviderId,
-  model?: string,
-  fallbackOpts?: FallbackOpts,
-  agentRuns?: AgentRuns,
+export interface PlainRunContext {
+  sender: TaggedSender
+  sendId: number
+  provider: ChatProvider
+  projectPath: string | null
+  messages: ChatMessage[]
+  signal: AbortSignal
+  recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
+  costGuard?: ReturnType<typeof createCostGuard>
+  providerId?: ProviderId
+  model?: string
+  fallbackOpts?: FallbackOpts
+  agentRuns?: AgentRuns
   runId?: string
-): Promise<void> {
+}
+
+export async function runPlainConversation(context: PlainRunContext): Promise<void> {
+  const {
+    sender,
+    sendId,
+    provider,
+    projectPath,
+    messages,
+    signal,
+    recordJournal,
+    costGuard,
+    providerId,
+    model,
+    fallbackOpts,
+    agentRuns,
+    runId,
+  } = context
   const startedAt = Date.now()
   logRuntime('ai.runner.loop_start', {
     sendId,
@@ -322,7 +339,11 @@ export async function runPlainConversation(
                   accounts: { fromLabel: sw.fromLabel ?? null, toLabel: sw.toLabel ?? null },
                 })
                 handedOff = true
-                return runPlainConversation(sender, sendId, freshAttempt.provider, projectPath, messages, signal, recordJournal, costGuard, providerId, model, fallbackOpts, agentRuns, runId)
+                return runPlainConversation({
+                  ...context,
+                  provider: freshAttempt.provider,
+                  messages,
+                })
               }
             }
           }
@@ -399,7 +420,13 @@ export async function runPlainConversation(
             fromModel: model ?? null,
             toModel: nextModel ?? null
           }, 'warn')
-          return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, nextModel, fallbackOpts, agentRuns, runId)
+          return runPlainConversation({
+            ...context,
+            provider: nextProvider,
+            messages,
+            providerId: nextId,
+            model: nextModel ?? undefined,
+          })
         }
       }
     }

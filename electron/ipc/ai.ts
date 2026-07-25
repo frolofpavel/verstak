@@ -49,6 +49,7 @@ import type { SwitchResult } from '../storage/subscription-accounts'
 import type { CooldownReason } from '../../shared/contracts/subscription'
 import { expandOfficeAttachments } from '../ai/attachment-text'
 import { logRuntime, logRuntimeError } from '../runtime-log'
+import { registerAiCountTokensIpc } from './ai-count-tokens'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -1467,11 +1468,28 @@ export function registerAiIpc(deps: AiDeps): void {
         detail: `${modelProgressLabel(providerId, model)} получил запрос. Жду первые признаки работы.`,
         status: 'running'
       })
-      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextAttempt: makeFallbackAttempt, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: switchAccountOnLimitForRun, pinnedAccount: chatPinned } : undefined,
-        deps.agentRuns,
-        runId
-      ).finally(cleanup)
+      void runPlainConversation({
+        sender: taggedSender,
+        sendId,
+        provider,
+        projectPath,
+        messages: messagesWithSystem,
+        signal: ctrl.signal,
+        recordJournal: deps.recordJournal,
+        costGuard,
+        providerId,
+        model,
+        fallbackOpts: smartFallbackEnabled ? {
+          getNextAttempt: makeFallbackAttempt,
+          getProviderModel: id => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null,
+          configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)),
+          triedProviders: new Set([providerId]),
+          switchAccountOnLimit: switchAccountOnLimitForRun,
+          pinnedAccount: chatPinned,
+        } : undefined,
+        agentRuns: deps.agentRuns,
+        runId,
+      }).finally(cleanup)
     }
     return sendId
   })
@@ -1511,68 +1529,7 @@ export function registerAiIpc(deps: AiDeps): void {
     }
   })
 
-  /**
-   * Count tokens for an outgoing prompt before send. Lets the renderer show a
-   * "≈ N tokens, ~$X" preview in the composer. Only implemented for providers
-   * that expose a real countTokens API — others get a rough estimate.
-   */
-  ipcMain.handle('ai:count-tokens', async (_e, text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => {
-    const providerId = deps.getProviderId()
-    const descriptor = PROVIDERS[providerId]
-    const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null
-    // No API key or CLI provider — fall back to a rough heuristic (~4 chars/token)
-    if (!apiKey || descriptor.transport !== 'API') {
-      const rough = Math.ceil((text?.length ?? 0) / 4)
-      return { tokens: rough, exact: false, providerId }
-    }
-    try {
-      // Currently we have a true countTokens path only for Gemini API. Others
-      // use the heuristic — extend as we add adapters.
-      if (providerId === 'gemini-api') {
-        const { GoogleGenAI } = await import('@google/genai')
-        const client = new GoogleGenAI({ apiKey })
-        const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
-        // Same compose path as ai:send — keeps countTokens estimate aligned
-        // with what actually gets sent on the next ai:send.
-        // Build the FULL context the next ai:send would see: system + history
-        // + draft text. Without history the estimate could be off by orders of
-        // magnitude on long conversations (50+ msgs → ~20k tokens of history).
-        const history = Array.isArray(historyMessages) ? historyMessages : []
-        // Include memories so the token count matches what ai:send actually sends.
-        let countTokensMemories: { type: string; content: string; tags: string[] }[] = []
-        if (projectPath) {
-          try {
-            countTokensMemories = deps.searchMemories(projectPath, '', 5)
-          } catch { /* ignore — token count stays a bit low rather than throwing */ }
-        }
-        const composed = await prepareSystemContext({
-          projectPath,
-          messages: history,
-          recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
-          memories: countTokensMemories
-        })
-        // Full context size: system + every prior turn + the draft text.
-        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [
-          { role: 'user', parts: [{ text: stripCacheBreakpoint(composed.system) }] }
-        ]
-        for (const m of history) {
-          if (m.role === 'system') continue  // already in composed.system
-          contents.push({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content ?? '' }]
-          })
-        }
-        if (text) contents.push({ role: 'user', parts: [{ text }] })
-        const res = await (client.models as unknown as {
-          countTokens: (opts: { model: string; contents: typeof contents }) => Promise<{ totalTokens?: number }>
-        }).countTokens({ model, contents })
-        return { tokens: res.totalTokens ?? 0, exact: true, providerId }
-      }
-    } catch (err) {
-      console.error('[count-tokens]', err instanceof Error ? err.message : err)
-    }
-    return { tokens: Math.ceil((text?.length ?? 0) / 4), exact: false, providerId }
-  })
+  registerAiCountTokensIpc(ipcMain, deps)
 
   ipcMain.handle('ai:resolve-command', (_e, callId: string, accept: boolean, sendId?: number) => {
     if (typeof sendId === 'number' && sendId > 0) {

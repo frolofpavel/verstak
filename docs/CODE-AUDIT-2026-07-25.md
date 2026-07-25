@@ -150,6 +150,18 @@
   `daily-cost-guard.ts`, получил тесты продолжения счётчика и сброса на новом локальном дне;
 - следующий срез: API/CLI envelope и дальнейшая декомпозиция `registerAiIpc`.
 
+Срез D выполнен 2026-07-26:
+
+- входной контракт CLI-runner переведён с 13 позиционных аргументов на именованный
+  `PlainRunContext`, симметричный `AgentRunContext` API-пути;
+- account rotation и provider fallback в CLI теперь передают envelope через явное
+  обновление context, без хрупкого позиционного порядка;
+- самостоятельный `ai:count-tokens` вынесен из `registerAiIpc` в
+  `ipc/ai-count-tokens.ts`; точный Gemini count, history/system context и rough fallback
+  закреплены unit-тестами;
+- следующий срез: вынести preflight/route preparation из обработчика `ai:send`, затем
+  оставить в `registerAiIpc` только регистрацию независимых IPC-модулей.
+
 ### 2.1.11 — Декомпозиция renderer (P1)
 
 Проблема:
