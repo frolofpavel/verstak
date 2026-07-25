@@ -13,7 +13,7 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import {
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_PIPE_BASENAME,
@@ -320,7 +320,7 @@ export interface BridgeServer {
 
 function pipePath(stateDir: string): string {
   if (process.platform === 'win32') {
-    const slug = Buffer.from(stateDir).toString('base64url').slice(0, 24)
+    const slug = createHash('sha256').update(stateDir).digest('hex').slice(0, 16)
     return `\\\\.\\pipe\\${BRIDGE_PIPE_BASENAME}-${slug}`
   }
   const sock = join(stateDir, `${BRIDGE_PIPE_BASENAME}.sock`)

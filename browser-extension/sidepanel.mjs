@@ -262,10 +262,21 @@ async function processUserPrompt(promptText) {
   streamText = ''
   streamNode = null
   const stepCard = addStepCard('Передаю задачу в Verstak...')
+
   const res = await chrome.runtime.sendMessage({ type: 'bridge.submitTask', prompt: p })
+
   if (stepCard?.parentNode) stepCard.parentNode.removeChild(stepCard)
   if (!res?.ok) {
-    addMessage('assistant', ['Не удалось запустить задачу: ' + (res?.error || 'неизвестная ошибка')])
+    const err = String(res?.error || 'offline')
+    if (err.includes('offline') || err.includes('native port') || err.includes('not found')) {
+      addMessage('assistant', [
+        '🔴 Verstak Desktop оффлайн',
+        'Для связи с AI-сотрудником запустите приложение Verstak на ПК.',
+        { text: 'Статус: Native Messaging Host offline', subtext: true },
+      ])
+    } else {
+      addMessage('assistant', ['⚠️ Не удалось запустить задачу: ' + err])
+    }
     return
   }
   activeSendId = res.task?.sendId ?? activeSendId
