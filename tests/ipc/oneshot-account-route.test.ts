@@ -38,15 +38,17 @@ vi.mock('../../electron/ai/registry', async importOriginal => {
   }
 })
 
-/** Шпион над fallbackOpts plain-пути (позиционный arg #10) — вызывает оригинал. */
+/** Шпион над fallbackOpts plain-пути. Читаем поле ENVELOPE'а (PlainRunContext), а не
+ *  позицию: после перевода runner'а на объект позиционный arg молча стал undefined,
+ *  и проверка строгости перестала что-либо доказывать (2.1.10-E). */
 let plainFallbackOpts: unknown = 'NOT-CALLED'
 vi.mock('../../electron/ai/runner-plain', async importOriginal => {
   const actual = await importOriginal<typeof import('../../electron/ai/runner-plain')>()
   return {
     ...actual,
-    runPlainConversation: (...args: unknown[]) => {
-      plainFallbackOpts = args[10]
-      return (actual.runPlainConversation as (...a: unknown[]) => Promise<void>)(...args)
+    runPlainConversation: (ctx: { fallbackOpts?: unknown }) => {
+      plainFallbackOpts = ctx.fallbackOpts
+      return (actual.runPlainConversation as (c: unknown) => Promise<void>)(ctx)
     },
   }
 })
@@ -144,10 +146,25 @@ describe('ai:send — one-shot маршрут с аккаунтом (CD)', () =>
     expect(JSON.stringify(routeEvent![2])).not.toContain('sk-B')
   })
 
+  // Строгость доказуема ТОЛЬКО на API-провайдере: у CLI/Tunnel-транспорта fallback
+  // выключен сам по себе, и проверка на claude-cli прошла бы при любом коде.
+  // noTools → plain-путь, где шпион и читает envelope.
+  async function sendApiPlain(promptRoute: Record<string, unknown>) {
+    secrets['anthropic_api_key'] = 'sk-api'
+    return handlers.get('ai:send')!(event(), messages, dir, undefined, { noTools: true, promptRoute }, '7') as Promise<number>
+  }
+
+  it('C-контроль: API-провайдер, allow БЕЗ аккаунта — fallback включён (проверка ниже не пустая)', async () => {
+    const sendId = await sendApiPlain({ providerId: 'claude', model: 'claude-sonnet-4-6', fallbackPolicy: 'allow' })
+    expect(sendId).toBeGreaterThan(0)
+    await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') })
+    expect(plainFallbackOpts, 'без выбранного аккаунта allow обязан давать fallback').toBeTruthy()
+  })
+
   it('C-strict: accountId форсит строгость — fallbackOpts НЕ передаётся даже при fallbackPolicy allow', async () => {
-    const b = addAccount('Аккаунт B', 'subacct:b')
-    secrets['subacct:b'] = 'sk-B'
-    const sendId = await sendOnce({ promptRoute: { providerId: 'claude-cli', model: 'auto', fallbackPolicy: 'allow', accountId: b.id } })
+    const b = createSubscriptionAccount(db, { providerId: 'claude', label: 'API аккаунт B', credRef: 'subacct:api-b' })
+    secrets['subacct:api-b'] = 'sk-B'
+    const sendId = await sendApiPlain({ providerId: 'claude', model: 'claude-sonnet-4-6', fallbackPolicy: 'allow', accountId: b.id })
     expect(sendId).toBeGreaterThan(0)
     await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') })
     expect(plainFallbackOpts, 'one-shot с аккаунтом обязан быть строгим: ни account-, ни provider-fallback').toBeUndefined()

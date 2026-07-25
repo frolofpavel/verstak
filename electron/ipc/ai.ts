@@ -7,7 +7,7 @@ import { createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, isCodexAuthProvider, type ProviderId } from '../ai/registry'
 import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
-import { isKnownProviderId, normalizeSelectedModel, type PromptRouteOverride } from '../../shared/contracts/provider'
+import type { PromptRouteOverride } from '../../shared/contracts/provider'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
 import { prepareHistoryForModel } from '../ai/history-preparation'
@@ -17,8 +17,7 @@ import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
 import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
 import { createLegacyMemoryProvider } from '../ai/memory/provider'
 import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemories } from '../ai/memory/run-snapshot'
-import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
-import { getConfiguredApiProviders } from '../ai/cross-verify'
+import { detectCliWorthiness } from '../ai/smart-router'
 import { createCostGuard } from '../ai/cost-guard'
 import { createDailyCostGuard } from '../ai/daily-cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
@@ -29,7 +28,12 @@ import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './to
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
 import { pushConversationSupplement } from '../ai/runner-supplements'
-import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun, type FallbackAttempt } from '../ai/runner-shared'
+import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+// Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
+import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
+import { selectSendProvider, selectSendModel, decideSmartRouting, resolveCodexHome } from './ai-send/route-selection'
+import { preflightSubscriptionAccount, buildRequestedAccountEvent, buildRotateAccountEvidence } from './ai-send/account-preflight'
+import { isSmartFallbackAllowed, createFallbackAttemptFactory, createLimitAccountSwitcher, buildFallbackOpts } from './ai-send/fallback-route'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -53,34 +57,10 @@ import { registerAiCountTokensIpc } from './ai-count-tokens'
 
 export type { ProviderId } from '../ai/registry'
 
-const OUTCOME_READ_TOOLS = [
-  'read_file',
-  'list_directory',
-  'search_project',
-  'find_files',
-  'find_definition',
-  'find_references',
-  'get_project_map',
-  'read_journal',
-  'memory_search',
-  'conversation_search',
-  'check_diagnostics',
-] as const
-
-/** Main-process capability ceiling: renderer/prompt cannot widen Outcome phases. */
-export function toolsForOutcomePhase(
-  phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan',
-): string[] | undefined {
-  if (phase === 'refine') return [...OUTCOME_READ_TOOLS, 'submit_task_contract']
-  if (phase === 'plan') {
-    return [...OUTCOME_READ_TOOLS, 'delegate_task', 'delegate_parallel', 'create_plan']
-  }
-  if (phase === 'replan') {
-    return [...OUTCOME_READ_TOOLS, 'delegate_task', 'delegate_parallel', 'replan_plan']
-  }
-  if (phase === 'verify') return [...OUTCOME_READ_TOOLS, 'run_command', 'attest_verification']
-  return undefined
-}
+// Публичная поверхность ai.ts сохранена: обе функции переехали в ai-send/*, но
+// импортёры (main.ts, тесты) продолжают брать их отсюда.
+export { toolsForOutcomePhase } from './ai-send/outcome-preflight'
+export { resolveCodexHome } from './ai-send/route-selection'
 
 /** 2.0.8-D2/2.1.3-CD: результат резолва подписочного аккаунта. Реэкспорт из единого
  *  резолвера (electron/ai/resolve-subscription-account.ts — логика readiness там;
@@ -389,35 +369,6 @@ export async function runScheduledHeadless(
   }
 }
 
-/**
- * 2.0.8-C: изолированный CODEX_HOME для Codex-провайдеров. `codex-cli` и нативный
- * `openai-codex-oauth` аутентифицируются ОДИНАКОВО — `codex login` пишет
- * `<CODEX_HOME>/auth.json` — поэтому ОБА резолвят один активный Codex-аккаунт (реестр
- * `codex-cli`) и получают его config-dir (свой auth.json → свой credential-store-стейт по
- * пути). Раньше codexHome резолвился ТОЛЬКО для `codex-cli` → openai-codex-oauth всегда шёл
- * в дефолтный `~/.codex/auth.json`, и переключение аккаунтов на нём не действовало (2.0.4).
- *
- * Никакой мутации `process.env.CODEX_HOME` (глобал всего Electron, гонка между чатами) —
- * codexHome течёт аргументом в конкретный provider instance. `|| null` (не `??`): пустая
- * строка configDir нормализуется в null, иначе '' утёк бы downstream и authFilePath('')
- * свалился бы на process.env/~/.codex, сломав изоляцию (ревью F2). null → дефолтный путь.
- */
-export function resolveCodexHome(
-  providerId: string,
-  // Структурный тип: берём только configDir. Явный union принимает и ResolvedSubscription
-  // (success с configDir | { unavailable } | { blocked }), и упрощённый resolve в тестах
-  // ({ configDir }). blocked-вариант configDir не несёт → дефолтный путь; реальный стоп
-  // по blocked делает send-хендлер ДО этого вызова (2.1.3-CD).
-  resolve: ((p: string, chatId?: number) => { configDir?: string | null } | { unavailable: true } | { blocked: true } | { allBlocked: true } | null) | undefined,
-  chatId?: number,
-): string | null {
-  if (!isCodexAuthProvider(providerId)) return null
-  // 2.0.8-D2: chatId → pinned Codex-аккаунт чата. unavailable-вариант configDir не несёт →
-  // null (дефолтный путь); реальный стоп по unavailable делает send-хендлер ДО этого вызова.
-  const r = resolve?.('codex-cli', chatId)
-  return (r && 'configDir' in r ? r.configDir : null) || null
-}
-
 export function registerAiIpc(deps: AiDeps): void {
   /**
    * Optional overrides for ai:send. Used by Explicit Review feature: the
@@ -464,12 +415,7 @@ export function registerAiIpc(deps: AiDeps): void {
      *  отключает smart-fallback (не переезжать молча на другого провайдера). */
     promptRoute?: PromptRouteOverride
     /** Server validates this against durable pipeline state before exposing it to tools. */
-    outcome?: {
-      pipelineId: number
-      phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'
-      planStepId?: number
-      attempt?: number
-    }
+    outcome?: OutcomeRequest
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -479,37 +425,13 @@ export function registerAiIpc(deps: AiDeps): void {
     if (projectPath && !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
     }
-    let outcome = overrides?.outcome
-    let outcomeStepInstruction: string | null = null
-    if (outcome) {
-      const pipeline = deps.pipelineRuns?.get(outcome.pipelineId)
-      const phases = new Set(['refine', 'plan', 'execute-step', 'verify', 'replan'])
-      if (!Number.isInteger(outcome.pipelineId) || !phases.has(outcome.phase) || !pipeline || !projectPath || pipeline.projectPath !== projectPath) {
-        throw new Error('OUTCOME_CONTEXT_INVALID: pipeline/phase не подтверждены main process')
-      }
-      if (outcome.phase === 'execute-step') {
-        const plan = pipeline.planId ? deps.plans?.get(pipeline.planId) : null
-        const requestedStepId = outcome.planStepId
-        const step = requestedStepId
-          ? plan?.steps.find(item => item.id === requestedStepId)
-          : plan?.steps.find(item => item.status !== 'done')
-        if (step && !outcome.planStepId) {
-          const attempts = deps.planOutcomes?.list(plan?.id ?? 0)
-            .filter(item => item.stepId === step.id).length ?? 0
-          outcome = { ...outcome, planStepId: step.id, attempt: attempts + 1 }
-        }
-        if (!step || step.planId !== pipeline.planId || step.status === 'done') {
-          throw new Error('OUTCOME_STEP_CONTEXT_INVALID: step не принадлежит активному плану или уже завершён')
-        }
-        outcomeStepInstruction = [
-          'SERVER OUTCOME STEP: execute exactly this one plan step, not the whole plan.',
-          `Step id=${step.id}: ${step.title}`,
-          step.detail ? `Detail: ${step.detail}` : '',
-          step.spec ? `Structured spec: ${JSON.stringify(step.spec)}` : '',
-          'Before the final answer call report_step_outcome with actual changed files, mandatory checks and evidence.',
-        ].filter(Boolean).join('\n')
-      }
-    }
+    // Outcome preflight (2.1.10-E, срез 1): pipeline/phase/step сверяются с durable
+    // состоянием ДО старта прогона; непроверенный контекст = throw, прогона нет.
+    const outcomePreflight = overrides?.outcome
+      ? preflightOutcome(overrides.outcome, projectPath, deps)
+      : null
+    const outcome = outcomePreflight?.outcome
+    const outcomeStepInstruction = outcomePreflight?.stepInstruction ?? null
     // #5 worktree-lifecycle: изолированный чат работает ЦЕЛИКОМ на своём worktree —
     // tools + контекст + recordWrite/undo (effRoot ниже). Иначе undo бил бы по main
     // (ревью: critical data-loss — правки в worktree, а undo-стек ключевался main).
@@ -552,16 +474,15 @@ export function registerAiIpc(deps: AiDeps): void {
     const promptRoute = overrides?.promptRoute ?? null
     // 2.0.7-F (карточка шаг 2): retry/resume берёт СОХРАНЁННЫЙ route из agent_run
     // (requested_*), а не из уже очищенного one-shot UI-стейта. Явный promptRoute этой
-    // отправки важнее сохранённого. Сохраняется provider+model (политика fallback на
-    // resume — обычная; отдельную колонку под неё не заводим).
-    // Ревью F1: сохранённый id валидируем — провайдер мог быть удалён между прогоном и
-    // resume, тогда PROVIDERS[providerId]=undefined → descriptor.transport упал бы. Гардим.
-    const resumedProvider: ProviderId | null =
-      isKnownProviderId(checkpointRun?.requestedProviderId) ? checkpointRun!.requestedProviderId : null
-    const selectedProviderId: ProviderId | null =
-      isKnownProviderId(overrides?.selectedProviderId) ? overrides!.selectedProviderId : null
-    const providerId = promptRoute?.providerId ?? overrides?.providerId ?? resumedProvider ?? selectedProviderId ?? deps.getProviderId()
-    const descriptor = PROVIDERS[providerId]
+    // отправки важнее сохранённого. Лестница приоритетов и гард удалённого провайдера —
+    // в selectSendProvider (2.1.10-E, срез 2а).
+    const { providerId, descriptor, resumedProviderId: resumedProvider } = selectSendProvider({
+      promptRoute,
+      overrideProviderId: overrides?.providerId,
+      overrideSelectedProviderId: overrides?.selectedProviderId,
+      checkpointRun,
+      getProviderId: deps.getProviderId,
+    })
     const sendId = ++currentSendId
     const planningOutcome = outcome?.phase === 'refine' || outcome?.phase === 'plan' || outcome?.phase === 'replan'
     const agentMode: AgentMode = planningOutcome ? 'plan' : (overrides?.agentMode ?? deps.getAgentMode())
@@ -585,15 +506,12 @@ export function registerAiIpc(deps: AiDeps): void {
     //  · blocked: явно выбранный (one-shot) или закреплённый аккаунт не готов (cooling /
     //    login-required) → стоп с понятной причиной вместо гарантированного фейла прогона.
     // chatPinned (аккаунт закреплён/явно выбран и жив) → ниже подавляет авто-свитч/fallback.
-    const pinResolution = deps.resolveSubscriptionAccount?.(
-      providerId, chatIdNum, oneShotAccountId != null ? { accountId: oneShotAccountId } : undefined)
-    const chatPinned = !!(pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution) && pinResolution.pinned)
-    // EF-R1 Б3: аккаунт, подтверждённый pre-flight для ЭТОГО прогона — фиксируется в
-    // agent_runs.account_id. Success/охлаждение привязываются к нему, а не к global
-    // active на момент финиша (параллельные прогоны / ручное переключение).
-    const runAccountId = pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution)
-      ? pinResolution.accountId
-      : null
+    const acctPreflight = preflightSubscriptionAccount({
+      providerId,
+      chatId: chatIdNum,
+      oneShotAccountId,
+      resolve: deps.resolveSubscriptionAccount,
+    })
     // Ранняя ошибка маршрута: id:0 (owner ещё не зарегистрирован) + chatId в обёртке —
     // рендерер доставляет спец-текст в нужный чат (CD; раньше дропался роутером, и
     // пользователь видел только общий «провайдер недоступен»).
@@ -603,38 +521,12 @@ export function registerAiIpc(deps: AiDeps): void {
       clearRunTimeout()
       return 0
     }
-    if (pinResolution && 'unavailable' in pinResolution) {
-      return earlyRouteStop(oneShotAccountId != null
-        ? 'Выбранный на один запрос аккаунт был удалён. Выберите другой аккаунт или режим Auto.'
-        : 'Аккаунт, закреплённый за этим чатом, был удалён. Выберите аккаунт заново или снимите закрепление.')
-    }
-    if (pinResolution && 'blocked' in pinResolution) {
-      const { reason, resetAt, label } = pinResolution
-      const suffix = oneShotAccountId != null
-        ? 'Выберите другой аккаунт или режим Auto.'
-        : 'Выберите другой аккаунт или снимите закрепление.'
-      const message = reason === 'cooling'
-        ? `Аккаунт «${label}» остывает после лимита · ${resetAt != null ? `восстановится в ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'время восстановления неизвестно'}. ${suffix}`
-        : `Аккаунт «${label}» требует входа. Выполните вход в Настройки → Подписки или выберите другой аккаунт.`
-      return earlyRouteStop(message)
-    }
-    // EF S1: Auto pre-flight исчерпал пул — ВСЕ аккаунты провайдера неготовы. Честный
-    // стоп ДО сети (вместо гарантированного 429 активного): ближайший известный resetAt,
-    // until=NULL у всех → «сроки неизвестны» (не превращаем в ложный ready).
-    if (pinResolution && 'allBlocked' in pinResolution) {
-      const { reason, resetAt, count } = pinResolution
-      const message = reason === 'cooling'
-        ? `Все аккаунты провайдера (${count}) остывают после лимита · ${resetAt != null ? `ближайшее восстановление в ${new Date(resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'сроки восстановления неизвестны'}. Дождитесь сброса лимита или проверьте аккаунты в Настройки → Подписки.`
-        : `Все аккаунты провайдера (${count}) требуют входа. Выполните вход в Настройки → Подписки.`
-      return earlyRouteStop(message)
-    }
-    // EF-R2 Б1: ЕДИНЫЙ resolved account context попытки. После ранних стопов здесь
-    // pinResolution ∈ {success, null, undefined}. Между этой точкой и createProvider —
-    // await'ы (attachments/context/CLI-prompt): повторный resolve после них мог прочитать
-    // УЖЕ сменившийся active/pin → провайдер пошёл бы через B при run.accountId=A.
-    // Credentials/codexHome у createProvider берутся ТОЛЬКО из этого объекта (тот же,
-    // что дал runAccountId) — смена active/pin во время подготовки расхождения не создаёт.
-    const mainAcct = pinResolution ?? null
+    if (!acctPreflight.ok) return earlyRouteStop(acctPreflight.message)
+    // EF-R2 Б1: ЕДИНЫЙ resolved account context попытки. Между этой точкой и
+    // createProvider — await'ы (attachments/context/CLI-prompt): повторный resolve после
+    // них мог прочитать УЖЕ сменившийся active/pin → провайдер пошёл бы через B при
+    // run.accountId=A. Credentials/codexHome у createProvider берутся ТОЛЬКО из mainAcct.
+    const { account: mainAcct, chatPinned, runAccountId } = acctPreflight
     // 2.0.11-B: реестр «чат занят» для гейта ручной компакции. Ставится ЗДЕСЬ — ПОСЛЕ
     // раннего выхода на удалённом pin'е и до любой длительной работы: прогон стартовал
     // по-настоящему. Раньше стояло рядом с activeAborts.set, и ранний выход оставлял чат
@@ -935,9 +827,16 @@ export function registerAiIpc(deps: AiDeps): void {
 
     // 2.0.7-F: сохранённая requested-модель прогона применяется при resume того же
     // провайдера (иначе взяли бы дефолт чата — потеря route). Только если провайдер совпал.
-    const resumedModel = (resumedProvider && resumedProvider === providerId && checkpointRun?.requestedModel) || null
-    let model = (promptRoute?.model ?? overrides?.model ?? resumedModel ?? overrides?.selectedModel ?? deps.getProviderModel(providerId)) ?? descriptor.defaultModel
-    model = normalizeSelectedModel(model, descriptor)
+    let model = selectSendModel({
+      promptRoute,
+      overrideModel: overrides?.model,
+      overrideSelectedModel: overrides?.selectedModel,
+      providerId,
+      resumedProviderId: resumedProvider,
+      checkpointRun,
+      descriptor,
+      getProviderModel: deps.getProviderModel,
+    })
     logRuntime('ai.send.start', {
       sendId,
       runId,
@@ -953,37 +852,37 @@ export function registerAiIpc(deps: AiDeps): void {
     })
 
     // Smart routing: если пользователь не задал модель явно и effort=standard,
-    // выбираем дешёвую/мощную модель по сложности запроса.
+    // выбираем дешёвую/мощную модель по сложности запроса. Решение — в decideSmartRouting;
+    // здесь остаются побочные эффекты (лог + info-событие), чтобы порядок событий не поехал.
     const smartRoutingEnabled = deps.getSecret('smart_routing') !== 'false'
-    if (
-      smartRoutingEnabled &&
-      !overrides?.model &&
-      !overrides?.selectedModel &&
-      !overrides?.providerId &&          // не в Explicit Review
-      resolvedEffort === 'standard' &&
-      descriptor.transport === 'API'
-    ) {
-      const complexity = estimateComplexity(messages, [])
-      const suggested = recommendModel(providerId, complexity)
-      if (suggested && suggested !== model) {
-        const previousModel = model
-        model = suggested
-        logRuntime('ai.smart_routing.pick', {
-          sendId,
-          runId,
-          providerId,
-          previousModel,
-          model,
-          complexity: complexityLabel(complexity)
-        })
-        taggedSender.send('ai:event', {
-          id: sendId,
-          event: {
-            type: 'info',
-            text: `📊 ${complexityLabel(complexity)} → using ${suggested} (smart routing)`
-          }
-        })
-      }
+    const smartPick = decideSmartRouting({
+      enabled: smartRoutingEnabled,
+      overrideModel: overrides?.model,
+      overrideSelectedModel: overrides?.selectedModel,
+      overrideProviderId: overrides?.providerId,
+      effortLevel: resolvedEffort,
+      descriptor,
+      providerId,
+      model,
+      messages,
+    })
+    if (smartPick) {
+      model = smartPick.model
+      logRuntime('ai.smart_routing.pick', {
+        sendId,
+        runId,
+        providerId,
+        previousModel: smartPick.previousModel,
+        model,
+        complexity: smartPick.complexity
+      })
+      taggedSender.send('ai:event', {
+        id: sendId,
+        event: {
+          type: 'info',
+          text: `📊 ${smartPick.complexity} → using ${smartPick.model} (smart routing)`
+        }
+      })
     }
 
     // Гибридный роутинг API↔CLI (Сценарий Б). Если активен API-провайдер, а
@@ -1208,56 +1107,24 @@ export function registerAiIpc(deps: AiDeps): void {
       })
       if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
       // 2.1.3-CD: запрошенный one-shot аккаунт — первая запись route-evidence прогона.
-      // Timeline/Proof читают её без разбора логов; label — безопасное имя, не id.
-      if (oneShotAccountId != null && pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution)) {
+      if (oneShotAccountId != null && mainAcct) {
         try {
-          deps.agentRuns?.appendEvent(runId, 'route', {
-            label: 'requested-account',
-            detail: `Запрошен аккаунт «${pinResolution.label}» на один запрос (строго, без ротации и запасного провайдера)`,
-            status: 'info',
-          })
+          deps.agentRuns?.appendEvent(runId, 'route', buildRequestedAccountEvent(mainAcct.label))
         } catch { /* best-effort */ }
       }
-      // EF S1+S6: Auto pre-flight выбрал следующий готовый аккаунт ДО сетевого запроса.
-      // Фиксируем ротацию в route-evidence (Timeline/Proof читают без разбора логов) и
-      // шлём route-changed — пилюля «⇄ Аккаунт A → B» появляется сразу, а не после 429.
-      // Только label'ы: никаких id/credRef/configDir наружу.
-      if (pinResolution && !('unavailable' in pinResolution) && !('blocked' in pinResolution) && !('allBlocked' in pinResolution) && pinResolution.skipped) {
-        const skipped = pinResolution.skipped
-        const reasonTxt = skipped.reason === 'cooling' ? 'остывает' : 'требует входа'
-        const resetTxt = skipped.resetAt != null
-          ? ` до ${new Date(skipped.resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-          : ', срок неизвестен'
-        try {
-          deps.agentRuns?.appendEvent(runId, 'route', {
-            label: 'rotate-account',
-            detail: `Auto: аккаунт «${skipped.fromLabel}» пропущен (${reasonTxt}${resetTxt}) → выбран «${pinResolution.label}»`,
-            ref: JSON.stringify({
-              kind: 'rotate-account',
-              preflight: true,
-              reason: skipped.reason,
-              fromAccountLabel: skipped.fromLabel,
-              toAccountLabel: pinResolution.label,
-              resetAt: skipped.resetAt,
-              requested: { providerId, model: model ?? null },
-              actual: { providerId, model: model ?? null },
-            }),
-            status: 'ok',
-          })
-        } catch { /* best-effort */ }
-        taggedSender.send('ai:event', {
-          id: sendId,
-          event: {
-            type: 'route-changed',
-            action: 'rotate-account',
-            reason: skipped.reason,
-            attempt: 0,
-            requested: { providerId, model: model ?? '' },
-            actual: { providerId, model: model ?? '' },
-            resetAt: skipped.resetAt,
-            accounts: { fromLabel: skipped.fromLabel, toLabel: pinResolution.label },
-          },
+      // EF S1+S6: Auto pre-flight выбрал следующий готовый аккаунт ДО сетевого запроса —
+      // фиксируем ротацию в Timeline и шлём route-changed (пилюля «⇄ A → B» сразу).
+      if (mainAcct?.skipped) {
+        const evidence = buildRotateAccountEvidence({
+          skipped: mainAcct.skipped,
+          toLabel: mainAcct.label,
+          providerId,
+          model,
         })
+        try {
+          deps.agentRuns?.appendEvent(runId, 'route', evidence.runEvent)
+        } catch { /* best-effort */ }
+        taggedSender.send('ai:event', { id: sendId, event: evidence.routeChanged })
       }
     } catch (err) {
       logRuntimeError('agent_runs.create.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
@@ -1321,76 +1188,42 @@ export function registerAiIpc(deps: AiDeps): void {
       return sendId
     }
 
-    // Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера.
-    // Только если smart_fallback не отключён явно, только для API-провайдеров,
-    // только без reviewer override (ревьюер работает в изоляции).
-    // 2.0.7-F: explicit prompt-route по умолчанию strict — при сбое выбранного провайдера
-    // НЕ переезжать молча на другого (пользователь выбрал модель осознанно). 'allow'
-    // возвращает прежнее поведение smart-fallback. Нет promptRoute → fallback как раньше.
-    // 2.1.3-CD: выбран КОНКРЕТНЫЙ аккаунт → строго всегда: ни ротации аккаунта, ни
-    // provider-fallback, независимо от fallbackPolicy (иначе запрос молча уехал бы с
-    // осознанно выбранного аккаунта — главный сценарий карточки C).
-    const routeFallbackAllowed = (!promptRoute || promptRoute.fallbackPolicy === 'allow') && oneShotAccountId == null
-    const smartFallbackEnabled = deps.getSecret('smart_fallback') !== 'false'
-      && descriptor.transport === 'API'
-      && !overrides?.providerId  // не задействуем fallback в Explicit Review
-      && routeFallbackAllowed    // strict prompt-route отключает fallback
-
-    /** Создаёт fallback-attempt (провайдер + аккаунт попытки) для кандидата с теми же опциями.
-     *  EF-R2 Б2: возвращает FallbackAttempt — lineage аккаунта доезжает до runner'а,
-     *  который фиксирует/очищает run.account_id ДО выполнения попытки. */
-    function makeFallbackAttempt(fallbackId: ProviderId): FallbackAttempt | null {
-      const fallbackDesc = PROVIDERS[fallbackId]
-      if (!fallbackDesc) return null
-      const fallbackKey = fallbackDesc.secretKey ? deps.getSecret(fallbackDesc.secretKey) : null
-      if (fallbackDesc.secretKey && !fallbackKey) return null
-      const fallbackModel = deps.getProviderModel(fallbackId) ?? fallbackDesc.defaultModel
-      // EF-R1 Б2: pre-flight НЕПОСРЕДСТВЕННО перед созданием fallback-attempt. Парк
-      // аккаунтов есть, но выбор unavailable/blocked/allBlocked → НЕ подменяем молча
-      // default credential (legacy env-токен / ~/.codex) — fallback-кандидата просто нет.
-      // Парка нет (resolver → null) → прежний legacy-путь, accountId=null (очистка).
-      const fbRes = deps.resolveSubscriptionAccount?.(fallbackId, chatIdNum) ?? null
-      if (fbRes && ('unavailable' in fbRes || 'blocked' in fbRes || 'allBlocked' in fbRes)) return null
-      // 1.9.3/1.9.4: при пересоздании CLI-провайдера резолвим активный аккаунт ЗАНОВО —
-      // для account-switch на лимите берётся новый токен/CODEX_HOME переключённого аккаунта.
-      const fbClaudeToken = fallbackId === 'claude-cli'
-        ? (fbRes && 'secret' in fbRes ? fbRes.secret : deps.getSecret('claude_code_oauth_token'))
-        : null
-      const fbCodexHome = fbRes && 'configDir' in fbRes
-        ? (fbRes.configDir || null)
-        : resolveCodexHome(fallbackId, deps.resolveSubscriptionAccount, chatIdNum)
-      try {
-        const provider = createProvider(fallbackId, {
-          apiKey: fallbackKey,
-          model: fallbackModel,
-          cwd: projectPath ?? process.cwd(),
-          signal: ctrl.signal,
-          projectSystemPrompt: projectSystemPromptForProvider,
-          skillPrompt: skillPromptForProvider,
-          effortLevel: overrides?.effortLevel,
-          agentMode,
-          claudeOauthToken: fbClaudeToken,
-          codexHome: fbCodexHome
-        })
-        // EF-R2 Б2: аккаунт, закреплённый за ЭТОЙ попыткой. Resolver вернул success →
-        // его accountId; парка нет → null (handoff явно очистит run.account_id).
-        const accountId = fbRes && 'accountId' in fbRes ? fbRes.accountId : null
-        return { provider, accountId }
-      } catch {
-        return null
-      }
-    }
-
-    /** EF-R1 Б3: охлаждаем аккаунт, на котором РЕАЛЬНО упал запрос (run.account_id),
-     *  а не текущий global active. EF-R2 Б2: accountId нового attempt фиксирует runner
-     *  через handoff-envelope (getNextAttempt) — здесь только охлаждение. */
-    const switchAccountOnLimitForRun = (pid: string, eta: number | null, reason?: CooldownReason): SwitchResult => {
-      let fromAccountId: number | null = null
-      try {
-        fromAccountId = deps.agentRuns?.get(runId)?.accountId ?? null
-      } catch { /* best-effort */ }
-      return deps.switchSubscriptionAccountOnLimit?.(pid, eta, reason, fromAccountId) ?? { switched: false }
-    }
+    // Smart fallback (2.1.10-E, срез 3): гейт + фабрика attempt'ов + свитчер аккаунта
+    // живут в ai-send/fallback-route.ts. Envelope собирается ЛЕНИВО — только когда
+    // fallback реально разрешён (иначе лишний обход настроек провайдеров на каждый send).
+    const smartFallbackEnabled = isSmartFallbackAllowed({
+      getSecret: deps.getSecret,
+      descriptor,
+      overrideProviderId: overrides?.providerId,
+      promptRoute,
+      oneShotAccountId,
+    })
+    const makeFallbackAttempt = createFallbackAttemptFactory(
+      { getSecret: deps.getSecret, getProviderModel: deps.getProviderModel, resolveSubscriptionAccount: deps.resolveSubscriptionAccount },
+      {
+        chatId: chatIdNum,
+        cwd: projectPath ?? process.cwd(),
+        signal: ctrl.signal,
+        projectSystemPrompt: projectSystemPromptForProvider,
+        skillPrompt: skillPromptForProvider,
+        effortLevel: overrides?.effortLevel,
+        agentMode,
+      },
+    )
+    const fallbackOpts = smartFallbackEnabled
+      ? buildFallbackOpts({
+        getSecret: deps.getSecret,
+        getProviderModel: deps.getProviderModel,
+        makeFallbackAttempt,
+        switchAccountOnLimit: createLimitAccountSwitcher({
+          agentRuns: deps.agentRuns,
+          runId,
+          switchSubscriptionAccountOnLimit: deps.switchSubscriptionAccountOnLimit,
+        }),
+        providerId,
+        pinnedAccount: chatPinned,
+      })
+      : undefined
 
     if (useToolsPath) {
       // projectPath здесь уже = worktree для изолированного чата (реассайн выше),
@@ -1442,7 +1275,7 @@ export function registerAiIpc(deps: AiDeps): void {
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
         resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
         providerId, model,
-        fallbackOpts: smartFallbackEnabled ? { getNextAttempt: makeFallbackAttempt, getProviderModel: (id) => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]), switchAccountOnLimit: switchAccountOnLimitForRun, pinnedAccount: chatPinned } : undefined,
+        fallbackOpts,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
@@ -1479,14 +1312,7 @@ export function registerAiIpc(deps: AiDeps): void {
         costGuard,
         providerId,
         model,
-        fallbackOpts: smartFallbackEnabled ? {
-          getNextAttempt: makeFallbackAttempt,
-          getProviderModel: id => deps.getProviderModel(id) ?? PROVIDERS[id]?.defaultModel ?? null,
-          configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)),
-          triedProviders: new Set([providerId]),
-          switchAccountOnLimit: switchAccountOnLimitForRun,
-          pinnedAccount: chatPinned,
-        } : undefined,
+        fallbackOpts,
         agentRuns: deps.agentRuns,
         runId,
       }).finally(cleanup)
