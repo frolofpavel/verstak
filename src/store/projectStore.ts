@@ -125,6 +125,11 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** Per-chat snapshots within active project — preserve state when switching
    *  between chats so a backgrounded chat's stream isn't lost. */
   chatSnapshots: Record<number, SessionSnapshot>
+  /** PerChatState 4.2: SSOT — bundle КАЖДОГО чата активного проекта, включая
+   *  активный. top-level bundle-поля — поддерживаемая проекция chats[activeChatId];
+   *  chatSnapshots — поддерживаемая вьюха «chats минус foreground активный».
+   *  Пишется только через updateChatBundle + lifecycle-билдеры. */
+  chats: Record<number, SessionSnapshot>
   /** Единый реестр in-flight sendId. Раньше было 2 параллельных мапа
    *  (sendIdToChatId + sendIdToReviewChatId), каждый со своим жизненным
    *  циклом — это давало race-баги в роутинге событий. Теперь один источник
@@ -356,6 +361,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   help: freshSnapshot(),
   sessions: {},
   chatSnapshots: {},
+  chats: {},
   sendOwners: {},
   chatLaneGenerations: {},
   artifacts: [],
@@ -480,8 +486,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         if (myToken !== setProjectToken) return
         const cur = get()
         if (cur.path !== path || cur.activeChatId !== hydrateChatId) return
-        set({
+        // 4.2: messages через единую точку (поддерживает chats SSOT); пагинация
+        // вне bundle — отдельным патчем (как в loadOlderMessages).
+        get().updateChatBundle(hydrateChatId, () => ({
           messages: history.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })),
+        }))
+        set({
           chatHasMoreBefore: history.hasMoreBefore,
           chatTotalCount: history.totalCount
         })
@@ -520,7 +530,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const state = get()
     const composerDrafts = pruneComposerDraftsForProject(state.composerDrafts, path)
     if (state.path === path) {
-      set({ path: null, tree: [], messages: [], chatHasMoreBefore: false, chatTotalCount: 0, agentProgress: [], projectList, activeChatId: null, chatSessions: [], composerDrafts })
+      set({ path: null, tree: [], messages: [], chatHasMoreBefore: false, chatTotalCount: 0, agentProgress: [], projectList, activeChatId: null, chatSessions: [], chatSnapshots: {}, chats: {}, composerDrafts })
     } else {
       set({ projectList, composerDrafts })
     }
@@ -697,8 +707,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         const history = await window.api.chats.listWindow(id, { limit: 50 })
         if (myToken !== switchChatSessionToken) return
         if (get().activeChatId !== id) return
-        set({
+        // 4.2: messages через единую точку (поддерживает chats SSOT); пагинация
+        // вне bundle — отдельным патчем.
+        get().updateChatBundle(id, () => ({
           messages: history.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })),
+        }))
+        set({
           chatHasMoreBefore: history.hasMoreBefore,
           chatTotalCount: history.totalCount
         })
@@ -920,10 +934,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const inflight = hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)
       // restoreBundle — единая форма восстановления (вкл. checkpointId/preflights/
       // subagentRuns per-chat). Стрим — только если реально ещё в полёте.
-      set(buildLeaveHelpRestorePatch({ snap, chatSnapshots: nextSnapshots, inflight }))
+      set(buildLeaveHelpRestorePatch({ snap, chatId, chatSnapshots: nextSnapshots, inflight }))
       return
     }
-    set({ helpMode: false, isStreaming: false, streamStartedAt: null })
+    // 4.2: стрим-флаги — через единую точку (поддерживает chats SSOT).
+    get().updateChatBundle(chatId, () => ({ isStreaming: false, streamStartedAt: null }))
+    set({ helpMode: false })
   },
   markHelpRead: () => set(s => ({
     help: { ...s.help, hasUnread: false }
@@ -1039,6 +1055,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         ...current.chatSnapshots,
         [current.activeChatId]: activeProjectSnapshot
       }
+      // 4.2: chats SSOT — уходящий в фон справки чат обновляем той же копией
+      // (keepStreamingOnlyWhenInflight мог снять фантомный стрим; без этого
+      // chats[active] разъехался бы с chatSnapshots[active]).
+      patch.chats = {
+        ...current.chats,
+        [current.activeChatId]: activeProjectSnapshot
+      }
       // Стрим проекта уехал в снапшот; в корне сбрасываем — иначе после выхода из
       // справки send блокируется, пока фоновый прогон не завершится.
       patch.isStreaming = false
@@ -1093,31 +1116,29 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         window.api.agentRuns.list(path, { status: 'running', owner: 'main', limit: 1 }),
         window.api.agentRuns.list(path, { status: 'queued', owner: 'main', limit: 1 }),
       ])
-      set(s => {
-        const hasLiveOwner = hasInflightProjectSend(s.sendOwners, path)
-        if ((running.length > 0 || queued.length > 0) && hasLiveOwner) return {}
-        const patch: Partial<ProjectState> = {}
-        if (s.path === path && s.isStreaming && !hasLiveOwner) {
-          patch.isStreaming = false
-          patch.streamStartedAt = null
-        }
-        const existing = s.sessions[path]
-        if (existing?.isStreaming && !hasLiveOwner) {
-          patch.sessions = {
-            ...s.sessions,
-            [path]: { ...existing, isStreaming: false, streamStartedAt: null }
+      // PerChatState 4.2: per-chat правки — через единую точку (поддерживает chats
+      // SSOT). Раньше был один атомарный set; теперь несколько последовательных —
+      // reconcile идёт на открытии проекта, промежуточные рендеры безвредны.
+      // sessions (проектный уровень) — вне chat-bundle, патчится отдельно.
+      const s = get()
+      const hasLiveOwner = hasInflightProjectSend(s.sendOwners, path)
+      if ((running.length > 0 || queued.length > 0) && hasLiveOwner) return
+      if (s.path === path && s.isStreaming && !hasLiveOwner) {
+        get().updateChatBundle(s.activeChatId, () => ({ isStreaming: false, streamStartedAt: null }))
+      }
+      if (s.sessions[path]?.isStreaming && !hasLiveOwner) {
+        set(s2 => ({
+          sessions: {
+            ...s2.sessions,
+            [path]: { ...s2.sessions[path], isStreaming: false, streamStartedAt: null }
           }
-        }
-        let nextChatSnapshots: ProjectState['chatSnapshots'] | null = null
-        for (const [chatIdRaw, snap] of Object.entries(s.chatSnapshots)) {
-          const chatId = Number(chatIdRaw)
-          if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)) continue
-          nextChatSnapshots = nextChatSnapshots ?? { ...s.chatSnapshots }
-          nextChatSnapshots[chatId] = { ...snap, isStreaming: false, streamStartedAt: null }
-        }
-        if (nextChatSnapshots) patch.chatSnapshots = nextChatSnapshots
-        return patch
-      })
+        }))
+      }
+      for (const [chatIdRaw, snap] of Object.entries(s.chatSnapshots)) {
+        const chatId = Number(chatIdRaw)
+        if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)) continue
+        get().updateChatBundle(chatId, () => ({ isStreaming: false, streamStartedAt: null }))
+      }
     } catch (err) {
       console.warn('[projectStore] reconcileStreamingState failed:', err)
     }

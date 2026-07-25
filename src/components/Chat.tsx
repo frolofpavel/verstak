@@ -2422,8 +2422,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
 
     if (item.messageId) {
       void window.api.chats.updateMessage(item.messageId, CANCELLED_SUPPLEMENT_CONTENT).catch(() => {})
-      useProject.setState(state => ({
-        messages: state.messages.map(message =>
+      // 4.2: через единую точку — поддерживает chats SSOT (прямой setState обошёл бы её).
+      useProject.getState().updateChatBundle(useProject.getState().activeChatId, b => ({
+        messages: b.messages.map(message =>
           message.dbId === item.messageId
             ? { ...message, content: CANCELLED_SUPPLEMENT_CONTENT }
             : message

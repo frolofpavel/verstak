@@ -7,6 +7,10 @@
 // session-snapshot.ts: ничего, что замыкается на zustand/window.api/React.
 // Поведение 1-в-1: каждый билдер возвращает ровно тот патч, что был inline
 // (харнес: tests/store/chat-lifecycle.test.ts).
+//
+// PerChatState 4.2: каждый билдер дополнительно поддерживает chats (SSOT) —
+// chats = chatSnapshots ∪ {активный чат}, а запись активного по построению
+// равна top-level bundle-полям (restoreBundle той же базы + chatId/hasUnread).
 import type { ChatMessage, ChatSession } from '../types/api'
 import {
   emptySessionUsage,
@@ -27,6 +31,11 @@ export function buildFreshSwitchPatch(opts: {
     chatTotalCount: 0,
     activeChatId: opts.activeChatId,
     chatSnapshots: opts.chatSnapshots,
+    // 4.2: SSOT = фоновые + активный (свежий, как top-level выше).
+    chats: {
+      ...opts.chatSnapshots,
+      [opts.activeChatId]: { ...restoreBundle(freshSnapshot()), chatId: opts.activeChatId, hasUnread: false },
+    },
     openedReviewId: null,
     // Эти поля НЕ входят в bundle (top-level стора) — без явного сброса они
     // утекают от уходящего чата (артефакты/маркеры/preview).
@@ -48,6 +57,11 @@ export function buildRestoredSwitchPatch(opts: {
     ...restoreBundle(opts.restored),
     activeChatId: opts.activeChatId,
     chatSnapshots: opts.chatSnapshots,
+    // 4.2: активный в SSOT — тот же bundle, что ушёл в top-level; смотрится → hasUnread=false.
+    chats: {
+      ...opts.chatSnapshots,
+      [opts.activeChatId]: { ...restoreBundle(opts.restored), chatId: opts.activeChatId, hasUnread: false },
+    },
     openedReviewId: null,
     touchedFiles: {},
     artifacts: [],
@@ -70,6 +84,11 @@ export function buildNewChatPatch(opts: {
     chatSessions: opts.chatSessions,
     activeChatId: opts.activeChatId,
     chatSnapshots: opts.chatSnapshots,
+    // 4.2: SSOT = фоновые + новый активный (свежий).
+    chats: {
+      ...opts.chatSnapshots,
+      [opts.activeChatId]: { ...restoreBundle(freshSnapshot()), chatId: opts.activeChatId, hasUnread: false },
+    },
     touchedFiles: {},
     artifacts: [],
     openedReviewId: null,
@@ -82,6 +101,7 @@ export function buildNewChatPatch(opts: {
  *  иначе залипает баннер «отвечает». */
 export function buildLeaveHelpRestorePatch(opts: {
   snap: SessionSnapshot
+  chatId: number
   chatSnapshots: Record<number, SessionSnapshot>
   inflight: boolean
 }) {
@@ -92,6 +112,17 @@ export function buildLeaveHelpRestorePatch(opts: {
     isStreaming: streaming,
     streamStartedAt: streaming ? opts.snap.streamStartedAt : null,
     chatSnapshots: opts.chatSnapshots,
+    // 4.2: чат вернулся из фона справки — активный в SSOT тождествен top-level.
+    chats: {
+      ...opts.chatSnapshots,
+      [opts.chatId]: {
+        ...restoreBundle(opts.snap),
+        isStreaming: streaming,
+        streamStartedAt: streaming ? opts.snap.streamStartedAt : null,
+        chatId: opts.chatId,
+        hasUnread: false,
+      },
+    },
   }
 }
 
@@ -119,6 +150,7 @@ export function buildCloseProjectPatch() {
     activeChatId: null,
     chatSessions: [],
     chatSnapshots: {},
+    chats: {},
     sessions: {},
     sendOwners: {},
     chatLaneGenerations: {},
@@ -171,6 +203,18 @@ export function buildSetProjectPatch(opts: {
     activeView: 'chat' as const,
     chatSessions: opts.chatSessions,
     activeChatId: opts.activeChatId,
+    // 4.2: проект сменился — SSOT пересоздаётся от активного чата нового проекта
+    // (фоновые чаты старого проекта не переносятся, как и chatSnapshots).
+    chats: opts.activeChatId != null
+      ? {
+          [opts.activeChatId]: {
+            ...restoreBundle(target),
+            messages: opts.messages,
+            chatId: opts.activeChatId,
+            hasUnread: false,
+          },
+        }
+      : {},
     sessions: opts.sessions,
     // touchedFiles/artifacts НЕ в bundle — сбрасываем при смене проекта.
     touchedFiles: {},

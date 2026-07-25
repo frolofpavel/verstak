@@ -3,6 +3,8 @@
 // newChatSession, setProject ×2 фазы, closeProject, leaveHelpMode). Поведение 1-в-1:
 // каждый expect — это бывший inline-литерал. Любая правка билдера, меняющая патч,
 // упадёт здесь ДО того как уедет в store.
+// PerChatState 4.2: патчи дополнительно несут chats (SSOT) — пины обновлены,
+// проверяя chats = chatSnapshots ∪ {активный}, а запись активного = top-level bundle.
 import { describe, expect, it } from 'vitest'
 import type { ChatSession } from '../../src/types/api'
 import {
@@ -13,7 +15,7 @@ import {
   buildRestoredSwitchPatch,
   buildSetProjectPatch,
 } from '../../src/store/chat-lifecycle'
-import { freshSnapshot, type SessionSnapshot } from '../../src/store/session-snapshot'
+import { freshSnapshot, restoreBundle, type SessionSnapshot } from '../../src/store/session-snapshot'
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 }
 
@@ -54,6 +56,10 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       sessionUsage: ZERO_USAGE,
       runningPlanStep: null,
       chatSnapshots: snapshots,
+      chats: {
+        ...snapshots,
+        2: { ...restoreBundle(freshSnapshot()), chatId: 2, hasUnread: false },
+      },
       openedReviewId: null,
       touchedFiles: {},
       checkpointId: null,
@@ -86,6 +92,11 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
     expect(patch.chatSnapshots).toBe(snapshots)
     // hasUnread — свойство фона, в top-level не поднимается
     expect(patch).not.toHaveProperty('hasUnread')
+    // 4.2: SSOT — активный тождествен top-level bundle (restoreBundle той же базы)
+    expect(patch.chats).toEqual({
+      ...snapshots,
+      7: { ...restoreBundle(snap), chatId: 7, hasUnread: false },
+    })
   })
 
   it('buildNewChatPatch = newChatSession (после VSK-FIX: пагинация истории сбрасывается)', () => {
@@ -95,6 +106,10 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       chatSessions: [chat(3)],
       activeChatId: 3,
       chatSnapshots: snapshots,
+      chats: {
+        ...snapshots,
+        3: { ...restoreBundle(freshSnapshot()), chatId: 3, hasUnread: false },
+      },
       messages: [],
       chatHasMoreBefore: false,
       chatTotalCount: 0,
@@ -121,22 +136,27 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
     const snap = usedSnapshot()
     const snapshots = { 2: freshSnapshot() }
 
-    const inflight = buildLeaveHelpRestorePatch({ snap, chatSnapshots: snapshots, inflight: true })
+    const inflight = buildLeaveHelpRestorePatch({ snap, chatId: 7, chatSnapshots: snapshots, inflight: true })
     expect(inflight.isStreaming).toBe(true)
     expect(inflight.streamStartedAt).toBe(123)
     expect(inflight.helpMode).toBe(false)
     expect(inflight.messages).toEqual(snap.messages)
     expect(inflight.chatSnapshots).toBe(snapshots)
+    // 4.2: SSOT — вернувшийся чат тождествен top-level (стрим по inflight)
+    expect(inflight.chats[7]).toMatchObject({ isStreaming: true, streamStartedAt: 123, hasUnread: false })
+    expect(inflight.chats[2]).toBe(snapshots[2])
 
     // Фоновый прогон завершился, пока были в справке → «отвечает…» не залипает
-    const stale = buildLeaveHelpRestorePatch({ snap, chatSnapshots: snapshots, inflight: false })
+    const stale = buildLeaveHelpRestorePatch({ snap, chatId: 7, chatSnapshots: snapshots, inflight: false })
     expect(stale.isStreaming).toBe(false)
     expect(stale.streamStartedAt).toBeNull()
+    expect(stale.chats[7]).toMatchObject({ isStreaming: false, streamStartedAt: null })
 
     // Не стримил и не inflight → тоже false
-    const quiet = buildLeaveHelpRestorePatch({ snap: usedSnapshot({ isStreaming: false }), chatSnapshots: snapshots, inflight: true })
+    const quiet = buildLeaveHelpRestorePatch({ snap: usedSnapshot({ isStreaming: false }), chatId: 7, chatSnapshots: snapshots, inflight: true })
     expect(quiet.isStreaming).toBe(false)
     expect(quiet.streamStartedAt).toBeNull()
+    expect(quiet.chats[7]).toMatchObject({ isStreaming: false, streamStartedAt: null })
   })
 
   it('buildCloseProjectPatch = closeProject: полный сброс эфемерного состояния', () => {
@@ -160,6 +180,7 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       activeChatId: null,
       chatSessions: [],
       chatSnapshots: {},
+      chats: {},
       sessions: {},
       sendOwners: {},
       chatLaneGenerations: {},
@@ -188,8 +209,9 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
     })
     // Общая часть фаз идентична (бывший дублированный литерал). chatTotalCount —
     // производная messages (messages.length), поэтому тоже варьируется по фазам.
-    const { messages: _m1, chatSessions: _c1, activeChatId: _a1, chatTotalCount: _t1, ...rest1 } = phase1
-    const { messages: _m2, chatSessions: _c2, activeChatId: _a2, chatTotalCount: _t2, ...rest2 } = phase2
+    // chats варьируется вслед за messages (4.2: SSOT активного несёт те же messages).
+    const { messages: _m1, chatSessions: _c1, activeChatId: _a1, chatTotalCount: _t1, chats: _ch1, ...rest1 } = phase1
+    const { messages: _m2, chatSessions: _c2, activeChatId: _a2, chatTotalCount: _t2, chats: _ch2, ...rest2 } = phase2
     expect(rest1).toEqual(rest2)
     expect(rest1).toEqual({
       path: '/p',
@@ -226,6 +248,13 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
     expect(phase2.messages).toEqual([])
     expect(phase2.chatSessions).toEqual([chat(9)])
     expect(phase2.chatTotalCount).toBe(0)
+    // 4.2: SSOT активного несёт те же messages, что top-level фазы.
+    expect(phase1.chats).toEqual({
+      9: { ...restoreBundle(target), messages: target.messages, chatId: 9, hasUnread: false },
+    })
+    expect(phase2.chats).toEqual({
+      9: { ...restoreBundle(target), messages: [], chatId: 9, hasUnread: false },
+    })
   })
 
   it('buildSetProjectPatch: agentProgress undefined в старом снапшоте → [] (legacy-защита)', () => {
@@ -234,5 +263,7 @@ describe('chat-lifecycle — пины бывших inline-патчей projectSt
       path: '/p', target: legacy, sessions: {}, messages: [], chatSessions: [], activeChatId: null,
     })
     expect(patch.agentProgress).toEqual([])
+    // 4.2: нет активного чата → пустой SSOT
+    expect(patch.chats).toEqual({})
   })
 })

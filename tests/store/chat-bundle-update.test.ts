@@ -30,6 +30,7 @@ const host = (over: Partial<BundleHostState> = {}): BundleHostState => ({
   activeChatId: 1,
   helpMode: false,
   chatSnapshots: {},
+  chats: {},
   ...over,
 })
 

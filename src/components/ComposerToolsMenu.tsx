@@ -275,7 +275,8 @@ export function ComposerToolsMenu({
     // после отката чат не отличался от перезагруженного: thinking и appliedSkills тоже
     // восстанавливаем (ре-ревью B #14 — здесь они терялись, и мой прошлый комментарий про
     // «паритет с другими путями» был неточен).
-    useProject.setState({
+    // 4.2: через единую точку — поддерживает chats SSOT (прямой setState обошёл бы её).
+    useProject.getState().updateChatBundle(activeChatId, () => ({
       messages: msgs.map(m => ({
         role: m.role,
         content: m.content,
@@ -284,7 +285,7 @@ export function ComposerToolsMenu({
         createdAt: m.createdAt,
         dbId: m.id,
       })),
-    })
+    }))
     pushActivity({
       id: `revert-task-${Date.now()}`, kind: 'write', label: `↶ Откатил задачу: −${deleted} сообщений`,
       detail: 'диалог обрезан к чекпоинту (файлы не тронуты)', status: 'ok', timestamp: Date.now(),
