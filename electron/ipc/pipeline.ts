@@ -89,6 +89,8 @@ export function registerPipelineIpc(deps: PipelineDeps): void {
     'pipeline:getActive',
     (_e, projectPath: string): PipelineRun | null => reconcileLatestOutcome(pipeline.getActive(projectPath)),
   )
+  ipcMain.handle('pipeline:list', (_e, projectPath: string, limit?: number) =>
+    projectPath ? pipeline.list(projectPath, limit) : [])
 
   // pipeline:cancel — отменить прогон (step='cancelled').
   ipcMain.handle('pipeline:cancel', (_e, id: number): void => {

@@ -73,6 +73,12 @@ describe('pipeline ipc (D2)', () => {
     expect(metrics.completed).toBe(0)
   })
 
+  it('list возвращает только историю текущего проекта', () => {
+    invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief })
+    expect(invoke<PipelineRun[]>('pipeline:list', dir)).toHaveLength(1)
+    expect(invoke<PipelineRun[]>('pipeline:list', '')).toEqual([])
+  })
+
   it('start без открытого проекта → null', () => {
     projectRoot = null
     expect(invoke('pipeline:start', { mode: 'dev', brief })).toBeNull()

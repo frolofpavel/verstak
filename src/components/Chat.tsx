@@ -22,6 +22,7 @@ import { ResumeBanner } from './ResumeBanner'
 import { WorktreeBar } from './WorktreeBar'
 import { PipelineWizard } from './PipelineWizard'
 import { PipelineBanner } from './PipelineBanner'
+import { OutcomeRunsPanel } from './OutcomeRunsPanel'
 import { TaskContractReview } from './TaskContractReview'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { EffortPicker } from './EffortPicker'
@@ -970,6 +971,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   /** sendId Execute-шага — для точной привязки agentRunId. */
   const pipelineExecuteSendIdRef = useRef<number | null>(null)
   const [pipelineWizardOpen, setPipelineWizardOpen] = useState(false)
+  const [outcomeRunsOpen, setOutcomeRunsOpen] = useState(false)
   const [pipelineInitialBrief, setPipelineInitialBrief] = useState<PipelineBrief | undefined>(undefined)
   const [pipelineWizardMode, setPipelineWizardMode] = useState<PipelineMode>('agency')
   const [taskContractReview, setTaskContractReview] = useState<TaskContractV1 | null>(null)
@@ -3407,6 +3409,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           onStarted={onPipelineStarted}
         />
       )}
+      {outcomeRunsOpen && activePath && (
+        <OutcomeRunsPanel projectPath={activePath} onClose={() => setOutcomeRunsOpen(false)} />
+      )}
 
       {isStreaming && agentProgress.length > 0 && (
         <div className="gg-agent-progress-host">
@@ -3976,6 +3981,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
                 >
                   {t.pipeline.entry}
+                </button>
+              )}
+              {!isHelpChat && activePath && (
+                <button
+                  type="button"
+                  className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
+                  onClick={() => setOutcomeRunsOpen(true)}
+                  title="История задач «До результата»"
+                >
+                  Прогоны
                 </button>
               )}
               {!isHelpChat && (

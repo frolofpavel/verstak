@@ -97,6 +97,18 @@ describe('pipeline-runs (migration 22)', () => {
     db.close()
   })
 
+  it('2.1.6 list возвращает историю новых первыми и изолирует проекты', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const pr = createPipelineRuns(db)
+    const first = pr.create({ projectPath: 'C:/a', mode: 'dev', brief })
+    const second = pr.create({ projectPath: 'C:/a', mode: 'dev', brief: { ...brief, goal: 'second' } })
+    pr.create({ projectPath: 'C:/b', mode: 'dev', brief })
+    expect(pr.list('C:/a').map(run => run.id)).toEqual([second.id, first.id])
+    expect(pr.list('C:/a', 1)).toHaveLength(1)
+    expect(pr.list('C:/b')).toHaveLength(1)
+    db.close()
+  })
+
   it('Task Contract переживает reopen и revision нельзя уменьшить', () => {
     const path = join(dir, 'test.db')
     let db = openDb(path)

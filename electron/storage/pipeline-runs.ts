@@ -90,6 +90,8 @@ export interface PipelineRuns {
   get(id: number): PipelineRun | null
   /** Последний НЕтерминальный прогон проекта (для resume-баннера). */
   getActive(projectPath: string): PipelineRun | null
+  /** История прогонов проекта, новые первыми. */
+  list(projectPath: string, limit?: number): PipelineRun[]
   advance(id: number, patch: AdvancePipelinePatch): PipelineRun | null
   saveContract(id: number, contract: TaskContractV1): PipelineRun
   cancel(id: number): void
@@ -199,6 +201,12 @@ export function createPipelineRuns(db: Database): PipelineRuns {
       ).all(projectPath) as PipelineRow[]
       const active = rows.find(r => !TERMINAL_STEPS.has(r.step as PipelineStep))
       return active ? mapRow(active) : null
+    },
+    list(projectPath, limit = 100) {
+      const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit) || 100))
+      return (db.prepare(
+        `${SELECT} WHERE project_path = ? ORDER BY id DESC LIMIT ?`
+      ).all(projectPath, safeLimit) as PipelineRow[]).map(mapRow)
     },
     advance(id, patch) {
       const sets: string[] = []

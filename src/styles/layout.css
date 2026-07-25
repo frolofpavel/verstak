@@ -20203,6 +20203,26 @@ html[data-theme="light"] .gg-policy {
 .gg-outcome-metric-grid > div { padding: 9px; border-radius: 9px; background: var(--surface-2); display: grid; gap: 3px; }
 .gg-outcome-metric-grid span { color: var(--text-muted); font-size: 11px; }
 .gg-outcome-metric-grid strong { font-size: 13px; }
+.gg-outcome-runs-panel { width: min(760px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); }
+.gg-outcome-run-filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 14px; }
+.gg-outcome-runs-list { display: grid; gap: 8px; overflow: auto; }
+.gg-outcome-run-row {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  color: inherit;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.gg-outcome-run-row:hover { border-color: var(--accent); }
+.gg-outcome-run-row-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.gg-outcome-run-row-main strong,
+.gg-outcome-run-row-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   .gg-outcome-effort,
   .gg-outcome-run-grid { grid-template-columns: 1fr; }

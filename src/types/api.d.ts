@@ -855,6 +855,8 @@ declare global {
         advance(id: number, patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null; verifyAttempts?: number }): Promise<PipelineRun | null>
         /** Активный (НЕтерминальный) прогон проекта для resume-баннера. */
         getActive(projectPath: string): Promise<PipelineRun | null>
+        /** История прогонов проекта, новые первыми. */
+        list(projectPath: string, limit?: number): Promise<PipelineRun[]>
         /** Отменить прогон (step='cancelled'). */
         cancel(id: number): Promise<void>
         listStepOutcomes(planId: number): Promise<StoredStepOutcome[]>
