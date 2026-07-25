@@ -27,24 +27,19 @@ import type { ChatMessage, ChatProvider } from '../ai/types'
 import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
-import { pushConversationSupplement } from '../ai/runner-supplements'
 import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 // Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
 import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
 import { selectSendProvider, selectSendModel, decideSmartRouting, resolveCodexHome } from './ai-send/route-selection'
-import { preflightSubscriptionAccount, buildRequestedAccountEvent, buildRotateAccountEvidence } from './ai-send/account-preflight'
+import { preflightSubscriptionAccount } from './ai-send/account-preflight'
 import { isSmartFallbackAllowed, createFallbackAttemptFactory, createLimitAccountSwitcher, buildFallbackOpts } from './ai-send/fallback-route'
+import { openAgentRun, linkDevTaskRun, startRunTimeout } from './ai-send/run-bookkeeping'
+import { registerAiResolveIpc } from './ai-resolve'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { type ToolEvent } from '../ai/procedural-memory'
-import {
-  AGENT_RUN_TIMEOUT_SETTING_KEY,
-  abortAgentRunForTimeout,
-  resolveAgentRunTimeoutPolicy,
-  shouldFireRunTimeout,
-} from '../ai/run-lifecycle'
 import { parseResumeCheckpoint, canReplayCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
@@ -1070,112 +1065,53 @@ export function registerAiIpc(deps: AiDeps): void {
     // finally по exitReason. Best-effort: agentRuns опционален + try/catch.
     const runOwner: AgentRunOwner = overrides?.useReviewerPrompt ? 'review' : 'main'
     const runTitle = ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
-    let runGeneration = 0
-    try {
-      const createdGeneration = deps.agentRuns?.create({
-        runId,
-        projectPath: projectPath ?? '',
-        chatId: chatId ? Number(chatId) : null,
-        owner: runOwner,
-        title: runTitle,
-        providerId,
-        model: model ?? null,
-        // 2.0.7-F: requested (что выбрал пользователь через promptRoute) отдельно от
-        // provider_id/model = actual (что реально отработало после fallback). null =
-        // запрошенное совпадает с дефолтом чата. DoD: after-send сверить actual vs requested.
-        requestedProviderId: promptRoute?.providerId ?? null,
-        requestedModel: promptRoute?.model ?? null,
-        sendId,
-        // Crash-resume: режим прогона — гард деструктива в баннере возобновления
-        // (auto/bypass → авто-resume запрещён).
-        agentMode,
-        // EF-R1 Б3: фактический аккаунт прогона (pre-flight подтверждённый).
-        accountId: runAccountId
-      })
-      // Timeline: исходный запрос пользователя первым событием — чтобы лента
-      // читалась как нарратив (запрос → действия → итог), а не только механика.
-      if (typeof createdGeneration === 'number') runGeneration = createdGeneration
-      logRuntime('agent_runs.create', {
-        runId,
-        sendId,
-        projectPath,
-        chatId: chatId ? Number(chatId) : null,
-        owner: runOwner,
-        providerId,
-        model,
-        generation: runGeneration
-      })
-      if (runTitle) deps.agentRuns?.appendEvent(runId, 'user_msg', { detail: runTitle })
-      // 2.1.3-CD: запрошенный one-shot аккаунт — первая запись route-evidence прогона.
-      if (oneShotAccountId != null && mainAcct) {
-        try {
-          deps.agentRuns?.appendEvent(runId, 'route', buildRequestedAccountEvent(mainAcct.label))
-        } catch { /* best-effort */ }
-      }
-      // EF S1+S6: Auto pre-flight выбрал следующий готовый аккаунт ДО сетевого запроса —
-      // фиксируем ротацию в Timeline и шлём route-changed (пилюля «⇄ A → B» сразу).
-      if (mainAcct?.skipped) {
-        const evidence = buildRotateAccountEvidence({
-          skipped: mainAcct.skipped,
-          toLabel: mainAcct.label,
-          providerId,
-          model,
-        })
-        try {
-          deps.agentRuns?.appendEvent(runId, 'route', evidence.runEvent)
-        } catch { /* best-effort */ }
-        taggedSender.send('ai:event', { id: sendId, event: evidence.routeChanged })
-      }
-    } catch (err) {
-      logRuntimeError('agent_runs.create.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
-      console.warn('[agent-runs] create failed:', err instanceof Error ? err.message : err)
-    }
+    const emitRunEvent = (event: unknown) => taggedSender.send('ai:event', { id: sendId, event })
+    openAgentRun({
+      agentRuns: deps.agentRuns,
+      runId,
+      sendId,
+      projectPath,
+      chatId: chatId ? Number(chatId) : null,
+      chatIdRaw: chatId ?? null,
+      owner: runOwner,
+      title: runTitle,
+      providerId,
+      model: model ?? null,
+      // 2.0.7-F: requested (что выбрал пользователь через promptRoute) отдельно от
+      // provider_id/model = actual (что реально отработало после fallback). null =
+      // запрошенное совпадает с дефолтом чата. DoD: after-send сверить actual vs requested.
+      requestedProviderId: promptRoute?.providerId ?? null,
+      requestedModel: promptRoute?.model ?? null,
+      agentMode,
+      // EF-R1 Б3: фактический аккаунт прогона (pre-flight подтверждённый).
+      accountId: runAccountId,
+      account: mainAcct,
+      oneShotAccountId,
+      emit: emitRunEvent,
+    })
 
-    // Dev Task Flow (Фаза 2): если у активного чата есть открытая dev_task —
-    // привязываем этот прогон к ней (один dev_task ↔ N run_id). Не для review-
-    // прогонов (их активность к задаче не относится). Best-effort.
-    if (projectPath && runOwner === 'main') {
-      try {
-        deps.linkDevTaskRun?.(projectPath, chatId ? Number(chatId) : null, runId)
-      } catch (err) {
-        logRuntimeError('dev_task.link_run.fail', err, { runId, sendId, projectPath, chatId: chatId ?? null })
-        console.warn('[dev-task] linkDevTaskRun failed:', err instanceof Error ? err.message : err)
-      }
-    }
+    linkDevTaskRun({
+      link: deps.linkDevTaskRun,
+      projectPath,
+      chatId: chatId ? Number(chatId) : null,
+      chatIdRaw: chatId ?? null,
+      runId,
+      sendId,
+      owner: runOwner,
+    })
 
-    const timeoutPolicy = resolveAgentRunTimeoutPolicy(deps.getSecret(AGENT_RUN_TIMEOUT_SETTING_KEY))
-    const timeoutMinutes = Math.max(1, Math.round(timeoutPolicy.timeoutMs / 60_000))
-    const timeoutMessage = `Прогон остановлен по таймауту ${timeoutMinutes} мин. Можно переотправить задачу или увеличить agent_run_timeout_ms.`
-    runTimeout = setTimeout(() => {
-      // M2: не слать таймаут, если прогон уже оборван ИЛИ уже успешно завершён
-      // (endedAt проставлен finish() до clearRunTimeout в cleanup) — иначе ложный
-      // timeout-тост на успешном прогоне в окне гонки finish→clearTimeout.
-      if (!shouldFireRunTimeout(ctrl.signal.aborted, deps.agentRuns?.get(runId)?.endedAt)) return
-      logRuntime('ai.run.timeout', {
-        sendId,
-        runId,
-        projectPath,
-        chatId: chatId ?? null,
-        providerId,
-        model,
-        timeoutMs: timeoutPolicy.timeoutMs,
-        source: timeoutPolicy.source,
-        clamped: timeoutPolicy.clamped
-      }, 'warn')
-      try {
-        deps.agentRuns?.appendEvent(runId, 'status', {
-          label: 'timeout',
-          detail: timeoutMessage,
-          status: 'timed_out'
-        })
-        deps.agentRuns?.finish(runId, 'timed_out', { error: timeoutMessage })
-      } catch (err) {
-        logRuntimeError('agent_runs.timeout.finish.fail', err, { runId, sendId, projectPath })
-      }
-      taggedSender.send('ai:event', { id: sendId, event: { type: 'error', message: timeoutMessage } })
-      abortAgentRunForTimeout(ctrl, timeoutPolicy.timeoutMs)
-    }, timeoutPolicy.timeoutMs)
-    runTimeout.unref?.()
+    runTimeout = startRunTimeout({
+      getSecret: deps.getSecret,
+      agentRuns: deps.agentRuns,
+      controller: ctrl,
+      runId,
+      sendId,
+      projectPath,
+      chatIdRaw: chatId ?? null,
+      providerId,
+      model: model ?? null,
+      emit: emitRunEvent,
+    })
 
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
@@ -1320,74 +1256,12 @@ export function registerAiIpc(deps: AiDeps): void {
     return sendId
   })
 
-  ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
-
-  // #4 suspend: приостановить прогон = abort, НО прогон помечается 'suspended'
-  // (не 'stopped') и чекпойнт сохраняется (он и так держится на abort) → ↻ Продолжить.
-  ipcMain.handle('ai:suspend', (_e, sendId: number) => {
-    suspendedSends.add(sendId)
-    return abortSend(sendId)
-  })
-
-  ipcMain.handle('ai:append-context', (_e, sendId: number, text: string) => {
-    const trimmed = String(text ?? '').trim()
-    if (!trimmed || sendId <= 0) return { ok: false as const, fallback: 'invalid' as const }
-    const mode = pushConversationSupplement(sendId, trimmed)
-    if (!mode) return { ok: false as const, fallback: 'unavailable' as const }
-    return { ok: true as const, mode }
-  })
-
-  ipcMain.handle('ai:resolve-write', (_e, callId: string, accept: boolean, sendId?: number) => {
-    // If renderer knows sendId (it should — Chat.tsx stores it after ai:send),
-    // use strict key lookup. Fallback to suffix scan for backward compat with
-    // older renderer code paths.
-    if (typeof sendId === 'number' && sendId > 0) {
-      const key = scopedKey(sendId, callId)
-      const exact = pendingWrites.get(key)
-      if (exact) { exact.resolve(accept); pendingWrites.delete(key); return }
-    }
-    for (const [k, p] of pendingWrites) {
-      if (k.endsWith('::' + callId)) {
-        p.resolve(accept)
-        pendingWrites.delete(k)
-        return
-      }
-    }
-  })
+  // Управление идущим прогоном (стоп / приостановка / append-context) и резолв
+  // pending-подтверждений — самостоятельный модуль (2.1.10-F). abortSend передаётся
+  // параметром: его ядро (activeAborts + дренаж pending сессии) остаётся здесь.
+  registerAiResolveIpc(ipcMain, abortSend)
 
   registerAiCountTokensIpc(ipcMain, deps)
-
-  ipcMain.handle('ai:resolve-command', (_e, callId: string, accept: boolean, sendId?: number) => {
-    if (typeof sendId === 'number' && sendId > 0) {
-      const key = scopedKey(sendId, callId)
-      const exact = pendingCommands.get(key)
-      if (exact) { exact.resolve(accept); pendingCommands.delete(key); return }
-    }
-    for (const [k, p] of pendingCommands) {
-      if (k.endsWith('::' + callId)) {
-        p.resolve(accept)
-        pendingCommands.delete(k)
-        return
-      }
-    }
-  })
-
-  // #3 plan-gate: решение пользователя по предложенному плану (Approve/Revise/Reject).
-  ipcMain.handle('ai:resolve-plan', (_e, callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => {
-    const payload = { decision, feedback }
-    if (typeof sendId === 'number' && sendId > 0) {
-      const key = scopedKey(sendId, callId)
-      const exact = pendingPlans.get(key)
-      if (exact) { exact.resolve(payload); pendingPlans.delete(key); return }
-    }
-    for (const [k, p] of pendingPlans) {
-      if (k.endsWith('::' + callId)) {
-        p.resolve(payload)
-        pendingPlans.delete(k)
-        return
-      }
-    }
-  })
 }
 
 // Type re-exports for renderer (api.d.ts)
