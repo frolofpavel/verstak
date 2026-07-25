@@ -42,7 +42,7 @@ export { buildRemoteTscCommand } from './tool-handlers/diagnostics'
 import { convertFileHandler, editSpreadsheetHandler } from './tool-handlers/files'
 export { convertFileHandler } from './tool-handlers/files'
 import { attestVerificationHandler, createPlanHandler, preflightHandler } from './tool-handlers/verification'
-import { memorySaveHandler, memoryInvalidateHandler, saveDecisionHandler, memorySearchHandler, coreMemoryAppendHandler, coreMemoryReplaceHandler, coreMemoryRemoveHandler } from './tool-handlers/memory'
+import { memorySaveHandler, memoryInvalidateHandler, saveDecisionHandler, memorySearchHandler, coreMemoryUpdateHandler, coreMemoryAppendHandler, coreMemoryReplaceHandler, coreMemoryRemoveHandler } from './tool-handlers/memory'
 import { screenCaptureHandler, screenInfoHandler } from './tool-handlers/screen'
 import { webFetchHandler, webSearchHandler } from './tool-handlers/web'
 import { mcpToolHandler } from './tool-handlers/mcp'
@@ -107,6 +107,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'save_decision': saveDecisionHandler,
   'memory_search': memorySearchHandler,
   // Core Memory (Hermes-style) — sequential, file-backed, no user confirmation
+  'core_memory_update': coreMemoryUpdateHandler,
   'core_memory_append': coreMemoryAppendHandler,
   'core_memory_replace': coreMemoryReplaceHandler,
   'core_memory_remove': coreMemoryRemoveHandler,

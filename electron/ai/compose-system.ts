@@ -104,7 +104,7 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
   // Подсказка по core memory tools — добавляется один раз к userLayer,
   // чтобы агент знал как обновлять MEMORY.md / USER.md.
   if (userLayer.content !== undefined) {
-    const hint = '\n\n<!-- core_memory_hint -->\nИспользуй core_memory_append/replace/remove чтобы обновлять свою память о проекте (MEMORY.md) и пользователе (USER.md). Core memory всегда видна — не нужно искать, она автоматически в контексте.'
+    const hint = '\n\n<!-- core_memory_hint -->\nИспользуй core_memory_update для пакетной консолидации памяти и core_memory_append/replace/remove для одиночных правок MEMORY.md или USER.md. Core memory всегда видна — не нужно искать, она автоматически в контексте.'
     userLayer = { path: userLayer.path, content: userLayer.content + hint }
   }
 

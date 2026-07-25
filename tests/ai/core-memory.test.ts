@@ -1,8 +1,57 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { appendCoreMemory, loadCoreMemory, saveCoreMemoryBlock, replaceCoreMemory } from '../../electron/ai/core-memory'
+import {
+  appendCoreMemory,
+  applyCoreMemoryOperations,
+  loadCoreMemory,
+  saveCoreMemoryBlock,
+  replaceCoreMemory,
+} from '../../electron/ai/core-memory'
+
+describe('core-memory — атомарный batch', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-core-batch-')) })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('remove + add проверяются по итоговому бюджету и сохраняются одним результатом', () => {
+    saveCoreMemoryBlock(dir, 'user', `УСТАРЕЛО ${'x'.repeat(1_300)}`)
+    const result = applyCoreMemoryOperations(dir, 'user', [
+      { op: 'remove', text: `УСТАРЕЛО ${'x'.repeat(1_300)}` },
+      { op: 'add', text: `АКТУАЛЬНО ${'y'.repeat(1_300)}` },
+    ])
+
+    expect(result.success).toBe(true)
+    expect(result.applied).toBe(2)
+    expect(result.content).toContain('АКТУАЛЬНО')
+    expect(result.content).not.toContain('УСТАРЕЛО')
+    expect(loadCoreMemory(dir).user).toBe(result.content)
+  })
+
+  it('ошибка в любой операции не оставляет частично применённую память', () => {
+    saveCoreMemoryBlock(dir, 'memory', 'исходный факт')
+    const result = applyCoreMemoryOperations(dir, 'memory', [
+      { op: 'add', text: 'не должен сохраниться' },
+      { op: 'replace', oldText: 'отсутствующий факт', newText: 'новый' },
+    ])
+
+    expect(result.success).toBe(false)
+    expect(result.applied).toBe(0)
+    expect(loadCoreMemory(dir).memory).toBe('исходный факт')
+  })
+
+  it('редактирует секреты и не оставляет временный файл после atomic rename', () => {
+    const secret = `ghp_${'a'.repeat(36)}`
+    const result = applyCoreMemoryOperations(dir, 'memory', [
+      { op: 'add', text: `релизный токен ${secret}` },
+    ])
+
+    expect(result.success).toBe(true)
+    expect(result.content).not.toContain(secret)
+    expect(readdirSync(join(dir, '.verstak'))).toEqual(['MEMORY.md'])
+  })
+})
 
 describe('core-memory — appendCoreMemory overflow (эвакуация, не потеря)', () => {
   let dir: string

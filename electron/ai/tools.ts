@@ -914,6 +914,31 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'core_memory_update',
+    description: 'Атомарно применяет пакет add/replace/remove к одному блоку core memory. Используй при консолидации: можно удалить устаревшее и добавить новое одним безопасным вызовом; при ошибке не применяется ничего.',
+    parameters: {
+      type: 'object',
+      properties: {
+        block: { type: 'string', enum: ['memory', 'user'], description: 'memory = о проекте, user = о пользователе' },
+        operations: {
+          type: 'array',
+          description: 'Операции выполняются по порядку, но сохраняются только вместе',
+          items: {
+            type: 'object',
+            properties: {
+              op: { type: 'string', enum: ['add', 'replace', 'remove'] },
+              text: { type: 'string', description: 'Текст для add/remove' },
+              old_text: { type: 'string', description: 'Существующий точный фрагмент для replace' },
+              new_text: { type: 'string', description: 'Новый текст для replace' }
+            },
+            required: ['op']
+          }
+        }
+      },
+      required: ['block', 'operations']
+    }
+  },
+  {
     name: 'core_memory_append',
     description: 'Добавляет текст в core memory (MEMORY.md или USER.md). Core memory всегда видна агенту в system prompt. Используй для записи важных фактов о проекте или предпочтениях пользователя.',
     parameters: {

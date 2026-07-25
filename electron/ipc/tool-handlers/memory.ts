@@ -113,6 +113,46 @@ export const memorySearchHandler: ToolHandler = {
 // Core Memory: core_memory_append / core_memory_replace / core_memory_remove
 // ============================================================================
 
+export const coreMemoryUpdateHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const { applyCoreMemoryOperations } = await import('../../ai/core-memory')
+      const block = String(call.args.block ?? '')
+      if (block !== 'memory' && block !== 'user') {
+        return { id: call.id, name: call.name, result: '', error: 'core_memory_update: block должен быть "memory" или "user"' }
+      }
+      if (!Array.isArray(call.args.operations)) {
+        return { id: call.id, name: call.name, result: '', error: 'core_memory_update: operations должен быть массивом' }
+      }
+      const operations = call.args.operations.map(raw => {
+        const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+        const op = String(value.op ?? '')
+        if (op === 'add') return { op, text: String(value.text ?? '') } as const
+        if (op === 'replace') return { op, oldText: String(value.old_text ?? ''), newText: String(value.new_text ?? '') } as const
+        return { op: 'remove', text: String(value.text ?? '') } as const
+      })
+      const invalidIndex = call.args.operations.findIndex(raw => {
+        if (!raw || typeof raw !== 'object') return true
+        return !['add', 'replace', 'remove'].includes(String((raw as Record<string, unknown>).op ?? ''))
+      })
+      if (invalidIndex >= 0) {
+        return { id: call.id, name: call.name, result: '', error: `core_memory_update: неизвестная операция №${invalidIndex + 1}` }
+      }
+      const res = applyCoreMemoryOperations(ctx.projectPath, block, operations)
+      if (!res.success) {
+        return { id: call.id, name: call.name, result: '', error: `core_memory_update: ${res.error}\n\nТекущее содержимое:\n${res.content}` }
+      }
+      emitActivity(ctx, call, 'ok', 'core_memory_update', `${block} · ${res.applied} операций`)
+      return { id: call.id, name: call.name, result: `Атомарно применено операций: ${res.applied}.\n\nТекущее содержимое:\n${res.content}` }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
 export const coreMemoryAppendHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {

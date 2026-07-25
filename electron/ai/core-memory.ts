@@ -10,8 +10,9 @@
  * обновлять её через tools: core_memory_append / core_memory_replace / core_memory_remove.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync } from 'fs'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { scanText } from './secret-scanner'
 
 const MEMORY_FILE = 'MEMORY.md'
@@ -22,6 +23,18 @@ const MAX_USER_CHARS = 1500
 export interface CoreMemoryBlocks {
   memory: string   // содержимое MEMORY.md
   user: string     // содержимое USER.md
+}
+
+export type CoreMemoryOperation =
+  | { op: 'add'; text: string }
+  | { op: 'replace'; oldText: string; newText: string }
+  | { op: 'remove'; text: string }
+
+export interface CoreMemoryBatchResult {
+  success: boolean
+  content: string
+  applied: number
+  error?: string
 }
 
 /** Прочитать оба блока core memory для проекта. Возвращает пустые строки если файлы не существуют.
@@ -50,7 +63,70 @@ export function saveCoreMemoryBlock(projectPath: string, block: 'memory' | 'user
   const file = block === 'memory' ? MEMORY_FILE : USER_FILE
   const max = block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS
   const safe = scanText(content).redacted
-  writeFileSync(join(dir, file), safe.slice(0, max), 'utf-8')
+  const target = join(dir, file)
+  const temp = join(dir, `.${file}.${process.pid}.${randomUUID()}.tmp`)
+  try {
+    writeFileSync(temp, safe.slice(0, max), 'utf-8')
+    renameSync(temp, target)
+  } finally {
+    rmSync(temp, { force: true })
+  }
+}
+
+/**
+ * Атомарно применить несколько правок к одному core-memory блоку.
+ *
+ * Проверка идёт на рабочей копии, запись — ровно один раз после успешного применения
+ * ВСЕХ операций. Поэтому модель может сначала удалить устаревшее и затем добавить новое,
+ * не получив промежуточное переполнение и не оставив полуприменённую память при ошибке.
+ */
+export function applyCoreMemoryOperations(
+  projectPath: string,
+  block: 'memory' | 'user',
+  operations: CoreMemoryOperation[]
+): CoreMemoryBatchResult {
+  const blocks = loadCoreMemory(projectPath)
+  const original = block === 'memory' ? blocks.memory : blocks.user
+  const max = block === 'memory' ? MAX_MEMORY_CHARS : MAX_USER_CHARS
+  if (operations.length === 0) {
+    return { success: false, content: original, applied: 0, error: 'Список операций пуст.' }
+  }
+  if (operations.length > 50) {
+    return { success: false, content: original, applied: 0, error: 'За один вызов разрешено не более 50 операций.' }
+  }
+
+  let working = original
+  for (let index = 0; index < operations.length; index++) {
+    const operation = operations[index]
+    if (operation.op === 'add') {
+      const text = scanText(operation.text).redacted.trim()
+      if (!text) return { success: false, content: original, applied: 0, error: `Операция ${index + 1}: text обязателен.` }
+      working = working ? `${working}\n${text}` : text
+      continue
+    }
+    if (operation.op === 'replace') {
+      if (!operation.oldText || !working.includes(operation.oldText)) {
+        return { success: false, content: original, applied: 0, error: `Операция ${index + 1}: oldText не найден.` }
+      }
+      working = working.replace(operation.oldText, scanText(operation.newText).redacted)
+      continue
+    }
+    if (!operation.text || !working.includes(operation.text)) {
+      return { success: false, content: original, applied: 0, error: `Операция ${index + 1}: text не найден.` }
+    }
+    working = working.replace(operation.text, '').replace(/\n{3,}/g, '\n\n').trim()
+  }
+
+  if (working.length > max) {
+    return {
+      success: false,
+      content: original,
+      applied: 0,
+      error: `Итоговый блок превышает лимит ${max} символов. Удали или замени устаревшее в том же batch.`,
+    }
+  }
+  saveCoreMemoryBlock(projectPath, block, working)
+  return { success: true, content: working, applied: operations.length }
 }
 
 /**
