@@ -23,6 +23,7 @@ import {
   type SubagentRunCard
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
+import { applyBundleUpdate, type BundleUpdater } from './chat-bundle-update'
 import {
   buildCloseProjectPatch,
   buildFreshSwitchPatch,
@@ -206,6 +207,11 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   hasActiveChatLane: (chatId: number, isHelp?: boolean) => boolean
   /** Убрать sendId из реестра — обычно при done/error event. */
   forgetSendOwner: (sendId: number) => void
+  /** PerChatState 4.1: ЕДИНАЯ точка мутации bundle одного чата. Активный чат →
+   *  патч top-level полей; фоновой → chatSnapshots[chatId] (нет снапшота →
+   *  freshSnapshot). chatId == null = «текущий активный» (семантика старых
+   *  экшенов без явного chatId). Новые writers пишут ТОЛЬКО через неё. */
+  updateChatBundle: (chatId: number | null, updater: BundleUpdater) => void
   /** Apply an ai:event to a background CHAT snapshot (within active project,
    *  but not the active chat). */
   applyEventToChat: (chatId: number, event: { type: string; [k: string]: unknown }) => void
@@ -368,14 +374,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   }),
   getComposerDraft: (key) => get().composerDrafts[key] ?? EMPTY_COMPOSER_DRAFT,
   clearComposerDraft: (key) => get().setComposerDraft(key, EMPTY_COMPOSER_DRAFT),
-  finalizeActiveStreamDuration: () => set(s => {
-    const stamped = stampDurationOnStreamEnd({
-      messages: s.messages,
-      isStreaming: s.isStreaming,
-      streamStartedAt: s.streamStartedAt,
+  finalizeActiveStreamDuration: () => get().updateChatBundle(get().activeChatId, b =>
+    stampDurationOnStreamEnd({
+      messages: b.messages,
+      isStreaming: b.isStreaming,
+      streamStartedAt: b.streamStartedAt,
     })
-    return { ...stamped }
-  }),
+  ),
   finalizeHelpStreamDuration: () => set(s => {
     const stamped = stampDurationOnStreamEnd(s.help)
     return { help: { ...s.help, ...stamped } }
@@ -545,66 +550,61 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     const older = result.messages.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id }))
     const existingIds = new Set(get().messages.map(m => m.dbId).filter((id): id is number => typeof id === 'number'))
     const uniqueOlder = older.filter(m => typeof m.dbId !== 'number' || !existingIds.has(m.dbId))
-    set(s => ({
-      messages: [...uniqueOlder, ...s.messages],
-      chatHasMoreBefore: result.hasMoreBefore,
-      chatTotalCount: result.totalCount
-    }))
+    // PerChatState 4.1: пагинация (chatHasMoreBefore/chatTotalCount) живёт вне
+    // bundle — патчится отдельно; messages — через единую точку. Поведение 1-в-1
+    // со старым кодом (писал в top-level активного на момент применения чата):
+    // известная гонка «loadOlder во время switch чата» здесь НЕ чинится — в план.
+    get().updateChatBundle(get().activeChatId, b => ({ messages: [...uniqueOlder, ...b.messages] }))
+    set({ chatHasMoreBefore: result.hasMoreBefore, chatTotalCount: result.totalCount })
   },
-  addMessage: (msg) => set(s => ({
-    messages: [...s.messages, { ...msg, createdAt: msg.createdAt ?? Date.now() }],
+  addMessage: (msg) => get().updateChatBundle(get().activeChatId, b => ({
+    messages: [...b.messages, { ...msg, createdAt: msg.createdAt ?? Date.now() }],
   })),
-  insertMessageBeforeLast: (msg) => set(s => {
+  insertMessageBeforeLast: (msg) => get().updateChatBundle(get().activeChatId, b => {
     const stamped = { ...msg, createdAt: msg.createdAt ?? Date.now() }
-    const msgs = [...s.messages]
+    const msgs = [...b.messages]
     if (msgs.length === 0) return { messages: [stamped] }
     const last = msgs[msgs.length - 1]
     const at = last?.role === 'assistant' ? msgs.length - 1 : msgs.length
     msgs.splice(at, 0, stamped)
     return { messages: msgs }
   }),
-  updateLastAssistant: (text) => set(s => ({ messages: appendToLastAssistant(s.messages, text) })),
-  appendLastAssistantThinking: (text) => set(s => ({ messages: appendThinkingToLastAssistant(s.messages, text) })),
-  setStreaming: (v) => set(s => ({
+  updateLastAssistant: (text) => get().updateChatBundle(get().activeChatId, b => ({ messages: appendToLastAssistant(b.messages, text) })),
+  appendLastAssistantThinking: (text) => get().updateChatBundle(get().activeChatId, b => ({ messages: appendThinkingToLastAssistant(b.messages, text) })),
+  setStreaming: (v) => get().updateChatBundle(get().activeChatId, b => ({
     isStreaming: v,
-    streamStartedAt: v ? Date.now() : s.streamStartedAt,
+    streamStartedAt: v ? Date.now() : b.streamStartedAt,
   })),
-  addPendingWrite: (w) => set(s => ({ pendingWrites: [...s.pendingWrites, w] })),
-  resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
-  clearPendingWrites: () => set({ pendingWrites: [] }),
-  setPendingCommand: (c) => set({ pendingCommand: c }),
+  addPendingWrite: (w) => get().updateChatBundle(get().activeChatId, b => ({ pendingWrites: [...b.pendingWrites, w] })),
+  resolvePendingWrite: (callId) => get().updateChatBundle(get().activeChatId, b => ({ pendingWrites: b.pendingWrites.filter(w => w.callId !== callId) })),
+  clearPendingWrites: () => get().updateChatBundle(get().activeChatId, () => ({ pendingWrites: [] })),
+  setPendingCommand: (c) => get().updateChatBundle(get().activeChatId, () => ({ pendingCommand: c })),
   setPendingPlan: (p) => set({ pendingPlan: p }),
-  clearChatPendingCommand: (chatId) => set(s => {
-    const patch: Partial<ProjectState> = {}
-    if (chatId === s.activeChatId && s.pendingCommand) patch.pendingCommand = null
-    const snap = s.chatSnapshots[chatId]
-    if (snap?.pendingCommand) {
-      patch.chatSnapshots = { ...s.chatSnapshots, [chatId]: { ...snap, pendingCommand: null } }
-    }
-    return patch
-  }),
+  clearChatPendingCommand: (chatId) => get().updateChatBundle(chatId, b =>
+    b.pendingCommand ? { pendingCommand: null } : null
+  ),
   // Дедуп по id: один и тот же tool-call (callId+name) может прийти дважды
   // (повторная доставка события / реплей) — иначе React ловит дубль-key на
   // одинаковых id в стриме активности. Существующий → обновляем на месте.
-  pushActivity: (entry) => set(s => (
-    s.activity.some(a => a.id === entry.id)
-      ? { activity: s.activity.map(a => a.id === entry.id ? { ...a, ...entry } : a) }
-      : { activity: [...s.activity, entry] }
+  pushActivity: (entry) => get().updateChatBundle(get().activeChatId, b => (
+    b.activity.some(a => a.id === entry.id)
+      ? { activity: b.activity.map(a => a.id === entry.id ? { ...a, ...entry } : a) }
+      : { activity: [...b.activity, entry] }
   )),
-  updateActivity: (id, patch) => set(s => ({
-    activity: s.activity.map(a => a.id === id ? { ...a, ...patch } : a)
+  updateActivity: (id, patch) => get().updateChatBundle(get().activeChatId, b => ({
+    activity: b.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
-  clearActivity: () => set({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] }),
-  setAgentProgress: (entries) => set({ agentProgress: entries }),
-  pushAgentProgress: (entry) => set(s => ({ agentProgress: upsertAgentProgress(s.agentProgress ?? [], entry) })),
-  applyAgentProgressEvent: (event) => set(s => ({
-    agentProgress: reduceAgentProgress(s.agentProgress ?? [], event)
+  clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] })),
+  setAgentProgress: (entries) => get().updateChatBundle(get().activeChatId, () => ({ agentProgress: entries })),
+  pushAgentProgress: (entry) => get().updateChatBundle(get().activeChatId, b => ({ agentProgress: upsertAgentProgress(b.agentProgress ?? [], entry) })),
+  applyAgentProgressEvent: (event) => get().updateChatBundle(get().activeChatId, b => ({
+    agentProgress: reduceAgentProgress(b.agentProgress ?? [], event)
   })),
-  pushPreflight: (card) => set(s => ({ preflights: [...s.preflights, card] })),
-  upsertSubagentRun: (card) => set(s => {
-    const idx = s.subagentRuns.findIndex(r => r.callId === card.callId)
-    if (idx === -1) return { subagentRuns: [...s.subagentRuns, card] }
-    const next = s.subagentRuns.slice()
+  pushPreflight: (card) => get().updateChatBundle(get().activeChatId, b => ({ preflights: [...b.preflights, card] })),
+  upsertSubagentRun: (card) => get().updateChatBundle(get().activeChatId, b => {
+    const idx = b.subagentRuns.findIndex(r => r.callId === card.callId)
+    if (idx === -1) return { subagentRuns: [...b.subagentRuns, card] }
+    const next = b.subagentRuns.slice()
     next[idx] = { ...next[idx], ...card }
     return { subagentRuns: next }
   }),
@@ -615,7 +615,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { touchedFiles: { ...s.touchedFiles, [path]: kind } }
   }),
   clearTouchedFiles: () => set({ touchedFiles: {} }),
-  setCheckpoint: (id, msgId) => set({ checkpointId: id, checkpointMessageId: msgId ?? null }),
+  setCheckpoint: (id, msgId) => get().updateChatBundle(get().activeChatId, () => ({ checkpointId: id, checkpointMessageId: msgId ?? null })),
   openDevTask: (task) => set({ activeDevTaskId: task.id, devTask: task, activeView: 'task' }),
   refreshDevTask: async () => {
     const id = get().activeDevTaskId
@@ -628,19 +628,19 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     } catch { /* IPC недоступен в dev — оставляем текущий снимок */ }
   },
   closeDevTask: () => set({ activeDevTaskId: null, devTask: null }),
-  addUsage: (delta) => set(s => ({
+  addUsage: (delta) => get().updateChatBundle(get().activeChatId, b => ({
     sessionUsage: {
-      inputTokens: s.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
-      outputTokens: s.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
-      cachedInputTokens: s.sessionUsage.cachedInputTokens + (delta.cacheReadTokens ?? delta.cachedInputTokens ?? 0),
-      cacheWriteTokens: (s.sessionUsage.cacheWriteTokens ?? 0) + (delta.cacheWriteTokens ?? delta.cacheCreationInputTokens ?? 0),
+      inputTokens: b.sessionUsage.inputTokens + (delta.inputTokens ?? 0),
+      outputTokens: b.sessionUsage.outputTokens + (delta.outputTokens ?? 0),
+      cachedInputTokens: b.sessionUsage.cachedInputTokens + (delta.cacheReadTokens ?? delta.cachedInputTokens ?? 0),
+      cacheWriteTokens: (b.sessionUsage.cacheWriteTokens ?? 0) + (delta.cacheWriteTokens ?? delta.cacheCreationInputTokens ?? 0),
       // 2.0.8-E хвост: держим семантику фактического провайдера (последнее событие
       // побеждает — как в runner'ах). Без неё ценник занижал Claude (дефект B).
-      inputAccounting: delta.inputAccounting ?? s.sessionUsage.inputAccounting
+      inputAccounting: delta.inputAccounting ?? b.sessionUsage.inputAccounting
     }
   })),
-  resetUsage: () => set({ sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 } }),
-  setRunningPlanStep: (s) => set({ runningPlanStep: s }),
+  resetUsage: () => get().updateChatBundle(get().activeChatId, () => ({ sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 } })),
+  setRunningPlanStep: (s) => get().updateChatBundle(get().activeChatId, () => ({ runningPlanStep: s })),
   applyEventToSession: (projectPath, event) => set(s => {
     const existing = s.sessions[projectPath] ?? freshSnapshot()
     let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
@@ -753,9 +753,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     delete next[sendId]
     return { sendOwners: next }
   }),
-  applyEventToChat: (chatId, event) => set(s => {
-    const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
-    let next = applySnapshotEvent({ ...existing, hasUnread: true }, event)
+  updateChatBundle: (chatId, updater) => set(s => applyBundleUpdate(s, chatId, updater)),
+  applyEventToChat: (chatId, event) => get().updateChatBundle(chatId, b => {
+    let next = applySnapshotEvent({ ...b, hasUnread: true }, event)
     // 5.1 (review P0): pending-write/command фонового чата — в его snapshot (как
     // applyEventToSession). Иначе после switchChatSession confirm-модалка не
     // всплывёт (restoreBundle поднимает pending из снапшота в top-level) и main
@@ -775,32 +775,20 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // persistedByChat: активный чат уже персистит сам (Chat.tsx) — не дублируем.
     if ((t === 'done' || t === 'error') && !event.persistedByChat) {
       const lastMsg = next.messages[next.messages.length - 1]
-      const persistProjectPath = typeof event.projectPath === 'string' ? event.projectPath : s.path
+      const persistProjectPath = typeof event.projectPath === 'string' ? event.projectPath : get().path
       if (lastMsg?.role === 'assistant' && lastMsg.content && persistProjectPath) {
         void window.api.chats.append(chatId, persistProjectPath, 'assistant', lastMsg.content).catch(() => {})
       }
     }
-    return { chatSnapshots: { ...s.chatSnapshots, [chatId]: next } }
+    return next
   }),
-  seedChatSnapshot: (chatId, messages) => set(s => {
-    const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
-    return { chatSnapshots: { ...s.chatSnapshots, [chatId]: { ...existing, messages } } }
-  }),
-  pushUserToChatSnapshot: (chatId, content, meta, assistantDbId) => set(s => {
-    const existing = s.chatSnapshots[chatId] ?? freshSnapshot()
-    return {
-      chatSnapshots: {
-        ...s.chatSnapshots,
-        [chatId]: {
-          ...existing,
-          messages: [...existing.messages, { ...meta, role: 'user', content }, { role: 'assistant', content: '', ...(assistantDbId ? { dbId: assistantDbId } : {}) }],
-          isStreaming: true,
-          streamStartedAt: Date.now(),
-          hasUnread: false
-        }
-      }
-    }
-  }),
+  seedChatSnapshot: (chatId, messages) => get().updateChatBundle(chatId, () => ({ messages })),
+  pushUserToChatSnapshot: (chatId, content, meta, assistantDbId) => get().updateChatBundle(chatId, b => ({
+    messages: [...b.messages, { ...meta, role: 'user', content }, { role: 'assistant', content: '', ...(assistantDbId ? { dbId: assistantDbId } : {}) }],
+    isStreaming: true,
+    streamStartedAt: Date.now(),
+    hasUnread: false
+  })),
   refreshChatSessions: async () => {
     const s = get()
     if (!s.path) return
