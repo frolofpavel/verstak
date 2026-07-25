@@ -6,11 +6,9 @@
 // пользователь). AiDeps — type-only импорт из ipc/ai (стирается, без рантайм-цикла).
 // Верификация — харнес tests/ipc/agent-loop.test.ts (18 кейсов).
 import type { AiDeps } from '../ipc/ai'
-import { scanText } from './secret-scanner'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from './process-registry'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from './tools'
-import { PROVIDERS, type ProviderId } from './registry'
-import type { InputAccounting } from '../../shared/contracts/usage'
+import type { ProviderId } from './registry'
 import type { McpClient } from '../mcp/client'
 import type { RecipeSpec } from './skills/types'
 import {
@@ -34,7 +32,7 @@ import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSend
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from './runner-shared'
+import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
 import { captureToolObservation } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
@@ -42,9 +40,8 @@ import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart
 import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
 import { detectSubscriptionLimit } from './subscription-limits'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
-import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from './session-journal'
+import { type ExitReason, callSignature, detectVerifyScriptsForHint } from './session-journal'
 import {
-  exitReasonToAgentRunStatus,
   isAgentRunTimeoutAbort,
 } from './run-lifecycle'
 import { decideCheckpointSave, type CheckpointThrottleState } from './checkpoint-throttle'
@@ -55,8 +52,8 @@ import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from './allowed-write
 import { join as joinPath } from 'node:path'
 import type { AgentRuns } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
-import { usageHash } from '../storage/agent-run-usage'
 import { logRuntime, logRuntimeError } from '../runtime-log'
+import { finalizeApiRun, type RunnerSessionUsage } from './runner-finalize'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -393,7 +390,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // Accumulate token usage across all turns of this session for the final journal entry.
   // 2.0.8-F: +cacheWriteTokens/inputAccounting — накапливаем для persistence прогона
   // (persistUsage при finalize). inputAccounting = фактического провайдера (последний usage-event).
-  const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; inputAccounting: InputAccounting | undefined } = {
+  const sessionUsage: RunnerSessionUsage = {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, inputAccounting: undefined
   }
   // 2.0.8-F: сигнатура набора инструментов прогона (для cache-диагностики), фиксируется на
@@ -1639,94 +1636,30 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       commandsCount: commandsRun.length
     }, exitReason === 'completed' || exitReason === 'aborted' || handedOff ? 'info' : 'warn')
     if (!handedOff) {
-    // GUARANTEED journal write on every exit path — completion, abort, error,
-    // max-turns, loop-detected, crashed (uncaught). Per Gemini audit Idea B:
-    // 'любое завершение runApiConversation обязано вызвать writeSessionJournal'.
-    try {
-      writeSessionJournal(recordJournal, projectPath, lastAssistantText, filesTouched, commandsRun, sessionUsage, exitReason)
-    } catch (err) {
-      console.error('[ai.ts] writeSessionJournal failed in finally:', err)
+      finalizeApiRun({
+        sendId,
+        projectPath,
+        exitReason,
+        lastAssistantText,
+        lastSummary,
+        filesTouched,
+        commandsRun,
+        sessionUsage,
+        recordJournal,
+        saveMemory,
+        agentRuns,
+        runId,
+        providerId,
+        model,
+        initialMessages,
+        toolsSignature,
+        attestedThisRun,
+        toolCallCount,
+        agentsCount: agentCounter.count,
+        costCents: costGuard?.current() ?? 0,
+        clearCheckpointThrottle: id => checkpointThrottle.delete(id),
+      })
     }
-    // #3 персист авто-резюме сессии: если прогон компактился (lastSummary непуст),
-    // сохраняем сжатый итог в память с тегом session-summary. Всплывёт в релевантном
-    // recall следующего чата (#1) — кросс-сессионный recall БЕЗ embeddings. Раньше
-    // lastSummary жил только in-run и терялся после закрытия чата.
-    if (lastSummary.trim() && projectPath) {
-      try {
-        // scanText ОБЯЗАТЕЛЕН: lastSummary включает сырые user-сообщения (compact-history),
-        // юзер мог вставить токен/ключ → иначе он осел бы в памяти и всплыл в recall →
-        // в system prompt внешнего провайдера (ревью: HIGH утечка секрета).
-        const safe = scanText(lastSummary.trim()).redacted.slice(0, 2000)
-        saveMemory(projectPath, 'fact', `Итог прошлой сессии: ${safe}`, ['session-summary'])
-      } catch (err) {
-        console.warn('[ai.ts] session-summary persist failed:', err instanceof Error ? err.message : err)
-      }
-    }
-    // Multi-agent Manager (Фаза 2): завершаем прогон — статус из exitReason,
-    // счётчики из того что уже накоплено в прогоне (tool/files/agents),
-    // стоимость из costGuard. Best-effort: ошибка storage не ломает loop.
-    // agentRuns/runId не прокидываются в рекурсивный fallback-вызов (undefined) →
-    // finish пишется ровно раз (этот внешний finally), даже если был фолбэк.
-    // (toolsAllow/verifications в fallback прокидываются — они не про финализацию.)
-    if (agentRuns && runId) {
-      try {
-        // DoD-принуждение (аудит P1 #8): прогон завершён успешно и менял файлы,
-        // но attest_verification не вызван → итог НЕ доказан. Помечаем в Timeline
-        // событием verify=not_run (видно в карточке «Задачи»), без навязчивого
-        // вмешательства в чат — мягкое принуждение через видимость.
-        if (exitReason === 'completed' && filesTouched.size > 0 && !attestedThisRun) {
-          agentRuns.appendEvent(runId, 'verify', {
-            status: 'not_run',
-            label: 'DoD не запущен',
-            detail: `Изменено файлов: ${filesTouched.size}, но attest_verification не вызван — итог не доказан проверками.`
-          })
-        }
-        // Timeline: финальный ответ агента последним событием — чтобы в карточке
-        // был виден ИТОГ, а не только список действий (аудит P0 «где результат?»).
-        if (lastAssistantText.trim()) {
-          agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
-        }
-        // #4 suspend: приостановленный прогон помечаем 'suspended' (не 'stopped').
-        // delete — в общем cleanup (для обоих путей); здесь только читаем.
-        const finishStatus = suspendedSends.has(sendId) ? 'suspended' as const : exitReasonToAgentRunStatus(exitReason)
-        agentRuns.finish(runId, finishStatus, {
-          costCents: costGuard?.current() ?? 0,
-          toolCount: toolCallCount,
-          filesCount: filesTouched.size,
-          agentsCount: agentCounter.count,
-          error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
-        })
-        // 2.0.8-F: persistence usage прогона (одна строка, идемпотентно по run_id).
-        // BEST-EFFORT: сбой персистенса НЕ роняет прогон. Пишем только при реальном usage.
-        if (providerId && (sessionUsage.inputTokens || sessionUsage.outputTokens || sessionUsage.cachedInputTokens)) {
-          try {
-            // Cache-диагностика: хешируем ЗДЕСЬ — текст промпта не покидает runner (каветат #3),
-            // в storage уходит только 16-символьный отпечаток для сравнения «то же / другое».
-            const systemText = initialMessages.find(m => m.role === 'system')?.content
-            agentRuns.persistUsage({
-              runId, providerId, model: model ?? '', transport: PROVIDERS[providerId]?.transport ?? null,
-              inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
-              cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
-              inputAccounting: sessionUsage.inputAccounting,
-              systemPromptHash: systemText ? usageHash(systemText) : null,
-              toolsHash: toolsSignature ? usageHash(toolsSignature) : null
-            })
-          } catch { /* best-effort: персистенс не роняет финализацию */ }
-        }
-        // Crash-resume Фаза 2: на чистом завершении снапшот не нужен — чистим,
-        // чтобы resume не предлагал возобновить доведённую сессию. Прерванные
-        // (crashed/error/aborted/max-turns/loop) сохраняют чекпойнт для resume.
-        if (exitReason === 'completed') {
-          agentRuns.clearCheckpoint(runId)
-        }
-        // 1.9.7 #7: прогон терминален (не handedOff) — чистим in-memory throttle-
-        // стейт, чтобы Map не рос по завершённым прогонам.
-        checkpointThrottle.delete(runId)
-      } catch (err) {
-        console.warn('[agent-runs] finish (api) failed:', err instanceof Error ? err.message : err)
-      }
-    }
-    } // /if (!handedOff) — #15
   }
 }
 

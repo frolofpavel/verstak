@@ -92,6 +92,15 @@
 
 Готово когда: orchestration-функции читаются по фазам, критичные ветки покрыты, поведение и публичные контракты не изменились.
 
+Срез A выполнен 2026-07-25:
+
+- терминальная логика API-runner вынесена из общего `finally` в `runner-finalize.ts`;
+- журнал, защищённое session-summary, Timeline, usage, итоговый статус и checkpoint
+  теперь имеют одну тестируемую точку применения;
+- отдельно закреплены completed / failed / suspended / run без storage;
+- основной метод сокращён на 64 строки, complexity 335 → 306 без изменения IPC;
+- следующий срез B: provider attempt + account/fallback lifecycle.
+
 ### 2.1.11 — Декомпозиция renderer (P1)
 
 Проблема:
