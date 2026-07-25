@@ -1,7 +1,18 @@
 # PerChatState — план (фаза 5, продолжение)
 
 Дата: 2026-07-25. Родительский документ: `FIX-PLAN-2026-07-24.md` (фаза 5, пункт 1).
-Статус: план на утверждении, код не начат.
+Статус: 4.1–4.3 СДЕЛАНЫ и запушены (см. таблицу ниже). Остался срез 4.4 (удаление
+дублей + единый event-router) — отдельная сессия: требует переработки ~139
+store-тестов, снимающих показания с top-level полей, и миграции
+Sidebar/SideChat/InboxApprovals с chatSnapshots на chats.
+
+## Сделанные срезы PerChatState
+
+| Срез | Что | Коммит |
+|---|---|---|
+| 4.1 | `updateChatBundle` — единая точку мутации bundle; все writers переведены | `d669af9f` |
+| 4.2 | `chats` — SSOT; top-level/chatSnapshots — поддерживаемые проекции; sync-страж | `93d112aa` |
+| 4.3 | Читатели на `useActiveChatField/Bundle` (хук `src/hooks/useActiveChatBundle.ts`); греп-страж чист | `ead12cab` |
 
 ---
 
