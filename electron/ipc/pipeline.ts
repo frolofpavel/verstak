@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
+import { join } from 'path'
 import type {
   PipelineRuns,
   PipelineMode,
@@ -10,6 +11,11 @@ import type {
 import type { PlanOutcomes } from '../storage/plan-outcomes'
 import type { Plans } from '../storage/plans'
 import { nextPipelineStep } from '../ai/outcome-controller'
+import { buildOutcomePassport, writeOutcomePassportFile } from '../ai/outcome-passport'
+import { scanText } from '../ai/secret-scanner'
+import type { AgentJobs } from '../storage/agent-jobs'
+import type { AgentRuns } from '../storage/agent-runs'
+import type { Verifications } from '../storage/verifications'
 
 /**
  * IPC Pipeline Brief→Proof (спек, шаг D2). Тонкая обвязка поверх storage-фасада
@@ -21,6 +27,9 @@ export interface PipelineDeps {
   planOutcomes: PlanOutcomes
   plans: Plans
   getProjectRoot: () => string | null
+  agentJobs?: AgentJobs
+  agentRuns?: AgentRuns
+  verifications?: Verifications
 }
 
 export function registerPipelineIpc(deps: PipelineDeps): void {
@@ -102,4 +111,41 @@ export function registerPipelineIpc(deps: PipelineDeps): void {
     planOutcomes.revisions(planId))
   ipcMain.handle('pipeline:metrics', (_e, projectPath: string) =>
     pipeline.metrics(projectPath))
+  ipcMain.handle('pipeline:export-passport', async (_e, pipelineId: number) => {
+    try {
+      const run = pipeline.get(pipelineId)
+      const projectPath = getProjectRoot()
+      if (!run || !projectPath || run.projectPath !== projectPath) {
+        return { ok: false, error: 'Прогон не найден в активном проекте.' }
+      }
+      const plan = run.planId ? plans.get(run.planId) : null
+      const jobs = deps.agentJobs?.listProject(projectPath).filter(job => job.pipelineId === run.id) ?? []
+      const verification = run.agentRunId
+        ? deps.verifications?.latestByRunId(projectPath, run.agentRunId) ?? null
+        : deps.verifications?.latest(projectPath, run.chatId) ?? null
+      const agentRun = run.agentRunId ? deps.agentRuns?.get(run.agentRunId) ?? null : null
+      const markdown = buildOutcomePassport({
+        pipeline: run,
+        plan,
+        jobs,
+        verification,
+        route: agentRun ? {
+          providerId: agentRun.providerId ?? 'unknown',
+          model: agentRun.model ?? 'unknown',
+          accountId: agentRun.accountId,
+        } : null,
+        metrics: pipeline.metrics(projectPath),
+      })
+      const result = await dialog.showSaveDialog({
+        title: 'Сохранить паспорт результата',
+        defaultPath: join(app.getPath('downloads'), `verstak-result-${run.id}.md`),
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      })
+      if (result.canceled || !result.filePath) return { ok: false, cancelled: true }
+      writeOutcomePassportFile(result.filePath, markdown)
+      return { ok: true, path: result.filePath }
+    } catch (cause) {
+      return { ok: false, error: scanText(cause instanceof Error ? cause.message : String(cause)).redacted }
+    }
+  })
 }

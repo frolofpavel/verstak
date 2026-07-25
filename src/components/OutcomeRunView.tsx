@@ -18,6 +18,8 @@ export function OutcomeRunView({ pipeline, onClose }: OutcomeRunViewProps) {
   const [jobs, setJobs] = useState<AgentJob[]>([])
   const [verification, setVerification] = useState<VerificationRow | null>(null)
   const [metrics, setMetrics] = useState<OutcomeMetrics | null>(null)
+  const [exportMessage, setExportMessage] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -38,6 +40,21 @@ export function OutcomeRunView({ pipeline, onClose }: OutcomeRunViewProps) {
     return () => { cancelled = true }
   }, [pipeline])
 
+  async function exportPassport() {
+    if (exporting) return
+    setExporting(true)
+    setExportMessage('')
+    try {
+      const result = await window.api.pipeline.exportPassport(pipeline.id)
+      if (result.ok) setExportMessage(`Сохранено: ${result.path}`)
+      else if (!result.cancelled) setExportMessage(result.error ?? 'Не удалось сохранить паспорт.')
+    } catch (cause) {
+      setExportMessage(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return createPortal(
     <div className="gg-modal-backdrop" onClick={onClose}>
       <div
@@ -54,10 +71,16 @@ export function OutcomeRunView({ pipeline, onClose }: OutcomeRunViewProps) {
               {effortLabel(pipeline.effortLevel)} · {pipeline.step}
             </div>
           </div>
-          <button type="button" className="gg-modal-close" onClick={onClose} aria-label="Закрыть">×</button>
+          <div className="gg-outcome-run-header-actions">
+            <button type="button" className="gg-btn gg-btn-ghost gg-btn-xs" disabled={exporting} onClick={() => void exportPassport()}>
+              {exporting ? 'Сохраняю…' : 'Сохранить паспорт'}
+            </button>
+            <button type="button" className="gg-modal-close" onClick={onClose} aria-label="Закрыть">×</button>
+          </div>
         </div>
 
         <div className="gg-modal-body gg-outcome-run-grid">
+          {exportMessage && <div className="gg-notice gg-outcome-export-message" role="status">{exportMessage}</div>}
           <section className="gg-outcome-card">
             <h3>Результат</h3>
             <p>{pipeline.brief.goal}</p>

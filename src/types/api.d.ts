@@ -862,6 +862,7 @@ declare global {
         listStepOutcomes(planId: number): Promise<StoredStepOutcome[]>
         listRevisions(planId: number): Promise<PlanRevisionSnapshot[]>
         metrics(projectPath: string): Promise<OutcomeMetrics>
+        exportPassport(pipelineId: number): Promise<{ ok: true; path: string } | { ok: false; cancelled?: true; error?: string }>
       }
       /** Project Brain — мозг проекта (warmup, состояние, решения). */
       brain: {

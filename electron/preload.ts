@@ -446,7 +446,8 @@ contextBridge.exposeInMainWorld('api', {
     cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id),
     listStepOutcomes: (planId: number) => ipcRenderer.invoke('pipeline:list-step-outcomes', planId),
     listRevisions: (planId: number) => ipcRenderer.invoke('pipeline:list-revisions', planId),
-    metrics: (projectPath: string) => ipcRenderer.invoke('pipeline:metrics', projectPath)
+    metrics: (projectPath: string) => ipcRenderer.invoke('pipeline:metrics', projectPath),
+    exportPassport: (pipelineId: number) => ipcRenderer.invoke('pipeline:export-passport', pipelineId)
   },
   brain: {
     warmup: () => ipcRenderer.invoke('brain:warmup'),

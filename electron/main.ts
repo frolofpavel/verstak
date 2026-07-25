@@ -491,7 +491,15 @@ app.whenReady().then(() => {
   // Pipeline Brief→Proof (спек D2) — storage + IPC. Поведение пока не активно
   // в UI (визард/баннер — D3+), но контур регистрируется.
   const pipelineRuns = createPipelineRuns(db)
-  registerPipelineIpc({ pipeline: pipelineRuns, planOutcomes, plans, getProjectRoot: getActiveProjectPath })
+  registerPipelineIpc({
+    pipeline: pipelineRuns,
+    planOutcomes,
+    plans,
+    agentJobs,
+    agentRuns,
+    verifications,
+    getProjectRoot: getActiveProjectPath,
+  })
   const brainStore = createProjectBrainStore(db)
   registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
