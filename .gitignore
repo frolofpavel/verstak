@@ -10,6 +10,11 @@ build/*.bmp
 .superpowers/
 mobile/last-local-mobile-link.txt
 
+# Локальные метаданные AI-рантаймов. Канонические правила проекта живут в AGENTS.md.
+.claude/
+.codex/
+.verstak/
+
 .worktrees/
 
 # Артефакт Playwright MCP (скриншоты/трейсы сессии)
