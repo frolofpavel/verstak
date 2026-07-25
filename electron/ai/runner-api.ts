@@ -26,7 +26,7 @@ import { SessionAgentCounter } from './delegation-limits'
 import type { AgentMode } from './mode-policy'
 import { loadPermissionRules } from './permission-rules'
 import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from './hooks'
-import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from './types'
+import type { ChatMessage, ToolCall, ChatProvider, Attachment } from './types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from '../ipc/tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
@@ -54,6 +54,7 @@ import { pickResumeGuardTool } from '../storage/agent-runs'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { finalizeApiRun, type RunnerSessionUsage } from './runner-finalize'
 import { createApiFallbackController } from './runner-attempt'
+import { dispatchToolTurn } from './runner-tool-turn'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -1066,7 +1067,6 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       return
     }
 
-    const toolResults: ToolResult[] = new Array(toolCalls.length)
     toolCallCount += toolCalls.length  // Manager (Фаза 2): tool_count прогона
 
     // P1 (Этап 6): снять baseline verify ДО первого мутирующего вызова active recipe.
@@ -1130,66 +1130,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // после writeVerificationArtifact (best-effort, для latest в Review DoD).
       verifications
     }
-    // F1: PreToolUse-хуки — детерминированный гейт ПЕРЕД исполнением тула (вне LLM).
-    // exit 2 / {block:true} → вызов блокируется, модель видит причину как tool error.
-    // Пре-пасс (последовательно, чтобы ранний блок виделся до запуска), потом dispatch.
-    const preBlocked = new Map<number, string>()
-    if (hooks) {
-      for (let i = 0; i < toolCalls.length; i++) {
-        const call = toolCalls[i]
-        try {
-          const pre = await runHooks('PreToolUse', hooks, { event: 'PreToolUse', cwd: projectPath, tool_name: call.name, tool_input: call.args })
-          if (pre.additionalContext) pendingSupplements.push(pre.additionalContext)
-          if (pre.block) preBlocked.set(i, pre.reason ?? `Вызов "${call.name}" заблокирован PreToolUse-хуком.`)
-        } catch { /* хук best-effort */ }
-      }
-    }
-    const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
-    const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
-    for (let i = 0; i < toolCalls.length; i++) {
-      const call = toolCalls[i]
-      // F1: заблокированный PreToolUse-хуком вызов не исполняем — отдаём error модели.
-      if (preBlocked.has(i)) {
-        const reason = preBlocked.get(i)!
-        toolResults[i] = { id: call.id, name: call.name, result: '', error: reason }
-        sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: call.id, name: call.name, command: '', reason } })
-        continue
-      }
-      const handler = lookupHandler(call.name, ctx)
-      if (handler.mode === 'parallel-read') {
-        readPromises.push({ idx: i, promise: handler.handle(call, ctx) })
-      } else if (handler.mode === 'confirm-write') {
-        // confirm-write tools all hit the same multi-file diff modal; they run
-        // concurrently from this side and the user accepts/rejects together.
-        writePromises.push({ idx: i, promise: handler.handle(call, ctx) })
-      } else {
-        // sequential — must finish before next tool (run_command, browser_*,
-        // connectors, create_plan all have ordered UI side effects)
-        toolResults[i] = await handler.handle(call, ctx)
-      }
-    }
-    // Parallel reads finish without user input
-    for (const { idx, promise } of readPromises) {
-      toolResults[idx] = await promise
-    }
-    // Then wait for user to resolve every pending write
-    for (const { idx, promise } of writePromises) {
-      toolResults[idx] = await promise
-    }
-    // F1: PostToolUse-хуки — после исполнения тулзов. Не блокируют (поздно); их
-    // additionalContext уходит в следующий ход через pendingSupplements. Пропускаем
-    // pre-заблокированные (тул не исполнялся).
-    if (hooks) {
-      for (let i = 0; i < toolCalls.length; i++) {
-        if (preBlocked.has(i)) continue
-        const call = toolCalls[i]
-        const result = toolResults[i]
-        try {
-          const post = await runHooks('PostToolUse', hooks, { event: 'PostToolUse', cwd: projectPath, tool_name: call.name, tool_input: call.args, tool_output: result?.result })
-          if (post.additionalContext) pendingSupplements.push(post.additionalContext)
-        } catch { /* хук best-effort */ }
-      }
-    }
+    const toolResults = await dispatchToolTurn({
+      toolCalls,
+      context: ctx,
+      hooks,
+      addContext: context => pendingSupplements.push(context),
+    })
     // P2 (Этап 6): зафиксировать успешный проход обязательного review gate по
     // результату его tool-вызова (маркер REVIEW_GATE_PASS_MARKER). Только при
     // recipe.reviewer.required — иначе no-op для обычных прогонов/скиллов.
