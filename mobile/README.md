@@ -67,7 +67,6 @@ mobile\start-local-mobile.cmd
 - чтение истории и обновление ответа во время выполнения;
 - остановка запуска на уровне протокола/desktop adapter;
 - capability-based доступ к файлам без передачи абсолютных путей телефону;
-- одноразовые pairing primitives и проверка attachment staging.
 
 ## Ограничения локального MVP
 

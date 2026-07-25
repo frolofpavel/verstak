@@ -26,6 +26,7 @@ Releases, а завершённые планы и отчёты доступны 
 
 ## Активная разработка
 
+- `CODE-AUDIT-2026-07-25.md` — результаты чистки и оставшийся технический долг.
 - `PERCHATSTATE-PLAN-2026-07-25.md` — оставшаяся миграция состояния чатов.
 - `2.0.9-A-chat-map.md` — characterization-карта исходного Chat.
 - `superpowers/specs/2026-07-11-mobile-remote-access-design.md` — контракт Mobile Remote.

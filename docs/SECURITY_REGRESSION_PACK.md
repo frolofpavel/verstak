@@ -37,9 +37,6 @@ quick focused gate for agent-safety work.
 | SEC-CMD-01 | command-binding | CWE-178 | block | `tests/security/command-binding.test.ts` | active |
 | SEC-CMD-02 | command-binding | CWE-178 | block | `tests/security/command-binding.test.ts` | active |
 | SEC-CMD-03 | command-binding | CWE-78 | block | `tests/ai/dangerous-commands.test.ts` | active |
-| SEC-SKILL-01 | skill-install | CWE-22 | block | `tests/security/skill-install.test.ts` | active |
-| SEC-SKILL-02 | skill-install | CWE-829 | block | `tests/security/skill-install.test.ts` | active |
-| SEC-SKILL-03 | skill-install | CWE-94 | block | `tests/security/skill-install.test.ts` | active |
 | SEC-CFG-01 | config-mutation | CWE-922 | block | `tests/security/config-mutation.test.ts` | active |
 | SEC-CFG-02 | config-mutation | CWE-922 | block | `tests/security/config-mutation.test.ts` | active |
 | SEC-DOTENV-01 | dotenv-guard | CWE-200 | block | `tests/security/dotenv-guard.test.ts` | active |
@@ -56,10 +53,6 @@ quick focused gate for agent-safety work.
 - The command shown to the user for approval is the exact command executed.
 - Dangerous command chains are classified as a whole command, not only by first token.
 - Dangerous command detection covers destructive shell operations and common obfuscation.
-- Skill install targets cannot escape the configured skills root.
-- Skill archive entries cannot use zip-slip or absolute paths.
-- Imported skills cannot include executable payloads or hidden runtime hook paths.
-- Skill archive scan errors fail closed.
 - Agent-visible tools do not expose settings, secret, token, provider-key, or env mutation.
 - Encrypted settings are not stored as plaintext when Electron safeStorage is available.
 - Workspace `.env*` files are forbidden, and Verstak/ClawHub/OpenClaw env prefixes are explicit no-context keys.

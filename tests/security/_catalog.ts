@@ -2,7 +2,6 @@ export type SecurityCategory =
   | 'path-escape'
   | 'command-binding'
   | 'ssrf'
-  | 'skill-install'
   | 'config-mutation'
   | 'dotenv-guard'
   | 'secret-leak'
@@ -91,36 +90,6 @@ export const SECURITY_RULES: SecurityRule[] = [
     status: 'active',
     testFile: '../ai/dangerous-commands.test.ts',
     source: 'Hermes tools/approval.py:546'
-  },
-  {
-    id: 'SEC-SKILL-01',
-    cwe: 'CWE-22',
-    category: 'skill-install',
-    severity: 'block',
-    title: 'Skill install archives cannot write outside the skill root',
-    status: 'active',
-    testFile: './skill-install.test.ts',
-    source: 'OpenClaw security/opengrep/precise.yml:2432'
-  },
-  {
-    id: 'SEC-SKILL-02',
-    cwe: 'CWE-829',
-    category: 'skill-install',
-    severity: 'block',
-    title: 'Skill install fails closed on unsafe manifests and executable payloads',
-    status: 'active',
-    testFile: './skill-install.test.ts',
-    source: 'Hermes skills loader discipline'
-  },
-  {
-    id: 'SEC-SKILL-03',
-    cwe: 'CWE-94',
-    category: 'skill-install',
-    severity: 'block',
-    title: 'Imported skills cannot introduce hidden runtime hooks',
-    status: 'active',
-    testFile: './skill-install.test.ts',
-    source: 'Hermes/OpenClaw skill governance audit'
   },
   {
     id: 'SEC-CFG-01',

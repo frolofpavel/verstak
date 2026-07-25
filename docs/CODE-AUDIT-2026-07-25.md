@@ -37,8 +37,26 @@
 - одинаковые имена `storage/*.ts` и `ipc/*.ts` — это разные слои, не дубли;
 - lazy/dynamic модули (`BrowserView`, `Settings`, `charts`, `sub-agent-loop`, release notes) реально подключены;
 - отдельный worktree `verstak-extension` — самостоятельный Browser Employee, его не трогаем;
-- `.verstak-data/`, `node_modules/`, `out/` — локальные ignored/runtime-артефакты, не попадают в Git;
-- mobile pairing/attachments сейчас test-only foundation, но зафиксированы в mobile roadmap, поэтому не удалены как случайный код.
+- `node_modules/` — локальные зависимости, не попадают в Git; `npm prune
+  --dry-run` не нашёл лишних пакетов;
+- `build/` и оставшиеся `resources/` — входы установщика и приложения, а не
+  результаты сборки;
+- отдельный worktree `verstak-extension` остаётся изолированным Browser
+  Employee и в эту чистку не входит.
+
+## Чистка структуры 2026-07-25
+
+- удалены локальные пересобираемые `out/` и `.verstak-data/model-gym`;
+- удалены завершённый outcome-план, старый BMP установщика, два одноразовых
+  provider smoke и выполненный мигратор `.grok/clients`;
+- Mobile Remote подтверждён как часть `main`; из `mobile/AGENTS.md` удалены
+  несуществующие ветка/worktree и датированные отчёты;
+- удалены пять test-only foundation, которые не были достижимы ни от одной
+  production-точки: отдельный Codex SSE reducer, skill install guard, mobile
+  pairing/attachment primitives и Model Gym TS contract вместе с тестами,
+  создававшими ложное ощущение работающей функции;
+- граф импортов после чистки: все production-модули `electron/src/shared/mobile`
+  достижимы от Electron, renderer, installer или mobile entry point.
 
 ## Открытые риски и следующий порядок
 
@@ -129,13 +147,12 @@
 
 Готово когда: ни один новый компонент не меняет поведение, а основные экраны проходят characterization и build.
 
-### 2.1.12 — Закрытие test-only foundation (P2)
+### 2.1.12 — Остаточный долг (P2)
 
-Нужно принять продуктовые решения:
-
-- либо подключить mobile pairing/attachments к relay production path, либо удалить foundation;
-- подключить `shared/contracts/model-eval.ts` к Arena policy output либо удалить отдельный TS-контракт;
-- реализовать или снять TODO второй ветки незакрытой review-сессии в `agent-runs`.
+- реализовать или снять TODO второй ветки незакрытой review-сессии в
+  `agent-runs`;
+- убрать неэффективные dynamic imports, которые сборщик всё равно включает
+  статически; это не ломает приложение, но маскирует реальную границу чанков.
 
 ## Инварианты следующих пакетов
 

@@ -147,20 +147,13 @@
 
 ### Task 8: Pairing и attachment staging
 
-**Files:**
-- Create: `mobile/relay/pairing.ts`
-- Create: `electron/mobile-bridge/pairing.ts`
-- Create: `electron/mobile-bridge/attachments.ts`
-- Test: `tests/mobile/pairing-attachments.test.ts`
+Отложено до production-контура авторизации и загрузки файлов. Ранний
+test-only каркас удалён: он не был подключён ни к relay, ни к desktop bridge и
+создавал ложное ощущение готовой функции.
 
-**Interfaces:**
-- Produces: одноразовый pairing TTL 10 минут, revocable device credential, staged attachment validator.
-
-- [ ] Написать тесты на expiry, replay, revoke, traversal, forbidden extension/path и size limit.
-- [ ] Запустить тест и подтвердить FAIL.
-- [ ] Реализовать pairing state machine и attachment staging без логирования содержимого.
-- [ ] Запустить тест; ожидать PASS.
-- [ ] Зафиксировать task отдельным коммитом.
+При возврате к задаче сначала определить production storage/transport и
+подключить один сквозной путь, затем покрыть expiry, replay, revoke, traversal,
+forbidden path и size limit интеграционным тестом.
 
 ### Task 9: Сквозная проверка и документация запуска
 
