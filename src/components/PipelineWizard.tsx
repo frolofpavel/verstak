@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '../i18n'
 import { EMPTY_BRIEF, isBriefReady } from '../lib/pipeline-brief'
-import type { PipelineBrief, PipelineMode, PipelineRun } from '../types/api'
+import type { OutcomeEffortLevel, PipelineBrief, PipelineMode, PipelineRun } from '../types/api'
 
 interface PipelineWizardProps {
   mode?: PipelineMode
@@ -23,7 +23,9 @@ interface PipelineWizardProps {
 export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, onStarted }: PipelineWizardProps) {
   const t = useT()
   const [brief, setBrief] = useState<PipelineBrief>(initialBrief ?? EMPTY_BRIEF)
+  const [effortLevel, setEffortLevel] = useState<OutcomeEffortLevel>('controlled')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const ready = isBriefReady(brief)
 
   useEffect(() => {
@@ -39,10 +41,17 @@ export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, on
   async function handleStart() {
     if (!ready || busy) return
     setBusy(true)
+    setError('')
     try {
-      const run = await window.api.pipeline.start({ mode, brief, chatId: chatId ?? null })
-      if (run) onStarted(run)
+      const run = await window.api.pipeline.start({ mode, effortLevel, brief, chatId: chatId ?? null })
+      if (!run) {
+        setError(t.pipeline.startError)
+        return
+      }
+      onStarted(run)
       onClose()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t.pipeline.startError)
     } finally {
       setBusy(false)
     }
@@ -64,6 +73,25 @@ export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, on
 
         <div className="gg-modal-body">
           <div className="gg-pipeline-subtitle">{t.pipeline.subtitle}</div>
+
+          <fieldset className="gg-outcome-effort" disabled={busy}>
+            <legend>{t.pipeline.effortLabel}</legend>
+            {(['quick', 'controlled', 'deep'] as const).map(level => (
+              <label key={level} className={effortLevel === level ? 'is-selected' : ''}>
+                <input
+                  type="radio"
+                  name="outcome-effort"
+                  value={level}
+                  checked={effortLevel === level}
+                  onChange={() => setEffortLevel(level)}
+                />
+                <span>
+                  <strong>{t.pipeline.effort[level].title}</strong>
+                  <small>{t.pipeline.effort[level].detail}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
           <label className="gg-create-client-field">
             <span className="gg-create-client-label">{t.pipeline.goalLabel}</span>
@@ -104,6 +132,7 @@ export function PipelineWizard({ mode = 'dev', chatId, initialBrief, onClose, on
               />
             </label>
           </details>
+          {error && <div className="gg-form-error" role="alert">{error}</div>}
         </div>
 
         <div className="gg-modal-footer">

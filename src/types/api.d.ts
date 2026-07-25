@@ -850,7 +850,7 @@ declare global {
       }
       pipeline: {
         /** Создать прогон Brief→Proof для активного проекта (step='plan'). */
-        start(opts: { mode: PipelineMode; brief: PipelineBrief; chatId?: number | null; workflowId?: string | null }): Promise<PipelineRun | null>
+        start(opts: { mode: PipelineMode; effortLevel?: OutcomeEffortLevel; brief: PipelineBrief; chatId?: number | null; workflowId?: string | null }): Promise<PipelineRun | null>
         /** Продвинуть шаг / привязать planId / runId. */
         advance(id: number, patch: { step?: PipelineStep; planId?: number | null; agentRunId?: string | null; chatId?: number | null; verifyAttempts?: number }): Promise<PipelineRun | null>
         /** Активный (НЕтерминальный) прогон проекта для resume-баннера. */
@@ -859,6 +859,7 @@ declare global {
         cancel(id: number): Promise<void>
         listStepOutcomes(planId: number): Promise<StoredStepOutcome[]>
         listRevisions(planId: number): Promise<PlanRevisionSnapshot[]>
+        metrics(projectPath: string): Promise<OutcomeMetrics>
       }
       /** Project Brain — мозг проекта (warmup, состояние, решения). */
       brain: {
@@ -1483,6 +1484,7 @@ export interface PlanRevisionSnapshot {
 }
 
 export type PipelineMode = 'dev' | 'agency'
+export type OutcomeEffortLevel = 'quick' | 'controlled' | 'deep'
 export type PipelineStep = 'brief' | 'refine' | 'plan' | 'execute' | 'verify' | 'review' | 'proof' | 'completed' | 'cancelled' | 'blocked'
 
 // Project Brain (зеркало electron/storage/project-brain.ts — renderer без main).
@@ -1530,6 +1532,7 @@ export interface PipelineRun {
   chatId: number | null
   agentRunId: string | null
   mode: PipelineMode
+  effortLevel: OutcomeEffortLevel
   workflowId: string | null
   step: PipelineStep
   brief: PipelineBrief
@@ -1540,6 +1543,24 @@ export interface PipelineRun {
   verifyAttempts: number
   createdAt: number
   updatedAt: number
+}
+
+export interface OutcomeMetrics {
+  starts: number
+  completed: number
+  blocked: number
+  cancelled: number
+  replans: number
+  retries: number
+  interventions: number
+  jobs: number
+  filesChanged: number
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  costCents: number | null
+  medianTimeToProofMs: number | null
+  noCorrectivePromptRuns: number
 }
 
 /** Conventional-группа коммита (commit-planner, Фаза 4). */

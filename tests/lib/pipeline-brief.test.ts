@@ -59,10 +59,11 @@ describe('pipeline-brief', () => {
   const brief = { goal: 'fix', constraints: '', dod: 'npm test' }
 
   it('buildPipelineSend refine creates a read-only Task Contract turn', () => {
-    const s = buildPipelineSend('refine', brief, null)
+    const s = buildPipelineSend('refine', brief, null, { effortLevel: 'deep' })
     expect(s?.mode).toBe('plan')
     expect(s?.outcomePhase).toBe('refine')
     expect(s?.text).toContain('submit_task_contract')
+    expect(s?.text).toContain('planningMode=deep')
     expect(buildRefinePrompt(brief)).toContain('submit_task_contract')
   })
 

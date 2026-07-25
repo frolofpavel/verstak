@@ -1348,6 +1348,20 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
           ON agent_jobs(run_id);
       `)
     }
+  },
+  {
+    version: 58,
+    description: '2.1.5 Outcome Mode GA: persisted effort level for durable outcome runs',
+    run: (db: DB) => {
+      const hasTable = Boolean(
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pipeline_runs'").get(),
+      )
+      if (!hasTable) return
+      const cols = (db.prepare('PRAGMA table_info(pipeline_runs)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('effort_level')) {
+        db.exec("ALTER TABLE pipeline_runs ADD COLUMN effort_level TEXT NOT NULL DEFAULT 'controlled'")
+      }
+    }
   }
 ]
 

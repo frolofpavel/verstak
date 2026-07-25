@@ -3,6 +3,7 @@ import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
 import { pipelineStepIndex, resolveReviewCandidateRunIds, reviewGateState, verifyState, type ReviewGateState } from '../lib/pipeline-brief'
 import type { PipelineStep, StoredStepOutcome, VerificationRow } from '../types/api'
+import { OutcomeRunView } from './OutcomeRunView'
 
 interface PipelineBannerProps {
   /** Действие первичной кнопки шага (advance + оркестрация send). */
@@ -21,6 +22,7 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
   const [verify, setVerify] = useState<VerificationRow | null>(null)
   const [review, setReview] = useState<{ state: ReviewGateState; detail: string | null } | null>(null)
   const [adaptive, setAdaptive] = useState<StoredStepOutcome | null>(null)
+  const [runViewOpen, setRunViewOpen] = useState(false)
 
   const step = pipeline?.step
   const projectPath = pipeline?.projectPath
@@ -124,6 +126,9 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
         </span>
       )}
       <span className="gg-pipeline-banner-spacer" />
+      <button type="button" className="gg-btn gg-btn-ghost gg-btn-xs" onClick={() => setRunViewOpen(true)}>
+        {t.pipeline.openRun}
+      </button>
 
       {step === 'verify' ? (
         vs.canProof ? (
@@ -161,6 +166,7 @@ export function PipelineBanner({ onPrimary }: PipelineBannerProps) {
       <button type="button" className="gg-btn gg-btn-ghost gg-btn-xs" onClick={() => void cancelPipeline()}>
         {t.pipeline.cancelRun}
       </button>
+      {runViewOpen && <OutcomeRunView pipeline={pipeline} onClose={() => setRunViewOpen(false)} />}
     </div>
   )
 }

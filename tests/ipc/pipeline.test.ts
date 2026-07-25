@@ -52,12 +52,25 @@ describe('pipeline ipc (D2)', () => {
   })
 
   it('start создаёт прогон для активного проекта (step=plan)', () => {
-    const run = invoke<PipelineRun | null>('pipeline:start', { mode: 'dev', brief, chatId: 3 })
+    const run = invoke<PipelineRun | null>('pipeline:start', {
+      mode: 'dev',
+      effortLevel: 'deep',
+      brief,
+      chatId: 3,
+    })
     expect(run).not.toBeNull()
     expect(run!.step).toBe('refine')
     expect(run!.mode).toBe('dev')
+    expect(run!.effortLevel).toBe('deep')
     expect(run!.projectPath).toBe(dir)
     expect(run!.brief).toEqual(brief)
+  })
+
+  it('metrics возвращает локальные метрики проекта', () => {
+    invoke<PipelineRun>('pipeline:start', { mode: 'dev', brief })
+    const metrics = invoke<{ starts: number; completed: number }>('pipeline:metrics', dir)
+    expect(metrics.starts).toBe(1)
+    expect(metrics.completed).toBe(0)
   })
 
   it('start без открытого проекта → null', () => {

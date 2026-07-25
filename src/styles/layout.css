@@ -20157,6 +20157,57 @@ html[data-theme="light"] .gg-policy {
 
 /* ── Pipeline Brief→Proof (визард брифа) ───────────────────────────── */
 .gg-pipeline-wizard { width: 520px; max-width: 92vw; }
+.gg-outcome-effort {
+  border: 0;
+  padding: 0;
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.gg-outcome-effort legend { margin-bottom: 8px; color: var(--text-muted); font-size: 12px; }
+.gg-outcome-effort label {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.gg-outcome-effort label.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.gg-outcome-effort input { margin-top: 2px; }
+.gg-outcome-effort span { display: grid; gap: 3px; }
+.gg-outcome-effort small { color: var(--text-muted); line-height: 1.3; }
+.gg-outcome-run-view { width: min(920px, 94vw); max-height: 88vh; }
+.gg-outcome-run-subtitle { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.gg-outcome-run-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; overflow: auto; }
+.gg-outcome-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; min-width: 0; }
+.gg-outcome-card h3 { margin: 0 0 10px; font-size: 13px; }
+.gg-outcome-card p { margin: 0; line-height: 1.45; }
+.gg-outcome-card dl { display: grid; grid-template-columns: 96px 1fr; gap: 6px 10px; margin: 12px 0 0; font-size: 12px; }
+.gg-outcome-card dt { color: var(--text-muted); }
+.gg-outcome-card dd { margin: 0; overflow-wrap: anywhere; }
+.gg-outcome-step-list { display: grid; gap: 7px; margin: 0; padding-left: 20px; }
+.gg-outcome-step-list li { padding-left: 4px; }
+.gg-outcome-status { margin-right: 7px; color: var(--text-muted); font-size: 11px; }
+.gg-outcome-status.is-done,
+.gg-outcome-status.is-succeeded { color: var(--success); }
+.gg-outcome-status.is-failed,
+.gg-outcome-status.is-blocked { color: var(--error); }
+.gg-outcome-job { display: grid; grid-template-columns: auto 1fr auto; gap: 7px; align-items: center; font-size: 12px; }
+.gg-outcome-job + .gg-outcome-job { margin-top: 8px; }
+.gg-outcome-job small,
+.gg-outcome-muted { color: var(--text-muted); }
+.gg-outcome-metrics { grid-column: 1 / -1; }
+.gg-outcome-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.gg-outcome-metric-grid > div { padding: 9px; border-radius: 9px; background: var(--surface-2); display: grid; gap: 3px; }
+.gg-outcome-metric-grid span { color: var(--text-muted); font-size: 11px; }
+.gg-outcome-metric-grid strong { font-size: 13px; }
+@media (max-width: 720px) {
+  .gg-outcome-effort,
+  .gg-outcome-run-grid { grid-template-columns: 1fr; }
+  .gg-outcome-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .gg-pipeline-subtitle {
   font-size: 12px;
   letter-spacing: 0.04em;

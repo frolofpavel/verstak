@@ -1,4 +1,4 @@
-import type { AgentRunEvent, PipelineBrief, PipelineStep, TaskContractV1, VerificationOverall } from '../types/api'
+import type { AgentRunEvent, OutcomeEffortLevel, PipelineBrief, PipelineStep, TaskContractV1, VerificationOverall } from '../types/api'
 import { TASK_SPEC_CONTRACT } from './task-spec'
 
 /** Тон Verify-шага + можно ли переходить к Proof. passed → зелёный путь;
@@ -40,12 +40,13 @@ export function isBriefReady(brief: PipelineBrief): boolean {
   return brief.goal.trim().length > 0
 }
 
-export function buildRefinePrompt(brief: PipelineBrief): string {
+export function buildRefinePrompt(brief: PipelineBrief, effortLevel: OutcomeEffortLevel = 'controlled'): string {
   return [
     `Исходная задача пользователя: ${brief.goal.trim()}`,
     `Предварительные ограничения: ${brief.constraints.trim() || 'не заданы'}`,
     `Предварительный DoD: ${brief.dod.trim() || 'не задан — выведи из задачи или задай blocking question'}`,
     '',
+    `Выбранная глубина выполнения: ${effortLevel}. Зафиксируй planningMode=${effortLevel} в Task Contract.`,
     'Это фаза Outcome refine. Только читай релевантный код и факты проекта; ничего не изменяй.',
     'После исследования ОБЯЗАТЕЛЬНО вызови submit_task_contract.',
     'Не выдумывай repoEvidence: указывай только реально прочитанные пути и символы.',
@@ -168,6 +169,7 @@ export type PipelineSendMode = 'plan' | 'accept-edits'
 export interface PipelineSendOptions {
   requireReviewGate?: boolean
   taskContract?: TaskContractV1 | null
+  effortLevel?: OutcomeEffortLevel
 }
 
 /**
@@ -182,7 +184,11 @@ export function buildPipelineSend(
   planId: number | null,
   opts: PipelineSendOptions = {},
 ): { text: string; mode: PipelineSendMode; outcomePhase?: 'refine' | 'plan' | 'execute-step' } | null {
-  if (step === 'refine') return { text: buildRefinePrompt(brief), mode: 'plan', outcomePhase: 'refine' }
+  if (step === 'refine') return {
+    text: buildRefinePrompt(brief, opts.effortLevel),
+    mode: 'plan',
+    outcomePhase: 'refine',
+  }
   if (step === 'plan') return { text: buildPlanPrompt(brief, opts.taskContract), mode: 'plan', outcomePhase: 'plan' }
   if (step === 'execute') return { text: buildExecutePrompt(brief, planId ?? 0, opts.requireReviewGate === true), mode: 'accept-edits', outcomePhase: 'execute-step' }
   return null

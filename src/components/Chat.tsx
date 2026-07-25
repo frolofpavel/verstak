@@ -1980,6 +1980,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const params = buildPipelineSend(step, brief, planId, {
       requireReviewGate: mode === 'agency',
       taskContract: pipeline?.taskContract,
+      effortLevel: pipeline?.effortLevel,
     })
     if (!params) return
     if (step === 'refine' || step === 'plan' || step === 'execute') pipelineAutoSendStepRef.current = step
@@ -3929,7 +3930,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                       )}
                       {!isHelpChat && !activePipeline && (
                         <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">Pipeline</span>
+                          <span className="gg-chat-settings-label">{t.pipeline.entry}</span>
                           <button
                             type="button"
                             className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
@@ -3941,7 +3942,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                             disabled={isCliProvider(provider.id)}
                             title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
                           >
-                            ▶ Agency task
+                            {t.pipeline.entry}
                           </button>
                         </div>
                       )}
@@ -3974,7 +3975,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   disabled={isCliProvider(provider.id)}
                   title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
                 >
-                  ▶ Agency task
+                  {t.pipeline.entry}
                 </button>
               )}
               {!isHelpChat && (

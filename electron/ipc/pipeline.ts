@@ -5,6 +5,7 @@ import type {
   PipelineBrief,
   PipelineStep,
   PipelineRun,
+  OutcomeEffortLevel,
 } from '../storage/pipeline-runs'
 import type { PlanOutcomes } from '../storage/plan-outcomes'
 import type { Plans } from '../storage/plans'
@@ -51,13 +52,20 @@ export function registerPipelineIpc(deps: PipelineDeps): void {
     'pipeline:start',
     (
       _e,
-      opts: { mode: PipelineMode; brief: PipelineBrief; chatId?: number | null; workflowId?: string | null },
+      opts: {
+        mode: PipelineMode
+        effortLevel?: OutcomeEffortLevel
+        brief: PipelineBrief
+        chatId?: number | null
+        workflowId?: string | null
+      },
     ): PipelineRun | null => {
       const projectPath = getProjectRoot()
       if (!projectPath) return null
       return pipeline.create({
         projectPath,
         mode: opts.mode,
+        effortLevel: opts.effortLevel,
         brief: opts.brief,
         chatId: opts.chatId ?? null,
         workflowId: opts.workflowId ?? null,
@@ -90,4 +98,6 @@ export function registerPipelineIpc(deps: PipelineDeps): void {
     planOutcomes.list(planId))
   ipcMain.handle('pipeline:list-revisions', (_e, planId: number) =>
     planOutcomes.revisions(planId))
+  ipcMain.handle('pipeline:metrics', (_e, projectPath: string) =>
+    pipeline.metrics(projectPath))
 }

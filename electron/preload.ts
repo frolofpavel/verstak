@@ -437,14 +437,15 @@ contextBridge.exposeInMainWorld('api', {
     setBranch: (id: number, branch: string) => ipcRenderer.invoke('devtask:setBranch', id, branch)
   },
   pipeline: {
-    start: (opts: { mode: 'dev' | 'agency'; brief: { goal: string; constraints: string; dod: string }; chatId?: number | null; workflowId?: string | null }) =>
+    start: (opts: { mode: 'dev' | 'agency'; effortLevel?: 'quick' | 'controlled' | 'deep'; brief: { goal: string; constraints: string; dod: string }; chatId?: number | null; workflowId?: string | null }) =>
       ipcRenderer.invoke('pipeline:start', opts),
     advance: (id: number, patch: { step?: string; planId?: number | null; agentRunId?: string | null; chatId?: number | null }) =>
       ipcRenderer.invoke('pipeline:advance', id, patch),
     getActive: (projectPath: string) => ipcRenderer.invoke('pipeline:getActive', projectPath),
     cancel: (id: number) => ipcRenderer.invoke('pipeline:cancel', id),
     listStepOutcomes: (planId: number) => ipcRenderer.invoke('pipeline:list-step-outcomes', planId),
-    listRevisions: (planId: number) => ipcRenderer.invoke('pipeline:list-revisions', planId)
+    listRevisions: (planId: number) => ipcRenderer.invoke('pipeline:list-revisions', planId),
+    metrics: (projectPath: string) => ipcRenderer.invoke('pipeline:metrics', projectPath)
   },
   brain: {
     warmup: () => ipcRenderer.invoke('brain:warmup'),

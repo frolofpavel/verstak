@@ -31,11 +31,34 @@ describe('pipeline-runs (migration 22)', () => {
     const run = pr.create({ projectPath: 'C:/proj', mode: 'dev', brief, chatId: 7 })
     expect(run.id).toBeGreaterThan(0)
     expect(run.mode).toBe('dev')
+    expect(run.effortLevel).toBe('controlled')
     expect(run.step).toBe('plan')
     expect(run.chatId).toBe(7)
     expect(run.brief).toEqual(brief)
     expect(run.createdAt).toBeGreaterThanOrEqual(before)
     expect(pr.get(run.id)).toEqual(run)
+    db.close()
+  })
+
+  it('2.1.5 сохраняет выбранную глубину и считает локальные outcome-метрики', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const pr = createPipelineRuns(db)
+    const quick = pr.create({ projectPath: 'C:/proj', mode: 'dev', effortLevel: 'quick', brief })
+    const deep = pr.create({ projectPath: 'C:/proj', mode: 'agency', effortLevel: 'deep', brief })
+    pr.advance(quick.id, { step: 'completed', verifyAttempts: 1 })
+    pr.advance(deep.id, { step: 'blocked', verifyAttempts: 2 })
+
+    expect(pr.get(quick.id)?.effortLevel).toBe('quick')
+    expect(pr.get(deep.id)?.effortLevel).toBe('deep')
+    expect(pr.metrics('C:/proj')).toMatchObject({
+      starts: 2,
+      completed: 1,
+      blocked: 1,
+      cancelled: 0,
+      retries: 3,
+      jobs: 0,
+      filesChanged: 0,
+    })
     db.close()
   })
 
