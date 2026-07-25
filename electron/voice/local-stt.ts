@@ -13,6 +13,26 @@ type AsrPipeline = (
   opts?: Record<string, unknown>,
 ) => Promise<AsrResult>
 
+interface LocalSttEnvironment {
+  cacheDir: string
+  allowLocalModels: boolean
+  backends: { onnx: { wasm: { numThreads: number } } }
+}
+
+export function configureLocalSttEnvironment(
+  env: LocalSttEnvironment,
+  cacheDir: string,
+  cpuCount: number,
+): void {
+  env.cacheDir = cacheDir
+  env.allowLocalModels = false
+  env.backends.onnx.wasm.numThreads = Math.min(4, Math.max(1, cpuCount - 1))
+}
+
+export function localSttPipelineOptions(): { dtype: 'q8' } {
+  return { dtype: 'q8' }
+}
+
 let pipelinePromise: Promise<AsrPipeline> | null = null
 let loadError: string | null = null
 let loading = false
@@ -37,11 +57,13 @@ async function getTranscriber(): Promise<AsrPipeline> {
   loading = true
   loadError = null
   pipelinePromise = (async () => {
-    const { env, pipeline } = await import('@xenova/transformers')
-    env.cacheDir = join(app.getPath('userData'), 'whisper-models')
-    env.allowLocalModels = false
-    env.backends.onnx.wasm.numThreads = Math.min(4, Math.max(1, cpus().length - 1))
-    const pipe = await pipeline('automatic-speech-recognition', MODEL_ID, { quantized: true })
+    const { env, pipeline } = await import('@huggingface/transformers')
+    configureLocalSttEnvironment(
+      env as unknown as LocalSttEnvironment,
+      join(app.getPath('userData'), 'whisper-models'),
+      cpus().length,
+    )
+    const pipe = await pipeline('automatic-speech-recognition', MODEL_ID, localSttPipelineOptions())
     loading = false
     return pipe as AsrPipeline
   })().catch((err: unknown) => {

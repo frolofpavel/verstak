@@ -14,7 +14,7 @@ const NATIVE_DEPS = [
   '@google/genai',
   '@anthropic-ai/sdk',
   'openai',
-  '@xenova/transformers',
+  '@huggingface/transformers',
   'onnxruntime-node',
   // ↑ AI SDKs internally pull in form-data / node-fetch / proxy-agent which
   //   often have __dirname / require.resolve. Safer to keep as external.

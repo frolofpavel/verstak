@@ -64,6 +64,16 @@
 
 Готово когда: нет critical runtime advisory; оставшийся advisory имеет документированный недостижимый путь или отдельный pinned debt.
 
+Срез A выполнен 2026-07-25:
+
+- `@xenova/transformers` заменён на поддерживаемый `@huggingface/transformers` 4.x;
+- удалён прямой pin `onnxruntime-node`, runtime теперь принадлежит Transformers.js;
+- старый `quantized: true` заменён на актуальный `dtype: 'q8'`;
+- cache/local-model/thread policy закреплена unit-тестами, packaging — отдельным тестом;
+- production audit: **critical 1 → 0**, всего runtime advisory **17 → 14**.
+
+Остаток среза B: high advisory в `onnxruntime-node/adm-zip`, `sharp/libvips` и `exceljs/archiver`. Автоматический `--force` запрещён: npm предлагает несовместимые откаты. Закрывать через обновление upstream/замену XLSX backend с отдельными smoke-тестами.
+
 ### 2.1.10 — Декомпозиция agent runtime (P1)
 
 Проблема:
