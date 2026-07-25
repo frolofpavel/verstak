@@ -33,8 +33,8 @@ export const SAMPLE_BRIEF: PipelineBrief = {
 }
 
 /**
- * Бриф готов к «Сформировать план», когда заданы цель и Definition of Done.
- * Границы (constraints) опциональны — не каждая задача их требует.
+ * Для Outcome Mode достаточно цели. Границы и Definition of Done опциональны:
+ * refine-агент выводит их из задачи либо фиксирует blocking question.
  */
 export function isBriefReady(brief: PipelineBrief): boolean {
   return brief.goal.trim().length > 0

@@ -14,6 +14,7 @@ export function buildArenaSummary(rows, repeat) {
       runs: 0,
       passes: 0,
       comparableRuns: 0,
+      executedRuns: 0,
       durations: [],
       costs: [],
       interventions: 0,
@@ -21,6 +22,7 @@ export function buildArenaSummary(rows, repeat) {
     group.runs++
     if (row.comparable) {
       group.comparableRuns++
+      if (row.result !== 'dry-run') group.executedRuns++
       if (row.result === 'pass') group.passes++
       if (Number.isFinite(row.durationMs)) group.durations.push(row.durationMs)
       if (Number.isFinite(row.estimatedCost)) group.costs.push(row.estimatedCost)
@@ -40,7 +42,11 @@ export function buildArenaSummary(rows, repeat) {
     medianEstimatedCost: median(group.costs),
     interventions: group.interventions,
     comparable: group.comparableRuns === group.runs && group.runs > 0,
-    productionRecommendationEligible: repeat >= 3 && group.comparableRuns === group.runs && group.runs > 0,
+    productionRecommendationEligible:
+      repeat >= 3
+      && group.comparableRuns === group.runs
+      && group.executedRuns === group.runs
+      && group.runs > 0,
   }))
 }
 

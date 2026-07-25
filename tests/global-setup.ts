@@ -29,9 +29,10 @@ export default function setup(): () => void {
   // их накопление (10 051 за сессию 18.07) насыщает антивирус → EPERM-эскалация. Свежие
   // каталоги активного параллельного прогона НЕ трогаем (olderThanMs). См. temp-sweep.ts.
   try { sweepTestTempDirs({ olderThanMs: 30 * 60 * 1000 }) } catch { /* best-effort */ }
-  // Teardown: чистим ВСЕ свои test-temp после прогона (тесты завершены → хендлы отпущены,
-  // rmDirRobust добьёт readonly/транзиентные локи).
+  // Teardown не умеет отличить каталоги этого процесса от параллельного
+  // Vitest/Arena. Поэтому не трогаем свежие temp: иначе завершившийся прогон
+  // удаляет рабочий Git-каталог ещё работающего прогона.
   return function teardown(): void {
-    try { sweepTestTempDirs() } catch { /* best-effort */ }
+    try { sweepTestTempDirs({ olderThanMs: 5 * 60 * 1000 }) } catch { /* best-effort */ }
   }
 }

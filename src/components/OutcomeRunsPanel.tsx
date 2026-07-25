@@ -22,9 +22,12 @@ export function OutcomeRunsPanel({ projectPath, onClose }: OutcomeRunsPanelProps
   function refresh() {
     let cancelled = false
     setLoading(true)
+    setError('')
     void Promise.all([
       window.api.pipeline.list(projectPath),
-      window.api.agentJobs.list(projectPath),
+      // История 2.1.6 должна оставаться доступной, даже если дополнительный
+      // контур вмешательств временно недоступен.
+      window.api.agentJobs.list(projectPath).catch(() => []),
     ]).then(([nextRuns, nextJobs]) => {
       if (!cancelled) {
         setRuns(nextRuns)

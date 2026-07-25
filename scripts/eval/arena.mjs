@@ -66,7 +66,9 @@ export async function runArena(argv, env = process.env) {
 }
 
 async function runOne({ runner, probe, fixture, repeat, args, env }) {
-  const workspace = mkdtempSync(join(tmpdir(), `verstak-arena-${runner.id}-${fixture.id}-`))
+  // Не использовать общий test-prefix `verstak-`: teardown любого параллельного
+  // Vitest-прогона удаляет такие каталоги и способен разрушить живой Arena run.
+  const workspace = mkdtempSync(join(tmpdir(), `model-gym-arena-${runner.id}-${fixture.id}-`))
   try {
     materializeFixture(workspace, fixture)
     const before = snapshot(workspace)

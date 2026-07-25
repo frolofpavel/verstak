@@ -51,7 +51,7 @@ describe('Model Gym Arena', () => {
         new Set(['verstak', 'codex', 'opencode']),
       )
       expect(report.rows.every((row: { result: string; comparable: boolean }) => row.result === 'dry-run' && row.comparable)).toBe(true)
-      expect(report.summary.every((item: { productionRecommendationEligible: boolean }) => item.productionRecommendationEligible)).toBe(true)
+      expect(report.summary.every((item: { productionRecommendationEligible: boolean }) => !item.productionRecommendationEligible)).toBe(true)
       expect(readFileSync(join(dir, 'arena.md'), 'utf8')).toContain('Несопоставимые запуски не ранжируются')
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -68,6 +68,24 @@ describe('Model Gym Arena', () => {
     expect(summary.medianDurationMs).toBe(30)
     expect(summary.comparable).toBe(false)
     expect(summary.productionRecommendationEligible).toBe(false)
+  })
+
+  it('requires executed rows, not only a repeat count from dry-run', () => {
+    const dryRows = [1, 2, 3].map(repeat => row({
+      repeat,
+      comparable: true,
+      result: 'dry-run',
+      verifyPass: false,
+    }))
+    const liveRows = [1, 2, 3].map(repeat => row({
+      repeat,
+      comparable: true,
+      result: 'pass',
+      verifyPass: true,
+    }))
+
+    expect(buildArenaSummary(dryRows, 3)[0].productionRecommendationEligible).toBe(false)
+    expect(buildArenaSummary(liveRows, 3)[0].productionRecommendationEligible).toBe(true)
   })
 })
 
