@@ -156,18 +156,15 @@ npm run dist:win     # NSIS + portable .exe
 
 ## 5. Известные слабые места (приоритеты на доработку)
 
-1. **`src/store/projectStore.ts` разрастается** (~800 строк). После Phase A (SendRegistry) часть классов race-багов закрыта, но при добавлении новых фич (фоновые агенты, debate mode) надо вынести:
-   - `ChatSessionLifecycle` (enterChat/leaveChat вместо setProject + switchChatSession + newChatSession)
-   - `PerChatState` (map chatId → ChatStateBundle вместо top-level полей + chatSnapshots копирования)
-   - План в комментариях того же файла.
+1. **`src/store/projectStore.ts` всё ещё крупный** (~1160 строк), но декомпозиция идёт с тестовыми пинами. `ChatSessionLifecycle` вынесен в `chat-lifecycle.ts`/`session-snapshot.ts`; PerChatState 4.1–4.3 перевёл `chats` в SSOT и вынес основные мутации/читателей. Остался срез 4.4: убрать поддерживаемые top-level/chatSnapshots-проекции и дочистить мёртвые поля без изменения поведения.
 
 2. **CLI parity 7.5/10.** runPlainConversation проще runApiConversation: нет attachments, нет verify hints. См. `cli-prompt.ts` для разбора уже сделанного (Phase 2 cli-аудит).
 
-3. **Тестовое покрытие критичных путей слабое.** Сильно покрыто: compact-history (6), with-retry (14), pricing (12), apply-patch. Слабо: ipc handlers, agent loop, review flow, multi-chat routing.
+3. **Тестовое покрытие критичных путей выросло, но неравномерно.** Хорошо покрыты agent loop, multi-chat routing, compact-history, retry, pricing, apply-patch и durable jobs. Слабее остаются часть IPC handlers, review flow и реальные live-сценарии с внешними CLI/браузером.
 
-4. **Long-running session resilience.** Есть exitReason + journal на любой exit. Нет: checkpoint-resume агентного цикла после crash.
+4. **Long-running session resilience построена частично.** Есть exitReason/journal, per-turn `agent_run_checkpoints`, reconcile stale runs и ResumeBanner с provider/destructive guards. Не закрыта нативная CLI session-continuity (Mode C): CLI по-прежнему получает сериализованную историю вместо надёжного `--continue`/session-id пути.
 
-5. **Multi-agent (debate / delegate_task) не построена.** Phase A очистила дорогу через SendRegistry. Для делегирования нужно: новый SendOwner kind, отдельная команда tool в реестре, UI индикация какой агент сейчас.
+5. **Multi-agent и durable control plane построены.** Есть delegate/parallel/orchestrate/swarm, persistent `agent_jobs`, восстановление после рестарта, write-scope guard и ручное принятие результата. Реальные хвосты: live-сценарий 2–3 параллельных агентов, adversarial debate и дальнейшая продуктовая полировка панели. Реализация разбита по `electron/ipc/tool-handlers/delegation/`; не возвращать её в монолит.
 
 ---
 

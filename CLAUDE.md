@@ -177,7 +177,7 @@ npm run dist:win     # NSIS + portable .exe
 
 4. **Long-running resilience — checkpoint-resume ПОСТРОЕН** (Crash-resume Фаза 1/2: per-turn snapshot `agent_run_checkpoints` с троттлингом, reconcileStale на старте, findResumable + ResumeBanner с гардом деструктива, provider-guard возобновления). Остаётся: Mode C session-continuity (см. п.2).
 
-5. **Multi-agent ПОСТРОЕН (delegate/parallel/orchestrate/swarm)** — `electron/ipc/tool-handlers/delegation.ts` (~1220 строк, свой распил + тест декомпозиции нужны). Реальный пробел — только адверсариальный iterative **debate** (тезис↔критика↔синтез) поверх swarm-арбитра (1.9.9). Плюс PTC (`execute_code`) построен, но по умолчанию инертен (ждёт live-валидации петли).
+5. **Multi-agent ПОСТРОЕН (delegate/parallel/orchestrate/swarm + durable jobs)** — старый монолит `delegation.ts` распилен: файл оставлен двухстрочным re-export, реализация живёт в `electron/ipc/tool-handlers/delegation/`. Durable control plane хранит job-состояние, переживает рестарт и не позволяет writer'у выйти за разрешённый scope. Реальный пробел — адверсариальный iterative **debate** (тезис↔критика↔синтез) поверх swarm-арбитра и live-приёмка полного сценария. PTC (`execute_code`) построен, но по умолчанию инертен до live-валидации петли.
 
 ---
 
