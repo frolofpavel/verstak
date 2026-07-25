@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField, getActiveChatBundle } from '../hooks/useActiveChatBundle'
 import { Markdown } from './Markdown'
 import { composeFixPrompt, findingsToPlanSteps, type ReviewFinding, type FindingSeverity } from '../lib/review-findings'
 import type { VerificationRow } from '../types/api'
@@ -80,7 +81,7 @@ export function ReviewPanel() {
   const addMessage = useProject(s => s.addMessage)
   const path = useProject(s => s.path)
   const activeChatId = useProject(s => s.activeChatId)
-  const isStreaming = useProject(s => s.isStreaming)
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const setStreaming = useProject(s => s.setStreaming)
   const registerSendOwner = useProject(s => s.registerSendOwner)
   const toggleFinding = useProject(s => s.toggleFinding)
@@ -116,7 +117,7 @@ export function ReviewPanel() {
     // Grok audit fix: если основной чат сейчас стримит ответ, нельзя
     // одновременно пушить новый user message + второй ai.send — будут два
     // assistant placeholders, события могут перепутаться.
-    if (useProject.getState().isStreaming) {
+    if (getActiveChatBundle()?.isStreaming) {
       window.alert('Основной чат сейчас отвечает. Подожди завершения и попробуй снова.')
       return
     }
@@ -132,7 +133,7 @@ export function ReviewPanel() {
       text.length > 300 ? text.slice(0, 300) + '…' : text)
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
-    const allMessages = [...useProject.getState().messages].slice(0, -1)
+    const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1)
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
     // через registerSendOwner — main об этом не знал.
@@ -150,7 +151,7 @@ export function ReviewPanel() {
       window.alert('Ревью ещё не завершилось — подожди немного и попробуй снова.')
       return
     }
-    if (useProject.getState().isStreaming) {
+    if (getActiveChatBundle()?.isStreaming) {
       window.alert('Основной чат сейчас отвечает. Подожди завершения и попробуй снова.')
       return
     }
@@ -167,7 +168,7 @@ export function ReviewPanel() {
       prompt.length > 300 ? prompt.slice(0, 300) + '…' : prompt)
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
-    const allMessages = [...useProject.getState().messages].slice(0, -1)
+    const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1)
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
     // через registerSendOwner — main об этом не знал.

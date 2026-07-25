@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import type { ProjectGroup, ProjectMeta, ProjectStatus } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SettingsGearIcon } from './SettingsGearIcon'
@@ -438,8 +439,9 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     helpMode,
     help,
     resumableRuns,
-    isStreaming,
   } = useProject()
+  // 4.3: bundle-поля активного чата — из chats (SSOT), не из top-level проекции.
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const [startupInterruptedPaths, setStartupInterruptedPaths] = useState<Set<string>>(() => new Set())
   const interruptedPaths = useMemo(() => {
     const paths = new Set<string>()

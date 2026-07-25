@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 
 export function CommandConfirm() {
-  const { pendingCommand, setPendingCommand } = useProject()
+  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
+  const pendingCommand = useActiveChatField('pendingCommand') ?? null
+  const setPendingCommand = useProject(s => s.setPendingCommand)
   const [remember, setRemember] = useState(false)
   if (!pendingCommand) return null
   const ref = pendingCommand
@@ -24,7 +27,7 @@ export function CommandConfirm() {
   }
 
   return (
-    <div className="gg-modal-backdrop" onClick={reject}>
+    <div className="gg-modal-backdrop" onClick={() => void reject()}>
       <div className="gg-modal" onClick={e => e.stopPropagation()}>
         <div className="gg-modal-header">
           <div>
@@ -47,8 +50,8 @@ export function CommandConfirm() {
         </div>
 
         <div className="gg-modal-footer">
-          <button className="gg-btn gg-btn-danger" onClick={reject}>Отклонить</button>
-          <button className="gg-btn gg-btn-success" onClick={accept}>Выполнить</button>
+          <button className="gg-btn gg-btn-danger" onClick={() => void reject()}>Отклонить</button>
+          <button className="gg-btn gg-btn-success" onClick={() => void accept()}>Выполнить</button>
         </div>
       </div>
     </div>

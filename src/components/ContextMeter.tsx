@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { meterView, compactResultText, compactedHint } from '../lib/context-meter'
 import type { ContextStateDTO } from '../types/api'
 
@@ -12,7 +13,7 @@ import type { ContextStateDTO } from '../types/api'
 export function ContextMeter() {
   const path = useProject(s => s.path)
   const activeChatId = useProject(s => s.activeChatId)
-  const isStreaming = useProject(s => s.isStreaming)
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const pushActivity = useProject(s => s.pushActivity)
 
   const [state, setState] = useState<ContextStateDTO | null>(null)

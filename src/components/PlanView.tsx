@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField, getActiveChatBundle } from '../hooks/useActiveChatBundle'
 import type { Plan, PlanStep, StepStatus, ChatMessage, StoredStepOutcome } from '../types/api'
 
 const STEP_LABEL: Record<StepStatus, string> = {
@@ -19,7 +20,10 @@ const STEP_COLOR: Record<StepStatus, string> = {
 }
 
 export function PlanView() {
-  const { path, setActiveView, addMessage, setStreaming, setRunningPlanStep, runningPlanStep, isStreaming, activePipeline } = useProject()
+  const { path, setActiveView, addMessage, setStreaming, setRunningPlanStep, activePipeline } = useProject()
+  // 4.3: bundle-поля активного чата — из chats (SSOT), не из top-level проекции.
+  const runningPlanStep = useActiveChatField('runningPlanStep') ?? null
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const [plans, setPlans] = useState<Plan[]>([])
   const [outcomes, setOutcomes] = useState<StoredStepOutcome[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
@@ -86,8 +90,9 @@ export function PlanView() {
       let timer: ReturnType<typeof setTimeout> | null = null
       const tick = () => {
         if (opts?.cancel?.current) { resolve(); return }
-        const streaming = useProject.getState().isStreaming
-        const running = useProject.getState().runningPlanStep
+        const bundle = getActiveChatBundle()
+        const streaming = bundle?.isStreaming ?? false
+        const running = bundle?.runningPlanStep ?? null
         // Primary exit: stream finished (whatever runningPlanStep says)
         if (!streaming) { resolve(); return }
         // Secondary: step explicitly switched away from us
@@ -191,7 +196,7 @@ ${remaining || '— нет —'}
     addMessage({ role: 'assistant', content: '' })
     setStreaming(true)
     setActiveView('chat')
-    const allMessages = [...useProject.getState().messages].slice(0, -1) as ChatMessage[]
+    const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1) as ChatMessage[]
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Страж: tests/contracts/chat-send-chatid-contract.
     if (outcomePipeline && activePipeline) {

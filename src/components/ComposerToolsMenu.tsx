@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
 import { runExactRewindFlow } from '../lib/exact-rewind-flow'
@@ -35,11 +36,12 @@ export function ComposerToolsMenu({
   exportBusy?: boolean
 }) {
   const path = useProject(s => s.path)
-  const messages = useProject(s => s.messages)
+  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
+  const messages = useActiveChatField('messages') ?? []
   const activeChatId = useProject(s => s.activeChatId)
-  const checkpointId = useProject(s => s.checkpointId)
-  const checkpointMessageId = useProject(s => s.checkpointMessageId)
-  const isStreaming = useProject(s => s.isStreaming)
+  const checkpointId = useActiveChatField('checkpointId') ?? null
+  const checkpointMessageId = useActiveChatField('checkpointMessageId') ?? null
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const helpMode = useProject(s => s.helpMode)
   const setCheckpoint = useProject(s => s.setCheckpoint)
   const pushActivity = useProject(s => s.pushActivity)

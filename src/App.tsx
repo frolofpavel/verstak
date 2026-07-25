@@ -35,6 +35,7 @@ import { ArtifactPreviewContainer } from './components/ArtifactPreview'
 import { TerminalErrorToast } from './components/TerminalErrorToast'
 import { GlobalTooltipHost } from './components/GlobalTooltipHost'
 import { useProject } from './store/projectStore'
+import { useActiveChatField } from './hooks/useActiveChatBundle'
 import { useSkills as useSkillsStore } from './store/skillStore'
 import { readAgentMode, writeAgentMode } from './hooks/useAgentMode'
 
@@ -118,16 +119,18 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [lang, setLang] = useState<Lang>('ru')
 
-  useEffect(() => window.api.mobile.onRunRequest(async payload => {
-    try {
-      const stored = await window.api.chats.list(payload.chatId)
-      const messages = stored.map(message => ({ role: message.role, content: message.content }))
-      const sendId = await window.api.ai.send(messages, payload.projectPath, String(payload.chatId))
-      mobileRunIdsRef.current.add(sendId)
-      await window.api.mobile.completeRunRequest(payload.requestId, sendId)
-    } catch (error) {
-      await window.api.mobile.completeRunRequest(payload.requestId, 0, error instanceof Error ? error.message : 'Не удалось запустить задачу')
-    }
+  useEffect(() => window.api.mobile.onRunRequest(payload => {
+    void (async () => {
+      try {
+        const stored = await window.api.chats.list(payload.chatId)
+        const messages = stored.map(message => ({ role: message.role, content: message.content }))
+        const sendId = await window.api.ai.send(messages, payload.projectPath, String(payload.chatId))
+        mobileRunIdsRef.current.add(sendId)
+        await window.api.mobile.completeRunRequest(payload.requestId, sendId)
+      } catch (error) {
+        await window.api.mobile.completeRunRequest(payload.requestId, 0, error instanceof Error ? error.message : 'Не удалось запустить задачу')
+      }
+    })()
   }), [])
 
   useEffect(() => window.api.ai.onEvent(({ id, event }) => {
@@ -206,7 +209,9 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject()
+  const { path, activeView, setActiveView, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject()
+  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const chatSessions = useProject(s => s.chatSessions)
 
   useEffect(() => {

@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
+import { useActiveChatBundle, getActiveChatBundle } from '../hooks/useActiveChatBundle'
+import { emptySessionUsage } from '../store/session-snapshot'
 import { findRunForChat } from '../lib/own-run'
 import { historyForSend } from '../lib/chat-messages'
 import { canEditMessage } from '../lib/fork-edit'
@@ -295,16 +297,17 @@ const GOAL_CYCLE_PROMPT = `Запусти цикл self-improvement по это�
 
 Out of scope: общие best practices, рефакторинги ради красоты, изменения без обоснования в журнале.`
 
+// 4.3: дефолт usage для «нет активного чата» — стабильная ссылка (не плодим
+// новый объект на каждый рендер).
+const EMPTY_SESSION_USAGE = emptySessionUsage()
+
 export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSettingsOpen = false, onOpenSideChat, onOpenFilePreview }: ChatProps) {
   const t = useT()
   const {
     helpMode, help, helpChatId,
-    messages: projectMessages, addMessage, insertMessageBeforeLast, updateLastAssistant,
-    isStreaming: projectIsStreaming, setStreaming, streamStartedAt: projectStreamStartedAt,
+    addMessage, insertMessageBeforeLast, updateLastAssistant,
+    setStreaming,
     finalizeActiveStreamDuration, finalizeHelpStreamDuration,
-    activity: projectActivity, preflights, subagentRuns,
-    agentProgress: projectAgentProgress,
-    sessionUsage: projectSessionUsage,
     path: activePath, chatSessions, activeChatId, resumableRuns,
     chatHasMoreBefore, chatTotalCount, loadOlderMessages,
     addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
@@ -315,6 +318,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     clearComposerDraft,
     setActiveView,
   } = useProject()
+  // 4.3: bundle активного чата — из chats (SSOT), не из top-level проекции.
+  // Chat.tsx и так подписан на весь store — гранулярность рендера не меняется.
+  const activeBundle = useActiveChatBundle()
+  const projectMessages = activeBundle?.messages ?? []
+  const projectIsStreaming = activeBundle?.isStreaming ?? false
+  const projectStreamStartedAt = activeBundle?.streamStartedAt ?? null
+  const projectActivity = activeBundle?.activity ?? []
+  const projectAgentProgress = activeBundle?.agentProgress ?? []
+  const projectSessionUsage = activeBundle?.sessionUsage ?? EMPTY_SESSION_USAGE
+  const preflights = activeBundle?.preflights ?? []
+  const subagentRuns = activeBundle?.subagentRuns ?? []
   const isHelpChat = helpMode
   const [skillSuggestionsEnabled, setSkillSuggestionsEnabled] = useState(() => readSkillSuggestionsEnabled(activePath))
   const messages = helpMode ? help.messages : projectMessages
@@ -1318,7 +1332,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         // Снять модалку CommandConfirm, если команда зарезолвлена НЕ кликом по модалке,
         // а извне (Stop/таймаут/ошибка) — иначе висит ghost-бэкдроп на завершённую
         // команду (ревью 24.06; фоновые чаты уже покрыты applySnapshotEvent).
-        if (store.pendingCommand?.callId === event.callId) store.setPendingCommand(null)
+        if (getActiveChatBundle()?.pendingCommand?.callId === event.callId) store.setPendingCommand(null)
         const status: 'ok' | 'error' | 'rejected' = event.status
         store.updateActivity(event.callId, {
           status,
@@ -1514,13 +1528,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       else if (event.type === 'done') {
         const path = store.path
         const activeChatId = store.activeChatId
-        const msgs = store.messages
+        const msgs = getActiveChatBundle()?.messages ?? []
         const lastAssistant = msgs[msgs.length - 1]
         if (path && activeChatId && lastAssistant?.role === 'assistant' && lastAssistant.content) {
           void window.api.chats.append(activeChatId, path, 'assistant', lastAssistant.content)
         }
         // If we were running a plan step, finalize it
-        const running = store.runningPlanStep
+        const running = getActiveChatBundle()?.runningPlanStep ?? null
         if (running) {
           const result = lastAssistant?.role === 'assistant' ? (lastAssistant.content || '') : ''
           void window.api.plans.updateStep(running.stepId, {
@@ -1549,7 +1563,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       }
       else if (event.type === 'error') {
         // If a plan step was running, mark it failed
-        const running = store.runningPlanStep
+        const running = getActiveChatBundle()?.runningPlanStep ?? null
         if (running) {
           void window.api.plans.updateStep(running.stepId, {
             status: 'failed',
@@ -2188,7 +2202,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       : null
     addMessage({ role: 'assistant', content: '', ...(assistantRow ? { dbId: assistantRow.id } : {}) })
     setStreaming(true)
-    const msgs = [...useProject.getState().messages].slice(0, -1)
+    const msgs = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1)
     // chatId обязателен и здесь: «Продолжить ходы» — тот же чат, те же компакция/pin/worktree.
     const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget, activeChatId != null ? String(activeChatId) : undefined)
     // sendId<=0 = прогон не стартовал (нет ключа, недоступен провайдер, закреплённый
@@ -2384,7 +2398,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   async function flushMessageQueue() {
     if (queuedMessagesRef.current.length === 0) return
     const st = useProject.getState()
-    if (st.helpMode ? st.help.isStreaming : st.isStreaming) return
+    if (st.helpMode ? st.help.isStreaming : (st.activeChatId != null && st.chats[st.activeChatId]?.isStreaming === true)) return
     const [next, ...rest] = queuedMessagesRef.current
     setQueuedMessagesState(rest)
     await send({ text: next.text, fromQueue: true })
@@ -2643,8 +2657,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           }
 
           const isActiveTarget = !store.helpMode && store.activeChatId === payload.chatId
+          // 4.3: активный чат читаем из chats (SSOT), фоновой — из chatSnapshots (вьюха).
           let priorMessages: ChatMessage[] | undefined = isActiveTarget
-            ? store.messages
+            ? store.chats[payload.chatId]?.messages
             : store.chatSnapshots[payload.chatId]?.messages
 
           if (!priorMessages) {

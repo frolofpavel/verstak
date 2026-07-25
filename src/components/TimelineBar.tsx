@@ -1,4 +1,5 @@
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { ReviewPills } from './ReviewPills'
 import { ArtifactsPanel } from './ArtifactsPanel'
 
@@ -38,8 +39,8 @@ function shortenPath(detail: string | undefined): string {
 }
 
 export function TimelineBar() {
-  const activity = useProject(s => s.activity)
-  const isStreaming = useProject(s => s.isStreaming)
+  const activity = useActiveChatField('activity') ?? []
+  const isStreaming = useActiveChatField('isStreaming') ?? false
   const reviews = useProject(s => s.reviews)
   const artifactsCount = useProject(s => s.artifacts.length)
   const activeChatId = useProject(s => s.activeChatId)
