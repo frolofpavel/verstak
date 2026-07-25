@@ -27,7 +27,12 @@ The key idea: never be locked in. If one provider is down or expensive, switch i
 
 Verstak **auto-detects installed CLIs on startup**. Switch provider and model per chat; if one is rate-limited or down, switch in one click without losing the session. Background sessions keep streaming when you switch projects. Automatic fallback on 429/503, smart model routing by task complexity.
 
-**Default agent model policy (2026-07-04):** coding/planner/reviewer default is `kimi-k2.7-code` through Verstak Gateway; coding fallback is `deepseek-chat`; `qwen3-coder` is allowed but not the default for required-review bugfix work. `verstak/fast` / `verstak/coder/fast` are not recommended for agent mode until the Gateway preset is remapped. Explicit user model selection is preserved. Source: [`docs/cheap-model-eval-2026-07-04.md`](docs/cheap-model-eval-2026-07-04.md).
+**Default agent model policy:** production defaults live in
+[`electron/ai/agent-model-policy.json`](electron/ai/agent-model-policy.json).
+The reproducible evaluation contract and promotion rules are documented in
+[`docs/cheap-model-eval-v0-contract.md`](docs/cheap-model-eval-v0-contract.md)
+and [`docs/model-gym-policy.md`](docs/model-gym-policy.md). Explicit user model
+selection always has priority over recommendations.
 
 ---
 

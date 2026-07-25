@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// СТРАХОВОЧНАЯ СЕТКА под срезы 2.0.9 (карта: docs/2.0.9-A-chat-map.md).
+// Страховочная сетка для миграции PerChatState (карта: docs/2.0.9-A-chat-map.md).
 //
 // Chat.tsx — 4292 строки, 37 эффектов, 38 веток событий, ноль тестов на компонент. Из него
 // будут извлекать persistent context snapshot / fork / rewind. Этот харнес фиксирует ФАКТИЧЕСКОЕ

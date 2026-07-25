@@ -11,7 +11,7 @@
  *     осознанный временный компромисс (без CA подключение к Сберу не работает
  *     из коробки). Правильный фикс — забандлить корневой сертификат Минцифры
  *     (Russian Trusted Root CA) в resources/ и включить rejectUnauthorized: true
- *     с опцией ca. См. SECURITY-NOTES.md. Затрагивает строки ~76 и ~160.
+ *     с опцией ca. См. docs/SECURITY_MODEL.md.
  *  3. Chat API OpenAI-compatible (SSE streaming с `data: {...}` строками).
  *  4. Function calling — OpenAI-формат: tools[] в запросе, delta.tool_calls в ответе.
  *     Tool result — role: "tool" с tool_call_id.

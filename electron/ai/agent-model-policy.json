@@ -1,6 +1,6 @@
 {
   "version": "2026-07-04-stage-11",
-  "source": "docs/cheap-model-eval-2026-07-04.md",
+  "source": "docs/model-gym-policy.md",
   "defaults": {
     "provider": "verstak-gateway",
     "coding": "kimi-k2.7-code",

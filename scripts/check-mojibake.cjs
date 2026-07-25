@@ -17,7 +17,6 @@ const SKIP_DIRS = new Set([
 ])
 const SKIP_FILES = new Set([
   'scripts/check-mojibake.cjs',
-  'docs/PROJECT_SETTINGS_ENCODING_FIX_PLAN.md',
   'electron/storage/journal.ts'
 ])
 

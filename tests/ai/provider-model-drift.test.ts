@@ -14,7 +14,7 @@
 // найти/разобрать PROVIDERS — молчаливое «зелено, потому что ничего не нашли»
 // недопустимо для анти-дрейф-стража.
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import ts from 'typescript'
@@ -224,12 +224,17 @@ describe('единый контракт провайдеров (shared/contracts
 // список можно было завести ЕЩЁ РАЗ в произвольном файле. Тест ловит новую копию.
 // Источник обхода — git ls-files, а НЕ ручной список каталогов. Ре-ревью 2.0.7-C
 // поймало: walk('src'/'electron'/'shared') врал про «все деревья кода приложения» —
-// мимо шли git-tracked legacy/rail-v1/*.tsx и корневые *.config.ts, куда можно было
+// мимо шли архивные TSX и корневые *.config.ts, куда можно было
 // спрятать копию списка. git ls-files перечисляет РОВНО отслеживаемый код, без дрейфа
 // каталогов. tests/ исключаем — там перечисление id легитимно (этот файл тому пример).
 function trackedSources(): string[] {
   const out = execSync('git ls-files "*.ts" "*.tsx"', { cwd: ROOT, encoding: 'utf8' })
-  return out.split(/\r?\n/).map(s => s.trim()).filter(Boolean).filter(f => !f.startsWith('tests/'))
+  return out
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(f => !f.startsWith('tests/'))
+    .filter(f => existsSync(join(ROOT, f)))
 }
 
 // Файлы-ОПРЕДЕЛЕНИЯ, где список id — это и есть определение (их сверяют drift/contract-
