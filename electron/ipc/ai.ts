@@ -20,6 +20,7 @@ import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemori
 import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from '../ai/smart-router'
 import { getConfiguredApiProviders } from '../ai/cross-verify'
 import { createCostGuard } from '../ai/cost-guard'
+import { createDailyCostGuard } from '../ai/daily-cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
 import { loadPermissionRules } from '../ai/permission-rules'
@@ -201,55 +202,6 @@ export interface AiDeps {
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 const autoProofReportsSent = new Set<string>()
-
-// Cost-cap на СУТКИ (Илья): лимит переносится через рестарт — дата+накопленные центы
-// в settings. Новый день → сброс. UI пишет cost_cap_usd_per_day; legacy per_session
-// читаем как fallback для старых конфигов.
-const COST_CAP_USD_PER_DAY_KEY = 'cost_cap_usd_per_day'
-const COST_CAP_LEGACY_SESSION_KEY = 'cost_cap_usd_per_session'
-const COST_CAP_DAY_KEY = 'cost_cap_daily_date'
-const COST_CAP_DAILY_CENTS_KEY = 'cost_cap_daily_cents'
-
-function localDayKey(date = new Date()): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function parsePositiveFloat(raw: string | null): number | null {
-  if (!raw) return null
-  const value = Number.parseFloat(raw.replace(',', '.'))
-  return Number.isFinite(value) && value > 0 ? value : null
-}
-
-function parseStoredCents(raw: string | null): number {
-  if (!raw) return 0
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) && value > 0 ? value : 0
-}
-
-function createDailyCostGuard(deps: AiDeps): ReturnType<typeof createCostGuard> {
-  const capUsd = parsePositiveFloat(deps.getSecret(COST_CAP_USD_PER_DAY_KEY) ?? deps.getSecret(COST_CAP_LEGACY_SESSION_KEY))
-  const today = localDayKey()
-  const storedDay = deps.getSecret(COST_CAP_DAY_KEY)
-  const shouldReset = storedDay !== today
-  const initialCents = shouldReset ? 0 : parseStoredCents(deps.getSecret(COST_CAP_DAILY_CENTS_KEY))
-
-  if (shouldReset) {
-    deps.setSecret?.(COST_CAP_DAY_KEY, today)
-    deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, '0')
-  }
-
-  return createCostGuard(capUsd, {
-    initialCents,
-    periodLabel: 'сутки',
-    onDailyCentsChange: cents => {
-      deps.setSecret?.(COST_CAP_DAY_KEY, today)
-      deps.setSecret?.(COST_CAP_DAILY_CENTS_KEY, String(Math.max(0, cents)))
-    }
-  })
-}
 
 // Track which chats have already received memory injection in this process
 // lifetime. Replaces the old isFirstTurn check so memory is injected on the

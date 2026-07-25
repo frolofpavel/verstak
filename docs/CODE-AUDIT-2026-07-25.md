@@ -138,6 +138,18 @@
 - основной agent loop больше не содержит внутренний планировщик инструментов;
 - следующий срез D: verification phase и выравнивание API/CLI envelope.
 
+Продолжение 2.1.10-C выполнено 2026-07-26:
+
+- учёт результата tool-turn вынесен в `runner-tool-outcome.ts`: записи, команды,
+  выполненные проверки, review gate и обязательные outcome-флаги считаются отдельно от orchestration;
+- verification phase вынесена в `runner-verification.ts`: TypeScript diagnostics, LSP и
+  подсказка project verify scripts сохранили прежний приоритет и best-effort семантику;
+- `runner-api.ts` сокращён ещё на 69 строк, новые фазы покрыты отдельными unit-тестами и
+  characterization agent-loop;
+- начата чистка `electron/ipc/ai.ts`: durable daily cost guard вынесен в
+  `daily-cost-guard.ts`, получил тесты продолжения счётчика и сброса на новом локальном дне;
+- следующий срез: API/CLI envelope и дальнейшая декомпозиция `registerAiIpc`.
+
 ### 2.1.11 — Декомпозиция renderer (P1)
 
 Проблема:

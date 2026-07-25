@@ -12,7 +12,7 @@ import type { ProviderId } from './registry'
 import type { McpClient } from '../mcp/client'
 import type { RecipeSpec } from './skills/types'
 import {
-  isMutatingToolName, snapshotVerifyBaseline, isReviewGatePassResult,
+  isMutatingToolName, snapshotVerifyBaseline,
   decideReviewGate, buildReviewGateRequiredNudge, REVIEW_GATE_STOP_MESSAGE,
   MAX_REVIEW_GATE_NUDGES, type VerifyRun,
 } from './review-gate'
@@ -27,7 +27,7 @@ import type { AgentMode } from './mode-policy'
 import { loadPermissionRules } from './permission-rules'
 import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from './hooks'
 import type { ChatMessage, ToolCall, ChatProvider, Attachment } from './types'
-import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from '../ipc/tool-handlers'
+import { type ToolContext, type TaggedSender as HandlerTaggedSender } from '../ipc/tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
@@ -39,22 +39,20 @@ import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfigur
 import { classifyFallbackReason } from './smart-fallback'
 import { classifyRouteReason } from './route-policy'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
-import { type ExitReason, callSignature, detectVerifyScriptsForHint } from './session-journal'
+import { type ExitReason, callSignature } from './session-journal'
 import {
   isAgentRunTimeoutAbort,
 } from './run-lifecycle'
 import { decideCheckpointSave, type CheckpointThrottleState } from './checkpoint-throttle'
-import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from './diagnostic-loop'
-import { isLspDiagnosableFile, formatLspDiagnosticHint } from './lang-servers'
-import { runLspDiagnostics } from './lsp-diagnose'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from './allowed-write-roots'
-import { join as joinPath } from 'node:path'
 import type { AgentRuns } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { finalizeApiRun, type RunnerSessionUsage } from './runner-finalize'
 import { createApiFallbackController } from './runner-attempt'
 import { dispatchToolTurn } from './runner-tool-turn'
+import { collectToolTurnOutcome, reviewGatePassedInTurn } from './runner-tool-outcome'
+import { buildTurnVerificationHint } from './runner-verification'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -1139,63 +1137,27 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // P2 (Этап 6): зафиксировать успешный проход обязательного review gate по
     // результату его tool-вызова (маркер REVIEW_GATE_PASS_MARKER). Только при
     // recipe.reviewer.required — иначе no-op для обычных прогонов/скиллов.
-    if (recipeRequiresReview && !reviewGatePassed) {
-      for (let i = 0; i < toolCalls.length; i++) {
-        if (toolCalls[i].name === 'review_before_commit'
-            && isReviewGatePassResult(toolResults[i]?.result, !!toolResults[i]?.error)) {
-          reviewGatePassed = true
-          break
-        }
-      }
+    if (recipeRequiresReview && !reviewGatePassed && reviewGatePassedInTurn(toolCalls, toolResults)) {
+      reviewGatePassed = true
     }
     // Tally tool usage for the end-of-session journal summary
     // auto_capture_memory: по умолчанию включено; выключается настройкой 'false'
     const autoCaptureEnabled = getSecretForDelegate?.('auto_capture_memory') !== 'false'
-    let acceptedWritesThisTurn = 0
-    let tsWritesThisTurn = 0  // Diagnostic Loop v2: правки .ts/.tsx → авто-tsc
-    const lspWrites = new Map<string, string>()  // T1.1: не-TS файлы за ход (path→content) → LSP-диагностика всех
+    const toolOutcome = collectToolTurnOutcome({
+      toolCalls,
+      toolResults,
+      filesTouched,
+      commandsRun,
+      sessionChanges,
+      executedChecks,
+    })
+    if (toolOutcome.attested) attestedThisRun = true
+    if (toolOutcome.outcomeContractSubmitted) outcomeContractSubmitted = true
+    if (toolOutcome.stepOutcomeReported) stepOutcomeReported = true
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       const result = toolResults[i]
       if (!result) continue
-      // #12: propose_edits (и любой тул с filesWritten) — принятые файлы в
-      // filesTouched, иначе attest-сверка claimed-vs-actual их не видела.
-      if (result.filesWritten?.length) {
-        for (const p of result.filesWritten) { filesTouched.add(p); acceptedWritesThisTurn++; if (isTypeScriptFile(p)) tsWritesThisTurn++ }
-      }
-      if ((call.name === 'write_file' || call.name === 'apply_patch') && !result.error) {
-        const p = String(call.args.path ?? '')
-        if (p) {
-          filesTouched.add(p)
-          if (isTypeScriptFile(p)) tsWritesThisTurn++
-          // Track content for cross-verify (write_file has 'content', apply_patch has 'patch')
-          const content = String(call.args.content ?? call.args.patch ?? '')
-          if (content && sessionChanges.length < 5) {
-            sessionChanges.push({ file: p, type: call.name === 'write_file' ? 'write' : 'patch', content })
-          }
-          // T1.1: write_file не-TS файла (Python/Go/Rust) → диагностика языковым
-          // сервером. write_file несёт полное содержимое (для didOpen); apply_patch
-          // даёт лишь diff — для него LSP-диагностику пока пропускаем.
-          if (call.name === 'write_file' && content && isLspDiagnosableFile(p)) {
-            lspWrites.set(p, content)  // дедуп по пути: последняя запись файла побеждает
-          }
-        }
-        acceptedWritesThisTurn++
-      } else if (call.name === 'run_command' && !result.error) {
-        const cmd = String(call.args.command ?? '')
-        if (cmd) commandsRun.push(cmd)
-      } else if (call.name === 'attest_verification' && !result.error) {
-        attestedThisRun = true  // DoD-принуждение (аудит P1 #8)
-      } else if (call.name === 'submit_task_contract' && !result.error) {
-        outcomeContractSubmitted = true
-        } else if (call.name === 'report_step_outcome' && !result.error) {
-          stepOutcomeReported = true
-        }
-        if ((call.name === 'run_command' || call.name === 'run_until_green') && !result.error) {
-          const exitCode = (result.result as { exitCode?: unknown } | null)?.exitCode
-          const command = typeof call.args.command === 'string' ? call.args.command.trim() : ''
-          if (command && typeof exitCode === 'number') executedChecks.set(command, exitCode)
-        }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(
         saveMemory,
@@ -1223,46 +1185,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // to verify (run tests / typecheck / lint). The context-pack already
     // showed verify_scripts; we re-surface as an inline reminder so the model
     // pays attention this turn specifically.
-    let verifyHint = ''
-    if (acceptedWritesThisTurn > 0) {
-      // Diagnostic Loop v2: после правок .ts/.tsx авто-прогоняем check_diagnostics
-      // (tsc) и подсовываем РЕАЛЬНЫЕ ошибки в следующий ход — не надеемся, что
-      // модель сама вспомнит проверить. Выключается diagnostic_loop='false'.
-      const diagnosticEnabled = getSecretForDelegate?.('diagnostic_loop') !== 'false'
-      const modelCheckedThisTurn = toolCalls.some(c => c.name === 'check_diagnostics')
-      if (shouldAutoDiagnose({ enabled: diagnosticEnabled, tsWritesThisTurn, modelCheckedThisTurn })) {
-        try {
-          const diagHandler = lookupHandler('check_diagnostics', ctx)
-          if (diagHandler) {
-            const diag = await diagHandler.handle({ id: 'auto-diag', name: 'check_diagnostics', args: {} }, ctx)
-            const hint = formatDiagnosticHint(typeof diag.result === 'string' ? diag.result : '')
-            if (hint) verifyHint = hint
-          }
-        } catch { /* Diagnostic Loop — best-effort, не ломает цикл */ }
-      }
-      // T1.1: не-TS файлы (Python/Go/Rust) — диагностика языковым сервером (LSP).
-      // ВСЕ не-TS файлы хода (не только последний), параллельно (wall-time = max, не
-      // сумма), с капом на число спавнов. Graceful: бинаря нет/таймаут → null → откат.
-      if (!verifyHint && lspWrites.size > 0 && diagnosticEnabled && !modelCheckedThisTurn) {
-        try {
-          const entries = [...lspWrites.entries()].slice(0, 5)
-          const hints = await Promise.all(entries.map(async ([rel, content]) => {
-            const diags = await runLspDiagnostics({ path: joinPath(projectPath, rel), content, root: projectPath })
-            return diags ? formatLspDiagnosticHint(rel, diags) : null
-          }))
-          const joined = hints.filter(Boolean).join('\n\n')
-          if (joined) verifyHint = joined
-        } catch { /* LSP — best-effort, не ломает цикл */ }
-      }
-      // Фолбэк: если авто-диагностика не дала нудж (выключена / чисто / не TS) —
-      // мягкое напоминание запустить проверку, как было.
-      if (!verifyHint) {
-        const hints = await detectVerifyScriptsForHint(projectPath)
-        if (hints.length > 0) {
-          verifyHint = `[system: пользователь принял ${acceptedWritesThisTurn} write(s). Перед "готово" запусти проверку через run_command — варианты: ${hints.slice(0, 2).join(' / ')}. Если уверен что проверка избыточна — объясни почему.]`
-        }
-      }
-    }
+    const verifyHint = await buildTurnVerificationHint({
+      acceptedWrites: toolOutcome.acceptedWrites,
+      tsWrites: toolOutcome.tsWrites,
+      lspWrites: toolOutcome.lspWrites,
+      toolCalls,
+      projectPath,
+      context: ctx,
+      diagnosticEnabled: getSecretForDelegate?.('diagnostic_loop') !== 'false',
+    })
     const nextUserMsg: ChatMessage = { role: 'user', content: verifyHint, toolResults }
     if (pendingAttachments.length > 0) {
       nextUserMsg.attachments = [...pendingAttachments]
