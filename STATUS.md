@@ -10,8 +10,8 @@
 - 2.1.2 Durable Agent Control Plane закрыт, включая модульный runtime делегирования.
 - 2.1.3 управление подписками, аккаунтами, fallback lineage и расходом находится
   в `main`.
-- 2.1.4 Model Gym: foundation A–D находится в `main`; оставшаяся продуктовая
-  работа — адаптеры E, отчёт/Arena F и release gate.
+- 2.1.4 Model Gym закрыт: 30 детерминированных fixture-задач, role policy,
+  адаптеры Verstak/Codex/OpenCode, воспроизводимый Arena-отчёт и release gate.
 - PerChatState: срезы 4.1–4.3 завершены; активный остаток 4.4 описан в
   `docs/PERCHATSTATE-PLAN-2026-07-25.md`.
 
@@ -30,5 +30,5 @@ Browser Employee / Connected Eyes развивается отдельно в wor
 
 ## Следующий продуктовый шаг
 
-Закрыть PerChatState 4.4, затем продолжить Model Gym с пакета E. Новый релиз
-готовить только после зелёного type/test/build gate.
+Следующий продуктовый пакет — 2.1.5 Outcome Mode GA. Новый релиз готовить только
+после зелёного type/test/build gate.

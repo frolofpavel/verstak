@@ -22,6 +22,7 @@ Releases, а завершённые планы и отчёты доступны 
 
 - `cheap-model-eval-v0-contract.md` — стабильный набор проверочных задач.
 - `model-gym-policy.md` — правила назначения моделей на роли.
+- `model-gym-arena-methodology.md` — воспроизводимое сравнение Verstak/Codex/OpenCode без ложного рейтинга.
 
 ## Активная разработка
 

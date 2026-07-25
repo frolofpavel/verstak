@@ -44,6 +44,7 @@
     "sync:changelog": "node scripts/sync-verstak-changelog.cjs",
     "generate:icon": "node scripts/generate-app-icon.mjs",
     "eval:models": "node scripts/eval/index.mjs",
+    "eval:arena": "node scripts/eval/arena.mjs",
     "eval:policy": "node scripts/eval/policy.mjs"
   },
   "build": {
