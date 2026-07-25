@@ -273,7 +273,7 @@ describe('createResolveSubscriptionAccount — Auto pre-flight (EF)', () => {
   })
 
   it('активный login-required (секрета нет) + B готов → сразу B, skipped login-required', () => {
-    const a = addToken('Без входа A', 'subacct:a')
+    addToken('Без входа A', 'subacct:a')
     const b = addToken('Готовый B', 'subacct:b')
     secrets['subacct:b'] = 'sk-b' // у A секрета нет
     const r = resolve()('claude-cli', 42)

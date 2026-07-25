@@ -66,7 +66,6 @@ function renderBar(input: ChartInput, w: number, h: number): string {
   const minVal = Math.min(...input.values, 0)
   const range = maxVal - minVal || 1
   const barWidth = (chartW / input.values.length) * 0.7
-  const barGap = (chartW / input.values.length) * 0.3
   // Нулевая линия в координатах шкалы: положительные бары рисуем вверх от неё,
   // отрицательные — вниз. Иначе негативный бар уходил за нижний край viewBox (B3).
   const zeroY = margin.top + chartH - ((0 - minVal) / range) * chartH

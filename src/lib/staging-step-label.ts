@@ -16,6 +16,8 @@ export function formatStagingStepLabel(
   const pct = String(Math.max(0, Math.min(100, Math.round(percent))))
   const v = version
   switch (step) {
+    case undefined:
+      return labels.updateStagingSetup.replace('{version}', v).replace('{percent}', pct)
     case 'payload':
       return labels.updateStagingPayload.replace('{version}', v).replace('{percent}', pct)
     case 'verify':

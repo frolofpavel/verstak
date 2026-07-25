@@ -109,7 +109,7 @@ describe('git-worktree (T1.2)', () => {
 
   it('sweepStaleWorktrees удаляет осиротевшие (не в keep), активный оставляет', () => {
     const keep = addWorktree(repo, 'keep')!
-    const stale = addWorktree(repo, 'stale')!
+    addWorktree(repo, 'stale')
     expect(listWorktrees(repo).length).toBe(3) // main + 2
     const removed = sweepStaleWorktrees(repo, [keep]) // keep — активный
     expect(removed).toBe(1) // stale удалён

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useProject } from '../store/projectStore'
 
 /**
  * Sidecar Terminal Intelligence — toast в углу когда в терминале

@@ -230,9 +230,11 @@ export function SetupWizard() {
       <button
         type="button"
         className="gg-btn gg-btn-primary"
-        onClick={async () => {
-          if (runAfter && installedDir) await window.installer.launchApp(installedDir)
-          void window.installer.window.close()
+        onClick={() => {
+          void (async () => {
+            if (runAfter && installedDir) await window.installer.launchApp(installedDir)
+            await window.installer.window.close()
+          })()
         }}
       >
         Готово

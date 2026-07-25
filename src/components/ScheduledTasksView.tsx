@@ -150,13 +150,15 @@ export function ScheduledTasksView() {
                 <input
                   type="checkbox"
                   checked={t.enabled}
-                  onChange={async () => { await window.api.scheduler.toggle(t.id, !t.enabled); await load() }}
+                  onChange={() => {
+                    void window.api.scheduler.toggle(t.id, !t.enabled).then(load)
+                  }}
                 />
               </label>
               <button className="gg-btn gg-btn-ghost gg-btn-sm" title="Запустить сейчас"
-                onClick={async () => { await window.api.scheduler.runNow(t.id); await load() }}>▶</button>
+                onClick={() => { void window.api.scheduler.runNow(t.id).then(load) }}>▶</button>
               <button className="gg-btn gg-btn-ghost gg-btn-sm" title="Удалить"
-                onClick={async () => { await window.api.scheduler.remove(t.id); await load() }}>🗑</button>
+                onClick={() => { void window.api.scheduler.remove(t.id).then(load) }}>🗑</button>
             </div>
           </div>
         ))}

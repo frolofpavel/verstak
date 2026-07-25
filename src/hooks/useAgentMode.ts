@@ -40,7 +40,7 @@ export function useAgentMode(chatId?: number | null, helpMode = false): { mode: 
   useEffect(() => {
     let cancelled = false
     void (async () => { if (!cancelled) await refresh() })()
-    const t = window.setInterval(refresh, POLL_MS)
+    const t = window.setInterval(() => { void refresh() }, POLL_MS)
     return () => { cancelled = true; window.clearInterval(t) }
   }, [refresh, key])
 

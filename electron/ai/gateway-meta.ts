@@ -35,6 +35,8 @@ export function mapGatewayError(status: number | undefined, code?: string | unde
     return 'Недостаточно баланса Verstak Gateway. Пополните баланс: https://agi-iri.ru/gateway'
   }
   switch (status) {
+    case undefined:
+      return null
     case 401:
     case 403:
       return 'Ключ Verstak Gateway неверный или отключён. Проверьте API-ключ в Настройках.'

@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   decideRoute, classifyRouteReason, attemptKey, routeChangedText, resolveChatAccount, pickChatAccountId,
-  type RouteDecisionInput, type RouteAttempt, type RoutePolicy, type RouteReason,
+  type RouteDecisionInput, type RouteAttempt, type RouteReason,
 } from '../../electron/ai/route-policy'
 import { MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES } from '../../electron/ai/runner-shared'
 

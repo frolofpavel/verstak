@@ -3,7 +3,6 @@
  * UI id (Settings) → registry id (electron/connectors).
  */
 
-import { createSign } from 'crypto'
 import type { ConnectorRegistry } from '../connectors/registry'
 import type { ConnectorContext } from '../connectors/types'
 

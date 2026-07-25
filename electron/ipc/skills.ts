@@ -12,7 +12,7 @@
 import { dialog, ipcMain } from 'electron'
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
-import { basename, extname, join } from 'path'
+import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import JSZip from 'jszip'
 import type { SkillRegistry } from '../ai/skills/types'

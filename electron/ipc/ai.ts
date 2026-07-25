@@ -2,9 +2,8 @@ import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent, shouldSendAutoProofReport } from '../ai/run-notify'
-import { scanText } from '../ai/secret-scanner'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
-import { createFileTools, createToolsForProject, TOOL_DEFS } from '../ai/tools'
+import { createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { createProvider, PROVIDERS, isCodexAuthProvider, type ProviderId } from '../ai/registry'
 import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
@@ -25,13 +24,11 @@ import { createCostGuard } from '../ai/cost-guard'
 import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
 import { loadPermissionRules } from '../ai/permission-rules'
-import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from '../ai/hooks'
-import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
-import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
+import type { ChatMessage, ChatProvider } from '../ai/types'
+import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
-import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from '../ai/runner-progress'
-import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from '../ai/runner-supplements'
-import { selectAllowedToolDefs, retriableErrorEvent } from '../ai/runner-util'
+import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
+import { pushConversationSupplement } from '../ai/runner-supplements'
 import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun, type FallbackAttempt } from '../ai/runner-shared'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
@@ -41,15 +38,12 @@ import { type ToolEvent } from '../ai/procedural-memory'
 import {
   AGENT_RUN_TIMEOUT_SETTING_KEY,
   abortAgentRunForTimeout,
-  exitReasonToAgentRunStatus,
-  isAgentRunTimeoutAbort,
   resolveAgentRunTimeoutPolicy,
   shouldFireRunTimeout,
 } from '../ai/run-lifecycle'
 import { parseResumeCheckpoint, canReplayCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
-import { join as joinPath } from 'node:path'
 import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
 import type { SwitchResult } from '../storage/subscription-accounts'
 import type { CooldownReason } from '../../shared/contracts/subscription'

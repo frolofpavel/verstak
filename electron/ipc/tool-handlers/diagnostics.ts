@@ -5,7 +5,6 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { safeRealJoin } from '../../ai/path-policy'
 import { createSshBackend, makeSshExec, parseSshProjectPath } from '../../projects/ssh-backend'
 
 const execFileAsync = promisify(execFile)

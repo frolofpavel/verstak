@@ -92,18 +92,18 @@ export function TasksView() {
   )
 }
 
-function TaskRow({ task, onToggle, onRemove }: { task: Task; onToggle: (id: number, done: boolean) => void; onRemove: (id: number) => void }) {
+function TaskRow({ task, onToggle, onRemove }: { task: Task; onToggle: (id: number, done: boolean) => Promise<void>; onRemove: (id: number) => Promise<void> }) {
   return (
     <div className={`gg-task-row ${task.done ? 'is-done' : ''}`}>
       <button
         className={`gg-task-check ${task.done ? 'is-done' : ''}`}
-        onClick={() => onToggle(task.id, !task.done)}
+        onClick={() => { void onToggle(task.id, !task.done) }}
         title={task.done ? 'Открыть' : 'Закрыть'}
       >
         {task.done ? '✓' : ''}
       </button>
       <span className="gg-task-text">{task.text}</span>
-      <button className="gg-task-remove" onClick={() => onRemove(task.id)} title="Удалить">×</button>
+      <button className="gg-task-remove" onClick={() => { void onRemove(task.id) }} title="Удалить">×</button>
     </div>
   )
 }

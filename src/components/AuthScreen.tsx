@@ -90,12 +90,15 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
       } catch { /* первый запуск */ }
       setLoading(false)
     })()
-    Promise.all([
+    void Promise.all([
       import('../lib/prefetch-cli').then(m => m.getDetectedClisCached()),
       window.api.localModels.scan().catch(() => [] as DetectedLocalServer[])
     ]).then(([cliList, serverList]) => {
       setClis(cliList)
       setLocalServers(serverList)
+    }).catch(() => {
+      setClis([])
+      setLocalServers([])
     }).finally(() => setScanLoading(false))
   }, [])
 

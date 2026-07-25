@@ -23,7 +23,7 @@ function harness(timeoutMs?: number) {
 describe('LspClient', () => {
   it('request шлёт корректный JSON-RPC 2.0 (jsonrpc/id/method/params)', () => {
     const h = harness()
-    h.client.request('textDocument/definition', { uri: 'file:///a.ts' })
+    void h.client.request('textDocument/definition', { uri: 'file:///a.ts' })
     expect(h.sent).toEqual([{ jsonrpc: '2.0', id: 1, method: 'textDocument/definition', params: { uri: 'file:///a.ts' } }])
   })
 

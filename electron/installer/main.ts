@@ -110,7 +110,7 @@ if (!gotLock) {
     }
   })
 
-  app.whenReady().then(() => {
+  void app.whenReady().then(() => {
     const silentArgs = parseSilentInstallArgs(process.argv.slice(1))
     if (silentArgs.silent && silentArgs.installDir) {
       dismissPortableSplash()
@@ -161,6 +161,9 @@ if (!gotLock) {
     })
     ipcMain.handle('installer:window:close', () => getWindow().close())
     ipcMain.handle('installer:window:isMaximized', () => getWindow().isMaximized())
+  }).catch(error => {
+    console.error('[installer] startup failed:', error)
+    app.exit(1)
   })
 
   app.on('window-all-closed', () => app.quit())

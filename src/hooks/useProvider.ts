@@ -78,11 +78,6 @@ function getMeta(id: string): ProviderMeta {
   return { label: id, transport: 'API', models: [], supportsTools: false, defaultModel: '', secretKey: null }
 }
 
-function getDefaultModel(id: string): string {
-  if (_providerCache && _providerCache[id]) return _providerCache[id].defaultModel
-  return ''
-}
-
 /**
  * Repair-путь сохранённой модели (срез 5, §2.2): сохранённая model ID может стать
  * невалидной (провайдер убрал модель, дрейф списков, старый конфиг). Тогда вместо

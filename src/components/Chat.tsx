@@ -26,7 +26,7 @@ import { OutcomeRunsPanel } from './OutcomeRunsPanel'
 import { TaskContractReview } from './TaskContractReview'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { EffortPicker } from './EffortPicker'
-import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
+import { SlashCommandPopup } from './SlashCommandPopup'
 import { MentionPopup } from './MentionPopup'
 import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { useSkills as useSkillsStore } from '../store/skillStore'
@@ -35,7 +35,7 @@ import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
 import { modeModelsKey, parseModeModels, resolveModeModel } from '../lib/mode-model'
 import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
-import type { AppliedSkillRef, Attachment, ChatEvent, ChatMessage, Reminder, Skill, Suggestion } from '../types/api'
+import type { AppliedSkillRef, Attachment, ChatMessage, Reminder, Skill } from '../types/api'
 import { useT } from '../i18n'
 import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
@@ -280,25 +280,6 @@ function TokenPreviewMeter({ tokens, exact, title }: { tokens: number; exact: bo
   )
 }
 
-/**
- * Goal-cycle prompt: композит из read_journal + project_map + create_plan.
- * Это конкретный "AI-Lab/Ideas cycle" внутри продукта — AI сам читает свою
- * историю, синтезирует идеи, предлагает план. Запускается кнопкой
- * "💡 Что улучшить" в пустом чате.
- */
-const GOAL_CYCLE_PROMPT = `Запусти цикл self-improvement по этому проекту:
-
-1. Вызови read_journal с limit=50 без фильтра — прочитай последние сессии, действия, ошибки
-2. Вызови read_journal с limit=20, kind="note" — собери AI-ошибки и заметки отдельно
-3. Вызови get_project_map с format=text — посмотри текущую структуру
-4. На основе истории + структуры + git status (он уже в context_pack) сформулируй ровно 3 конкретных улучшения. Каждое:
-   - что именно сделать (file:line если применимо)
-   - почему это важно сейчас (с привязкой к найденному в журнале)
-   - оценка усилия (small/medium/large)
-5. Спроси какое из 3 запустить — я выберу одно, и ты создашь по нему create_plan.
-
-Out of scope: общие best practices, рефакторинги ради красоты, изменения без обоснования в журнале.`
-
 // 4.3: дефолт usage для «нет активного чата» — стабильная ссылка (не плодим
 // новый объект на каждый рендер).
 const EMPTY_SESSION_USAGE = emptySessionUsage()
@@ -309,13 +290,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     helpMode, help, helpChatId,
     addMessage, insertMessageBeforeLast, updateLastAssistant,
     setStreaming,
-    finalizeActiveStreamDuration, finalizeHelpStreamDuration,
     path: activePath, chatSessions, activeChatId, resumableRuns,
     chatHasMoreBefore, chatTotalCount, loadOlderMessages,
-    addHelpMessage, insertHelpMessageBeforeLast, updateHelpLastAssistant,
-    setHelpStreaming, clearHelpActivity, pushHelpActivity, setHelpAgentProgress, addHelpUsage,
-    appendHelpLastAssistantThinking,
-    setAgentProgress,
+    addHelpMessage, setHelpStreaming,
     setComposerDraft,
     clearComposerDraft,
     setActiveView,
@@ -746,7 +723,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const [queueNotice, setQueueNotice] = useState<string | null>(null)
   const [exportNotice, setExportNotice] = useState<{ title: string; detail: string; ok: boolean } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
-  const [contextCompactNotice, setContextCompactNotice] = useState<{ text: string; loading: boolean } | null>(null)
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
   const visibleDateRafRef = useRef<number | null>(null)
@@ -988,7 +964,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // null = ещё не было; object = последний результат (сбрасывается при новом send).
   const [crossVerify, setCrossVerify] = useState<{ result: string; provider: string; ok: boolean } | null>(null)
   const [cvExpanded, setCvExpanded] = useState(false)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [homeAgentId, setHomeAgentId] = useState<string | null>(null)
   useEffect(() => {
     setHomeAgentId(null)
@@ -2172,12 +2147,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }, 120)
     return () => window.clearTimeout(timer)
   }, [input])
-
-  // Proactive suggestions — загружаем при открытии проекта / смене чата
-  useEffect(() => {
-    if (!activePath || messages.length > 0) { setSuggestions([]); return }
-    void window.api.suggestions.get(activePath).then(setSuggestions).catch(() => setSuggestions([]))
-  }, [activePath, activeChatId, messages.length])
 
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items
@@ -3454,12 +3423,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           />
         )}
         {warning && <div className="gg-composer-warning">{warning}</div>}
-        {contextCompactNotice && (
-          <div className={`gg-context-compact-toast ${contextCompactNotice.loading ? 'is-loading' : 'is-done'}`} role="status" aria-live="polite">
-            <span className="gg-context-compact-spinner" aria-hidden />
-            <span>{contextCompactNotice.text}</span>
-          </div>
-        )}
         {exhausted && !isStreaming && (
           <div className="gg-budget-bar">
             <span>⏸ Бюджет {exhausted.used} ходов исчерпан — задача не завершена.</span>

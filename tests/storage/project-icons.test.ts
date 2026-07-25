@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
-import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from 'fs'
+import { mkdtempSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 

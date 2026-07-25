@@ -2,7 +2,6 @@
 import type { ToolHandler } from './shared'
 import { emitActivity, awaitCommandConfirm } from './shared'
 import { scanText, isForbiddenPath } from '../../ai/secret-scanner'
-import { safeRealJoin } from '../../ai/path-policy'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 

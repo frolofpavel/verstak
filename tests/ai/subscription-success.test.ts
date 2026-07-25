@@ -115,7 +115,7 @@ describe('wrapFinishWithSuccess (EF-R1 Б4)', () => {
     const ended = new Set<string>()
     return {
       calls: [] as Array<{ runId: string; status: string }>,
-      finish: (runId: string, status: string): boolean => {
+      finish: (runId: string, _status: string): boolean => {
         if (ended.has(runId)) return false
         ended.add(runId)
         return true

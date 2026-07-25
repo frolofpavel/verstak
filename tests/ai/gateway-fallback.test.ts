@@ -47,7 +47,7 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
 
   it('сетевой сбой релея (нет HTTP-статуса) → фолбэк на прямой + info-плашка + ответ доходит', async () => {
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('api-ru')) throw {} // нет .status = сбой соединения
+      if (baseURL?.includes('api-ru')) throw new Error('synthetic network failure') // нет .status = сбой соединения
       return okStream('привет')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })
@@ -60,7 +60,10 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
   it('HTTP-ошибка апстрима (429) → НЕ фолбэк, человеко-читаемая ошибка', async () => {
     let relayCalls = 0
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('api-ru')) { relayCalls++; throw { status: 429 } }
+      if (baseURL?.includes('api-ru')) {
+        relayCalls++
+        throw Object.assign(new Error('synthetic rate limit'), { status: 429 })
+      }
       throw new Error('фолбэк не должен вызываться при HTTP-ошибке')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })
@@ -72,7 +75,7 @@ describe('Verstak Gateway: авто-фолбэк релея + override baseUrl',
 
   it('отмена юзером (signal aborted) при сбое → НЕ фолбэк', async () => {
     setCreateImpl((baseURL) => {
-      if (baseURL?.includes('api-ru')) throw {}
+      if (baseURL?.includes('api-ru')) throw new Error('synthetic network failure')
       throw new Error('фолбэк не должен вызываться при отмене')
     })
     const provider = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_x' })

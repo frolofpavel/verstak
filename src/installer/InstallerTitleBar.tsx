@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react'
 import iconUrl from '../assets/icon.png'
 
 function CloseIcon() {

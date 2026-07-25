@@ -2,7 +2,7 @@
 import { useProvider, type ProviderId } from '../hooks/useProvider'
 import { useProject } from '../store/projectStore'
 import {
-  chatAccountView, canPinAccounts, accountStateLabel, isPinnable, pinBinding, autoBinding,
+  chatAccountView, accountStateLabel, isPinnable, pinBinding, autoBinding,
   shouldShowAccountBinding,
 } from '../lib/chat-account-binding'
 import type { SubscriptionAccountDTO, ChatSubscriptionBindingDTO } from '../types/api'

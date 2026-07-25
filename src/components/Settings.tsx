@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import type { DetectedCli, PolicyMatrixDTO, PolicyDecision, ProviderCatalogStatusDTO } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import {
@@ -2040,24 +2040,6 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     }
   }
 
-  async function saveConnectorOnly(uiId: string): Promise<void> {
-    setConnectorApplying(uiId)
-    try {
-      await persistConnector(uiId)
-      await window.api.settings.setKey(`connector_mode_${uiId}`, connectorSafety[uiId] ?? 'confirm')
-      await refreshConfiguredConnectors()
-      setConnectorHealthMsg(m => ({ ...m, [uiId]: 'Сохранено' }))
-      setConnectorHealth(h => ({ ...h, [uiId]: 'unknown' }))
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Не удалось сохранить коннектор'
-      setConnectorHealth(h => ({ ...h, [uiId]: 'error' }))
-      setConnectorHealthMsg(m => ({ ...m, [uiId]: message }))
-      setConnectorCapabilities(c => ({ ...c, [uiId]: [] }))
-    } finally {
-      setConnectorApplying(null)
-    }
-  }
-
   function resetConnectorLocalState(uiId: string): void {
     switch (uiId) {
       case 'claude-oauth': setClaudeOauthToken(''); break
@@ -2927,259 +2909,6 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     }
   }
 
-  function renderConnectorsTab(): React.ReactNode {
-    const configuredCount = CONNECTORS.filter(c => configuredConnectors.has(c.id) && connectorHealth[c.id] === 'ok').length
-    const errorCount = CONNECTORS.filter(c => configuredConnectors.has(c.id) && connectorHealth[c.id] === 'error').length
-    const checkingCount = CONNECTORS.filter(c => connectorHealth[c.id] === 'checking').length
-    const query = connectorSearch.trim().toLowerCase()
-
-    const connectorStatus = (id: string) => {
-      const configured = configuredConnectors.has(id)
-      const health = connectorHealth[id] ?? 'unknown'
-      if (!configured) return { label: 'Не настроен', tone: 'muted' }
-      if (health === 'ok') return { label: 'Подключён', tone: 'ok' }
-      if (health === 'error') return { label: 'Ошибка подключения', tone: 'error' }
-      if (health === 'checking') return { label: 'Проверяется', tone: 'checking' }
-      return { label: 'Сохранён, не проверялся', tone: 'warn' }
-    }
-
-    const filteredList = CONNECTORS
-      .filter(c => {
-        const meta = connectorMeta(c.id)
-        if (connectorFilter === 'configured' && !configuredConnectors.has(c.id)) return false
-        if (connectorFilter === 'errors' && connectorHealth[c.id] !== 'error') return false
-        if (connectorFilter !== 'all' && connectorFilter !== 'configured' && connectorFilter !== 'errors' && meta.category !== connectorFilter) return false
-        if (!query) return true
-        const haystack = `${c.name} ${c.description} ${c.id} ${meta.label} ${meta.search} ${meta.capabilities.join(' ')}`.toLowerCase()
-        return haystack.includes(query)
-      })
-      .sort((a, b) => {
-        const aConfigured = configuredConnectors.has(a.id)
-        const bConfigured = configuredConnectors.has(b.id)
-        if (aConfigured !== bConfigured) return aConfigured ? -1 : 1
-        return a.name.localeCompare(b.name, 'ru')
-      })
-
-    const renderConnectorDetail = (id: string) => {
-      const def = CONNECTORS.find(c => c.id === id)
-      const meta = connectorMeta(id)
-      const status = connectorStatus(id)
-      const safety = connectorSafety[id] ?? 'confirm'
-      return (
-        <div className="gg-connector-detail" ref={openConnector === id ? connectorDetailRef : undefined}>
-          <div className="gg-connector-detail-header">
-            {def ? <><def.icon size={20} /><span>{def.name}</span></> : null}
-            <span className={`gg-connector-status-text is-${status.tone}`}>{status.label}</span>
-            <button className="gg-connector-detail-close" onClick={() => setOpenConnector(null)}>×</button>
-          </div>
-          <div className="gg-connector-detail-body">
-            <div className="gg-connector-detail-intro">
-              <div>
-                <div className="gg-connector-detail-kicker">{meta.label}</div>
-                <div className="gg-connector-detail-desc">{def?.description}</div>
-              </div>
-              <div className="gg-connector-capabilities">
-                {meta.capabilities.map(item => <span key={item} className="gg-connector-capability">{item}</span>)}
-              </div>
-            </div>
-
-            <div className="gg-connector-safe-block">
-              <div>
-                <div className="gg-connector-safe-title">Режим доступа</div>
-                <div className="gg-connector-safe-desc">Ограничивает, что агенту можно делать через этот коннектор</div>
-              </div>
-              <div className="gg-connector-safe-modes">
-                {([
-                  ['read', 'Только чтение'],
-                  ['confirm', 'С подтверждением'],
-                  ['write', 'Полный доступ']
-                ] as Array<[ConnectorSafetyMode, string]>).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`gg-connector-safe-mode${safety === mode ? ' is-active' : ''}`}
-                    onClick={() => setConnectorSafety(s => ({ ...s, [id]: mode }))}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {renderConnectorForm(id)}
-
-            <div className="gg-connector-detail-actions">
-              {connectorApplying === id && <div className="gg-connector-progress" aria-hidden />}
-              <div className="gg-connector-detail-actions-row">
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-primary"
-                  disabled={connectorApplying === id}
-                  onClick={() => void applyConnector(id)}
-                >
-                  {connectorApplying === id ? 'Идёт действие' : 'Сохранить и проверить'}
-                </button>
-                <button
-                  type="button"
-                  className="gg-btn"
-                  disabled={connectorApplying === id}
-                  onClick={() => void saveConnectorOnly(id)}
-                >
-                  Сохранить ключ
-                </button>
-                <button
-                  type="button"
-                  className="gg-btn"
-                  disabled={connectorApplying === id}
-                  onClick={() => void checkConnectorCurrentInput(id)}
-                >
-                  Проверить
-                </button>
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-danger"
-                  disabled={connectorApplying === id || !(CONNECTOR_SETTING_KEYS[id]?.length)}
-                  onClick={() => void deleteConnectorKeys(id)}
-                >
-                  Удалить ключи
-                </button>
-                {connectorHealthMsg[id] && connectorApplying !== id && (
-                  <span className={`gg-connector-test-msg ${connectorHealth[id] === 'ok' ? 'is-ok' : connectorHealth[id] === 'error' ? 'is-error' : ''}`}>
-                    {connectorHealthMsg[id]}
-                  </span>
-                )}
-                {connectorCapabilities[id]?.length ? (
-                  <div className="gg-connector-capability-checks" aria-label="Доступные функции токена">
-                    {connectorCapabilities[id].map(item => (
-                      <div
-                        key={item.id}
-                        className={`gg-connector-capability-check ${item.ok ? 'is-ok' : 'is-error'}`}
-                        title={item.message}
-                      >
-                        <span className="gg-connector-capability-dot" aria-hidden />
-                        <span>{item.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    const renderConnectorItem = (c: ConnectorDef) => {
-      const configured = configuredConnectors.has(c.id)
-      const health = connectorHealth[c.id] ?? 'unknown'
-      const meta = connectorMeta(c.id)
-      const status = connectorStatus(c.id)
-      const healthTitle = connectorHealthMsg[c.id]
-        ?? (health === 'checking' ? t.connectors.healthChecking
-          : health === 'ok' ? t.connectors.healthOk
-          : health === 'error' ? t.connectors.healthError
-          : '')
-      const isOpen = openConnector === c.id
-      return (
-        <div key={c.id} className={`gg-connector-item${isOpen ? ' is-expanded' : ''}`}>
-          <button
-            type="button"
-            className={`gg-connector-card ${status.tone === 'ok' ? 'is-connected' : ''} ${isOpen ? 'is-open' : ''}`}
-            onClick={() => setOpenConnector(isOpen ? null : c.id)}
-          >
-            <div className="gg-connector-card-icon"><c.icon size={32} /></div>
-            <div className="gg-connector-card-body">
-              <div className="gg-connector-card-top">
-                <span className="gg-connector-card-name">{c.name}</span>
-                <span className="gg-connector-chip">{meta.label}</span>
-              </div>
-              <div className="gg-connector-card-desc">{c.description}</div>
-              <div className="gg-connector-card-caps">
-                {meta.capabilities.slice(0, 3).map(item => <span key={item}>{item}</span>)}
-              </div>
-            </div>
-            <div className="gg-connector-card-status">
-              {configured && (
-                <span
-                  className={`gg-connector-health ${health === 'ok' ? 'is-ok' : health === 'error' ? 'is-error' : health === 'checking' ? 'is-checking' : ''}`}
-                  title={healthTitle}
-                  aria-label={healthTitle}
-                />
-              )}
-              <span className={`gg-connector-status-text is-${status.tone}`}>{status.label}</span>
-            </div>
-          </button>
-          {isOpen && renderConnectorDetail(c.id)}
-        </div>
-      )
-    }
-
-    const connectedFilteredList = filteredList.filter(c => configuredConnectors.has(c.id))
-    const availableFilteredList = filteredList.filter(c => !configuredConnectors.has(c.id))
-    const shouldSplitList = connectorFilter !== 'configured' && connectorFilter !== 'errors'
-    const renderConnectorSection = (title: string, items: ConnectorDef[]) => {
-      if (!items.length) return null
-      return (
-        <section className="gg-connector-section-v3">
-          <div className="gg-connector-section-head-v3">
-            <span>{title}</span>
-            <span>{items.length}</span>
-          </div>
-          <div className="gg-connector-list">
-            {items.map(renderConnectorItem)}
-          </div>
-        </section>
-      )
-    }
-
-    return (
-      <div className="gg-connectors-page">
-        <div className="gg-connectors-summary">
-          <div className="gg-connectors-summary-card"><span>Всего</span><strong>{CONNECTORS.length}</strong></div>
-          <div className="gg-connectors-summary-card"><span>Подключено</span><strong>{configuredCount}</strong></div>
-          <div className="gg-connectors-summary-card"><span>С ошибкой</span><strong>{errorCount}</strong></div>
-          <div className="gg-connectors-summary-card"><span>Проверяется</span><strong>{checkingCount}</strong></div>
-        </div>
-
-        <div className="gg-connectors-toolbar">
-          <input
-            className="gg-input gg-connectors-search"
-            value={connectorSearch}
-            onChange={e => setConnectorSearch(e.target.value)}
-            placeholder="Поиск по коннекторам, задачам и сервисам"
-          />
-          <div className="gg-connectors-filters">
-            {CONNECTOR_FILTERS.map(filter => (
-              <button
-                key={filter.id}
-                type="button"
-                className={`gg-connectors-filter${connectorFilter === filter.id ? ' is-active' : ''}`}
-                onClick={() => setConnectorFilter(filter.id)}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {filteredList.length > 0 ? (
-          shouldSplitList ? (
-            <div className="gg-connector-sections-v3">
-              {renderConnectorSection('Подключённые', connectedFilteredList)}
-              {renderConnectorSection('Не подключены', availableFilteredList)}
-            </div>
-          ) : (
-            <div className="gg-connector-list">
-              {filteredList.map(renderConnectorItem)}
-            </div>
-          )
-        ) : (
-          <div className="gg-connectors-empty">Ничего не найдено</div>
-        )}
-      </div>
-    )
-  }
-
   function renderConnectorsTabV3(): React.ReactNode {
     const configuredCount = CONNECTORS.filter(c => configuredConnectors.has(c.id) && connectorHealth[c.id] === 'ok').length
     const errorCount = CONNECTORS.filter(c => configuredConnectors.has(c.id) && connectorHealth[c.id] === 'error').length
@@ -3379,9 +3108,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     }
 
     const renderConnectorItem = (c: ConnectorDef) => {
-      const configured = configuredConnectors.has(c.id)
       const health = connectorHealth[c.id] ?? 'unknown'
-      const meta = connectorMeta(c.id)
       const status = connectorStatus(c.id)
       const healthTitle = connectorHealthMsg[c.id]
         ?? (health === 'checking' ? t.connectors.healthChecking
@@ -4311,26 +4038,6 @@ function ProvidersPage(props: ProvidersPageProps) {
     }
   }
 
-  async function relogin(p: ProviderConfig) {
-    if (p.transport !== 'CLI') return
-    setBusy(p.id)
-    try {
-      const res = await window.api.cliAuth.relogin(p.id)
-      if (res.ok) {
-        showToast('ok', `${p.name}: открыл терминал для входа. Пройди OAuth в новом окне → вернись сюда.`)
-      } else {
-        showToast('err', res.message ?? `${p.name}: не удалось открыть терминал`)
-      }
-    } catch (err) {
-      showToast('err', `${p.name}: ошибка — ${(err as Error).message}`)
-    } finally {
-      setBusy(null)
-      // После relogin'а проверим статус — но не сразу, OAuth требует времени.
-      // Шлём через 8 сек когда пользователь успел пройти браузер-flow.
-      setTimeout(() => void loadCliStatus(), 8000)
-    }
-  }
-
   const showEmptyState = readyProviders.length === 0
 
   function checkProvider(p: ProviderConfig) {
@@ -4821,7 +4528,6 @@ interface ModelsPageProps {
 type ModelsCliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
 function ModelsPage(props: ModelsPageProps) {
-  const t = useT()
   const {
     providers, enabledModels, setEnabledModels, models, setModels,
     activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onGoToProviders, catalogSource

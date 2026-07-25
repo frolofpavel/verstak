@@ -6,30 +6,19 @@
 // пользователь). AiDeps — type-only импорт из ipc/ai (стирается, без рантайм-цикла).
 // Верификация — харнес tests/ipc/agent-loop.test.ts (18 кейсов).
 import type { AiDeps } from '../ipc/ai'
-import { randomUUID } from 'crypto'
-import { basename } from 'path'
-import { notifyRunEvent, shouldSendAutoProofReport } from './run-notify'
 import { scanText } from './secret-scanner'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from './process-registry'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from './tools'
-import { isWithinKnownRoots } from './path-policy'
-import { createProvider, PROVIDERS, type ProviderId } from './registry'
+import { PROVIDERS, type ProviderId } from './registry'
 import type { InputAccounting } from '../../shared/contracts/usage'
 import type { McpClient } from '../mcp/client'
-import { prepareSystemContext } from './compose-system'
-import { applyRecipeToSkillPrompt } from './skills/recipe'
 import type { RecipeSpec } from './skills/types'
 import {
   isMutatingToolName, snapshotVerifyBaseline, isReviewGatePassResult,
   decideReviewGate, buildReviewGateRequiredNudge, REVIEW_GATE_STOP_MESSAGE,
   MAX_REVIEW_GATE_NUDGES, type VerifyRun,
 } from './review-gate'
-import { systemForProvider, stripCacheBreakpoint } from './compose-prompt'
 import { MAX_STEPS_REPORT } from './model-presets'
-import { buildCliPrompt, type CliProviderId } from './cli-prompt'
-import { createLegacyMemoryProvider } from './memory/provider'
-import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemories } from './memory/run-snapshot'
-import { REVIEWER_SYSTEM_PROMPT } from './review-prompt'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from './compact-history'
 import { estimateTokens } from './context-limits'
 import { withInitialRetry } from './with-retry'
@@ -42,40 +31,31 @@ import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHo
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from './types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from '../ipc/tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
-import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
-import { registerConversationSupplements, unregisterConversationSupplements, pushConversationSupplement, formatConversationSupplement } from './runner-supplements'
+import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
+import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, type FallbackAttempt, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from './runner-shared'
+import { type FallbackOpts, MAX_FALLBACK_ATTEMPTS, MAX_ACCOUNT_SWITCHES, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey } from './runner-shared'
 import { captureToolObservation } from './memory-hooks'
-import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
-import { trackToolForPatterns, type ToolEvent } from './procedural-memory'
+import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
 import { shouldFallback, getNextFallback, classifyFallbackReason } from './smart-fallback'
 import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
 import { detectSubscriptionLimit } from './subscription-limits'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
-import { estimateComplexity, recommendModel, complexityLabel, detectCliWorthiness } from './smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from './session-journal'
 import {
-  AGENT_RUN_TIMEOUT_SETTING_KEY,
-  abortAgentRunForTimeout,
   exitReasonToAgentRunStatus,
   isAgentRunTimeoutAbort,
-  resolveAgentRunTimeoutPolicy,
-  shouldFireRunTimeout,
 } from './run-lifecycle'
-import { parseResumeCheckpoint, canReplayCheckpoint } from './resume-checkpoint'
 import { decideCheckpointSave, type CheckpointThrottleState } from './checkpoint-throttle'
-import { intensityConfig, parseIntensity } from './intensity'
 import { isTypeScriptFile, shouldAutoDiagnose, formatDiagnosticHint } from './diagnostic-loop'
 import { isLspDiagnosableFile, formatLspDiagnosticHint } from './lang-servers'
 import { runLspDiagnostics } from './lsp-diagnose'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from './allowed-write-roots'
 import { join as joinPath } from 'node:path'
-import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
+import type { AgentRuns } from '../storage/agent-runs'
 import { pickResumeGuardTool } from '../storage/agent-runs'
 import { usageHash } from '../storage/agent-run-usage'
-import { expandOfficeAttachments } from './attachment-text'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.

@@ -75,14 +75,14 @@ export function ResumeBanner() {
             {resumeBannerActions(run).map(action => {
               if (action === 'resume-with-context') return (
                 <button key={action} type="button" className="gg-btn gg-btn-primary"
-                  onClick={() => resume(run, true)}
+                  onClick={() => { void resume(run, true) }}
                   title="Повторить последний запрос с восстановленным контекстом">
                   Повторить запрос
                 </button>
               )
               if (action === 'resend-fresh') return (
                 <button key={action} type="button" className="gg-btn gg-btn-primary"
-                  onClick={() => resume(run, false)}
+                  onClick={() => { void resume(run, false) }}
                   title="Запустить последний запрос заново (без реплея прерванной работы)">
                   Повторить запрос заново
                 </button>

@@ -17,14 +17,6 @@ function projectName(projectPath: string): string {
   return projectPath.replace(/^.*[\\/]/, '') || projectPath
 }
 
-function reminderChatText(reminder: Reminder): string {
-  return [
-    `⏰ Напоминание: ${reminder.title}`,
-    reminder.body?.trim() ? reminder.body.trim() : null,
-    `Назначено на: ${new Date(reminder.dueAt).toLocaleString()}`
-  ].filter(Boolean).join('\n')
-}
-
 function reminderUserText(reminder: Reminder): string {
   return [
     reminder.title.trim(),

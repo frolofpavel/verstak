@@ -7,7 +7,7 @@ import {
 } from '../ui-scale'
 import { detectInstalledClis } from '../ai/cli-detect'
 import { scanLocalModelServers } from '../ai/local-models'
-import { PROVIDERS, providerCapabilities, type ProviderCapabilities } from '../ai/registry'
+import { PROVIDERS, providerCapabilities } from '../ai/registry'
 import { findGrokBinary } from '../ai/grok-cli'
 import { runGrokDiscovery } from '../ai/model-discovery'
 import {

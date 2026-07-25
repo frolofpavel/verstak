@@ -69,32 +69,26 @@ export function cleanGrokOutput(raw: string): { answer: string; reasoning: strin
 
   const paragraphs = work.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
   const answerPars: string[] = []
-  let inAnswer = false
   for (const p of paragraphs) {
-    // Заголовки-маркеры reasoning блоков. После них Grok часто продолжает
-    // английский анализ — сбрасываем inAnswer чтобы следующие английские
-    // параграфы тоже ушли в reasoning.
+    // Заголовки-маркеры reasoning блоков.
     if (/^(Explanation|Reasoning|Analysis|Thinking|Note|Confidence|Объяснение|Рассуждение|Анализ|Размышление|Заметка|Уверенность):?$/i.test(p)) {
       reasoningParts.push(p)
-      inAnswer = false
       continue
     }
     // Reasoning-префикс — всегда reasoning (даже если параграф содержит
     // русские слова в цитатах).
     if (REASONING_PREFIX.test(p)) {
       reasoningParts.push(p)
-      inAnswer = false
       continue
     }
     // Порог 0.15: чистый английский reasoning ≈ 0 кириллицы; русский ответ
     // с code-снипетами / URL / file paths остаётся выше (тест «Я Grok через
-    // electron/ai/grok.ts» = 0.29). Применяем независимо от inAnswer —
+    // electron/ai/grok.ts» = 0.29). Применяем ко всем абзацам —
     // английский «хвост» после русского ответа тоже выкидываем.
     if (cyrRatio(p) < 0.15) {
       reasoningParts.push(p)
       continue
     }
-    inAnswer = true
     answerPars.push(p)
   }
 

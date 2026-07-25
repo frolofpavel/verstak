@@ -140,6 +140,7 @@ function pickHeadingLevel(level: number | undefined): typeof HeadingLevel[keyof 
   switch (level) {
     case 1: return HeadingLevel.HEADING_1
     case 3: return HeadingLevel.HEADING_3
+    case undefined:
     case 2:
     default: return HeadingLevel.HEADING_2
   }

@@ -106,6 +106,10 @@ const DELEGATION_TOOLS = ['delegate_task', 'delegate_parallel'] as const
 export function getRoleToolset(role?: string | null, opts?: { depth?: number }): string[] {
   let tools: string[]
   switch (role) {
+    case undefined:
+    case null:
+      tools = [...READ_ONLY_TOOLS, 'todo_list']
+      break
     case 'executor':
       // executor берёт пункты todo в работу и закрывает + сохраняет находки в память.
       tools = [...READ_ONLY_TOOLS, ...RESEARCH_READ_TOOLS, ...TODO_WORKER_TOOLS, 'apply_patch', 'write_file', 'run_command', 'check_diagnostics', ...ARTIFACT_TOOLS, 'memory_save']
