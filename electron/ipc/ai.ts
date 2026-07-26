@@ -5,8 +5,7 @@ import { notifyRunEvent, shouldSendAutoProofReport } from '../ai/run-notify'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
 import { createToolsForProject, TOOL_DEFS } from '../ai/tools'
 import { isWithinKnownRoots } from '../ai/path-policy'
-import { createProvider, PROVIDERS, isCodexAuthProvider, type ProviderId } from '../ai/registry'
-import { loadLiveCatalog, checkModelAvailable } from '../ai/model-catalog-service'
+import { createProvider, PROVIDERS, type ProviderId } from '../ai/registry'
 import type { PromptRouteOverride } from '../../shared/contracts/provider'
 import type { McpClient } from '../mcp/client'
 import { prepareSystemContext } from '../ai/compose-system'
@@ -14,9 +13,6 @@ import { prepareHistoryForModel } from '../ai/history-preparation'
 import { applyRecipeToSkillPrompt } from '../ai/skills/recipe'
 import type { RecipeSpec } from '../ai/skills/types'
 import { systemForProvider, stripCacheBreakpoint } from '../ai/compose-prompt'
-import { REVIEWER_SYSTEM_PROMPT } from '../ai/review-prompt'
-import { createLegacyMemoryProvider } from '../ai/memory/provider'
-import { buildRunMemorySnapshot, memorySnapshotFingerprint, snapshotPromptMemories } from '../ai/memory/run-snapshot'
 import { detectCliWorthiness } from '../ai/smart-router'
 import { createCostGuard } from '../ai/cost-guard'
 import { createDailyCostGuard } from '../ai/daily-cost-guard'
@@ -34,13 +30,18 @@ import { selectSendProvider, selectSendModel, decideSmartRouting, resolveCodexHo
 import { preflightSubscriptionAccount } from './ai-send/account-preflight'
 import { isSmartFallbackAllowed, createFallbackAttemptFactory, createLimitAccountSwitcher, buildFallbackOpts } from './ai-send/fallback-route'
 import { openAgentRun, linkDevTaskRun, startRunTimeout } from './ai-send/run-bookkeeping'
+// Распил ai.ts (2.1.10-G): сборка контекста и промпта вынесена в ai-send/*.
+import { buildSendMemoryContext } from './ai-send/memory-context'
+import { assembleSendSystem } from './ai-send/system-assembly'
+import { buildProviderRuntimeOptions } from './ai-send/provider-options'
+import { saveRunInputSnapshot } from './ai-send/run-input'
 import { registerAiResolveIpc } from './ai-resolve'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
 import type { NewDecisionRecord, DecisionRecord } from '../storage/project-brain'
 import { type ToolEvent } from '../ai/procedural-memory'
-import { parseResumeCheckpoint, canReplayCheckpoint } from '../ai/resume-checkpoint'
+import { parseResumeCheckpoint } from '../ai/resume-checkpoint'
 import { intensityConfig, parseIntensity } from '../ai/intensity'
 import { ALLOWED_WRITE_ROOTS_KEY, parseAllowedWriteRoots } from '../ai/allowed-write-roots'
 import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
@@ -179,28 +180,10 @@ let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
 const autoProofReportsSent = new Set<string>()
 
-// Track which chats have already received memory injection in this process
-// lifetime. Replaces the old isFirstTurn check so memory is injected on the
-// first ai:send for a chat in this app session — not only on truly-first-ever
-// turns (which broke reopened old chats with existing assistant messages).
-const memorizedChats = new Set<string>()
-
-/**
- * Remove a single chat key from the memory-injection cache.
- * Call when a chat session is deleted so a new session reusing the same
- * numeric id (or projectPath fallback) gets a fresh memory injection.
- */
-export function forgetMemorizedChat(key: string): void {
-  memorizedChats.delete(key)
-}
-
-/**
- * Remove a projectPath fallback key when a project is removed.
- * Only relevant for chats where no chatId was provided to ai:send.
- */
-export function forgetMemorizedProject(projectPath: string): void {
-  memorizedChats.delete(projectPath)
-}
+// Реестр прогретых памятью чатов переехал в ai-send/memory-context вместе с блоком
+// recall'а (2.1.10-G). Публичная поверхность ai.ts сохранена: main.ts и тесты
+// продолжают импортировать обе функции отсюда.
+export { forgetMemorizedChat, forgetMemorizedProject } from './ai-send/memory-context'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -619,80 +602,15 @@ export function registerAiIpc(deps: AiDeps): void {
     // Топ-5 воспоминаний проекта — инжектируются в context-pack один раз за
     // app-сессию для данного чата. Вычисляем до ветки API/CLI чтобы CLI-провайдеры
     // тоже получали память через buildCliPrompt → prepareParts.
-    const memoryCacheKey = chatId ?? (projectPath ?? '__no_project__')
-    const shouldInjectMemory = projectPath && !memorizedChats.has(memoryCacheKey)
-    if (shouldInjectMemory) {
-      // Safety net: if the Set has grown past 500 entries (process running for
-      // many days without restart), clear it entirely. This is a one-time
-      // cache miss — memories get re-injected once per affected chat — not data loss.
-      if (memorizedChats.size > 500) memorizedChats.clear()
-      memorizedChats.add(memoryCacheKey)
-    }
-    let memories: { type: string; content: string; tags: string[] }[] = []
-    let consolidationHint: string | null = null
-    let coreMemorySnapshot = { memory: '', user: '' }
-    if (projectPath) {
-      emitAgentProgress(taggedSender, sendId, {
-        id: 'context-memory',
-        phase: 'context',
-        title: 'Ищу память проекта',
-        detail: 'Подбираю сохранённые факты и недавние записи, которые могут быть полезны для ответа.',
-        status: 'running'
-      })
-      try {
-        // #1 релевантный recall + ось 4 #1 RRF-fusion: блендим два канала вместо бинарного
-        // «релевантные ИЛИ недавние». Канал релевантности (FTS5/BM25 по последнему user-
-        // сообщению) ⊕ канал недавности (без session-summary, чтобы не вытесняли факты).
-        // Факт и релевантный, и недавний — всплывает выше. Чисто на позициях, без векторов.
-        const recallQuery = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
-        const memoryProvider = createLegacyMemoryProvider({
-          searchMemories: deps.searchMemories,
-          memoryConsolidationHint: deps.memoryConsolidationHint,
-        })
-        // Ревью HIGH: фильтр session-summary ПОСЛЕ LIMIT обнулял recency-канал — session-summary
-        // (свежайший accessed_at, пишутся в конце каждой сессии) занимали топ-5 и все выпадали
-        // фильтром, реальные факты не попадали. Берём с запасом (20) ДО фильтра, потом slice(5).
-        const memorySnapshot = buildRunMemorySnapshot(memoryProvider, {
-          projectPath,
-          query: typeof recallQuery === 'string' ? recallQuery : '',
-          includeRecall: Boolean(shouldInjectMemory),
-        })
-        memories = snapshotPromptMemories(memorySnapshot)
-        // memory-nudge консолидации (раз на чат, как и recall): если воспоминания
-        // накопились/задублировались — мягко предлагаем модели консолидировать.
-        consolidationHint = memorySnapshot.consolidationHint
-        coreMemorySnapshot = memorySnapshot.coreMemory
-        logRuntime('ai.memory.snapshot', {
-          sendId,
-          runId,
-          projectPath,
-          entries: memories.length,
-          coreMemoryChars: coreMemorySnapshot.memory.length,
-          coreUserChars: coreMemorySnapshot.user.length,
-          fingerprint: memorySnapshotFingerprint(memorySnapshot),
-        })
-        emitAgentProgress(taggedSender, sendId, {
-          id: 'context-memory',
-          phase: 'context',
-          title: memories.length > 0 ? 'Память проекта добавлена' : 'Память проверена',
-          detail: memories.length > 0
-            ? `Нашёл ${memories.length} подходящих записей и добавил их в контекст.`
-            : 'Подходящих записей не нашёл, продолжаю по истории чата и настройкам проекта.',
-          status: 'done'
-        })
-      } catch (err) {
-        // Память недоступна — продолжаем без неё, не блокируем пользователя
-        logRuntimeError('ai.memories.search.fail', err, { sendId, runId, projectPath })
-        console.warn('[ai] searchMemories failed:', err instanceof Error ? err.message : err)
-        emitAgentProgress(taggedSender, sendId, {
-          id: 'context-memory',
-          phase: 'context',
-          title: 'Память проекта недоступна',
-          detail: 'Не блокирую ответ: продолжаю без сохранённой памяти проекта.',
-          status: 'done'
-        })
-      }
-    }
+    const { memories, consolidationHint, coreMemory: coreMemorySnapshot } = buildSendMemoryContext({
+      projectPath,
+      chatId,
+      messages,
+      deps: { searchMemories: deps.searchMemories, memoryConsolidationHint: deps.memoryConsolidationHint },
+      sendId,
+      runId,
+      emitProgress: payload => emitAgentProgress(taggedSender, sendId, payload),
+    })
 
     let messagesWithSystem = messages
     // composedSystem — точная system-строка, ушедшая модели в API-пути. Захватываем
@@ -715,75 +633,33 @@ export function registerAiIpc(deps: AiDeps): void {
         : 'Собираю prompt для внешнего CLI-агента с учётом скиллов, памяти и текущего режима.',
       status: 'running'
     })
-    // Reviewer override (Explicit Review) — ПОЛНАЯ ЗАМЕНА системного промпта.
-    // Ревьюер не является агентом проекта: он читает работу другого AI и даёт
-    // независимый разбор. Давать ему system-layer + user-layer = заставить
-    // вести себя как сам агент, а не как критик → теряется смысл кросс-ревью.
-    // Поэтому reviewer-промпт остаётся единственной системной инструкцией.
-    if (resumedMessages && canReplayCheckpoint(checkpointRun, providerId)) {
-      // Crash-resume Фаза 2: чекпойнт уже содержит system + полную историю прогона
-      // — подаём как есть, минуя пере-сборку контекста. composedSystem остаётся
-      // null (Debug-снапшот системы для возобновления не делаем — это продолжение).
-      // 1.9.8 #4: только если провайдер совпадает — иначе tool_use-история одного
-      // провайдера не ляжет в формат другого (свежий старт по messages безопаснее).
-      messagesWithSystem = resumedMessages
-    } else if (overrides?.useReviewerPrompt) {
-      messagesWithSystem = [{ role: 'system', content: REVIEWER_SYSTEM_PROMPT }, ...messages]
-    } else if (descriptor.transport === 'API') {
-      // Same assembly path as CLI providers — see ai/compose-system.ts.
-      // projectSystemPrompt — пользовательский промпт из Project Settings
-      // (UI шестерёнки в Project Rail). Хранится в settings ключом
-      // `system_prompt_${path}`. Если пусто — игнорируется.
-      const projectSystemPrompt = projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null
-      // Core memory frozen at run start: MEMORY.md + USER.md stay stable for prompt-cache diagnostics.
-      const coreMemory = coreMemorySnapshot
-      // Project Brain (Итер.4): если проект прогрет и не выключено — инжектим
-      // готовый ContextPack под задачу (вместо сборки всего контекста заново).
-      const brainOn = deps.getSecret('use_project_brain') !== 'false'
-      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
-      brain = (brainOn && projectPath && deps.getBrainContext)
-        ? deps.getBrainContext(projectPath, lastUserMsg) : null
-      // Skill override — НАСЛОЕНИЕ, а не замена. Промпт скилла (overrides.systemPrompt)
-      // дописывается ПОВЕРХ базового промпта секцией <skill_layer> внутри
-      // composeSystemPrompt. Так скилл уточняет роль агента, но базовый протокол
-      // выполнения (system-layer 7-шаговый цикл + работа с тулзами) сохраняется —
-      // раньше промпт скилла полностью заменял базу и агент терял протокол.
-      const composed = await prepareSystemContext({
-        projectPath,
-        messages,
-        recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
-        projectSystemPrompt,
-        memories,
-        consolidationHint: consolidationHint ?? undefined,
-        coreMemory,
-        agentMode,
-        brainContext: brain?.content ?? null,
-        skillPrompt: skillLayerPrompt ?? undefined,
-        // Output style (формат/персона ответа) — глобальная настройка, инжектится
-        // в user_layer секцией. 'default'/пусто → ничего не добавляется. ЛИМИТ: только
-        // API-путь; CLI-провайдеры (claude-cli/codex-cli/grok-cli/gemini-cli) строят свой
-        // промпт в buildCliPrompt без outputStyle — стиль на них не применяется (известный
-        // CLI-parity лимит, как бинарные вложения; см. CLAUDE.md §5.2).
-        outputStyle: deps.getSecret('output_style')
-      })
-      // Наслоение интенсивности (<intensity>) поверх собранного промпта — стерёт
-      // поведение под Простой/Турбо. Простой-подсказка нейтральна к сегодняшнему
-      // поведению (один прямой путь), Турбо — поощряет всю машинерию.
-      composedSystem = composed.system + '\n\n' + intCfg.systemHint
-      // Prompt caching: 'claude' получает маркер (сам режет и кэширует стабильный
-      // префикс), остальные провайдеры — снятый маркер (авто-кэш по стабильному
-      // префиксу OpenAI/DeepSeek/Gemini implicit). Порядок stable→volatile уже задан
-      // в composeSystemPrompt — этого достаточно для implicit-кэша прочих.
-      messagesWithSystem = [{ role: 'system', content: systemForProvider(composedSystem, providerId) }, ...messages]
-    } else if (overrides?.systemPrompt) {
-      // Не-API (CLI) транспорт со скилл-override. CLI-провайдеры строят свой
-      // системный промпт внутри buildCliPrompt и игнорируют system-сообщение в
-      // messages (cli-prompt.ts фильтрует role==='system'). Сам скилл наслаивается
-      // для CLI через skillPromptForProvider → createProvider → buildCliPrompt
-      // секцией <skill_layer> (см. ниже). Это system-сообщение — безвредный
-      // fallback для гипотетических не-CLI не-API провайдеров (CLI его отфильтрует).
-      messagesWithSystem = [{ role: 'system', content: skillLayerPrompt ?? overrides.systemPrompt }, ...messages]
-    }
+    // Ветвление сборки (resume / reviewer / API / CLI-скилл) вынесено в
+    // ai-send/system-assembly (2.1.10-G). Порядок веток и их приоритет сохранены;
+    // здесь остались только побочные эффекты — прогресс и бейдж Мозга.
+    const assembled = await assembleSendSystem({
+      messages,
+      projectPath,
+      providerId,
+      descriptor,
+      agentMode,
+      resumedMessages,
+      checkpointRun,
+      skillLayerPrompt,
+      skillOverridePrompt: overrides?.systemPrompt,
+      useReviewerPrompt: Boolean(overrides?.useReviewerPrompt),
+      memories,
+      consolidationHint,
+      coreMemory: coreMemorySnapshot,
+      intensitySystemHint: intCfg.systemHint,
+      deps: {
+        getSecret: deps.getSecret,
+        recentWrites: deps.recentWrites,
+        getBrainContext: deps.getBrainContext,
+      },
+    })
+    messagesWithSystem = assembled.messagesWithSystem
+    composedSystem = assembled.composedSystem
+    brain = assembled.brain
 
     // Project Brain (Итер.4 + Phase 3): бейдж «использован прогретый контекст» +
     // метрика экономии — сколько токенов контекста мозг дал готовыми (агент не
@@ -900,20 +776,17 @@ export function registerAiIpc(deps: AiDeps): void {
     // Debug Packet: снапшот реального входа run'а. Только API-путь, где собран
     // композитный system prompt (composedSystem != null). model уже финализирован
     // smart-routing'ом выше. Берём контент последнего user-сообщения как user_message.
-    if (composedSystem != null && deps.saveRunInput) {
-      const lastUser = [...messages].reverse().find(m => m.role === 'user')
-      try {
-        deps.saveRunInput({
-          runId,
-          projectPath,
-          chatId: chatId ? Number(chatId) : null,
-          timestamp: Date.now(),
-          providerId,
-          model: model ?? null,
-          systemPrompt: stripCacheBreakpoint(composedSystem),
-          userMessage: lastUser?.content ?? ''
-        })
-      } catch { /* snapshot not critical */ }
+    if (composedSystem != null) {
+      saveRunInputSnapshot({
+        save: deps.saveRunInput,
+        runId,
+        projectPath,
+        chatId: chatId ? Number(chatId) : null,
+        providerId,
+        model: model ?? null,
+        systemPrompt: stripCacheBreakpoint(composedSystem),
+        messages,
+      })
     }
 
     // Project Settings system prompt — нужен и для API (через
@@ -932,21 +805,16 @@ export function registerAiIpc(deps: AiDeps): void {
     // CLI-провайдера. Раньше здесь синхронно строился второй полный context-pack,
     // удваивая локальную подготовку до первого токена.
     const onCliPromptBuilt = descriptor.transport !== 'API' && deps.saveRunInput
-      ? (cliPayload: string) => {
-          const lastUser = [...messages].reverse().find(m => m.role === 'user')
-          try {
-            deps.saveRunInput?.({
-              runId,
-              projectPath,
-              chatId: chatId ? Number(chatId) : null,
-              timestamp: Date.now(),
-              providerId,
-              model: model ?? null,
-              systemPrompt: cliPayload,
-              userMessage: lastUser?.content ?? ''
-            })
-          } catch { /* snapshot not critical — CLI run continues unaffected */ }
-        }
+      ? (cliPayload: string) => saveRunInputSnapshot({
+          save: deps.saveRunInput,
+          runId,
+          projectPath,
+          chatId: chatId ? Number(chatId) : null,
+          providerId,
+          model: model ?? null,
+          systemPrompt: cliPayload,
+          messages,
+        })
       : undefined
 
     emitAgentProgress(taggedSender, sendId, {
@@ -958,53 +826,20 @@ export function registerAiIpc(deps: AiDeps): void {
     })
     let provider: ChatProvider
     try {
-      // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
-      // 1.9.3 мультиаккаунт: токен ИМЕННО аккаунта прогона (mainAcct — единый resolve
-      // EF-R2 Б1, тот же, что дал run.accountId); парка нет → legacy-одиночный токен settings.
-      const claudeOauthToken = providerId === 'claude-cli'
-        ? (mainAcct?.secret ?? deps.getSecret('claude_code_oauth_token'))
-        : null
-      // Codex мультиаккаунт (2.0.8-C): CODEX_HOME аккаунта прогона (тот же mainAcct —
-      // никакого повторного resolve после await, EF-R2 Б1). Парка нет (mainAcct=null) →
-      // прежний legacy-путь resolveCodexHome (дефолтный ~/.codex вне управляемого парка).
-      const codexHome = isCodexAuthProvider(providerId)
-        ? (mainAcct
-            ? (mainAcct.configDir || null)
-            : resolveCodexHome(providerId, deps.resolveSubscriptionAccount, chatIdNum))
-        : null
-      // custom-openai: baseUrl + список моделей задаются юзером в Settings.
-      // models приходят как comma-separated string; парсим в массив.
-      let customBaseUrl: string | undefined
-      let customModels: string[] | undefined
-      if (providerId === 'custom-openai') {
-        customBaseUrl = deps.getSecret('custom_openai_baseurl') ?? undefined
-        const modelsRaw = deps.getSecret('custom_openai_models')
-        if (modelsRaw) {
-          customModels = modelsRaw.split(',').map(s => s.trim()).filter(Boolean)
-        }
-      } else if (providerId === 'verstak-gateway') {
-        // Override РФ-релея без релиза (kill-switch): задан verstak_gateway_baseurl —
-        // используем его вместо дефолтного релея. Пусто → дефолт из spec.
-        customBaseUrl = deps.getSecret('verstak_gateway_baseurl') ?? undefined
-      }
-      // YandexGPT и GigaChat имеют по второму секрету: yandex_folder_id и
-      // gigachat_client_secret. Они хранятся отдельно в SafeStorage и
-      // пробрасываются в registry.createProvider() через extension options.
-      const yandexFolderId = providerId === 'yandex-gpt'
-        ? (deps.getSecret('yandex_folder_id') ?? undefined)
-        : undefined
-      const gigachatClientSecret = providerId === 'gigachat'
-        ? (deps.getSecret('gigachat_client_secret') ?? undefined)
-        : undefined
-      // Аудит M3: TLS-верификация GigaChat по настройке (по умолчанию выкл).
-      const gigachatTlsVerify = providerId === 'gigachat'
-        ? (deps.getSecret('gigachat_tls_verify') === 'true')
-        : undefined
-      // 2.0.7-E: гейт живого каталога для grok-cli. Читает кешированный каталог (settings)
-      // и решает, блокировать ли запрошенную модель. Только для grok-cli (первый live-адаптер).
-      const checkModel = providerId === 'grok-cli'
-        ? (m: string) => checkModelAvailable(loadLiveCatalog({ get: deps.getSecret, set: () => {} }, 'grok-cli'), m, Date.now())
-        : undefined
+      // Провайдер-специфичные опции (OAuth-токен Claude Code, изолированный CODEX_HOME,
+      // custom endpoint, вторые секреты YandexGPT/GigaChat, гейт каталога grok-cli)
+      // собраны в ai-send/provider-options (2.1.10-G). Аккаунт попытки — mainAcct,
+      // единый resolve EF-R2 Б1: повторного резолва после await'ов по-прежнему нет.
+      const {
+        claudeOauthToken, codexHome, customBaseUrl, customModels,
+        yandexFolderId, gigachatClientSecret, gigachatTlsVerify, checkModel,
+      } = buildProviderRuntimeOptions({
+        providerId,
+        account: mainAcct,
+        chatId: chatIdNum,
+        getSecret: deps.getSecret,
+        resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
+      })
       provider = createProvider(providerId, {
         apiKey,
         model,
