@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findRunForChat, isRunOfChat } from '../../src/lib/own-run'
+import { findRunForChat } from '../../src/lib/own-run'
 import type { SendOwner } from '../../src/store/projectStore'
 
 /**
@@ -55,21 +55,3 @@ describe('чей это прогон (дефект №2: дополнение у
   })
 })
 
-describe('isRunOfChat — страж перед отправкой в прогон', () => {
-  it('свой → true', () => {
-    expect(isRunOfChat({ 101: chat(7) }, 101, 7)).toBe(true)
-  })
-
-  it('ЧУЖОЙ → false (ровно эта проверка не давала бы дополнению уехать)', () => {
-    expect(isRunOfChat({ 101: chat(7), 102: chat(8) }, 102, 7)).toBe(false)
-  })
-
-  it('неизвестный sendId → false', () => {
-    expect(isRunOfChat({ 101: chat(7) }, 999, 7)).toBe(false)
-  })
-
-  it('null-аргументы → false, а не падение', () => {
-    expect(isRunOfChat({ 101: chat(7) }, null, 7)).toBe(false)
-    expect(isRunOfChat({ 101: chat(7) }, 101, null)).toBe(false)
-  })
-})

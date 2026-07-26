@@ -220,30 +220,3 @@ export const CURRENT_USER_REQUEST_CLOSE = '</current_user_request>'
 export function wrapCurrentUserRequest(userMessage: string): string {
   return `${CURRENT_USER_REQUEST_OPEN}\n${userMessage}\n${CURRENT_USER_REQUEST_CLOSE}`
 }
-
-const CURRENT_USER_REQUEST_RE =
-  /<current_user_request>\n([\s\S]*?)\n<\/current_user_request>\s*$/
-
-/**
- * Fit a CLI payload into argv length cap WITHOUT dropping the latest user turn.
- * Naive slice(0, cap) keeps system/context at the start and cuts the current
- * user message at the end — model then answers the first turn forever.
- */
-export function fitCliPayloadToArgvCap(payload: string, cap: number): string {
-  if (payload.length <= cap) return payload
-  const match = payload.match(CURRENT_USER_REQUEST_RE)
-  if (!match || match.index == null) {
-    // Fallback: keep tail (better than head for one-shot CLI)
-    return payload.slice(payload.length - cap)
-  }
-  const userMsg = match[1]
-  const wrappedUser = wrapCurrentUserRequest(userMsg)
-  const head = payload.slice(0, match.index).trimEnd()
-  const marker = '\n\n[truncated]\n\n'
-  const headBudget = cap - wrappedUser.length - marker.length
-  if (headBudget < 0) {
-    return wrappedUser.slice(0, cap)
-  }
-  const trimmedHead = head.length > headBudget ? head.slice(0, headBudget) : head
-  return trimmedHead + marker + wrappedUser
-}

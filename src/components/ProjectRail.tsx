@@ -450,7 +450,6 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
     help: s.help,
     resumableRuns: s.resumableRuns,
   })))
-  // 4.3: bundle-поля активного чата — из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const [startupInterruptedPaths, setStartupInterruptedPaths] = useState<Set<string>>(() => new Set())
   const interruptedPaths = useMemo(() => {

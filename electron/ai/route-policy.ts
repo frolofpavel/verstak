@@ -87,18 +87,6 @@ export function pickChatAccountId(
   return { kind: 'auto' }
 }
 
-/** Человекочитаемый текст смены маршрута для UI-пилюли (единый для обоих runner'ов). */
-export function routeChangedText(
-  action: 'rotate-account' | 'model-fallback' | 'refresh-auth',
-  requested: { providerId: string },
-  actual: { providerId: string; model: string },
-): string {
-  switch (action) {
-    case 'rotate-account': return `⚡ Лимит аккаунта — переключился на другой аккаунт (${requested.providerId})`
-    case 'model-fallback': return `⚡ ${requested.providerId} недоступен, переключаюсь на ${actual.providerId}`
-    case 'refresh-auth': return `↻ Обновляю авторизацию (${requested.providerId})`
-  }
-}
 
 /** 2.1.3-CD: маппинг детектора подписочного лимита в причину cooldown (единый для обоих
  *  runner'ов). usage/quota — исчерпание пула → 'quota'; rate — транзиентная частота →
@@ -207,86 +195,3 @@ function parseHttpStatus(msg: string): number | null {
   return m ? parseInt(m[1], 10) : null
 }
 
-/** Детерминированное решение о маршруте по 8 инвариантам карточки. Чистая функция. */
-export function decideRoute(input: RouteDecisionInput): RouteDecision {
-  const { policy, pinned, current, reason, triedKeys, readyAccounts, modelFallbacks, maxAttempts } = input
-  const attemptNumber = triedKeys.length + 1
-  const locked = policy === 'strict' || pinned // инвариант 1: без авто-смены провайдера/аккаунта
-  const warn = policy === 'allow'               // инвариант 2
-
-  const stop = (): RouteDecision =>
-    ({ action: 'stop', next: null, reason, attemptNumber, cooldown: null, visibleWarning: false })
-
-  // Loop guard (инвариант 7): общий потолок попыток — единственный источник ограничения.
-  if (triedKeys.length >= maxAttempts) return stop()
-
-  // Ничего решать не нужно / маршрутизация не спасёт.
-  if (reason === 'none' || reason === 'context-overflow') return stop()
-
-  // auth (инвариант 4): обновить токен на ТОМ ЖЕ аккаунте — это НЕ смена маршрута, поэтому
-  // разрешено и при locked. Без cooldown (аккаунт не виноват), без предупреждения.
-  if (reason === 'auth') {
-    return { action: 'refresh-auth', next: current, reason, attemptNumber, cooldown: null, visibleWarning: false }
-  }
-
-  // Дальше — смены маршрута. При locked (strict/pinned) запрещены → stop (инвариант 1).
-  if (locked) return stop()
-
-  const notTried = (a: RouteAttempt): boolean => !triedKeys.includes(attemptKey(a))
-  const nextAccount = readyAccounts.find(notTried) ?? null
-  const nextModel = modelFallbacks.find(notTried) ?? null
-
-  const cooldownReasonFor = (r: RouteReason): CooldownReason => {
-    switch (r) {
-      case 'quota': return 'quota'
-      case 'rate-limit': return 'rate-limit'
-      case 'provider-unavailable': return 'provider-unavailable'
-      case 'auth':
-      case 'network':
-      case 'model-not-found':
-      case 'context-overflow':
-      case 'none':
-        return 'unknown'
-    }
-  }
-
-  // quota / rate-limit: сначала ротация готового аккаунта того же провайдера/модели
-  // (инвариант 3), пул исчерпан → model-fallback. cooldown на аккаунт (инвариант 6).
-  if (reason === 'quota' || reason === 'rate-limit') {
-    const cooldown: RouteCooldown = { scope: 'account', reason: cooldownReasonFor(reason) }
-    if (nextAccount) {
-      return { action: 'rotate-account', next: nextAccount, reason, attemptNumber, cooldown, visibleWarning: warn }
-    }
-    if (nextModel) {
-      return { action: 'model-fallback', next: nextModel, reason, attemptNumber, cooldown, visibleWarning: warn }
-    }
-    return stop()
-  }
-
-  // provider-unavailable: провайдер лёг → сразу другой провайдер, cooldown на провайдера (инвариант 6).
-  if (reason === 'provider-unavailable') {
-    if (nextModel) {
-      return { action: 'model-fallback', next: nextModel, reason, attemptNumber, cooldown: { scope: 'provider', reason: 'provider-unavailable' }, visibleWarning: warn }
-    }
-    return stop()
-  }
-
-  // model-not-found: модель не существует → другой провайдер/модель, cooldown на модель (инвариант 6).
-  if (reason === 'model-not-found') {
-    if (nextModel) {
-      return { action: 'model-fallback', next: nextModel, reason, attemptNumber, cooldown: { scope: 'model', reason: 'unknown' }, visibleWarning: warn }
-    }
-    return stop()
-  }
-
-  // network (после with-retry): текущий провайдер недоступен → другой провайдер БЕЗ бана
-  // аккаунта (инвариант 5 — cooldown null). Пул провайдеров исчерпан → stop.
-  if (reason === 'network') {
-    if (nextModel) {
-      return { action: 'model-fallback', next: nextModel, reason, attemptNumber, cooldown: null, visibleWarning: warn }
-    }
-    return stop()
-  }
-
-  return stop()
-}

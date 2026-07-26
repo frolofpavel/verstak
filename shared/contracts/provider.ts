@@ -259,33 +259,6 @@ export interface ResolvedRoute {
   fallbackAllowed: boolean
 }
 
-/**
- * Резолв requested-маршрута ДО отправки. Override (если есть) побеждает default чата,
- * но НЕ мутирует его (one-shot). Renderer-facing контракт: тестируемое определение
- * семантики маршрута (source + fallbackAllowed) для показа requested route в UI.
- * Main (ipc/ai.ts) гейтит fallback ЭКВИВАЛЕНТНОЙ инлайн-логикой (`!route || policy==='allow'`) —
- * там резолв провайдера/модели богаче (getProviderId/getProviderModel + resume-route), поэтому
- * не через этот хелпер; при правках держать fallbackAllowed-семантику синхронной.
- */
-export function resolvePromptRoute(
-  chatDefault: { providerId: ProviderId; model: string },
-  override: PromptRouteOverride | null | undefined,
-): ResolvedRoute {
-  if (override) {
-    return {
-      providerId: override.providerId,
-      model: override.model,
-      source: 'prompt-explicit',
-      fallbackAllowed: override.fallbackPolicy === 'allow',
-    }
-  }
-  return {
-    providerId: chatDefault.providerId,
-    model: chatDefault.model,
-    source: 'chat-default',
-    fallbackAllowed: true,
-  }
-}
 
 /** Известен ли сохранённый ID. Неизвестный НЕ схлопывается молча — см. resolveStoredProviderId. */
 export function isKnownProviderId(v: unknown): v is ProviderId {

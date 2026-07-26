@@ -18,7 +18,6 @@ export function WorktreeBar() {
     path: s.path,
     helpMode: s.helpMode,
   })))
-  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const provider = useProvider()
   const [status, setStatus] = useState<Status>({ active: false })

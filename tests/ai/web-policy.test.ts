@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isHostAllowed, checkUrlDomain, type WebPolicy } from '../../electron/ai/web-policy'
+import { isHostAllowed, type WebPolicy } from '../../electron/ai/web-policy'
 
 const empty: WebPolicy = { allow: [], deny: [] }
 
@@ -53,15 +53,3 @@ describe('web-policy — deny сильнее allow', () => {
   })
 })
 
-describe('web-policy — checkUrlDomain', () => {
-  const policy: WebPolicy = { allow: ['python.org'], deny: [] }
-  it('URL с разрешённым хостом проходит', () => {
-    expect(checkUrlDomain('https://docs.python.org/3/library', policy).allowed).toBe(true)
-  })
-  it('URL с запрещённым хостом блокируется', () => {
-    expect(checkUrlDomain('https://evil.com/x', policy).allowed).toBe(false)
-  })
-  it('невалидный URL блокируется', () => {
-    expect(checkUrlDomain('не url', policy).allowed).toBe(false)
-  })
-})

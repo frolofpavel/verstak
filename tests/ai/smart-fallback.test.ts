@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldFallback, classifyFallbackReason, fallbackPlan } from '../../electron/ai/smart-fallback'
+import { shouldFallback, classifyFallbackReason } from '../../electron/ai/smart-fallback'
 
 describe('shouldFallback', () => {
   it('матчит по тексту message (rate limit / 5xx)', () => {
@@ -49,23 +49,3 @@ describe('classifyFallbackReason', () => {
   })
 })
 
-describe('fallbackPlan', () => {
-  it('tool_calling_unsupported → JSON-режим, не смена модели', () => {
-    const p = fallbackPlan('tool_calling_unsupported')
-    expect(p.switchToJsonMode).toBe(true)
-    expect(p.switchModel).toBe(false)
-  })
-  it('provider_auth_error → смена провайдера, без повтора на том же', () => {
-    const p = fallbackPlan('provider_auth_error')
-    expect(p.switchModel).toBe(true)
-    expect(p.retrySameModel).toBe(false)
-  })
-  it('malformed_tool_call → corrective retry на той же модели', () => {
-    const p = fallbackPlan('malformed_tool_call')
-    expect(p.retrySameModel).toBe(true)
-    expect(p.switchModel).toBe(false)
-  })
-  it('context_overflow → спросить пользователя (смена модели не спасёт)', () => {
-    expect(fallbackPlan('context_overflow').askUser).toBe(true)
-  })
-})

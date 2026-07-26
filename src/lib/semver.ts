@@ -17,8 +17,4 @@ export function semverGt(a: string, b: string): boolean {
   }
   return false
 }
-
-export function isVersionInRange(v: string, since: string, current: string): boolean {
-  const nv = normalizeVersion(v)
-  return semverGt(nv, normalizeVersion(since)) && !semverGt(nv, normalizeVersion(current))
-}
+

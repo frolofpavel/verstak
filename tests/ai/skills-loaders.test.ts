@@ -1,13 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { lookupLoader, listLoaders } from '../../electron/ai/skills/loaders'
+import { lookupLoader } from '../../electron/ai/skills/loaders'
 
 describe('skills/loaders registry', () => {
-  it('listLoaders возвращает зарегистрированные имена', () => {
-    const list = listLoaders()
-    expect(list).toContain('load_client_card')
-    expect(list).toContain('load_clients_list')
-    expect(list).toContain('load_today_brief')
-  })
 
   it('lookupLoader находит существующий', () => {
     const fn = lookupLoader('load_today_brief')

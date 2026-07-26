@@ -203,7 +203,7 @@ function ChatNavSection() {
                   title={s.title}
                 >
                   {/* 4.4: живое состояние из chats. Раньше читалась застывшая копия из
-                      chatSnapshots, и у активного чата точка могла показывать
+                      снятой проекции, и у активного чата точка могла показывать
                       «отвечает» уже после завершения стрима. */}
                   <span className={`gg-chat-nav-dot ${chats[s.id]?.isStreaming ? 'is-streaming' : chats[s.id]?.hasUnread ? 'is-unread' : ''}`} />
                   <span className="gg-chat-nav-title">{s.parentChatId != null ? '⑂ ' : ''}{s.title}</span>

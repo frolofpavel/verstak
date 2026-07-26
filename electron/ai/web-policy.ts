@@ -46,12 +46,6 @@ export function isHostAllowed(host: string, policy: WebPolicy): { allowed: boole
   return { allowed: true }
 }
 
-/** Проверить домен URL по политике. Невалидный URL → блок. */
-export function checkUrlDomain(url: string, policy: WebPolicy): { allowed: boolean; reason?: string } {
-  let host: string
-  try { host = new URL(url).hostname } catch { return { allowed: false, reason: `невалидный URL: ${url}` } }
-  return isHostAllowed(host, policy)
-}
 
 function readPolicyFile(path: string): Partial<WebPolicy> | null {
   try {

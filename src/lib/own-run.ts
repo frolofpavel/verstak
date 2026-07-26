@@ -41,16 +41,3 @@ export function findRunForChat(
   return null
 }
 
-/**
- * Принадлежит ли прогон этому чату. Нужен там, где sendId уже на руках и надо решить,
- * наш он или чужой (например прежде чем слать в него дополнение).
- */
-export function isRunOfChat(
-  sendOwners: Record<number, SendOwner>,
-  sendId: number | null,
-  chatId: number | null,
-): boolean {
-  if (sendId == null || chatId == null) return false
-  const o = sendOwners[sendId]
-  return o?.kind === 'chat' && o.chatId === chatId
-}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractErrorSignatures, diffAgainstBaseline, BaselineStore } from '../../electron/ai/baseline-verify'
+import { extractErrorSignatures, diffAgainstBaseline } from '../../electron/ai/baseline-verify'
 
 /** Этап 4, Блок F — baseline-aware verification: pre-existing red не блокирует,
  *  новые ошибки блокируют, идентичный вывод проходит. */
@@ -66,26 +66,3 @@ describe('diffAgainstBaseline', () => {
   })
 })
 
-describe('BaselineStore', () => {
-  it('snapshot → compare по run+command', () => {
-    const s = new BaselineStore()
-    expect(s.has('run1', 'npm run type')).toBe(false)
-    s.snapshot('run1', 'npm run type', TSC_ONE)
-    expect(s.has('run1', 'npm run type')).toBe(true)
-    const d = s.compare('run1', 'npm run type', TSC_TWO)
-    expect(d).not.toBeNull()
-    expect(d!.blocked).toBe(true)
-  })
-
-  it('compare без baseline → null', () => {
-    const s = new BaselineStore()
-    expect(s.compare('nope', 'npm run type', TSC_ONE)).toBeNull()
-  })
-
-  it('clear убирает снапшоты прогона', () => {
-    const s = new BaselineStore()
-    s.snapshot('run1', 'npm run type', TSC_ONE)
-    s.clear('run1')
-    expect(s.has('run1', 'npm run type')).toBe(false)
-  })
-})

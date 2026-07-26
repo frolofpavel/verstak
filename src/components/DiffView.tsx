@@ -22,7 +22,6 @@ function computeDiff(before: string, after: string): FileDiffStats {
 }
 
 export function DiffView() {
-  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const pendingWrites = useActiveChatField('pendingWrites') ?? []
   const { resolvePendingWrite, updateActivity, path } = useProject(useShallow(s => ({
     resolvePendingWrite: s.resolvePendingWrite,

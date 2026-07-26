@@ -121,9 +121,3 @@ export function secretProtectionLevel(providerId: string): SecretProtectionLevel
   return CLI_SECRET_LEVEL[providerId] ?? 'none'
 }
 
-// Тон бейджа по уровню (подписи — в i18n secretProtection.*).
-export const SECRET_PROTECTION_UI: Record<SecretProtectionLevel, { tone: 'ok' | 'warn' | 'danger' }> = {
-  full: { tone: 'ok' },
-  partial: { tone: 'warn' },
-  none: { tone: 'danger' },
-}

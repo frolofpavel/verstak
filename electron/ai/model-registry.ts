@@ -80,18 +80,9 @@ export const MODEL_REGISTRY: ModelRegistryEntry[] = [
   { providerId: 'qwen', model: 'qwen-flash', contextLimit: 1_000_000, pricePerM: { input: 0.05, output: 0.40 }, agentMode: 'allowed' }
 ]
 
-export function modelRegistryForProvider(providerId: string): ModelRegistryEntry[] {
-  return MODEL_REGISTRY.filter(entry => entry.providerId === providerId)
-}
 
-export function modelRegistryEntry(providerId: string, model: string): ModelRegistryEntry | undefined {
-  return MODEL_REGISTRY.find(entry => entry.providerId === providerId && entry.model === model)
-}
 
 export function getRegisteredContextLimit(model: string): number | undefined {
   return MODEL_REGISTRY.find(entry => entry.model === model)?.contextLimit
 }
 
-export function getRegisteredModelPrice(model: string): ModelRegistryEntry['pricePerM'] | undefined {
-  return MODEL_REGISTRY.find(entry => entry.model === model)?.pricePerM
-}

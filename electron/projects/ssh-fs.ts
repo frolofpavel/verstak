@@ -36,10 +36,6 @@ export function buildListCmd(remotePath: string): string {
   return `ls -1Ap -- ${shq(remotePath)}`
 }
 
-/** Существует ли путь: печатает EXISTS/MISSING (а не падает exit-кодом). */
-export function buildExistsCmd(remotePath: string): string {
-  return `test -e ${shq(remotePath)} && echo __EXISTS__ || echo __MISSING__`
-}
 
 /** Разобрать вывод buildListCmd в записи дерева (имя + isDirectory). */
 export function parseListOutput(stdout: string): Array<{ name: string; isDirectory: boolean }> {

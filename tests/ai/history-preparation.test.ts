@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prepareHistoryForModel, historyStats, summaryBlock } from '../../electron/ai/history-preparation'
+import { prepareHistoryForModel, summaryBlock } from '../../electron/ai/history-preparation'
 import type { HistoryMessage } from '../../electron/ai/history-preparation'
 import { IGNORED_TOOLS_NUDGE } from '../../electron/ai/tool-mode'
 
@@ -84,11 +84,6 @@ describe('история для модели со снапшотом (2.0.11-B)'
     expect(summaryBlock('итог').content).toMatch(/не додумывай/)
   })
 
-  it('статистика показывает РЕАЛЬНЫЙ эффект, а не обещание', () => {
-    expect(historyStats(history, null)).toEqual({ totalMessages: 5, sentMessages: 5, compacted: false })
-    expect(historyStats(history, { summary: 'итог', throughMessageId: 4 }))
-      .toEqual({ totalMessages: 5, sentMessages: 2, compacted: true })
-  })
 
   it('пустая история не падает', () => {
     expect(prepareHistoryForModel([], null)).toEqual([])
@@ -129,12 +124,4 @@ describe('протухшие corrective-nudge не уходят модели', (
     expect(joined).toContain('свежее')
   })
 
-  it('historyStats считает уже без протухших nudge', () => {
-    const hist: HistoryMessage[] = [
-      m(1, 'user', 'a'),
-      m(2, 'user', IGNORED_TOOLS_NUDGE),
-      m(3, 'user', 'b'),
-    ]
-    expect(historyStats(hist, null).sentMessages).toBe(2)
-  })
 })

@@ -101,23 +101,6 @@ export function classifyFallbackReason(error: unknown): FallbackReason {
   return 'unknown'
 }
 
-/** Стратегия реакции цикла на класс сбоя. Чистая таблица. */
-export function fallbackPlan(reason: FallbackReason): FallbackPlan {
-  const P = (retrySameModel: boolean, switchModel: boolean, switchToJsonMode: boolean, askUser: boolean): FallbackPlan =>
-    ({ retrySameModel, switchModel, switchToJsonMode, askUser })
-  switch (reason) {
-    case 'tool_calling_unsupported': return P(false, false, true, false)   // сначала JSON-режим, не менять модель
-    case 'malformed_tool_call':      return P(true, false, false, false)   // corrective retry на той же
-    case 'empty_tool_call_arguments':return P(true, false, false, false)
-    case 'model_ignored_tools':      return P(true, false, true, false)    // nudge + JSON-режим
-    case 'context_overflow':         return P(false, false, false, true)   // смена модели не спасёт — компакция/юзер
-    case 'provider_auth_error':      return P(false, true, false, false)   // ключ битый → другой провайдер
-    case 'provider_rate_limit':      return P(true, true, false, false)
-    case 'provider_network':         return P(true, true, false, false)
-    case 'provider_compat_error':    return P(false, true, false, false)
-    case 'unknown':                  return P(true, false, false, false)
-  }
-}
 
 /**
  * Возвращает следующего кандидата для fallback.

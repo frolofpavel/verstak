@@ -2,10 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { buildCliPrompt, fitCliPayloadToArgvCap, wrapCurrentUserRequest } from '../../electron/ai/cli-prompt'
+import { buildCliPrompt, wrapCurrentUserRequest } from '../../electron/ai/cli-prompt'
 import type { ChatMessage } from '../../electron/ai/types'
 
 describe('buildCliPrompt', () => {
+
+  it('wrapCurrentUserRequest оборачивает запрос парными маркерами', () => {
+    const out = wrapCurrentUserRequest('сделай X')
+    expect(out.startsWith('<current_user_request>')).toBe(true)
+    expect(out.trimEnd().endsWith('</current_user_request>')).toBe(true)
+    expect(out).toContain('сделай X')
+  })
   let dir: string
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'gg-cli-'))
@@ -173,20 +180,3 @@ describe('buildCliPrompt', () => {
   })
 })
 
-describe('fitCliPayloadToArgvCap', () => {
-  it('сохраняет текущий user turn при обрезке head', () => {
-    const head = 'A'.repeat(10_000)
-    const user = 'второй вопрос пользователя'
-    const payload = `${head}\n\n${wrapCurrentUserRequest(user)}`
-    const fitted = fitCliPayloadToArgvCap(payload, 8000)
-    expect(fitted).toContain('второй вопрос пользователя')
-    expect(fitted).toContain('<current_user_request>')
-    expect(fitted.length).toBeLessThanOrEqual(8000)
-    expect(fitted).not.toMatch(/^A{8000}/)
-  })
-
-  it('не меняет payload если он уже влезает', () => {
-    const payload = wrapCurrentUserRequest('короткий')
-    expect(fitCliPayloadToArgvCap(payload, 8000)).toBe(payload)
-  })
-})

@@ -23,7 +23,3 @@ export function resumeBannerActions(run: { autoResumable: boolean; lastUserReque
   return canResend ? ['resend-fresh', 'show-what-was-done'] : ['show-what-was-done']
 }
 
-/** Нужен ли resumeFromRunId (реплей контекста) для данного действия. */
-export function actionReplaysContext(action: ResumeAction): boolean {
-  return action === 'resume-with-context'
-}

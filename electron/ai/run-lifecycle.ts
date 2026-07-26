@@ -73,18 +73,6 @@ export function agentRunStatusToRunStatus(status: AgentRunStatus): RunStatus {
   }
 }
 
-export function exitReasonToRunStatus(reason: ExitReason): RunStatus {
-  switch (reason) {
-    case 'completed': return 'completed'
-    case 'aborted': return 'cancelled'
-    case 'timeout': return 'timed_out'
-    case 'error':
-    case 'crashed': return 'failed'
-    case 'max-turns':
-    case 'loop-detected': return 'completed'
-    default: return 'failed'
-  }
-}
 
 export function exitReasonToAgentRunStatus(reason: ExitReason): AgentRunStatus {
   switch (reason) {

@@ -68,19 +68,3 @@ export function prepareHistoryForModel(messages: HistoryMessage[], snapshot: Act
   return [summaryBlock(snapshot.summary), ...tail]
 }
 
-/**
- * Сколько сообщений реально уходит модели (для честного ContextMeter: показываем эффект
- * сжатия, а не выдуманную экономию).
- */
-export function historyStats(messages: HistoryMessage[], snapshot: ActiveSnapshot | null): {
-  totalMessages: number
-  sentMessages: number
-  compacted: boolean
-} {
-  const prepared = prepareHistoryForModel(messages, snapshot)
-  return {
-    totalMessages: messages.length,
-    sentMessages: prepared.length,
-    compacted: !!snapshot && !!snapshot.summary.trim(),
-  }
-}

@@ -21,7 +21,7 @@ import ts from 'typescript'
 import { PROVIDERS as MAIN_PROVIDERS, providerCapabilities } from '../../electron/ai/registry'
 import { EXTRA_PROVIDERS } from '../../electron/ai/extra-providers'
 import { BUNDLED_PROVIDERS } from '../../src/lib/model-catalog'
-import { parseProviderId, normalizeStoredModel, type ProviderMeta } from '../../src/hooks/useProvider'
+import { normalizeStoredModel, type ProviderMeta } from '../../src/hooks/useProvider'
 import {
   PROVIDER_IDS,
   isKnownProviderId,
@@ -387,19 +387,7 @@ describe('per-provider политики ссылаются только на с�
 // сам факт, что ни один провайдер реестра не схлопывается в дефолт.
 // Живой случай: openai-codex-oauth был добавлен в union и в реестр, но забыт в KNOWN_IDS.
 describe('provider-id parity — renderer allowlist ↔ main-реестр', () => {
-  it('каждый провайдер из реестра принимается renderer\'ом (не схлопывается в gemini-api)', () => {
-    const broken: string[] = []
-    for (const id of Object.keys(MAIN_PROVIDERS)) {
-      if (parseProviderId(id) !== id) broken.push(id)
-    }
-    expect(broken, `провайдеры из реестра молча подменяются на gemini-api: ${broken.join(', ')}`).toEqual([])
-  })
 
-  it('неизвестный/пустой id падает в безопасный дефолт', () => {
-    expect(parseProviderId('такого-провайдера-нет')).toBe('gemini-api')
-    expect(parseProviderId(null)).toBe('gemini-api')
-    expect(parseProviderId(undefined)).toBe('gemini-api')
-  })
 
   // 2.0.7-C, суть фикса: дефолт остаётся (иначе приложению не с чем стартовать), но
   // ФАКТ подмены больше не теряется — раньше пользователь просто видел «мой провайдер

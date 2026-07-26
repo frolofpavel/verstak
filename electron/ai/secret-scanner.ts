@@ -61,10 +61,6 @@ export const FORBIDDEN_ENV_PREFIXES = [
   'OPENCLAW_'
 ] as const
 
-export function isForbiddenEnvKey(key: string): boolean {
-  const normalized = key.trim().toUpperCase()
-  return FORBIDDEN_ENV_PREFIXES.some(prefix => normalized.startsWith(prefix))
-}
 
 /** True when the relative path (POSIX-style, no leading slash) looks like a secret store. */
 export function isForbiddenPath(relPath: string): boolean {

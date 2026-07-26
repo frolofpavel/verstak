@@ -66,9 +66,6 @@ const MATRIX: Record<string, CliSecurityCapability> = {
   },
 }
 
-export function cliSecurityCapability(providerId: string): CliSecurityCapability | null {
-  return MATRIX[providerId] ?? null
-}
 
 /**
  * Уровень защиты СЕКРЕТОВ (по чтению): full только когда путь-чтение закрыто И

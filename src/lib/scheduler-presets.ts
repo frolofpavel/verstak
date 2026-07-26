@@ -58,10 +58,6 @@ export const SCHEDULER_PRESETS: SchedulerPreset[] = [
   },
 ]
 
-/** Пресет по id (для UI-пикера). null если нет. */
-export function findSchedulerPreset(id: string): SchedulerPreset | null {
-  return SCHEDULER_PRESETS.find(p => p.id === id) ?? null
-}
 
 /**
  * Мост «дозор → контролируемый фикс» (1.9.9 срез 2): из находки read-only прогона

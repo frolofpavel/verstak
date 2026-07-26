@@ -319,7 +319,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     clearComposerDraft: s.clearComposerDraft,
     setActiveView: s.setActiveView,
   })))
-  // 4.3: bundle активного чата — из chats (SSOT), не из top-level проекции.
   // Chat.tsx и так подписан на весь store — гранулярность рендера не меняется.
   const activeBundle = useActiveChatBundle()
   const projectMessages = activeBundle?.messages ?? []
@@ -1189,7 +1188,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // sendIdToChatId + sendIdToReviewChatId — давало race-баги).
       // Owner определяет КУДА события идут:
       //  - 'review' → reviews state, не трогает main чат
-      //  - 'chat' → если не активный, в chatSnapshots; если активный, в
+      //  - 'chat' → в chats[chatId] (хранилище одно, 4.4); если активный, в
       //             основное состояние ниже по логике
       const owner = store.lookupSendOwner(id)
       if (owner?.kind === 'chat' && owner.isHelp) {

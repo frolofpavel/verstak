@@ -326,7 +326,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   deps.getProjectState().setAgentProgress(activateModelProgress(deps.getProjectState().agentProgress ?? [], providerLabel))
   // Bind this send to the chat that initiated it — if user switches to
   // another chat mid-stream, the event handler will route events into
-  // chatSnapshots[activeChatId] rather than corrupting the new active chat.
+  // chats[activeChatId] rather than corrupting the new active chat.
   if (activeChatId != null) {
     deps.registerChatSendOwner(sendId, activeChatId, false, path)
     if (assistantRow && sendId > 0) deps.registerPersistedAssistant(sendId, assistantRow.id)

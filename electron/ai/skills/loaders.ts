@@ -52,9 +52,6 @@ export function lookupLoader(impl: string): ContextLoader | null {
   return REGISTRY[impl] ?? null
 }
 
-export function listLoaders(): string[] {
-  return Object.keys(REGISTRY)
-}
 
 // ============================================================================
 // Реализации лоадеров — без external creds, работают сразу

@@ -214,20 +214,6 @@ export async function fetchRemoteVersion(): Promise<RemoteVersionProbeResult> {
   return { version: null, rateLimit }
 }
 
-/** electron-updater часто падает, если на GitHub ещё нет Release с latest.yml — это не сбой для пользователя. */
-export function isBenignUpdaterError(message: string): boolean {
-  const m = message.toLowerCase()
-  return (
-    m.includes('404')
-    || m.includes('not found')
-    || m.includes('latest.yml')
-    || m.includes('no published')
-    || m.includes('cannot find')
-    || m.includes('please check update first')
-    || m.includes('net::')
-    || m.includes('httperror')
-  )
-}
 
 export type ReleaseArtifactMeta = {
   version: string
@@ -266,43 +252,6 @@ export async function releaseArtifactsReady(version: string): Promise<boolean> {
   return (await fetchReleaseArtifactMeta(version)) != null
 }
 
-/** Синхронная логика: что ставить, если в main уже новее, чем на Releases. */
-export function pickInstallableUpdate(params: {
-  installed: string
-  repoMax: string | null
-  latestRelease: string | null
-  hasArtifacts: (version: string) => boolean
-}): { installable: string | null; pendingVersion: string | null } {
-  const { installed, repoMax, latestRelease, hasArtifacts } = params
-  const candidates = new Set<string>()
-  if (latestRelease) candidates.add(normalizeVersion(latestRelease))
-  if (repoMax) candidates.add(normalizeVersion(repoMax))
-
-  const ordered = [...candidates].sort((a, b) => {
-    if (semverGt(a, b)) return -1
-    if (semverGt(b, a)) return 1
-    return 0
-  })
-
-  let installable: string | null = null
-  for (const version of ordered) {
-    if (!semverGt(version, installed)) continue
-    if (hasArtifacts(version)) {
-      installable = version
-      break
-    }
-  }
-
-  if (installable) {
-    return { installable, pendingVersion: null }
-  }
-
-  if (repoMax && semverGt(repoMax, installed)) {
-    return { installable: null, pendingVersion: normalizeVersion(repoMax) }
-  }
-
-  return { installable: null, pendingVersion: null }
-}
 
 /** Версия для скачивания: последний Release с артефактами, даже если package.json на main впереди. */
 export async function resolveInstallableUpdate(

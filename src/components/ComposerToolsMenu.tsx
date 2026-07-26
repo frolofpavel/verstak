@@ -36,7 +36,6 @@ export function ComposerToolsMenu({
   exportBusy?: boolean
 }) {
   const path = useProject(s => s.path)
-  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const messages = useActiveChatField('messages') ?? []
   const activeChatId = useProject(s => s.activeChatId)
   const checkpointId = useActiveChatField('checkpointId') ?? null

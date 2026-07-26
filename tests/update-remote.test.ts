@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanReleaseBody,
-  isBenignUpdaterError,
   maxSemver,
   mergeRateLimit,
   normalizeVersion,
   parseGithubRateLimit,
   parseLatestYmlArtifact,
   parseReleaseTagFromUrl,
-  pickInstallableUpdate,
   rateLimitWaitMinutes,
   releaseFeedBase,
   semverGt,
@@ -43,47 +41,6 @@ describe('cleanReleaseBody', () => {
   })
 })
 
-describe('pickInstallableUpdate', () => {
-  it('prefers latest release when package.json on main is ahead', () => {
-    const result = pickInstallableUpdate({
-      installed: '1.5.5',
-      repoMax: '1.5.12',
-      latestRelease: '1.5.11',
-      hasArtifacts: (v) => v === '1.5.11',
-    })
-    expect(result).toEqual({ installable: '1.5.11', pendingVersion: null })
-  })
-
-  it('returns pending when repo is newer but no artifacts exist', () => {
-    const result = pickInstallableUpdate({
-      installed: '1.5.5',
-      repoMax: '1.5.12',
-      latestRelease: null,
-      hasArtifacts: () => false,
-    })
-    expect(result).toEqual({ installable: null, pendingVersion: '1.5.12' })
-  })
-
-  it('uses repo max when it has artifacts', () => {
-    const result = pickInstallableUpdate({
-      installed: '1.5.10',
-      repoMax: '1.5.11',
-      latestRelease: '1.5.11',
-      hasArtifacts: (v) => v === '1.5.11',
-    })
-    expect(result).toEqual({ installable: '1.5.11', pendingVersion: null })
-  })
-
-  it('installs latest published when package.json on main is ahead without installer', () => {
-    const result = pickInstallableUpdate({
-      installed: '1.5.17',
-      repoMax: '1.5.20',
-      latestRelease: '1.5.19',
-      hasArtifacts: (v) => v === '1.5.19',
-    })
-    expect(result).toEqual({ installable: '1.5.19', pendingVersion: null })
-  })
-})
 
 describe('parseReleaseTagFromUrl', () => {
   it('extracts semver from releases/latest redirect url', () => {
@@ -146,13 +103,4 @@ path: Verstak-Setup-1.5.11-x64.exe
     expect(m?.[1]).toBe('1.5.11')
   })
 })
-
-describe('isBenignUpdaterError', () => {
-  it('treats missing latest.yml as benign', () => {
-    expect(isBenignUpdaterError('Cannot find latest.yml in the latest release')).toBe(true)
-  })
-
-  it('keeps unexpected errors', () => {
-    expect(isBenignUpdaterError('disk full')).toBe(false)
-  })
-})
+

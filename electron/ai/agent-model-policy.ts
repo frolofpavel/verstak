@@ -51,14 +51,7 @@ export function getAgentModelPolicy(model: string | null | undefined): AgentMode
   return AGENT_MODEL_POLICIES.find(p => p.model === canonical) ?? null
 }
 
-export function isAgentModelNotRecommended(model: string | null | undefined): boolean {
-  return getAgentModelPolicy(model)?.agentMode === 'not_recommended'
-}
 
-export function recommendedGatewayPresetTarget(model: string | null | undefined): string | null {
-  if (!model) return null
-  return GATEWAY_AGENT_PRESET_RECOMMENDATIONS[model] ?? null
-}
 
 export function recommendAgentModel(
   role: AgentModelRole = 'coding',

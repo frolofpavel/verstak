@@ -27,16 +27,3 @@ export function jobsConflict(
   return left.id !== right.id && scopesMayConflict(left.writeScope, right.writeScope)
 }
 
-export function buildConflictGraph(
-  jobs: Array<Pick<AgentJobV1, 'id' | 'writeScope'>>,
-): Map<string, string[]> {
-  const graph = new Map(jobs.map(job => [job.id, [] as string[]]))
-  for (let left = 0; left < jobs.length; left++) {
-    for (let right = left + 1; right < jobs.length; right++) {
-      if (!jobsConflict(jobs[left], jobs[right])) continue
-      graph.get(jobs[left].id)!.push(jobs[right].id)
-      graph.get(jobs[right].id)!.push(jobs[left].id)
-    }
-  }
-  return graph
-}

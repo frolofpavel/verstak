@@ -3,9 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  buildProfileBlock, safeParseProfile, profileHasContent, EXTRACT_PROFILE_PROMPT,
-  loadProjectProfile, PROFILE_REL_PATH,
-} from '../../electron/ai/project-profile'
+  buildProfileBlock, safeParseProfile, profileHasContent, loadProjectProfile, } from '../../electron/ai/project-profile'
 
 describe('project-profile — Шаг C (machine-readable профиль)', () => {
   it('buildProfileBlock: только непустые поля, с заголовком', () => {
@@ -45,11 +43,6 @@ describe('project-profile — Шаг C (machine-readable профиль)', () =>
     expect(safeParseProfile(JSON.stringify(orig))).toEqual(orig)
   })
 
-  it('промпт извлечения требует JSON «для агента» + запись в .verstak/profile.json', () => {
-    expect(EXTRACT_PROFILE_PROMPT).toMatch(/ДЛЯ АГЕНТА/)
-    expect(EXTRACT_PROFILE_PROMPT).toMatch(/валидный JSON/)
-    expect(EXTRACT_PROFILE_PROMPT).toContain(PROFILE_REL_PATH)
-  })
 
   it('loadProjectProfile: читает .verstak/profile.json; нет файла → null', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'gg-profile-'))

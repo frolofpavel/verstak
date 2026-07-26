@@ -220,7 +220,6 @@ export function App() {
     setPendingPlan: s.setPendingPlan,
     setProject: s.setProject,
   })))
-  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const chatSessions = useProject(s => s.chatSessions)
 

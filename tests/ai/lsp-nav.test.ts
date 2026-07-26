@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseLocations, findSymbolPosition, findSymbolPositions } from '../../electron/ai/lsp-nav'
+import { parseLocations, findSymbolPositions } from '../../electron/ai/lsp-nav'
 
 // Tier-2 #1 — LSP-навигация: чистое ядро (парсинг LSP-ответа Location/LocationLink +
 // поиск позиции символа в файле). Сетевой запрос (definition/references) — в runtime.
@@ -39,23 +39,6 @@ describe('parseLocations', () => {
   })
 })
 
-describe('findSymbolPosition', () => {
-  const code = 'import os\n\ndef compute(x):\n    return compute_inner(x)\n'
-  it('находит первое словограничное вхождение (строка/колонка 0-based)', () => {
-    const p = findSymbolPosition(code, 'compute')
-    expect(p).toEqual({ line: 2, character: 4 }) // "def compute" на строке 2, col 4
-  })
-  it('словограница: compute НЕ матчит внутри compute_inner', () => {
-    const p = findSymbolPosition('x = compute_inner()\ncompute()\n', 'compute')
-    expect(p).toEqual({ line: 1, character: 0 }) // не строка 0 (там compute_inner)
-  })
-  it('не найден → null', () => {
-    expect(findSymbolPosition(code, 'nonexistent')).toBeNull()
-  })
-  it('спецсимволы в имени экранируются (не ломают regex)', () => {
-    expect(() => findSymbolPosition('a.b.c\n', 'b.c')).not.toThrow()
-  })
-})
 
 describe('findSymbolPositions (перебор кандидатов: первое вхождение может быть в комментарии)', () => {
   it('возвращает ВСЕ вхождения сверху вниз', () => {

@@ -88,10 +88,3 @@ export async function loadProjectProfile(projectPath: string): Promise<ProjectPr
   }
 }
 
-/** Промпт извлечения профиля (для онбординга / авто-скана репо). */
-export const EXTRACT_PROFILE_PROMPT = [
-  'Собери профиль этого проекта для будущих сессий AI-агента. Пиши ДЛЯ АГЕНТА, не для человека:',
-  'конкретно, без воды, без общих фраз. Изучи README, package.json, структуру src/, конфиги.',
-  `Сохрани результат в файл ${PROFILE_REL_PATH} — валидный JSON с полями (любое опусти, если неизвестно):`,
-  '{ "summary", "goal", "audience", "stack", "conventions", "keyPaths" }',
-].join('\n')

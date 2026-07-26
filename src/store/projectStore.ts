@@ -194,13 +194,12 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   hasActiveChatLane: (chatId: number, isHelp?: boolean) => boolean
   /** Убрать sendId из реестра — обычно при done/error event. */
   forgetSendOwner: (sendId: number) => void
-  /** PerChatState 4.1: ЕДИНАЯ точка мутации bundle одного чата. Активный чат →
-   *  патч top-level полей; фоновой → chatSnapshots[chatId] (нет снапшота →
-   *  freshSnapshot). chatId == null = «текущий активный» (семантика старых
-   *  экшенов без явного chatId). Новые writers пишут ТОЛЬКО через неё. */
+  /** ЕДИНАЯ точка мутации состояния одного чата: патч ложится в chats[chatId]
+   *  (записи ещё нет → freshSnapshot). chatId == null = «текущий активный»
+   *  (семантика старых экшенов без явного chatId). Все writers идут через неё. */
   updateChatBundle: (chatId: number | null, updater: BundleUpdater) => void
-  /** Apply an ai:event to a background CHAT snapshot (within active project,
-   *  but not the active chat). */
+  /** Apply an ai:event to a background chat's record in chats (within the active
+   *  project, but not the active chat). */
   applyEventToChat: (chatId: number, event: { type: string; [k: string]: unknown }) => void
   /** Replace the message list of a background CHAT snapshot. Used by SideChat
    *  to seed persisted history on first open without touching the active chat. */

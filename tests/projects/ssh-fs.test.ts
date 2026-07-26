@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shq, remoteDirname, buildReadCmd, buildWriteCmd, buildListCmd, buildExistsCmd, parseListOutput } from '../../electron/projects/ssh-fs'
+import { shq, remoteDirname, buildReadCmd, buildWriteCmd, buildListCmd, parseListOutput } from '../../electron/projects/ssh-fs'
 
 describe('ssh-fs', () => {
   it('shq экранирует одинарные кавычки', () => {
@@ -21,9 +21,9 @@ describe('ssh-fs', () => {
     expect(buildWriteCmd('/var/www/site/a.css')).toBe("mkdir -p '/var/www/site' && cat > '/var/www/site/a.css'")
   })
 
-  it('buildListCmd / buildExistsCmd', () => {
+
+  it('buildListCmd: ls с экранированным путём', () => {
     expect(buildListCmd('/var/www')).toBe("ls -1Ap -- '/var/www'")
-    expect(buildExistsCmd('/x')).toBe("test -e '/x' && echo __EXISTS__ || echo __MISSING__")
   })
 
   it('parseListOutput: каталоги (с /) vs файлы, мусор отброшен', () => {

@@ -6,7 +6,6 @@ import {
   buildRunWaitResult,
   DEFAULT_AGENT_RUN_TIMEOUT_MS,
   exitReasonToAgentRunStatus,
-  exitReasonToRunStatus,
   isAgentRunTimeoutAbort,
   isTerminalAgentRunStatus,
   MAX_AGENT_RUN_TIMEOUT_MS,
@@ -60,17 +59,13 @@ describe('run lifecycle', () => {
     expect(agentRunStatusToRunStatus('interrupted')).toBe('interrupted')
   })
 
-  it('keeps exit-reason mapping aligned for storage and public status', () => {
+
+  it('exit-reason маппится в статус durable-прогона', () => {
     expect(exitReasonToAgentRunStatus('completed')).toBe('done')
-    expect(exitReasonToRunStatus('completed')).toBe('completed')
     expect(exitReasonToAgentRunStatus('aborted')).toBe('stopped')
-    expect(exitReasonToRunStatus('aborted')).toBe('cancelled')
     expect(exitReasonToAgentRunStatus('timeout')).toBe('timed_out')
-    expect(exitReasonToRunStatus('timeout')).toBe('timed_out')
     expect(exitReasonToAgentRunStatus('crashed')).toBe('failed')
-    expect(exitReasonToRunStatus('crashed')).toBe('failed')
     expect(exitReasonToAgentRunStatus('max-turns')).toBe('done')
-    expect(exitReasonToRunStatus('loop-detected')).toBe('completed')
   })
 
   it('marks only ended storage states as terminal for wait', () => {

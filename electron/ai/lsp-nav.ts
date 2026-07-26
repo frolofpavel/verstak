@@ -68,10 +68,6 @@ export function findSymbolPositions(content: string, symbol: string, limit = 8):
   return out
 }
 
-/** Первое вхождение (back-compat). */
-export function findSymbolPosition(content: string, symbol: string): { line: number; character: number } | null {
-  return findSymbolPositions(content, symbol, 1)[0] ?? null
-}
 
 /** Дождаться готовности анализа (первый publishDiagnostics для файла) или фолбэка. */
 function waitForReadiness(client: LspClient, path: string): Promise<void> {

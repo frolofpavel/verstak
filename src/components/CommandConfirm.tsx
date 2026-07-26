@@ -3,7 +3,6 @@ import { useProject } from '../store/projectStore'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 
 export function CommandConfirm() {
-  // 4.3: bundle-поля читаем из chats (SSOT), не из top-level проекции.
   const pendingCommand = useActiveChatField('pendingCommand') ?? null
   const setPendingCommand = useProject(s => s.setPendingCommand)
   const [remember, setRemember] = useState(false)

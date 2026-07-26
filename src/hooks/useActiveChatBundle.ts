@@ -2,17 +2,15 @@ import { useProject } from '../store/projectStore'
 import type { ChatStateBundle } from '../store/session-snapshot'
 
 /**
- * PerChatState 4.3: единая точка ЧТЕНИЯ bundle активного чата — из chats (SSOT),
- * а не из top-level проекции (top-level bundle-поля будут удалены в 4.4).
+ * Единая точка ЧТЕНИЯ bundle активного чата из chats — единственного хранилища
+ * состояния чатов (PerChatState 4.4).
  *
  * Гранулярность по полю: селектор возвращает само поле, поэтому zustand
- * перерисовывает компонент только при смене ЭТОГО поля (как раньше при чтении
- * top-level поля напрямую). undefined — если активного чата нет.
+ * перерисовывает компонент только при смене ЭТОГО поля. undefined — активного
+ * чата нет.
  *
- * Нюанс helpMode: в справке chats[activeChatId] — ЖИВОЙ фоновый чат (события
- * идут в него), а не замороженная top-level копия, как раньше. Для читателей
- * «состояние проектного чата» это корректнее; Chat.tsx переключает help/проект
- * вручную, как и прежде.
+ * Нюанс helpMode: в справке chats[activeChatId] — ЖИВОЙ проектный чат (события
+ * идут в него). Chat.tsx переключает help/проект вручную.
  */
 export function useActiveChatField<K extends keyof ChatStateBundle>(key: K): ChatStateBundle[K] | undefined {
   return useProject(s => (s.activeChatId != null ? s.chats[s.activeChatId]?.[key] : undefined))

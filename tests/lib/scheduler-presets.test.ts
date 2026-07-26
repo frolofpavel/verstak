@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SCHEDULER_PRESETS, findSchedulerPreset, buildScheduledFixPrompt } from '../../src/lib/scheduler-presets'
+import { SCHEDULER_PRESETS, buildScheduledFixPrompt } from '../../src/lib/scheduler-presets'
 
 /**
  * Хиро-пресеты «AI-дежурного» (1.9.9). Тест лочит их как РЕАЛЬНЫЙ curated-набор,
@@ -37,10 +37,6 @@ describe('scheduler-presets', () => {
     }
   })
 
-  it('findSchedulerPreset: находит по id, null для неизвестного', () => {
-    expect(findSchedulerPreset(SCHEDULER_PRESETS[0].id)?.id).toBe(SCHEDULER_PRESETS[0].id)
-    expect(findSchedulerPreset('нет-такого')).toBeNull()
-  })
 })
 
 describe('buildScheduledFixPrompt — мост дозор→контролируемый фикс', () => {

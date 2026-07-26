@@ -21,7 +21,6 @@ const STEP_COLOR: Record<StepStatus, string> = {
 
 export function PlanView() {
   const { path, setActiveView, addMessage, setStreaming, setRunningPlanStep, activePipeline } = useProject()
-  // 4.3: bundle-поля активного чата — из chats (SSOT), не из top-level проекции.
   const runningPlanStep = useActiveChatField('runningPlanStep') ?? null
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const [plans, setPlans] = useState<Plan[]>([])

@@ -105,15 +105,6 @@ export function isModelValidForProvider(providerId: string, model: string): bool
   return meta.models.includes(model)
 }
 
-/**
- * Резолв сохранённого provider-id. Список известных ID — из shared-контракта, второго
- * allowlist'а в renderer больше нет (см. комментарий вверху файла).
- * Неизвестный id по-прежнему приводит к дефолту (иначе приложение не запустится), но
- * ФАКТ подмены доступен через `resolveStoredProviderId` и попадает в `useProvider`.
- */
-export function parseProviderId(v: string | null | undefined): ProviderId {
-  return resolveStoredProviderId(v).id
-}
 
 const POLL_INTERVAL_MS = 1500
 

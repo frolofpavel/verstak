@@ -314,15 +314,4 @@ export function suggestScoredFromIndex(
     .map(item => ({ skill: item.entry.skill, score: item.score, domain: item.entry.domain }))
 }
 
-/**
- * Наиболее релевантный скилл к черновику или null. Скоринг по пересечению токенов:
- * suggested_prompts (вес 2) + name/description (вес 1). Активный скилл исключён.
- * Удобная обёртка (строит индекс + скорит) — для разовых вызовов и тестов.
- */
-export function suggestSkill(draft: string, skills: Skill[], activeSkillId: string | null): Skill | null {
-  return suggestFromIndex(draft, buildSkillIndex(skills), activeSkillId)
-}
 
-export function suggestSkills(draft: string, skills: Skill[], activeSkillId: string | null, limit = 4): Skill[] {
-  return suggestManyFromIndex(draft, buildSkillIndex(skills), activeSkillId, new Set(), limit)
-}
