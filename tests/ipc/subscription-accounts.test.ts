@@ -63,9 +63,23 @@ describe('toSubscriptionAccountDTO — acceptance: ноль запрещённы
 
   it('DTO содержит РОВНО безопасный whitelist полей', () => {
     const dto = toSubscriptionAccountDTO(FILLED, { hasCredential: true, now: T0 })
+    // 2.1.14: добавлен stats — счётчики наблюдаемости. Пин намеренно строгий: любое новое
+    // поле обязано пройти через этот тест, иначе однажды сюда просочится путь или секрет.
     expect(Object.keys(dto).sort()).toEqual(
-      ['active', 'authMode', 'hasCredential', 'id', 'label', 'lastUsedAt', 'providerId', 'state'].sort()
+      ['active', 'authMode', 'hasCredential', 'id', 'label', 'lastUsedAt', 'providerId', 'state', 'stats'].sort()
     )
+  })
+
+  it('stats несёт только числа и отметки времени — ни строк пути, ни секретов', () => {
+    const dto = toSubscriptionAccountDTO(FILLED, { hasCredential: true, now: T0 })
+    expect(Object.keys(dto.stats).sort()).toEqual([
+      'attempts', 'authFailures', 'cooldowns', 'lastErrorAt', 'lastErrorReason', 'lastSuccessAt',
+      'quotaHits', 'rateLimitHits', 'rotationsIn', 'rotationsOut', 'since', 'successes',
+    ].sort())
+    for (const [k, v] of Object.entries(dto.stats)) {
+      const ok = typeof v === 'number' || v === null || (k === 'lastErrorReason' && typeof v === 'string')
+      expect(ok, `поле stats.${k} несёт неожиданный тип ${typeof v}`).toBe(true)
+    }
   })
 
   it('authMode выводится из формы аккаунта, не из сырых полей', () => {

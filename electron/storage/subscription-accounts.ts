@@ -31,21 +31,87 @@ export interface SubscriptionAccount {
   lastUsedAt: number | null
   /** 2.1.3-EF S5: последний РЕАЛЬНО успешный ответ через этот аккаунт (NULL = не было / нет данных). */
   lastSuccessAt: number | null
+  /** 2.1.14 телеметрия пула. Счётчики durable и растут в тех же транзакциях, что и
+   *  смена состояния аккаунта — «остыл, но не посчитан» невозможно. */
+  stats: SubscriptionAccountStats
 }
 
-interface Row extends Omit<SubscriptionAccount, 'active'> { active: number }
+/**
+ * Наблюдаемость пула аккаунтов. Считаем ФАКТЫ, а не производные: доля успеха и прочее
+ * выводятся потребителем из этих чисел. Ноль здесь означает «ноль с момента statsSince»,
+ * а не «никогда» — историю до включения учёта мы не знаем и не выдумываем.
+ */
+export interface SubscriptionAccountStats {
+  /** Аккаунт выбран для запроса (резолвер отдал его прогону). */
+  attempts: number
+  /** Прогон реально завершился ответом через этот аккаунт. */
+  successes: number
+  /** Сколько раз аккаунт уходил в остывание — ЛЮБАЯ причина. */
+  cooldowns: number
+  quotaHits: number
+  rateLimitHits: number
+  /** Отказы авторизации: аккаунт потребовал повторного входа. */
+  authFailures: number
+  /** Сколько раз с этого аккаунта уводили маршрут. */
+  rotationsOut: number
+  /** Сколько раз маршрут переключали НА этот аккаунт. */
+  rotationsIn: number
+  lastErrorAt: number | null
+  lastErrorReason: string | null
+  /** С какого момента ведётся учёт. NULL — аккаунт заведён до появления телеметрии. */
+  since: number | null
+}
+
+interface Row extends Omit<SubscriptionAccount, 'active' | 'stats'> {
+  active: number
+  attempts_total: number
+  success_total: number
+  cooldown_total: number
+  quota_hits: number
+  rate_limit_hits: number
+  auth_failures: number
+  rotations_out: number
+  rotations_in: number
+  last_error_at: number | null
+  last_error_reason: string | null
+  stats_since: number | null
+}
 
 const SELECT = `
   SELECT id, provider_id as providerId, label, cred_ref as credRef,
          config_dir as configDir, base_url as baseUrl, active, state,
          cooling_until as coolingUntil,
          cooldown_scope as cooldownScope, cooldown_reason as cooldownReason, cooldown_model as cooldownModel,
-         created_at as createdAt, last_used_at as lastUsedAt, last_success_at as lastSuccessAt
+         created_at as createdAt, last_used_at as lastUsedAt, last_success_at as lastSuccessAt,
+         attempts_total, success_total, cooldown_total, quota_hits, rate_limit_hits,
+         auth_failures, rotations_out, rotations_in,
+         last_error_at, last_error_reason, stats_since
   FROM subscription_accounts
 `
 
 function toAccount(r: Row): SubscriptionAccount {
-  return { ...r, active: r.active === 1 }
+  const {
+    attempts_total, success_total, cooldown_total, quota_hits, rate_limit_hits,
+    auth_failures, rotations_out, rotations_in, last_error_at, last_error_reason, stats_since,
+    ...rest
+  } = r
+  return {
+    ...rest,
+    active: r.active === 1,
+    stats: {
+      attempts: attempts_total ?? 0,
+      successes: success_total ?? 0,
+      cooldowns: cooldown_total ?? 0,
+      quotaHits: quota_hits ?? 0,
+      rateLimitHits: rate_limit_hits ?? 0,
+      authFailures: auth_failures ?? 0,
+      rotationsOut: rotations_out ?? 0,
+      rotationsIn: rotations_in ?? 0,
+      lastErrorAt: last_error_at ?? null,
+      lastErrorReason: last_error_reason ?? null,
+      since: stats_since ?? null,
+    },
+  }
 }
 
 export interface CreateAccountInput {
@@ -66,9 +132,9 @@ export function createSubscriptionAccount(db: Database, input: CreateAccountInpu
   const active = hasActive ? 0 : 1
   const info = db.prepare(
     `INSERT INTO subscription_accounts
-       (provider_id, label, cred_ref, config_dir, base_url, active, state, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, NULL)`
-  ).run(input.providerId, input.label, input.credRef, input.configDir ?? null, input.baseUrl ?? null, active, now)
+       (provider_id, label, cred_ref, config_dir, base_url, active, state, created_at, last_used_at, stats_since)
+     VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, NULL, ?)`
+  ).run(input.providerId, input.label, input.credRef, input.configDir ?? null, input.baseUrl ?? null, active, now, now)
   return getSubscriptionAccount(db, Number(info.lastInsertRowid))!
 }
 
@@ -104,8 +170,15 @@ export function renameSubscriptionAccount(db: Database, id: number, label: strin
   db.prepare('UPDATE subscription_accounts SET label = ? WHERE id = ?').run(label, id)
 }
 
+/**
+ * Отметка ПОПЫТКИ: аккаунт выбран для запроса. Единственная точка вызова — резолвер
+ * (ai/resolve-subscription-account.ts), поэтому attempts_total и last_used_at растут
+ * строго вместе: расхождения «использовали, но не посчитали» быть не может.
+ */
 export function touchSubscriptionAccount(db: Database, id: number, when = Date.now()): void {
-  db.prepare('UPDATE subscription_accounts SET last_used_at = ? WHERE id = ?').run(when, id)
+  db.prepare(
+    'UPDATE subscription_accounts SET last_used_at = ?, attempts_total = attempts_total + 1 WHERE id = ?'
+  ).run(when, id)
 }
 
 /**
@@ -113,7 +186,9 @@ export function touchSubscriptionAccount(db: Database, id: number, when = Date.n
  * финиша прогона со статусом done — last_used_at (попытка) ставится раньше, до запроса.
  */
 export function markAccountSuccess(db: Database, id: number, when = Date.now()): void {
-  db.prepare('UPDATE subscription_accounts SET last_success_at = ? WHERE id = ?').run(when, id)
+  db.prepare(
+    'UPDATE subscription_accounts SET last_success_at = ?, success_total = success_total + 1 WHERE id = ?'
+  ).run(when, id)
 }
 
 /** Пометить аккаунт «остывающим» после лимита (до coolingUntil epoch ms). */
@@ -124,11 +199,29 @@ export interface CooldownDetail {
   model?: string | null
 }
 
-export function markAccountCooling(db: Database, id: number, coolingUntil: number | null, detail?: CooldownDetail): void {
+export function markAccountCooling(db: Database, id: number, coolingUntil: number | null, detail?: CooldownDetail, when = Date.now()): void {
   const state = detail?.reason === 'auth' && coolingUntil == null ? 'invalid' : 'cooling'
+  const reason = detail?.reason ?? null
+  // 2.1.14: cooldown_total считает ЛЮБОЕ охлаждение, именованные счётчики — разбивку.
+  // Так «прочие» причины (unknown / provider-unavailable) не исчезают из картины:
+  // их всегда можно получить как total минус сумма именованных.
   db.prepare(
-    'UPDATE subscription_accounts SET state = ?, cooling_until = ?, cooldown_scope = ?, cooldown_reason = ?, cooldown_model = ? WHERE id = ?'
-  ).run(state, coolingUntil, detail?.scope ?? null, detail?.reason ?? null, detail?.model ?? null, id)
+    `UPDATE subscription_accounts
+        SET state = ?, cooling_until = ?, cooldown_scope = ?, cooldown_reason = ?, cooldown_model = ?,
+            cooldown_total = cooldown_total + 1,
+            quota_hits = quota_hits + ?,
+            rate_limit_hits = rate_limit_hits + ?,
+            auth_failures = auth_failures + ?,
+            last_error_at = ?, last_error_reason = ?
+      WHERE id = ?`
+  ).run(
+    state, coolingUntil, detail?.scope ?? null, reason, detail?.model ?? null,
+    reason === 'quota' ? 1 : 0,
+    reason === 'rate-limit' ? 1 : 0,
+    reason === 'auth' ? 1 : 0,
+    when, reason ?? 'unknown',
+    id,
+  )
 }
 
 /** Вернуть аккаунт в готовое состояние (лимит сброшен / вручную). Чистит и scoped-поля. */
@@ -177,6 +270,9 @@ export function switchActiveOnLimit(db: Database, providerId: string, coolingUnt
     if (!candidate) return { switched: false }
     clearCooling(db, candidate.id)
     setActiveAccount(db, providerId, candidate.id)
+    // Ротация считается на ОБОИХ концах: видно и кто отдаёт нагрузку, и кто её принимает.
+    if (current) db.prepare('UPDATE subscription_accounts SET rotations_out = rotations_out + 1 WHERE id = ?').run(current.id)
+    db.prepare('UPDATE subscription_accounts SET rotations_in = rotations_in + 1 WHERE id = ?').run(candidate.id)
     return { switched: true, newAccountId: candidate.id, fromLabel: current?.label ?? null, toLabel: candidate.label }
   })
   return tx()

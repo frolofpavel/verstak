@@ -1362,6 +1362,38 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.exec("ALTER TABLE pipeline_runs ADD COLUMN effort_level TEXT NOT NULL DEFAULT 'controlled'")
       }
     }
+  },
+  {
+    version: 59,
+    description: '2.1.14 телеметрия пула подписок: durable-счётчики попыток, успехов, лимитов, отказов входа и ротаций на subscription_accounts. stats_since — момент начала учёта: у существующих аккаунтов история до миграции неизвестна, и без этой отметки «0 попыток» читалось бы как «аккаунтом не пользовались», то есть врало бы. Счётчики NOT NULL DEFAULT 0 — считаем от нуля, но честно говорим, с какого момента.',
+    run: (db: DB) => {
+      const hasTable = Boolean(
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subscription_accounts'").get(),
+      )
+      if (!hasTable) return
+      const cols = (db.prepare('PRAGMA table_info(subscription_accounts)').all() as Array<{ name: string }>).map(c => c.name)
+      const counters = [
+        'attempts_total',
+        'success_total',
+        'cooldown_total',
+        'quota_hits',
+        'rate_limit_hits',
+        'auth_failures',
+        'rotations_out',
+        'rotations_in',
+      ]
+      for (const c of counters) {
+        if (!cols.includes(c)) db.exec(`ALTER TABLE subscription_accounts ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`)
+      }
+      if (!cols.includes('last_error_at')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN last_error_at INTEGER')
+      if (!cols.includes('last_error_reason')) db.exec('ALTER TABLE subscription_accounts ADD COLUMN last_error_reason TEXT')
+      if (!cols.includes('stats_since')) {
+        db.exec('ALTER TABLE subscription_accounts ADD COLUMN stats_since INTEGER')
+        // Существующим аккаунтам ставим момент миграции: до него счётчиков не было,
+        // и приписывать им нули задним числом нельзя.
+        db.prepare('UPDATE subscription_accounts SET stats_since = ? WHERE stats_since IS NULL').run(Date.now())
+      }
+    }
   }
 ]
 

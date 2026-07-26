@@ -20412,6 +20412,17 @@ html[data-theme="light"] .gg-policy {
   color: var(--accent);
 }
 .gg-subacct-spacer { flex: 1; }
+/* 2.1.14 телеметрия пула: справочная строка счётчиков в строке аккаунта. Приглушена —
+   это фон для решения, а не статус. is-alarming зажигается, когда попытки идут, а
+   ответов нет: аккаунт формально «готов», но маршрут через него не доходит до результата. */
+.gg-subacct-telemetry {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  margin-right: 8px;
+  cursor: default;
+}
+.gg-subacct-telemetry.is-alarming { color: var(--warning, #d08770); font-weight: 600; }
 .gg-subacct-use { padding: 2px 8px !important; font-size: 12px !important; }
 .gg-subacct-action {
   width: 22px;

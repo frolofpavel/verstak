@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { SubscriptionAccountDto, SubscriptionDoctorReportDTO } from '../../types/api'
+import { formatAccountTelemetry } from '../../lib/subscription-telemetry'
 
 // Срез 2.1.3-A/B: вкладка «Подписки» — ЕДИНЫЙ центр управления подписочными аккаунтами
 // (раньше была read-only обзором, а управление жило дублирующими панелями в карточках
@@ -59,6 +60,9 @@ function AccountRow({ a, doctorBusy, onActivate, onLogin, onDoctor, onRename, on
 }) {
   const until = (ms: number | null) =>
     ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+  // 2.1.14: накопленная статистика аккаунта. «Нет данных» и «ноль» показываются
+  // по-разному — см. formatAccountTelemetry.
+  const tele = formatAccountTelemetry(a.stats)
   return (
     <div className={`gg-subacct-item${a.active ? ' is-active' : ''}`}>
       <span className={`gg-subacct-dot${a.active ? ' is-active' : ''}${a.state === 'cooling' ? ' is-cooling' : ''}`} />
@@ -81,6 +85,12 @@ function AccountRow({ a, doctorBusy, onActivate, onLogin, onDoctor, onRename, on
         {doctorBusy ? 'Проверяю…' : 'Проверить'}
       </button>
       <span className="gg-subacct-spacer" />
+      <span
+        className={`gg-subacct-telemetry${tele.alarming ? ' is-alarming' : ''}`}
+        title={tele.detail || undefined}
+      >
+        {tele.line}
+      </span>
       <button type="button" className="gg-subacct-action" title="Переименовать" onClick={onRename}>✎</button>
       <button type="button" className="gg-subacct-action" title="Удалить" onClick={onRemove}>✕</button>
     </div>

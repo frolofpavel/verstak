@@ -32,6 +32,28 @@ export interface SubscriptionAccountDTO {
   cooldown?: SubscriptionCooldownDTO
   lastUsedAt: number | null
   hasCredential: boolean
+  /** 2.1.14: наблюдаемость пула. Только факты — производные считает потребитель. */
+  stats: SubscriptionAccountStatsDTO
+}
+
+/**
+ * Счётчики аккаунта. Ноль здесь значит «ноль с момента since», а не «никогда»:
+ * до включения телеметрии история не велась, и приписывать аккаунту нули задним
+ * числом нельзя. since=null — аккаунт заведён до появления учёта.
+ */
+export interface SubscriptionAccountStatsDTO {
+  attempts: number
+  successes: number
+  cooldowns: number
+  quotaHits: number
+  rateLimitHits: number
+  authFailures: number
+  rotationsOut: number
+  rotationsIn: number
+  lastErrorAt: number | null
+  lastErrorReason: string | null
+  lastSuccessAt: number | null
+  since: number | null
 }
 
 /** Привязка чата к аккаунту. pin — свойство КОНКРЕТНОГО чата, не глобальный флаг аккаунта. */
@@ -58,6 +80,8 @@ export interface SubscriptionAccountSource {
   credRef?: string
   configDir?: string | null
   baseUrl?: string | null
+  lastSuccessAt?: number | null
+  stats?: Partial<SubscriptionAccountStatsDTO>
   active: boolean
   state?: string | null
   coolingUntil?: number | null
@@ -105,6 +129,21 @@ export function toSubscriptionAccountDTO(
     active: src.active,
     lastUsedAt: src.lastUsedAt,
     hasCredential: opts.hasCredential,
+    stats: {
+      attempts: src.stats?.attempts ?? 0,
+      successes: src.stats?.successes ?? 0,
+      cooldowns: src.stats?.cooldowns ?? 0,
+      quotaHits: src.stats?.quotaHits ?? 0,
+      rateLimitHits: src.stats?.rateLimitHits ?? 0,
+      authFailures: src.stats?.authFailures ?? 0,
+      rotationsOut: src.stats?.rotationsOut ?? 0,
+      rotationsIn: src.stats?.rotationsIn ?? 0,
+      lastErrorAt: src.stats?.lastErrorAt ?? null,
+      lastErrorReason: src.stats?.lastErrorReason ?? null,
+      lastSuccessAt: src.lastSuccessAt ?? null,
+      // null доезжает как null: «учёт не вёлся» и «учёт начат тогда-то» — разные факты.
+      since: src.stats?.since ?? null,
+    },
   }
 
   // cooldown прикрепляем ТОЛЬКО когда итоговое состояние действительно 'cooling' (ревью
@@ -139,6 +178,7 @@ export type SubscriptionDoctorCheckId =
   | 'last-use'       // последняя ПОПЫТКА использования (lastUsedAt пишется до результата;
                      // настоящий lastSuccessAt — осознанный долг, нужен touch после ответа)
   | 'route'          // как прогон идёт в аккаунт (конфигурация маршрута, без запуска)
+  | 'telemetry'      // накопленные счётчики: попытки, ответы, лимиты, ротации (2.1.14)
 
 export interface SubscriptionDoctorCheckDTO {
   id: SubscriptionDoctorCheckId

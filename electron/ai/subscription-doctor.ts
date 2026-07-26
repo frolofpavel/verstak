@@ -220,6 +220,34 @@ function lastUseCheck(account: SubscriptionAccount): SubscriptionDoctorCheckDTO 
     : { id: 'last-use', status: 'info', label: 'Аккаунт ещё не использовался.' }
 }
 
+/**
+ * 2.1.14: что накопила телеметрия пула. Статус — 'info', кроме случая, когда аккаунт
+ * систематически не отвечает: попытки были, успехов ноль. Это не «ошибка прямо сейчас»
+ * (её показывают cooldown/credential), а сигнал «маршрут сюда не работает».
+ *
+ * Ноль попыток НЕ выдаётся за «аккаунт не используется»: если учёт начат недавно,
+ * честнее сказать именно это.
+ */
+function telemetryCheck(account: SubscriptionAccount): SubscriptionDoctorCheckDTO {
+  const st = account.stats
+  if (!st || st.since == null) {
+    return { id: 'telemetry', status: 'info', label: 'Статистика по этому аккаунту пока не велась.' }
+  }
+  const since = new Date(st.since).toLocaleDateString()
+  if (st.attempts === 0) {
+    return { id: 'telemetry', status: 'info', label: `С ${since} аккаунт ни разу не выбирался для запроса.` }
+  }
+  const parts = [`попыток ${st.attempts}`, `ответов ${st.successes}`]
+  if (st.cooldowns > 0) parts.push(`лимитов и отказов ${st.cooldowns}`)
+  if (st.rotationsOut > 0) parts.push(`уводов ${st.rotationsOut}`)
+  const body = `С ${since}: ${parts.join(', ')}.`
+  // Попытки есть, ответов нет — маршрут до аккаунта не доходит до результата.
+  if (st.successes === 0) {
+    return { id: 'telemetry', status: 'warn', label: `${body} Ни одного успешного ответа — проверь вход и лимиты.` }
+  }
+  return { id: 'telemetry', status: 'info', label: body }
+}
+
 function routeCheck(f: DoctorFacts): SubscriptionDoctorCheckDTO {
   return {
     id: 'route', status: 'info',
@@ -273,7 +301,7 @@ export function runSubscriptionDoctor(
   deps: SubscriptionDoctorDeps,
 ): SubscriptionDoctorReportDTO {
   const f = collectFacts(account, deps)
-  // Всегда все 8 проверок; неприменимое — честный 'info' (на итог не влияет).
+  // Всегда все 9 проверок; неприменимое — честный 'info' (на итог не влияет).
   const checks: SubscriptionDoctorCheckDTO[] = [
     configDirCheck(f),
     credentialCheck(f),
@@ -282,6 +310,7 @@ export function runSubscriptionDoctor(
     modelsCheck(account),
     cooldownCheck(account, f),
     lastUseCheck(account),
+    telemetryCheck(account),
     routeCheck(f),
   ]
   const overall: SubscriptionDoctorReportDTO['overall'] =

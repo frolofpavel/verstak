@@ -39,6 +39,11 @@ function acct(over: Partial<SubscriptionAccount> = {}): SubscriptionAccount {
     createdAt: NOW - 1000,
     lastUsedAt: null,
     lastSuccessAt: null,
+    stats: {
+      attempts: 0, successes: 0, cooldowns: 0, quotaHits: 0, rateLimitHits: 0,
+      authFailures: 0, rotationsOut: 0, rotationsIn: 0,
+      lastErrorAt: null, lastErrorReason: null, since: NOW - 1000,
+    },
     ...over,
   }
 }
@@ -207,12 +212,59 @@ describe('subscription-doctor — config-dir аккаунт (Codex, CODEX_HOME)'
 })
 
 describe('subscription-doctor — форма отчёта', () => {
-  it('все 8 проверок присутствуют (last-use, не last-success), checkedAt = now', () => {
+  it('все 9 проверок присутствуют (last-use, не last-success), checkedAt = now', () => {
     const r = runSubscriptionDoctor(acct(), { hasCredential: () => true, now: NOW })
     expect(r.checks.map(c => c.id).sort()).toEqual(
-      ['config-dir', 'cooldown', 'credential', 'last-use', 'models', 'oauth-expiry', 'refresh', 'route'].sort(),
+      ['config-dir', 'cooldown', 'credential', 'last-use', 'models', 'oauth-expiry', 'refresh', 'route', 'telemetry'].sort(),
     )
     expect(r.checkedAt).toBe(NOW)
     expect(r.accountId).toBe(7)
+  })
+})
+
+describe('subscription-doctor — телеметрия пула (2.1.14)', () => {
+  const withStats = (over: Record<string, number | string | null>) =>
+    acct({ stats: {
+      attempts: 0, successes: 0, cooldowns: 0, quotaHits: 0, rateLimitHits: 0,
+      authFailures: 0, rotationsOut: 0, rotationsIn: 0,
+      lastErrorAt: null, lastErrorReason: null, since: NOW - 86_400_000,
+      ...over,
+    } as never })
+
+  const tele = (a: ReturnType<typeof acct>) =>
+    runSubscriptionDoctor(a, { hasCredential: () => true, now: NOW }).checks.find(c => c.id === 'telemetry')!
+
+  it('учёт не вёлся — так и говорим, а не показываем нули', () => {
+    const c = tele(acct({ stats: { since: null } as never }))
+    expect(c.status).toBe('info')
+    expect(c.label).toMatch(/не велась/i)
+    expect(c.label, 'ноль без контекста читался бы как «не пользовались»').not.toMatch(/0/)
+  })
+
+  it('учёт есть, попыток нет — «ни разу не выбирался», с датой начала учёта', () => {
+    const c = tele(withStats({ attempts: 0 }))
+    expect(c.status).toBe('info')
+    expect(c.label).toMatch(/ни разу не выбирался/i)
+  })
+
+  it('попытки и ответы есть — обычная сводка без тревоги', () => {
+    const c = tele(withStats({ attempts: 12, successes: 11, cooldowns: 1, rotationsOut: 1 }))
+    expect(c.status).toBe('info')
+    expect(c.label).toContain('попыток 12')
+    expect(c.label).toContain('ответов 11')
+    expect(c.label).toContain('лимитов и отказов 1')
+    expect(c.label).toContain('уводов 1')
+  })
+
+  it('попытки есть, ответов ноль — предупреждение: маршрут не доходит до результата', () => {
+    const c = tele(withStats({ attempts: 5, successes: 0 }))
+    expect(c.status).toBe('warn')
+    expect(c.label).toMatch(/Ни одного успешного ответа/i)
+  })
+
+  it('нулевые счётчики не попадают в сводку — она не должна быть шумной', () => {
+    const c = tele(withStats({ attempts: 3, successes: 3 }))
+    expect(c.label).not.toMatch(/лимитов/i)
+    expect(c.label).not.toMatch(/уводов/i)
   })
 })
