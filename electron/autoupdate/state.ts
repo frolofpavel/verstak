@@ -157,11 +157,3 @@ export function acquireLock(operation: string, version?: string): () => void {
     try { rmSync(path, { force: true }) } catch { /* ignore */ }
   }
 }
-
-export function fileSize(path: string): number {
-  try {
-    return statSync(path).size
-  } catch {
-    return 0
-  }
-}
