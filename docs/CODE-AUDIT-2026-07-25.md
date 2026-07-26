@@ -92,6 +92,44 @@
 
 Остаток среза B: high advisory в `onnxruntime-node/adm-zip`, `sharp/libvips` и `exceljs/archiver`. Автоматический `--force` запрещён: npm предлагает несовместимые откаты. Закрывать через обновление upstream/замену XLSX backend с отдельными smoke-тестами.
 
+### 2.2.2 — Supply-chain: разбор 14 advisories (2026-07-26)
+
+14 advisories оказались не 14 проблемами, а **тремя корнями**. Разбор вёлся от
+достижимости, а не от номера CVE: «есть advisory» и «нас это касается» — разные
+утверждения, и второе требует доказательства.
+
+**Корень 1 — цепочка exceljs (9 advisories).** exceljs 4.4.0 — последний релиз,
+пиннит archiver ^5, оттуда тянутся archiver-utils / zip-stream / readdir-glob /
+glob / minimatch / brace-expansion и uuid. Единственный «fix» от npm — exceljs
+**3.4.0**, то есть откат на мажор назад: это не исправление, а регрессия
+xlsx-функции. Вместо него применены два точечных override:
+
+- `brace-expansion ^5.0.8` — патч-уровень над уязвимым `<=5.0.7`; снял сразу 8
+  advisories, потому что minimatch/glob/archiver-цепочка висела именно на нём;
+- `uuid ^11.1.1` — exceljs просит `^8.3.0`, но использует только `v4()`, чей
+  контракт в 11.x не менялся; проверено `tests/ai/office-tools.test.ts` (7/7).
+
+**Корень 2 — @huggingface/transformers → onnxruntime-node → adm-zip (2).**
+Upstream-фикса нет. Достижимость: adm-zip распаковывает СОБСТВЕННЫЕ бинарники
+onnxruntime с фиксированного CDN на этапе установки. Verstak не подаёт туда
+пользовательские архивы, поэтому «crafted ZIP → 4 ГБ аллокации» через наш путь
+не воспроизводится.
+
+**Корень 3 — @huggingface/transformers → sharp/libvips (2).** Upstream-фикса нет.
+Достижимость: **отсутствует**. `sharp` в коде Verstak не импортируется вообще, а
+transformers подключается ровно в одном месте — `electron/voice/local-stt.ts` — и
+только для `automatic-speech-recognition`. sharp там image-backend; ASR-конвейер
+его не трогает.
+
+Итог: **14 → 4** production advisories. Все четыре оставшихся — цепочка
+transformers без upstream-фикса и без достижимого пути. `npm audit fix` (без
+--force) отдельно проверен: меняет 3 пакета в lock и не убирает НИ ОДНОГО
+advisory — чистый шум, откачен.
+
+Пересматривать при: появлении transformers без sharp/onnxruntime-node, релизе
+exceljs 5.x, либо если в Verstak появится обработка изображений через sharp или
+распаковка пользовательских архивов.
+
 ### 2.1.10 — Декомпозиция agent runtime (P1)
 
 Проблема:
