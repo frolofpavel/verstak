@@ -165,7 +165,10 @@ export const CHAT_API_DEFAULTS: ApiOverrides = {
   chatSessions: { list: async () => [], listReviews: async () => [] },
   agentRuns: { list: async () => [], sessionStats: async () => null },
   settings: { getKey: async () => null },
-  skills: { list: async () => [] },
+  // skillStore.refresh читает ФОРМУ ответа (status.lastRefreshAt / .serverReachable).
+  // Без этого дефолта status() отдаёт undefined, refresh падает в catch — и стор уходит
+  // в бесконечный перезапрос: под act() это вешало прогон наглухо (2.1.11-B).
+  skills: { list: async () => [], status: async () => ({ lastRefreshAt: null, serverReachable: false }) },
   undo: { count: async () => 0 },
   suggestions: { get: async () => [] },
   files: { tree: async () => [] },

@@ -63,6 +63,10 @@ import {
   isSameLocalDay,
 } from '../lib/chat-timestamps'
 import { ComposerPendingBar } from './ComposerPendingBar'
+// Декомпозиция Chat.tsx (2.1.11 срез B): узлы композера вынесены в chat/*.
+import { ComposerSkillBar } from './chat/ComposerSkillBar'
+import { ComposerBudgetBar } from './chat/ComposerBudgetBar'
+import { buildSystemSlashCommands } from './chat/system-slash-commands'
 import {
   CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
@@ -3468,143 +3472,31 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         )}
         {warning && <div className="gg-composer-warning">{warning}</div>}
         {exhausted && !isStreaming && (
-          <div className="gg-budget-bar">
-            <span>⏸ Бюджет {exhausted.used} ходов исчерпан — задача не завершена.</span>
-            <div className="gg-budget-actions">
-              <button
-                className="gg-btn gg-btn-primary"
-                onClick={() => void continueWithMoreTurns()}
-                title={`Продолжить с тем же контекстом, +${exhausted.suggestedAdd} ходов`}
-              >+{exhausted.suggestedAdd} ходов</button>
-              <button
-                className="gg-btn gg-btn-ghost"
-                onClick={() => setExhausted(null)}
-              >Закрыть</button>
-            </div>
-          </div>
+          <ComposerBudgetBar
+            used={exhausted.used}
+            suggestedAdd={exhausted.suggestedAdd}
+            onContinue={() => void continueWithMoreTurns()}
+            onClose={() => setExhausted(null)}
+          />
         )}
-        {appliedSkills.length > 0 && (
-          <div className="gg-applied-skills-draft" aria-label="Скиллы, применённые к текущему сообщению">
-            <span className="gg-applied-skills-draft-label">К сообщению применено</span>
-            <div className="gg-applied-skills-draft-list">
-              {appliedSkills.map(skill => (
-                <span key={skill.id} className="gg-applied-skill-chip">
-                  {skill.icon && <span aria-hidden>{skill.icon}</span>}
-                  <span>{skillDisplayName(skill)}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeAppliedSkill(skill.id)}
-                    title={`Убрать скилл ${skillDisplayName(skill)} из этого сообщения`}
-                    aria-label={`Убрать скилл ${skillDisplayName(skill)} из этого сообщения`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        {!isHelpChat && activeSkillForComposer && (
-          <div className="gg-active-skill-bar">
-            <div className="gg-active-skill-main">
-              <span className="gg-active-skill-dot" aria-hidden />
-              <span className="gg-active-skill-kicker">Активен скилл</span>
-              <strong>{skillDisplayName(activeSkillForComposer)}</strong>
-              <span className="gg-active-skill-detail">следующее сообщение пойдёт по его инструкции</span>
-            </div>
-            <button
-              type="button"
-              className="gg-active-skill-clear"
-              onClick={() => useSkillsStore.getState().setActiveSkill(null)}
-            >
-              Снять
-            </button>
-          </div>
-        )}
-        {!isHelpChat && skillSuggestionsToast != null && (
-          <div className="gg-skill-suggest-toast" role="status" aria-live="polite">
-            Рекомендации скиллов скрыты. Вернуть их можно в «Инструментах чата».
-          </div>
-        )}
-        {suggestedRecipe && (
-          <div className="gg-skill-suggest is-recipe">
-            <div className="gg-skill-suggest-icon" aria-hidden>{suggestedRecipe.icon ?? '◎'}</div>
-            <div className="gg-skill-suggest-main">
-              <div className="gg-skill-suggest-kicker">Рекомендованный workflow</div>
-              <div className="gg-skill-suggest-title">{skillDisplayName(suggestedRecipe)}</div>
-              <div className="gg-skill-suggest-detail">
-                Применится только к этому сообщению и даст модели строгий порядок работы.
-              </div>
-            </div>
-            <button
-              type="button"
-              className="gg-skill-suggest-accept"
-              onClick={() => applySkillToCurrentMessage(suggestedRecipe)}
-            >Применить</button>
-            <button
-              type="button"
-              className="gg-skill-suggest-project-off"
-              onClick={() => setProjectSkillSuggestionsEnabled(false)}
-              title="Отключить рекомендации скиллов в этом проекте"
-            >Не показывать</button>
-            <button
-              type="button"
-              className="gg-skill-suggest-dismiss"
-              onClick={() => setDismissedRecipeId(suggestedRecipe.id)}
-              title="Скрыть предложение"
-            >×</button>
-          </div>
-        )}
-        {suggestedSkills.length > 0 && !suggestedRecipe && (
-          <div className="gg-skill-suggest">
-            <div className="gg-skill-suggest-icon" aria-hidden>{suggestedSkills.length === 1 ? (suggestedSkills[0].icon ?? '◎') : '＋'}</div>
-            <div className="gg-skill-suggest-main">
-              <div className="gg-skill-suggest-kicker">
-                {suggestedSkills.length === 1 ? 'Рекомендованный скилл' : 'Рекомендованные скиллы'}
-              </div>
-              <div className="gg-skill-suggest-title">
-                {suggestedSkills.length === 1 ? skillDisplayName(suggestedSkills[0]) : `${suggestedSkills.length} регламента под задачу`}
-              </div>
-              <div className="gg-skill-suggest-detail">
-                Подключаются только к текущему сообщению и передаются модели как прямое указание.
-              </div>
-              <div className="gg-skill-suggest-chips" aria-label="Подходящие скиллы">
-                {suggestedSkills.map(skill => (
-                  <span key={skill.id} className="gg-skill-suggest-chip">
-                    {skill.icon && <span aria-hidden>{skill.icon}</span>}
-                    <span>{skillDisplayName(skill)}</span>
-                    <button
-                      type="button"
-                      onClick={() => applySkillToCurrentMessage(skill)}
-                      title={`Применить ${skillDisplayName(skill)} к текущему сообщению`}
-                    >+</button>
-                  </span>
-                ))}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="gg-skill-suggest-accept"
-              onClick={() => suggestedSkills.forEach(skill => applySkillToCurrentMessage(skill))}
-            >{suggestedSkills.length === 1 ? 'Применить' : 'Применить все'}</button>
-            <button
-              type="button"
-              className="gg-skill-suggest-project-off"
-              onClick={() => setProjectSkillSuggestionsEnabled(false)}
-              title="Отключить рекомендации скиллов в этом проекте"
-            >Не показывать</button>
-            <button
-              type="button"
-              className="gg-skill-suggest-dismiss"
-              onClick={() => setDismissedSuggestIds(prev => {
-                const next = new Set(prev)
-                suggestedSkills.forEach(skill => next.add(skill.id))
-                return next
-              })}
-              title="Скрыть предложение"
-            >×</button>
-          </div>
-        )}
+        <ComposerSkillBar
+          appliedSkills={appliedSkills}
+          onRemoveApplied={removeAppliedSkill}
+          activeSkill={activeSkillForComposer}
+          onClearActiveSkill={() => useSkillsStore.getState().setActiveSkill(null)}
+          showSuggestionsHiddenToast={skillSuggestionsToast != null}
+          suggestedRecipe={suggestedRecipe}
+          suggestedSkills={suggestedSkills}
+          onApplySkill={applySkillToCurrentMessage}
+          onDisableSuggestions={() => setProjectSkillSuggestionsEnabled(false)}
+          onDismissRecipe={id => setDismissedRecipeId(id)}
+          onDismissSkills={skills => setDismissedSuggestIds(prev => {
+            const next = new Set(prev)
+            skills.forEach(skill => next.add(skill.id))
+            return next
+          })}
+          isHelpChat={isHelpChat}
+        />
         <div className="gg-composer-inner">
           {!isHelpChat && (
             <MentionPopup
@@ -3619,52 +3511,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             onInject={text => setInput(text)}
             projectPath={activePath}
             helpScope={isHelpChat}
-            systemCommands={isHelpChat ? [] : [
-              {
-                kind: 'system',
-                trigger: 'new',
-                label: 'Новый чат',
-                description: 'Создать новый чат в проекте',
-                icon: '➕',
-                action: () => { void useProject.getState().newChatSession() }
-              },
-              {
-                kind: 'system',
-                trigger: 'clear',
-                label: 'Очистить контекст',
-                description: 'Снять активный скилл (сообщения остаются)',
-                icon: '∅',
-                action: () => { useSkillsStore.getState().setActiveSkill(null) }
-              },
-              // Мультиагент: системные команды инжектят шаблон в композер. Сам
-              // execute() в popup после action() зовёт onClear() (= setInput('')),
-              // поэтому ставим значение в следующий тик, иначе очистка перетрёт
-              // шаблон. Курсор остаётся в textarea — пользователь дописывает цель.
-              {
-                kind: 'system',
-                trigger: MULTI_AGENT_TEMPLATES.orchestrate.trigger,
-                label: MULTI_AGENT_TEMPLATES.orchestrate.label,
-                description: 'Оркестратор — разбить цель на подзадачи по ролям',
-                icon: MULTI_AGENT_TEMPLATES.orchestrate.icon,
-                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.orchestrate.template)
-              },
-              {
-                kind: 'system',
-                trigger: MULTI_AGENT_TEMPLATES.swarm.trigger,
-                label: MULTI_AGENT_TEMPLATES.swarm.label,
-                description: 'Рой — N агентов разными стратегиями + арбитр',
-                icon: MULTI_AGENT_TEMPLATES.swarm.icon,
-                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.swarm.template)
-              },
-              {
-                kind: 'system',
-                trigger: MULTI_AGENT_TEMPLATES.parallel.trigger,
-                label: MULTI_AGENT_TEMPLATES.parallel.label,
-                description: 'Параллельно — пакет независимых задач суб-агентам',
-                icon: MULTI_AGENT_TEMPLATES.parallel.icon,
-                action: () => injectTemplate(MULTI_AGENT_TEMPLATES.parallel.template)
-              }
-            ]}
+            systemCommands={isHelpChat ? [] : buildSystemSlashCommands({
+              newChatSession: () => { void useProject.getState().newChatSession() },
+              clearActiveSkill: () => { useSkillsStore.getState().setActiveSkill(null) },
+              injectTemplate,
+            })}
           />
           <textarea
             ref={textareaRef}
