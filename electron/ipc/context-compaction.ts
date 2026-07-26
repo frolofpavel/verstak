@@ -7,6 +7,8 @@ import { summarizeOnce } from '../ai/summarize-once'
 import { hasActiveRunForChat } from '../ai/runner-shared'
 import { snapshotHistory } from '../storage/chat-context-snapshots'
 import type { CompactableMessage } from '../ai/manual-compaction'
+import { capturePreCompressMemories } from '../ai/memory-lifecycle'
+import { listMemories, saveMemory } from '../storage/memories'
 import { logRuntime } from '../runtime-log'
 
 /**
@@ -21,6 +23,10 @@ export interface ContextCompactionDeps {
   chats: Chats
   /** Провайдер для summary. null — нет ключей/настроек (честная ошибка, не молчание). */
   createSummaryProvider: () => { provider: ChatProvider; providerId: string; model: string | null } | null
+  /** Проект чата — граница памяти события pre-compress. null = писать некуда. */
+  chatProjectPath: (chatId: number) => string | null
+  /** Настройка memory lifecycle. По умолчанию событие включено. */
+  isMemoryLifecycleEnabled?: () => boolean
 }
 
 /**
@@ -71,6 +77,40 @@ export function registerContextCompactionIpc(deps: ContextCompactionDeps): void 
       now: () => Date.now(),
       providerId: resolved.providerId,
       model: resolved.model,
+      // memory lifecycle `pre-compress` (2.1.13): забрать решения и факты из части,
+      // которая уходит под сжатие. Извлечение идёт тем же одноразовым путём, что и
+      // summary — вне agent-loop и без инструментов.
+      captureMemories: async input => {
+        const projectPath = deps.chatProjectPath(chatId)
+        const outcome = await capturePreCompressMemories({
+          projectPath,
+          messages: input.compacted.map(m => ({ role: m.role, content: m.content })),
+          previousSummary: input.previousSummary,
+          enabled: deps.isMemoryLifecycleEnabled?.() ?? true,
+          extract: prompt => summarizeOnce(resolved.provider, [
+            { role: 'system', content: prompt.system },
+            { role: 'user', content: prompt.user },
+          ]),
+          existingContents: () => projectPath ? listMemories(deps.db, projectPath).map(m => m.content) : [],
+          // Атомарность пачки: либо записаны все отобранные факты, либо ни одного.
+          // Полупачка — худший исход: часть решений сохранена, часть потеряна, и понять
+          // чего не хватает уже нельзя.
+          saveBatch: (project, items) => {
+            deps.db.transaction(() => {
+              for (const item of items) saveMemory(deps.db, project, item.type, item.content, item.tags)
+            })()
+          },
+        })
+        logRuntime('memory.lifecycle.pre_compress', {
+          chatId,
+          projectPath,
+          ok: outcome.ok,
+          saved: outcome.saved,
+          skipped: outcome.skipped,
+          redacted: outcome.redacted,
+          reason: outcome.reason ?? null,
+        }, outcome.ok ? 'info' : 'warn')
+      },
     })
 
     if (result.ok) {

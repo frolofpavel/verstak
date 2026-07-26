@@ -853,6 +853,9 @@ app.whenReady().then(() => {
         model: gated.model,
       }
     },
+    // memory lifecycle `pre-compress` (2.1.13): память пишется строго в проект чата.
+    chatProjectPath: chatId => chatSessions.get(chatId)?.projectPath ?? null,
+    isMemoryLifecycleEnabled: () => getSecret('memory_lifecycle') !== 'false',
   })
   registerPlansIpc(plans)
   registerWorkflowsIpc({

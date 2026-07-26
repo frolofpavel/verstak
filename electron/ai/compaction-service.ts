@@ -27,6 +27,14 @@ export interface CompactionDeps {
   now: () => number
   providerId?: string | null
   model?: string | null
+  /** Событие memory lifecycle `pre-compress` (2.1.13). Вызывается ПОСЛЕ успешной записи
+   *  снапшота: до неё сжатие ещё может сорваться, и память бы копилась за каждую
+   *  неудачную попытку. Результат на CompactionResult не влияет — см. ниже. */
+  captureMemories?: (input: {
+    compacted: CompactableMessage[]
+    previousSummary: string
+    throughMessageId: number
+  }) => Promise<unknown>
 }
 
 export type CompactionResult =
@@ -81,6 +89,12 @@ async function runCompaction(
   const boundary = pickBoundary(messages)
   if (!boundary.ok) return { ok: false, reason: 'nothing-to-compact', detail: boundary.detail }
 
+  // Итог ПРЕДЫДУЩЕГО сжатия — для события pre-compress. Второе сжатие видит в
+  // messages и то, что уже покрыто прошлым снапшотом; без этого текста экстрактор
+  // достал бы те же факты ещё раз, только другими словами (дедуп по тексту такое
+  // уже не поймает).
+  const previousSummary = activeSnapshot(db, chatId)?.summary ?? ''
+
   // 2. Фиксируем максимум ДО долгого вызова модели — это и есть страж гонки.
   const sourceMax = maxMessageId(db, chatId)
 
@@ -123,6 +137,20 @@ async function runCompaction(
       }
     }
     return { ok: false, reason: 'nothing-to-compact', detail: saved.detail }
+  }
+
+  // 5. memory lifecycle `pre-compress`. Сжатая часть диалога больше не уйдёт модели —
+  // до этого момента из неё надо забрать то, что изменит следующую работу. Строго
+  // best-effort: ни исключение, ни отказ извлечения не имеют права поменять уже
+  // достигнутый результат сжатия (контекст сжат, снапшот записан — это факт).
+  if (deps.captureMemories) {
+    try {
+      await deps.captureMemories({
+        compacted: messages.filter(m => typeof m.dbId === 'number' && m.dbId <= boundary.boundary.throughMessageId),
+        previousSummary,
+        throughMessageId: boundary.boundary.throughMessageId,
+      })
+    } catch { /* извлечение памяти не имеет права ломать компакцию */ }
   }
 
   return {

@@ -291,3 +291,61 @@ describe('состояние контекста для ContextMeter', () => {
     expect(contextState(db, CHAT, seed(CHAT, 3)).canCompact).toBe(false)
   })
 })
+
+/**
+ * memory lifecycle `pre-compress` (2.1.13). Событие висит на компакции, поэтому здесь
+ * проверяется ровно одно: оно не имеет права влиять на сжатие. Содержимое пачки и её
+ * границы живут в tests/ai/memory-lifecycle.test.ts.
+ */
+describe('компакция ↔ событие pre-compress', () => {
+  it('событие получает ТОЛЬКО сжимаемую часть — хвост остаётся в живом контексте', async () => {
+    const messages = seed(CHAT, 12)
+    let seen: { compacted: CompactableMessage[]; previousSummary: string; throughMessageId: number } | null = null
+    const res = await compactChatContext(db, CHAT, deps(messages, {
+      captureMemories: async input => { seen = input },
+    }))
+    expect(res.ok).toBe(true)
+    expect(seen).toBeTruthy()
+    const captured = seen as unknown as { compacted: CompactableMessage[]; throughMessageId: number }
+    expect(captured.compacted).toHaveLength(6)  // 12 - KEEP_RECENT_MESSAGES
+    expect(captured.compacted.every(m => m.dbId! <= captured.throughMessageId)).toBe(true)
+  })
+
+  it('событию отдаётся итог ПРЕДЫДУЩЕГО сжатия — иначе те же факты извлекутся дважды', async () => {
+    const first = seed(CHAT, 12)
+    await compactChatContext(db, CHAT, deps(first, { summarize: async () => 'итог первого сжатия' }))
+
+    const second = [...first, ...seed(CHAT, 8)]
+    let previous = 'НЕ-ПЕРЕДАН'
+    await compactChatContext(db, CHAT, deps(second, {
+      summarize: async () => 'итог второго сжатия',
+      captureMemories: async input => { previous = input.previousSummary },
+    }))
+    expect(previous).toBe('итог первого сжатия')
+  })
+
+  it('исключение в событии НЕ ломает уже состоявшееся сжатие', async () => {
+    const messages = seed(CHAT, 12)
+    const res = await compactChatContext(db, CHAT, deps(messages, {
+      captureMemories: async () => { throw new Error('извлечение упало') },
+    }))
+    expect(res.ok, 'снапшот записан — событие памяти не имеет права это отменить').toBe(true)
+    expect(activeSnapshot(db, CHAT)).toBeTruthy()
+  })
+
+  it('осечка сжатия — события нет вовсе (иначе память копилась бы за каждую попытку)', async () => {
+    const messages = seed(CHAT, 12)
+    let called = 0
+    const res = await compactChatContext(db, CHAT, deps(messages, {
+      summarize: async () => { throw new Error('модель лёгла') },
+      captureMemories: async () => { called++ },
+    }))
+    expect(res.ok).toBe(false)
+    expect(called).toBe(0)
+  })
+
+  it('без captureMemories компакция работает ровно как раньше', async () => {
+    const res = await compactChatContext(db, CHAT, deps(seed(CHAT, 12)))
+    expect(res.ok).toBe(true)
+  })
+})
