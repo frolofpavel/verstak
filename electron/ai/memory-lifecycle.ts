@@ -30,8 +30,11 @@ export const TAIL_CONTEXT_MESSAGES = 6
 
 const MEMORY_TYPES = new Set<MemoryType>(['fact', 'decision', 'bug', 'preference', 'pattern'])
 
-/** Тег события — по нему видно, откуда запись, и его же читает будущий session-end. */
+/** Тег события — по нему видно, откуда запись. */
 export const PRE_COMPRESS_TAG = 'lifecycle:pre-compress'
+/** Тег итога сессии. Совместимость: рядом остаётся исторический 'session-summary',
+ *  по которому recency-канал recall отсекает итоги от фактов. */
+export const SESSION_END_TAG = 'lifecycle:session-end'
 
 export interface LifecycleMessage {
   role: string
@@ -286,4 +289,58 @@ export async function capturePreCompressMemories(deps: PreCompressCaptureDeps): 
     }
   }
   return { ok: true, saved: batch.accepted.length, skipped: batch.skipped.length, redacted: batch.redactedCount }
+}
+
+// ─── Событие `session-end` ──────────────────────────────────────────────────
+//
+// Прогон закончился — что из него должно пережить сессию?
+//
+// Раньше ответ был «весь итог модели, до 2000 символов, одной записью с тегом
+// session-summary, каждую сессию». Recency-канал recall такие записи отсекает
+// (см. memory/run-snapshot.ts), а канал релевантности — НЕТ: длинный дамп попадает
+// в FTS и вытесняет из топа настоящие факты проекта. Плюс каждая сессия добавляла
+// ещё один почти такой же дамп.
+//
+// Здесь тот же принцип, что и у pre-compress, но БЕЗ отдельного вызова модели:
+// итог сессии модель уже написала сама, платить ещё раз не за что. Наша работа —
+// границы: редактировать секреты, обрезать до размера факта, не писать повтор.
+
+/** Префикс записи итога. Часть формы, по которой идёт дедуп. */
+const SESSION_END_PREFIX = 'Итог прошлой сессии: '
+
+export interface SessionEndMemory {
+  content: string
+  tags: string[]
+}
+
+/**
+ * Итог сессии → одна ограниченная запись памяти (или null, если писать нечего).
+ *
+ * null — это нормальный исход: пустой итог, огрызок или повтор уже сохранённого.
+ * Молчание лучше, чем ещё один дубль в свалке.
+ */
+export function buildSessionEndMemory(input: {
+  summary: string
+  existing?: string[]
+  contentLimit?: number
+  minLength?: number
+}): SessionEndMemory | null {
+  const batch = normalizeMemoryBatch(
+    [{ type: 'fact', content: input.summary ?? '', tags: ['session-summary'] }],
+    {
+      limit: 1,
+      contentLimit: input.contentLimit,
+      minLength: input.minLength,
+      tag: SESSION_END_TAG,
+    },
+  )
+  const first = batch.accepted[0]
+  if (!first) return null
+  // Дедуп ТОЛЬКО на финальной форме записи. В памяти итог лежит с префиксом, и
+  // сравнение «голого» текста с сохранённым не совпало бы никогда — каждая сессия
+  // добавляла бы ещё одного близнеца, ровно ту свалку, ради которой всё затевалось.
+  const content = `${SESSION_END_PREFIX}${first.content}`
+  const key = memoryKey(content)
+  if ((input.existing ?? []).some(existing => memoryKey(existing) === key)) return null
+  return { content, tags: first.tags }
 }

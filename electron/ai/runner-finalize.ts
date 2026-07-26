@@ -4,7 +4,7 @@ import { usageHash } from '../storage/agent-run-usage'
 import { exitReasonToAgentRunStatus } from './run-lifecycle'
 import { PROVIDERS, type ProviderId } from './registry'
 import { suspendedSends } from './runner-shared'
-import { scanText } from './secret-scanner'
+import { buildSessionEndMemory } from './memory-lifecycle'
 import { writeSessionJournal, type ExitReason } from './session-journal'
 import type { ChatMessage } from './types'
 
@@ -37,6 +37,9 @@ export interface FinalizeApiRunInput {
     content: string,
     tags: string[]
   ) => unknown
+  /** Уже сохранённые тексты памяти проекта — дедуп события session-end. Опционально:
+   *  без него итог сессии просто пишется без сверки с прошлым (прежнее поведение). */
+  existingMemoryContents?: (projectPath: string) => string[]
   agentRuns?: AgentRuns
   runId?: string
   providerId?: ProviderId
@@ -50,16 +53,26 @@ export interface FinalizeApiRunInput {
   clearCheckpointThrottle: (runId: string) => void
 }
 
+/**
+ * Событие memory lifecycle `session-end` (2.1.13).
+ *
+ * Раньше сюда падал итог модели целиком — до 2000 символов, каждую сессию, одной
+ * записью. Recency-канал recall такие записи отсекает, а канал релевантности НЕТ:
+ * длинный дамп попадал в FTS и вытеснял из топа настоящие факты проекта.
+ *
+ * Теперь запись проходит те же границы, что и pre-compress: редакция, размер факта,
+ * дедуп против уже сохранённого. Отдельного вызова модели здесь нет и не нужно —
+ * итог она уже написала сама. null (нечего писать / повтор) — нормальный исход.
+ */
 function persistSessionSummary(input: FinalizeApiRunInput): void {
   if (!input.lastSummary.trim() || !input.projectPath) return
   try {
-    const safe = scanText(input.lastSummary.trim()).redacted.slice(0, 2000)
-    input.saveMemory(
-      input.projectPath,
-      'fact',
-      `Итог прошлой сессии: ${safe}`,
-      ['session-summary']
-    )
+    const memory = buildSessionEndMemory({
+      summary: input.lastSummary,
+      existing: input.existingMemoryContents?.(input.projectPath) ?? [],
+    })
+    if (!memory) return
+    input.saveMemory(input.projectPath, 'fact', memory.content, memory.tags)
   } catch (err) {
     console.warn(
       '[runner-finalize] session-summary persist failed:',

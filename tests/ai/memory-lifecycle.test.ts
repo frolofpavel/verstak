@@ -15,6 +15,8 @@ import {
   MEMORY_BATCH_LIMIT,
   MEMORY_CONTENT_LIMIT,
   PRE_COMPRESS_TAG,
+  SESSION_END_TAG,
+  buildSessionEndMemory,
   type MemoryCandidate,
 } from '../../electron/ai/memory-lifecycle'
 
@@ -243,5 +245,52 @@ describe('capturePreCompressMemories — событие целиком', () => {
     const prompt = extract.mock.calls[0][0]
     expect(prompt.user).toContain('давай решим')
     expect(prompt.user).toContain('ранее: выбрали better-sqlite3')
+  })
+})
+
+/**
+ * Событие `session-end`. Раньше сюда падал итог модели целиком — до 2000 символов,
+ * каждую сессию. Recency-канал recall такие записи отсекает, а канал релевантности НЕТ:
+ * дамп попадал в FTS и вытеснял из топа настоящие факты проекта.
+ */
+describe('buildSessionEndMemory — итог сессии как факт, а не дамп', () => {
+  it('длинный итог обрезается до размера факта, а не до 2000 символов', () => {
+    const mem = buildSessionEndMemory({ summary: 'разобрали маршрут. '.repeat(60) })
+    expect(mem).toBeTruthy()
+    expect(mem!.content.length).toBeLessThanOrEqual(MEMORY_CONTENT_LIMIT + 'Итог прошлой сессии: '.length)
+  })
+
+  it('несёт оба тега: новый lifecycle и исторический session-summary', () => {
+    const mem = buildSessionEndMemory({ summary: 'вынесли маршрут ai:send в отдельные модули' })
+    expect(mem!.tags).toContain(SESSION_END_TAG)
+    expect(mem!.tags, 'по нему recency-канал recall отсекает итоги от фактов').toContain('session-summary')
+  })
+
+  it('секрет в итоге не доезжает до памяти', () => {
+    const mem = buildSessionEndMemory({ summary: 'записали ключ sk-ant-api03-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB в конфиг' })
+    expect(mem!.content).not.toContain('sk-ant-api03')
+    expect(mem!.content).toContain('REDACTED')
+  })
+
+  it('пустой и куцый итог не пишется вовсе', () => {
+    expect(buildSessionEndMemory({ summary: '' })).toBeNull()
+    expect(buildSessionEndMemory({ summary: '   ' })).toBeNull()
+    expect(buildSessionEndMemory({ summary: 'готово' })).toBeNull()
+  })
+
+  it('повтор прошлой сессии не пишется — иначе каждая сессия плодит близнеца', () => {
+    const summary = 'Вынесли маршрут ai:send в отдельные модули'
+    const first = buildSessionEndMemory({ summary })
+    expect(first).toBeTruthy()
+    const second = buildSessionEndMemory({ summary: summary + '.', existing: [first!.content] })
+    expect(second).toBeNull()
+  })
+
+  it('новый итог при наличии старых записей пишется', () => {
+    const mem = buildSessionEndMemory({
+      summary: 'Починили загрузку обновлений в установщике',
+      existing: ['Итог прошлой сессии: вынесли маршрут ai:send в отдельные модули'],
+    })
+    expect(mem).toBeTruthy()
   })
 })

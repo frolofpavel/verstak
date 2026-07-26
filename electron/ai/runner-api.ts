@@ -1469,6 +1469,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         sessionUsage,
         recordJournal,
         saveMemory,
+        // session-end дедуп: сверяем итог с релевантной уже сохранённой памятью,
+        // иначе каждая похожая сессия добавляла бы ещё один почти такой же дамп.
+        existingMemoryContents: p => {
+          try {
+            return searchMemories(p, lastSummary, 20).map(m => m.content)
+          } catch {
+            return []
+          }
+        },
         agentRuns,
         runId,
         providerId,
