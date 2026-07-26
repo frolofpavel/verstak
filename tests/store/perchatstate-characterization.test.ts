@@ -1,13 +1,13 @@
 // PerChatState 4.4 — characterization ПЕРЕД удалением проекций.
 //
-// Срезы 4.1–4.3 сделали `chats` единственным источником правды, оставив top-level
-// bundle-поля и `chatSnapshots` поддерживаемыми проекциями. 4.4 их удаляет. Этот файл
+// Срезы 4.1–4.3 сделали `chats` источником правды, оставив top-level bundle-поля и
+// chatSnapshots поддерживаемыми проекциями. 4.4 их удалил. Этот файл
 // фиксирует поведение так, как оно наблюдается ЧЕРЕЗ `chats` — то есть через
 // поверхность, которая переживёт удаление. Тесты обязаны быть зелёными и до, и после:
 // разница между «убрали дубль» и «потеряли состояние чата» видна только здесь.
 //
-// Умышленно НЕ читаем ни top-level поля, ни chatSnapshots: тест, снимающий показания
-// с удаляемой проекции, доказывал бы существование проекции, а не сохранность данных.
+// Умышленно читаем ТОЛЬКО chats: тест, снимавший показания с удаляемой проекции,
+// доказывал бы существование проекции, а не сохранность данных.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const windowStub = {
@@ -48,9 +48,7 @@ beforeEach(async () => {
   // Глобальный afterEach (tests/setup.ts) снимает стабы — переставляем на каждый тест.
   vi.stubGlobal('window', windowStub)
   useProject.setState({
-    path: '/proj', chats: {}, chatSnapshots: {}, activeChatId: null, helpMode: false,
-    messages: [], isStreaming: false, activity: [], agentProgress: [], preflights: [],
-    pendingWrites: [], pendingCommand: null, sendOwners: {}, chatLaneGenerations: {},
+    path: '/proj', chats: {}, activeChatId: null, helpMode: false,
     chatHasMoreBefore: false, chatTotalCount: 0,
   } as never, false)
   await st().switchChatSession(1)
@@ -115,11 +113,9 @@ describe('4.4 characterization: состояние чатов переживае
 })
 
 describe('4.4 characterization: потребители фоновых чатов', () => {
-  // ЛОВУШКА МИГРАЦИИ, найденная этим харнесом. Селектор берёт активный чат из
-  // отдельного поля pendingCommand И проходит по всей поданной map. Сейчас в map
-  // (chatSnapshots) активного нет, поэтому он попадает в список ровно один раз.
-  // Подать вместо неё `chats`, где активный есть, — значит задвоить его строку.
-  // 4.4 обязан либо исключать активного при подаче chats, либо пропускать его в цикле.
+  // ЛОВУШКА МИГРАЦИИ, найденная этим харнесом до 4.4: селектор берёт активный чат из
+  // отдельного поля pendingCommand И проходит по всей поданной map. Подача chats, где
+  // активный есть, задвоила бы его строку. Закрыто пропуском активного в цикле.
   it('каждый чат с ожидающим подтверждением попадает в список РОВНО один раз', () => {
     st().setPendingCommand({ callId: 'active', command: 'активная команда' } as never)
     st().applyEventToChat(2, { type: 'confirm-command', callId: 'bg', command: 'фоновая команда' } as never)
@@ -131,7 +127,7 @@ describe('4.4 characterization: потребители фоновых чатов
     const rows = selectInboxApprovals({
       activeChatId: s.activeChatId,
       pendingCommand: s.chats[s.activeChatId!]?.pendingCommand ?? null,
-      chatSnapshots: background,
+      chats: background,
     } as never)
     const ids = rows.map(r => r.chatId)
     expect(ids.filter(id => id === 1), 'активный чат — одна строка, не две').toHaveLength(1)

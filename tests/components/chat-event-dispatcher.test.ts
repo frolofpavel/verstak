@@ -15,6 +15,7 @@
 // Любое извлечение с «честными» deps пересоздаст подписку, и события, пришедшие между off() и
 // onEvent(), потеряются молча: текст пропадёт, done не придёт → isStreaming залипнет НАВСЕГДА.
 // Тесты ниже краснеют именно на этом (проверено мутацией deps).
+import { active, seedActive } from '../store/_active-bundle'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, cleanup, act } from '@testing-library/react'
@@ -49,9 +50,8 @@ beforeEach(() => {
   mock = makeApiMock(CHAT_API_DEFAULTS)
   vi.stubGlobal('window', Object.assign(globalThis.window, { api: mock.api }))
   useProject.setState({
-    path: '/p', activeChatId: 7, messages: [], isStreaming: false,
-    sendOwners: {}, chatSessions: [{ id: 7 }] as never, helpMode: false,
-  }, false)
+    path: '/p', activeChatId: 7,
+    sendOwners: {}, chatSessions: [{ id: 7 }] as never, helpMode: false }, false); seedActive(useProject, { messages: [], isStreaming: false })
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -72,11 +72,11 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
       mock.aiEvents.emit({ id: 101, event: { type: 'text', text: 'Привет' } })
       mock.aiEvents.emit({ id: 101, event: { type: 'text', text: ', Павел' } })
     })
-    expect(useProject.getState().messages.at(-1)?.content).toBe('')
+    expect(active(useProject.getState()).messages.at(-1)?.content).toBe('')
 
     act(() => { mock.aiEvents.emit({ id: 101, event: { type: 'done' } }) })
-    expect(useProject.getState().messages.at(-1)?.content).toBe('Привет, Павел')
-    expect(useProject.getState().isStreaming).toBe(false)
+    expect(active(useProject.getState()).messages.at(-1)?.content).toBe('Привет, Павел')
+    expect(active(useProject.getState()).isStreaming).toBe(false)
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
 
@@ -84,7 +84,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     mountChat()
     startRun(102, 7)
     act(() => { mock.aiEvents.emit({ id: 102, event: { type: 'error', message: 'сломалось' } }) })
-    expect(useProject.getState().isStreaming).toBe(false)
+    expect(active(useProject.getState()).isStreaming).toBe(false)
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
 
@@ -94,7 +94,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     act(() => { mock.aiEvents.emit({ id: 103, event: { type: 'text', text: 'моё' } }) })
     act(() => { mock.aiEvents.emit({ id: 999, event: { type: 'text', text: 'ЧУЖОЕ' } }) })
     act(() => { mock.aiEvents.emit({ id: 103, event: { type: 'done' } }) })
-    expect(useProject.getState().messages.at(-1)?.content).toBe('моё')
+    expect(active(useProject.getState()).messages.at(-1)?.content).toBe('моё')
   })
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
         onOpenSettings: vi.fn(), rightPanel: null as never, onSelectRightPanel: vi.fn(),
         isSettingsOpen: false, onOpenSideChat: vi.fn(), onOpenFilePreview: vi.fn(),
       }))
-      act(() => { useProject.setState({ isStreaming: true }, false) })
+      act(() => { useProject.getState().setStreaming(true) })
       act(() => { useProject.getState().addMessage({ role: 'user', content: 'ещё' }) })
 
       expect(mock.aiEvents.subscribeCount).toBe(afterMount) // не переподписались
@@ -128,7 +128,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
 
       // Чередуем ре-рендеры и события — так выглядит живой стрим. Активный чат НЕ меняем:
       // харнес показал, что уход с чата прогона — это ДРУГОЕ (и корректное) поведение —
-      // события уходят в фоновый путь (chatSnapshots) и isStreaming активного чата не трогают.
+      // события уходят в фоновый путь (chats) и isStreaming активного чата не трогают.
       // Смешивать два инварианта в одном тесте — путать себя же.
       act(() => { mock.aiEvents.emit({ id: 104, event: { type: 'text', text: 'a' } }) })
       act(() => { useProject.getState().addMessage({ role: 'user', content: 'ре-рендер 1' }) })
@@ -144,7 +144,7 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
       expect(mock.aiEvents.handlers).toHaveLength(1)
       expect(mock.aiEvents.lostEvents).toBe(0)
       // …и итог трассы: done дошёл, стрим не залип.
-      expect(useProject.getState().isStreaming).toBe(false)
+      expect(active(useProject.getState()).isStreaming).toBe(false)
     })
   })
 })
@@ -161,7 +161,7 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
   beforeEach(() => {
     // earlyRouteStop живёт в глобальном zustand и протекает между тестами файла —
     // внешний beforeEach его не знает (поле новое). Сбрасываем здесь.
-    useProject.setState({ earlyRouteStop: null, chatSnapshots: {} }, false)
+    useProject.setState({ earlyRouteStop: null, chats: {} }, false)
   })
 
   it('route-changed (ротация аккаунта) → activity с именами аккаунтов и причиной', () => {
@@ -179,7 +179,7 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
         },
       })
     })
-    const a = useProject.getState().activity.at(-1)
+    const a = active(useProject.getState()).activity.at(-1)
     expect(a?.kind).toBe('route')
     expect(a?.label).toBe('⇄ Аккаунт Рабочий Max → Личный Max')
     expect(a?.detail).toContain('квота исчерпана')
@@ -201,7 +201,7 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
         },
       })
     })
-    const a = useProject.getState().activity.at(-1)
+    const a = active(useProject.getState()).activity.at(-1)
     expect(a?.kind).toBe('route')
     expect(a?.label).toBe('⚡ gemini-api → claude')
     expect(a?.detail).toContain('claude-sonnet')
@@ -219,7 +219,7 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
     expect(useProject.getState().earlyRouteStop).toMatchObject({ chatId: 7 })
     expect(useProject.getState().earlyRouteStop?.message).toContain('Личный Max')
     // в ленту активного чата при этом ничего не прилипло (её допишет сам send)
-    expect(useProject.getState().messages).toHaveLength(0)
+    expect(active(useProject.getState()).messages).toHaveLength(0)
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
 
@@ -233,9 +233,9 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
     })
     // активному чату (7) ничего не досталось
     expect(useProject.getState().earlyRouteStop).toBeNull()
-    expect(useProject.getState().messages).toHaveLength(0)
+    expect(active(useProject.getState()).messages).toHaveLength(0)
     // фоновый чат получил событие в snapshot — при открытии причина будет видна
-    const snap = useProject.getState().chatSnapshots[9]
+    const snap = useProject.getState().chats[9]
     expect(snap).toBeTruthy()
     expect(snap.hasUnread).toBe(true)
   })
@@ -244,6 +244,6 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
     mountChat()
     act(() => { mock.aiEvents.emit({ id: 0, event: { type: 'error', message: 'странное' } }) })
     expect(useProject.getState().earlyRouteStop).toBeNull()
-    expect(useProject.getState().messages).toHaveLength(0)
+    expect(active(useProject.getState()).messages).toHaveLength(0)
   })
 })

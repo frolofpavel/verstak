@@ -1,3 +1,4 @@
+import { active, seedActive } from './_active-bundle'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // projectStore actions reference window.api inside a few branches (e.g.
@@ -14,6 +15,7 @@ const windowStub = { api: { chats: { listWindow: vi.fn(async () => ({ messages: 
 vi.stubGlobal('window', windowStub)
 
 import { useProject } from '../../src/store/projectStore'
+import { freshSnapshot } from '../../src/store/session-snapshot'
 import type { SendOwner, PreflightCard } from '../../src/store/projectStore'
 import type { ChatMessage } from '../../src/types/api'
 
@@ -23,16 +25,13 @@ const INITIAL = useProject.getState()
 function resetStore() {
   useProject.setState({
     path: INITIAL.path,
-    messages: [],
-    isStreaming: false,
-    pendingWrites: [],
-    pendingCommand: null,
-    activity: [],
-    agentProgress: [],
-    preflights: [],
     touchedFiles: {},
-    activeChatId: null,
-    chatSnapshots: {},
+    // 4.4: экшены без явного chatId пишут в chats[активный]. Без активного чата
+    // писать некуда — и это правильно: в продакшене pendingWrites/activity
+    // появляются только во время отправки, то есть при открытом чате. Заготовка
+    // обязана отражать это, иначе она проверяет несуществующий режим.
+    activeChatId: 1,
+    chats: { 1: { ...freshSnapshot(), chatId: 1 } },
     sendOwners: {},
     chatLaneGenerations: {},
     reviews: {},
@@ -56,29 +55,11 @@ describe('reconcileStreamingState', () => {
     useProject.setState({
       path: 'C:/proj',
       activeChatId: 1,
-      isStreaming: true,
-      streamStartedAt: 1000,
-      messages: [
-        { role: 'user', content: 'вопрос' },
-        { role: 'assistant', content: '' }
-      ] as ChatMessage[],
-      chatSnapshots: {
-        2: {
-          messages: [{ role: 'assistant', content: '' }] as ChatMessage[],
-          isStreaming: true,
-          streamStartedAt: 1000,
-          pendingWrites: [],
-          pendingCommand: null,
-          activity: [],
-          agentProgress: [],
-          sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
-          runningPlanStep: null,
-          hasUnread: false,
-          checkpointId: null,
-          checkpointMessageId: null,
-          preflights: [],
-          subagentRuns: []
-        }
+      chats: {
+        1: { ...freshSnapshot(), chatId: 1, isStreaming: true, streamStartedAt: 1000,
+             messages: [{ role: 'user', content: 'вопрос' }, { role: 'assistant', content: '' }] as ChatMessage[] },
+        2: { ...freshSnapshot(), chatId: 2, isStreaming: true, streamStartedAt: 1000,
+             messages: [{ role: 'assistant', content: '' }] as ChatMessage[] },
       },
       sendOwners: {}
     }, false)
@@ -86,10 +67,10 @@ describe('reconcileStreamingState', () => {
     await useProject.getState().reconcileStreamingState('C:/proj')
 
     const st = useProject.getState()
-    expect(st.isStreaming).toBe(false)
-    expect(st.streamStartedAt).toBeNull()
-    expect(st.chatSnapshots[2].isStreaming).toBe(false)
-    expect(st.chatSnapshots[2].streamStartedAt).toBeNull()
+    expect(active(st).isStreaming).toBe(false)
+    expect(active(st).streamStartedAt).toBeNull()
+    expect(st.chats[2].isStreaming).toBe(false)
+    expect(st.chats[2].streamStartedAt).toBeNull()
   })
 })
 
@@ -145,16 +126,14 @@ describe('SendRegistry — registerSendOwner / lookupSendOwner / forgetSendOwner
   })
 })
 
-describe('Routing — события фонового чата идут в chatSnapshots, не в активный чат', () => {
-  it('applyEventToChat для НЕактивного чата пишет в chatSnapshots[chatId], активный нетронут', () => {
+describe('Routing — события фонового чата идут в chats, не в активный чат', () => {
+  it('applyEventToChat для НЕактивного чата пишет в chats[chatId], активный нетронут', () => {
     // Active chat 1 has its own messages + activity.
     const activeMessages: ChatMessage[] = [{ role: 'user', content: 'привет' }]
     const activeActivity = [{ id: 'a1', kind: 'read' as const, label: 'read', status: 'ok' as const, timestamp: 1 }]
     useProject.setState({
       activeChatId: 1,
-      messages: activeMessages,
-      activity: activeActivity,
-      isStreaming: true
+      chats: { 1: { ...freshSnapshot(), chatId: 1, messages: activeMessages, activity: activeActivity } },
     }, false)
 
     // Background chat 2 receives a text event.
@@ -162,20 +141,22 @@ describe('Routing — события фонового чата идут в chatS
 
     const st = useProject.getState()
     // Background landed in its snapshot.
-    expect(st.chatSnapshots[2]).toBeDefined()
-    expect(st.chatSnapshots[2].messages).toEqual([{ role: 'assistant', content: 'ответ фонового чата' }])
-    expect(st.chatSnapshots[2].hasUnread).toBe(true)
+    expect(st.chats[2]).toBeDefined()
+    expect(st.chats[2].messages).toEqual([{ role: 'assistant', content: 'ответ фонового чата' }])
+    expect(st.chats[2].hasUnread).toBe(true)
     // Active chat top-level state is untouched — core race-bug guard.
-    expect(st.messages).toBe(activeMessages)
-    expect(st.activity).toBe(activeActivity)
-    expect(st.isStreaming).toBe(true)
-    expect(st.chatSnapshots[1]).toBeUndefined()
+    expect(active(st).messages).toBe(activeMessages)
+    expect(active(st).activity).toBe(activeActivity)
+    // 4.4: у активного чата своя запись в chats. Раньше здесь проверялось, что он
+    // НЕ продублирован в chatSnapshots; дубля больше нет, проверяем сохранность.
+    expect(st.chats[1], 'запись активного чата обязана остаться').toBeDefined()
+    expect(st.chats[1].hasUnread, 'активный чат непрочитанным не помечается').toBe(false)
   })
 
   it('несколько text events одного фонового чата аккумулируются в его snapshot', () => {
     useProject.getState().applyEventToChat(5, { type: 'text', text: 'часть1 ' })
     useProject.getState().applyEventToChat(5, { type: 'text', text: 'часть2' })
-    expect(useProject.getState().chatSnapshots[5].messages).toEqual([
+    expect(useProject.getState().chats[5].messages).toEqual([
       { role: 'assistant', content: 'часть1 часть2' }
     ])
   })
@@ -183,7 +164,7 @@ describe('Routing — события фонового чата идут в chatS
   it('события двух разных фоновых чатов не смешиваются между собой', () => {
     useProject.getState().applyEventToChat(2, { type: 'text', text: 'для двойки' })
     useProject.getState().applyEventToChat(3, { type: 'text', text: 'для тройки' })
-    const snaps = useProject.getState().chatSnapshots
+    const snaps = useProject.getState().chats
     expect(snaps[2].messages[0].content).toBe('для двойки')
     expect(snaps[3].messages[0].content).toBe('для тройки')
   })
@@ -192,7 +173,7 @@ describe('Routing — события фонового чата идут в chatS
     useProject.setState({ path: 'C:/proj' }, false)
     useProject.getState().applyEventToChat(2, { type: 'text', text: 'готовый ответ' })
     useProject.getState().applyEventToChat(2, { type: 'done' })
-    expect(useProject.getState().chatSnapshots[2].isStreaming).toBe(false)
+    expect(useProject.getState().chats[2].isStreaming).toBe(false)
     // Завершённый ассистентский ответ сохраняется в БД (переживёт reload).
     expect(appendSpy).toHaveBeenCalledWith(2, 'C:/proj', 'assistant', 'готовый ответ')
   })
@@ -209,13 +190,14 @@ describe('Routing — события фонового чата идут в chatS
     expect(appendSpy).toHaveBeenCalledWith(7, 'C:/real-project', 'assistant', 'ответ из другого проекта')
   })
 
-  it('background project chat event lands in the project session, not in the currently opened project chatSnapshots', () => {
+  it('background project chat event lands in the project session, not in the currently opened project chats', () => {
     useProject.setState({
       path: 'C:/project-b',
       activeChatId: 22,
-      messages: [{ role: 'user', content: 'project b task' }] as ChatMessage[],
+      chats: { 22: { ...freshSnapshot(), chatId: 22, messages: [{ role: 'user', content: 'project b task' }] as ChatMessage[] } },
       sessions: {
         'C:/project-a': {
+          ...freshSnapshot(),
           chatId: 11,
           messages: [
             { role: 'user', content: 'project a task' },
@@ -223,17 +205,6 @@ describe('Routing — события фонового чата идут в chatS
           ] as ChatMessage[],
           isStreaming: true,
           streamStartedAt: 1000,
-          pendingWrites: [],
-          pendingCommand: null,
-          activity: [],
-          agentProgress: [],
-          sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
-          runningPlanStep: null,
-          hasUnread: false,
-          checkpointId: null,
-          checkpointMessageId: null,
-          preflights: [],
-          subagentRuns: []
         }
       }
     }, false)
@@ -251,8 +222,8 @@ describe('Routing — события фонового чата идут в chatS
     })
 
     const st = useProject.getState()
-    expect(st.messages).toEqual([{ role: 'user', content: 'project b task' }])
-    expect(st.chatSnapshots[11]).toBeUndefined()
+    expect(active(st).messages).toEqual([{ role: 'user', content: 'project b task' }])
+    expect(st.chats[11]).toBeUndefined()
     expect(st.sessions['C:/project-a'].chatId).toBe(11)
     expect(st.sessions['C:/project-a'].messages.at(-1)?.content).toBe('finished while user was elsewhere')
     expect(st.sessions['C:/project-a'].isStreaming).toBe(false)
@@ -262,7 +233,7 @@ describe('Routing — события фонового чата идут в chatS
   it('error event дописывает текст ошибки в последнее сообщение фонового чата', () => {
     useProject.getState().applyEventToChat(2, { type: 'text', text: 'частичный' })
     useProject.getState().applyEventToChat(2, { type: 'error', message: 'таймаут' })
-    const snap = useProject.getState().chatSnapshots[2]
+    const snap = useProject.getState().chats[2]
     expect(snap.isStreaming).toBe(false)
     expect(snap.messages[0].content).toContain('частичный')
     expect(snap.messages[0].content).toContain('таймаут')
@@ -271,43 +242,43 @@ describe('Routing — события фонового чата идут в chatS
   it('usage event фонового чата накапливает токены только в его snapshot', () => {
     useProject.getState().applyEventToChat(2, { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } })
     useProject.getState().applyEventToChat(2, { type: 'usage', usage: { inputTokens: 3, outputTokens: 1 } })
-    const snap = useProject.getState().chatSnapshots[2]
+    const snap = useProject.getState().chats[2]
     expect(snap.sessionUsage.inputTokens).toBe(13)
     expect(snap.sessionUsage.outputTokens).toBe(6)
     // Активная сессия (top-level) не затронута.
-    expect(useProject.getState().sessionUsage.inputTokens).toBe(0)
+    expect(active(useProject.getState()).sessionUsage.inputTokens).toBe(0)
   })
 })
 
 describe('Pending writes / commands — scoping и очистка', () => {
   it('clearPendingWrites убирает pending writes предыдущего send', () => {
     useProject.getState().addPendingWrite({ callId: 'w1', path: 'a.ts', before: '', after: 'x', sendId: 1 })
-    expect(useProject.getState().pendingWrites).toHaveLength(1)
+    expect(active(useProject.getState()).pendingWrites).toHaveLength(1)
     useProject.getState().clearPendingWrites()
-    expect(useProject.getState().pendingWrites).toEqual([])
+    expect(active(useProject.getState()).pendingWrites).toEqual([])
   })
 
   it('resolvePendingWrite убирает только write с совпавшим callId', () => {
     useProject.getState().addPendingWrite({ callId: 'w1', path: 'a.ts', before: '', after: 'x' })
     useProject.getState().addPendingWrite({ callId: 'w2', path: 'b.ts', before: '', after: 'y' })
     useProject.getState().resolvePendingWrite('w1')
-    const ids = useProject.getState().pendingWrites.map(w => w.callId)
+    const ids = active(useProject.getState()).pendingWrites.map(w => w.callId)
     expect(ids).toEqual(['w2'])
   })
 
   it('pendingCommand из send A не виден после старта send B (setPendingCommand(null))', () => {
     useProject.getState().setPendingCommand({ callId: 'c1', command: 'rm -rf /', sendId: 1 })
-    expect(useProject.getState().pendingCommand?.callId).toBe('c1')
+    expect(active(useProject.getState()).pendingCommand?.callId).toBe('c1')
     // Новый send B стартует — старая pending-confirmation должна обнулиться.
     useProject.getState().setPendingCommand(null)
-    expect(useProject.getState().pendingCommand).toBeNull()
+    expect(active(useProject.getState()).pendingCommand).toBeNull()
   })
 
   it('pending state фонового чата живёт в его snapshot, не в активном', () => {
-    useProject.setState({ activeChatId: 1, pendingCommand: null, pendingWrites: [] }, false)
+    useProject.setState({ activeChatId: 1 }, false); seedActive(useProject, { pendingCommand: null, pendingWrites: []  })
     useProject.getState().applyEventToChat(2, { type: 'pending-command', callId: 'bg', command: 'ls' })
     // Активный чат без pending; фоновый имеет своё.
-    expect(useProject.getState().pendingCommand).toBeNull()
+    expect(active(useProject.getState()).pendingCommand).toBeNull()
   })
 
   // 5.1 (review P0): фоновый чат должен СОХРАНЯТЬ pending-write/command в свой
@@ -316,22 +287,22 @@ describe('Pending writes / commands — scoping и очистка', () => {
   // resolveWrite. Тест выше проверял лишь что активный не загрязнён — это скрывало
   // потерю pending у фонового чата.
   it('5.1: pending-write фонового чата сохраняется в его snapshot', () => {
-    useProject.setState({ activeChatId: 1, pendingCommand: null, pendingWrites: [] }, false)
+    useProject.setState({ activeChatId: 1 }, false); seedActive(useProject, { pendingCommand: null, pendingWrites: []  })
     useProject.getState().applyEventToChat(2, { type: 'pending-write', callId: 'bgw', path: 'a.ts', before: '', after: 'x' })
-    const snap = useProject.getState().chatSnapshots[2]
+    const snap = useProject.getState().chats[2]
     expect(snap.pendingWrites).toHaveLength(1)
     expect(snap.pendingWrites[0].callId).toBe('bgw')
     expect(snap.pendingWrites[0].path).toBe('a.ts')
-    expect(useProject.getState().pendingWrites).toEqual([])
+    expect(active(useProject.getState()).pendingWrites).toEqual([])
   })
 
   it('5.1: pending-command фонового чата сохраняется в его snapshot', () => {
-    useProject.setState({ activeChatId: 1, pendingCommand: null, pendingWrites: [] }, false)
+    useProject.setState({ activeChatId: 1 }, false); seedActive(useProject, { pendingCommand: null, pendingWrites: []  })
     useProject.getState().applyEventToChat(2, { type: 'pending-command', callId: 'bgc', command: 'ls' })
-    const snap = useProject.getState().chatSnapshots[2]
+    const snap = useProject.getState().chats[2]
     expect(snap.pendingCommand?.callId).toBe('bgc')
     expect(snap.pendingCommand?.command).toBe('ls')
-    expect(useProject.getState().pendingCommand).toBeNull()
+    expect(active(useProject.getState()).pendingCommand).toBeNull()
   })
 })
 
@@ -342,12 +313,12 @@ describe('clearActivity — сброс activity + preflights на новом sen
       callId: 'p1', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: []
     }
     useProject.getState().pushPreflight(card)
-    expect(useProject.getState().activity).toHaveLength(1)
-    expect(useProject.getState().preflights).toHaveLength(1)
+    expect(active(useProject.getState()).activity).toHaveLength(1)
+    expect(active(useProject.getState()).preflights).toHaveLength(1)
 
     useProject.getState().clearActivity()
-    expect(useProject.getState().activity).toEqual([])
-    expect(useProject.getState().preflights).toEqual([])
+    expect(active(useProject.getState()).activity).toEqual([])
+    expect(active(useProject.getState()).preflights).toEqual([])
   })
 
   it('новый send стартует с чистым activity (нет утечки из прошлого)', () => {
@@ -355,7 +326,7 @@ describe('clearActivity — сброс activity + preflights на новом sen
     // Эмуляция начала нового send.
     useProject.getState().clearActivity()
     useProject.getState().pushActivity({ id: 'new', kind: 'read', label: 'r', status: 'pending', timestamp: 2 })
-    const ids = useProject.getState().activity.map(a => a.id)
+    const ids = active(useProject.getState()).activity.map(a => a.id)
     expect(ids).toEqual(['new'])
   })
 })
@@ -369,7 +340,10 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     useProject.getState().registerSendOwner(3, { kind: 'chat', chatId: 20 })
     useProject.setState({
       path: 'C:/proj',
-      messages: [{ role: 'user', content: 'жив' }],
+      // Страж partial-merge: у активного чата есть содержимое, и оно обязано пережить
+      // запись из review-slice.
+      activeChatId: 1,
+      chats: { 1: { ...freshSnapshot(), chatId: 1, messages: [{ role: 'user', content: 'жив' }] as ChatMessage[] } },
       reviews: {
         55: { reviewChatId: 55, parentChatId: 10, providerId: 'grok', model: null, content: '', status: 'streaming', createdAt: 1, noteCount: -1, findings: [], accepted: [] }
       }
@@ -388,7 +362,7 @@ describe('cleanupReviewsFor — дренаж review-owners при удалени
     // §5 распил, страж partial-merge: cleanupReviewsFor (review-slice) пишет
     // sendOwners (поле MainSlice) одним set — main-поля НЕ должны обнулиться.
     expect(st.path).toBe('C:/proj')
-    expect(st.messages).toEqual([{ role: 'user', content: 'жив' }])
+    expect(active(st).messages).toEqual([{ role: 'user', content: 'жив' }])
   })
 })
 
@@ -408,12 +382,19 @@ describe('newChatSession — снапшот уходящего стримяще�
     useProject.setState({
       path: 'C:/proj',
       activeChatId: 1,
-      isStreaming: true,
-      messages: [
-        { role: 'user', content: 'вопрос' },
-        { role: 'assistant', content: 'частичный ответ' }
-      ] as ChatMessage[],
-      chatSnapshots: {},
+      // 4.4: состояние чата живёт в chats — заготовка кладёт его туда же, куда рантайм.
+      chats: {
+        1: {
+          ...freshSnapshot(),
+          chatId: 1,
+          isStreaming: true,
+          streamStartedAt: 1000,
+          messages: [
+            { role: 'user', content: 'вопрос' },
+            { role: 'assistant', content: 'частичный ответ' }
+          ] as ChatMessage[],
+        },
+      },
       sendOwners: {
         7: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' }
       }
@@ -425,11 +406,11 @@ describe('newChatSession — снапшот уходящего стримяще�
     // активный чат переключился на новый
     expect(st.activeChatId).toBe(99)
     // снапшот старого чата 1 СОХРАНЁН (раньше был undefined → потеря ответа)
-    expect(st.chatSnapshots[1]).toBeDefined()
-    expect(st.chatSnapshots[1].messages).toEqual([
+    expect(st.chats[1]).toBeDefined()
+    expect(st.chats[1].messages).toEqual([
       { role: 'user', content: 'вопрос' },
       { role: 'assistant', content: 'частичный ответ' }
     ])
-    expect(st.chatSnapshots[1].isStreaming).toBe(true)
+    expect(st.chats[1].isStreaming).toBe(true)
   })
 })

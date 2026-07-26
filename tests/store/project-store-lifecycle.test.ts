@@ -1,3 +1,4 @@
+import { active, seedActive } from './_active-bundle'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // Характеризационные тесты жизненного цикла чата (switchChatSession): snapshot
@@ -57,19 +58,10 @@ function distinctiveBundle(tag: string): SessionSnapshot {
 function resetStore() {
   useProject.setState({
     path: 'C:/proj',
-    messages: [],
-    isStreaming: false,
-    pendingWrites: [],
-    pendingCommand: null,
-    activity: [],
-    agentProgress: [],
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
-    runningPlanStep: null,
     activeChatId: null,
     chatSessions: [],
-    chatSnapshots: {},
+    chats: {},
     touchedFiles: {},
-    checkpointId: null,
     artifacts: [],
     openedReviewId: null,
     // Изоляция: sendOwners/chatLaneGenerations/helpMode не сбрасывались и текли
@@ -93,27 +85,17 @@ beforeEach(() => {
 })
 
 describe('switchChatSession — snapshot уходящего чата', () => {
-  it('переключение прочь снапшотит ВСЕ поля активного чата в chatSnapshots[oldId]', async () => {
+  it('переключение прочь снапшотит ВСЕ поля активного чата в chats[oldId]', async () => {
     const active = distinctiveBundle('A')
     useProject.setState({
       activeChatId: 1,
-      messages: active.messages,
-      isStreaming: active.isStreaming,
-      pendingWrites: active.pendingWrites,
-      pendingCommand: active.pendingCommand,
-      activity: active.activity,
-      agentProgress: active.agentProgress,
-      sessionUsage: active.sessionUsage,
-      runningPlanStep: active.runningPlanStep,
-      checkpointId: active.checkpointId,
-      preflights: active.preflights,
-      subagentRuns: active.subagentRuns,
+      chats: { 1: { ...active, chatId: 1, hasUnread: false } },
       sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },
     }, false)
 
     await useProject.getState().switchChatSession(2)
 
-    const snap = useProject.getState().chatSnapshots[1]
+    const snap = useProject.getState().chats[1]
     expect(snap).toBeDefined()
     expect(snap.messages).toBe(active.messages)
     expect(snap.isStreaming).toBe(true)
@@ -132,9 +114,12 @@ describe('switchChatSession — snapshot уходящего чата', () => {
   })
 
   it('switch на самого себя (id === activeChatId) не снапшотит', async () => {
-    useProject.setState({ activeChatId: 5, messages: [{ role: 'user', content: 'x' }] as ChatMessage[] }, false)
+    useProject.setState({ activeChatId: 5 }, false); seedActive(useProject, { messages: [{ role: 'user', content: 'x' }] as ChatMessage[]  })
     await useProject.getState().switchChatSession(5)
-    expect(useProject.getState().chatSnapshots[5]).toBeUndefined()
+    // 4.4: переключение на самого себя ничего не меняет — состояние чата на месте.
+    const st5 = useProject.getState()
+    expect(st5.activeChatId).toBe(5)
+    expect(st5.chats[5].messages).toEqual([{ role: 'user', content: 'x' }])
   })
 })
 
@@ -143,8 +128,7 @@ describe('switchChatSession — restore входящего чата', () => {
     const saved = distinctiveBundle('B')
     useProject.setState({
       activeChatId: 1,
-      messages: [],
-      chatSnapshots: { 2: saved },
+      chats: { 2: saved },
       sendOwners: { 22: { kind: 'chat', chatId: 2, projectPath: 'C:/proj' } },
     }, false)
 
@@ -152,20 +136,22 @@ describe('switchChatSession — restore входящего чата', () => {
 
     const st = useProject.getState()
     expect(st.activeChatId).toBe(2)
-    expect(st.messages).toBe(saved.messages)
-    expect(st.isStreaming).toBe(saved.isStreaming)
-    expect(st.pendingWrites).toBe(saved.pendingWrites)
-    expect(st.pendingCommand).toBe(saved.pendingCommand)
-    expect(st.activity).toBe(saved.activity)
-    expect(st.agentProgress).toBe(saved.agentProgress)
-    expect(st.sessionUsage).toBe(saved.sessionUsage)
-    expect(st.runningPlanStep).toBe(saved.runningPlanStep)
+    expect(active(st).messages).toBe(saved.messages)
+    expect(active(st).isStreaming).toBe(saved.isStreaming)
+    expect(active(st).pendingWrites).toBe(saved.pendingWrites)
+    expect(active(st).pendingCommand).toBe(saved.pendingCommand)
+    expect(active(st).activity).toBe(saved.activity)
+    expect(active(st).agentProgress).toBe(saved.agentProgress)
+    expect(active(st).sessionUsage).toBe(saved.sessionUsage)
+    expect(active(st).runningPlanStep).toBe(saved.runningPlanStep)
     // finding 2/3: checkpointId/preflights/subagentRuns восстанавливаются per-chat.
-    expect(st.checkpointId).toBe(saved.checkpointId)
-    expect(st.preflights).toBe(saved.preflights)
-    expect(st.subagentRuns).toBe(saved.subagentRuns)
+    expect(active(st).checkpointId).toBe(saved.checkpointId)
+    expect(active(st).preflights).toBe(saved.preflights)
+    expect(active(st).subagentRuns).toBe(saved.subagentRuns)
     // Восстановленный чат убирается из карты снапшотов (он теперь активный).
-    expect(st.chatSnapshots[2]).toBeUndefined()
+    // 4.4: вошедший чат остаётся в chats — это и есть единственное хранилище.
+    expect(st.chats[2], 'состояние вошедшего чата обязано быть на месте').toBeDefined()
+    expect(st.chats[2].hasUnread).toBe(false)
   })
 
   // finding 2/3 (ревью Verstak 23.06): checkpointId/preflights/subagentRuns теперь
@@ -175,12 +161,9 @@ describe('switchChatSession — restore входящего чата', () => {
     const saved = distinctiveBundle('B')  // checkpointId=500, pf-B, sr-B
     useProject.setState({
       activeChatId: 1,
-      chatSnapshots: { 2: saved },
+      chats: { 2: saved },
       // состояние УХОДЯЩЕГО чата 1 — НЕ должно протечь в чат 2:
       touchedFiles: { 'a.ts': { before: '', after: 'x' } },
-      checkpointId: 999,
-      preflights: [{ callId: 'pf-A', summary: 's', affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
-      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
       artifacts: [{ id: 'art-A', kind: 'html', title: 't', content: 'c', createdAt: 1 }],
       previewArtifactId: 'art-A',
     } as never, false)
@@ -190,9 +173,9 @@ describe('switchChatSession — restore входящего чата', () => {
     const st = useProject.getState()
     expect(st.activeChatId).toBe(2)
     // bundle-поля = СВОИ чата 2 (не 999/pf-A/sr-A уходящего):
-    expect(st.checkpointId).toBe(500)
-    expect(st.preflights).toBe(saved.preflights)
-    expect(st.subagentRuns).toBe(saved.subagentRuns)
+    expect(active(st).checkpointId).toBe(500)
+    expect(active(st).preflights).toBe(saved.preflights)
+    expect(active(st).subagentRuns).toBe(saved.subagentRuns)
     // не-bundle поля сброшены:
     expect(st.touchedFiles).toEqual({})
     expect(st.artifacts).toEqual([])
@@ -203,9 +186,6 @@ describe('switchChatSession — restore входящего чата', () => {
     listSpy.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'из БД', createdAt: 7 }], totalCount: 1, hasMoreBefore: false })
     useProject.setState({
       activeChatId: 1,
-      messages: [{ role: 'user', content: 'старое' }] as ChatMessage[],
-      isStreaming: true,
-      pendingWrites: [{ callId: 'w', path: 'a', before: '', after: 'b' }],
     }, false)
 
     await useProject.getState().switchChatSession(9)
@@ -214,12 +194,12 @@ describe('switchChatSession — restore входящего чата', () => {
     const st = useProject.getState()
     expect(st.activeChatId).toBe(9)
     // чистый сброс полей
-    expect(st.isStreaming).toBe(false)
-    expect(st.pendingWrites).toEqual([])
-    expect(st.pendingCommand).toBeNull()
+    expect(active(st).isStreaming).toBe(false)
+    expect(active(st).pendingWrites).toEqual([])
+    expect(active(st).pendingCommand).toBeNull()
     // гидратация истории из БД
     expect(listSpy).toHaveBeenCalledWith(9, { limit: 50 })
-    expect(st.messages).toEqual([{ role: 'user', content: 'из БД', createdAt: 7 }])
+    expect(active(st).messages).toEqual([{ role: 'user', content: 'из БД', createdAt: 7 }])
   })
 
   // finding 3: чат БЕЗ снапшота (else-ветка) = чистый старт — preflights/subagentRuns
@@ -227,33 +207,25 @@ describe('switchChatSession — restore входящего чата', () => {
   it('switch на чат без снапшота даёт пустые preflights/subagentRuns (не утекают от уходящего)', async () => {
     useProject.setState({
       activeChatId: 1,
-      preflights: [{ callId: 'p-A', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] }],
-      subagentRuns: [{ callId: 'sr-A', label: 'l', task: 't', status: 'running' }],
     } as never, false)
 
     await useProject.getState().switchChatSession(9)
 
     const st = useProject.getState()
-    expect(st.preflights).toEqual([])
-    expect(st.subagentRuns).toEqual([])
+    expect(active(st).preflights).toEqual([])
+    expect(active(st).subagentRuns).toEqual([])
   })
 
   it('roundtrip: A→B→A возвращает исходный bundle чата A без потерь (вкл. checkpointId/preflights)', async () => {
     const a = distinctiveBundle('roundtrip')
     useProject.setState({
       activeChatId: 1,
-      messages: a.messages,
-      isStreaming: a.isStreaming,
-      pendingWrites: a.pendingWrites,
-      pendingCommand: a.pendingCommand,
-      activity: a.activity,
-      agentProgress: a.agentProgress,
-      sessionUsage: a.sessionUsage,
-      runningPlanStep: a.runningPlanStep,
-      checkpointId: 111,           // distinct от B (500) — проверяем, что вернётся СВОЙ
-      preflights: a.preflights,
-      subagentRuns: a.subagentRuns,
-      chatSnapshots: { 2: distinctiveBundle('B') },
+      chats: {
+        // checkpointId чата 1 намеренно отличается от B (500) — проверяем, что после
+        // A→B→A вернётся СВОЙ, а не соседский.
+        1: { ...a, chatId: 1, hasUnread: false, checkpointId: 111 },
+        2: distinctiveBundle('B'),
+      },
     }, false)
 
     await useProject.getState().switchChatSession(2)  // leave 1, enter 2
@@ -261,17 +233,17 @@ describe('switchChatSession — restore входящего чата', () => {
 
     const st = useProject.getState()
     expect(st.activeChatId).toBe(1)
-    expect(st.messages).toBe(a.messages)
-    expect(st.pendingWrites).toBe(a.pendingWrites)
-    expect(st.pendingCommand).toBe(a.pendingCommand)
-    expect(st.activity).toBe(a.activity)
-    expect(st.agentProgress).toBe(a.agentProgress)
-    expect(st.sessionUsage).toBe(a.sessionUsage)
-    expect(st.runningPlanStep).toBe(a.runningPlanStep)
+    expect(active(st).messages).toBe(a.messages)
+    expect(active(st).pendingWrites).toBe(a.pendingWrites)
+    expect(active(st).pendingCommand).toBe(a.pendingCommand)
+    expect(active(st).activity).toBe(a.activity)
+    expect(active(st).agentProgress).toBe(a.agentProgress)
+    expect(active(st).sessionUsage).toBe(a.sessionUsage)
+    expect(active(st).runningPlanStep).toBe(a.runningPlanStep)
     // finding 2/3: checkpointId/preflights/subagentRuns чата A пережили roundtrip.
-    expect(st.checkpointId).toBe(111)
-    expect(st.preflights).toBe(a.preflights)
-    expect(st.subagentRuns).toBe(a.subagentRuns)
+    expect(active(st).checkpointId).toBe(111)
+    expect(active(st).preflights).toBe(a.preflights)
+    expect(active(st).subagentRuns).toBe(a.subagentRuns)
   })
 })
 
@@ -283,11 +255,7 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
     const active = distinctiveBundle('N')  // isStreaming: true
     useProject.setState({
       activeChatId: 1,
-      messages: active.messages, isStreaming: true, streamStartedAt: 1000,
-      pendingWrites: active.pendingWrites, pendingCommand: active.pendingCommand,
-      activity: active.activity, agentProgress: active.agentProgress,
-      sessionUsage: active.sessionUsage, runningPlanStep: active.runningPlanStep,
-      checkpointId: active.checkpointId, preflights: active.preflights, subagentRuns: active.subagentRuns,
+      chats: { 1: { ...active, chatId: 1, hasUnread: false } },
       sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },  // in-flight
     }, false)
 
@@ -295,7 +263,7 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
 
     const st = useProject.getState()
     expect(st.activeChatId).toBe(100)  // created.id из createSpy
-    const snap = st.chatSnapshots[1]
+    const snap = st.chats[1]
     expect(snap).toBeDefined()
     expect(snap.messages).toBe(active.messages)
     expect(snap.isStreaming).toBe(true)   // in-flight → живой стрим уходящего чата сохранён
@@ -311,26 +279,24 @@ describe('newChatSession — snapshot уходящего чата (leave-пар�
   it('новый чат сбрасывает openedReviewId/previewArtifactId/sessionUsage (не тащит из прошлого)', async () => {
     useProject.setState({
       activeChatId: 1, openedReviewId: 42, previewArtifactId: 'art-old',
-      sessionUsage: { inputTokens: 500000, outputTokens: 200000, cachedInputTokens: 0 },
     }, false)
     await useProject.getState().newChatSession('new one')
     const st = useProject.getState()
     expect(st.openedReviewId).toBeNull()
     expect(st.previewArtifactId).toBeNull()
-    expect(st.sessionUsage).toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 })
+    expect(active(st).sessionUsage).toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 })
   })
 
   it('гасит isStreaming уходящего чата когда send НЕ in-flight (анти-фантом стрима)', async () => {
     useProject.setState({
       activeChatId: 1,
-      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
-      isStreaming: true, streamStartedAt: 1000,
+      chats: { 1: { ...distinctiveBundle('phantom'), chatId: 1, hasUnread: false } },  // isStreaming: true
       sendOwners: {},  // нет активного send → не in-flight
     }, false)
 
     await useProject.getState().newChatSession()
 
-    const snap = useProject.getState().chatSnapshots[1]
+    const snap = useProject.getState().chats[1]
     expect(snap).toBeDefined()
     expect(snap.isStreaming).toBe(false)      // висячий флаг снят
     expect(snap.streamStartedAt).toBeNull()
@@ -370,14 +336,13 @@ describe('switchChatSession — provider/model preservation (#3)', () => {
   it('не-inflight стрим гасится и при switch (паритет с newChatSession)', async () => {
     useProject.setState({
       activeChatId: 1,
-      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
-      isStreaming: true, streamStartedAt: 1000,
+      chats: { 1: { ...distinctiveBundle('switch'), chatId: 1, hasUnread: false } },  // isStreaming: true
       sendOwners: {},  // не in-flight
     }, false)
 
     await useProject.getState().switchChatSession(2)
 
-    const snap = useProject.getState().chatSnapshots[1]
+    const snap = useProject.getState().chats[1]
     expect(snap.isStreaming).toBe(false)
     expect(snap.streamStartedAt).toBeNull()
   })
@@ -391,14 +356,12 @@ describe('openHelpChat — реконсиляция стрим-флага (па�
   it('фантомный стрим (send НЕ in-flight) не уносится в снапшот активного чата', async () => {
     useProject.setState({
       activeChatId: 1,
-      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
-      isStreaming: true, streamStartedAt: 1000,
       sendOwners: {},  // не in-flight → фантом
     }, false)
 
     await useProject.getState().openHelpChat()
 
-    const snap = useProject.getState().chatSnapshots[1]
+    const snap = useProject.getState().chats[1]
     expect(snap).toBeDefined()
     expect(snap.isStreaming).toBe(false)
     expect(snap.streamStartedAt).toBeNull()
@@ -407,14 +370,13 @@ describe('openHelpChat — реконсиляция стрим-флага (па�
   it('живой стрим (in-flight) сохраняется в снапшоте при уходе в справку', async () => {
     useProject.setState({
       activeChatId: 1,
-      messages: [{ role: 'assistant', content: 'x' }] as ChatMessage[],
-      isStreaming: true, streamStartedAt: 1000,
+      chats: { 1: { ...distinctiveBundle('help'), chatId: 1, hasUnread: false } },  // isStreaming, streamStartedAt: 1000
       sendOwners: { 11: { kind: 'chat', chatId: 1, projectPath: 'C:/proj' } },  // in-flight
     }, false)
 
     await useProject.getState().openHelpChat()
 
-    const snap = useProject.getState().chatSnapshots[1]
+    const snap = useProject.getState().chats[1]
     expect(snap.isStreaming).toBe(true)
     expect(snap.streamStartedAt).toBe(1000)
   })
@@ -430,12 +392,10 @@ describe('closeProject — полный сброс эфемерного сост
       sendOwners: { 1: { kind: 'chat', chatId: 5 } },
       helpMode: true,
       sessions: { 'C:/proj': distinctiveBundle('S') },
-      chatSnapshots: { 2: distinctiveBundle('C') },
-      subagentRuns: [{ callId: 'sr1', label: 'l', task: 't', status: 'running' }],
+      chats: { 2: distinctiveBundle('C') },
       reviews: { 9: { reviewChatId: 9, parentChatId: 1, providerId: 'grok', model: null, content: '', status: 'streaming', createdAt: 1, noteCount: -1, findings: [], accepted: [] } },
       openedReviewId: 9,
       activeChatId: 3,
-      pendingWrites: [{ callId: 'w', path: 'a', before: '', after: 'b' }],
     }, false)
     useProject.getState().pushPreflight({ callId: 'p1', summary: 's', affectedZones: ['z'], risk: 'low', riskReason: 'r', verifyAfter: [], outOfScope: [] })
 
@@ -446,12 +406,12 @@ describe('closeProject — полный сброс эфемерного сост
     expect(st.sendOwners).toEqual({})
     expect(st.helpMode).toBe(false)
     expect(st.sessions).toEqual({})
-    expect(st.chatSnapshots).toEqual({})
-    expect(st.preflights).toEqual([])
-    expect(st.subagentRuns).toEqual([])
+    expect(st.chats).toEqual({})
+    expect(active(st).preflights).toEqual([])
+    expect(active(st).subagentRuns).toEqual([])
     expect(st.reviews).toEqual({})
     expect(st.openedReviewId).toBeNull()
     expect(st.activeChatId).toBeNull()
-    expect(st.pendingWrites).toEqual([])
+    expect(active(st).pendingWrites).toEqual([])
   })
 })

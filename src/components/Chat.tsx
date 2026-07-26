@@ -2322,7 +2322,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }
 
     let priorMessages: ChatMessage[] | undefined = sameProject
-      ? store.chatSnapshots[chatId]?.messages
+      ? store.chats[chatId]?.messages
       : undefined
 
     if (!priorMessages) {
@@ -2641,7 +2641,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       await sendHelpMessage(
         { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, opts },
         {
-          getProjectState: () => useProject.getState(),
+          // 4.4: bundle-поля живут в chats — подмешиваем их к состоянию стора,
+        // контракт отправки не трогаем.
+        getProjectState: () => {
+          const st = useProject.getState()
+          const bundle = st.activeChatId != null ? st.chats[st.activeChatId] : undefined
+          return { ...st, messages: bundle?.messages ?? [], agentProgress: bundle?.agentProgress ?? [] }
+        },
           getSkillsState: () => useSkillsStore.getState(),
           api: {
             chatsAppend: (chatId, projectPath, role, content) => window.api.chats.append(chatId, projectPath, role, content),
@@ -2668,7 +2674,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     await sendChatMessage(
       { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
       {
-        getProjectState: () => useProject.getState(),
+        // 4.4: bundle-поля живут в chats — подмешиваем их к состоянию стора,
+        // контракт отправки не трогаем.
+        getProjectState: () => {
+          const st = useProject.getState()
+          const bundle = st.activeChatId != null ? st.chats[st.activeChatId] : undefined
+          return { ...st, messages: bundle?.messages ?? [], agentProgress: bundle?.agentProgress ?? [] }
+        },
         getSkillsState: () => useSkillsStore.getState(),
         api: {
           runLoaders: (skillId, o) => window.api.skills.runLoaders(skillId, o),
@@ -2721,10 +2733,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           }
 
           const isActiveTarget = !store.helpMode && store.activeChatId === payload.chatId
-          // 4.3: активный чат читаем из chats (SSOT), фоновой — из chatSnapshots (вьюха).
+          // 4.4: и активный, и фоновый чат читаются из chats — хранилище одно.
           let priorMessages: ChatMessage[] | undefined = isActiveTarget
             ? store.chats[payload.chatId]?.messages
-            : store.chatSnapshots[payload.chatId]?.messages
+            : store.chats[payload.chatId]?.messages
 
           if (!priorMessages) {
             const history = await window.api.chats.list(payload.chatId)
@@ -2835,7 +2847,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // подтверждения команды → main зарезолвил pendingCommand в false, но command-result
     // мог дропнуться (owner забыт выше) → модалка осталась бы (ревью 24.06).
     const cur = useProject.getState()
-    if (cur.pendingCommand?.sendId === id) cur.setPendingCommand(null)
+    const curPending = cur.activeChatId != null ? cur.chats[cur.activeChatId]?.pendingCommand : null
+    if (curPending?.sendId === id) cur.setPendingCommand(null)
     if (cur.pendingPlan?.sendId === id) cur.setPendingPlan(null) // #3 plan-gate: снять модалку плана при Stop
     currentSendIdRef.current = null
     flushQueueRef.current()

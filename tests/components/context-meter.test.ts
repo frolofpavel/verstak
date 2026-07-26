@@ -5,6 +5,7 @@
 // Зачем живой компонент, если тексты и доступность уже покрыты (tests/lib/context-meter):
 // ровно потому, что фича без работающей кнопки — полая. Здесь проверяется проводка:
 // читает состояние, зовёт сжатие нужного чата, честно показывает осечку и НЕ падает на ней.
+import { seedActive } from '../store/_active-bundle'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, cleanup, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -29,7 +30,7 @@ function mount(contextState: unknown, compact?: () => Promise<unknown>, path: st
     },
   })
   ;(globalThis as { window?: unknown }).window = Object.assign(globalThis.window ?? {}, { api: api.api })
-  useProject.setState({ path, activeChatId: 7, isStreaming: false })
+  useProject.setState({ path, activeChatId: 7 }); seedActive(useProject, { isStreaming: false  })
   return render(createElement(ContextMeter))
 }
 

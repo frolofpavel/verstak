@@ -1,3 +1,4 @@
+import { active } from './_active-bundle'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // Регрессия: pushActivity дедупит по id. attest_verification (и др. tool-activity)
@@ -16,9 +17,12 @@ const windowStub = {
 vi.stubGlobal('window', windowStub)
 
 import { useProject } from '../../src/store/projectStore'
+import { freshSnapshot } from '../../src/store/session-snapshot'
 
 describe('pushActivity — дедуп по id', () => {
   beforeEach(() => {
+    // 4.4: activity живёт в bundle активного чата — без открытого чата писать некуда.
+    useProject.setState({ activeChatId: 1, chats: { 1: { ...freshSnapshot(), chatId: 1 } } } as never, false)
     useProject.getState().clearActivity()
   })
 
@@ -28,7 +32,7 @@ describe('pushActivity — дедуп по id', () => {
     store.pushActivity({ id, kind: 'command', label: 'attest_verification', status: 'pending', timestamp: 1 })
     store.pushActivity({ id, kind: 'command', label: 'attest_verification', detail: 'DoD 2/2', status: 'ok', timestamp: 2 })
 
-    const activity = useProject.getState().activity
+    const activity = active(useProject.getState()).activity
     expect(activity).toHaveLength(1)
     expect(activity[0].status).toBe('ok')
     expect(activity[0].detail).toBe('DoD 2/2')
@@ -41,7 +45,7 @@ describe('pushActivity — дедуп по id', () => {
     store.pushActivity({ id: 'a', kind: 'read', label: 'read_file', status: 'ok', timestamp: 1 })
     store.pushActivity({ id: 'b', kind: 'list', label: 'list_directory', status: 'ok', timestamp: 2 })
 
-    const activity = useProject.getState().activity
+    const activity = active(useProject.getState()).activity
     expect(activity.map(a => a.id)).toEqual(['a', 'b'])
   })
 })

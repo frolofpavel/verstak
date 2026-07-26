@@ -10,6 +10,7 @@
 // Сценарий 4 (поздняя запись settings) на момент написания был КРАСНЫМ —
 // блок записи provider/model НЕ имел token-guard'а, который есть у history-загрузки
 // → стейл-switch дописывал модель поверх нового чата. Добавлен guard (мин. фикс).
+import { active, seedActive } from './_active-bundle'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const appendSpy = vi.fn(async () => {})
@@ -48,23 +49,14 @@ function deferred<T = void>() {
 function resetStore() {
   useProject.setState({
     path: 'C:/proj',
-    messages: [],
-    isStreaming: false,
-    streamStartedAt: null,
-    pendingWrites: [],
-    pendingCommand: null,
-    activity: [],
-    agentProgress: [],
-    preflights: [],
     touchedFiles: {},
     activeChatId: null,
-    chatSnapshots: {},
+    chats: {},
     chatSessions: [],
     sendOwners: {},
     chatLaneGenerations: {},
     reviews: {},
     openedReviewId: null,
-    sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
   }, false)
 }
 
@@ -96,26 +88,22 @@ describe('Сц.1 — стейл-загрузка history отбрасывает�
     const st = useProject.getState()
     expect(st.activeChatId).toBe(2)
     // Активный чат B — его сообщения; стейл-history A отброшена guard'ом (токен).
-    expect(st.messages).toEqual([{ role: 'assistant', content: 'ответ чата B', thinking: undefined, appliedSkills: undefined, createdAt: undefined, dbId: 20 }])
+    expect(active(st).messages).toEqual([{ role: 'assistant', content: 'ответ чата B', thinking: undefined, appliedSkills: undefined, createdAt: undefined, dbId: 20 }])
   })
 })
 
 // ─── Сценарий 2: переключение во время активного стрима ──────────────────────
 describe('Сц.2 — switch во время стрима снапшотит уходящий чат (не теряет ответ)', () => {
-  it('уходящий стримящий чат сохраняется в chatSnapshots с частичным ответом', async () => {
+  it('уходящий стримящий чат сохраняется в chats с частичным ответом', async () => {
     // chat 2 имеет снапшот → restore-путь (без async-гидратации).
     useProject.setState({
       activeChatId: 1,
-      isStreaming: true,
-      streamStartedAt: 1000,
-      messages: [
-        { role: 'user', content: 'вопрос' },
-        { role: 'assistant', content: 'частичный ответ' }
-      ] as ChatMessage[],
       chatSessions: [{ id: 1 }, { id: 2 }] as never,
       sendOwners: { 7: { kind: 'chat', chatId: 1, projectPath: 'C:/proj', laneGeneration: 1 } } as never,
       chatLaneGenerations: { 'chat:1': 1 } as never,
-      chatSnapshots: {
+      chats: {
+        // Уходящий чат 1 стримит частичный ответ — именно его сохранность и проверяем.
+        1: { messages: [{ role: 'user', content: 'вопрос' }, { role: 'assistant', content: 'частичный ответ' }], isStreaming: true, streamStartedAt: 1000, pendingWrites: [], pendingCommand: null, activity: [], agentProgress: [], sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }, runningPlanStep: null, hasUnread: false, checkpointId: null, checkpointMessageId: null, preflights: [], subagentRuns: [], chatId: 1 },
         2: { messages: [{ role: 'user', content: 'старое B' }], isStreaming: false, streamStartedAt: null, pendingWrites: [], pendingCommand: null, activity: [], agentProgress: [], sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }, runningPlanStep: null, hasUnread: false, checkpointId: null, checkpointMessageId: null, preflights: [], subagentRuns: [] }
       } as never
     }, false)
@@ -125,14 +113,14 @@ describe('Сц.2 — switch во время стрима снапшотит ух
     const st = useProject.getState()
     expect(st.activeChatId).toBe(2)
     // Уходящий чат 1 снапшотнут со стримом и частичным ответом (не потерян).
-    expect(st.chatSnapshots[1]).toBeDefined()
-    expect(st.chatSnapshots[1].isStreaming).toBe(true)
-    expect(st.chatSnapshots[1].messages).toEqual([
+    expect(st.chats[1]).toBeDefined()
+    expect(st.chats[1].isStreaming).toBe(true)
+    expect(st.chats[1].messages).toEqual([
       { role: 'user', content: 'вопрос' },
       { role: 'assistant', content: 'частичный ответ' }
     ])
     // Активный чат B восстановлен из снапшота.
-    expect(st.messages).toEqual([{ role: 'user', content: 'старое B' }])
+    expect(active(st).messages).toEqual([{ role: 'user', content: 'старое B' }])
   })
 })
 
@@ -173,7 +161,7 @@ describe('Сц.4 — стейл-запись settings не дописывает 
     const snap = (msg: string) => ({ messages: [{ role: 'user', content: msg }], isStreaming: false, streamStartedAt: null, pendingWrites: [], pendingCommand: null, activity: [], agentProgress: [], sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }, runningPlanStep: null, hasUnread: false, checkpointId: null, checkpointMessageId: null, preflights: [], subagentRuns: [] })
     useProject.setState({
       chatSessions: [{ id: 1, providerId: 'openai', model: 'gpt-x' }, { id: 2, providerId: 'grok', model: 'grok-x' }] as never,
-      chatSnapshots: { 1: snap('A'), 2: snap('B') } as never
+      chats: { 1: snap('A'), 2: snap('B') } as never
     }, false)
 
     await useProject.getState().switchChatSession(1) // provider openai (ждёт dP1)
@@ -208,15 +196,15 @@ describe('Сц.5 — конкурентные send: одна lane инвалид
 describe('Сц.6 — позднее событие остановленного/стейл send не попадает в новый чат', () => {
   it('late-событие старого чата уходит в его snapshot, активный чат нетронут', () => {
     const activeMessages: ChatMessage[] = [{ role: 'user', content: 'новый чат B' }]
-    useProject.setState({ activeChatId: 2, messages: activeMessages, isStreaming: false }, false)
+    useProject.setState({ activeChatId: 2 }, false); seedActive(useProject, { messages: activeMessages, isStreaming: false  })
 
     // Позднее событие от старого send чата 1 (после переключения на 2).
     useProject.getState().applyEventToChat(1, { type: 'text', text: 'хвост старого send' })
 
     const st = useProject.getState()
     // Ушло в snapshot чата 1, активный чат 2 не затронут (нет утечки).
-    expect(st.chatSnapshots[1]?.messages).toEqual([{ role: 'assistant', content: 'хвост старого send' }])
-    expect(st.messages).toBe(activeMessages)
+    expect(st.chats[1]?.messages).toEqual([{ role: 'assistant', content: 'хвост старого send' }])
+    expect(active(st).messages).toBe(activeMessages)
     expect(st.activeChatId).toBe(2)
   })
 

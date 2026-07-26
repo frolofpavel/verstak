@@ -1,3 +1,4 @@
+import { seedActive } from './_active-bundle'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 /**
@@ -43,9 +44,8 @@ beforeEach(() => {
   forkSpy.mockClear()
   listSpy.mockClear()
   useProject.setState({
-    path: '/p', activeChatId: 7, messages: HISTORY, isStreaming: false,
-    sendOwners: {}, chatSnapshots: {}, chatSessions: [], composerDrafts: {},
-  }, false)
+    path: '/p', activeChatId: 7,
+    sendOwners: {}, chats: {}, chatSessions: [], composerDrafts: {} }, false); seedActive(useProject, { messages: HISTORY, isStreaming: false })
 })
 afterEach(() => { vi.clearAllMocks() })
 
@@ -87,7 +87,6 @@ describe('editViaFork — правка через ветку', () => {
   // Инвариант 3: правим ПРОШЛОЕ сообщение — стрим оригинала обязан пережить форк.
   it('активный стрим оригинала не трогается (sendOwner жив после форка)', async () => {
     useProject.setState({
-      isStreaming: true,
       sendOwners: { 55: { kind: 'chat', chatId: 7, projectPath: '/p' } },
     }, false)
 

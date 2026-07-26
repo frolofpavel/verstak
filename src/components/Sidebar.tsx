@@ -22,7 +22,7 @@ function clampChatMenuPos(x: number, y: number): { left: number; top: number } {
 
 function ChatNavSection() {
   const t = useT()
-  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, forkChat, refreshChatSessions, chatSnapshots, patchChatSession, cleanupReviewsFor } = useProject(useShallow(s => ({
+  const { path, chatSessions, activeChatId, activeView, setActiveView, switchChatSession, newChatSession, forkChat, refreshChatSessions, chats, patchChatSession, cleanupReviewsFor } = useProject(useShallow(s => ({
     path: s.path,
     chatSessions: s.chatSessions,
     activeChatId: s.activeChatId,
@@ -32,7 +32,7 @@ function ChatNavSection() {
     newChatSession: s.newChatSession,
     forkChat: s.forkChat,
     refreshChatSessions: s.refreshChatSessions,
-    chatSnapshots: s.chatSnapshots,
+    chats: s.chats,
     patchChatSession: s.patchChatSession,
     cleanupReviewsFor: s.cleanupReviewsFor,
   })))
@@ -202,7 +202,10 @@ function ChatNavSection() {
                   onContextMenu={(e) => openContextMenu(e, s.id, s.title)}
                   title={s.title}
                 >
-                  <span className={`gg-chat-nav-dot ${chatSnapshots[s.id]?.isStreaming ? 'is-streaming' : chatSnapshots[s.id]?.hasUnread ? 'is-unread' : ''}`} />
+                  {/* 4.4: живое состояние из chats. Раньше читалась застывшая копия из
+                      chatSnapshots, и у активного чата точка могла показывать
+                      «отвечает» уже после завершения стрима. */}
+                  <span className={`gg-chat-nav-dot ${chats[s.id]?.isStreaming ? 'is-streaming' : chats[s.id]?.hasUnread ? 'is-unread' : ''}`} />
                   <span className="gg-chat-nav-title">{s.parentChatId != null ? '⑂ ' : ''}{s.title}</span>
                   {s.providerId && (
                     <span className="gg-chat-nav-provider" title={`${s.providerId}${s.model ? ' · ' + s.model : ''}`}>

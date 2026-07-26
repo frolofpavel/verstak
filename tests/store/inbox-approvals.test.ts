@@ -11,7 +11,7 @@ describe('selectInboxApprovals', () => {
     const r = selectInboxApprovals({
       activeChatId: 10,
       pendingCommand: cmd('a', 'rm -rf x'),
-      chatSnapshots: {
+      chats: {
         20: { pendingCommand: cmd('b', 'npm i') },
         30: { pendingCommand: null },
       },
@@ -23,11 +23,11 @@ describe('selectInboxApprovals', () => {
   })
 
   it('ничего не ждёт → []', () => {
-    expect(selectInboxApprovals({ activeChatId: 10, pendingCommand: null, chatSnapshots: {} })).toEqual([])
+    expect(selectInboxApprovals({ activeChatId: 10, pendingCommand: null, chats: {} })).toEqual([])
   })
 
   it('активная команда без activeChatId не включается (защитно)', () => {
-    const r = selectInboxApprovals({ activeChatId: null, pendingCommand: cmd('a', 'ls'), chatSnapshots: {} })
+    const r = selectInboxApprovals({ activeChatId: null, pendingCommand: cmd('a', 'ls'), chats: {} })
     expect(r).toEqual([])
   })
 
@@ -35,7 +35,7 @@ describe('selectInboxApprovals', () => {
     const r = selectInboxApprovals({
       activeChatId: 10,
       pendingCommand: null,
-      chatSnapshots: { 20: { pendingCommand: cmd('b', 'git push') } },
+      chats: { 20: { pendingCommand: cmd('b', 'git push') } },
     })
     expect(r).toEqual([{ chatId: 20, command: cmd('b', 'git push') }])
   })

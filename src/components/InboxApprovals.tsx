@@ -10,15 +10,16 @@ import { selectInboxApprovals } from '../store/session-snapshot'
  * не заходя в чат (ai:resolve-command ищет по ключу, а не по активному чату).
  */
 export function InboxApprovals() {
-  // 4.3: pendingCommand активного — из chats (SSOT), фоновые — из chatSnapshots (вьюха).
-  const { activeChatId, chatSnapshots, switchChatSession, clearChatPendingCommand } = useProject(useShallow(s => ({
+  // 4.4: всё из chats. selectInboxApprovals пропускает активного в цикле —
+  // его подтверждение подаётся отдельным полем, иначе строка задвоилась бы.
+  const { activeChatId, chats, switchChatSession, clearChatPendingCommand } = useProject(useShallow(s => ({
     activeChatId: s.activeChatId,
-    chatSnapshots: s.chatSnapshots,
+    chats: s.chats,
     switchChatSession: s.switchChatSession,
     clearChatPendingCommand: s.clearChatPendingCommand,
   })))
   const pendingCommand = useActiveChatField('pendingCommand') ?? null
-  const background = selectInboxApprovals({ activeChatId, pendingCommand, chatSnapshots })
+  const background = selectInboxApprovals({ activeChatId, pendingCommand, chats })
     .filter(a => a.chatId !== activeChatId)
   if (background.length === 0) return null
 

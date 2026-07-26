@@ -122,21 +122,24 @@ export interface InboxApproval {
 }
 
 /**
- * T1.3 Inbox: все ожидающие подтверждения команды по ВСЕМ чатам (активный +
- * фоновые снапшоты) одним списком. Раньше approval фонового чата был не виден,
+ * T1.3 Inbox: все ожидающие подтверждения команды по ВСЕМ чатам одним списком. Раньше approval фонового чата был не виден,
  * пока не переключишься в него — агент в фоне молча ждал. Resolve работает по
  * callId+sendId (ai:resolve-command), т.е. одобрять можно не заходя в чат.
  */
 export function selectInboxApprovals(state: {
   activeChatId: number | null
   pendingCommand: PendingCommand | null
-  chatSnapshots: Record<number, Pick<SessionSnapshot, 'pendingCommand'>>
+  chats: Record<number, Pick<SessionSnapshot, 'pendingCommand'>>
 }): InboxApproval[] {
   const out: InboxApproval[] = []
   if (state.pendingCommand && state.activeChatId != null) {
     out.push({ chatId: state.activeChatId, command: state.pendingCommand })
   }
-  for (const [id, snap] of Object.entries(state.chatSnapshots)) {
+  for (const [id, snap] of Object.entries(state.chats)) {
+    // PerChatState 4.4: сюда подаётся `chats` — SSOT, где активный чат ЕСТЬ.
+    // Его подтверждение уже добавлено выше отдельным полем, поэтому пропускаем:
+    // иначе активный чат дал бы две одинаковые строки в «Центре вмешательств».
+    if (Number(id) === state.activeChatId) continue
     if (snap?.pendingCommand) out.push({ chatId: Number(id), command: snap.pendingCommand })
   }
   return out
@@ -166,72 +169,9 @@ export function freshSnapshot(): SessionSnapshot {
   }
 }
 
-/** Набор полей одного чата, путешествующих вместе при уходе в фон / возврате.
- *  Это SessionSnapshot без hasUnread — тот же набор держит top-level стора для
- *  активного чата. Единый источник истины формы «состояние одного чата». */
+/** Набор полей одного чата без hasUnread. Единый источник истины формы
+ *  «состояние одного чата» — им типизируются патчи bundle. */
 export type ChatStateBundle = Omit<SessionSnapshot, 'hasUnread'>
-
-/** Снять bundle активного чата в снапшот (уход в фон). hasUnread=false —
- *  пользователь только что его смотрел. Заменяет 3 рукописные копии литерала
- *  bundle в setProject / switchChatSession / newChatSession (источник #8/#17:
- *  «забыли поле в одной из копий»). */
-export function captureBundle(s: ChatStateBundle & { activeChatId?: number | null }): SessionSnapshot {
-  return {
-    chatId: s.activeChatId ?? null,
-    messages: s.messages,
-    isStreaming: s.isStreaming,
-    streamStartedAt: s.streamStartedAt,
-    pendingWrites: s.pendingWrites,
-    pendingCommand: s.pendingCommand,
-    activity: s.activity,
-    agentProgress: s.agentProgress,
-    sessionUsage: s.sessionUsage,
-    runningPlanStep: s.runningPlanStep,
-    checkpointId: s.checkpointId,
-    checkpointMessageId: s.checkpointMessageId,
-    preflights: s.preflights,
-    subagentRuns: s.subagentRuns,
-    hasUnread: false
-  }
-}
-
-/** Развернуть снапшот обратно в top-level поля активного чата (восстановление
- *  из фона). Обратная к captureBundle — отбрасывает hasUnread. */
-export function restoreBundle(snap: SessionSnapshot): ChatStateBundle {
-  return {
-    messages: snap.messages,
-    isStreaming: snap.isStreaming,
-    streamStartedAt: snap.streamStartedAt,
-    pendingWrites: snap.pendingWrites,
-    pendingCommand: snap.pendingCommand,
-    activity: snap.activity,
-    agentProgress: snap.agentProgress ?? [],
-    sessionUsage: snap.sessionUsage,
-    runningPlanStep: snap.runningPlanStep,
-    checkpointId: snap.checkpointId,
-    checkpointMessageId: snap.checkpointMessageId,
-    preflights: snap.preflights,
-    subagentRuns: snap.subagentRuns
-  }
-}
-
-/** «leaveChat»: положить активный чат в фон. Возвращает новую копию карты
- *  снапшотов с активным чатом, снятым в bundle. No-op (свежая копия без
- *  изменений), если активного чата нет или переключаемся на него же. Единый
- *  путь ухода для switchChatSession + newChatSession (раньше — две копии
- *  одного if + literal). */
-export function backgroundActiveChat(
-  snapshots: Record<number, SessionSnapshot>,
-  activeChatId: number | null,
-  movingToId: number | null,
-  active: ChatStateBundle
-): Record<number, SessionSnapshot> {
-  const next = { ...snapshots }
-  if (activeChatId != null && activeChatId !== movingToId) {
-    next[activeChatId] = captureBundle(active)
-  }
-  return next
-}
 
 /** Привести стрим-флаг снапшота к реальности: сохранить isStreaming только пока
  *  send реально in-flight; иначе снять «отвечает…»-фантом (залипал баннер после
@@ -246,21 +186,3 @@ export function keepStreamingOnlyWhenInflight(snap: SessionSnapshot, inflight: b
   }
 }
 
-/** «leaveChat» одним шагом: снять активный чат в фон (captureBundle) И привести его
- *  стрим-флаг к реальности (keepStreamingOnlyWhenInflight). Раньше этот двухшаг был
- *  рукописно продублирован в switchChatSession + newChatSession — правка в одной
- *  копии, забытая в другой, и есть race-класс #3 (1.9.8). Единый путь ухода.
- *  inflight — есть ли живой ai:send у уходящего чата (caller: hasInflightChatSend). */
-export function leaveChat(
-  snapshots: Record<number, SessionSnapshot>,
-  activeChatId: number | null,
-  movingToId: number | null,
-  active: ChatStateBundle,
-  inflight: boolean
-): Record<number, SessionSnapshot> {
-  const next = backgroundActiveChat(snapshots, activeChatId, movingToId, active)
-  if (activeChatId != null && activeChatId !== movingToId && next[activeChatId]) {
-    next[activeChatId] = keepStreamingOnlyWhenInflight(next[activeChatId], inflight)
-  }
-  return next
-}

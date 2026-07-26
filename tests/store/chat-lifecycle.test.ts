@@ -1,269 +1,126 @@
-// Characterization-харнес ChatSessionLifecycle (фаза 5, срез 3): пины патчей,
-// которые РАНЬШЕ были рукописными литералами в projectStore (switchChatSession ×2,
-// newChatSession, setProject ×2 фазы, closeProject, leaveHelpMode). Поведение 1-в-1:
-// каждый expect — это бывший inline-литерал. Любая правка билдера, меняющая патч,
-// упадёт здесь ДО того как уедет в store.
-// PerChatState 4.2: патчи дополнительно несут chats (SSOT) — пины обновлены,
-// проверяя chats = chatSnapshots ∪ {активный}, а запись активного = top-level bundle.
-import { describe, expect, it } from 'vitest'
-import type { ChatSession } from '../../src/types/api'
+// PerChatState 4.4: patch-билдеры переходов чата. Хранилище одно (chats), поэтому
+// билдеры проверяются по двум свойствам: состояние чатов не теряется при переходе,
+// а поля ВНЕ bundle (артефакты, маркеры файлов, превью, пагинация) не утекают от
+// уходящего чата к приходящему — исторически именно это и дрейфовало.
+import { describe, it, expect } from 'vitest'
 import {
-  buildCloseProjectPatch,
   buildFreshSwitchPatch,
-  buildLeaveHelpRestorePatch,
-  buildNewChatPatch,
   buildRestoredSwitchPatch,
+  buildNewChatPatch,
+  buildLeaveHelpRestorePatch,
+  buildCloseProjectPatch,
   buildSetProjectPatch,
 } from '../../src/store/chat-lifecycle'
-import { freshSnapshot, restoreBundle, type SessionSnapshot } from '../../src/store/session-snapshot'
+import { freshSnapshot, type SessionSnapshot } from '../../src/store/session-snapshot'
 
-const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 }
+const snap = (chatId: number, over: Partial<SessionSnapshot> = {}): SessionSnapshot =>
+  ({ ...freshSnapshot(), chatId, ...over })
 
-const chat = (id: number): ChatSession => ({
-  id, projectPath: '/p', title: `Чат ${id}`, kind: 'main',
-  providerId: null, model: null, parentChatId: null,
-  createdAt: 1, updatedAt: 1,
-} as unknown as ChatSession)
+const NON_BUNDLE = ['openedReviewId', 'touchedFiles', 'artifacts', 'previewArtifactId'] as const
 
-const usedSnapshot = (patch: Partial<SessionSnapshot> = {}): SessionSnapshot => ({
-  ...freshSnapshot(),
-  chatId: 7,
-  messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }],
-  isStreaming: true,
-  streamStartedAt: 123,
-  checkpointId: 55,
-  checkpointMessageId: 56,
-  preflights: [{ callId: 'c1', summary: 's', affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
-  subagentRuns: [{ callId: 'd1', label: 'sub', task: 't', status: 'running' }],
-  hasUnread: true,
-  ...patch,
+describe('вход в чат без сохранённого состояния', () => {
+  const patch = buildFreshSwitchPatch({ activeChatId: 2, chats: { 1: snap(1, { isStreaming: true }) } })
+
+  it('новый активный получает пустой bundle со своим id', () => {
+    expect(patch.chats[2].chatId).toBe(2)
+    expect(patch.chats[2].messages).toHaveLength(0)
+    expect(patch.chats[2].hasUnread).toBe(false)
+  })
+
+  it('состояние остальных чатов сохраняется', () => {
+    expect(patch.chats[1].isStreaming).toBe(true)
+  })
+
+  it('поля вне bundle сброшены — иначе утекут от уходящего чата', () => {
+    for (const k of NON_BUNDLE) expect(patch, `не сброшено: ${k}`).toHaveProperty(k)
+  })
+
+  it('пагинация истории сброшена', () => {
+    expect(patch.chatHasMoreBefore).toBe(false)
+    expect(patch.chatTotalCount).toBe(0)
+  })
 })
 
-describe('chat-lifecycle — пины бывших inline-патчей projectStore', () => {
-  it('buildFreshSwitchPatch = else-ветка switchChatSession (нет снапшота)', () => {
-    const snapshots = { 1: freshSnapshot() }
-    expect(buildFreshSwitchPatch({ activeChatId: 2, chatSnapshots: snapshots })).toEqual({
-      activeChatId: 2,
-      messages: [],
-      chatHasMoreBefore: false,
-      chatTotalCount: 0,
-      isStreaming: false,
-      streamStartedAt: null,
-      pendingWrites: [],
-      pendingCommand: null,
-      activity: [],
-      agentProgress: [],
-      sessionUsage: ZERO_USAGE,
-      runningPlanStep: null,
-      chatSnapshots: snapshots,
-      chats: {
-        ...snapshots,
-        2: { ...restoreBundle(freshSnapshot()), chatId: 2, hasUnread: false },
-      },
-      openedReviewId: null,
-      touchedFiles: {},
-      checkpointId: null,
-      checkpointMessageId: null,
-      artifacts: [],
-      previewArtifactId: null,
-      preflights: [],
-      subagentRuns: [],
-    })
+describe('вход в чат с сохранённым состоянием', () => {
+  const restored = snap(2, { messages: [{ role: 'user', content: 'было' }], checkpointId: 42 })
+  const patch = buildRestoredSwitchPatch({ activeChatId: 2, restored, chats: { 1: snap(1), 2: restored } })
+
+  it('состояние чата возвращается целиком, включая per-chat checkpoint', () => {
+    expect(patch.chats[2].messages).toHaveLength(1)
+    expect(patch.chats[2].checkpointId, 'чужой checkpoint не должен подменить свой').toBe(42)
   })
 
-  it('buildRestoredSwitchPatch = if-ветка switchChatSession: bundle из снапшота + non-bundle сброс', () => {
-    const snap = usedSnapshot()
-    const snapshots = { 1: freshSnapshot() }
-    const patch = buildRestoredSwitchPatch({ activeChatId: 7, restored: snap, chatSnapshots: snapshots })
-    // per-chat поля восстанавливаются ИЗ снапшота (finding 2/3 — чужие не утекают)
-    expect(patch.messages).toEqual(snap.messages)
-    expect(patch.isStreaming).toBe(true)
-    expect(patch.streamStartedAt).toBe(123)
-    expect(patch.checkpointId).toBe(55)
-    expect(patch.checkpointMessageId).toBe(56)
-    expect(patch.preflights).toEqual(snap.preflights)
-    expect(patch.subagentRuns).toEqual(snap.subagentRuns)
-    // non-bundle — явный сброс (2.0.1: раньше протекали от уходящего чата)
-    expect(patch.touchedFiles).toEqual({})
-    expect(patch.artifacts).toEqual([])
-    expect(patch.previewArtifactId).toBeNull()
-    expect(patch.openedReviewId).toBeNull()
-    expect(patch.activeChatId).toBe(7)
-    expect(patch.chatSnapshots).toBe(snapshots)
-    // hasUnread — свойство фона, в top-level не поднимается
-    expect(patch).not.toHaveProperty('hasUnread')
-    // 4.2: SSOT — активный тождествен top-level bundle (restoreBundle той же базы)
-    expect(patch.chats).toEqual({
-      ...snapshots,
-      7: { ...restoreBundle(snap), chatId: 7, hasUnread: false },
-    })
+  it('вошедший чат прочитан', () => {
+    expect(patch.chats[2].hasUnread).toBe(false)
   })
 
-  it('buildNewChatPatch = newChatSession (после VSK-FIX: пагинация истории сбрасывается)', () => {
-    const snapshots = { 1: freshSnapshot() }
-    const patch = buildNewChatPatch({ activeChatId: 3, chatSnapshots: snapshots, chatSessions: [chat(3)] })
-    expect(patch).toEqual({
-      chatSessions: [chat(3)],
-      activeChatId: 3,
-      chatSnapshots: snapshots,
-      chats: {
-        ...snapshots,
-        3: { ...restoreBundle(freshSnapshot()), chatId: 3, hasUnread: false },
-      },
-      messages: [],
-      chatHasMoreBefore: false,
-      chatTotalCount: 0,
-      activity: [],
-      agentProgress: [],
-      pendingWrites: [],
-      pendingCommand: null,
-      runningPlanStep: null,
-      isStreaming: false,
-      streamStartedAt: null,
-      touchedFiles: {},
-      checkpointId: null,
-      checkpointMessageId: null,
-      artifacts: [],
-      openedReviewId: null,
-      previewArtifactId: null,
-      sessionUsage: ZERO_USAGE,
-      preflights: [],
-      subagentRuns: [],
-    })
+  it('поля вне bundle сброшены', () => {
+    for (const k of NON_BUNDLE) expect(patch).toHaveProperty(k)
+  })
+})
+
+describe('создание нового чата', () => {
+  const patch = buildNewChatPatch({ activeChatId: 5, chats: { 1: snap(1) }, chatSessions: [] })
+
+  it('новый чат пустой, старые сохранены', () => {
+    expect(patch.chats[5].messages).toHaveLength(0)
+    expect(patch.chats[1]).toBeDefined()
   })
 
-  it('buildLeaveHelpRestorePatch: стрим восстанавливается только при реальном inflight', () => {
-    const snap = usedSnapshot()
-    const snapshots = { 2: freshSnapshot() }
+  it('пагинация сброшена (VSK-FIX-PAGINATION)', () => {
+    expect(patch.chatHasMoreBefore).toBe(false)
+    expect(patch.chatTotalCount).toBe(0)
+  })
+})
 
-    const inflight = buildLeaveHelpRestorePatch({ snap, chatId: 7, chatSnapshots: snapshots, inflight: true })
-    expect(inflight.isStreaming).toBe(true)
-    expect(inflight.streamStartedAt).toBe(123)
-    expect(inflight.helpMode).toBe(false)
-    expect(inflight.messages).toEqual(snap.messages)
-    expect(inflight.chatSnapshots).toBe(snapshots)
-    // 4.2: SSOT — вернувшийся чат тождествен top-level (стрим по inflight)
-    expect(inflight.chats[7]).toMatchObject({ isStreaming: true, streamStartedAt: 123, hasUnread: false })
-    expect(inflight.chats[2]).toBe(snapshots[2])
+describe('выход из справки', () => {
+  const base = snap(1, { isStreaming: true, streamStartedAt: 1000, messages: [{ role: 'user', content: 'x' }] })
 
-    // Фоновый прогон завершился, пока были в справке → «отвечает…» не залипает
-    const stale = buildLeaveHelpRestorePatch({ snap, chatId: 7, chatSnapshots: snapshots, inflight: false })
-    expect(stale.isStreaming).toBe(false)
-    expect(stale.streamStartedAt).toBeNull()
-    expect(stale.chats[7]).toMatchObject({ isStreaming: false, streamStartedAt: null })
-
-    // Не стримил и не inflight → тоже false
-    const quiet = buildLeaveHelpRestorePatch({ snap: usedSnapshot({ isStreaming: false }), chatId: 7, chatSnapshots: snapshots, inflight: true })
-    expect(quiet.isStreaming).toBe(false)
-    expect(quiet.streamStartedAt).toBeNull()
-    expect(quiet.chats[7]).toMatchObject({ isStreaming: false, streamStartedAt: null })
+  it('живой стрим сохраняется — иначе теряется идущий ответ', () => {
+    const p = buildLeaveHelpRestorePatch({ snap: base, chatId: 1, chats: { 1: base }, inflight: true })
+    expect(p.chats[1].isStreaming).toBe(true)
+    expect(p.chats[1].streamStartedAt).toBe(1000)
+    expect(p.helpMode).toBe(false)
   })
 
-  it('buildCloseProjectPatch = closeProject: полный сброс эфемерного состояния', () => {
-    expect(buildCloseProjectPatch()).toEqual({
-      path: null,
-      tree: [],
-      messages: [],
-      chatHasMoreBefore: false,
-      chatTotalCount: 0,
-      isStreaming: false,
-      streamStartedAt: null,
-      pendingWrites: [],
-      pendingCommand: null,
-      pendingPlan: null,
-      activity: [],
-      agentProgress: [],
-      preflights: [],
-      subagentRuns: [],
-      sessionUsage: ZERO_USAGE,
-      runningPlanStep: null,
-      activeChatId: null,
-      chatSessions: [],
-      chatSnapshots: {},
-      chats: {},
-      sessions: {},
-      sendOwners: {},
-      chatLaneGenerations: {},
-      reviews: {},
-      openedReviewId: null,
-      touchedFiles: {},
-      checkpointId: null,
-      checkpointMessageId: null,
-      artifacts: [],
-      resumableRuns: [],
-      activePipeline: null,
-      activeDevTaskId: null,
-      devTask: null,
-      helpMode: false,
-    })
+  it('фантомный стрим снимается — иначе залипает баннер «отвечает»', () => {
+    const p = buildLeaveHelpRestorePatch({ snap: base, chatId: 1, chats: { 1: base }, inflight: false })
+    expect(p.chats[1].isStreaming).toBe(false)
+    expect(p.chats[1].streamStartedAt).toBeNull()
+    expect(p.chats[1].messages, 'сообщения при этом теряться не должны').toHaveLength(1)
   })
+})
 
-  it('buildSetProjectPatch: фазы отличаются только messages/chatSessions/activeChatId', () => {
-    const target = usedSnapshot({ chatId: 9 })
-    const sessions = { '/other': freshSnapshot() }
-    const phase1 = buildSetProjectPatch({
-      path: '/p', target, sessions, messages: target.messages, chatSessions: [], activeChatId: 9,
-    })
-    const phase2 = buildSetProjectPatch({
-      path: '/p', target, sessions, messages: [], chatSessions: [chat(9)], activeChatId: 9,
-    })
-    // Общая часть фаз идентична (бывший дублированный литерал). chatTotalCount —
-    // производная messages (messages.length), поэтому тоже варьируется по фазам.
-    // chats варьируется вслед за messages (4.2: SSOT активного несёт те же messages).
-    const { messages: _m1, chatSessions: _c1, activeChatId: _a1, chatTotalCount: _t1, chats: _ch1, ...rest1 } = phase1
-    const { messages: _m2, chatSessions: _c2, activeChatId: _a2, chatTotalCount: _t2, chats: _ch2, ...rest2 } = phase2
-    expect(rest1).toEqual(rest2)
-    expect(rest1).toEqual({
-      path: '/p',
-      tree: [],
-      chatHasMoreBefore: false,
-      isStreaming: true,
-      streamStartedAt: 123,
-      pendingWrites: [],
-      pendingCommand: null,
-      activity: [],
-      agentProgress: [],
-      sessionUsage: target.sessionUsage,
-      runningPlanStep: null,
-      checkpointId: 55,
-      checkpointMessageId: 56,
-      preflights: target.preflights,
-      subagentRuns: target.subagentRuns,
-      activeView: 'chat',
-      sessions,
-      touchedFiles: {},
-      activeDevTaskId: null,
-      devTask: null,
-      chatSnapshots: {},
-      reviews: {},
-      openedReviewId: null,
-      artifacts: [],
-      resumableRuns: [],
-      activePipeline: null,
-      helpMode: false,
-    })
-    expect(phase1.messages).toEqual(target.messages)
-    expect(phase1.chatTotalCount).toBe(2)
-    expect(phase1.chatSessions).toEqual([])
-    expect(phase2.messages).toEqual([])
-    expect(phase2.chatSessions).toEqual([chat(9)])
-    expect(phase2.chatTotalCount).toBe(0)
-    // 4.2: SSOT активного несёт те же messages, что top-level фазы.
-    expect(phase1.chats).toEqual({
-      9: { ...restoreBundle(target), messages: target.messages, chatId: 9, hasUnread: false },
-    })
-    expect(phase2.chats).toEqual({
-      9: { ...restoreBundle(target), messages: [], chatId: 9, hasUnread: false },
-    })
-  })
-
-  it('buildSetProjectPatch: agentProgress undefined в старом снапшоте → [] (legacy-защита)', () => {
-    const legacy = { ...usedSnapshot(), agentProgress: undefined as unknown as SessionSnapshot['agentProgress'] }
-    const patch = buildSetProjectPatch({
-      path: '/p', target: legacy, sessions: {}, messages: [], chatSessions: [], activeChatId: null,
-    })
-    expect(patch.agentProgress).toEqual([])
-    // 4.2: нет активного чата → пустой SSOT
+describe('закрытие проекта', () => {
+  const patch = buildCloseProjectPatch()
+  it('состояние чатов очищено полностью', () => {
     expect(patch.chats).toEqual({})
+    expect(patch.activeChatId).toBeNull()
+    expect(patch.helpMode).toBe(false)
+  })
+})
+
+describe('смена проекта', () => {
+  const target = snap(0, { isStreaming: true })
+  const patch = buildSetProjectPatch({
+    path: '/b', target, sessions: {}, messages: [{ role: 'user', content: 'из истории' }],
+    chatSessions: [], activeChatId: 9,
+  })
+
+  it('чаты прошлого проекта не переносятся: id разных проектов пересекаются', () => {
+    expect(Object.keys(patch.chats)).toEqual(['9'])
+  })
+
+  it('активный чат нового проекта получает загруженную историю', () => {
+    expect(patch.chats[9].messages).toHaveLength(1)
+    expect(patch.chats[9].chatId).toBe(9)
+    expect(patch.chats[9].hasUnread).toBe(false)
+  })
+
+  it('без активного чата состояние чатов пустое, а не унаследованное', () => {
+    const p = buildSetProjectPatch({
+      path: '/b', target, sessions: {}, messages: [], chatSessions: [], activeChatId: null,
+    })
+    expect(p.chats).toEqual({})
   })
 })

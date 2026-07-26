@@ -37,7 +37,7 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
   const patchChatSession = useProject(s => s.patchChatSession)
   const refreshChatSessions = useProject(s => s.refreshChatSessions)
   const chatSessions = useProject(s => s.chatSessions)
-  const snapshot = useProject(s => sideChatId != null ? s.chatSnapshots[sideChatId] : undefined)
+  const snapshot = useProject(s => sideChatId != null ? s.chats[sideChatId] : undefined)
   const path = useProject(s => s.path)
   const [draftMessages, setDraftMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const messages = sideChatId != null ? (snapshot?.messages ?? []) : draftMessages
@@ -173,11 +173,11 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
     if (sideChatId == null) return
     let cancelled = false
     const store = useProject.getState()
-    const snap = store.chatSnapshots[sideChatId]
+    const snap = store.chats[sideChatId]
     if (snap && snap.messages.length > 0) return
     void window.api.chats.list(sideChatId).then(history => {
       if (cancelled) return
-      const current = useProject.getState().chatSnapshots[sideChatId]
+      const current = useProject.getState().chats[sideChatId]
       if (current && current.messages.length > 0) return
       store.seedChatSnapshot(sideChatId, history.map(m => ({ role: m.role, content: m.content, thinking: m.thinking, appliedSkills: m.appliedSkills, createdAt: m.createdAt, dbId: m.id })))
     }).catch(() => {})
@@ -204,7 +204,7 @@ export function SideChat({ sideChatId, width, onResizeStart, onSessionCreated, o
     if (chatId == null) return
 
     const store = useProject.getState()
-    const priorMessages = store.chatSnapshots[chatId]?.messages ?? draftMessages
+    const priorMessages = store.chats[chatId]?.messages ?? draftMessages
     const isFirstUserMessage = !priorMessages.some(m => m.role === 'user' && m.content.trim())
     // historyForSend сохраняет dbId — по нему main режет историю по границе сжатого
     // итога (ревью 2.0.11-B #4). Локальная копия его срезала, и сжатие вырождалось.
