@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { captureToolObservation } from '../../electron/ai/memory-hooks'
+import { captureToolObservation, isAutoCaptureEnabled, AUTO_CAPTURE_SETTING_KEY } from '../../electron/ai/memory-hooks'
 
 type Saved = { projectPath: string; type: string; content: string; tags: string[] }
 
@@ -45,5 +45,31 @@ describe('memory-hooks — captureToolObservation', () => {
     captureToolObservation(saveMemory, { tool: 'run_command', args: { command: cmd }, result: 'exit code 0', projectPath: '/proj/a' })
     captureToolObservation(saveMemory, { tool: 'run_command', args: { command: cmd }, result: 'exit code 0', projectPath: '/proj/a' })
     expect(saved).toHaveLength(1)
+  })
+})
+
+/**
+ * 2.1.13: сырой автозахват стал opt-in. Раньше он писал в память строку на каждый
+ * write_file/run_command — механику, а не знание; полезные факты вытеснялись
+ * служебными записями. Ту же задачу решает bounded-событие `pre-compress`.
+ * Механизм оставлен рабочим за флагом — эти пины держат ровно дефолт и обратимость.
+ */
+describe('isAutoCaptureEnabled — сырой захват выключен по умолчанию', () => {
+  it('настройки нет — выключено (в память идёт только bounded-событие)', () => {
+    expect(isAutoCaptureEnabled(() => null)).toBe(false)
+  })
+
+  it('резолвера настроек нет вовсе — выключено', () => {
+    expect(isAutoCaptureEnabled(undefined)).toBe(false)
+  })
+
+  it("'true' возвращает прежнее поведение целиком, без правки кода", () => {
+    expect(isAutoCaptureEnabled(k => (k === AUTO_CAPTURE_SETTING_KEY ? 'true' : null))).toBe(true)
+  })
+
+  it('любое другое значение не включает захват втихую', () => {
+    expect(isAutoCaptureEnabled(() => 'false')).toBe(false)
+    expect(isAutoCaptureEnabled(() => '1')).toBe(false)
+    expect(isAutoCaptureEnabled(() => '')).toBe(false)
   })
 })

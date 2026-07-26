@@ -33,7 +33,7 @@ import { compactProgressText, modelProgressLabel, emitAgentProgress, createModel
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
 import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
-import { captureToolObservation } from './memory-hooks'
+import { captureToolObservation, isAutoCaptureEnabled } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
 import { classifyFallbackReason } from './smart-fallback'
@@ -1141,8 +1141,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       reviewGatePassed = true
     }
     // Tally tool usage for the end-of-session journal summary
-    // auto_capture_memory: по умолчанию включено; выключается настройкой 'false'
-    const autoCaptureEnabled = getSecretForDelegate?.('auto_capture_memory') !== 'false'
+    // auto_capture_memory: 2.1.13 — сырой захват tool-потока стал opt-in (по умолчанию
+    // ВЫКЛЮЧЕН). Знание в память кладёт bounded-событие pre-compress, а не поток
+    // «Записан файл X (123 символов)». Прежнее поведение возвращается настройкой 'true'.
+    const autoCaptureEnabled = isAutoCaptureEnabled(getSecretForDelegate)
     const toolOutcome = collectToolTurnOutcome({
       toolCalls,
       toolResults,

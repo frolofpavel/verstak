@@ -80,6 +80,25 @@ function isDuplicate(projectPath: string, content: string): boolean {
   return false
 }
 
+/** Ключ настройки сырого автозахвата. */
+export const AUTO_CAPTURE_SETTING_KEY = 'auto_capture_memory'
+
+/**
+ * Включён ли сырой автозахват tool-потока.
+ *
+ * 2.1.13: ВЫКЛЮЧЕН по умолчанию (opt-in вместо opt-out). Раньше он писал в память
+ * строку на каждый write_file/run_command («Записан файл X (123 символов)») — это
+ * механика, а не знание: recall зашумлялся, и полезные факты вытеснялись служебными
+ * записями. Ту же задачу теперь решает bounded-событие `pre-compress`
+ * (ai/memory-lifecycle.ts): один ограниченный batch решений и фактов вместо потока.
+ *
+ * Механизм намеренно оставлен рабочим за флагом: `auto_capture_memory='true'`
+ * возвращает прежнее поведение целиком, без правки кода.
+ */
+export function isAutoCaptureEnabled(getSecret: ((key: string) => string | null) | undefined): boolean {
+  return getSecret?.(AUTO_CAPTURE_SETTING_KEY) === 'true'
+}
+
 /**
  * Главная функция — вызывается после каждого tool call.
  * Fire-and-forget: не кидает исключения, не блокирует агентный цикл.
