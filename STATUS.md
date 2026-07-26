@@ -46,10 +46,12 @@
 
 ## Открытый остаток
 
-- **2.1.11 декомпозиция renderer (P1).** `Settings.tsx`, `Chat.tsx`,
-  `layout.css` остаются крупнейшими поверхностями. Срез A (`PolicyTab`)
-  выполнен; дальше — composer, stream rendering, pipeline controls, вкладки
-  Settings, деление CSS, UI smoke.
+- **2.1.11 декомпозиция renderer (P1).** Срез A (`PolicyTab`) и срез B (композер
+  `Chat.tsx` → `chat/ComposerSkillBar`, `chat/ComposerBudgetBar`,
+  `chat/system-slash-commands`) выполнены. Размеры на 27.07: `Chat.tsx` 3973,
+  `Settings.tsx` 4649, `layout.css` 21994. Дальше — срез C (stream rendering),
+  срез D (pipeline controls), вкладки Settings, деление CSS, UI smoke. Границу
+  тестового харнесса для срезов C/D см. в аудите, раздел 2.1.11.
 - **2.1.12 остаточный долг (P2).** TODO второй ветки незакрытой review-сессии в
   `electron/ipc/agent-runs.ts`; lazy-импорты в `App.tsx`, которые сборщик всё
   равно включает статически; рантайм-флаги (`memory_lifecycle`,
