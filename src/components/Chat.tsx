@@ -1,14 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useProject, type PreflightCard, type SendOwner } from '../store/projectStore'
 import { useActiveChatBundle, getActiveChatBundle } from '../hooks/useActiveChatBundle'
 import { emptySessionUsage } from '../store/session-snapshot'
 import { findRunForChat } from '../lib/own-run'
 import { historyForSend } from '../lib/chat-messages'
-import { canEditMessage } from '../lib/fork-edit'
 import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
-import { Markdown } from './Markdown'
 import { TimelineBar } from './TimelineBar'
 import { AgentProgressPanel } from './AgentProgressPanel'
 import { ReviewPanel } from './ReviewPills'
@@ -31,9 +29,8 @@ import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import { sendHelpMessage } from './chat/send-help-message'
 import { sendChatMessage } from './chat/send-chat-message'
-import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, skillDisplayName, toAppliedSkillRef } from './chat/skill-prompts'
+import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, toAppliedSkillRef } from './chat/skill-prompts'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
-import { formatDuration } from '../lib/format-duration'
 import { routeChangedActivity } from '../lib/route-activity'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
@@ -44,23 +41,18 @@ import { toProjectAbsPath } from '../lib/project-path'
 import type { PipelineRun, PipelineStep, PipelineBrief, PipelineMode, TaskContractV1 } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import { isStaleModelId, normalizeSelectedModel } from '../../shared/contracts/provider'
-import {
-  formatChatDateDivider,
-  formatMessageClock,
-  formatMessageDateTitle,
-  isSameLocalDay,
-} from '../lib/chat-timestamps'
 import { ComposerPendingBar } from './ComposerPendingBar'
 // Декомпозиция Chat.tsx (2.1.11 срез B): узлы композера вынесены в chat/*.
 import { ComposerSkillBar } from './chat/ComposerSkillBar'
 import { ComposerInputRow } from './chat/ComposerInputRow'
 import { ComposerBudgetBar } from './chat/ComposerBudgetBar'
 import { ComposerMetaRow } from './chat/ComposerMetaRow'
+import { ChatStreamMessages } from './chat/ChatStreamMessages'
+import { AttachmentChip, formatSize } from './chat/message-parts'
 import {
   CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
   nextComposerItemId,
-  parseSupplementMessage,
   type PendingSupplement,
   type PendingSupplementStatus,
   type QueuedComposerMessage,
@@ -69,7 +61,6 @@ import {
   blobToAttachment,
   isLegacyDoc,
 } from '../lib/chat-attachments'
-import { type AgentProgressEntry } from '../lib/agent-progress'
 import { createStreamDeltaBatcher } from '../lib/stream-delta-batcher'
 
 interface ComposerPendingState {
@@ -219,20 +210,6 @@ function readAutoScrollPref(): boolean {
   return true
 }
 
-function buildInterruptedAnswerProgress(createdAt: number | undefined, providerLabel: string): AgentProgressEntry[] {
-  const timestamp = createdAt ?? Date.now()
-  return [
-    {
-      id: 'interrupted-answer',
-      phase: 'final',
-      title: 'Ответ прерван',
-      detail: `${providerLabel} начал отвечать, но приложение было закрыто до сохранения видимого ответа. Запуск не удалось восстановить автоматически — если задача ещё актуальна, повтори запрос.`,
-      status: 'error',
-      timestamp
-    }
-  ]
-}
-
 type RightPanel = 'none' | 'terminal' | 'sidechat' | 'file-preview'
 
 interface ChatProps {
@@ -246,11 +223,6 @@ interface ChatProps {
 
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 // 4.3: дефолт usage для «нет активного чата» — стабильная ссылка (не плодим
 // новый объект на каждый рендер).
@@ -3004,311 +2976,32 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
             </button>
           </div>
         )}
-        {messages.map((m, i) => {
-          const isLast = i === messages.length - 1
-          const isStreamingAssistant = isLast && m.role === 'assistant' && isStreaming
-          const hasAgentProgress = isLast && m.role === 'assistant' && agentProgress.length > 0
-          const showInlineAgentProgress = hasAgentProgress && !isStreamingAssistant
-          // Render activity rows just before the (last) assistant message
-          const showActivity = isLast && m.role === 'assistant' && activity.length > 0
-          const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
-          const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
-          const changedFiles = isLast && m.role === 'assistant' && !isStreaming
-            ? activity.filter(a => a.kind === 'write' && a.status === 'ok').map(a => a.detail ?? '')
-            : []
-          const prevMsg = i > 0 ? messages[i - 1] : null
-          const showDateDivider = m.createdAt != null
-            && (prevMsg?.createdAt == null || !isSameLocalDay(prevMsg.createdAt, m.createdAt))
-          const messageDateLabel = m.createdAt != null ? formatChatDateDivider(m.createdAt) : undefined
-          const messageDay = m.createdAt != null ? new Date(m.createdAt).toLocaleDateString('en-CA') : undefined
-          const supplement = m.role === 'user' && m.content ? parseSupplementMessage(m.content) : null
-          const hideProgressMeta = m.role === 'assistant' && hasAgentProgress
-          const hideStreamingProgressPlaceholder = isStreamingAssistant
-            && hasAgentProgress
-            && !m.content?.trim()
-            && !m.thinking
-            && !m.attachments?.length
-            && changedFiles.length === 0
-          const isAnimatedAssistant = m.role === 'assistant'
-            && i === lastAssistantInfo?.index
-            && animatedAssistantText?.key === lastAssistantAnimationKey
-          const renderedContent = isAnimatedAssistant
-            ? (animatedAssistantText?.shown ?? m.content)
-            : m.content
-          const isEmptyInterruptedAssistant = m.role === 'assistant'
-            && !isStreamingAssistant
-            && !renderedContent?.trim()
-            && !m.thinking?.trim()
-            && !m.attachments?.length
-            && !showInlineAgentProgress
-            && !showActivity
-            && !showPreflights
-            && !showSubagents
-          if (isEmptyInterruptedAssistant) {
-            if (resumableRuns.length > 0) return null
-            return (
-              <Fragment key={i}>
-                {showDateDivider && (
-                  <div className="gg-chat-date-divider" role="separator" aria-label={formatChatDateDivider(m.createdAt!)}>
-                    <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
-                  </div>
-                )}
-                <div
-                  className="gg-msg gg-msg-assistant gg-msg-agent-progress-standalone"
-                  data-message-day={messageDay}
-                  data-message-date-label={messageDateLabel}
-                >
-                  <div className="gg-agent-progress-inline is-standalone">
-                    <AgentProgressPanel
-                      entries={buildInterruptedAnswerProgress(m.createdAt, provider.label)}
-                      isStreaming={false}
-                      finishedAt={m.createdAt ?? null}
-                      onToggleOpen={handleAgentProgressToggle}
-                    />
-                  </div>
-                </div>
-              </Fragment>
-            )
-          }
-          return (
-            <Fragment key={i}>
-            {showDateDivider && (
-              <div className="gg-chat-date-divider" role="separator" aria-label={formatChatDateDivider(m.createdAt!)}>
-                <span className="gg-chat-date-divider-label">{formatChatDateDivider(m.createdAt!)}</span>
-              </div>
-            )}
-            <div
-              className={`gg-msg ${m.role === 'user' ? 'gg-msg-user' : 'gg-msg-assistant'}${supplement ? ' is-supplement' : ''}`}
-              data-message-day={messageDay}
-              data-message-date-label={messageDateLabel}
-            >
-              {showInlineAgentProgress && (
-                <div className="gg-agent-progress-inline">
-                  <AgentProgressPanel
-                    entries={agentProgress}
-                    isStreaming={false}
-                    durationMs={agentProgressDurationMs}
-                    finishedAt={agentProgressFinishedAt}
-                    onToggleOpen={handleAgentProgressToggle}
-                  />
-                </div>
-              )}
-              {showActivity && (
-                <div className="gg-activity-list">
-                  {activity.map(a => (
-                    <div key={a.id} className={`gg-activity-row is-${a.status}`}>
-                      <span className="gg-activity-icon" />
-                      <span className="gg-activity-label">{a.label}</span>
-                      {a.detail && <span className="gg-activity-detail">{a.detail.length > 80 ? a.detail.slice(0, 80) + '…' : a.detail}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {showPreflights && preflights.map(pf => {
-                const riskLabel = pf.risk === 'high' ? 'высокий риск' : pf.risk === 'medium' ? 'средний риск' : 'низкий риск'
-                return (
-                  <div key={pf.callId} className={`gg-preflight is-${pf.risk}`}>
-                    <div className="gg-preflight-head">
-                      <span className="gg-preflight-title">🛫 План перед действием</span>
-                      <span className={`gg-preflight-pill is-${pf.risk}`}>{riskLabel}</span>
-                    </div>
-                    <div className="gg-preflight-summary">{pf.summary}</div>
-                    {pf.riskReason && <div className="gg-preflight-reason">{pf.riskReason}</div>}
-                    {pf.affectedZones.length > 0 && (
-                      <div className="gg-preflight-section">
-                        <div className="gg-preflight-label">Затронутые зоны</div>
-                        <ul className="gg-preflight-ul">
-                          {pf.affectedZones.map((z, zi) => <li key={zi}>{z}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {pf.verifyAfter.length > 0 && (
-                      <div className="gg-preflight-section">
-                        <div className="gg-preflight-label">Проверить после</div>
-                        <ul className="gg-preflight-ul">
-                          {pf.verifyAfter.map((v, vi) => <li key={vi}>{v}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {pf.outOfScope.length > 0 && (
-                      <div className="gg-preflight-section">
-                        <div className="gg-preflight-label">Вне scope / запреты</div>
-                        <ul className="gg-preflight-ul">
-                          {pf.outOfScope.map((o, oi) => <li key={oi}>{o}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {/* Dev Task Flow (Фаза 2): мягкое предложение открыть задачу из
-                        плана — НЕ авто-создание. Снимет checkpoint + зафиксирует
-                        git-базу, появится вкладка «Задача» с откатом. */}
-                    <div className="gg-preflight-section gg-preflight-devtask">
-                      <button
-                        type="button"
-                        className="gg-preflight-opentask"
-                        onClick={() => void openTaskFromPreflight(pf)}
-                        title="Открыть задачу из этого плана — снимет чекпоинт и покажет вкладку «Задача» с откатом"
-                      >
-                        🗂️ Открыть задачу из этого плана
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-              {showSubagents && subagentRuns.map(sa => {
-                const statusLabel = sa.status === 'running' ? 'выполняется' : sa.status === 'done' ? 'готово' : 'ошибка'
-                return (
-                  <div key={sa.callId} className={`gg-subagent is-${sa.status}`}>
-                    <div className="gg-subagent-head">
-                      <span className="gg-subagent-title">🤖 Sub-agent: {sa.label}</span>
-                      <span className={`gg-subagent-pill is-${sa.status}`}>{statusLabel}</span>
-                    </div>
-                    <div className="gg-subagent-meta">
-                      {sa.skill && <span className="gg-subagent-tag">скилл: {sa.skill}</span>}
-                      {sa.provider && <span className="gg-subagent-tag">провайдер: {sa.provider}</span>}
-                      {sa.role && <span className="gg-subagent-tag">роль: {sa.role}</span>}
-                      {typeof sa.toolCount === 'number' && sa.toolCount > 0 && (
-                        <span className="gg-subagent-tag">🔧 {sa.toolCount} tool-вызовов</span>
-                      )}
-                    </div>
-                    <div className="gg-subagent-task">{sa.task}</div>
-                    {sa.result && (
-                      <details className="gg-subagent-result">
-                        <summary>{sa.status === 'error' ? 'Ошибка' : 'Результат'}</summary>
-                        <div className="gg-subagent-result-body">{sa.result}</div>
-                      </details>
-                    )}
-                  </div>
-                )
-              })}
-              {(m.role === 'assistant' || m.role === 'user') && !hideProgressMeta && (
-                <div className="gg-msg-meta">
-                  {m.role === 'assistant' && (
-                    <span className="gg-msg-author">{provider.label}</span>
-                  )}
-                  {m.createdAt != null && (
-                    <time
-                      className="gg-msg-time"
-                      dateTime={new Date(m.createdAt).toISOString()}
-                      title={formatMessageDateTitle(m.createdAt)}
-                    >
-                      {formatMessageClock(m.createdAt)}
-                    </time>
-                  )}
-                  {isStreamingAssistant && streamStartedAt != null && !hasAgentProgress && (
-                    <span className="gg-msg-duration is-live" title={t.chat.responseRunningTitle}>
-                      {t.chat.responseRunning.replace('{duration}', formatDuration(tickNow - streamStartedAt))}
-                    </span>
-                  )}
-                  {!isStreamingAssistant && m.responseDurationMs != null && (
-                    <span className="gg-msg-duration" title={t.chat.responseDoneTitle}>
-                      {t.chat.responseDone.replace('{duration}', formatDuration(m.responseDurationMs))}
-                    </span>
-                  )}
-                </div>
-              )}
-              {!hideStreamingProgressPlaceholder && (
-              <div className="gg-msg-bubble">
-                {m.role === 'assistant' && m.thinking && (() => {
-                  // Edge case: модель эмитнула ТОЛЬКО thinking без видимого
-                  // ответа (короткий запрос → длинное рассуждение → done без
-                  // финального текста). Чтобы пузырь не казался пустым —
-                  // автоматически разворачиваем блок и показываем подпись.
-                  const hasVisibleAnswer = !!(m.content && m.content.trim())
-                  const isFinal = !isStreamingAssistant
-                  const onlyThinking = !hasVisibleAnswer && isFinal
-                  return (
-                    <details className="gg-thinking" open={onlyThinking || undefined}>
-                      <summary className="gg-thinking-summary">
-                        <span>💭</span>
-                        <span>{onlyThinking ? 'Только размышление, без видимого ответа' : 'Размышление модели'}</span>
-                        <span className="gg-thinking-len">{m.thinking.length} симв.</span>
-                      </summary>
-                      <div className="gg-thinking-body">
-                        <Markdown text={m.thinking} onOpenFile={onOpenFilePreview} />
-                      </div>
-                    </details>
-                  )
-                })()}
-                {changedFiles.length > 0 && (
-                  <div className="gg-changed-files">
-                    <div className="gg-changed-files-title">✓ Изменены файлы ({changedFiles.length})</div>
-                    {changedFiles.map((f, ci) => (
-                      <div key={ci} className="gg-changed-files-row">{f}</div>
-                    ))}
-                  </div>
-                )}
-                {m.attachments?.length ? (
-                  <div className="gg-msg-attachments">
-                    {m.attachments.map((a, ai) => (
-                      <AttachmentPreview key={ai} attachment={a} compact />
-                    ))}
-                  </div>
-                ) : null}
-                {renderedContent
-                  ? (m.role === 'assistant'
-                      ? <Markdown text={renderedContent} onOpenFile={onOpenFilePreview} />
-                      : supplement
-                        ? (
-                          <>
-                            <div className="gg-msg-supplement-tag">{supplement.tag}</div>
-                            <span style={{ whiteSpace: 'pre-wrap' }}>{supplement.body}</span>
-                          </>
-                        )
-                        : <span style={{ whiteSpace: 'pre-wrap' }}>{renderedContent}</span>)
-                  : isStreamingAssistant
-                    ? <div className="gg-typing"><span /><span /><span /></div>
-                    : null
-                }
-              </div>
-              )}
-              {m.role === 'user' && m.source === 'reminder' && (
-                <div className="gg-msg-source-note">Отправлено автоматически из раздела Напоминания</div>
-              )}
-              {m.role === 'user' && !!m.appliedSkills?.length && (
-                <div className="gg-msg-skill-note" title="Эти скиллы были применены только к этому сообщению">
-                  <span className="gg-msg-skill-note-label">
-                    {m.appliedSkills.length === 1 ? 'Применён скилл' : 'Применены скиллы'}
-                  </span>
-                  <span className="gg-msg-skill-note-list">
-                    {m.appliedSkills.map(skill => (
-                      <span key={skill.id} className="gg-msg-skill-note-pill">
-                        {skill.icon && <span aria-hidden>{skill.icon}</span>}
-                        <span>{skillDisplayName(skill)}</span>
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              )}
-              {m.content && !isStreamingAssistant && (
-                <MessageActions
-                  text={m.content}
-                  // «Править» ведёт в ветку через editViaFork: оригинал не трогается.
-                  // Видимость — единый гейт canEditMessage (в т.ч. НЕ в справке, ре-ревью D #2).
-                  onEdit={canEditMessage(m, { activeChatId, helpMode })
-                    ? () => { void useProject.getState().editViaFork(activeChatId!, m.dbId!) }
-                    : undefined}
-                />
-              )}
-              {/* Cross-verify pill: показываем под последним assistant-сообщением */}
-              {isLast && m.role === 'assistant' && !isStreaming && crossVerify && (
-                <div
-                  className={`gg-cross-verify ${crossVerify.ok ? 'is-ok' : 'is-warn'}`}
-                  onClick={() => setCvExpanded(v => !v)}
-                  title={cvExpanded ? 'Свернуть' : 'Развернуть результат ревью'}
-                >
-                  <span className="gg-cv-badge">
-                    {crossVerify.ok ? '✅' : '⚠️'} Проверено {crossVerify.provider}
-                    <span className="gg-cv-chevron">{cvExpanded ? '▴' : '▾'}</span>
-                  </span>
-                  {cvExpanded && (
-                    <div className="gg-cv-detail">{crossVerify.result}</div>
-                  )}
-                </div>
-              )}
-            </div>
-            </Fragment>
-          )
-        })}
+        <ChatStreamMessages
+          messages={messages}
+          isStreaming={isStreaming}
+          provider={provider}
+          t={t}
+          activeChatId={activeChatId}
+          helpMode={helpMode}
+          activity={activity}
+          preflights={preflights}
+          subagentRuns={subagentRuns}
+          agentProgress={agentProgress}
+          agentProgressDurationMs={agentProgressDurationMs}
+          agentProgressFinishedAt={agentProgressFinishedAt}
+          handleAgentProgressToggle={handleAgentProgressToggle}
+          resumableRuns={resumableRuns}
+          lastAssistantInfo={lastAssistantInfo}
+          lastAssistantAnimationKey={lastAssistantAnimationKey}
+          animatedAssistantText={animatedAssistantText}
+          streamStartedAt={streamStartedAt}
+          tickNow={tickNow}
+          crossVerify={crossVerify}
+          cvExpanded={cvExpanded}
+          setCvExpanded={setCvExpanded}
+          openTaskFromPreflight={openTaskFromPreflight}
+          onOpenFilePreview={onOpenFilePreview}
+        />
         {/* Crash-resume: keep it next to the latest interrupted answer, not above the scrolled history. */}
         <ResumeBanner />
         </div>
@@ -3529,99 +3222,5 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   )
 }
 
-/**
- * Hover toolbar shown under every message — copy-to-clipboard for now.
- * Hidden by default; fades in on .gg-msg:hover (см. layout.css).
- * При наведении появляется кнопка копирования.
- */
-function MessageActions({ text, onEdit }: { text: string; onEdit?: () => void }) {
-  const [copied, setCopied] = useState(false)
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1400)
-    } catch { /* clipboard может быть запрещён — молча игнорим */ }
-  }
-  return (
-    <div className="gg-msg-actions">
-      {/* 2.0.11-D: «править» доступна только на своих сообщениях. Правка не меняет
-          оригинал — создаёт ветку с этого места, текст ждёт черновиком в композере. */}
-      {onEdit && (
-        <button
-          type="button"
-          className="gg-msg-action"
-          onClick={onEdit}
-          title="Править в новой ветке (оригинал не меняется)"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
-          <span>править</span>
-        </button>
-      )}
-      <button
-        type="button"
-        className="gg-msg-action"
-        onClick={() => void copy()}
-        title="Скопировать текст сообщения"
-      >
-        {copied ? (
-          <>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>скопировано</span>
-          </>
-        ) : (
-          <>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            <span>копировать</span>
-          </>
-        )}
-      </button>
-    </div>
-  )
-}
 
-function AttachmentChip({ attachment, onRemove }: { attachment: Attachment; onRemove: () => void }) {
-  const isImage = attachment.mimeType.startsWith('image/')
-  const src = isImage ? `data:${attachment.mimeType};base64,${attachment.data}` : null
-  return (
-    <div className="gg-attach-chip">
-      {src ? <img src={src} alt={attachment.name} className="gg-attach-thumb" /> : <div className="gg-attach-icon">📄</div>}
-      <div className="gg-attach-meta">
-        <div className="gg-attach-name" title={attachment.name}>{attachment.name}</div>
-        <div className="gg-attach-size">{formatSize(attachment.size)}</div>
-      </div>
-      <button className="gg-attach-remove" onClick={onRemove} title="Убрать">×</button>
-    </div>
-  )
-}
 
-function AttachmentPreview({ attachment, compact }: { attachment: Attachment; compact?: boolean }) {
-  const isImage = attachment.mimeType.startsWith('image/')
-  if (isImage) {
-    return (
-      <img
-        src={`data:${attachment.mimeType};base64,${attachment.data}`}
-        alt={attachment.name}
-        className={compact ? 'gg-msg-image' : ''}
-        style={{ maxWidth: compact ? 360 : '100%', maxHeight: compact ? 280 : '100%', borderRadius: 8, display: 'block', marginBottom: 6 }}
-      />
-    )
-  }
-  return (
-    <div className="gg-attach-chip" style={{ marginBottom: 6 }}>
-      <div className="gg-attach-icon">📄</div>
-      <div className="gg-attach-meta">
-        <div className="gg-attach-name">{attachment.name}</div>
-        <div className="gg-attach-size">{formatSize(attachment.size)}</div>
-      </div>
-    </div>
-  )
-}
