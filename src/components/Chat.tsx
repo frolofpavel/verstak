@@ -8,23 +8,16 @@ import { historyForSend } from '../lib/chat-messages'
 import { canEditMessage } from '../lib/fork-edit'
 import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
-import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
-import { ModelPicker } from './ModelPicker'
-import { PromptRouteControl } from './chat/PromptRouteControl'
-import { ModePicker } from './ModePicker'
-import { IntensityToggle } from './IntensityToggle'
 import { TimelineBar } from './TimelineBar'
 import { AgentProgressPanel } from './AgentProgressPanel'
 import { ReviewPanel } from './ReviewPills'
-import { DevTaskBadge } from './DevTaskBadge'
 import { ResumeBanner } from './ResumeBanner'
 import { WorktreeBar } from './WorktreeBar'
 import { PipelineWizard } from './PipelineWizard'
 import { PipelineBanner } from './PipelineBanner'
 import { OutcomeRunsPanel } from './OutcomeRunsPanel'
 import { TaskContractReview } from './TaskContractReview'
-import { ComposerToolsMenu } from './ComposerToolsMenu'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestManyFromIndex, suggestScoredFromIndex } from '../lib/skill-suggest'
 import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
@@ -35,7 +28,7 @@ import type { AppliedSkillRef, Attachment, ChatMessage, Reminder, Skill } from '
 import { useT } from '../i18n'
 import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
-import { HELP_AGENT_MODE, HELP_PROJECT_PATH } from '../lib/help-scope'
+import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import { sendHelpMessage } from './chat/send-help-message'
 import { sendChatMessage } from './chat/send-chat-message'
 import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, skillDisplayName, toAppliedSkillRef } from './chat/skill-prompts'
@@ -62,6 +55,7 @@ import { ComposerPendingBar } from './ComposerPendingBar'
 import { ComposerSkillBar } from './chat/ComposerSkillBar'
 import { ComposerInputRow } from './chat/ComposerInputRow'
 import { ComposerBudgetBar } from './chat/ComposerBudgetBar'
+import { ComposerMetaRow } from './chat/ComposerMetaRow'
 import {
   CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
@@ -256,28 +250,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
-}
-
-/** Иконка-индикатор черновика: заливка растёт с объёмом текста (визуальный cap 32k). */
-function TokenPreviewMeter({ tokens, exact, title }: { tokens: number; exact: boolean; title: string }) {
-  const fill = Math.min(1, tokens / 32_000)
-  const innerH = Math.max(1.2, fill * 9)
-  const innerY = 13.2 - innerH
-  return (
-    <span className="gg-usage-pill is-preview" title={title}>
-      <svg className="gg-usage-meter-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-        <rect x="3" y="2" width="10" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.15" opacity="0.38" />
-        <rect x="3.6" y={innerY} width="8.8" height={innerH} rx="1.1" fill="currentColor" opacity="0.9" />
-      </svg>
-      <span className="gg-usage-meter-label">{exact ? '' : '≈'}{formatTokens(tokens)}</span>
-    </span>
-  )
 }
 
 // 4.3: дефолт usage для «нет активного чата» — стабильная ссылка (не плодим
@@ -3519,253 +3491,39 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           newChatSession={() => { void useProject.getState().newChatSession() }}
           clearActiveSkill={() => { useSkillsStore.getState().setActiveSkill(null) }}
         />
-        <div className="gg-composer-hint">
-          {isStreaming && input.trim() ? (
-            <div className="gg-composer-insights">
-              {isStreaming && input.trim() && (
-                <div className="gg-composer-streaming-hint">
-                  <span>
-                    <kbd className="gg-kbd">Ctrl+Enter</kbd>
-                    {' - '}
-                    {t.chat.streamingAppendHint}
-                    {' / '}
-                    <kbd className="gg-kbd">Enter</kbd>
-                    {' - '}
-                    {t.chat.streamingQueueHint}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : null}
-          {false && isStreaming && input.trim() && (
-            <div className="gg-composer-streaming-hint">
-              <span>
-                <kbd className="gg-kbd">Ctrl+Enter</kbd>
-                {' - '}
-                {t.chat.streamingAppendHint}
-                {' / '}
-                <kbd className="gg-kbd">Enter</kbd>
-                {' - '}
-                {t.chat.streamingQueueHint}
-              </span>
-            </div>
-          )}
-          <div className="gg-composer-meta">
-            <div className="gg-composer-meta-cluster">
-              {previewTokens && previewTokens.tokens > 0 && (() => {
-                const cost = estimateCost(provider.id, provider.model, previewTokens.tokens, 0, 0)
-                const title = previewTokens.exact
-                  ? `Точная оценка от ${provider.label}: ${previewTokens.tokens} токенов на следующий запрос${cost.usd ? `, ~${cost.usd} (только input)` : ''}`
-                  : `Грубая оценка (4 символа = 1 токен): ${previewTokens.tokens} токенов`
-                return (
-                  <>
-                    <TokenPreviewMeter tokens={previewTokens.tokens} exact={previewTokens.exact} title={title} />
-                    {cost.usd && previewTokens.exact && (
-                      <span className="gg-usage-pill is-preview is-cost-hint" title={title}>
-                        <span className="gg-usage-cost">~{cost.usd}</span>
-                      </span>
-                    )}
-                  </>
-                )
-              })()}
-              {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
-                // 2.0.8-E хвост: передаём семантику провайдера — иначе у Claude (exclusive)
-                // из input повторно вычитался кэш и ценник занижал реальную стоимость (дефект B).
-                const cost = estimateCost(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting, sessionUsage.cacheWriteTokens ?? 0)
-                const severity = costSeverity(cost.cents)
-                const breakdown = costBreakdown(provider.id, provider.model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedInputTokens, sessionUsage.inputAccounting, sessionUsage.cacheWriteTokens ?? 0)
-                return (
-                  <span className={`gg-usage-pill ${severity}`} title={breakdown}>
-                    <span>↑{formatTokens(sessionUsage.inputTokens)}</span>
-                    <span className="gg-usage-sep">·</span>
-                    <span>↓{formatTokens(sessionUsage.outputTokens)}</span>
-                    {sessionUsage.cachedInputTokens > 0 && (
-                      <>
-                        <span className="gg-usage-sep">·</span>
-                        <span title="Cached input">⟲{formatTokens(sessionUsage.cachedInputTokens)}</span>
-                      </>
-                    )}
-                    {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
-                      <span title="Записано в prompt cache">⇧{formatTokens(sessionUsage.cacheWriteTokens ?? 0)}</span>
-                    )}
-                    {cost.usd && (
-                      <>
-                        <span className="gg-usage-sep">·</span>
-                        <span className="gg-usage-cost">{cost.usd}</span>
-                      </>
-                    )}
-                  </span>
-                )
-              })()}
-              {sessionStats && sessionStats.runs > 0 && (
-                <span
-                  className="gg-usage-pill"
-                  title={`Σ за всю сессию (${sessionStats.runs} прогон(ов)${sessionStats.durationMs > 1000 ? ` · ${Math.max(1, Math.round(sessionStats.durationMs / 60000))} мин` : ''}) — переживает рестарт`}
-                >
-                  <span>Σ ${(sessionStats.costCents / 100).toFixed(2)}</span>
-                  {sessionStats.toolCount > 0 && (<><span className="gg-usage-sep">·</span><span>🔧{sessionStats.toolCount}</span></>)}
-                  {sessionStats.filesCount > 0 && (<><span className="gg-usage-sep">·</span><span>📄{sessionStats.filesCount}</span></>)}
-                </span>
-              )}
-              {undoCount > 0 && !chatIsolated && (
-                <button
-                  type="button"
-                  className="gg-undo-btn"
-                  onClick={() => void revertLastWrite()}
-                  title="Откатить последнюю правку файла"
-                >
-                  <span>↶</span>
-                  <span className="gg-undo-count">{undoCount}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                className={`gg-auto-scroll-btn ${autoScrollEnabled ? 'is-on' : 'is-off'}`}
-                onClick={toggleAutoScroll}
-                title={autoScrollEnabled ? t.chat.autoScrollOn : t.chat.autoScrollOff}
-                aria-pressed={autoScrollEnabled}
-              >
-                {autoScrollEnabled ? t.chat.autoScrollLabelOn : t.chat.autoScrollLabelOff}
-              </button>
-              <DevTaskBadge />
-            </div>
-            <div className="gg-composer-meta-cluster gg-composer-meta-cluster--end">
-              <div className="gg-chat-settings-wrap" ref={composerSettingsRef}>
-                <button
-                  type="button"
-                  className={`gg-chat-settings-btn ${composerSettingsOpen ? 'is-active' : ''}`}
-                  onClick={() => setComposerSettingsOpen(v => !v)}
-                  title="Инструменты чата"
-                  aria-expanded={composerSettingsOpen}
-                >
-                  <span>Инструменты чата</span>
-                </button>
-                {composerSettingsOpen && (
-                  <div className="gg-chat-settings-popover">
-                    <div className="gg-chat-settings-grid">
-                      <div className="gg-chat-settings-item gg-chat-settings-item--model">
-                        <span className="gg-chat-settings-label">Модель</span>
-                        <div className="gg-chat-settings-model-control">
-                          <ModelPicker onOpenSettings={onOpenSettings} />
-                          <span className={`gg-chat-settings-model-kind ${isCliProvider(provider.id) ? 'is-cli' : 'is-api'}`}>
-                            {isCliProvider(provider.id) ? 'CLI' : 'API'}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="gg-chat-settings-item gg-chat-settings-item--mode">
-                        <span className="gg-chat-settings-label">Режим</span>
-                        <ModePicker
-                          mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                          onChange={m => { void applyMode(m) }}
-                          locked={isHelpChat}
-                        />
-                      </div>
-                      {!isHelpChat && (
-                        <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">Инструменты</span>
-                          <ComposerToolsMenu
-                            onInject={injectTemplate}
-                            onSaveHandoff={saveHandoffToDownloads}
-                            onExportTranscript={exportTranscript}
-                            exportBusy={handoffBusy}
-                          />
-                        </div>
-                      )}
-                      {!isHelpChat && (
-                        <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">Скиллы</span>
-                          <button
-                            type="button"
-                            className="gg-chat-settings-toggle-control"
-                            onClick={() => setProjectSkillSuggestionsEnabled(!skillSuggestionsEnabled)}
-                            title="Показывать автоматические рекомендации скиллов в этом проекте"
-                          >
-                            <span className="gg-chat-settings-toggle-text">Рекомендации скиллов</span>
-                            <span className={`gg-toggle ${skillSuggestionsEnabled ? 'is-on' : ''}`} aria-hidden>
-                              <span className="gg-toggle-knob" />
-                            </span>
-                          </button>
-                        </div>
-                      )}
-                      {!isHelpChat && !activePipeline && (
-                        <div className="gg-chat-settings-item">
-                          <span className="gg-chat-settings-label">{t.pipeline.entry}</span>
-                          <button
-                            type="button"
-                            className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-                            onClick={() => {
-                              setComposerSettingsOpen(false)
-                              setPipelineWizardMode('agency')
-                              setPipelineWizardOpen(true)
-                            }}
-                            disabled={isCliProvider(provider.id)}
-                            title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
-                          >
-                            {t.pipeline.entry}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                className={`gg-chat-turbo-btn ${agentMode === 'auto' || agentMode === 'bypass' ? 'is-turbo' : 'is-simple'}`}
-                onClick={() => { void setAgentMode(agentMode === 'auto' || agentMode === 'bypass' ? 'ask' : 'auto') }}
-                disabled={isHelpChat}
-                title={
-                  isHelpChat
-                    ? 'В справке режим зафиксирован'
-                    : agentMode === 'auto' || agentMode === 'bypass'
-                      ? 'Турбо-режим включён. Нажмите, чтобы вернуться в простой режим.'
-                      : 'Включить турбо-режим: агент будет выполнять действия быстрее и принимать правки автоматически.'
-                }
-                aria-label={agentMode === 'auto' || agentMode === 'bypass' ? 'Выключить турбо-режим' : 'Включить турбо-режим'}
-                aria-pressed={agentMode === 'auto' || agentMode === 'bypass'}
-              >
-                <span aria-hidden>🔥</span>
-              </button>
-              {!isHelpChat && !activePipeline && (
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-                  onClick={() => { setPipelineWizardMode('agency'); setPipelineWizardOpen(true) }}
-                  disabled={isCliProvider(provider.id)}
-                  title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
-                >
-                  {t.pipeline.entry}
-                </button>
-              )}
-              {!isHelpChat && activePath && (
-                <button
-                  type="button"
-                  className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-                  onClick={() => setOutcomeRunsOpen(true)}
-                  title="История задач «До результата»"
-                >
-                  Прогоны
-                </button>
-              )}
-              {!isHelpChat && (
-                <ComposerToolsMenu
-                  onInject={injectTemplate}
-                  onSaveHandoff={saveHandoffToDownloads}
-                  onExportTranscript={exportTranscript}
-                  exportBusy={handoffBusy}
-                />
-              )}
-              <ModePicker
-                mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-                onChange={m => { void applyMode(m) }}
-                locked={isHelpChat}
-              />
-              {!isHelpChat && <IntensityToggle />}
-              <ModelPicker onOpenSettings={onOpenSettings} />
-              {!isHelpChat && <PromptRouteControl />}
-            </div>
-          </div>
-        </div>
+        <ComposerMetaRow
+          input={input}
+          isStreaming={isStreaming}
+          isHelpChat={isHelpChat}
+          activePath={activePath}
+          t={t}
+          provider={provider}
+          previewTokens={previewTokens}
+          sessionUsage={sessionUsage}
+          sessionStats={sessionStats}
+          undoCount={undoCount}
+          chatIsolated={chatIsolated}
+          revertLastWrite={revertLastWrite}
+          autoScrollEnabled={autoScrollEnabled}
+          toggleAutoScroll={toggleAutoScroll}
+          composerSettingsRef={composerSettingsRef}
+          composerSettingsOpen={composerSettingsOpen}
+          setComposerSettingsOpen={setComposerSettingsOpen}
+          onOpenSettings={onOpenSettings}
+          agentMode={agentMode}
+          applyMode={applyMode}
+          setAgentMode={setAgentMode}
+          injectTemplate={injectTemplate}
+          saveHandoffToDownloads={saveHandoffToDownloads}
+          exportTranscript={exportTranscript}
+          handoffBusy={handoffBusy}
+          skillSuggestionsEnabled={skillSuggestionsEnabled}
+          setProjectSkillSuggestionsEnabled={setProjectSkillSuggestionsEnabled}
+          activePipeline={activePipeline}
+          setPipelineWizardMode={setPipelineWizardMode}
+          setPipelineWizardOpen={setPipelineWizardOpen}
+          setOutcomeRunsOpen={setOutcomeRunsOpen}
+        />
       </div>
     </div>
   )

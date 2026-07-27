@@ -218,3 +218,58 @@ describe('композер — ряд ввода', () => {
     expect(document.querySelector('.gg-pause-btn')).toBeNull()
   })
 })
+
+// Пины под срез B-остаток, часть 2 (нижняя строка композера: gg-composer-hint +
+// gg-composer-meta). Сняты ДО переноса блока в отдельный компонент.
+describe('композер — нижняя строка', () => {
+  it('нижняя строка держит оба кластера меты', () => {
+    mountChat()
+    expect(document.querySelector('.gg-composer-hint')).toBeTruthy()
+    expect(document.querySelector('.gg-composer-meta')).toBeTruthy()
+    expect(document.querySelectorAll('.gg-composer-meta-cluster').length).toBe(2)
+    expect(document.querySelector('.gg-composer-meta-cluster--end')).toBeTruthy()
+  })
+
+  it('правок не было — кнопка отката не рендерится', () => {
+    mountChat()
+    expect(document.querySelector('.gg-undo-btn')).toBeNull()
+  })
+
+  it('превью черновика нет — счётчик токенов не рендерится', () => {
+    mountChat()
+    expect(document.querySelector('.gg-usage-pill.is-preview')).toBeNull()
+    expect(document.querySelector('.gg-usage-meter-label')).toBeNull()
+  })
+
+  it('расхода за сессию нет — пилюля usage не рендерится', () => {
+    mountChat()
+    expect(document.querySelector('.gg-usage-pill')).toBeNull()
+  })
+
+  // Турбо = auto/bypass. На старте режим 'ask', значит кнопка обязана
+  // сообщать выключенное состояние и через класс, и через aria.
+  it('турбо-кнопка отражает режим в aria-pressed', () => {
+    mountChat()
+    const turbo = document.querySelector('.gg-chat-turbo-btn') as HTMLButtonElement
+    expect(turbo).toBeTruthy()
+    expect(turbo.getAttribute('aria-pressed')).toBe('false')
+    expect(turbo.className).toContain('is-simple')
+    expect(turbo.getAttribute('aria-label')).toBe('Включить турбо-режим')
+  })
+
+  it('подсказки стрима нет, пока черновик пуст и прогон не идёт', () => {
+    mountChat()
+    expect(document.querySelector('.gg-composer-streaming-hint')).toBeNull()
+    startStreaming()
+    type('и ещё вот это')
+    expect(document.querySelector('.gg-composer-streaming-hint')).toBeTruthy()
+  })
+
+  it('в конце меты стоят пикеры режима, модели и маршрута', () => {
+    mountChat()
+    const end = document.querySelector('.gg-composer-meta-cluster--end') as HTMLElement
+    expect(end.querySelector('.gg-mp-wrap')).toBeTruthy()
+    expect(end.querySelector('.gg-chat-settings-wrap')).toBeTruthy()
+    expect(end.querySelector('.gg-chat-turbo-btn')).toBeTruthy()
+  })
+})
