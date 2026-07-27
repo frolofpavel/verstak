@@ -105,7 +105,8 @@ export function isAutoCaptureEnabled(getSecret: ((key: string) => string | null)
  *
  * @param saveMemory — функция сохранения из ToolContext (обёртка над DB)
  * @param obs — контекст tool call
- * @param isEnabled — значение настройки auto_capture_memory (по умолчанию true)
+ * @param isEnabled — значение настройки auto_capture_memory. Механизм opt-in:
+ *   по умолчанию ВЫКЛЮЧЕН (решение 2026-07-26), включается явным 'true'.
  */
 export function captureToolObservation(
   saveMemory: (projectPath: string, type: string, content: string, tags: string[]) => { id: string },
