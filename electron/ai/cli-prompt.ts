@@ -36,12 +36,34 @@ If a <skill_layer> is present, it is mandatory execution guidance, not optional 
 </skill_compliance_contract>`
 
 /**
- * True if the CLI provider reads this user_layer file by itself on startup.
- * grok-cli — no documented convention file, always inject.
+ * True if the CLI provider reads this user_layer file by itself on startup —
+ * тогда инжектить его в payload значит платить за один и тот же текст дважды.
+ *
+ * Разрешено РОВНО ОДНО сочетание, и каждое условие здесь существенно.
+ *
+ * 1. `claude-cli` — единственный провайдер, у которого нативное чтение
+ *    ПОДТВЕРЖДЕНО документацией самого установленного бинаря: `claude --help`
+ *    перечисляет «CLAUDE.md auto-discovery» среди того, что отключает `--bare`,
+ *    то есть в обычном режиме оно включено. Verstak запускает дочерний процесс с
+ *    `cwd` = корень проекта (`claude-cli.ts`), так что CLI видит тот же файл.
+ *    Для `gemini-cli` / `codex-cli` / `grok-cli` такого подтверждения на руках
+ *    нет — у них поведение сохраняется прежним (инжектим), пока не проверено
+ *    живьём. Ошибиться здесь дороже, чем сэкономить: пропустим слой, который
+ *    никто не прочитал, — агент останется без правил проекта.
+ *
+ * 2. Путь должен быть РОВНО `CLAUDE.md`. Слой собирает `loadUserLayer`, и он
+ *    выбирает ПЕРВЫЙ найденный из `AGENTS.md → CLAUDE.md → GEMINI.md →
+ *    .verstak/RULES.md`. Если в проекте есть `AGENTS.md`, инжектится именно он —
+ *    а его CLI не читает, и пропуск потерял бы правила. Ровно этот случай и есть
+ *    в репозитории Verstak: там лежат оба файла.
+ *
+ * 3. Точное сравнение отсекает и склейку с глобальным слоем: при наличии
+ *    `~/.verstak/RULES.md` путь выглядит как `~/.verstak/RULES.md + CLAUDE.md`, и
+ *    payload несёт ещё и глобальные правила, которых CLI не видит. Пропускать
+ *    такой слой нельзя.
  */
-function cliReadsLayerNatively(providerId: CliProviderId, layerPath: string | null): boolean {
-  void providerId; void layerPath
-  return false
+export function cliReadsLayerNatively(providerId: CliProviderId, layerPath: string | null): boolean {
+  return providerId === 'claude-cli' && layerPath === 'CLAUDE.md'
 }
 
 interface BuildCliPromptOpts {
