@@ -25,6 +25,14 @@ function sse(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`
 }
 
+/**
+ * Эти три теста поднимают НАСТОЯЩИЙ дочерний CLI и дают ему 120 с. Дефолтный
+ * таймаут vitest (20 с) короче, поэтому под нагрузкой (полный прогон, pre-commit)
+ * vitest убивал тест раньше, чем процесс успевал отработать: падение выглядело как
+ * регрессия, а было гонкой за таймаут. Ставим запас НАД внутренним бюджетом.
+ */
+const CLI_RUN_TEST_TIMEOUT_MS = 180_000
+
 function runCliAsync(args: string[], timeoutMs: number): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn('node', [CLI, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -164,7 +172,7 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(parsed.trace.finalStatus).toBe('failed')
     expect(parsed.trace.failureReason).toContain('review_before_commit')
     expect(parsed.trace.toolCalls.some((c: any) => c.name === 'review-gate-nudge')).toBe(true)
-  })
+  }, CLI_RUN_TEST_TIMEOUT_MS)
 
   it('takes baseline before first mutation and allows final only after review gate pass', async () => {
     if (!canBind) return
@@ -184,7 +192,7 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(parsed.trace.reviewGate).toBe('pass')
     expect(parsed.trace.finalStatus).toBe('success')
     expect(readFileSync(join(projectDir, 'sum.mjs'), 'utf8')).toContain('return a + b')
-  })
+  }, CLI_RUN_TEST_TIMEOUT_MS)
 
   it('blocks dangerous verify commands inside review_before_commit', async () => {
     if (!canBind) return
@@ -201,5 +209,5 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(parsed.trace.reviewGate).toBe('fail')
     expect(parsed.trace.failureReason).toContain('allowlist')
     expect(existsSync(badFile)).toBe(true)
-  })
+  }, CLI_RUN_TEST_TIMEOUT_MS)
 })
