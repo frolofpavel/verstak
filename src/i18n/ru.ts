@@ -415,11 +415,8 @@ export const ru: Translations = {
   chat: {
     cliStrip: 'Внешний агент — без undo, checkpoint и подтверждения правок в Verstak',
     placeholder: 'Опишите задачу…',
-    homePlaceholder: 'Какой план?',
-    homeRecent: 'Недавние агенты',
-    homeSuggested: 'Предложенные',
-    homeAsideEmpty: 'Выберите агента, чтобы начать',
-    homeAsideStart: 'Начать',
+    homePlaceholder: 'Опишите задачу…',
+    homeTitle: 'Что нужно сделать?',
     streamingPlaceholder: 'отвечает… (Esc — остановить)',
     responseRunning: 'выполняется {duration}',
     responseRunningTitle: 'Задача выполняется',

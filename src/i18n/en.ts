@@ -425,11 +425,8 @@ export const en = {
   chat: {
     cliStrip: 'External agent — no undo, checkpoint, or write confirmation in Verstak',
     placeholder: 'Describe your task…',
-    homePlaceholder: "What's the plan?",
-    homeRecent: 'Recent Agents',
-    homeSuggested: 'Suggested',
-    homeAsideEmpty: 'Choose an agent to start',
-    homeAsideStart: 'Start',
+    homePlaceholder: 'Describe your task…',
+    homeTitle: 'What needs to be done?',
     streamingPlaceholder: 'is responding… (Esc — stop)',
     responseRunning: 'running {duration}',
     responseRunningTitle: 'Task in progress',

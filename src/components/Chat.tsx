@@ -17,7 +17,7 @@ import { readAgentMode, useAgentMode } from '../hooks/useAgentMode'
 import type { AgentMode } from './ModePicker'
 import type { AppliedSkillRef, Attachment, ChatMessage, Reminder, Skill } from '../types/api'
 import { useT } from '../i18n'
-import { ChatHome, ChatHomeAside, type HomeAgent } from './ChatHome'
+import { ChatHome } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import { sendHelpMessage } from './chat/send-help-message'
@@ -928,11 +928,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // null = ещё не было; object = последний результат (сбрасывается при новом send).
   const [crossVerify, setCrossVerify] = useState<{ result: string; provider: string; ok: boolean } | null>(null)
   const [cvExpanded, setCvExpanded] = useState(false)
-  const [homeAgentId, setHomeAgentId] = useState<string | null>(null)
-  useEffect(() => {
-    setHomeAgentId(null)
-  }, [activeChatId])
-
   function flashWarning(msg: string) {
     setWarning(msg)
     if (warningTimer.current) window.clearTimeout(warningTimer.current)
@@ -2955,12 +2950,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           </div>
         )}
         {!hasMessages && !isHelpChat && (
-          <ChatHome
-            selectedId={homeAgentId}
-            onSelect={(agent: HomeAgent | null) => setHomeAgentId(agent?.id ?? null)}
-            recentTitle={t.chat.homeRecent}
-            suggestedTitle={t.chat.homeSuggested}
-          />
+          <ChatHome title={t.chat.homeTitle} />
         )}
         {hasOlderMessages && (
           <div className="gg-chat-history-more">
@@ -3083,15 +3073,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         outcomeRunsOpen={outcomeRunsOpen}
         setOutcomeRunsOpen={setOutcomeRunsOpen}
       />
-
-      {isHome && (
-        <ChatHomeAside
-          selectedId={homeAgentId}
-          onUsePrompt={prompt => setInput(prompt)}
-          asideEmpty={t.chat.homeAsideEmpty}
-          asideStart={t.chat.homeAsideStart}
-        />
-      )}
 
       <div className="gg-composer">
         <WorktreeBar />
