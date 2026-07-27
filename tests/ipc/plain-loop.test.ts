@@ -58,6 +58,10 @@ function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: Abor
   })
 }
 
+/** Запас над дефолтными 10 с: тест ждёт реальные задержки ретраев (см. комментарий
+ *  у самого теста). Отдельно он идёт ~3 с, под полной нагрузкой перешагивал лимит. */
+const BOUNDED_SWITCH_TEST_TIMEOUT_MS = 60_000
+
 describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
   let dir: string
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'plain-loop-')) })
@@ -172,6 +176,13 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(evs.some(e => e.type === 'text' && (e as { text?: string }).text?.includes('НЕ ДОЛЖНО'))).toBe(false)
   })
 
+  /**
+   * Тест гоняет ПОЛНЫЙ bounded-цикл переключений аккаунтов с реальными задержками
+   * ретраев: отдельно укладывается в ~3 с, но под полной нагрузкой (весь прогон,
+   * pre-commit) перешагивает дефолтные 10 с и падает по таймауту. Падение выглядит
+   * как регрессия bounded-гарда, а является гонкой за таймаут — тот же класс, что
+   * чинили в 2fe6c2c для verstak-cli. Ставим запас над фактическим временем.
+   */
   it('РЕВЬЮ-ФИКС: resetEta=null + пул все в лимите → НЕ зацикливается (bounded switches)', async () => {
     // Оба аккаунта в лимите, сообщение без парсируемого ETA (resetEta=null) →
     // switchAccountOnLimit всегда switched:true, свежий аккаунт снова лимит. Без
@@ -208,7 +219,7 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     expect(switchAccountOnLimit).toHaveBeenCalledTimes(1)
     // Не зациклился — терминальный done есть.
     expect(sentEvents(sender).some(e => e.type === 'done')).toBe(true)
-  })
+  }, BOUNDED_SWITCH_TEST_TIMEOUT_MS)
 
   it('прерванный сигнал → терминальный done, провайдер не зовётся', async () => {
     const ac = new AbortController(); ac.abort()
