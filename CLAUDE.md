@@ -56,6 +56,12 @@ electron/                  ← main process (Node.js)
 │   ├── runner-progress.ts   ← эмиссия прогресса agent-loop в UI
 │   ├── runner-supplements.ts← ai:append-context во время прогона (conversationSupplements)
 │   ├── runner-util.ts       ← чистые хелперы runner'ов (selectAllowedToolDefs, retriableErrorEvent)
+│   ├── runner-attempt.ts    ← попытка провайдера внутри хода
+│   ├── runner-tool-turn.ts  ← исполнение tool-хода
+│   ├── runner-tool-outcome.ts← сбор итога tool-хода для журнала сессии
+│   ├── runner-verification.ts← проверки перед финалом хода
+│   ├── runner-finalize.ts   ← финализация прогона
+│   ├── ptc.ts               ← execute_code: vm-песочница + read-only тулзы (за флагом ptc_enabled)
 │   ├── compose-system.ts    ← единый сборщик system prompt
 │   ├── system-layer.ts      ← неизменяемый протокол агента
 │   ├── user-layer.ts        ← поиск AGENTS/CLAUDE/GEMINI.md/RULES
@@ -102,10 +108,20 @@ electron/                  ← main process (Node.js)
 
 src/                      ← renderer (React 19)
 ├── App.tsx                ← composition root + Onboarding + Toast + Preview
-├── store/
-│   ├── projectStore.ts    ← основной zustand store (см. п.5 — рефакторить!)
+├── store/                 ← 8 модулей; состояние чата живёт ТОЛЬКО в chats (PerChatState 4.4)
+│   ├── projectStore.ts    ← основной zustand store, 1153 строки
+│   ├── session-snapshot.ts← типы одной сессии + фабрика пустого снапшота
+│   ├── chat-lifecycle.ts  ← enterChat/leaveChat, перевод чата в фон и обратно
+│   ├── chat-bundle-update.ts + apply-snapshot-event.ts ← применение событий к bundle
+│   ├── review-slice.ts + pipeline-slice.ts ← Explicit Review и pipeline
 │   └── skillStore.ts      ← V3: список скиллов + activeSkillId
 ├── components/            ← UI компоненты
+│   ├── chat/              ← 12 модулей, вынесенных из Chat.tsx (пакет 2.1.11):
+│   │     ComposerSkillBar / ComposerInputRow / ComposerMetaRow / ComposerBudgetBar,
+│   │     ChatStreamMessages (рендер потока) / message-parts / ChatRunControls,
+│   │     PromptRouteControl, send-chat-message, send-help-message, skill-prompts,
+│   │     system-slash-commands
+│   ├── RuntimeFlagsTab.tsx — вкладка «Поведение агента» (рантайм-флаги, 27.07)
 │   ├── SkillPicker.tsx + SlashCommandPopup.tsx — V3 skill UX
 │   ├── ArtifactPreview.tsx + ArtifactsPanel.tsx — V3 артефакты
 │   ├── OnboardingWizard.tsx + ProfilesTab.tsx — V3 multi-user
@@ -114,7 +130,7 @@ src/                      ← renderer (React 19)
 │   ├── CheckpointButton.tsx + TimelineBar.tsx — UX штурм V1
 │   └── (остальные старые)
 ├── hooks/                 ← useProvider / useAgentMode / useTheme
-├── lib/                   ← compose-review-payload, pricing
+├── lib/                   ← compose-review-payload, pricing, runtime-flags
 ├── styles/                ← layout / theme / markdown CSS
 └── types/api.d.ts         ← типы для window.api (bridge типизация)
 
@@ -165,19 +181,22 @@ npm run dist:win     # NSIS + portable .exe
 
 ## 5. Известные слабые места (приоритеты на доработку)
 
-> Актуализировано 2026-07-10 (сверка с кодом в рамках плана усиления 1.9.6–1.9.9).
+> Актуализировано 2026-07-27. Каждая цифра ниже перепроверена командой на живом
+> коде, а не переписана из прошлой версии.
 
-1. **~~ГЛАВНЫЙ монолит — `electron/ipc/ai.ts`~~ РАСПИЛЕН (1.9.8 #1, 11.07):** было ~3360 строк, стало **~1250** (−63%). Оба гиганта вынесены в `ai/runner-*.ts`: `runApiConversation` (~1300) → `runner-api.ts`, `runPlainConversation` (~419) → `runner-plain.ts`; circular-dep разорван через `runner-shared.ts` (pending-registry + turn-константы), `AiDeps` type-only. Каждый переезд верифицирован харнесами `tests/ipc/agent-loop.test.ts`(18)+`plain-loop.test.ts`(8) — поведение идентично; 2 адверсариальных ревьюера подтвердили (identity разделяемого состояния + семантика байт-в-байт). `ai.ts` = IPC-shell (registerAiIpc ~700 + resolve/stop/suspend + scheduled headless). **Остаток:** registerAiIpc можно дробить дальше, но это уже НЕ гигант-функция — низкий приоритет. При правках runner'ов держать харнесы зелёными.
-   - Второй монолит: `src/store/projectStore.ts` (~1130 строк). PerChatState частично вынесен (`session-snapshot.ts`/`review-slice.ts`/`pipeline-slice.ts`); `ChatSessionLifecycle` (enterChat/leaveChat) НЕ сделан — `chatSnapshots`-копирование при switch/new остаётся race-классом.
+1. **~~ГЛАВНЫЙ монолит — `electron/ipc/ai.ts`~~ РАСПИЛЕН (1.9.8 #1 → пакет 2.1.10):** было ~3360 строк, стало **1104** (−67%). Оба гиганта вынесены в `ai/runner-*.ts`: `runApiConversation` (~1300) → `runner-api.ts`, `runPlainConversation` (~419) → `runner-plain.ts`; circular-dep разорван через `runner-shared.ts` (pending-registry + turn-константы), `AiDeps` type-only. Каждый переезд верифицирован харнесами `tests/ipc/agent-loop.test.ts`(30)+`plain-loop.test.ts`(17) — поведение идентично; 2 адверсариальных ревьюера подтвердили (identity разделяемого состояния + семантика байт-в-байт). `ai.ts` = IPC-shell (registerAiIpc ~700 + resolve/stop/suspend + scheduled headless). **Остаток:** registerAiIpc можно дробить дальше, но это уже НЕ гигант-функция — низкий приоритет. При правках runner'ов держать харнесы зелёными.
+   - `src/store/projectStore.ts` — **1153 строки**, но монолитом уже не является: PerChatState закрыт полностью (срез 4.4, `ef4af73`). Состояние чата живёт ТОЛЬКО в `chats`; `chatSnapshots` и тройное хранение удалены, `chat-lifecycle.ts` держит единый `enterChat`/`leaveChat`. Прежняя запись про «`ChatSessionLifecycle` НЕ сделан и `chatSnapshots`-race» устарела — `chatSnapshots` остался лишь в исторических комментариях.
+   - `src/components/Chat.tsx` — **3205 строк** (было 4122). Пакет 2.1.11 закрыт: вся разметка вынесена в 12 модулей `src/components/chat/`, поведение закреплено 46 пинами characterization. Осталось ~394 строки JSX против ~2810 строк логики, поэтому дальнейшее сокращение = декомпозиция эффектов, а это другой класс риска (подписка `ai.onEvent` ставится один раз за жизнь экрана — её пересоздание теряет события молча). Не брать без отдельной постановки со своей сеткой.
+   - Крупное, что осталось нетронутым: `src/components/Settings.tsx` **4662** строки, `src/styles/layout.css` **22055** строк. Решение 27.07 — не трогать: техдолг без пользовательского эффекта.
    - Дубли renderer↔main (нет shared-модуля из-за context-изоляции): `CLI_WITH_TIMELINE`, `secretProtectionLevel`, `GATEWAY_PRESET_LABELS`, `ProviderId`, `PRICES` — держать синхронно, часть покрыта анти-дрейф-тестами.
 
-2. **CLI-путь: session-continuity (Mode C) НЕ построена.** Проекция tool-таймлайна, честные runtime-ярлыки, Control Envelope (git-якорь + откат из UI), permission-mode/guard секретов claude-cli, account-switch на лимите — ВСЁ есть (1.9.5–1.9.7). Остаётся: каждый ход CLI сериализует всю историю в one-shot `--print` (нет нативной сессии `--continue`/session-id). Требует верификации на живом claude ПЕРЕД кодом.
+2. **CLI-путь: session-continuity (Mode C) НЕ построена; разведка проведена 27.07.** Проекция tool-таймлайна, честные runtime-ярлыки, Control Envelope (git-якорь + откат из UI), permission-mode/guard секретов claude-cli, account-switch на лимите — ВСЁ есть (1.9.5–1.9.7). Остаётся: каждый ход CLI сериализует всю историю в one-shot `--print`. **Проверено живьём на `claude 2.1.207`: нативная сессия ЕСТЬ** (`-c/--continue`, `-r/--resume`, `--session-id`, `--fork-session`), `--resume` удержал один `session_id` на три хода. Значит допущение в шапке `electron/ai/cli-prompt.ts` («CLI providers in `stream-json` mode are effectively ONE-SHOT») для claude-cli устарело. НЕ снято: input-токены по ходам (не было авторизованного CLI) — размер выигрыша неизвестен, реализацию начинать рано. Отчёт и команда для досъёма: `docs/cli-session-recon-2026-07-27.md`.
 
-3. **Тест-покрытие критичных путей — выросло, но есть дыры.** Хорошо: agent-loop API (`agent-loop.test.ts` 18+), CLI-путь (`plain-loop.test.ts`), multi-chat routing (`project-store-routing.test.ts`), compact-history/with-retry/pricing/apply-patch. Слабо: review flow, часть ipc handlers, `cross-verify.ts` (0 тестов).
+3. **Тест-покрытие критичных путей — выросло.** Хорошо: agent-loop API (`agent-loop.test.ts`, 30), CLI-путь (`plain-loop.test.ts`, 17), multi-chat routing (`project-store-routing.test.ts`), композер и поток чата (46 пинов в трёх сетках `tests/components/chat-*-characterization.test.ts`), рантайм-флаги (30 пинов), PTC (`ptc.test.ts` + `execute-code-*`), compact-history/with-retry/pricing/apply-patch. Прежняя запись «`cross-verify.ts` (0 тестов)» **неверна**: `tests/ai/cross-verify.test.ts` существует и содержит 10 тестов. Реально слабое место — review flow целиком и часть ipc handlers.
 
 4. **Long-running resilience — checkpoint-resume ПОСТРОЕН** (Crash-resume Фаза 1/2: per-turn snapshot `agent_run_checkpoints` с троттлингом, reconcileStale на старте, findResumable + ResumeBanner с гардом деструктива, provider-guard возобновления). Остаётся: Mode C session-continuity (см. п.2).
 
-5. **Multi-agent ПОСТРОЕН (delegate/parallel/orchestrate/swarm + durable jobs)** — старый монолит `delegation.ts` распилен: файл оставлен двухстрочным re-export, реализация живёт в `electron/ipc/tool-handlers/delegation/`. Durable control plane хранит job-состояние, переживает рестарт и не позволяет writer'у выйти за разрешённый scope. Реальный пробел — адверсариальный iterative **debate** (тезис↔критика↔синтез) поверх swarm-арбитра и live-приёмка полного сценария. PTC (`execute_code`) построен, но по умолчанию инертен до live-валидации петли.
+5. **Multi-agent ПОСТРОЕН (delegate/parallel/orchestrate/swarm + durable jobs)** — старый монолит `delegation.ts` распилен: файл оставлен двухстрочным re-export, реализация живёт в `electron/ipc/tool-handlers/delegation/`. Durable control plane хранит job-состояние, переживает рестарт и не позволяет writer'у выйти за разрешённый scope. Реальный пробел — адверсариальный iterative **debate** (тезис↔критика↔синтез) поверх swarm-арбитра и live-приёмка полного сценария. PTC (`execute_code`) построен и остаётся за флагом `ptc_enabled` (по умолчанию выключен). 27.07 доказан периметр: в песочнице ровно пять read-only тулзов, права совпадают с `run_command` во всех пяти режимах, гейт под пином; петля проверена на реальных файлах (итог в контексте >10× короче суммы сырых tool-результатов). Не хватает одного — прогона, где МОДЕЛЬ сама вызывает инструмент; условие включения описано в аудите.
 
 ---
 
@@ -234,4 +253,4 @@ npm run dist:win     # NSIS + portable .exe
 
 ---
 
-Последнее обновление: 2026-07-11 (§2 карта: добавлены ai/runner-*.ts, ai.ts = IPC-shell; §5 #1: монолит ai.ts распилен 3360→1250). Если архитектура изменилась — обнови этот файл.
+Последнее обновление: 2026-07-27 (позиция 5 плана работ: §2 и §5 сверены с кодом покомандно — размеры ai.ts 1104, projectStore 1153, Chat.tsx 3205, Settings 4662, layout.css 22055; добавлены 12 модулей `components/chat/` и полный список `ai/runner-*`; снята неверная запись про 0 тестов у cross-verify; обновлены Mode C и PTC). Если архитектура изменилась — обнови этот файл.
