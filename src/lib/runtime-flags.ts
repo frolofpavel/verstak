@@ -1,0 +1,94 @@
+// Рантайм-флаги, которые до 27.07 жили только в БД и не были видны человеку.
+//
+// Пять переключателей поведения агента читаются в main через getSecret(key) и
+// сравнение со строкой. Полярность у них РАЗНАЯ, и это не случайность:
+//   · четыре флага — opt-out: `getSecret(k) !== 'false'`, то есть включены, пока
+//     явно не выключили;
+//   · `auto_capture_memory` — opt-in: `getSecret(k) === 'true'`, то есть выключен,
+//     пока явно не включили. Решение Павла от 26.07 (2.1.13): сырой автозахват
+//     tool-потока засорял память проекта служебными записями.
+//
+// Здесь ровно одна декларация на весь renderer: и UI, и тесты берут дефолты
+// отсюда. Соответствие этой таблицы тому, как читает main, стережёт анти-дрейф
+// тест tests/lib/runtime-flags.test.ts — он парсит исходники electron/ и падает,
+// если полярность разъехалась или чтение флага исчезло.
+
+export type RuntimeFlagKey =
+  | 'memory_lifecycle'
+  | 'auto_capture_memory'
+  | 'smart_routing'
+  | 'smart_fallback'
+  | 'use_project_brain'
+
+export interface RuntimeFlagDef {
+  key: RuntimeFlagKey
+  /** Человеческая подпись — что это для пользователя, а не имя ключа. */
+  title: string
+  /** Что происходит, когда включено. */
+  what: string
+  /** Что теряется, когда выключено, — чтобы решение было осознанным. */
+  whenOff: string
+  /** true — включён, пока не выключили явно; false — выключен, пока не включили. */
+  defaultOn: boolean
+  /** Где в main читается — для анти-дрейф стража и для отладки. */
+  readAt: string
+}
+
+export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
+  {
+    key: 'memory_lifecycle',
+    title: 'Память проекта',
+    what: 'Перед сжатием контекста и в конце сессии агент сохраняет решения, факты и долги — и подхватывает их в следующих разговорах.',
+    whenOff: 'Каждый разговор начинается с чистого листа: принятые решения придётся напоминать вручную.',
+    defaultOn: true,
+    readAt: 'electron/main.ts',
+  },
+  {
+    key: 'use_project_brain',
+    title: 'Знание о проекте в промпте',
+    what: 'К запросу добавляется выжимка накопленного знания о проекте, чтобы агент не переспрашивал то, что уже выяснено.',
+    whenOff: 'Агент работает только с тем, что видит в текущем разговоре.',
+    defaultOn: true,
+    readAt: 'electron/ipc/ai-send/system-assembly.ts',
+  },
+  {
+    key: 'smart_routing',
+    title: 'Умный выбор модели',
+    what: 'Модель под задачу подбирается автоматически: рассуждение — сильной, простое действие — быстрой и дешёвой.',
+    whenOff: 'Всегда работает модель, выбранная в чате вручную.',
+    defaultOn: true,
+    readAt: 'electron/ipc/ai.ts',
+  },
+  {
+    key: 'smart_fallback',
+    title: 'Автоподмена при сбое',
+    what: 'Если провайдер недоступен или упёрся в лимит, прогон продолжается на запасной модели вместо ошибки.',
+    whenOff: 'Прогон останавливается с ошибкой, переключать придётся руками.',
+    defaultOn: true,
+    readAt: 'electron/ipc/ai-send/fallback-route.ts',
+  },
+  {
+    key: 'auto_capture_memory',
+    title: 'Сырой автозахват в память',
+    what: 'В память пишется строка на каждое действие с файлом или командой — прежнее поведение до версии 2.1.13.',
+    whenOff: 'В память попадают только осмысленные выжимки, а не поток служебных записей. Это состояние по умолчанию.',
+    defaultOn: false,
+    readAt: 'electron/ai/memory-hooks.ts',
+  },
+] as const
+
+/** Включён ли флаг при таком сохранённом значении. Повторяет чтение main дословно. */
+export function isRuntimeFlagOn(def: RuntimeFlagDef, stored: string | null | undefined): boolean {
+  return def.defaultOn ? stored !== 'false' : stored === 'true'
+}
+
+/** Что записать в настройки, чтобы флаг оказался в нужном состоянии. */
+export function runtimeFlagValue(on: boolean): string {
+  return on ? 'true' : 'false'
+}
+
+export function runtimeFlagByKey(key: RuntimeFlagKey): RuntimeFlagDef {
+  const found = RUNTIME_FLAGS.find(f => f.key === key)
+  if (!found) throw new Error(`неизвестный рантайм-флаг: ${key}`)
+  return found
+}

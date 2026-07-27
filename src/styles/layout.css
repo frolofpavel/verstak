@@ -21992,3 +21992,64 @@ html[data-theme="light"] .gg-connectors-page {
 @media (max-width: 700px) {
   .gg-skill-tags-editor { flex-direction: column; }
 }
+
+/* ── Поведение агента: рантайм-флаги (позиция 2 плана 2026-07-27) ──────────
+   Новая секция, существующие классы не переименованы. Тумблер переиспользует
+   .gg-toggle/.gg-toggle-knob — тот же элемент, что в остальных Настройках. */
+.gg-runtime-flags-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.gg-runtime-flag-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.gg-runtime-flag-copy { min-width: 0; }
+
+.gg-runtime-flag-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.gg-runtime-flag-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.gg-runtime-flag-what {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.gg-runtime-flag-off {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.gg-settings-hint.is-error { color: var(--danger, #d9534f); }
+
+@media (max-width: 700px) {
+  .gg-runtime-flag-row { flex-direction: column; align-items: stretch; }
+}

@@ -19,6 +19,7 @@ import { UpdatesSettings } from './UpdatesSettings'
 import { SubscriptionsTab } from './settings/SubscriptionsTab'
 import { UsageTab } from './settings/UsageTab'
 import { PolicyTab } from './settings/PolicyTab'
+import { RuntimeFlagsTab } from './RuntimeFlagsTab'
 import { SubscriptionAccountsPanel } from './SubscriptionAccountsPanel'
 import { ProfilesTab } from './ProfilesTab'
 import {
@@ -59,8 +60,8 @@ import type { AgentMode } from './ModePicker'
  *  main-реестра, презентация из PROVIDER_UI_META. */
 type ProviderConfig = CatalogProvider
 
-type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'subscriptions' | 'usage'
-type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'subscriptions' | 'usage'
+type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
+type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
 type SettingsNavTab = { id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean; disabled?: boolean; keywords?: string }
 type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
@@ -157,6 +158,15 @@ function SettingsNavIcon({ name }: { name: SettingsNavIconName }) {
         <svg {...svgProps}>
           <path d="M12 4.6 17.8 7v4.7c0 3.6-2.15 6-5.8 7.7-3.65-1.7-5.8-4.1-5.8-7.7V7L12 4.6Z" {...strokeProps} />
           <path d="m9.4 12.1 1.7 1.7 3.6-3.75" {...strokeProps} />
+        </svg>
+      )
+    case 'runtimeFlags':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="7.4" width="16" height="4.4" rx="2.2" {...strokeProps} />
+          <circle cx="8.2" cy="9.6" r="1.1" {...strokeProps} />
+          <rect x="4" y="14" width="16" height="4.4" rx="2.2" {...strokeProps} />
+          <circle cx="15.8" cy="16.2" r="1.1" {...strokeProps} />
         </svg>
       )
     // 2.0.8: «Подписки» — карточка аккаунта; «Расход» — столбики отчёта.
@@ -1061,6 +1071,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       { id: 'models', label: t.settings.models, icon: 'models', keywords: 'default fallback reviewer planner picker пресеты модели выбор модель показывать подключенные подключённые рабочий набор текущая чат лимит расходы сутки рубли доллары бюджет стоимость' },
       { id: 'modelModes', label: 'Режимы работы моделей', icon: 'modelModes', keywords: 'режимы модели планирование авто правки привязка стандарт турбо простой поведение подтверждение без подтверждений разрешения задачи' },
       { id: 'policy', label: 'Права модели', icon: 'policy', keywords: 'allowlist permissions bash команды политика права модели доступ что разрешено разрешения запреты запрет доверенные действия папки файлы команды коннекторы подтверждение' },
+      { id: 'runtimeFlags', label: 'Поведение агента', icon: 'runtimeFlags', keywords: 'память проекта memory lifecycle автозахват auto capture умный выбор модели smart routing автоподмена fallback знание о проекте project brain флаги поведение переключатели тумблеры включить выключить' },
       // 2.0.8: подписочные аккаунты (состояние/остывание) и история расхода.
       { id: 'subscriptions', label: 'Подписки', icon: 'subscriptions', keywords: 'подписка подписки аккаунт аккаунты claude max codex chatgpt plus вход логин остывание лимит квота готов переключение несколько аккаунтов' },
       { id: 'usage', label: 'Расход', icon: 'usage', keywords: 'расход расходы токены деньги стоимость сколько потратил кэш кеш история статистика отчёт провайдер модель за неделю за месяц' },
@@ -3151,6 +3162,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         {tab === 'policy' && (
           <PolicyTab />
         )}
+
+        {tab === 'runtimeFlags' && <RuntimeFlagsTab />}
 
         {/* 2.0.8: обе вкладки строились standalone (ждали merge ветки дизайнера) —
             merge случился, монтируем, чтобы фичи перестали быть недоступными. */}
