@@ -39,6 +39,7 @@ export function createOneCConnector(): Connector {
         id: 'onec',
         label: '1С:Предприятие (OData)',
         kind: 'onec-odata',
+        requires: ['onec_base_url', 'onec_username', 'onec_password'],
         status: 'ready',  // optimistic; query() will report needs-config if creds missing
         detail: 'HTTP Basic + standard.odata'
       }

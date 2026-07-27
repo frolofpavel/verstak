@@ -59,6 +59,7 @@ export function createSendPulseConnector(): Connector {
         id: 'sendpulse',
         label: 'SendPulse',
         kind: 'sendpulse',
+        requires: ['sendpulse_client_id', 'sendpulse_client_secret'],
         status: 'ready',
         detail: 'Email-рассылки, кампании, баланс. client_id/secret в settings (sendpulse_client_id).'
       }

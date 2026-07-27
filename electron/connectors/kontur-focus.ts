@@ -34,6 +34,7 @@ export function createKonturFocusConnector(): Connector {
         id: 'kontur_focus',
         label: 'Контур.Фокус',
         kind: 'kontur_focus',
+        requires: ['kontur_focus_api_key'],
         status: 'ready',
         detail: 'Проверка контрагентов по ИНН/ОГРН: реквизиты + риск-аналитика. Ключ в settings (kontur_focus_api_key).'
       }

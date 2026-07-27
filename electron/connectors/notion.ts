@@ -39,6 +39,7 @@ export function createNotionConnector(): Connector {
         id: 'notion',
         label: 'Notion',
         kind: 'notion',
+        requires: ['notion_token'],
         status: 'ready',
         detail: 'Поиск страниц, чтение баз и страниц. Integration token в settings (notion_token).'
       }

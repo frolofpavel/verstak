@@ -38,6 +38,7 @@ export function createVkConnector(): Connector {
         id: 'vk',
         label: 'VK',
         kind: 'vk',
+        requires: ['vk_access_token'],
         status: 'ready',
         detail: 'Сообщества, стена, пользователи ВКонтакте. Access token в settings (vk_access_token).'
       }

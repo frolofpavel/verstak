@@ -437,6 +437,7 @@ export function createGitHubConnector(): Connector {
         id: 'github',
         label: 'GitHub',
         kind: 'github',
+        requires: ['github_token'],
         status: 'ready',
         detail: 'Репозитории, issues, PR, code search (github_token в settings)'
       }

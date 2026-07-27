@@ -23,9 +23,22 @@ export interface ConnectorInfo {
   label: string
   /** Stable kind identifier (one of the built-in adapters). */
   kind: string
-  /** Human-readable status: 'ready' | 'needs-config' | 'error' */
+  /**
+   * Готовность источника. ВАЖНО: сам адаптер этот флаг не вычисляет — у `info()`
+   * нет доступа к хранилищу. Честный статус проставляет реестр, сверяя `requires`
+   * / `requiresAnyOf` с настройками (см. `registry.ts`). Адаптер объявляет
+   * 'ready' как «код готов», реестр превращает это в «и ключи на месте».
+   */
   status: 'ready' | 'needs-config' | 'error'
   detail?: string
+  /**
+   * Ключи настроек, без которых источник работать не может — ВСЕ обязательны.
+   * Пусто = источнику хранилище не нужно (например SSH: хост можно передать
+   * прямо в аргументах).
+   */
+  requires?: string[]
+  /** Ключи, из которых достаточно ЛЮБОГО одного (несколько каналов/эндпоинтов). */
+  requiresAnyOf?: string[]
 }
 
 export interface ConnectorContext {

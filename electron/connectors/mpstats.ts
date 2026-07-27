@@ -38,6 +38,7 @@ export function createMpStatsConnector(): Connector {
         id: 'mpstats',
         label: 'MPSTATS',
         kind: 'mpstats',
+        requires: ['mpstats_token'],
         status: 'ready',
         detail: 'Аналитика WB: категория и продажи артикула. Token в settings (mpstats_token).'
       }

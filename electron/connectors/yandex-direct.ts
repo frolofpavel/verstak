@@ -35,6 +35,7 @@ export function createYandexDirectConnector(): Connector {
         id: 'yandex_direct',
         label: 'Яндекс.Директ',
         kind: 'yandex_direct',
+        requires: ['yandex_direct_token'],
         status: 'ready',
         detail: 'OAuth token в settings (yandex_direct_token). Reports API — sync polling до 30s.'
       }

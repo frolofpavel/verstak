@@ -62,6 +62,7 @@ export function createAvitoConnector(): Connector {
         id: 'avito',
         label: 'Avito',
         kind: 'avito',
+        requires: ['avito_client_id', 'avito_client_secret'],
         status: 'ready',
         detail: 'Объявления, статистика, баланс. client_id/secret в settings (avito_client_id).'
       }

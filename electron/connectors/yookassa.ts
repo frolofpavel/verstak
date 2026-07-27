@@ -37,6 +37,7 @@ export function createYooKassaConnector(): Connector {
         id: 'yookassa',
         label: 'ЮКасса',
         kind: 'yookassa',
+        requires: ['yookassa_shop_id', 'yookassa_secret_key'],
         status: 'ready',
         detail: 'Платежи и возвраты (только чтение). shopId + секретный ключ в settings (yookassa_shop_id, yookassa_secret_key).'
       }

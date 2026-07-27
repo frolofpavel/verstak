@@ -59,6 +59,7 @@ export function createOzonPerformanceConnector(): Connector {
         id: 'ozon_performance',
         label: 'Ozon Performance',
         kind: 'ozon_performance',
+        requires: ['ozon_perf_client_id', 'ozon_perf_client_secret'],
         status: 'ready',
         detail: 'Рекламные кампании Ozon (бета). client_id/secret в settings (ozon_perf_client_id).'
       }

@@ -78,6 +78,7 @@ export function createHttpConnector(): Connector {
         id: 'http',
         label: 'Generic HTTP (REST)',
         kind: 'http-rest',
+        requiresAnyOf: ['http_endpoint_1_base', 'http_endpoint_2_base', 'http_endpoint_3_base', 'http_endpoint_4_base'],
         status: 'ready',
         detail: 'до 4 пользовательских эндпоинтов'
       }

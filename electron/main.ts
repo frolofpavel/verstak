@@ -536,7 +536,9 @@ app.whenReady().then(() => {
   const undoStack = createUndoStack(db)
   const feedback = createFeedback(db)
   const runUsage = createRunUsage(db) // 2.0.8-F: read-поверхность persistence usage
-  const connectorRegistry = createConnectorRegistry()
+  // getSecret передаём, чтобы list_connectors отдавал ЧЕСТНЫЙ статус: без него
+  // каждый источник рапортовал 'ready' даже без ключа (аудит 27.07).
+  const connectorRegistry = createConnectorRegistry(getSecret)
   const userProfiles = createUserProfiles(db)
   const skillUsage = createSkillUsageStore(db)
   logRuntime('startup.project_storage.ready')

@@ -68,6 +68,9 @@ export function createSshConnector(): Connector {
         id: 'ssh',
         label: 'SSH executor',
         kind: 'ssh',
+        // Хост и ключ можно передать прямо в аргументах, поэтому хранилище не
+        // обязательно: осознанное исключение, а не забытое объявление.
+        requires: [],
         status: 'ready',
         detail: 'Системный ssh клиент. Default host в settings (ssh_default_host).'
       }

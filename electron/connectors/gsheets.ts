@@ -61,6 +61,7 @@ export function createGSheetsConnector(): Connector {
         id: 'gsheets',
         label: 'Google Sheets',
         kind: 'gsheets',
+        requires: ['gsheets_service_account_json'],
         status: 'ready',
         detail: 'Service account JSON в settings (gsheets_service_account_json)'
       }

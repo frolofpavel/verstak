@@ -31,6 +31,7 @@ export function createYandexMetrikaConnector(): Connector {
         id: 'yandex_metrika',
         label: 'Яндекс.Метрика',
         kind: 'yandex_metrika',
+        requires: ['yandex_metrika_token'],
         status: 'ready',
         detail: 'Веб-аналитика. OAuth token в settings (yandex_metrika_token).'
       }

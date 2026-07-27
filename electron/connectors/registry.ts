@@ -72,13 +72,49 @@ export interface ConnectorRegistry {
   query(id: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown>
 }
 
-export function createConnectorRegistry(): ConnectorRegistry {
+/** Ключ считается заполненным, только если в нём есть непробельный текст. */
+function filled(getSecret: (key: string) => string | null, key: string): boolean {
+  return ((getSecret(key) ?? '').trim().length > 0)
+}
+
+/**
+ * Честный статус источника.
+ *
+ * До 27.07 каждый адаптер возвращал захардкоженное `status: 'ready'` — `info()`
+ * не получает контекста и проверить хранилище не может. Из-за этого модель через
+ * `list_connectors` видела все 31 источника готовыми, включая те, где ключа нет
+ * вовсе, и уверенно шла в них за данными. Симптом обходили формулировкой в
+ * промпте; причина была здесь.
+ *
+ * Теперь реестр знает `getSecret` и сверяет объявленные требования. Названия
+ * недостающих ключей попадают в `detail` — ЗНАЧЕНИЯ не читаются и не показываются.
+ */
+function withHonestStatus(info: ConnectorInfo, getSecret?: (key: string) => string | null): ConnectorInfo {
+  // Нет доступа к хранилищу — не выдумываем: отдаём как есть (прежнее поведение).
+  if (!getSecret) return info
+  const missingAll = (info.requires ?? []).filter(k => !filled(getSecret, k))
+  const anyOf = info.requiresAnyOf ?? []
+  const anyMissing = anyOf.length > 0 && !anyOf.some(k => filled(getSecret, k))
+  if (missingAll.length === 0 && !anyMissing) return info
+
+  const parts: string[] = []
+  if (missingAll.length > 0) parts.push(`не заданы: ${missingAll.join(', ')}`)
+  if (anyMissing) parts.push(`нужен хотя бы один из: ${anyOf.join(', ')}`)
+  const note = `Не настроено — ${parts.join('; ')}. Settings → коннекторы.`
+  return { ...info, status: 'needs-config', detail: info.detail ? `${info.detail} ${note}` : note }
+}
+
+/**
+ * @param getSecret доступ к хранилищу настроек. Без него статусы остаются такими,
+ *        какими их объявил адаптер (обратная совместимость для тестов и утилит).
+ */
+export function createConnectorRegistry(getSecret?: (key: string) => string | null): ConnectorRegistry {
   const byId = new Map<string, Connector>()
   for (const c of BUILTINS) byId.set(c.info().id, c)
 
   return {
     list() {
-      return BUILTINS.map(c => c.info())
+      return BUILTINS.map(c => withHonestStatus(c.info(), getSecret))
     },
     get(id: string) {
       return byId.get(id) ?? null

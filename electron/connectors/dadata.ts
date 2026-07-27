@@ -43,6 +43,7 @@ export function createDaDataConnector(): Connector {
         id: 'dadata',
         label: 'DaData',
         kind: 'dadata',
+        requires: ['dadata_api_key'],
         status: 'ready',
         detail: 'Контрагенты по ИНН, подсказки адресов/банков. Token в settings (dadata_api_key).'
       }

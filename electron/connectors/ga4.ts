@@ -33,6 +33,7 @@ export function createGa4Connector(): Connector {
         id: 'ga4',
         label: 'Google Analytics 4',
         kind: 'ga4',
+        requires: ['ga4_access_token', 'ga4_property_id'],
         status: 'ready',
         detail: 'GA4 Data API. OAuth token + property_id в settings (ga4_access_token, ga4_property_id).'
       }

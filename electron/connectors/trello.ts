@@ -32,6 +32,7 @@ export function createTrelloConnector(): Connector {
         id: 'trello',
         label: 'Trello',
         kind: 'trello',
+        requires: ['trello_api_key', 'trello_token'],
         status: 'ready',
         detail: 'Доски, списки, карточки. API key + token в settings (trello_api_key / trello_token).'
       }

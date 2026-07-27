@@ -39,6 +39,7 @@ export function createYandexWebmasterConnector(): Connector {
         id: 'yandex_webmaster',
         label: 'Яндекс.Вебмастер',
         kind: 'yandex_webmaster',
+        requires: ['yandex_webmaster_token'],
         status: 'ready',
         detail: 'SEO: ИКС, проблемы, запросы. OAuth token в settings (yandex_webmaster_token).'
       }

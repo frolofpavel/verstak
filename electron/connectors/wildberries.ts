@@ -31,6 +31,7 @@ export function createWildberriesConnector(): Connector {
         id: 'wildberries',
         label: 'Wildberries',
         kind: 'wildberries',
+        requires: ['wildberries_token'],
         status: 'ready',
         detail: 'Статистика продаж/заказов/остатков WB. Token в settings (wildberries_token).'
       }

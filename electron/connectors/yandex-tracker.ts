@@ -30,6 +30,7 @@ export function createYandexTrackerConnector(): Connector {
         id: 'yandex_tracker',
         label: 'Яндекс.Трекер',
         kind: 'yandex_tracker',
+        requires: ['yandex_tracker_token', 'yandex_tracker_org_id'],
         status: 'ready',
         detail: 'Задачи и очереди Трекера. OAuth token + org_id в settings (yandex_tracker_token / yandex_tracker_org_id).'
       }

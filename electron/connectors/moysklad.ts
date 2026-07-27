@@ -33,6 +33,7 @@ export function createMoySkladConnector(): Connector {
         id: 'moysklad',
         label: 'МойСклад',
         kind: 'moysklad',
+        requires: ['moysklad_token'],
         status: 'ready',
         detail: 'Товары, заказы, остатки. Bearer token в settings (moysklad_token).'
       }

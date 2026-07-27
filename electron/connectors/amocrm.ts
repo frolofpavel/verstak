@@ -43,6 +43,7 @@ export function createAmoCrmConnector(): Connector {
         id: 'amocrm',
         label: 'amoCRM',
         kind: 'amocrm',
+        requires: ['amocrm_subdomain', 'amocrm_access_token'],
         status: 'ready',
         detail: 'Сделки, контакты, воронки. Поддомен + long-lived токен в settings (amocrm_subdomain, amocrm_access_token).'
       }

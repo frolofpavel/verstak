@@ -43,6 +43,7 @@ export function createJiraConnector(): Connector {
         id: 'jira',
         label: 'Jira',
         kind: 'jira',
+        requires: ['jira_base_url', 'jira_email', 'jira_api_token'],
         status: 'ready',
         detail: 'Задачи, проекты, поиск по JQL. base_url/email/api_token в settings (jira_base_url).'
       }

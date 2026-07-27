@@ -32,6 +32,7 @@ export function createOzonConnector(): Connector {
         id: 'ozon',
         label: 'Ozon Seller',
         kind: 'ozon',
+        requires: ['ozon_client_id', 'ozon_api_key'],
         status: 'ready',
         detail: 'Товары, остатки, аналитика и финансы продавца. Client-Id + Api-Key в settings (ozon_client_id, ozon_api_key).'
       }

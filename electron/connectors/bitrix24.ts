@@ -40,6 +40,7 @@ export function createBitrix24Connector(): Connector {
         id: 'bitrix24',
         label: 'Битрикс24',
         kind: 'bitrix24',
+        requires: ['bitrix24_webhook_url'],
         status: 'ready',
         detail: 'Incoming webhook URL в settings (bitrix24_webhook_url). Пилот: example.'
       }

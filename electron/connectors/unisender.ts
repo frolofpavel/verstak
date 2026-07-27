@@ -33,6 +33,7 @@ export function createUniSenderConnector(): Connector {
         id: 'unisender',
         label: 'UniSender',
         kind: 'unisender',
+        requires: ['unisender_api_key'],
         status: 'ready',
         detail: 'Email/SMS-рассылки: списки, кампании, статистика. API-ключ в settings (unisender_api_key).'
       }

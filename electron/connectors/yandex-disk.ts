@@ -34,6 +34,7 @@ export function createYandexDiskConnector(): Connector {
         id: 'yandex_disk',
         label: 'Yandex Disk',
         kind: 'yandex_disk',
+        requires: ['yandex_disk_token'],
         status: 'ready',
         detail: 'OAuth token в settings (yandex_disk_token). Upload идёт в /Verstak/.'
       }
