@@ -55,16 +55,27 @@ describe('lazy-импорты App.tsx', () => {
   })
 
   // ГЛАВНЫЙ пин позиции 4. Статический импорт рядом с lazy = чанк схлопнулся.
+  //
+  // Один проход по дереву, а не по проходу на каждый компонент: наивная вложенность
+  // (26 × ~500 файлов = 13 тыс. чтений) занимала 33 с и под полной нагрузкой не
+  // укладывалась в таймаут vitest — страж падал не по делу. Теперь каждый файл
+  // читается ровно один раз, и все value-импорты из него разбираются сразу.
   it('ни один lazy-компонент не импортируется статически', () => {
+    const lazySet = new Set(lazy)
+    // Захватываем имя модуля из любого value-импорта (не `import type`).
+    const importRe = /^import\s+(?!type\s)[^\n]*from '[^']*\/([\w.-]+)'/gm
     const offenders: string[] = []
-    for (const mod of lazy) {
-      const self = `${sep}components${sep}${mod}`
-      for (const f of files) {
-        if (f.endsWith(`${self}.tsx`) || f.endsWith(`${self}.ts`)) continue
-        const src = readFileSync(f, 'utf8')
-        // Только value-импорты: `import type { X } from ...` чанк не тянет.
-        const re = new RegExp(`^import\\s+(?!type\\s)[^\\n]*from '[^']*/${mod}'`, 'm')
-        if (re.test(src)) offenders.push(`${mod} ← ${relative(ROOT, f).replace(/\\/g, '/')}`)
+
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, '/')
+      const self = `${sep}components${sep}`
+      const src = readFileSync(f, 'utf8')
+      for (const m of src.matchAll(importRe)) {
+        const mod = m[1]
+        if (!lazySet.has(mod)) continue
+        // Сам себя импортировать не может; файл самого компонента пропускаем.
+        if (f.endsWith(`${self}${mod}.tsx`) || f.endsWith(`${self}${mod}.ts`)) continue
+        offenders.push(`${mod} ← ${rel}`)
       }
     }
     expect(offenders, `lazy обесценен статическим импортом:\n${offenders.join('\n')}`).toEqual([])
