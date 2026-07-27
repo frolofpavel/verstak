@@ -7,15 +7,8 @@ import { findRunForChat } from '../lib/own-run'
 import { historyForSend } from '../lib/chat-messages'
 import { activeScopeKey, ownerScopeKey } from '../lib/pending-scope'
 import { useProvider } from '../hooks/useProvider'
-import { TimelineBar } from './TimelineBar'
-import { AgentProgressPanel } from './AgentProgressPanel'
-import { ReviewPanel } from './ReviewPills'
 import { ResumeBanner } from './ResumeBanner'
 import { WorktreeBar } from './WorktreeBar'
-import { PipelineWizard } from './PipelineWizard'
-import { PipelineBanner } from './PipelineBanner'
-import { OutcomeRunsPanel } from './OutcomeRunsPanel'
-import { TaskContractReview } from './TaskContractReview'
 import { useSkills as useSkillsStore } from '../store/skillStore'
 import { buildSkillIndex, suggestManyFromIndex, suggestScoredFromIndex } from '../lib/skill-suggest'
 import { suggestRecipe, hasExplicitRecipeIntent } from '../lib/recipe-suggest'
@@ -49,6 +42,7 @@ import { ComposerBudgetBar } from './chat/ComposerBudgetBar'
 import { ComposerMetaRow } from './chat/ComposerMetaRow'
 import { ChatStreamMessages } from './chat/ChatStreamMessages'
 import { AttachmentChip, formatSize } from './chat/message-parts'
+import { ChatRunControls } from './chat/ChatRunControls'
 import {
   CANCELLED_SUPPLEMENT_CONTENT,
   formatSupplementForAgent,
@@ -3065,42 +3059,30 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         )}
       </div>
 
-      <TimelineBar />
-      <ReviewPanel />
-      <PipelineBanner onPrimary={step => { void onPipelinePrimary(step) }} />
-      {taskContractReview && (
-        <TaskContractReview
-          contract={taskContractReview}
-          onApprove={() => void approveTaskContract()}
-          onRefine={refineTaskContract}
-          onEdit={() => void editTaskContractSource()}
-        />
-      )}
-      {pipelineWizardOpen && (
-        <PipelineWizard
-          mode={pipelineWizardMode}
-          chatId={activeChatId}
-          initialBrief={pipelineInitialBrief}
-          onClose={() => { setPipelineWizardOpen(false); setPipelineInitialBrief(undefined); setPipelineWizardMode('agency') }}
-          onStarted={onPipelineStarted}
-        />
-      )}
-      {outcomeRunsOpen && activePath && (
-        <OutcomeRunsPanel projectPath={activePath} onClose={() => setOutcomeRunsOpen(false)} />
-      )}
-
-      {isStreaming && agentProgress.length > 0 && (
-        <div className="gg-agent-progress-host">
-          <AgentProgressPanel
-            entries={agentProgress}
-            isStreaming={isStreaming}
-            elapsedMs={agentProgressElapsedMs}
-            durationMs={agentProgressDurationMs}
-            finishedAt={agentProgressFinishedAt}
-            onToggleOpen={handleAgentProgressToggle}
-          />
-        </div>
-      )}
+      <ChatRunControls
+        isStreaming={isStreaming}
+        activePath={activePath}
+        activeChatId={activeChatId}
+        agentProgress={agentProgress}
+        agentProgressElapsedMs={agentProgressElapsedMs}
+        agentProgressDurationMs={agentProgressDurationMs}
+        agentProgressFinishedAt={agentProgressFinishedAt}
+        handleAgentProgressToggle={handleAgentProgressToggle}
+        onPipelinePrimary={onPipelinePrimary}
+        taskContractReview={taskContractReview}
+        approveTaskContract={approveTaskContract}
+        refineTaskContract={refineTaskContract}
+        editTaskContractSource={editTaskContractSource}
+        pipelineWizardOpen={pipelineWizardOpen}
+        pipelineWizardMode={pipelineWizardMode}
+        pipelineInitialBrief={pipelineInitialBrief}
+        setPipelineWizardOpen={setPipelineWizardOpen}
+        setPipelineInitialBrief={setPipelineInitialBrief}
+        setPipelineWizardMode={setPipelineWizardMode}
+        onPipelineStarted={onPipelineStarted}
+        outcomeRunsOpen={outcomeRunsOpen}
+        setOutcomeRunsOpen={setOutcomeRunsOpen}
+      />
 
       {isHome && (
         <ChatHomeAside
@@ -3221,6 +3203,3 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     </div>
   )
 }
-
-
-
