@@ -185,3 +185,36 @@ describe('композер — служебные контролы', () => {
     expect(document.querySelector('.gg-applied-skills-draft')).toBeNull()
   })
 })
+
+// Пины под срез B-остаток (ядро композера): ряд ввода, скрытый файловый вход,
+// кнопка вложения и её блокировка на стриме. Сняты ДО переноса ряда в компонент.
+describe('композер — ряд ввода', () => {
+  it('ряд ввода содержит поле, действия и скрытый файловый вход', () => {
+    mountChat()
+    expect(document.querySelector('.gg-composer-inner')).toBeTruthy()
+    expect(document.querySelector('.gg-composer-actions')).toBeTruthy()
+    const file = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(file).toBeTruthy()
+    expect(file.multiple).toBe(true)
+    expect(file.style.display).toBe('none')
+  })
+
+  it('кнопка вложения активна вне стрима и блокируется на стриме', () => {
+    mountChat()
+    expect((document.querySelector('.gg-attach-btn') as HTMLButtonElement).disabled).toBe(false)
+    startStreaming()
+    expect((document.querySelector('.gg-attach-btn') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('поле ввода однострочное по умолчанию и хранит текст композера', () => {
+    mountChat()
+    expect(textarea().rows).toBe(1)
+    type('черновик')
+    expect(textarea().value).toBe('черновик')
+  })
+
+  it('пауза не предлагается, когда прогон не идёт', () => {
+    mountChat()
+    expect(document.querySelector('.gg-pause-btn')).toBeNull()
+  })
+})
