@@ -46,12 +46,14 @@
 
 ## Открытый остаток
 
-- **2.1.11 декомпозиция renderer (P1).** Срез A (`PolicyTab`) и срез B (композер
-  `Chat.tsx` → `chat/ComposerSkillBar`, `chat/ComposerBudgetBar`,
-  `chat/system-slash-commands`) выполнены. Размеры на 27.07: `Chat.tsx` 3973,
-  `Settings.tsx` 4649, `layout.css` 21994. Дальше — срез C (stream rendering),
-  срез D (pipeline controls), вкладки Settings, деление CSS, UI smoke. Границу
-  тестового харнесса для срезов C/D см. в аудите, раздел 2.1.11.
+- **2.1.11 декомпозиция renderer (P1).** Выполнены: срез A (`PolicyTab`),
+  периферия композера (`chat/ComposerSkillBar`, `chat/ComposerBudgetBar`,
+  `chat/system-slash-commands`) и ядро композера (`chat/ComposerInputRow`).
+  Размеры на 27.07: `Chat.tsx` **3869**, `Settings.tsx` 4649, `layout.css` 21994.
+  Остаток пакета: часть 2 среза B — нижняя строка композера (`gg-composer-hint` +
+  `gg-composer-meta`, ~247 строк), затем срез C (stream rendering), срез D
+  (pipeline controls), вкладки Settings, деление CSS, UI smoke. Границу тестового
+  харнесса и раскладку остатка см. в аудите, раздел 2.1.11.
 - **2.1.12 остаточный долг (P2).** TODO второй ветки незакрытой review-сессии в
   `electron/ipc/agent-runs.ts`; lazy-импорты в `App.tsx`, которые сборщик всё
   равно включает статически; рантайм-флаги (`memory_lifecycle`,
