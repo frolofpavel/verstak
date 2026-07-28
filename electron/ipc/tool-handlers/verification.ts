@@ -7,6 +7,7 @@ import { scanText } from '../../ai/secret-scanner'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../../ai/verification'
 import { scorePlanQuality } from '../../ai/plan-quality'
 import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contracts/outcome'
+import { getPlanForRun, rememberPlanForRun } from '../../ai/runner-shared'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
 // способ прогнать 50 команд разом. Ручные проверки сверх лимита не режем.
@@ -250,6 +251,21 @@ export const createPlanHandler: ToolHandler = {
         return { id: call.id, name: call.name, result: '', error: 'PLAN_APPROVAL_UNAVAILABLE: approval channel is not registered' }
       }
 
+      // Идемпотентность (§9 ТЗ): один прогон — один план. Повторный create_plan в
+      // том же прогоне возвращает уже созданный planId, а не плодит дубликат.
+      // Проверка стоит ПОСЛЕ валидации и quality-гейта: невалидный повторный
+      // вызов должен получить свою ошибку, а не молча «успех» со старым id.
+      const alreadyCreated = getPlanForRun(ctx.sendId)
+      if (alreadyCreated != null && ctx.getPlan?.(alreadyCreated)) {
+        return {
+          id: call.id,
+          name: call.name,
+          result: `План этой задачи уже создан: planId=${alreadyCreated}. ` +
+            'Повторный create_plan не нужен — дубликат не создан. ' +
+            'Для доработки существующего плана используй replan_plan.',
+        }
+      }
+
       const plan = ctx.recordPlan(
         ctx.projectPath,
         title,
@@ -260,6 +276,7 @@ export const createPlanHandler: ToolHandler = {
         })),
         quality ? { contractRevision, planRevision, quality } : undefined,
       )
+      rememberPlanForRun(ctx.sendId, plan.id)
       try { ctx.recordJournal(ctx.projectPath, 'note', `План: ${title}`, `${steps.length} шагов`) } catch { /* journal not critical */ }
       ctx.sender.send('ai:event', {
         id: ctx.sendId,

@@ -92,6 +92,36 @@ export function registerChatRun(sendId: number, chatId: number | null | undefine
 
 export function unregisterChatRun(sendId: number): void {
   activeChatRuns.delete(sendId)
+  planForRun.delete(sendId)
+}
+
+// ── Идемпотентность create_plan (VSK-TASK-FLOW-A1, блок B) ──────────────────
+//
+// Один прогон = одна задача = один план. Модель, вызвавшая create_plan дважды
+// (перечитала контекст, «уточнила» формулировку, ушла на второй круг), раньше
+// плодила дубликаты: в разделе «Планы» появлялись два плана на одну задачу, и
+// было неясно, какой из них исполняется.
+//
+// Решение РАНТАЙМОМ, а не промптом: помним planId прогона и на повторный вызов
+// возвращаем его же. Промпт можно проигнорировать, реестр — нет.
+//
+// Ревизии это не мешает: доработка идёт отдельным инструментом `replan_plan`,
+// который поднимает planRevision у ТОГО ЖЕ плана и через этот реестр не ходит.
+const planForRun = new Map<number, number>() // sendId → planId
+
+/** Запомнить план, созданный этим прогоном. */
+export function rememberPlanForRun(sendId: number, planId: number): void {
+  if (Number.isFinite(sendId) && Number.isFinite(planId)) planForRun.set(sendId, planId)
+}
+
+/** План, уже созданный этим прогоном, если он был. */
+export function getPlanForRun(sendId: number): number | null {
+  return planForRun.get(sendId) ?? null
+}
+
+/** Только для тестов: реестр — модульный синглтон, между кейсами его надо чистить. */
+export function __resetPlanForRunForTests(): void {
+  planForRun.clear()
 }
 
 /** Идёт ли прямо сейчас прогон в этом чате. Гейт ручной компакции. */
