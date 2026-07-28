@@ -264,10 +264,16 @@ export const createPlanHandler: ToolHandler = {
         planApprovalSetting: ctx.getSecretForDelegate?.('plan_approval_gate') === 'true',
         delegationDepth: ctx.delegationDepth,
       })
+      // §4.2 живой порог: сырой spec отдаём порогу ВСЕГДА. `specs` заполняется
+      // только под ctx.outcome, поэтому на чат-пути сюда приезжал null даже
+      // когда модель spec ПРИСЛАЛА — порог судил по пустоте и требовал карточку
+      // на каждый план. Полный разбор для outcome/quality не меняется: там
+      // по-прежнему нужен parsePlanStepSpec без диагностик.
       const verdict = planApprovalVerdict(steps.map((step, index) => ({
         title: step.title,
         detail: step.detail,
         spec: specs[index] ?? null,
+        rawSpec: step.rawSpec,
       })))
       const requiresApproval = gateApplies && verdict.needsCard
 

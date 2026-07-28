@@ -13,8 +13,26 @@
  * через `mode-policy.decide()` в общем порядке. Неверная самооценка модели даёт
  * лишний вопрос пользователю, а не тихую запись.
  *
- * Fail-safe: если объявленных данных нет вовсе (легаси-путь без structured spec),
- * считаем, что карточка НУЖНА. Неизвестное — не то же самое, что безопасное.
+ * Fail-safe: если про шаг решить нельзя, считаем, что карточка НУЖНА.
+ * Неизвестное — не то же самое, что безопасное; сомнение = пишет.
+ *
+ * ЖИВОЙ ПОРОГ НА ЛЕГАСИ-ПУТИ (28.07). Раньше «нельзя решить» означало «нет
+ * полного structured spec», и порог вырождался: `parsePlanStepSpec` отдаёт
+ * значение только при нуле диагностик по всем шестнадцати полям, а описание
+ * `create_plan` прямо разрешает планам spec не передавать. При включённом
+ * тумблере карточка вылезала на КАЖДЫЙ многошаговый план, включая читающий, —
+ * то есть ломала третье правило §1 ТЗ («вопрос отвечается без единого клика»).
+ *
+ * Теперь у шага три источника суждения, в порядке доверия:
+ *   1) полный spec — объявление модели как есть (прежнее поведение);
+ *   2) СЫРОЙ spec, разобранный частично — только те поля, по которым судит порог.
+ *      Партиальность живёт ТОЛЬКО здесь и никуда не протекает: outcome-путь и
+ *      quality-гейт по-прежнему требуют полного разбора через parsePlanStepSpec;
+ *   3) текст шага — консервативный вывод: признак записи перевешивает признак
+ *      чтения, а отсутствие обоих оставляет шаг неопределимым (карточка).
+ *
+ * Инвариант безопасности не изменился ни на йоту: автоутверждение снимает
+ * КАРТОЧКУ и не выдаёт прав на запись.
  */
 
 import type { PlanStepSpecV1 } from '../../shared/contracts/outcome'
@@ -70,11 +88,101 @@ function mentionsResponsible(text: string): boolean {
   return RESPONSIBLE_HINTS.some(hint => hay.includes(hint))
 }
 
+/**
+ * Признаки ИЗМЕНЕНИЯ мира — для шагов, у которых объявления нет вовсе.
+ * Список намеренно шире буквальной записи файла: запуск команды и установка
+ * пакета тоже меняют состояние, и ошибка в эту сторону стоит лишнего вопроса,
+ * а в обратную — тихой правки. Подстрочный поиск по тем же причинам, что у
+ * RESPONSIBLE_HINTS (граница слова в JS — ASCII, «Записать» её не даёт).
+ */
+const WRITE_HINTS: readonly string[] = [
+  'запис', 'созда', 'измен', 'правк', 'отредакт', 'редактир', 'обнов', 'перепиш', 'перезапиш',
+  'сгенерир', 'сохран', 'установ', 'запуст', 'выполн команд', 'коммит', 'закоммит', 'деплой',
+  'мигра', 'переимен', 'настро', 'внедр', 'добав',
+  'write', 'create', 'modify', 'update', 'edit', 'generate', 'save', 'install',
+  'commit', 'patch', 'apply', 'rewrite', 'rename', 'migrat', 'scaffold',
+]
+
+/**
+ * Признаки ЧТЕНИЯ. Нужны как ПОЛОЖИТЕЛЬНОЕ доказательство: без него шаг остаётся
+ * неопределимым и получает карточку. Отсутствие признака записи само по себе
+ * основанием не является — иначе пустой заголовок проезжал бы как чтение.
+ */
+const READ_HINTS: readonly string[] = [
+  'прочит', 'прочесть', 'читать', 'посмотр', 'изуч', 'проанализ', 'анализ', 'сравн',
+  'найд', 'поиск', 'поищ', 'посчит', 'подсчит', 'оцен', 'объясн', 'ответ', 'сводк',
+  'просмотр', 'перечисл', 'собрать список', 'сформулир',
+  'read', 'list', 'search', 'analyz', 'inspect', 'review', 'summar', 'explain',
+  'compare', 'count', 'audit', 'diagnose',
+]
+// СОЗНАТЕЛЬНО НЕ ВКЛЮЧЕНЫ «разобраться», «выяснить», «уточнить»: это не
+// доказательство чтения, а расплывчатое намерение — за ним одинаково часто идёт
+// и правка. Поймано собственным тестом: «Разобраться с остальным» проезжало как
+// чтение и автоутверждало план. Сомнение = пишет = карточка.
+
+const mentionsAny = (text: string, hints: readonly string[]): boolean => {
+  const hay = text.toLowerCase()
+  return hints.some(hint => hay.includes(hint))
+}
+
 /** Шаг в том виде, в котором его отдал `create_plan`. */
 export interface DeclaredStep {
   title: string
   detail?: string | null
   spec?: PlanStepSpecV1 | null
+  /**
+   * Spec, присланный моделью, но НЕ прошедший полный разбор. На чат-пути это
+   * единственный вид объявления: `createPlanHandler` заполняет `specs` только
+   * внутри `if (ctx.outcome)`, поэтому раньше объявление модели здесь просто
+   * выбрасывалось, а порог судил по пустоте.
+   */
+  rawSpec?: unknown
+}
+
+/** Ровно те поля объявления, по которым судит порог. Больше ему не нужно. */
+interface DeclaredView {
+  writeScope: string[]
+  actions: string[]
+  intent: string
+  risk: string | null
+  key: string | null
+}
+
+const stringsOf = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+/**
+ * Частичный разбор сырого spec. Судить по нему можно ТОЛЬКО если объявлен
+ * `writeScope` массивом: это и есть заявление «пишу вот сюда» либо «никуда».
+ * Без него объект нам ничего не сказал (обрезан, опечатка в имени поля), и шаг
+ * уходит на текстовый вывод — иначе дыра: сломанное объявление читалось бы как
+ * «писать некуда».
+ */
+function partialView(raw: unknown): DeclaredView | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const obj = raw as Record<string, unknown>
+  if (!Array.isArray(obj.writeScope)) return null
+  return {
+    writeScope: stringsOf(obj.writeScope),
+    actions: stringsOf(obj.actions),
+    intent: typeof obj.intent === 'string' ? obj.intent : '',
+    risk: typeof obj.risk === 'string' ? obj.risk : null,
+    key: typeof obj.key === 'string' ? obj.key : null,
+  }
+}
+
+/** Объявление шага: полный spec сильнее частичного, частичный — сильнее текста. */
+function viewOf(step: DeclaredStep): DeclaredView | null {
+  if (step.spec) {
+    return {
+      writeScope: step.spec.writeScope ?? [],
+      actions: step.spec.actions ?? [],
+      intent: step.spec.intent ?? '',
+      risk: step.spec.risk ?? null,
+      key: step.spec.key ?? null,
+    }
+  }
+  return partialView(step.rawSpec)
 }
 
 /**
@@ -89,47 +197,40 @@ export function planApprovalVerdict(steps: readonly DeclaredStep[]): PlanApprova
     return { needsCard: true, reason: 'no-declaration', triggeredBy: [] }
   }
 
-  const withSpec = steps.filter(s => s.spec)
-  // Ни одного structured spec — легаси-путь. Объявления, по которому можно судить,
-  // нет: карточку показываем.
-  if (withSpec.length === 0) {
-    return { needsCard: true, reason: 'no-declaration', triggeredBy: [] }
-  }
-  // Часть шагов без spec — тоже неполное объявление, судить нельзя.
-  if (withSpec.length !== steps.length) {
-    return { needsCard: true, reason: 'no-declaration', triggeredBy: [] }
-  }
+  // Разбираем каждый шаг ОДИН раз: объявление (полное или частичное), текст для
+  // текстовых проверок и вывод «пишет / читает / неопределим».
+  const judged = steps.map((s, i) => {
+    const view = viewOf(s)
+    const haystack = [s.title, s.detail ?? '', view?.intent ?? '', ...(view?.actions ?? [])].join(' \n ')
+    // Объявленный writeScope сильнее текста: порог считается по тому, что модель
+    // САМА объявила (текст остаётся судьёй только там, где объявления нет).
+    const writes = view ? view.writeScope.length > 0 : mentionsAny(haystack, WRITE_HINTS)
+    const reads = view ? true : mentionsAny(haystack, READ_HINTS)
+    return {
+      label: view?.key || s.title || `шаг ${i + 1}`,
+      writes,
+      responsible: mentionsResponsible(haystack),
+      highRisk: view?.risk === 'high',
+      // Неопределим = объявления нет И текст молчит в обе стороны.
+      unknown: !view && !writes && !reads,
+    }
+  })
 
-  const label = (s: DeclaredStep, i: number) => s.spec?.key || s.title || `шаг ${i + 1}`
+  const pick = (predicate: (j: typeof judged[number]) => boolean) => judged.filter(predicate).map(j => j.label)
 
-  const writers = steps
-    .map((s, i) => ({ s, i }))
-    .filter(({ s }) => (s.spec?.writeScope?.length ?? 0) > 0)
-  if (writers.length > 0) {
-    return { needsCard: true, reason: 'write-scope', triggeredBy: writers.map(({ s, i }) => label(s, i)) }
-  }
+  // Порядок причин прежний: запись → ответственное действие → высокий риск →
+  // неопределимость. Он же зафиксирован пинами `reason`.
+  const writers = pick(j => j.writes)
+  if (writers.length > 0) return { needsCard: true, reason: 'write-scope', triggeredBy: writers }
 
-  const responsible = steps
-    .map((s, i) => ({ s, i }))
-    .filter(({ s }) => {
-      const haystack = [
-        s.title,
-        s.detail ?? '',
-        s.spec?.intent ?? '',
-        ...(s.spec?.actions ?? []),
-      ].join(' \n ')
-      return mentionsResponsible(haystack)
-    })
-  if (responsible.length > 0) {
-    return { needsCard: true, reason: 'responsible-action', triggeredBy: responsible.map(({ s, i }) => label(s, i)) }
-  }
+  const responsible = pick(j => j.responsible)
+  if (responsible.length > 0) return { needsCard: true, reason: 'responsible-action', triggeredBy: responsible }
 
-  const risky = steps
-    .map((s, i) => ({ s, i }))
-    .filter(({ s }) => s.spec?.risk === 'high')
-  if (risky.length > 0) {
-    return { needsCard: true, reason: 'high-risk', triggeredBy: risky.map(({ s, i }) => label(s, i)) }
-  }
+  const risky = pick(j => j.highRisk)
+  if (risky.length > 0) return { needsCard: true, reason: 'high-risk', triggeredBy: risky }
+
+  const unknown = pick(j => j.unknown)
+  if (unknown.length > 0) return { needsCard: true, reason: 'no-declaration', triggeredBy: unknown }
 
   return { needsCard: false, reason: null, triggeredBy: [] }
 }
