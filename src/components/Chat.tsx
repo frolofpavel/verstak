@@ -1179,9 +1179,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         } else if (event.type === 'error') {
           notifyAgentFinished(owner, chatOwnerProjectPath, true)
         }
-        if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
-          store.setPendingPlan(null)
-        }
+        // §10: карточку плана здесь НЕ снимаем — см. комментарий у основной ветки
+        // ниже. Прогон фонового чата завершается сразу после показа карточки, и
+        // его done не имеет отношения к решению человека.
         if (event.type === 'done' || event.type === 'error') {
           clearPendingSupplementsForScope(pendingScopeKeyFor(owner))
           store.forgetSendOwner(id)
@@ -1233,11 +1233,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         }
         return
       }
-      // #3 plan-gate: прогон завершился/упал (gate был сдренен в main как reject) —
-      // снимаем модалку плана, чтобы не висела ghost поверх завершённого прогона.
-      if ((event.type === 'done' || event.type === 'error') && store.pendingPlan?.sendId === id) {
-        store.setPendingPlan(null)
-      }
+      // §10: карточку плана по завершению прогона НЕ снимаем.
+      //
+      // Раньше здесь стояло снятие с обоснованием «gate был сдренен в main как
+      // reject — не держим ghost». Это было верно, пока ожидание жило ВНУТРИ
+      // прогона: done по тому же sendId и правда означал, что решать больше
+      // нечего. После §10 всё наоборот — прогон завершается штатно СРАЗУ после
+      // показа карточки, done приходит через секунды, и снятие убивало карточку
+      // до решения человека: кнопка «Одобрить» становилась недостижимой, а
+      // продолжение по чекпойнту — незапускаемым. Ожидание теперь живёт в БД и
+      // прогону не принадлежит, поэтому снимает карточку только решение
+      // человека (PlanConfirm) — либо она честно висит до перезапуска.
       // Фоновый чат: другая ветка, экран справки ИЛИ другой проект (стрим начатый до
       // смены проекта). Персистим в БД по sessionId (applyEventToChat), атрибутируем
       // уведомление реальному проекту чата (projectPath), а не текущему store.path.
