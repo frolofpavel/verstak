@@ -12,6 +12,14 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ChatEvent, ChatMessage } from '../../electron/ai/types'
 
+// Ревизия ambient-лимитов (28.07): у `vi.waitFor` бюджет по умолчанию 1000 мс —
+// число vitest'а, а не наше измерение. Замер по трём полным параллельным
+// прогонам: худший тест этого файла занимал 1018 мс целиком, то есть дефолт уже
+// был меньше фактической длительности. 10_000 — запас ~10× над измеренным и
+// заведомо ниже testTimeout=20_000, чтобы падение оставалось именно ожиданием
+// runner'а, а не безымянным таймаутом. Логика теста не тронута.
+const RUNNER_WAIT_TIMEOUT_MS = 10_000
+
 const handlers = new Map<string, (...a: unknown[]) => unknown>()
 vi.mock('electron', () => ({
   ipcMain: { handle: (ch: string, fn: (...a: unknown[]) => unknown) => { handlers.set(ch, fn) } },
@@ -157,7 +165,7 @@ describe('ai:send — one-shot маршрут с аккаунтом (CD)', () =>
   it('C-контроль: API-провайдер, allow БЕЗ аккаунта — fallback включён (проверка ниже не пустая)', async () => {
     const sendId = await sendApiPlain({ providerId: 'claude', model: 'claude-sonnet-4-6', fallbackPolicy: 'allow' })
     expect(sendId).toBeGreaterThan(0)
-    await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') })
+    await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') }, RUNNER_WAIT_TIMEOUT_MS)
     expect(plainFallbackOpts, 'без выбранного аккаунта allow обязан давать fallback').toBeTruthy()
   })
 
@@ -166,7 +174,7 @@ describe('ai:send — one-shot маршрут с аккаунтом (CD)', () =>
     secrets['subacct:api-b'] = 'sk-B'
     const sendId = await sendApiPlain({ providerId: 'claude', model: 'claude-sonnet-4-6', fallbackPolicy: 'allow', accountId: b.id })
     expect(sendId).toBeGreaterThan(0)
-    await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') })
+    await vi.waitFor(() => { if (plainFallbackOpts === 'NOT-CALLED') throw new Error('runner не вызван') }, RUNNER_WAIT_TIMEOUT_MS)
     expect(plainFallbackOpts, 'one-shot с аккаунтом обязан быть строгим: ни account-, ни provider-fallback').toBeUndefined()
   })
 

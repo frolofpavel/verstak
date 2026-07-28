@@ -20,7 +20,14 @@ function nodeCommand(script: string): string {
   return `${quoteArg(process.execPath)} ${quoteArg(file)}`
 }
 
-async function waitFor<T>(fn: () => T, predicate: (value: T) => boolean, timeoutMs = 5000): Promise<T> {
+// Ревизия ambient-лимитов (28.07): бюджет ожидания завершения дочернего процесса
+// был 5000 мс «на глаз». Замер по трём полным параллельным прогонам: худший тест
+// этого файла целиком занимал 5907 мс — то есть бюджет уже был МЕНЬШЕ фактической
+// длительности, и зелёным он оставался только потому, что ожидание — часть теста.
+// 15_000 даёт запас ~2.5× над измеренным и остаётся ниже testTimeout=20_000.
+const PROCESS_WAIT_TIMEOUT_MS = 15_000
+
+async function waitFor<T>(fn: () => T, predicate: (value: T) => boolean, timeoutMs = PROCESS_WAIT_TIMEOUT_MS): Promise<T> {
   const started = Date.now()
   let value = fn()
   while (!predicate(value)) {
