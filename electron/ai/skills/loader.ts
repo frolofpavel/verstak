@@ -65,6 +65,19 @@ export interface LoaderConfig {
   serverBase?: string | null
   /** Доп. пользовательские директории помимо ~/.verstak/skills/. */
   extraDirs?: string[]
+  /**
+   * ПОЛНАЯ замена корней вместо `SKILL_ROOTS_IN_PRIORITY_ORDER` (порядок тот же:
+   * поздние перебивают ранних). Нужен изоляции: без него любая проверка загрузчика
+   * обходит РЕАЛЬНЫЕ домашние деревья машины, где их может быть сколько угодно.
+   *
+   * Найдено 28.07 замером: на машине с адаптерами чужих CLI это 272 скилла и 778
+   * файлов, ~300 мс НА КАЖДЫЙ вызов. Для приложения это приемлемо (один раз при
+   * старте), а для набора из тринадцати вызовов под параллельной нагрузкой —
+   * четыре теста, упавших в общий 20-секундный таймаут. Лечение — убрать лишнюю
+   * работу, а не поднять лимит: сам продукт при этом не меняется, поле
+   * необязательное и прод его не передаёт.
+   */
+  roots?: readonly string[]
 }
 
 export interface LoadResult {
@@ -87,7 +100,7 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
   //        bootstrap для пользователей которые мигрируют из Claude Code.
   //    (b) ~/.verstak/skills/ — личные скиллы пользователя (приоритетнее claude).
   //    (c) extraDirs — для тестов / опытов.
-  const userDirs = [...SKILL_ROOTS_IN_PRIORITY_ORDER, ...(config.extraDirs ?? [])]
+  const userDirs = [...(config.roots ?? SKILL_ROOTS_IN_PRIORITY_ORDER), ...(config.extraDirs ?? [])]
   let userCount = 0
   for (const dir of userDirs) {
     try {

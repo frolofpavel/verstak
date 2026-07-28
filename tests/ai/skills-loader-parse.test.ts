@@ -37,6 +37,25 @@ describe('parseSkillFile — защита от не-строкового raw', (
 // и Codex. Папочный обход уже существовал, но применялся только к Grok.
 // Стало: каждый корень читается в ОБОИХ формах.
 // ─────────────────────────────────────────────────────────────────────────────
+// ИЗОЛЯЦИЯ ОТ МАШИНЫ (28.07). Проверки загрузчика раньше звали loadAllSkills без
+// ограничения корней — то есть каждый кейс обходил РЕАЛЬНЫЕ ~/.claude, ~/.codex,
+// ~/.grok и ~/.verstak. Замером на этой машине: 272 скилла, 778 файлов, ~300 мс
+// на вызов; тринадцать вызовов под параллельной нагрузкой давали падения в общий
+// 20-секундный таймаут. Лимит тут ни при чём — тест делал лишнюю работу и зависел
+// от того, что лежит в домашней папке у запускающего.
+describe('изоляция загрузчика от домашних деревьев', () => {
+  it('roots:[] читает ТОЛЬКО built-in — домашние корни не трогаются', async () => {
+    const { skills, stats } = await loadAllSkills({ roots: [] })
+    expect(stats.user, 'пришли скиллы с реальной машины — изоляция дырявая').toBe(0)
+    expect(skills.map(s => s.id).sort()).toEqual(BUILT_IN_SKILLS.map(s => s.id).sort())
+  })
+
+  it('без roots поведение прежнее: стандартные корни в работе', async () => {
+    const { stats } = await loadAllSkills({ roots: SKILL_ROOTS_IN_PRIORITY_ORDER })
+    expect(stats.failed.filter(f => f.includes('ENOENT'))).toEqual([])
+  })
+})
+
 describe('скиллы папками: оба формата в одном корне', () => {
   let root: string
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'gg-skills-')) })
@@ -49,7 +68,7 @@ describe('скиллы папками: оба формата в одном ко�
 
   it('папка со SKILL.md становится скиллом, id и slash — из имени папки', async () => {
     folderSkill('pavel-verstak')
-    const { skills } = await loadAllSkills({ extraDirs: [root] })
+    const { skills } = await loadAllSkills({ roots: [root] })
     const s = skills.find(x => x.id === 'pavel-verstak')
     expect(s, 'скилл из папки не найден').toBeTruthy()
     expect(s!.slash).toBe('pavel-verstak')
@@ -58,7 +77,7 @@ describe('скиллы папками: оба формата в одном ко�
 
   it('sourceRef указывает на фактический SKILL.md, а не на папку', async () => {
     folderSkill('pavel-verstak')
-    const { skills } = await loadAllSkills({ extraDirs: [root] })
+    const { skills } = await loadAllSkills({ roots: [root] })
     const s = skills.find(x => x.id === 'pavel-verstak')!
     expect(s.sourceRef.endsWith('SKILL.md')).toBe(true)
     expect(existsSync(s.sourceRef), 'путь из sourceRef не существует на диске').toBe(true)
@@ -68,7 +87,7 @@ describe('скиллы папками: оба формата в одном ко�
     mkdirSync(join(root, 'не-скилл', 'references'), { recursive: true })
     writeFileSync(join(root, 'не-скилл', 'README.md'), 'просто файл', 'utf8')
     folderSkill('живой')
-    const res = await loadAllSkills({ extraDirs: [root] })
+    const res = await loadAllSkills({ roots: [root] })
     expect(res.skills.some(x => x.id === 'живой')).toBe(true)
     expect(res.skills.some(x => x.id === 'не-скилл')).toBe(false)
     expect(res.stats.failed.filter(f => f.includes(root))).toEqual([])
@@ -77,7 +96,7 @@ describe('скиллы папками: оба формата в одном ко�
   it('одиночный .md рядом с папками виден так же', async () => {
     folderSkill('из-папки')
     writeFileSync(join(root, 'из-файла.md'), '---\nid: из-файла\n---\nтело\n', 'utf8')
-    const { skills } = await loadAllSkills({ extraDirs: [root] })
+    const { skills } = await loadAllSkills({ roots: [root] })
     expect(skills.some(x => x.id === 'из-папки')).toBe(true)
     expect(skills.some(x => x.id === 'из-файла')).toBe(true)
   })
@@ -86,14 +105,14 @@ describe('скиллы папками: оба формата в одном ко�
     folderSkill('со-ссылками')
     mkdirSync(join(root, 'со-ссылками', 'references'), { recursive: true })
     writeFileSync(join(root, 'со-ссылками', 'references', 'servers.md'), '# справка', 'utf8')
-    const { skills } = await loadAllSkills({ extraDirs: [root] })
+    const { skills } = await loadAllSkills({ roots: [root] })
     expect(skills.some(x => x.id === 'со-ссылками')).toBe(true)
     expect(skills.some(x => x.id === 'references' || x.id === 'servers')).toBe(false)
   })
 
   it('frontmatter сильнее имени папки', async () => {
     folderSkill('имя-папки', 'тело', 'id: из-фронтматтера\nslash: свой-слэш\n')
-    const { skills } = await loadAllSkills({ extraDirs: [root] })
+    const { skills } = await loadAllSkills({ roots: [root] })
     expect(skills.some(x => x.id === 'из-фронтматтера')).toBe(true)
     expect(skills.find(x => x.id === 'из-фронтматтера')!.slash).toBe('свой-слэш')
     expect(skills.some(x => x.id === 'имя-папки')).toBe(false)
@@ -116,7 +135,7 @@ describe('приоритет источников при совпадении id
     try {
       writeFileSync(join(weak, 'спорный.md'), '---\nid: спорный\n---\nСЛАБЫЙ\n', 'utf8')
       writeFileSync(join(strong, 'спорный.md'), '---\nid: спорный\n---\nСИЛЬНЫЙ\n', 'utf8')
-      const { skills } = await loadAllSkills({ extraDirs: [weak, strong] })
+      const { skills } = await loadAllSkills({ roots: [weak, strong] })
       const s = skills.find(x => x.id === 'спорный')!
       expect(s.systemPrompt).toContain('СИЛЬНЫЙ')
       expect(s.systemPrompt).not.toContain('СЛАБЫЙ')
@@ -131,7 +150,7 @@ describe('приоритет источников при совпадении id
     try {
       const builtInId = BUILT_IN_SKILLS[0].id
       writeFileSync(join(dir, 'x.md'), `---\nid: ${builtInId}\n---\nМОЙ ВАРИАНТ\n`, 'utf8')
-      const { skills } = await loadAllSkills({ extraDirs: [dir] })
+      const { skills } = await loadAllSkills({ roots: [dir] })
       const s = skills.find(x => x.id === builtInId)!
       expect(s.systemPrompt).toContain('МОЙ ВАРИАНТ')
       expect(s.source).toBe('user')
@@ -146,7 +165,7 @@ describe('приоритет источников при совпадении id
       writeFileSync(join(dir, 'дубль.md'), '---\nid: дубль\n---\nФАЙЛ\n', 'utf8')
       mkdirSync(join(dir, 'дубль'), { recursive: true })
       writeFileSync(join(dir, 'дубль', 'SKILL.md'), '---\nid: дубль\n---\nПАПКА\n', 'utf8')
-      const { skills } = await loadAllSkills({ extraDirs: [dir] })
+      const { skills } = await loadAllSkills({ roots: [dir] })
       expect(skills.find(x => x.id === 'дубль')!.systemPrompt).toContain('ПАПКА')
     } finally {
       rmSync(dir, { recursive: true, force: true })

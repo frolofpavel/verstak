@@ -9,6 +9,16 @@ import { buildArenaSummary } from '../../scripts/eval/arena-report.mjs'
 const ARENA = resolve(__dirname, '../../scripts/eval/arena.mjs')
 const PACKAGE = resolve(__dirname, '../../package.json')
 
+// Ревизия ambient-лимитов, добор 28.07. Кейс запускает ДОЧЕРНИЙ node
+// (spawnSync scripts/eval/arena.mjs), и прежний бюджет 20_000 совпадал с
+// глобальным testTimeout — то есть запаса над самим собой у него не было.
+// Измерено: соло 3.3 с (два прогона подряд), под полным параллельным прогоном
+// 9.6 с в лучшем наблюдении, а 28.07 кейс упёрся в 20 с и упал. Класс тот же,
+// что лечили в 2fe6c2c (verstak-cli) и 136eba9: дочерний процесс под
+// конкуренцией за CPU и диск. Логика теста не тронута — только бюджет, и он
+// именованный, чтобы следующий не гадал, на что он выдан.
+const ARENA_DRY_RUN_TIMEOUT_MS = 90_000
+
 describe('Model Gym Arena', () => {
   it('exposes a reproducible dry-run command and keeps competitors separate', () => {
     const pkg = JSON.parse(readFileSync(PACKAGE, 'utf8'))
@@ -56,7 +66,7 @@ describe('Model Gym Arena', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, ARENA_DRY_RUN_TIMEOUT_MS)
 
   it('requires three repeats and full comparability before a production recommendation', () => {
     const rows = [

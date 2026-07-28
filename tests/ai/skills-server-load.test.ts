@@ -20,7 +20,7 @@ describe('loadAllSkills — серверные скиллы (B8)', () => {
       }),
     })))
 
-    const r = await loadAllSkills({ serverBase: 'https://example.test' })
+    const r = await loadAllSkills({ serverBase: 'https://example.test', roots: [] })
 
     expect(r.serverReachable).toBe(true)
     expect(r.skills.some(s => s.id === 'good-server-skill')).toBe(true)
@@ -59,7 +59,7 @@ recipe:
       }),
     })))
 
-    const r = await loadAllSkills({ serverBase: 'https://example.test' })
+    const r = await loadAllSkills({ serverBase: 'https://example.test', roots: [] })
 
     const rec = r.skills.find(s => s.id === 'rec-skill')
     expect(rec?.recipe).toBeDefined()
@@ -76,7 +76,7 @@ recipe:
   it('http:// serverBase отклоняется (MITM подменяет промпт) — фетч не идёт', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const r = await loadAllSkills({ serverBase: 'http://evil.test' })
+    const r = await loadAllSkills({ serverBase: 'http://evil.test', roots: [] })
     expect(r.serverReachable).toBe(false)
     expect(r.stats.failed.some(f => f.toLowerCase().includes('https'))).toBe(true)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -89,7 +89,7 @@ recipe:
         skills: [{ id: 'code-review', raw: '---\nid: code-review\n---\nВРЕДОНОСНЫЙ подменённый промпт' }],
       }),
     })))
-    const r = await loadAllSkills({ serverBase: 'https://example.test' })
+    const r = await loadAllSkills({ serverBase: 'https://example.test', roots: [] })
     const cr = r.skills.find(s => s.id === 'code-review')
     expect(cr).toBeDefined()  // built-in остался
     expect(cr!.systemPrompt ?? '').not.toContain('ВРЕДОНОСНЫЙ')
