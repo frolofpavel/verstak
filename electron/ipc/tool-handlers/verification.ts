@@ -8,6 +8,7 @@ import type { VerificationArtifact, VerificationCheck, VerificationChangedFile }
 import { scorePlanQuality } from '../../ai/plan-quality'
 import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contracts/outcome'
 import { getPlanForRun, rememberPlanForRun } from '../../ai/runner-shared'
+import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
 // способ прогнать 50 команд разом. Ручные проверки сверх лимита не режем.
@@ -245,8 +246,24 @@ export const createPlanHandler: ToolHandler = {
           : 1
       }
 
-      const requiresApproval = ctx.outcome?.phase === 'plan'
+      // Порог показа карточки (§4.2). Гейт как таковой прежний; порог решает
+      // только, ПОКАЗЫВАТЬ ли карточку. План, объявивший одно чтение,
+      // автоутверждается: карточки нет, след в БД остаётся.
+      //
+      // КЛЮЧЕВОЕ ПРО БЕЗОПАСНОСТЬ: автоутверждение НЕ трогает режим прогона.
+      // Approve по кнопке переключает режим (ctx.setAgentMode) и тем самым выдаёт
+      // право писать; автоутверждение этого НЕ делает. Поэтому план, объявивший
+      // себя read-only и попытавшийся писать, упирается в обычный
+      // mode-policy.decide и останавливается — неверная самооценка модели даёт
+      // лишний вопрос, а не тихую запись.
+      const gateApplies = ctx.outcome?.phase === 'plan'
         || (ctx.agentMode === 'plan' && ctx.getSecretForDelegate?.('plan_approval_gate') === 'true')
+      const verdict = planApprovalVerdict(steps.map((step, index) => ({
+        title: step.title,
+        detail: step.detail,
+        spec: specs[index] ?? null,
+      })))
+      const requiresApproval = gateApplies && verdict.needsCard
       if (requiresApproval && !ctx.pendingPlans) {
         return { id: call.id, name: call.name, result: '', error: 'PLAN_APPROVAL_UNAVAILABLE: approval channel is not registered' }
       }
@@ -317,6 +334,18 @@ export const createPlanHandler: ToolHandler = {
         // turn выполнял правки. Фолбэк на прямую мутацию, если setAgentMode не задан.
         if (outcome.newMode) { if (ctx.setAgentMode) ctx.setAgentMode(outcome.newMode); else ctx.agentMode = outcome.newMode }
         return { id: call.id, name: call.name, result: outcome.result }
+      }
+      // Автоутверждение: гейт применим, но план только читает. Карточку не
+      // показываем и режим НЕ повышаем — права остаются прежними.
+      if (gateApplies && !verdict.needsCard) {
+        return {
+          id: call.id,
+          name: call.name,
+          result: `План #${plan.id} сохранён и автоутверждён: ${explainVerdict(verdict)} ` +
+            'Выполняй читающие шаги. Права на запись НЕ выданы: попытка изменить ' +
+            'файлы или внешнюю систему пройдёт обычную проверку режима и потребует ' +
+            'подтверждения.',
+        }
       }
       return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.${specFeedback}` }
     } catch (err) {
