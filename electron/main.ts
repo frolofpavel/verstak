@@ -22,6 +22,8 @@ import { registerProjectIpc } from './ipc/projects'
 import { registerProjectMapIpc } from './ipc/project-map'
 import { registerFilesIpc } from './ipc/files'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerPlanGenerateIpc, PLAN_GENERATION_MODE, PLAN_GENERATION_TOOLS } from './ipc/plans-generate'
+import { isWithinKnownRoots } from './ai/path-policy'
 import { registerJournalIpc } from './ipc/journal'
 import { registerRemindersIpc } from './ipc/reminders'
 import { getActiveProjectPath } from './state/project-state'
@@ -865,6 +867,25 @@ app.whenReady().then(() => {
     isMemoryLifecycleEnabled: () => getSecret('memory_lifecycle') !== 'false',
   })
   registerPlansIpc(plans, agentRuns)
+  // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Прогон — ТОТ ЖЕ
+  // headless-цикл, что у scheduled (ТЗ §2: второй agent loop запрещён); отличия
+  // объявлены явно — режим планирования (изменения блокирует mode-policy),
+  // набор инструментов с create_plan и собственный sendId как ключ реестра планов.
+  registerPlanGenerateIpc({
+    plans,
+    isKnownProject: (projectPath) => isWithinKnownRoots(projectPath, aiDeps.getKnownRoots()),
+    runPlanning: ({ projectPath, prompt, sendId, signal }) => runScheduledHeadless(aiDeps, {
+      projectPath,
+      prompt,
+      providerId: aiDeps.getProviderId(),
+      model: null,
+      signal,
+      sendId,
+      agentMode: PLAN_GENERATION_MODE,
+      allowedTools: PLAN_GENERATION_TOOLS,
+      role: 'plan-generation',
+    }),
+  })
   registerWorkflowsIpc({
     createPlan: (projectPath, title, steps) => {
       const plan = plans.create(projectPath, title, steps)

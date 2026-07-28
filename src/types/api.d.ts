@@ -807,6 +807,12 @@ declare global {
         }>
         /** §10 хвост: карточка снята без решения — освободить удержанный чекпойнт. */
         releaseApproval: (id: number) => Promise<void>
+        /** VSK-PLAN-GEN-A2: сформировать план по названию и описанию задачи.
+         *  Промпт, провайдер и режим — забота main; renderer передаёт намерение. */
+        generate: (req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) =>
+          Promise<{ ok: boolean; planId?: number; error?: string }>
+        /** Отмена активной генерации проекта (штатный stop прогона). */
+        cancelGenerate: (projectPath: string) => Promise<boolean>
       }
       /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html + proof.md). */
       proof: {

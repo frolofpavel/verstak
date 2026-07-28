@@ -21930,3 +21930,23 @@ html[data-theme="light"] .gg-connectors-page {
 .gg-plan-card-open {
   margin-top: 6px;
 }
+
+/* Пакет A2 §4: состояния формы генерации плана — ошибка видна, действия рядом.
+   Новых компонентов интерфейса не вводится, композицию утверждает Павел. */
+.gg-plan-gen-actions {
+  display: flex;
+  gap: 8px;
+  align-self: flex-end;
+}
+.gg-plan-gen-error {
+  padding: 8px 10px;
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.gg-plan-gen-hint {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}

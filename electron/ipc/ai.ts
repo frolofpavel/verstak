@@ -261,7 +261,17 @@ export const SCHEDULED_READONLY_TOOLS = [
  */
 export async function runScheduledHeadless(
   deps: AiDeps,
-  opts: { projectPath: string; prompt: string; providerId: ProviderId; model: string | null; signal: AbortSignal }
+  opts: {
+    projectPath: string; prompt: string; providerId: ProviderId; model: string | null; signal: AbortSignal
+    /** VSK-PLAN-GEN-A2: генерация плана переиспользует ЭТОТ прогон, а не заводит
+     *  свой (ТЗ §2 запрещает второй agent loop). Отличий ровно три и все явные:
+     *  режим (plan вместо auto — изменения блокирует mode-policy), набор
+     *  инструментов (+create_plan) и sendId (ключ реестра планов прогона). */
+    agentMode?: ToolContext['agentMode']
+    allowedTools?: readonly string[]
+    sendId?: number
+    role?: 'scheduled' | 'plan-generation'
+  }
 ): Promise<{ ok: boolean; text: string; error?: string }> {
   // Гейт пути как в ai:send: unattended-прогон не должен получить файловый доступ к
   // незарегистрированной/системной папке (напр. осиротевшая задача после удаления проекта).
@@ -316,12 +326,15 @@ export async function runScheduledHeadless(
       allowedWriteRoots: parseAllowedWriteRoots(deps.getSecret(ALLOWED_WRITE_ROOTS_KEY))
     })
     const ctx: ToolContext = {
-      sender, sendId: -1, signal: opts.signal, projectPath: opts.projectPath, tools,
+      sender, sendId: opts.sendId ?? -1, signal: opts.signal, projectPath: opts.projectPath, tools,
       recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, recordJournal: deps.recordJournal,
       readJournal: deps.readJournal, saveMemory: deps.saveMemory, saveDecision: deps.saveDecision,
       searchMemories: deps.searchMemories, searchConversations: deps.searchConversations, connectors: deps.connectors,
       pendingAttachments: [], pendingWrites: new Map(), pendingCommands: new Map(), scopedKey,
-      agentMode: 'auto', readOnlyConnectors: true, skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      agentMode: opts.agentMode ?? 'auto', readOnlyConnectors: true, skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret,
+      // Генерации плана нужен доступ к таблице планов: create_plan пишет через
+      // recordPlan, а порог согласования читает уже сохранённое.
+      plans: deps.plans, getPlan: deps.getPlan,
       resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
       permissionRules: loadPermissionRules(opts.projectPath),
       currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
@@ -331,8 +344,8 @@ export async function runScheduledHeadless(
     }
     const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
     const result = await runSubAgentLoop({
-      provider, messages, allowedToolNames: SCHEDULED_READONLY_TOOLS, ctx,
-      signal: opts.signal, role: 'scheduled',
+      provider, messages, allowedToolNames: [...(opts.allowedTools ?? SCHEDULED_READONLY_TOOLS)], ctx,
+      signal: opts.signal, role: opts.role ?? 'scheduled',
     })
     if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error }
     // EF-R1 Б3: успех подтверждён реальным ответом — отмечаем аккаунт, выбранный

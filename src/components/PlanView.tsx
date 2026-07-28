@@ -27,6 +27,11 @@ export function PlanView() {
   const [outcomes, setOutcomes] = useState<StoredStepOutcome[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [composer, setComposer] = useState<{ title: string; brief: string }>({ title: '', brief: '' })
+  // Пакет A2 §4: состояния формы генерации. Ошибка видна, текст не теряется,
+  // повторный запуск во время работы заблокирован.
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
+  const [clarification, setClarification] = useState('')
   const [autopilot, setAutopilot] = useState({ enabled: false, maxSteps: 5, verifyCmd: '' })
   const [autopilotLog, setAutopilotLog] = useState<string[]>([])
   /** Set to true to cancel an in-flight Autopilot run (waits + loop). */
@@ -54,32 +59,50 @@ export function PlanView() {
   }
 
   /**
-   * §7.1 ТЗ: генератор плана вместо ручного ввода шагов. Пользователь описывает
-   * задачу словами — шаги формирует AI и сохраняет их ЧЕРЕЗ `create_plan`, тем
-   * же путём, что и план из чата: с контекстом проекта, порогом согласования и
-   * проверкой качества ТЗ. Прямой `plans.create` здесь больше не вызывается
-   * СОЗНАТЕЛЬНО: он кладёт в БД ровно то, что напечатал человек, минуя и
-   * планирование, и гейт.
+   * Генератор плана (минимум §7.1 A1, доводка — пакет A2).
+   *
+   * ЧТО ИЗМЕНИЛОСЬ ОТ МИНИМУМА. Раньше кнопка диспатчила событие в чат: промпт
+   * собирался ЗДЕСЬ, провайдер и режим брались у чата, ошибок не было вовсе, а
+   * двойной клик давал два прогона. Пакет A2 §3 это запрещает — renderer передаёт
+   * НАМЕРЕНИЕ (название + описание), а промпт, провайдер, режим планирования и
+   * guard одного активного запроса живут в main.
+   *
+   * Прямой `plans.create` не вызывается СОЗНАТЕЛЬНО: он кладёт в БД ровно то, что
+   * напечатал человек, минуя и планирование, и порог согласования.
    */
-  function generatePlan() {
+  async function generatePlan() {
     const title = composer.title.trim()
     const brief = composer.brief.trim()
-    if (!title || !brief) return
-    const prompt = [
-      `Составь план работы «${title}».`,
-      '',
-      'Что нужно сделать (словами пользователя):',
-      brief,
-      '',
-      'Изучи контекст проекта, при необходимости добери недостающее чтением файлов,',
-      'и сохрани результат ОДНИМ вызовом create_plan. Шаги — с конкретными файлами',
-      'и критерием готовности. Полотно плана в чат не выводи: подробности живут в разделе «Планы».',
-    ].join('\n')
-    setComposer({ title: '', brief: '' })
-    // Работа идёт в чате — переключаемся туда, иначе прогон уедет «в никуда» с
-    // точки зрения пользователя.
-    setActiveView('chat')
-    window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: { text: prompt } }))
+    if (!title || !brief || generating) return
+    setGenerating(true)
+    setGenError(null)
+    try {
+      const res = await window.api.plans.generate({
+        projectPath: path!,
+        title,
+        taskDescription: brief,
+        ...(clarification.trim() ? { clarification: clarification.trim() } : {}),
+      })
+      if (!res.ok || res.planId == null) {
+        // §4 A2: текст формы НЕ теряется при ошибке — человек дописывает и повторяет.
+        setGenError(res.error ?? 'Не удалось сформировать план.')
+        return
+      }
+      setComposer({ title: '', brief: '' })
+      setClarification('')
+      await refresh()
+      setActiveId(res.planId)
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  /** §4 A2: отмена во время генерации — штатный stop прогона, ноль строк в БД. */
+  async function cancelGeneration() {
+    if (!path) return
+    await window.api.plans.cancelGenerate(path).catch(() => false)
   }
 
   async function toggleStep(step: PlanStep) {
@@ -269,14 +292,35 @@ ${remaining || '— нет —'}
             rows={3}
             onChange={e => setComposer(c => ({ ...c, brief: e.target.value }))}
           />
-          <button
-            className="gg-btn gg-btn-primary"
-            onClick={() => generatePlan()}
-            disabled={!composer.title.trim() || !composer.brief.trim()}
-            style={{ alignSelf: 'flex-end' }}
-          >
-            Сгенерировать план
-          </button>
+          {genError && (
+            <div className="gg-plan-gen-error" role="alert">
+              {genError}
+              <div className="gg-plan-gen-hint">Текст сохранён — дополните описание и попробуйте снова.</div>
+            </div>
+          )}
+          {genError && (
+            <textarea
+              className="gg-input"
+              placeholder="Уточнение"
+              value={clarification}
+              rows={2}
+              onChange={e => setClarification(e.target.value)}
+            />
+          )}
+          <div className="gg-plan-gen-actions">
+            <button
+              className="gg-btn gg-btn-primary"
+              onClick={() => void generatePlan()}
+              disabled={generating || !composer.title.trim() || !composer.brief.trim()}
+            >
+              {generating ? 'Формирую план…' : 'Сгенерировать план'}
+            </button>
+            {generating && (
+              <button className="gg-btn gg-btn-ghost" onClick={() => void cancelGeneration()}>
+                Отменить
+              </button>
+            )}
+          </div>
         </div>
 
         {plans.length === 0 && (

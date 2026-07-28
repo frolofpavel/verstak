@@ -16,6 +16,10 @@ const { PlanView } = await import('../../src/components/PlanView')
 
 const plansCreate = vi.fn(async () => ({ id: 1 }))
 const plansList = vi.fn(async () => [])
+// Пакет A2: форма зовёт продуктовый метод main, а не собирает промпт сама.
+let generateResult: { ok: boolean; planId?: number; error?: string } = { ok: true, planId: 7 }
+const plansGenerate = vi.fn(async (_req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) => generateResult)
+const plansCancelGenerate = vi.fn(async () => true)
 
 function mount() {
   return render(createElement(PlanView))
@@ -31,7 +35,10 @@ beforeEach(() => {
   plansCreate.mockClear()
   vi.stubGlobal('window', Object.assign(globalThis.window, {
     api: {
-      plans: { list: plansList, create: plansCreate, get: vi.fn(async () => null), updateStep: vi.fn(), setStatus: vi.fn() },
+      plans: {
+        list: plansList, create: plansCreate, get: vi.fn(async () => null), updateStep: vi.fn(), setStatus: vi.fn(),
+        generate: plansGenerate, cancelGenerate: plansCancelGenerate,
+      },
       pipeline: { listStepOutcomes: vi.fn(async () => []) },
     },
   }))
@@ -54,7 +61,7 @@ describe('§7.1: раздел «Планы» — генератор вместо
     expect((btn as HTMLButtonElement).disabled, 'пустое описание не должно запускать прогон').toBe(true)
   })
 
-  it('генерация идёт через AI, а НЕ через прямой plans.create', () => {
+  it('генерация идёт через продуктовый метод main, а НЕ через прямой plans.create', () => {
     const { container } = mount()
     const [titleInput] = Array.from(container.querySelectorAll('input'))
     const [brief] = Array.from(container.querySelectorAll('textarea'))
@@ -70,15 +77,102 @@ describe('§7.1: раздел «Планы» — генератор вместо
     act(() => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
     expect(plansCreate, 'прямой plans.create минует планирование и порог').not.toHaveBeenCalled()
-    expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('Настройка Директа')
-    expect(sent[0]).toContain('Изучи контекст проекта и составь план настройки кампаний')
-    expect(sent[0], 'план обязан сохраняться тем же инструментом, что и из чата').toContain('create_plan')
-    expect(useProject.getState().activeView, 'работа идёт в чате — туда и переключаемся').toBe('chat')
+    // Пакет A2 §3: renderer передаёт НАМЕРЕНИЕ, а не промпт. Прежний вариант
+    // (событие в чат с собранным здесь промптом) запрещён прямо.
+    expect(sent, 'renderer больше не собирает промпт и не шлёт его в чат').toHaveLength(0)
+    expect(plansGenerate).toHaveBeenCalledTimes(1)
+    const req = plansGenerate.mock.calls[0][0] as unknown as { title: string; taskDescription: string; projectPath: string }
+    expect(req.title).toBe('Настройка Директа')
+    expect(req.taskDescription).toBe('Изучи контекст проекта и составь план настройки кампаний')
+    expect(req.projectPath).toBe('/p')
   })
 
   it('пустое состояние объясняет оба входа — раздел и чат', () => {
     const { container } = mount()
     expect(container.textContent).toContain('Verstak сам сформирует план')
+  })
+})
+
+// Пакет A2 §4/§6: состояния формы. Проверяется ПОВЕДЕНИЕ (что вызов не ушёл,
+// что текст остался), а не наличие слов в разметке.
+describe('A2 §4: состояния формы генерации', () => {
+  it('во время генерации кнопка занята и повторный запуск НЕ уходит в main', async () => {
+    let release: ((v: { ok: boolean; planId?: number }) => void) | null = null
+    plansGenerate.mockImplementationOnce(() => new Promise(r => { release = r }))
+    const { container } = mount()
+    const [titleInput] = Array.from(container.querySelectorAll('input'))
+    const [brief] = Array.from(container.querySelectorAll('textarea'))
+    act(() => { type(titleInput, 'План') })
+    act(() => { type(brief, 'Описание задачи') })
+    const btn = () => Array.from(container.querySelectorAll('button')).find(b => /Сгенерировать план|Формирую план/.test(b.textContent ?? ''))!
+
+    act(() => { btn().dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(btn().textContent).toBe('Формирую план…')
+    expect((btn() as HTMLButtonElement).disabled, 'кнопка доступна во время работы').toBe(true)
+
+    act(() => { btn().dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(plansGenerate, 'двойной клик отправил второй запрос').toHaveBeenCalledTimes(1)
+
+    await act(async () => { release!({ ok: true, planId: 7 }) })
+  })
+
+  it('во время генерации доступна отмена и она зовёт штатный stop', async () => {
+    let release: ((v: { ok: boolean }) => void) | null = null
+    plansGenerate.mockImplementationOnce(() => new Promise(r => { release = r }))
+    const { container } = mount()
+    const [titleInput] = Array.from(container.querySelectorAll('input'))
+    const [brief] = Array.from(container.querySelectorAll('textarea'))
+    act(() => { type(titleInput, 'План') })
+    act(() => { type(brief, 'Описание задачи') })
+    act(() => {
+      Array.from(container.querySelectorAll('button'))
+        .find(b => b.textContent === 'Сгенерировать план')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const cancel = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Отменить')
+    expect(cancel, 'отмены во время генерации нет').toBeTruthy()
+    act(() => { cancel!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(plansCancelGenerate).toHaveBeenCalledWith('/p')
+
+    await act(async () => { release!({ ok: false }) })
+  })
+
+  it('ошибка видна, а введённый текст НЕ теряется', async () => {
+    generateResult = { ok: false, error: 'Не удалось сформировать план. Не указан кабинет.' }
+    const { container } = mount()
+    const [titleInput] = Array.from(container.querySelectorAll('input'))
+    const [brief] = Array.from(container.querySelectorAll('textarea'))
+    act(() => { type(titleInput, 'Настройка Директа') })
+    act(() => { type(brief, 'Проверь кампании') })
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find(b => b.textContent === 'Сгенерировать план')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain('Не указан кабинет')
+    expect((titleInput as HTMLInputElement).value, 'название потеряно при ошибке').toBe('Настройка Директа')
+    expect((brief as HTMLTextAreaElement).value, 'описание потеряно при ошибке').toBe('Проверь кампании')
+    generateResult = { ok: true, planId: 7 }
+  })
+
+  it('успех очищает поля — постановка закрыта', async () => {
+    generateResult = { ok: true, planId: 7 }
+    const { container } = mount()
+    const [titleInput] = Array.from(container.querySelectorAll('input'))
+    const [brief] = Array.from(container.querySelectorAll('textarea'))
+    act(() => { type(titleInput, 'План') })
+    act(() => { type(brief, 'Описание') })
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find(b => b.textContent === 'Сгенерировать план')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect((titleInput as HTMLInputElement).value).toBe('')
+    expect((brief as HTMLTextAreaElement).value).toBe('')
   })
 })

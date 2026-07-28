@@ -380,7 +380,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('plans:resolve-approval', id, decision, feedback),
     // §10 хвост: карточка снята БЕЗ решения (Stop / Shift+Esc / закрытие проекта) —
     // продолжения не будет, удержанный чекпойнт прогона можно освободить.
-    releaseApproval: (id: number) => ipcRenderer.invoke('plans:release-approval', id)
+    releaseApproval: (id: number) => ipcRenderer.invoke('plans:release-approval', id),
+    // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Renderer передаёт
+    // намерение (название + описание), а не промпт: сборка промпта, выбор
+    // провайдера и режим — в main.
+    generate: (req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) =>
+      ipcRenderer.invoke('plans:generate', req),
+    cancelGenerate: (projectPath: string) => ipcRenderer.invoke('plans:generate-cancel', projectPath)
   },
   proof: {
     generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<
