@@ -4,7 +4,9 @@
  *   1. SERVER API (your-skills-server.example.com/api/skills) — основной источник
  *      для команды. Эндпоинт настраивается в Settings.
  *      Реализация падает gracefully (timeout 5s) и переходит к local.
- *   2. ~/.verstak/skills/*.md — пользовательские личные.
+ *   2. Локальные корни — см. SKILL_ROOTS_IN_PRIORITY_ORDER: адаптеры чужих CLI
+ *      (~/.claude, ~/.codex, ~/.grok) и личная ~/.verstak/skills. В каждом корне
+ *      читаются ОБА формата: одиночные *.md и папки со SKILL.md внутри.
  *   3. BUILT_IN_SKILLS — гарантированный baseline в коде.
  *
  * Если скилл с одинаковым id встречается в нескольких источниках — приоритет
@@ -28,10 +30,32 @@ export const USER_SKILLS_DIR = join(homedir(), '.verstak', 'skills')
  *  файл с одинаковым id — .verstak/skills/ имеет приоритет (это явный
  *  GG-override). */
 const CLAUDE_SKILLS_DIR = join(homedir(), '.claude', 'skills')
+/** Codex CLI — та же конвенция, что у Claude Code: одиночные *.md и папки со SKILL.md. */
+const CODEX_SKILLS_DIR = join(homedir(), '.codex', 'skills')
 /** Grok Build CLI — те же скиллы что в ~/.grok/skills/{id}/SKILL.md и bundled. */
 const GROK_SKILL_ROOTS = [
   join(homedir(), '.grok', 'skills'),
   join(homedir(), '.grok', 'bundled', 'skills')
+]
+
+/**
+ * Корни личных скиллов в порядке ОТ СЛАБОГО К СИЛЬНОМУ: при совпадении id
+ * побеждает тот, кто ниже по списку, и делает это молча — конфликт-репорта нет.
+ *
+ * Адаптеры чужих CLI (claude / codex / grok) идут первыми: это чужой канон, к
+ * которому Verstak подключается «как есть». Личная папка ~/.verstak/skills —
+ * сильнее любого адаптера: это явный override пользователя. Ещё сильнее только
+ * extraDirs (см. LoaderConfig) — папка, которую человек указал руками.
+ *
+ * ВАЖНО: grok раньше стоял ПОСЛЕ ~/.verstak и перебивал личные скиллы. Это
+ * противоречило заявленному в комментарии приоритету «.verstak — явный
+ * GG-override»; порядок приведён к нему.
+ */
+export const SKILL_ROOTS_IN_PRIORITY_ORDER: readonly string[] = [
+  CLAUDE_SKILLS_DIR,
+  CODEX_SKILLS_DIR,
+  ...GROK_SKILL_ROOTS,
+  USER_SKILLS_DIR
 ]
 const SERVER_TIMEOUT_MS = 5_000
 
@@ -63,29 +87,17 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
   //        bootstrap для пользователей которые мигрируют из Claude Code.
   //    (b) ~/.verstak/skills/ — личные скиллы пользователя (приоритетнее claude).
   //    (c) extraDirs — для тестов / опытов.
-  const userDirs = [CLAUDE_SKILLS_DIR, USER_SKILLS_DIR, ...(config.extraDirs ?? [])]
+  const userDirs = [...SKILL_ROOTS_IN_PRIORITY_ORDER, ...(config.extraDirs ?? [])]
   let userCount = 0
   for (const dir of userDirs) {
     try {
-      const skills = await loadFromDir(dir)
+      const skills = await loadFromRoot(dir)
       for (const s of skills) {
         byId.set(s.id, s)
         userCount++
       }
     } catch (err) {
       failed.push(`${dir}: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
-  for (const root of GROK_SKILL_ROOTS) {
-    try {
-      const skills = await loadFromGrokTree(root)
-      for (const s of skills) {
-        byId.set(s.id, s)
-        userCount++
-      }
-    } catch (err) {
-      failed.push(`${root}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -126,7 +138,24 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
   }
 }
 
-async function loadFromGrokTree(root: string): Promise<Skill[]> {
+/**
+ * Один корень скиллов — ОБА формата сразу:
+ *   · одиночные `<root>/имя.md` — исторический формат Verstak;
+ *   · папки `<root>/имя/SKILL.md` — формат Claude Code / Codex / Grok, рядом с
+ *     которым обычно лежит `references/`.
+ *
+ * Так один и тот же корень читается независимо от того, чем скилл создан. Папки
+ * сканируются ПОСЛЕ файлов: при совпадении id внутри одного корня побеждает
+ * папочная форма (у неё есть собственный каталог и она обычно новее).
+ *
+ * Вложенные каталоги (`references/`, `assets/`) отдельными скиллами не считаются:
+ * скиллом становится ровно `SKILL.md` в папке первого уровня.
+ */
+async function loadFromRoot(root: string): Promise<Skill[]> {
+  return [...await loadSingleFiles(root), ...await loadFolderTree(root)]
+}
+
+async function loadFolderTree(root: string): Promise<Skill[]> {
   const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
   const out: Skill[] = []
   for (const ent of entries) {
@@ -134,16 +163,18 @@ async function loadFromGrokTree(root: string): Promise<Skill[]> {
     const skillPath = join(root, ent.name, 'SKILL.md')
     try {
       const raw = await readFile(skillPath, 'utf8')
+      // folderId — запасной id/slash: имя папки. Frontmatter, если он их задал,
+      // всё равно сильнее (см. parseSkillFile).
       const skill = parseSkillFile(raw, skillPath, 'user', ent.name)
       if (skill) out.push(skill)
     } catch {
-      // no SKILL.md in this folder — skip
+      // в папке нет SKILL.md — молча пропускаем, это не ошибка
     }
   }
   return out
 }
 
-async function loadFromDir(dir: string): Promise<Skill[]> {
+async function loadSingleFiles(dir: string): Promise<Skill[]> {
   // Создаём директорию если её нет — это упрощает первый запуск
   try { await mkdir(dir, { recursive: true }) } catch { /* ignore */ }
   const files = await readdir(dir).catch(() => [] as string[])

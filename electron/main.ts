@@ -548,7 +548,10 @@ app.whenReady().then(() => {
   // settings (URL можно сменить через UI). Refresh при старте — async,
   // не блокирует window open.
   const skillRegistry = createSkillRegistry(() => ({
-    serverBase: settings.getSecret('skills_server_base')
+    serverBase: settings.getSecret('skills_server_base'),
+    // Дополнительная папка скиллов из Настроек: канон читается прямо из
+    // источника истины, без копирования файлов. Пусто = ничего не сканируем.
+    extraDirs: [(settings.getSecret('skills_extra_dir') ?? '').trim()].filter(Boolean)
   }), {
     isArchived: (skillId) => skillUsage.get(skillId)?.state === 'archived'
   })

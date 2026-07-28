@@ -1156,6 +1156,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [trelloToken, setTrelloToken] = useState('')
   const [yDirectLogin, setYDirectLogin] = useState('')
   const [skillsServerBase, setSkillsServerBase] = useState('')
+  const [skillsExtraDir, setSkillsExtraDir] = useState('')
   const [claudeOauthToken, setClaudeOauthToken] = useState('')
   const [yDiskToken, setYDiskToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
@@ -1280,6 +1281,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         'notion_token', 'kontur_focus_api_key', 'mpstats_token', 'ozon_perf_client_id',
         'ozon_perf_client_secret', 'jira_base_url', 'jira_email', 'jira_api_token',
         'trello_api_key', 'trello_token', 'yandex_direct_login', 'skills_server_base',
+        'skills_extra_dir',
         'claude_code_oauth_token', 'yandex_disk_token', 'github_token',
         'social_publish_telegram_channels', 'social_publish_vk_token', 'social_publish_vk_group_id',
         'social_publish_webhooks', 'cost_cap_usd_per_day', 'cost_cap_usd_per_session', 'cost_cap_value', 'cost_cap_currency', 'custom_openai_baseurl',
@@ -1345,6 +1347,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       setTrelloToken(F['trello_token'])
       setYDirectLogin(F['yandex_direct_login'])
       setSkillsServerBase(F['skills_server_base'])
+      setSkillsExtraDir(F['skills_extra_dir'])
       setClaudeOauthToken(F['claude_code_oauth_token'])
       setYDiskToken(F['yandex_disk_token'])
       setGithubToken(F['github_token'])
@@ -1427,6 +1430,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     trelloToken,
     yDirectLogin,
     skillsServerBase,
+    skillsExtraDir,
     claudeOauthToken,
     yDiskToken,
     githubToken,
@@ -1597,6 +1601,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         break
       case 'skills-server':
         await window.api.settings.setKey('skills_server_base', skillsServerBase)
+    await window.api.settings.setKey('skills_extra_dir', skillsExtraDir)
         break
       case 'github':
         await window.api.settings.setKey('github_token', githubToken)
@@ -1717,7 +1722,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       case 'bitrix': setBitrixWebhook(''); break
       case 'ydirect': setYDirectToken(''); setYDirectLogin(''); break
       case 'ydisk': setYDiskToken(''); break
-      case 'skills-server': setSkillsServerBase(''); break
+      case 'skills-server': setSkillsServerBase(''); setSkillsExtraDir(''); break
       case 'github': setGithubToken(''); break
       case 'social-publish': setSocialTgChannels(''); setSocialVkToken(''); setSocialVkGroupId(''); setSocialWebhooks(''); break
       case 'dadata': setDadataApiKey(''); setDadataSecret(''); break
@@ -1870,6 +1875,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     await window.api.settings.setKey('trello_token', trelloToken)
     await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
     await window.api.settings.setKey('skills_server_base', skillsServerBase)
+    await window.api.settings.setKey('skills_extra_dir', skillsExtraDir)
     await window.api.settings.setKey('claude_code_oauth_token', claudeOauthToken)
     await window.api.settings.setKey('yandex_disk_token', yDiskToken)
     await window.api.settings.setKey('github_token', githubToken)
@@ -2487,6 +2493,22 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
               placeholder="https://your-skills-server.example.com (или пусто для built-in only)"
               spellCheck={false}
             />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Дополнительная папка скиллов</label>
+            <input
+              className="gg-input"
+              value={skillsExtraDir}
+              onChange={e => setSkillsExtraDir(e.target.value)}
+              placeholder="например C:\Users\...\Sistems\skills (пусто — не сканируется)"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Читается как есть, без копирования файлов: обновили скилл в источнике —
+            Verstak увидит новую версию после «обновить скиллы». Поддержаны оба вида:
+            одиночные <code>*.md</code> и папки со <code>SKILL.md</code> внутри.
+            При совпадении id эта папка сильнее остальных источников.
           </div>
           <div className="gg-settings-hint">
             Сервер должен предоставлять <code>GET /api/skills</code> возвращающий
