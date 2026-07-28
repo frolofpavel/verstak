@@ -11,6 +11,7 @@
  * доказательству. Не по совпадению текста, не по «кажется сделано». Поэтому
  * `checklist_complete` требует evidence, а пустое evidence закрытием не является.
  */
+import { evidenceExists } from '../../ai/evidence'
 import type { ToolHandler } from './shared'
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -48,6 +49,29 @@ export const checklistCompleteHandler: ToolHandler = {
       return {
         id: call.id, name: call.name, result: '',
         error: 'CHECKLIST_EVIDENCE_REQUIRED: пункт закрывается только с доказательством (файл, команда, ссылка на результат).',
+      }
+    }
+    // Ревью 28.07, дыра 1: инструмент не смотрел на источник пункта вовсе и мог
+    // закрыть то, что завёл ЧЕЛОВЕК. Чек-лист — его список; Verstak закрывает
+    // только свои пункты. Инструменты чек-листа живут при любом положении
+    // тумблера согласования, поэтому дыра была живой всегда.
+    const target = ctx.tasks.list(ctx.projectPath).find(item => item.id === id)
+    if (!target) return { id: call.id, name: call.name, result: '', error: `checklist_complete: пункт #${id} не найден` }
+    if (target.source !== 'system') {
+      return {
+        id: call.id, name: call.name, result: '',
+        error: `CHECKLIST_MANUAL_ITEM: пункт #${id} завёл человек — закрывает его тоже человек. Скажи о выполнении в ответе.`,
+      }
+    }
+    // Ревью 28.07, дыра 2: доказательством считалась любая непустая строка, и
+    // `evidence='.'` закрывал пункт. Проверка теперь ОБЩАЯ с пайплайн-осью
+    // (ai/evidence.ts): либо существующий путь внутри проекта, либо ссылка вида
+    // run:/event:/artifact:/command:. Двух понятий доказательства в продукте нет.
+    if (!evidenceExists(ctx.projectPath, evidence)) {
+      return {
+        id: call.id, name: call.name, result: '',
+        error: 'CHECKLIST_EVIDENCE_INVALID: доказательством считается существующий файл проекта ' +
+          'или ссылка вида run:/event:/artifact:/command:. Строка-заглушка не подходит.',
       }
     }
     const ok = ctx.tasks.complete(id, evidence)

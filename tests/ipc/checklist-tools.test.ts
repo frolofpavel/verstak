@@ -81,14 +81,19 @@ describe('блок C §9: инструменты чек-листа', () => {
     const { tasks } = openStores()
     const item = tasks.add('/p', 'Собрать отчёт', { source: 'system' })
 
+    // Фикстура сменена после ревью 28.07: доказательство теперь проверяется тем
+    // же способом, что на пайплайн-оси (существующий файл проекта ЛИБО ссылка
+    // run:/event:/artifact:/command:). Утверждения теста не изменились —
+    // «закрылось и доказательство сохранено»; изменилось только само
+    // доказательство, потому что прежняя строка была вымышленным путём.
     await checklistCompleteHandler.handle(
-      call('checklist_complete', { id: item.id, evidence: 'reports/2026-07.csv' }),
+      call('checklist_complete', { id: item.id, evidence: 'artifact:reports/2026-07.csv' }),
       ctxOf(tasks),
     )
 
     const [done] = tasks.list('/p')
     expect(done.done).toBe(true)
-    expect(done.evidence).toBe('reports/2026-07.csv')
+    expect(done.evidence).toBe('artifact:reports/2026-07.csv')
     expect(done.doneAt).not.toBeNull()
   })
 

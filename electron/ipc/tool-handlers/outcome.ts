@@ -1,4 +1,5 @@
 import { scanText } from '../../ai/secret-scanner'
+import { evidenceExists } from '../../ai/evidence'
 import { existsSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { decideAdaptiveAction, failureSignature } from '../../ai/adaptive-decision'
@@ -93,12 +94,10 @@ export const submitTaskContractHandler: ToolHandler = {
 }
 
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
-const evidenceExists = (projectPath: string, evidence: string): boolean => {
-  if (/^(run|event|artifact|command):\S+/i.test(evidence)) return true
-  const absolute = isAbsolute(evidence) ? resolve(evidence) : resolve(projectPath, evidence)
-  const rel = relative(projectPath, absolute)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) && existsSync(absolute)
-}
+// Определение доказательства — общее для всего продукта (`ai/evidence.ts`).
+// Раньше копия жила здесь и применялась только на пайплайн-оси, а чек-лист
+// блока C считал доказательством любую непустую строку. Ревью 28.07 назвало это
+// двумя разными понятиями внутри одного продукта — теперь оно одно.
 
 export const reportStepOutcomeHandler: ToolHandler = {
   mode: 'sequential',

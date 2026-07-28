@@ -92,8 +92,13 @@ export function createTasks(db: Database): Tasks {
       // закрытия, причём молча ничего не меняем.
       const proof = (evidence ?? '').trim()
       if (!proof) return false
-      const info = db.prepare('UPDATE tasks SET done = 1, done_at = ?, evidence = ? WHERE id = ?')
-        .run(Date.now(), proof, id)
+      // Ревью 28.07: запрет на закрытие ЧУЖОГО (ручного) пункта живёт ЗДЕСЬ, а не
+      // только в инструменте. Пункты человека закрывает человек — это его список,
+      // и обойти правило мимо инструмента (из другого хендлера, из автозакрытия
+      // по шагу плана) не должно быть возможно.
+      const info = db.prepare(
+        `UPDATE tasks SET done = 1, done_at = ?, evidence = ? WHERE id = ? AND source = 'system'`,
+      ).run(Date.now(), proof, id)
       return info.changes > 0
     },
     remove(id) {
