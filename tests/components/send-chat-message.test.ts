@@ -31,6 +31,8 @@ const skillWithLoaders: Skill = {
 }
 
 function makeHarness(opts: {
+  /** Заставить запуск прогона БРОСИТЬ с этим текстом (баг Ильи 28.07). */
+  sendThrows?: string
   ctx?: { path: string; activeChatId: number } | null
   laneActive?: boolean
   effort?: 'quick' | 'standard' | 'deep'
@@ -99,6 +101,7 @@ function makeHarness(opts: {
       sendWithOverrides: vi.fn(async (messages, projectPath, overrides, chatId) => {
         calls.push('sendWithOverrides')
         sentCalls.push({ messages, projectPath, overrides, chatId })
+        if (opts.sendThrows) throw new Error(opts.sendThrows)
         return opts.sendId ?? 7
       }),
     },
@@ -383,5 +386,18 @@ describe('sendChatMessage — characterization бывшего основного
     expect(h.appended[0].meta).toEqual({ appliedSkills: applied })
     // systemPrompt собран из применённого скилла → skill-ветка overrides.
     expect(h.sentCalls[0].overrides.systemPrompt).toContain('SYS')
+  })
+  // Илья, 28.07: запуск прогона может БРОСИТЬ (ai:send отвергает незарегистрированный
+  // путь проекта). Без перехвата пузырь ответа оставался пустым, а чат — в состоянии
+  // «отвечаю»: выглядело как «чат сбросился и не доделал работу».
+  it('запуск прогона БРОСИЛ → причина в пузыре, стрим снят, чат не завис', async () => {
+    const h = makeHarness({ sendThrows: 'Доступ запрещён: путь проекта не зарегистрирован' })
+    const res = await sendChatMessage(baseInput, h.deps)
+    expect(res).toEqual({ kind: 'send-failed' })
+    expect(h.state.updateLastAssistant).toHaveBeenCalledWith('\n\n[Ошибка: Доступ запрещён: путь проекта не зарегистрирован]')
+    expect(h.updatedMessages).toEqual([{ id: ASSISTANT_ROW_ID, content: '\n\n[Ошибка: Доступ запрещён: путь проекта не зарегистрирован]' }])
+    expect(h.calls).toContain('setStreaming:false')
+    expect(h.calls).toContain('setCurrentSendId:null')
+    expect(h.calls.some(c => c.startsWith('registerOwner'))).toBe(false)
   })
 })

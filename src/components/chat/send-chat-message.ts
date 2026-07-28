@@ -249,55 +249,73 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   // и изоляция worktree. Фоновые пути его передавали, главный — забывал, и все три
   // молча не работали в основном чате. Страж: tests/contracts/chat-send-chatid-contract.
   const sendChatId = activeChatId != null ? String(activeChatId) : undefined
-  if (activeSkill || skillSystemPrompt) {
-    // Узнаём текущий provider пользователя — чтобы решить override или нет
-    const currentProvider = activeSkill ? await api.getSetting('provider') : null
-    // Provider/model override скилла (B5). Провайдер — только при разном
-    // семействе (сохраняем выбор API/CLI). Модель — и при том же семействе.
-    const { providerId: overrideProvider, model: overrideModel } = activeSkill
-      ? resolveSkillOverride(activeSkill, currentProvider)
-      : { providerId: undefined, model: undefined }
-    // Anti-stall guard: некоторые скиллы — оркестраторы/штабы (los-hq, bos-hq,
-    // навигаторы) с протоколом «жди пакет задачи / маршрутизируй / ✋ СТОП».
-    // Базовый system-layer теперь НАСЛАИВАЕТСЯ под скилл (ipc/ai.ts передаёт
-    // skillPrompt в prepareSystemContext — см. <skill_layer>), так что протокол
-    // выполнения восстановлен. Но тело таких скиллов всё равно может сильно
-    // давить «жди ТЗ»; nudge — дешёвое подкрепление: ясный запрос = действуй.
-    sendId = await api.sendWithOverrides(modelMessages, path, {
-      ...(skillSystemPrompt ? { systemPrompt: skillSystemPrompt } : {}),
-      ...(overrideProvider ? { providerId: overrideProvider } : {}),
-      ...(overrideModel ? { model: overrideModel } : {}),
-      // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
-      ...(toolsAllow?.length ? { toolsAllow } : {}),
-      // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
-      ...(recipe ? { recipe } : {}),
-      effortLevel: deps.getProjectState().effortLevel,
-      agentMode: sendAgentMode,
-      ...(resumeFromRunId ? { resumeFromRunId } : {}),
-      ...selectedRoute,
-      ...outcomeOverride,
-      ...routeOverride
-    }, sendChatId)
-  } else if (resumeFromRunId) {
-    // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
-    const effort = deps.getProjectState().effortLevel
-    sendId = await api.sendWithOverrides(modelMessages, path, {
-      resumeFromRunId,
-      agentMode: sendAgentMode,
-      ...(effort !== 'standard' ? { effortLevel: effort } : {}),
-      ...selectedRoute,
-      ...outcomeOverride,
-      ...routeOverride
-    }, sendChatId)
-  } else {
-    const effort = deps.getProjectState().effortLevel
-    sendId = await api.sendWithOverrides(modelMessages, path, {
-      ...(effort !== 'standard' ? { effortLevel: effort } : {}),
-      agentMode: sendAgentMode,
-      ...selectedRoute,
-      ...outcomeOverride,
-      ...routeOverride
-    }, sendChatId)
+  // Илья, 28.07: запуск прогона может БРОСИТЬ (например, ai:send отвергает
+  // незарегистрированный путь проекта). Без перехвата пустой пузырь ответа так и
+  // оставался пустым, а чат — в состоянии «отвечаю»: со стороны выглядело, будто
+  // чат сбросился и не доделал работу. Ведём себя как при недоступном провайдере.
+  try {
+    if (activeSkill || skillSystemPrompt) {
+      // Узнаём текущий provider пользователя — чтобы решить override или нет
+      const currentProvider = activeSkill ? await api.getSetting('provider') : null
+      // Provider/model override скилла (B5). Провайдер — только при разном
+      // семействе (сохраняем выбор API/CLI). Модель — и при том же семействе.
+      const { providerId: overrideProvider, model: overrideModel } = activeSkill
+        ? resolveSkillOverride(activeSkill, currentProvider)
+        : { providerId: undefined, model: undefined }
+      // Anti-stall guard: некоторые скиллы — оркестраторы/штабы (los-hq, bos-hq,
+      // навигаторы) с протоколом «жди пакет задачи / маршрутизируй / ✋ СТОП».
+      // Базовый system-layer теперь НАСЛАИВАЕТСЯ под скилл (ipc/ai.ts передаёт
+      // skillPrompt в prepareSystemContext — см. <skill_layer>), так что протокол
+      // выполнения восстановлен. Но тело таких скиллов всё равно может сильно
+      // давить «жди ТЗ»; nudge — дешёвое подкрепление: ясный запрос = действуй.
+      sendId = await api.sendWithOverrides(modelMessages, path, {
+        ...(skillSystemPrompt ? { systemPrompt: skillSystemPrompt } : {}),
+        ...(overrideProvider ? { providerId: overrideProvider } : {}),
+        ...(overrideModel ? { model: overrideModel } : {}),
+        // Аудит M4: tools_allow скилла → agent-loop ограничивает инструменты модели.
+        ...(toolsAllow?.length ? { toolsAllow } : {}),
+        // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
+        ...(recipe ? { recipe } : {}),
+        effortLevel: deps.getProjectState().effortLevel,
+        agentMode: sendAgentMode,
+        ...(resumeFromRunId ? { resumeFromRunId } : {}),
+        ...selectedRoute,
+        ...outcomeOverride,
+        ...routeOverride
+      }, sendChatId)
+    } else if (resumeFromRunId) {
+      // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
+      const effort = deps.getProjectState().effortLevel
+      sendId = await api.sendWithOverrides(modelMessages, path, {
+        resumeFromRunId,
+        agentMode: sendAgentMode,
+        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+        ...selectedRoute,
+        ...outcomeOverride,
+        ...routeOverride
+      }, sendChatId)
+    } else {
+      const effort = deps.getProjectState().effortLevel
+      sendId = await api.sendWithOverrides(modelMessages, path, {
+        ...(effort !== 'standard' ? { effortLevel: effort } : {}),
+        agentMode: sendAgentMode,
+        ...selectedRoute,
+        ...outcomeOverride,
+        ...routeOverride
+      }, sendChatId)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const errorText = `
+
+[Ошибка: ${message || 'не удалось запустить модель'}]`
+    store.updateLastAssistant(errorText)
+    if (assistantRow) void api.chatsUpdateMessage(assistantRow.id, errorText).catch(() => {})
+    deps.getProjectState().applyAgentProgressEvent({ type: 'error', message: message || 'Не удалось запустить модель' })
+    store.setStreaming(false)
+    deps.setCurrentSendId(null)
+    if (oneShotRoute) deps.getProjectState().setPromptRouteOverride(null)
+    return { kind: 'send-failed' }
   }
   // one-shot: маршрут действовал только на эту отправку — снимаем.
   if (oneShotRoute) deps.getProjectState().setPromptRouteOverride(null)
