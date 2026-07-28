@@ -1394,6 +1394,48 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         db.prepare('UPDATE subscription_accounts SET stats_since = ? WHERE stats_since IS NULL').run(Date.now())
       }
     }
+  },
+  {
+    version: 60,
+    description: 'VSK-TASK-FLOW-A1 блок A: связи «задача → план → чек-лист». plans получает происхождение (chat_id / source_message_id / agent_run_id), tasks — источник и НЕОБЯЗАТЕЛЬНУЮ связь с планом (source / plan_id / plan_step_id / evidence). Все новые колонки nullable, кроме tasks.source с DEFAULT manual: внешние скрипты пишут в plans мимо create_plan (регламент проекта), и NOT NULL без дефолта сломал бы им INSERT. Старые записи чек-листа становятся manual — они и были ручными. FK на plan_id намеренно НЕ ставим: связь необязательная, удаление плана не должно уносить личные пункты; обнуление связи делает storage-слой (plans.remove).',
+    run: (db: DB) => {
+      const planCols = (db.prepare('PRAGMA table_info(plans)').all() as Array<{ name: string }>).map(c => c.name)
+      // Происхождение плана: из какого чата и какого сообщения он вырос.
+      if (!planCols.includes('chat_id')) db.exec('ALTER TABLE plans ADD COLUMN chat_id INTEGER')
+      if (!planCols.includes('source_message_id')) db.exec('ALTER TABLE plans ADD COLUMN source_message_id INTEGER')
+      // agent_run_id — прогон, который план породил. Нужен блоку B: если ожидание
+      // approve выносится ИЗ прогона, после утверждения выполнение продолжается
+      // именно этим run'ом по чекпойнту (§10, вариант «б»).
+      if (!planCols.includes('agent_run_id')) db.exec('ALTER TABLE plans ADD COLUMN agent_run_id TEXT')
+
+      const taskCols = (db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!taskCols.includes('source')) {
+        db.exec("ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        // Явный UPDATE поверх DEFAULT: на существующих строках DEFAULT уже применён
+        // при ALTER, но пустая строка из внешней записи дефолтом не лечится.
+        db.prepare("UPDATE tasks SET source = 'manual' WHERE source IS NULL OR TRIM(source) = ''").run()
+      }
+      if (!taskCols.includes('plan_id')) db.exec('ALTER TABLE tasks ADD COLUMN plan_id INTEGER')
+      if (!taskCols.includes('plan_step_id')) db.exec('ALTER TABLE tasks ADD COLUMN plan_step_id INTEGER')
+      if (!taskCols.includes('evidence')) db.exec('ALTER TABLE tasks ADD COLUMN evidence TEXT')
+
+      // Сторож времени прогона (§10, вариант «а»): отметка, с какого момента прогон
+      // ждёт человека. Позволяет не тикать таймауту, пока висит карточка
+      // согласования. Колонка заводится здесь, чтобы блок B не городил вторую
+      // миграцию; какой из двух вариантов выберут — решается там.
+      const hasRuns = Boolean(
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_runs'").get(),
+      )
+      if (hasRuns) {
+        const runCols = (db.prepare('PRAGMA table_info(agent_runs)').all() as Array<{ name: string }>).map(c => c.name)
+        if (!runCols.includes('awaiting_human_since')) {
+          db.exec('ALTER TABLE agent_runs ADD COLUMN awaiting_human_since INTEGER')
+        }
+      }
+
+      db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_plan ON tasks(plan_id)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_plans_chat ON plans(chat_id)')
+    }
   }
 ]
 

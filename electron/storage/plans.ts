@@ -33,6 +33,12 @@ export interface Plan {
   contractRevision: number | null
   planRevision: number
   quality: PlanQualityV1 | null
+  /** Происхождение плана. Заполнено, если план вырос из диалога; у планов,
+   *  созданных внешним скриптом мимо create_plan, остаётся null. */
+  chatId: number | null
+  sourceMessageId: number | null
+  /** Прогон, породивший план (нужен блоку B для продолжения после approve). */
+  agentRunId: string | null
   steps: PlanStep[]
 }
 
@@ -46,6 +52,10 @@ export interface CreatePlanMeta {
   contractRevision?: number | null
   planRevision?: number
   quality?: PlanQualityV1 | null
+  /** Происхождение: из какого чата, сообщения и прогона вырос план. */
+  chatId?: number | null
+  sourceMessageId?: number | null
+  agentRunId?: string | null
 }
 
 export interface Plans {
@@ -67,6 +77,9 @@ interface PlanRow {
   contractRevision: number | null
   planRevision: number
   qualityJson: string | null
+  chatId: number | null
+  sourceMessageId: number | null
+  agentRunId: string | null
 }
 
 interface StepRow {
@@ -107,7 +120,8 @@ export function createPlans(db: Database): Plans {
     list(projectPath) {
       const rows = db.prepare(`
         SELECT id, title, status, created_at as createdAt, completed_at as completedAt,
-               contract_revision as contractRevision, plan_revision as planRevision, quality_json as qualityJson
+               contract_revision as contractRevision, plan_revision as planRevision, quality_json as qualityJson,
+               chat_id as chatId, source_message_id as sourceMessageId, agent_run_id as agentRunId
         FROM plans WHERE project_path = ?
         ORDER BY id DESC
       `).all(projectPath) as PlanRow[]
@@ -120,7 +134,8 @@ export function createPlans(db: Database): Plans {
     get(id) {
       const row = db.prepare(`
         SELECT id, title, status, created_at as createdAt, completed_at as completedAt,
-               contract_revision as contractRevision, plan_revision as planRevision, quality_json as qualityJson
+               contract_revision as contractRevision, plan_revision as planRevision, quality_json as qualityJson,
+               chat_id as chatId, source_message_id as sourceMessageId, agent_run_id as agentRunId
         FROM plans WHERE id = ?
       `).get(id) as PlanRow | undefined
       if (!row) return null
@@ -131,8 +146,9 @@ export function createPlans(db: Database): Plans {
       const now = Date.now()
       const planInfo = db.prepare(
         `INSERT INTO plans
-          (project_path, title, status, created_at, contract_revision, plan_revision, quality_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+          (project_path, title, status, created_at, contract_revision, plan_revision, quality_json,
+           chat_id, source_message_id, agent_run_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         projectPath,
         title,
@@ -141,6 +157,9 @@ export function createPlans(db: Database): Plans {
         meta.contractRevision ?? null,
         meta.planRevision ?? 1,
         meta.quality ? JSON.stringify(meta.quality) : null,
+        meta.chatId ?? null,
+        meta.sourceMessageId ?? null,
+        meta.agentRunId ?? null,
       )
       const planId = Number(planInfo.lastInsertRowid)
       const insertStep = db.prepare(
@@ -203,6 +222,10 @@ export function createPlans(db: Database): Plans {
       return updated
     },
     remove(id) {
+      // Чек-лист живёт своей жизнью: удаление плана НЕ уносит пункты. У связанных
+      // обнуляем связь — пункт остаётся видимым, просто перестаёт указывать на
+      // несуществующий план. Каскад здесь был бы потерей пользовательских данных.
+      db.prepare('UPDATE tasks SET plan_id = NULL, plan_step_id = NULL WHERE plan_id = ?').run(id)
       db.prepare('DELETE FROM plan_steps WHERE plan_id = ?').run(id)
       db.prepare('DELETE FROM plans WHERE id = ?').run(id)
     }
