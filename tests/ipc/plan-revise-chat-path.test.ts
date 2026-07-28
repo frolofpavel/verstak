@@ -42,6 +42,17 @@ function openStores() {
 }
 
 type Plans = ReturnType<typeof createPlans>
+type Runs = ReturnType<typeof createAgentRuns>
+
+/** Прогон с чекпойнтом — тот, что показал первую карточку. */
+function seedRun(agentRuns: Runs) {
+  agentRuns.create({
+    runId: RUN_ONE, projectPath: '/p', chatId: 7, owner: 'main',
+    title: 'Лендинг', providerId: 'claude', model: 'sonnet',
+    requestedProviderId: null, requestedModel: null, sendId: 1, agentMode: 'ask', accountId: null,
+  })
+  agentRuns.saveCheckpoint(RUN_ONE, 3, JSON.stringify([{ role: 'user', content: 'Сделай лендинг' }]))
+}
 
 /** ToolContext ПЕРВОГО прогона: тот, что показал карточку. */
 function planCtx(plans: Plans) {
@@ -64,7 +75,7 @@ function planCtx(plans: Plans) {
 }
 
 /** ToolContext ПРОДОЛЖЕНИЯ: обычная отправка в чат, outcome нет — только якорь. */
-function continuationCtx(plans: Plans, revisePlanId: number | null) {
+function continuationCtx(plans: Plans, revisePlanId: number | null, agentRuns?: Runs) {
   const sender = { send: vi.fn() }
   const setAgentMode = vi.fn()
   return {
@@ -75,6 +86,7 @@ function continuationCtx(plans: Plans, revisePlanId: number | null) {
       getPlan: (id: number) => plans.get(id),
       recordJournal: () => {},
       plans,
+      ...(agentRuns ? { clearRunCheckpoint: (id: string) => agentRuns.clearCheckpoint(id) } : {}),
       ...(revisePlanId != null ? { revisePlanId } : {}),
       pendingPlans: new Map(),
       scopedKey: (s: number, c: string) => `${s}::${c}`,
@@ -173,6 +185,24 @@ describe('§10 хвост: «Доработать» на чат-пути пра�
     expect(plans.get(plan.id)!.agentRunId, 'продолжение реплеит СВЕЖИЙ прогон').toBe(RUN_TWO)
   })
 
+  // ДОРАБОТКА ПОСЛЕ РЕВЬЮ 28.07: у переезда якоря есть обратная сторона. После
+  // rebind'а чекпойнт ПЕРВОГО прогона не связан ни с одним планом, а
+  // releasePlanApproval ищет прогон только через план — значит освободить его
+  // больше нечем. Каждая доработка оставляла осиротевший снапшот истории
+  // навсегда: та же утечка, которую закрывает дефект 5.
+  it('чекпойнт ПРЕЖНЕГО прогона освобождён — осиротевший снапшот не копится', async () => {
+    const { agentRuns, plans } = openStores()
+    seedRun(agentRuns)
+    const plan = await seedPlanAwaitingApproval(plans)
+    expect(agentRuns.latestCheckpoint(RUN_ONE), 'заготовка сломана').not.toBeNull()
+
+    const { ctx } = continuationCtx(plans, plan.id, agentRuns)
+    await replanPlanHandler.handle(reviseCall, ctx)
+
+    expect(agentRuns.latestCheckpoint(RUN_ONE), 'снимок первого прогона осиротел').toBeNull()
+    expect(getPlanAwaitingApproval(RUN_ONE), 'реестр ожиданий тоже течёт').toBeNull()
+  })
+
   it('нет цели доработки → честная ошибка, а не тихая правка чужого плана', async () => {
     const { plans } = openStores()
     await seedPlanAwaitingApproval(plans)
@@ -181,6 +211,54 @@ describe('§10 хвост: «Доработать» на чат-пути пра�
     const res = await replanPlanHandler.handle(reviseCall, ctx) as { result: string; error?: string }
 
     expect(res.error).toBe('REPLAN_TARGET_REQUIRED')
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ДОРАБОТКА ПОСЛЕ РЕВЬЮ 28.07. План, рождённый Outcome-пайплайном, чат-ветка
+  // трогать НЕ ИМЕЕТ ПРАВА: у него есть Task Contract, quality gate и запрет на
+  // расширение writeScope high-risk шагами — на чат-пути всего этого нет.
+  // Вдобавок на plan-шаге пайплайна режим прогона принудительно 'plan', а в нём
+  // матрица §5 карточку не показывает: доработка проходила БЕЗ гейта качества и
+  // БЕЗ нового согласования, то есть молча. Это регрессия, внесённая фиксом
+  // дефекта 1 (до него ветки не было и инструмент честно отказывал).
+  // ─────────────────────────────────────────────────────────────────────────
+  it('план Outcome-пайплайна чат-ветка не переписывает — отказ, а не тихая правка', async () => {
+    const { plans } = openStores()
+    // Признак происхождения: contractRevision/quality проставляет ТОЛЬКО
+    // outcome-ветка create_plan (там есть Task Contract, который их считает).
+    const pipelinePlan = plans.create('/p', 'План пайплайна', [{ title: 'Шаг', detail: 'детали' }], {
+      contractRevision: 1,
+      planRevision: 1,
+      quality: { score: 90, status: 'pass', warnings: [], hardErrors: [] } as never,
+      agentRunId: RUN_ONE,
+    })
+
+    const { ctx } = continuationCtx(plans, pipelinePlan.id)
+    const res = await replanPlanHandler.handle(reviseCall, ctx) as { result: string; error?: string }
+
+    expect(res.error).toMatch(/^REPLAN_PIPELINE_OWNED/)
+    const after = plans.get(pipelinePlan.id)!
+    expect(after.planRevision, 'ревизия выросла в обход quality gate пайплайна').toBe(1)
+    expect(after.steps.map(s => s.title), 'шаги подменены мимо гейта').toEqual(['Шаг'])
+  })
+
+  // ДОРАБОТКА ПОСЛЕ РЕВЬЮ 28.07: два текста продолжения противоречили друг
+  // другу — plan-gate.ts велел «обнови через create_plan», plan-await.ts тут же
+  // «правь через replan_plan, новый не создавай». «Дубликата нет» держалось на
+  // послушании модели: create_plan о ctx.revisePlanId не знал, а его
+  // идемпотентность ключуется по sendId, который у продолжения ДРУГОЙ.
+  it('create_plan в прогоне доработки не плодит второй план, а возвращает тот же', async () => {
+    const { plans } = openStores()
+    const plan = await seedPlanAwaitingApproval(plans)
+
+    const { ctx } = continuationCtx(plans, plan.id)
+    const res = await createPlanHandler.handle(createCall, ctx) as { result: string; error?: string }
+
+    expect(res.error).toBeUndefined()
+    expect(plans.list('/p'), 'модель послушалась текста — но полагаться на это нельзя').toHaveLength(1)
+    expect(res.result).toContain(`planId=${plan.id}`)
+    expect(res.result).toContain('replan_plan')
+    expect(plans.get(plan.id)!.planRevision, 'create_plan ревизию не двигает').toBe(1)
   })
 
   it('outcome-путь не задет: без фазы replan инструмент по-прежнему отказывает', async () => {

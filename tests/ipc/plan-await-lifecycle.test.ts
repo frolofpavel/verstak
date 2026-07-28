@@ -249,6 +249,9 @@ describe('§10: решения reject и revise', () => {
     expect(outcome.planStatus).toBe('draft')
     expect(outcome.continuation!.text).toContain('добавь проверку')
     expect(outcome.continuation!.text).toContain('replan_plan')
+    // Доработка после ревью 28.07: раньше в этом же тексте стояло «обнови через
+    // create_plan» из resolvePlanGate — два инструмента в одной инструкции.
+    expect(outcome.continuation!.text, 'противоречивая инструкция модели').not.toContain('create_plan')
     expect(outcome.continuation!.text).toContain(`#${plan.id}`)
     expect(outcome.continuation!.agentMode, 'доработка прав на запись не даёт').toBeNull()
   })

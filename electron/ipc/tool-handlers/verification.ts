@@ -275,7 +275,13 @@ export const createPlanHandler: ToolHandler = {
       // том же прогоне возвращает уже созданный planId, а не плодит дубликат.
       // Проверка стоит ПОСЛЕ валидации и quality-гейта: невалидный повторный
       // вызов должен получить свою ошибку, а не молча «успех» со старым id.
-      const alreadyCreated = getPlanForRun(ctx.sendId)
+      // …и та же защита для прогона ДОРАБОТКИ (доработка после ревью 28.07).
+      // Реестр выше ключуется по sendId, а у продолжения он ДРУГОЙ: модель,
+      // позвавшая create_plan вместо replan_plan, спокойно создавала второй
+      // план на ту же задачу. «Дубликата нет» держалось на послушании модели —
+      // теперь на рантайме. Только чат-путь: у пайплайна свой create_plan с
+      // контрактом и своей ревизией, его поведение не трогаем.
+      const alreadyCreated = getPlanForRun(ctx.sendId) ?? (ctx.outcome ? null : ctx.revisePlanId ?? null)
       if (alreadyCreated != null && ctx.getPlan?.(alreadyCreated)) {
         return {
           id: call.id,

@@ -1080,6 +1080,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,
+      // §10 хвост: отпустить чекпойнт прогона, с которого сняли план (доработка
+      // переносит якорь на текущий прогон — прежний иначе осиротел бы).
+      clearRunCheckpoint: (id: string) => { try { agentRuns?.clearCheckpoint(id) } catch { /* уборка не критична */ } },
         runChecks: () => Array.from(executedChecks, ([command, exitCode]) => ({ command, exitCode })),
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,

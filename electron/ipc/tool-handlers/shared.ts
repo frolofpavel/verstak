@@ -63,6 +63,10 @@ export interface ToolContext {
    *  план ещё в draft, и id считается из этой связи, а не из аргументов модели
    *  (та же логика, что у идемпотентности create_plan). Вне доработки — null. */
   revisePlanId?: number | null
+  /** §10 хвост: отпустить чекпойнт прогона, который больше никому не нужен.
+   *  Нужен доработке плана: якорь плана переезжает на текущий прогон, и без
+   *  этого снимок истории прежнего осиротел бы навсегда. */
+  clearRunCheckpoint?: (runId: string) => void
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   /** Read recent journal entries — used by the `read_journal` AI tool for self-reflection. */
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>

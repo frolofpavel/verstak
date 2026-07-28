@@ -15,7 +15,7 @@ import { planSpecFeedback } from '../../ai/task-spec-check'
 import { awaitingApprovalResult } from '../../ai/plan-await'
 import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
 import { planGateApplies } from '../../ai/plan-gate-modes'
-import { markPlanAwaitingApproval } from '../../ai/runner-shared'
+import { markPlanAwaitingApproval, clearPlanAwaitingApproval } from '../../ai/runner-shared'
 import type { ToolContext, ToolHandler } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 
@@ -244,6 +244,25 @@ async function replanOnChatPath(call: ToolCall, ctx: ToolContext): Promise<ToolR
     // мы не знаем, что именно человек просил доработать.
     return { id: call.id, name: call.name, result: '', error: 'REPLAN_TARGET_REQUIRED' }
   }
+  // План, рождённый Outcome-пайплайном, чат-ветка трогать НЕ ИМЕЕТ ПРАВА.
+  //
+  // Найдено ревью 28.07 и это регрессия САМОГО фикса дефекта 1. У такого плана
+  // есть Task Contract, а значит quality gate и запрет на расширение writeScope
+  // high-risk шагами (см. outcome-ветку ниже) — на чат-пути ни того, ни другого
+  // нет. Хуже: на plan-шаге пайплайна режим прогона принудительно 'plan', в нём
+  // матрица §5 карточку не показывает, и доработка проходила БЕЗ гейта качества
+  // и БЕЗ нового согласования — то есть молча.
+  //
+  // `contractRevision`/`quality` проставляет ровно одна ветка — outcome'овая
+  // (там есть контракт, которым они считаются), поэтому это честный признак
+  // происхождения, а не эвристика.
+  if (plan.contractRevision != null || plan.quality != null) {
+    return {
+      id: call.id, name: call.name, result: '',
+      error: 'REPLAN_PIPELINE_OWNED: план создан Outcome-пайплайном и правится только внутри него (фаза replan). ' +
+        'Сообщи это пользователю — молча переписывать такой план нельзя.',
+    }
+  }
   const reason = String(call.args.reason ?? '').trim()
   const steps = list(call.args.steps).flatMap(raw => {
     if (typeof raw !== 'object' || raw === null) return []
@@ -266,12 +285,21 @@ async function replanOnChatPath(call: ToolCall, ctx: ToolContext): Promise<ToolR
   // История ревизий — best-effort: на чат-пути её может не быть, и это не повод
   // терять саму доработку.
   try { ctx.planOutcomes?.saveRevision(plan.id, plan.planRevision, reason, plan) } catch { /* история не критична */ }
+  const previousRunId = plan.agentRunId
   const updated = ctx.plans.replacePending(plan.id, steps, {
     planRevision: plan.planRevision + 1,
     // Якорь переезжает на ТЕКУЩИЙ прогон: продолжение после нового approve
     // должно реплеить разговор с замечаниями, а не исходный план без них.
     agentRunId: ctx.runId ?? null,
   })
+  // …и ровно поэтому прежний прогон надо отпустить ЗДЕСЬ. После переезда якоря
+  // его чекпойнт не связан ни с одним планом, а releasePlanApproval ищет прогон
+  // только через план — освободить было бы больше нечем, и каждая доработка
+  // оставляла осиротевший снапшот истории навсегда (найдено ревью 28.07).
+  if (previousRunId && previousRunId !== ctx.runId) {
+    clearPlanAwaitingApproval(previousRunId)
+    try { ctx.clearRunCheckpoint?.(previousRunId) } catch { /* уборка не критична */ }
+  }
   ctx.sender.send('ai:event', {
     id: ctx.sendId,
     event: { type: 'plan-replanned', planId: plan.id, revision: updated.planRevision, reason, preservedSteps: updated.steps.filter(s => s.status === 'done').length },

@@ -133,4 +133,16 @@ describe('§10 хвост: продолжение плана не переклю
   it('режим продолжения уезжает одноразовым параметром прогона', () => {
     expect(source).toContain('consumeRunAgentMode')
   })
+
+  // ВТОРАЯ ВЕТКА ТОЙ ЖЕ КНОПКИ (доработка после ревью 28.07). При выключенном
+  // тумблере карточки рождает НЕ чат-контекст, а Outcome-пайплайн: гейт
+  // применим по первой оси (outcomePhase==='plan'), тумблер там не спрашивается.
+  // Approve такой карточки идёт через advancePipeline → gg-pipeline-send, и ЭТА
+  // ветка писала agent_mode_chat_N ровно так же — то есть живая половина
+  // дефекта 2 оставалась открытой.
+  it('pipeline-отправка не зовёт setAgentMode', () => {
+    const handler = source.slice(source.indexOf('function onPipelineSend')).slice(0, 700)
+    expect(handler, 'pipeline-ветка пишет режим в настройку чата — навсегда')
+      .not.toContain('setAgentMode(')
+  })
 })

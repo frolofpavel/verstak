@@ -1899,22 +1899,28 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }, [])
 
   // Pipeline auto-send (спек D5): PipelineBanner/визард диспатчат
-  // CustomEvent('gg-pipeline-send', { text, mode }). Ставим режим + текст и
-  // взводим ref; авто-send ниже ждёт, пока agentMode реально станет нужным.
+  // CustomEvent('gg-pipeline-send', { text, mode }).
+  //
+  // §10 хвост, доработка после ревью: раньше здесь стоял `setAgentMode(d.mode)`,
+  // то есть запись в настройку `agent_mode_chat_N`. Это ВТОРАЯ ветка того же
+  // дефекта 2 — и живая: при выключенном тумблере карточки согласования рождает
+  // именно Outcome-пайплайн (гейт применим по первой оси, без тумблера), а его
+  // approve идёт сюда. Один одобренный план оставлял чат в «Принимать правки»
+  // навсегда. Теперь режим — одноразовое право прогона, как и у чат-ветки.
   useEffect(() => {
     function onPipelineSend(e: Event) {
       const ev = e as CustomEvent<{ text: string; mode: 'plan' | 'accept-edits'; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' } }>
       const d = ev.detail
       if (d && typeof d.text === 'string' && d.text.trim()) {
-        void setAgentMode(d.mode)
         setInput(d.text)
+        resumeSendModeRef.current = d.mode
         pipelineSendModeRef.current = d.mode
         pipelineOutcomeRef.current = d.outcome ?? null
       }
     }
     window.addEventListener('gg-pipeline-send', onPipelineSend)
     return () => window.removeEventListener('gg-pipeline-send', onPipelineSend)
-  }, [setAgentMode])
+  }, [])
 
   // First Win (спек D10): онбординг ставит флаг «попробовать Pipeline» —
   // на маунте открываем визард с демо-брифом (race-free через settings, не
@@ -2082,11 +2088,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // флаг — шлём ровно как при ручной отправке (через send()). Флаг гасим сразу,
   // чтобы обычный ввод пользователя не уезжал в авто-send.
   useEffect(() => {
-    if (
-      pipelineSendModeRef.current && input.trim() && !isStreaming
-      && agentMode === pipelineSendModeRef.current
-    ) {
-      // Pipeline-send: ждём пока agentMode применился к нужному режиму, потом шлём.
+    if (pipelineSendModeRef.current && input.trim() && !isStreaming) {
+      // §10 хвост, доработка: ждать больше нечего — режим не пишется в настройку
+      // чата, а едет параметром прогона (send() заберёт его из ref'а). Прежнее
+      // условие `agentMode === pipelineSendModeRef.current` было следствием
+      // записи режима в чат, а не самостоятельным требованием.
       pipelineSendModeRef.current = null
       void send()
     }
