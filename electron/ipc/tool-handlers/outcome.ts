@@ -191,6 +191,18 @@ export const reportStepOutcomeHandler: ToolHandler = {
       verificationStatus: outcome.checks.every(check => check.status === 'passed') ? 'passed' : 'failed',
       changedFilesCount: actualFiles.length,
     })
+    // §4.4/§4.5 ТЗ (блок D): связанные пункты чек-листа обновляются вместе с
+    // шагом — но закрываются ТОЛЬКО по подтверждённому результату и только с
+    // доказательством. Провалившийся или заблокированный шаг оставляет пункт
+    // открытым: «шаг больше не выполняется» и «дело сделано» — разные вещи.
+    const stepEvidence = outcome.status === 'succeeded'
+      ? [...outcome.evidence, ...actualFiles].map(item => item.trim()).filter(Boolean)[0] ?? null
+      : null
+    if (stepEvidence && ctx.tasks) {
+      for (const task of ctx.tasks.list(ctx.projectPath)) {
+        if (task.planStepId === step.id && !task.done) ctx.tasks.complete(task.id, stepEvidence)
+      }
+    }
     const remainingSteps = ctx.plans.get(plan.id)?.steps
       .filter(item => item.status !== 'done').length ?? 0
     ctx.pipelineRuns.advance(pipeline.id, {
