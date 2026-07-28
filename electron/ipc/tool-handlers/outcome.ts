@@ -1,5 +1,6 @@
 import { scanText } from '../../ai/secret-scanner'
 import { evidenceExists } from '../../ai/evidence'
+import { pickNextStep, summarizePlan } from '../../ai/plan-step-order'
 import { existsSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { decideAdaptiveAction, failureSignature } from '../../ai/adaptive-decision'
@@ -207,8 +208,25 @@ export const reportStepOutcomeHandler: ToolHandler = {
         if (task.planStepId === step.id && !task.done) ctx.tasks.complete(task.id, stepEvidence)
       }
     }
-    const remainingSteps = ctx.plans.get(plan.id)?.steps
-      .filter(item => item.status !== 'done').length ?? 0
+    // Блок D §4.5: план дошёл до конца → человек получает ИТОГ обычным
+    // сообщением ассистента (решение постановщика 29.07: не системной строкой —
+    // это ответ на его задачу, а не служебная отметка).
+    //
+    // Хрупкая зона НЕ ТРОНУТА: подписка `ai.onEvent` в Chat.tsx не правится и не
+    // пересоздаётся. Мы шлём событие `text` — того же типа, что уже льётся в
+    // поток ответа; для renderer'а это обычный кусок ответа ассистента.
+    // Оформление итога не изобретается: текст берётся у готовой `summarizePlan`,
+    // а внешний вид — зона Павла.
+    const afterStep = ctx.plans.get(plan.id)?.steps ?? []
+    if (afterStep.length > 0 && pickNextStep(afterStep) === null) {
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'text', text: `
+
+${summarizePlan(plan.title, afterStep)}` },
+      })
+    }
+    const remainingSteps = afterStep.filter(item => item.status !== 'done').length
     ctx.pipelineRuns.advance(pipeline.id, {
       step: nextPipelineStep(decision, remainingSteps),
       agentRunId: ctx.runId,

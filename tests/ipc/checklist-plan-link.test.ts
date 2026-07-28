@@ -137,3 +137,47 @@ describe('позиция 2 (в): заблокированный шаг поме�
     expect(s.plans.get(s.plan.id)!.steps[0].status).toBe('failed')
   })
 })
+
+// Блок D §4.5: итог плана приходит в чат ОБЫЧНЫМ сообщением ассистента.
+// Решение постановщика 29.07: не системной строкой — человек читает это как
+// ответ на свою задачу. Хрупкая зона не тронута: событие того же типа `text`,
+// что уже льётся в поток ответа, подписка ai.onEvent не правится.
+describe('блок D §4.5: итог плана в чат', () => {
+  const textsOf = (sender: { send: ReturnType<typeof vi.fn> }) =>
+    sender.send.mock.calls
+      .map(c => (c[1] as { event: { type: string; text?: string } }).event)
+      .filter(e => e.type === 'text')
+      .map(e => e.text ?? '')
+
+  it('последний шаг завершён → в чат уходит итог: что сделано и где результат', async () => {
+    const s = seed()
+    const ctx = ctxOf(s, 'succeeded') as unknown as { sender: { send: ReturnType<typeof vi.fn> } }
+
+    await reportStepOutcomeHandler.handle(call('succeeded'), ctx as never)
+
+    const texts = textsOf(ctx.sender)
+    expect(texts, 'итог не отправлен — человек не узнал результат').toHaveLength(1)
+    expect(texts[0]).toContain('План «План»')
+    expect(texts[0], 'что сделано').toContain('Собрать отчёт')
+    expect(texts[0], 'план выполнен целиком').toContain('План выполнен полностью')
+  })
+
+  // КОНТРОЛЬ: без него первый кейс был бы зелёным и от «шлём итог всегда».
+  it('пока остались шаги — итог НЕ отправляется', async () => {
+    const s = seed()
+    // Второй шаг остаётся невыполненным: план не закончен.
+    s.plans.replacePending(s.plan.id, [
+      { title: 'Собрать отчёт', detail: null, spec: SPEC as never },
+      { title: 'Ещё шаг', detail: null, spec: { ...SPEC, key: 's2' } as never },
+    ], { planRevision: 2 })
+    const fresh = s.plans.get(s.plan.id)!
+    const ctx = {
+      ...(ctxOf(s, 'succeeded') as object),
+      outcome: { pipelineId: 1, phase: 'execute-step', planStepId: fresh.steps[0].id, attempt: 1 },
+    } as unknown as { sender: { send: ReturnType<typeof vi.fn> } }
+
+    await reportStepOutcomeHandler.handle(call('succeeded'), ctx as never)
+
+    expect(textsOf(ctx.sender), 'итог пришёл посреди работы').toHaveLength(0)
+  })
+})
