@@ -110,3 +110,74 @@ describe('§4.2: spec, присланный моделью на чат-пути,
     }
   })
 })
+
+// ДОЛГ РЕВЬЮ 28.07, пункты 1, 2 и 5 — закрыты здесь.
+describe('долг: пробелы в признаках записи закрыты', () => {
+  const step = (title: string, detail?: string) => ({ title, detail: detail ?? null })
+
+  it('починка и правка — это ЗАПИСЬ, а не неопределимость', () => {
+    for (const t of [
+      'Исправить опечатку в src/app.ts',
+      'Починить сборку',
+      'Поправить отступы в layout.css',
+      'Убрать мёртвый код',
+      'Заменить старый логотип',
+      'Fix broken import',
+      'Refactor the loader',
+      'Remove unused export',
+    ]) {
+      const v = planApprovalVerdict([step(t)])
+      expect(v.needsCard, t).toBe(true)
+      expect(v.reason, t).toBe('write-scope')
+    }
+  })
+
+  // ГЛАВНЫЙ пин пункта 1: раньше один читающий глагол рядом выводил пишущий шаг
+  // из-под fail-safe целиком — «посмотреть и поправить» проезжало как чтение.
+  it('читающий глагол рядом с пишущим НЕ выводит шаг из-под проверки', () => {
+    const v = planApprovalVerdict([
+      step('Посмотреть логи и поправить конфиг', 'Открыть logs/app.log и исправить config.json'),
+    ])
+    expect(v.needsCard, 'признак записи обязан перевешивать признак чтения').toBe(true)
+    expect(v.reason).toBe('write-scope')
+  })
+
+  it('пустой writeScope в сыром spec НЕ перебивает собственные actions', () => {
+    const contradictory = {
+      key: 's1', intent: 'Записать лендинг', actions: ['Создать src/index.html'],
+      writeScope: [], readScope: ['src'],
+    }
+    const v = planApprovalVerdict([{ title: 'Шаг', rawSpec: contradictory }])
+    expect(v.needsCard, 'объявление «пишу никуда» при действии «создать файл» проехало как чтение').toBe(true)
+    expect(v.reason).toBe('write-scope')
+  })
+
+  it('непротиворечивый частичный spec по-прежнему автоутверждается', () => {
+    const honest = {
+      key: 's1', intent: 'Посчитать итог', actions: ['Прочитать выгрузку'],
+      writeScope: [], readScope: ['data'],
+    }
+    expect(planApprovalVerdict([{ title: 'Прочитать данные', rawSpec: honest }]).needsCard).toBe(false)
+  })
+})
+
+// ДОЛГ, пункт 5: READING_PLAN этого файла был подобран в обход WRITE_HINTS —
+// проверить это можно только на формулировках, которых человек напишет сам.
+describe('долг: читающий план узнаётся на естественных формулировках', () => {
+  it('обычные читающие задачи автоутверждаются', () => {
+    const plans = [
+      [
+        { title: 'Изучить структуру проекта', detail: 'Просмотреть src/components и перечислить модули.' },
+        { title: 'Объяснить, что устарело', detail: 'Сравнить с package.json и сформулировать вывод.' },
+      ],
+      [
+        { title: 'Проанализировать рекламные кампании', detail: 'Прочитать выгрузку data/ads.csv и посчитать расход.' },
+        { title: 'Ответить в чате', detail: 'Сформулировать вывод по data/ads.csv для клиента.' },
+      ],
+    ]
+    for (const plan of plans) {
+      const v = planApprovalVerdict(plan)
+      expect(v.needsCard, JSON.stringify(plan.map(s => s.title))).toBe(false)
+    }
+  })
+})

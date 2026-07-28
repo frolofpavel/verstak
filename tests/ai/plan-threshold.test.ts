@@ -70,10 +70,26 @@ describe('порог: что требует карточку', () => {
     expect(planApprovalVerdict([{ title: 'Что-то сделать' }]).reason).toBe('no-declaration')
   })
 
-  it('spec есть не у всех шагов — карточка', () => {
-    const v = planApprovalVerdict([step(), { title: 'Шаг без объявления' }])
-    expect(v.needsCard).toBe(true)
-    expect(v.reason).toBe('no-declaration')
+  // ПИН ПЕРЕПИСАН (долг ревью 28.07, пункт 5) — объявляю прямо. Прежняя
+  // формулировка «spec есть не у всех шагов — карточка» стерегла ОТМЕНЁННЫЙ
+  // контракт: после живого порога §4.2 неполнота spec сама по себе карточку не
+  // требует — шаг без объявления судится по тексту. Зелёным пин оставался по
+  // СЛУЧАЙНОСТИ фикстуры: «Шаг без объявления» не содержит ни признака записи,
+  // ни признака чтения, то есть неопределим и даёт карточку по другой причине.
+  // Проверяем теперь именно это правило, и обе его стороны.
+  it('шаг без spec судится по тексту: неопределимый — карточка, пишущий — карточка', () => {
+    const undecidable = planApprovalVerdict([step(), { title: 'Шаг без объявления' }])
+    expect(undecidable.needsCard).toBe(true)
+    expect(undecidable.reason).toBe('no-declaration')
+
+    const writing = planApprovalVerdict([step(), { title: 'Записать отчёт в out.csv' }])
+    expect(writing.needsCard).toBe(true)
+    expect(writing.reason, 'пишущий шаг без spec обязан давать write-scope').toBe('write-scope')
+  })
+
+  it('шаг без spec, но явно читающий, карточки НЕ требует', () => {
+    const v = planApprovalVerdict([step(), { title: 'Прочитать логи и объяснить причину' }])
+    expect(v.needsCard, 'неполнота spec сама по себе больше не повод для карточки').toBe(false)
   })
 
   it('пустой план — карточка', () => {

@@ -99,6 +99,11 @@ const WRITE_HINTS: readonly string[] = [
   'запис', 'созда', 'измен', 'правк', 'отредакт', 'редактир', 'обнов', 'перепиш', 'перезапиш',
   'сгенерир', 'сохран', 'установ', 'запуст', 'выполн команд', 'коммит', 'закоммит', 'деплой',
   'мигра', 'переимен', 'настро', 'внедр', 'добав',
+  // Долг ревью 28.07, пункт 1: правка и починка — тоже запись, а их в списке не
+  // было. «Исправить опечатку в src/app.ts» проезжало как неопределимое, а рядом
+  // с любым читающим глаголом («посмотреть и поправить») — как ЧТЕНИЕ.
+  'исправ', 'почин', 'поправ', 'убрать', 'удали', 'замен', 'перенес', 'вынес', 'отключ', 'включ',
+  'fix', 'refactor', 'remove', 'delete', 'replace', 'move', 'cleanup', 'revert', 'bump',
   'write', 'create', 'modify', 'update', 'edit', 'generate', 'save', 'install',
   'commit', 'patch', 'apply', 'rewrite', 'rename', 'migrat', 'scaffold',
 ]
@@ -204,7 +209,18 @@ export function planApprovalVerdict(steps: readonly DeclaredStep[]): PlanApprova
     const haystack = [s.title, s.detail ?? '', view?.intent ?? '', ...(view?.actions ?? [])].join(' \n ')
     // Объявленный writeScope сильнее текста: порог считается по тому, что модель
     // САМА объявила (текст остаётся судьёй только там, где объявления нет).
-    const writes = view ? view.writeScope.length > 0 : mentionsAny(haystack, WRITE_HINTS)
+    // Долг ревью 28.07, пункт 2: пустой writeScope в СЫРОМ spec больше не
+    // перебивает собственные `actions`. На outcome-пути такое расхождение ловит
+    // quality-гейт (перекрёстная проверка spec против контракта), на чат-пути её
+    // нет вовсе — значит объявление «пишу никуда» при действиях «записать файл»
+    // проезжало как чтение. Полный spec остаётся сильнее текста: он прошёл
+    // проверку целиком, и там расхождение уже исключено.
+    const declaredWriteScope = view ? view.writeScope.length > 0 : false
+    const partialContradiction = view != null && s.spec == null && !declaredWriteScope
+      && mentionsAny([view.intent, ...view.actions].join(' | '), WRITE_HINTS)
+    const writes = view
+      ? declaredWriteScope || partialContradiction
+      : mentionsAny(haystack, WRITE_HINTS)
     const reads = view ? true : mentionsAny(haystack, READ_HINTS)
     return {
       label: view?.key || s.title || `шаг ${i + 1}`,

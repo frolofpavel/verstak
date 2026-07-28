@@ -98,3 +98,66 @@ describe('§10 хвост: карточка согласования прина�
     expect(container.textContent, 'показан план чужого чата').not.toContain('Отчёт')
   })
 })
+
+// ДОЛГ РЕВЬЮ 28.07, пункт 4: карточка §7.2 была выкачена с НУЛЕВЫМ поведенческим
+// покрытием — ровно тот класс, на котором §10 уже горела однажды (событие есть,
+// а в интерфейсе ничего). Здесь карточка проверяется поведением: событие
+// plan-created кладёт её в bundle своего чата, plan-approval меняет её статус,
+// новый прогон её убирает.
+describe('§7.2: карточка созданного плана — поведение, а не разметка', () => {
+  const cardsOf = (chatId: number) => useProject.getState().chats[chatId]?.planCards ?? []
+
+  function planCreated(sendId: number, planId: number, title = 'Лендинг') {
+    act(() => {
+      mock.aiEvents.emit({ id: sendId, event: { type: 'plan-created', planId, title, stepCount: 3 } })
+    })
+  }
+
+  it('plan-created кладёт карточку в bundle СВОЕГО чата', () => {
+    mountChat()
+    startRun(101, 7)
+    planCreated(101, 42)
+
+    expect(cardsOf(7)).toHaveLength(1)
+    expect(cardsOf(7)[0]).toMatchObject({ planId: 42, title: 'Лендинг', stepCount: 3, awaitingApproval: false })
+  })
+
+  // ГРАНИЦА, НАЙДЕННАЯ ЭТИМ ПИНОМ (29.07) и зафиксированная как есть.
+  // События ФОНОВОГО чата уходят в общий роутинг (`applyEventToChat`, персист в
+  // БД) и возвращаются ДО ветки `plan-created` — значит карточка создаётся
+  // только для активного чата. У `plan-approval` иначе: она обрабатывается
+  // раньше этой развилки, поэтому карточка СОГЛАСОВАНИЯ фонового чата работает.
+  //
+  // Продукт здесь НЕ правился сознательно: развилка живёт в диспетчере
+  // `ai.onEvent` — хрупкая зона, 46 пинов, и лезть туда ради карточки-уведомления
+  // дороже, чем она стоит. Главное свойство при этом соблюдено: чужая карточка
+  // НЕ приезжает в активный чат. Ограничение записано в аудит.
+  it('карточка фонового чата не приезжает в активный (её там просто нет)', () => {
+    mountChat()
+    startRun(202, 9)
+    planCreated(202, 77, 'Отчёт')
+
+    expect(cardsOf(7), 'карточка чужого чата приехала в активный').toHaveLength(0)
+  })
+
+  it('plan-approval того же плана меняет статус карточки, а не плодит вторую', () => {
+    mountChat()
+    startRun(101, 7)
+    planCreated(101, 42)
+    showCard(101, 42, 'Лендинг')
+
+    expect(cardsOf(7), 'появилась вторая карточка на тот же план').toHaveLength(1)
+    expect(cardsOf(7)[0].awaitingApproval, 'статус «ждёт решения» не отражён').toBe(true)
+  })
+
+  it('новый прогон в чате убирает карточки прошлого — они эфемерные', () => {
+    mountChat()
+    startRun(101, 7)
+    planCreated(101, 42)
+    expect(cardsOf(7)).toHaveLength(1)
+
+    act(() => { useProject.getState().clearActivity() })
+
+    expect(cardsOf(7), 'карточка прошлого прогона осталась висеть').toHaveLength(0)
+  })
+})
