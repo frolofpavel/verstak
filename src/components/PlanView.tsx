@@ -198,16 +198,27 @@ ${remaining || '— нет —'}
     const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1) as ChatMessage[]
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Страж: tests/contracts/chat-send-chatid-contract.
+    let sendId: number
     if (outcomePipeline && activePipeline) {
       const attempt = outcomes.filter(item => item.stepId === step.id).length + 1
-      await window.api.ai.sendWithOverrides(
+      sendId = await window.api.ai.sendWithOverrides(
         allMessages,
         path,
         { outcome: { pipelineId: activePipeline.id, phase: 'execute-step', planStepId: step.id, attempt } },
         activeChatId != null ? String(activeChatId) : undefined,
       )
     } else {
-      await window.api.ai.send(allMessages, path, activeChatId != null ? String(activeChatId) : undefined)
+      sendId = await window.api.ai.send(allMessages, path, activeChatId != null ? String(activeChatId) : undefined)
+    }
+    // План запускает тот же ai:send, что и чат, поэтому обязан зарегистрировать
+    // владельца sendId в том же реестре. Иначе Chat показывает стрим, но Stop/Pause
+    // не знают, какой процесс прервать (currentSendIdRef заполняется только chat-send).
+    if (activeChatId != null) {
+      useProject.getState().registerSendOwner(sendId, {
+        kind: 'chat',
+        chatId: activeChatId,
+        projectPath: path,
+      })
     }
     // refresh on next paint cycle so user sees the step go to 'running'
     void refresh()

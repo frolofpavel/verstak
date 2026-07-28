@@ -2752,7 +2752,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   }, [])
 
   async function stop(asSuspend = false) {
-    const id = currentSendIdRef.current
+    const before = useProject.getState()
+    // currentSendIdRef знает только о запусках из Chat.send(). Шаги из PlanView,
+    // SideChat и другие штатные входы регистрируются в sendOwners. Ищем владельца
+    // активной ленты первым — это также не даёт остановить чужой параллельный чат.
+    const ownedId = findRunForChat(
+      before.sendOwners,
+      before.helpMode ? before.helpChatId : before.activeChatId,
+      { help: before.helpMode },
+    )
+    const id = ownedId ?? currentSendIdRef.current
     if (id == null) return
     // #4 suspend: та же очистка, что Stop, но прогон помечается 'suspended' с
     // сохранённым чекпойнтом для ↻ Продолжить (резюм через resumeFromRunId).
@@ -2780,7 +2789,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const curPending = cur.activeChatId != null ? cur.chats[cur.activeChatId]?.pendingCommand : null
     if (curPending?.sendId === id) cur.setPendingCommand(null)
     if (cur.pendingPlan?.sendId === id) cur.setPendingPlan(null) // #3 plan-gate: снять модалку плана при Stop
-    currentSendIdRef.current = null
+    if (currentSendIdRef.current === id) currentSendIdRef.current = null
     flushQueueRef.current()
   }
 
