@@ -862,7 +862,7 @@ app.whenReady().then(() => {
     chatProjectPath: chatId => chatSessions.get(chatId)?.projectPath ?? null,
     isMemoryLifecycleEnabled: () => getSecret('memory_lifecycle') !== 'false',
   })
-  registerPlansIpc(plans)
+  registerPlansIpc(plans, agentRuns)
   registerWorkflowsIpc({
     createPlan: (projectPath, title, steps) => {
       const plan = plans.create(projectPath, title, steps)

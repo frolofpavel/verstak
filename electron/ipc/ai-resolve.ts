@@ -69,6 +69,8 @@ export function registerAiResolveIpc(ipcMain: IpcMain, abortSend: (sendId: numbe
   })
 
   // #3 plan-gate: решение пользователя по предложенному плану (Approve/Revise/Reject).
+  // МЁРТВЫЙ КАНАЛ с §10: ожидание живёт снаружи прогона, класть сюда стало некому,
+  // и резолв ничего не находит. Живой путь решения — `plans:resolve-approval`.
   ipcMain.handle('ai:resolve-plan', (_e, callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => {
     resolvePending(pendingPlans, callId, sendId, { decision, feedback })
   })

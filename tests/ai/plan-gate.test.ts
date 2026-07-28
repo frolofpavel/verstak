@@ -33,8 +33,13 @@ describe('plan-gate: resolvePlanGate', () => {
   })
 })
 
-// Интеграция: createPlanHandler в plan-режиме блокирует-и-ждёт, approve → setAgentMode.
-describe('plan-gate: createPlanHandler (block-and-wait)', () => {
+// Интеграция: §10 — гейт показывает карточку и НЕ ждёт внутри прогона.
+//
+// Прежний контракт этого блока («блокирует-и-ждёт, approve → setAgentMode
+// изнутри») переписан сознательно: решение по §10 вынесло ожидание наружу
+// прогона. Оба старых кейса резолвили промис из pendingPlans — промиса больше
+// нет, ждать нечего. Кейсы ниже держат НОВЫЙ контракт того же места.
+describe('plan-gate: createPlanHandler (ожидание снаружи прогона)', () => {
   function makeCtx(over: Record<string, unknown> = {}) {
     return {
       agentMode: 'plan',
@@ -45,6 +50,7 @@ describe('plan-gate: createPlanHandler (block-and-wait)', () => {
       recordJournal: () => {},
       sender: { send: vi.fn() },
       sendId: 1,
+      runId: 'run-1',
       scopedKey: (s: number, c: string) => `${s}::${c}`,
       projectPath: '/p',
       ...over,
@@ -62,25 +68,35 @@ describe('plan-gate: createPlanHandler (block-and-wait)', () => {
     },
   } as never
 
-  it('approve → setAgentMode(accept-edits) (одобренный план выполняется в прогоне)', async () => {
+  // Главное свойство переноса: хендлер возвращается САМ. Ничего не резолвим —
+  // если await вернётся, значит прогон снова ждёт человека внутри себя.
+  it('карточка показана, но хендлер возвращается сам — прогон не ждёт человека', async () => {
     const ctx = makeCtx()
-    const p = createPlanHandler.handle(call, ctx)
-    // Promise-executor поставил pending синхронно — резолвим approve.
-    const pending = [...(ctx as { pendingPlans: Map<string, { resolve: (d: unknown) => void }> }).pendingPlans.values()][0]
-    expect(pending).toBeTruthy()
-    pending.resolve({ decision: 'approve' })
-    const res = await p as { result: string }
-    expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode).toHaveBeenCalledWith('accept-edits')
-    expect(res.result).toContain('ОДОБРИЛ')
+    const res = await createPlanHandler.handle(call, ctx) as { result: string }
+    const events = (ctx as { sender: { send: ReturnType<typeof vi.fn> } }).sender.send.mock.calls
+      .map(c => (c[1] as { event: { type: string } }).event)
+    expect(events.some(e => e.type === 'plan-approval'), 'карточка обязана появиться').toBe(true)
+    expect(res.result).toContain('согласование')
+    expect(res.result).toContain('не выполняй')
+    expect((ctx as { pendingPlans: Map<string, unknown> }).pendingPlans.size, 'ожидание внутри прогона не заводится').toBe(0)
   })
 
-  it('reject → setAgentMode НЕ вызван (выполнение не включается)', async () => {
-    const ctx = makeCtx()
-    const p = createPlanHandler.handle(call, ctx)
-    const pending = [...(ctx as { pendingPlans: Map<string, { resolve: (d: unknown) => void }> }).pendingPlans.values()][0]
-    pending.resolve({ decision: 'reject', feedback: 'нет' })
-    await p
-    expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode).not.toHaveBeenCalled()
+  // Рантайм, а не просьба в тексте: пока решение не принято, прогон работает в
+  // режиме plan, где mode-policy блокирует любую запись.
+  it('на время ожидания режим прогона ПОНИЖЕН до plan', async () => {
+    const ctx = makeCtx({ agentMode: 'plan' })
+    await createPlanHandler.handle(call, ctx)
+    expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode).toHaveBeenCalledWith('plan')
+    expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode)
+      .not.toHaveBeenCalledWith('accept-edits')
+  })
+
+  it('план запоминает прогон — по нему пойдёт продолжение после approve', async () => {
+    const recordPlan = vi.fn(() => ({ id: 7 }))
+    const ctx = makeCtx({ recordPlan, runId: 'run-42' })
+    await createPlanHandler.handle(call, ctx)
+    expect(recordPlan).toHaveBeenCalledWith('/p', 'Рефактор', expect.any(Array),
+      expect.objectContaining({ agentRunId: 'run-42' }))
   })
 
   it('гейт ВЫКЛ (plan_approval_gate≠true) → НЕ блокирует, обычный план', async () => {

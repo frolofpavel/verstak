@@ -78,3 +78,23 @@ This is intentionally a small polling primitive over the existing `agent_runs` s
 3. default `30 min`.
 
 The policy is clamped to a safe range (`30s..6h`). When the watchdog fires, it writes `agent_runs.status='timed_out'`, appends a timeout event, emits a chat error, and aborts the shared run `AbortController`. The runner then unwinds normally, but `agentRuns.finish()` is idempotent, so the later abort cleanup cannot overwrite the `timed_out` terminal state.
+
+## Plan approval waits outside the run (VSK-TASK-FLOW-A1 §10)
+
+A run that proposes a plan does **not** block waiting for the human decision.
+`create_plan` persists the plan, links it to the run via `plans.agent_run_id`,
+emits the approval card and returns immediately; the run then finishes normally
+and the watchdog above is disarmed with it. A plan left pending for hours can no
+longer die of `agent_run_timeout_ms`.
+
+The wait itself is durable state, not a live promise: plan row in `draft` plus
+the run's checkpoint. `runner-finalize` keeps the checkpoint of a run that left a
+plan awaiting approval (normally a clean `completed` run drops it), because that
+checkpoint is where execution resumes.
+
+On approve, `plans:resolve-approval` returns a continuation (`text`,
+`resumeFromRunId`, `agentMode`) and the renderer sends it as a normal `ai:send`
+with checkpoint replay — history is not rebuilt. On reject the plan becomes
+`cancelled` and the checkpoint is released. While the decision is pending, the
+proposing run is demoted to `plan` mode, so `mode-policy.decide` blocks writes
+regardless of what the model decides to attempt.

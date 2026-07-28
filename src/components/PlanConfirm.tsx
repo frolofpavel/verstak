@@ -30,13 +30,26 @@ export function PlanConfirm() {
   const ref = pendingPlan
 
   async function resolve(decision: 'approve' | 'revise' | 'reject') {
-    await window.api.ai.resolvePlan(ref.callId, decision, feedback.trim() || undefined, ref.sendId)
-    if (decision === 'approve') {
-      const store = useProject.getState()
-      if (store.activePipeline?.step === 'plan') {
-        await store.advancePipeline({ step: 'execute', planId: ref.planId })
-        window.dispatchEvent(new CustomEvent('gg-pipeline-plan-approved'))
-      }
+    // §10: прогон, показавший карточку, уже завершён — резолвить внутри него
+    // нечего. Решение идёт в БД, а работа продолжается отдельной отправкой с
+    // якорем на чекпойнт того прогона (историю заново не пересобираем).
+    const outcome = await window.api.plans.resolveApproval(ref.planId, decision, feedback.trim() || undefined)
+    const store = useProject.getState()
+    if (decision === 'approve' && store.activePipeline?.step === 'plan') {
+      // Pipeline ведёт своё продолжение сам (execute-промпт из брифа) — второй
+      // отправкой мы бы запустили тот же шаг дважды.
+      await store.advancePipeline({ step: 'execute', planId: ref.planId })
+      window.dispatchEvent(new CustomEvent('gg-pipeline-plan-approved'))
+    } else if (outcome?.continuation) {
+      // Режим едет вместе с продолжением: чат применит его и дождётся, прежде
+      // чем отправлять (иначе одобренный план переспросит на первой же записи).
+      window.dispatchEvent(new CustomEvent('gg-resume-send', {
+        detail: {
+          text: outcome.continuation.text,
+          ...(outcome.continuation.resumeFromRunId ? { resumeFromRunId: outcome.continuation.resumeFromRunId } : {}),
+          ...(outcome.continuation.agentMode ? { agentMode: outcome.continuation.agentMode } : {}),
+        },
+      }))
     }
     setPendingPlan(null)
     setFeedback('')

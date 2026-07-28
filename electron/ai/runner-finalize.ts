@@ -3,7 +3,7 @@ import type { AgentRuns } from '../storage/agent-runs'
 import { usageHash } from '../storage/agent-run-usage'
 import { exitReasonToAgentRunStatus } from './run-lifecycle'
 import { PROVIDERS, type ProviderId } from './registry'
-import { suspendedSends } from './runner-shared'
+import { suspendedSends, getPlanAwaitingApproval } from './runner-shared'
 import { buildSessionEndMemory } from './memory-lifecycle'
 import { writeSessionJournal, type ExitReason } from './session-journal'
 import type { ChatMessage } from './types'
@@ -150,7 +150,11 @@ function persistAgentRun(input: FinalizeApiRunInput): void {
 
     persistUsage(input, agentRuns, runId)
 
-    if (input.exitReason === 'completed') {
+    // §10: прогон, оставивший план на согласовании, завершается ЧИСТО — но его
+    // чекпойнт и есть то место, с которого продолжится работа после approve.
+    // Удалить его здесь значило бы после каждой карточки пересобирать историю
+    // заново, то есть ровно то, чего §10 требует не делать.
+    if (input.exitReason === 'completed' && getPlanAwaitingApproval(runId) == null) {
       agentRuns.clearCheckpoint(runId)
     }
     input.clearCheckpointThrottle(runId)

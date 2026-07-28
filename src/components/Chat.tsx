@@ -728,6 +728,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const flushQueueRef = useRef<() => void>(() => {})
   // Resume задачи (Фаза 4): взводится при gg-resume-send, эффект ниже шлёт send().
   const resumeAutoSendRef = useRef(false)
+  // §10: продолжение после approve приходит с режимом («выполняй правки»). Шлём
+  // только когда режим реально применился — иначе одобренный план поедет в
+  // прежнем режиме и переспросит на первой же записи.
+  const resumeSendModeRef = useRef<AgentMode | null>(null)
   // Crash-resume Фаза 2: runId прерванного прогона для re-send с полным контекстом
   // (взводится из gg-resume-send с объектом-detail; консьюмится в send()).
   const resumeFromRunIdRef = useRef<string | null>(null)
@@ -1865,13 +1869,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     function onResume(e: Event) {
       // detail: либо строка (legacy — AgentRunsPanel/PipelineBanner), либо объект
       // { text, resumeFromRunId } (ResumeBanner Фаза 2 — re-send с полным контекстом).
-      const ev = e as CustomEvent<string | { text: string; resumeFromRunId?: string }>
+      const ev = e as CustomEvent<string | { text: string; resumeFromRunId?: string; agentMode?: AgentMode }>
       const d = ev.detail
       const text = typeof d === 'string' ? d : d?.text
       const resumeRunId = typeof d === 'string' ? null : (d?.resumeFromRunId ?? null)
+      const resumeMode = typeof d === 'string' ? null : (d?.agentMode ?? null)
       if (typeof text === 'string' && text.trim()) {
         setInput(text)
         resumeFromRunIdRef.current = resumeRunId
+        resumeSendModeRef.current = resumeMode
         resumeAutoSendRef.current = true
       }
     }
@@ -2081,11 +2087,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // resumeFromRunIdRef). Флаг гасим сразу, чтобы обычный ввод не уезжал в авто-send.
   useEffect(() => {
     if (resumeAutoSendRef.current && input.trim() && !isStreaming) {
+      // §10: продолжение с режимом («выполняй правки») сначала применяет режим и
+      // только потом шлёт. Ставим его здесь, а не в обработчике события: этот
+      // эффект пересобирается каждый рендер, значит setAgentMode тут свежий и
+      // пишет в настройку ТЕКУЩЕГО чата, а не того, что был при подписке.
+      const wantMode = resumeSendModeRef.current
+      if (wantMode && agentMode !== wantMode) { void setAgentMode(wantMode); return }
+      resumeSendModeRef.current = null
       resumeAutoSendRef.current = false
       void send()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, isStreaming])
+  }, [input, isStreaming, agentMode])
 
   // Cleanup warning / queue notice timers on unmount
   useEffect(() => () => {

@@ -374,7 +374,10 @@ contextBridge.exposeInMainWorld('api', {
     setStatus: (id: number, status: string) => ipcRenderer.invoke('plans:set-status', id, status),
     updateStep: (id: number, patch: { status?: string; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) =>
       ipcRenderer.invoke('plans:update-step', id, patch),
-    remove: (id: number) => ipcRenderer.invoke('plans:remove', id)
+    remove: (id: number) => ipcRenderer.invoke('plans:remove', id),
+    // §10: решение по карточке согласования принимается снаружи прогона.
+    resolveApproval: (id: number, decision: 'approve' | 'revise' | 'reject', feedback?: string) =>
+      ipcRenderer.invoke('plans:resolve-approval', id, decision, feedback)
   },
   proof: {
     generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<

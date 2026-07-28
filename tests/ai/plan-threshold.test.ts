@@ -128,11 +128,18 @@ describe('инвариант: автоутверждение не выдаёт �
     expect(branch).not.toContain('ctx.agentMode =')
   })
 
-  it('карточка по-прежнему единственный путь к повышению режима', () => {
+  // ПИН ПЕРЕПИСАН при переносе ожидания наружу прогона (§10). Раньше он держал
+  // «повышение режима живёт в ветке решения пользователя» — но решение больше не
+  // принимается внутри хендлера, и той ветки в файле нет. Инвариант от этого не
+  // ослаб, а усилился: хендлер теперь НЕ УМЕЕТ повышать режим вообще, ни в одной
+  // ветке. Единственный setAgentMode здесь — понижение до 'plan'.
+  it('хендлер не умеет повышать режим: единственный setAgentMode — понижение до plan', () => {
     const src = readFileSync(join(process.cwd(), 'electron/ipc/tool-handlers/verification.ts'), 'utf8')
-    // setAgentMode вызывается ровно там, где разобрано решение пользователя.
-    const idx = src.indexOf('ctx.setAgentMode(outcome.newMode)')
-    expect(idx, 'повышение режима должно оставаться в ветке решения пользователя').toBeGreaterThan(-1)
-    expect(src.slice(0, idx)).toContain('const outcome = resolvePlanGate(')
+    const calls = src.match(/setAgentMode\([^)]*\)/g) ?? []
+    expect(calls.length, 'смена режима в этом файле должна быть ровно одна').toBe(1)
+    expect(calls[0]).toBe("setAgentMode('plan')")
+    for (const raising of ['accept-edits', 'auto', 'bypass']) {
+      expect(src, `режим ${raising} не должен назначаться в create_plan`).not.toContain(`setAgentMode('${raising}')`)
+    }
   })
 })

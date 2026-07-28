@@ -786,6 +786,12 @@ declare global {
         setStatus: (id: number, status: PlanStatus) => Promise<void>
         updateStep: (id: number, patch: { status?: StepStatus; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) => Promise<void>
         remove: (id: number) => Promise<void>
+        /** §10: решение по карточке согласования. Прогон, показавший карточку, уже
+         *  завершён — продолжение приходит отдельным ai:send с resumeFromRunId. */
+        resolveApproval: (id: number, decision: 'approve' | 'revise' | 'reject', feedback?: string) => Promise<{
+          planStatus: PlanStatus | null
+          continuation: { text: string; resumeFromRunId: string | null; agentMode: AgentModeId | null } | null
+        }>
       }
       /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html + proof.md). */
       proof: {

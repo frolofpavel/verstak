@@ -68,6 +68,11 @@ export const pendingWrites = new Map<string, PendingWrite>()
 export interface PendingCommand { sendId: number; resolve: (accept: boolean) => void }
 export const pendingCommands = new Map<string, PendingCommand>()
 
+/** ВНИМАНИЕ: с §10 (ожидание согласования вынесено наружу прогона) план-гейт этой
+ *  картой БОЛЬШЕ НЕ ПОЛЬЗУЕТСЯ — `create_plan` не блокируется и никого сюда не
+ *  кладёт, а `ai:resolve-plan` резолвит пустоту. Канал оставлен нетронутым, чтобы
+ *  не трогать пути abort/suspend ради уборки; решение по плану идёт через
+ *  `plans:resolve-approval`. Снос канала — в остатке блока B. */
 export interface PendingPlan { sendId: number; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }
 export const pendingPlans = new Map<string, PendingPlan>()
 
@@ -122,6 +127,42 @@ export function getPlanForRun(sendId: number): number | null {
 /** Только для тестов: реестр — модульный синглтон, между кейсами его надо чистить. */
 export function __resetPlanForRunForTests(): void {
   planForRun.clear()
+}
+
+// ── Ожидание согласования снаружи прогона (VSK-TASK-FLOW-A1 §10) ────────────
+//
+// Прогон, показавший карточку плана, завершается штатно и НЕ ждёт человека (см.
+// `plan-await.ts`). Но продолжение после approve идёт по чекпойнту этого
+// прогона, а чистое завершение чекпойнт удаляет (`runner-finalize`). Реестр —
+// единственный сигнал финализации: «у этого прогона висит план, чекпойнт нужен».
+//
+// Ключ — runId, а не sendId: чекпойнты живут по runId, и решение может прийти
+// после перезапуска приложения, когда sendId уже ничего не значит. Реестр
+// внутрипроцессный и нужен ровно на окно «хендлер вернул → finalize отработал»;
+// durable-состояние ожидания держит БД (план в draft + agent_run_id + чекпойнт).
+const plansAwaitingApproval = new Map<string, number>() // runId → planId
+
+/** Прогон показал карточку и завершается — его чекпойнт удалять нельзя. */
+export function markPlanAwaitingApproval(runId: string | null | undefined, planId: number): void {
+  if (typeof runId === 'string' && runId && Number.isFinite(planId)) {
+    plansAwaitingApproval.set(runId, planId)
+  }
+}
+
+/** План, ожидающий согласования по этому прогону, если он есть. */
+export function getPlanAwaitingApproval(runId: string | null | undefined): number | null {
+  if (typeof runId !== 'string' || !runId) return null
+  return plansAwaitingApproval.get(runId) ?? null
+}
+
+/** Решение принято (или план удалён) — держать чекпойнт больше не за чем. */
+export function clearPlanAwaitingApproval(runId: string | null | undefined): void {
+  if (typeof runId === 'string' && runId) plansAwaitingApproval.delete(runId)
+}
+
+/** Только для тестов: реестр — модульный синглтон, между кейсами его надо чистить. */
+export function __resetAwaitingPlansForTests(): void {
+  plansAwaitingApproval.clear()
 }
 
 /** Идёт ли прямо сейчас прогон в этом чате. Гейт ручной компакции. */

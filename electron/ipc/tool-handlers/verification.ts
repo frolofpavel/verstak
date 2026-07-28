@@ -2,12 +2,12 @@
 import type { ToolHandler } from './shared'
 import { emitActivity } from './shared'
 import { planSpecFeedback } from '../../ai/task-spec-check'
-import { resolvePlanGate, type PlanDecision } from '../../ai/plan-gate'
+import { awaitingApprovalResult } from '../../ai/plan-await'
 import { scanText } from '../../ai/secret-scanner'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../../ai/verification'
 import { scorePlanQuality } from '../../ai/plan-quality'
 import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contracts/outcome'
-import { getPlanForRun, rememberPlanForRun } from '../../ai/runner-shared'
+import { getPlanForRun, rememberPlanForRun, markPlanAwaitingApproval } from '../../ai/runner-shared'
 import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
@@ -264,9 +264,6 @@ export const createPlanHandler: ToolHandler = {
         spec: specs[index] ?? null,
       })))
       const requiresApproval = gateApplies && verdict.needsCard
-      if (requiresApproval && !ctx.pendingPlans) {
-        return { id: call.id, name: call.name, result: '', error: 'PLAN_APPROVAL_UNAVAILABLE: approval channel is not registered' }
-      }
 
       // Идемпотентность (§9 ТЗ): один прогон — один план. Повторный create_plan в
       // том же прогоне возвращает уже созданный planId, а не плодит дубликат.
@@ -291,7 +288,14 @@ export const createPlanHandler: ToolHandler = {
           detail: step.detail,
           ...(specs[index] ? { spec: specs[index] } : {}),
         })),
-        quality ? { contractRevision, planRevision, quality } : undefined,
+        // §10: происхождение плана. agentRunId — якорь продолжения после approve:
+        // по нему находят чекпойнт прогона, с которого работа поедет дальше.
+        // sourceMessageId у ToolContext нет — остаётся null (см. остаток блока B).
+        {
+          ...(quality ? { contractRevision, planRevision, quality } : {}),
+          chatId: ctx.parentChatId ?? null,
+          agentRunId: ctx.runId ?? null,
+        },
       )
       rememberPlanForRun(ctx.sendId, plan.id)
       try { ctx.recordJournal(ctx.projectPath, 'note', `План: ${title}`, `${steps.length} шагов`) } catch { /* journal not critical */ }
@@ -305,11 +309,13 @@ export const createPlanHandler: ToolHandler = {
           ...(quality ? { quality: { score: quality.score, status: quality.status, warnings: quality.warnings } } : {}),
         },
       })
-      // #3 plan-gate: в режиме планирования БЛОКИРУЕМ-И-ЖДЁМ явного решения юзера
-      // (Approve/Revise/Reject), а не просто пишем план и полагаемся на ручное
-      // переключение. approve → выполнение в этом же прогоне (мутируем ctx.agentMode —
-      // decide() читает его живо на каждом tool-call).
-      if (requiresApproval && ctx.pendingPlans) {
+      // §10 plan-gate: карточку показываем, а ЖДЁМ решения снаружи прогона.
+      // Раньше здесь стоял await на промисе, и параллельно тикал сторож времени
+      // прогона: ушёл человек от карточки надолго — вернулся к мёртвому прогону.
+      // Теперь прогон завершается штатно (сторож снимается вместе с ним), а
+      // ожидание держит БД: план в draft + agent_run_id + чекпойнт прогона.
+      // Продолжение после approve собирает ipc/plans.ts → PlanConfirm.
+      if (requiresApproval) {
         ctx.sender.send('ai:event', {
           id: ctx.sendId,
           event: {
@@ -321,19 +327,20 @@ export const createPlanHandler: ToolHandler = {
             ...(quality ? { quality: { score: quality.score, status: quality.status, warnings: quality.warnings } } : {}),
           },
         })
-        const pending = ctx.pendingPlans
-        const key = ctx.scopedKey(ctx.sendId, call.id)
-        const decision = await new Promise<{ decision: PlanDecision; feedback?: string }>(resolve => {
-          let settled = false
-          const finish = (d: { decision: PlanDecision; feedback?: string }) => { if (!settled) { settled = true; resolve(d) } }
-          pending.set(key, { sendId: ctx.sendId, resolve: finish })
-        })
-        pending.delete(key)
-        const outcome = resolvePlanGate(decision.decision, decision.feedback, title)
-        // approve → переключаем режим ПРОГОНА (мутабельный holder), чтобы следующий
-        // turn выполнял правки. Фолбэк на прямую мутацию, если setAgentMode не задан.
-        if (outcome.newMode) { if (ctx.setAgentMode) ctx.setAgentMode(outcome.newMode); else ctx.agentMode = outcome.newMode }
-        return { id: call.id, name: call.name, result: outcome.result }
+        // Финализация прогона узнаёт отсюда, что чекпойнт удалять нельзя: он и
+        // есть место, с которого продолжится работа.
+        markPlanAwaitingApproval(ctx.runId, plan.id)
+        // Права на остаток прогона ПОНИЖАЕМ до plan-режима. Это рантайм, а не
+        // просьба в тексте: модель может проигнорировать «ничего не выполняй»,
+        // но mode-policy.decide в режиме plan блокирует запись независимо от её
+        // намерений. Повышение режима сюда не приходит и прийти не может —
+        // единственный путь к нему остаётся через решение человека.
+        if (ctx.setAgentMode) ctx.setAgentMode('plan'); else ctx.agentMode = 'plan'
+        return {
+          id: call.id,
+          name: call.name,
+          result: awaitingApprovalResult({ id: plan.id, stepCount: steps.length }),
+        }
       }
       // Автоутверждение: гейт применим, но план только читает. Карточку не
       // показываем и режим НЕ повышаем — права остаются прежними.
