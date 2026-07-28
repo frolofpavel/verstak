@@ -189,6 +189,27 @@ export const attestVerificationHandler: ToolHandler = {
   }
 }
 
+/**
+ * Понизить права ПРОГОНА — и сразу, и на будущие ходы.
+ *
+ * Две записи, а не одна, и это существенно. `ctx.setAgentMode` мутирует
+ * переменную прогона в `runner-api` (её видят СЛЕДУЮЩИЕ ходы), а `ctx.agentMode`
+ * — снимок в объекте контекста, по которому судят инструменты ТЕКУЩЕГО хода.
+ * Раньше писалось только первое, поэтому `write_file`, вызванный моделью в одном
+ * ходе с `create_plan`, проходил ещё по старому режиму: понижение опаздывало
+ * ровно на тот ход, в котором оно и нужно.
+ *
+ * «Понизить» — не «переставить»: строгий режим не ослабляем. Порядок строгости
+ * plan > ask > остальные, поэтому просьба понизить до `ask` план-режим не тронет.
+ */
+function lowerRunMode(ctx: Parameters<ToolHandler['handle']>[1], target: 'ask' | 'plan'): void {
+  const STRICTNESS: Record<string, number> = { plan: 3, ask: 2, 'accept-edits': 1, auto: 0, bypass: 0 }
+  const current = STRICTNESS[ctx.agentMode] ?? 0
+  if (current >= (STRICTNESS[target] ?? 0)) return
+  ctx.setAgentMode?.(target)
+  ctx.agentMode = target
+}
+
 export const createPlanHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
@@ -353,23 +374,32 @@ export const createPlanHandler: ToolHandler = {
         // но mode-policy.decide в режиме plan блокирует запись независимо от её
         // намерений. Повышение режима сюда не приходит и прийти не может —
         // единственный путь к нему остаётся через решение человека.
-        if (ctx.setAgentMode) ctx.setAgentMode('plan'); else ctx.agentMode = 'plan'
+        lowerRunMode(ctx, 'plan')
         return {
           id: call.id,
           name: call.name,
           result: awaitingApprovalResult({ id: plan.id, stepCount: steps.length }),
         }
       }
-      // Автоутверждение: гейт применим, но план только читает. Карточку не
-      // показываем и режим НЕ повышаем — права остаются прежними.
+      // Автоутверждение: гейт применим, но план только читает.
+      //
+      // ПОЗИЦИЯ 1 РЕВЬЮ 28.07 — здесь была дыра, и она была живой. Раньше эта
+      // ветка не трогала режим вовсе, а текст обещал, что «права на запись НЕ
+      // выданы». В режиме «Принимать правки» обещание было ложным: правки там
+      // проходят автоматически, поэтому ошибка порога (модель объявила пишущий
+      // шаг читающим) давала запись файла БЕЗ единого клика — ни карточки, ни
+      // вопроса. Теперь права понижаются рантаймом: чтение остаётся свободным
+      // (read-инструменты не гейтятся вовсе), а любая попытка записи или команды
+      // упирается в подтверждение. Ровно то, что обещает §4.2: неверная
+      // самооценка модели стоит пользователю лишнего вопроса, а не тихой записи.
       if (gateApplies && !verdict.needsCard) {
+        lowerRunMode(ctx, 'ask')
         return {
           id: call.id,
           name: call.name,
           result: `План #${plan.id} сохранён и автоутверждён: ${explainVerdict(verdict)} ` +
             'Выполняй читающие шаги. Права на запись НЕ выданы: попытка изменить ' +
-            'файлы или внешнюю систему пройдёт обычную проверку режима и потребует ' +
-            'подтверждения.',
+            'файлы или внешнюю систему потребует подтверждения человека.',
         }
       }
       return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.${specFeedback}` }

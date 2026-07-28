@@ -116,16 +116,23 @@ describe('инвариант: автоутверждение не выдаёт �
     }
   })
 
-  // Страж на исходник: ветка автоутверждения обязана возвращать результат, НЕ
-  // трогая режим. Если кто-то добавит туда setAgentMode «чтобы выполнялось» —
-  // порог превратится в дыру, и этот пин покраснеет.
-  it('ветка автоутверждения в хендлере не повышает режим прогона', () => {
+  // ПИН ПЕРЕПИСАН (позиция 1 ревью 28.07), и это объявлено прямо: прежнее
+  // утверждение — «ветка автоутверждения НЕ трогает режим» — стерегло ОТМЕНЁННЫЙ
+  // контракт. Именно оно делало дыру легальной: в режиме accept-edits правки
+  // проходят автоматически, поэтому «не тронуть режим» означало отдать запись
+  // без единого клика по плану, который никто не утверждал. Теперь ветка обязана
+  // ПОНИЖАТЬ права, а не оставлять их. Инвариант «хендлер не повышает режим»
+  // не ослаб — он ниже, отдельным пином, и стал строже.
+  //
+  // Поведенческое доказательство запрета живёт в
+  // tests/ipc/plan-autoapprove-write-gate.test.ts: там настоящий writeFileHandler
+  // и проверка по файловой системе. Здесь — только форма реализации.
+  it('ветка автоутверждения ПОНИЖАЕТ права прогона', () => {
     const src = readFileSync(join(process.cwd(), 'electron/ipc/tool-handlers/verification.ts'), 'utf8')
     const start = src.indexOf('if (gateApplies && !verdict.needsCard)')
     expect(start, 'ветка автоутверждения исчезла — страж ослеп').toBeGreaterThan(-1)
-    const branch = src.slice(start, start + 700)
-    expect(branch).not.toContain('setAgentMode')
-    expect(branch).not.toContain('ctx.agentMode =')
+    const branch = src.slice(start, start + 900)
+    expect(branch, 'без понижения прав автоутверждение отдаёт запись без клика').toContain("lowerRunMode(ctx, 'ask')")
   })
 
   // ПИН ПЕРЕПИСАН при переносе ожидания наружу прогона (§10). Раньше он держал
@@ -133,13 +140,20 @@ describe('инвариант: автоутверждение не выдаёт �
   // принимается внутри хендлера, и той ветки в файле нет. Инвариант от этого не
   // ослаб, а усилился: хендлер теперь НЕ УМЕЕТ повышать режим вообще, ни в одной
   // ветке. Единственный setAgentMode здесь — понижение до 'plan'.
-  it('хендлер не умеет повышать режим: единственный setAgentMode — понижение до plan', () => {
+  it('хендлер не умеет повышать режим: смена прав идёт ТОЛЬКО через понижение', () => {
     const src = readFileSync(join(process.cwd(), 'electron/ipc/tool-handlers/verification.ts'), 'utf8')
-    const calls = src.match(/setAgentMode\([^)]*\)/g) ?? []
-    expect(calls.length, 'смена режима в этом файле должна быть ровно одна').toBe(1)
-    expect(calls[0]).toBe("setAgentMode('plan')")
+    // Форма изменилась (позиция 1): вместо двух прямых записей режима — одна
+    // функция `lowerRunMode`, которая по построению не повышает (сравнивает
+    // строгость и выходит). Утверждение то же и сильнее: прямых назначений
+    // режима в файле не осталось вовсе.
+    const direct = src.match(/ctx\.setAgentMode\?\?\(|ctx\.agentMode = '(?!plan|ask)/g) ?? []
+    expect(direct.length, 'прямое назначение режима мимо lowerRunMode').toBe(0)
     for (const raising of ['accept-edits', 'auto', 'bypass']) {
       expect(src, `режим ${raising} не должен назначаться в create_plan`).not.toContain(`setAgentMode('${raising}')`)
+      expect(src, `режим ${raising} не должен назначаться в create_plan`).not.toContain(`lowerRunMode(ctx, '${raising}')`)
     }
+    // Понижение возможно ровно в две цели, и обе строже исходной.
+    const lowered = src.match(/lowerRunMode\(ctx, '(\w[\w-]*)'\)/g) ?? []
+    expect(new Set(lowered)).toEqual(new Set(["lowerRunMode(ctx, 'plan')", "lowerRunMode(ctx, 'ask')"]))
   })
 })
