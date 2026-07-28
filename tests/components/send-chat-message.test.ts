@@ -120,6 +120,9 @@ function makeHarness(opts: {
     setExhausted: vi.fn(() => { calls.push('setExhausted:null') }),
     setCrossVerify: vi.fn(() => { calls.push('setCrossVerify:null') }),
     consumeResumeFromRunId: vi.fn(() => { const v = resumeFromRunId; resumeFromRunId = null; return v }),
+    // §10 хвост: одноразовый режим прогона. В этом харнесе его нет — режим берётся
+    // у чата, как и до §10, поэтому характеризация основного пути не меняется.
+    consumeRunAgentMode: vi.fn(() => null),
     consumePipelineOutcome: vi.fn(() => { const v = pipelineOutcome; pipelineOutcome = null; return v }),
     getPipelineAutoSendStep: vi.fn(() => opts.pipelineAutoSendStep ?? null),
     setPipelineExecuteSendId: vi.fn((id) => { calls.push(`setPipelineExecuteSendId:${id}`) }),

@@ -77,9 +77,14 @@ export interface SendChatMessageDeps {
   /** Crash-resume Фаза 2: читает ref и обнуляет (однократное потребление). */
   consumeResumeFromRunId: () => string | null
   /** §10 хвост: режим на ОДНУ отправку (одобренный план даёт права прогону, а
-   *  не чату). Читает ref и обнуляет. Необязателен: тесты и другие вызывающие
-   *  без него ведут себя как раньше — режим берётся у чата. */
-  consumeRunAgentMode?: () => AgentMode | null
+   *  не чату). Читает ref и обнуляет.
+   *
+   *  ОБЯЗАТЕЛЕН СОЗНАТЕЛЬНО. Пока поле было необязательным, снятие проводки в
+   *  Chat.tsx проходило тайпчек молча (проверено мутацией), а единственной
+   *  защитой чат-ветки оставался страж на исходник — он краснеет на удалении
+   *  текста, но не на мутации, сохраняющей текст. Обязательность делает поломку
+   *  ошибкой компиляции. Отправка без одноразового режима — это `() => null`. */
+  consumeRunAgentMode: () => AgentMode | null
   /** Pipeline outcome на одну отправку: читает ref и обнуляет. */
   consumePipelineOutcome: () => PipelineOutcomeRef | null
   getPipelineAutoSendStep: () => 'refine' | 'plan' | 'execute' | null
@@ -229,7 +234,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   // отправку. Раньше он применялся через writeAgentMode (`agent_mode_chat_N`) —
   // и один клик «Одобрить» переводил ЧАТ в accept-edits навсегда. Здесь он
   // просто побеждает режим чата в overrides и никуда не сохраняется.
-  const runAgentMode = deps.consumeRunAgentMode?.() ?? null
+  const runAgentMode = deps.consumeRunAgentMode()
   const sendAgentMode = runAgentMode ?? await deps.readAgentMode(activeChatId, false)
   // Skill override: если активен скилл — system prompt берётся из его тела.
   // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
