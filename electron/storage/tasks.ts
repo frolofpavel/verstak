@@ -29,6 +29,9 @@ export interface Tasks {
   list: (projectPath: string) => Task[]
   add: (projectPath: string, text: string, opts?: AddTaskOptions) => Task
   toggle: (id: number, done: boolean) => void
+  /** §9 ТЗ: системный пункт закрывается ТОЛЬКО с доказательством. Пустое
+   *  evidence — не закрытие: возвращает false и ничего не меняет. */
+  complete: (id: number, evidence: string) => boolean
   remove: (id: number) => void
   clearDone: (projectPath: string) => number
 }
@@ -82,6 +85,16 @@ export function createTasks(db: Database): Tasks {
     toggle(id, done) {
       const doneAt = done ? Date.now() : null
       db.prepare('UPDATE tasks SET done = ?, done_at = ? WHERE id = ?').run(done ? 1 : 0, doneAt, id)
+    },
+    complete(id, evidence) {
+      // «Закрыто по совпадению текста» — ровно то, что ТЗ запрещает: закрытие
+      // системного пункта обязано опираться на доказательство. Нет его — нет и
+      // закрытия, причём молча ничего не меняем.
+      const proof = (evidence ?? '').trim()
+      if (!proof) return false
+      const info = db.prepare('UPDATE tasks SET done = 1, done_at = ?, evidence = ? WHERE id = ?')
+        .run(Date.now(), proof, id)
+      return info.changes > 0
     },
     remove(id) {
       db.prepare('DELETE FROM tasks WHERE id = ?').run(id)

@@ -663,6 +663,8 @@ app.whenReady().then(() => {
     getPlan: (id) => plans.get(id),
     plans,
     planOutcomes,
+    // Чек-лист проекта — инструменты checklist_* блока C.
+    tasks,
     pipelineRuns,
     recordJournal: (projectPath, kind, title, detail) => {
       journal.append(projectPath, kind, title, detail ?? null)

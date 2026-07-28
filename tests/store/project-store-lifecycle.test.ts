@@ -47,6 +47,9 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     // §10 хвост: карточка согласования переехала в bundle чата — значит она тоже
     // обязана переживать roundtrip перехода между чатами.
     pendingPlan: { callId: `pc-${tag}`, planId: 1, title: `plan-card-${tag}`, stepCount: 2 },
+    // §7.2: карточка созданного плана — тоже состояние чата, обязана переживать
+    // переход между чатами вместе с остальным bundle.
+    planCards: [{ planId: 1, title: `plan-${tag}`, stepCount: 2, awaitingApproval: false }],
     activity: [{ id: `act-${tag}`, kind: 'read', label: 'r', status: 'ok', timestamp: 1 }],
     agentProgress: [{ id: `progress-${tag}`, phase: 'tool', title: `progress-${tag}`, status: 'running', timestamp: 1 }],
     sessionUsage: { inputTokens: 11, outputTokens: 22, cachedInputTokens: 3 },

@@ -102,7 +102,19 @@ function TaskRow({ task, onToggle, onRemove }: { task: Task; onToggle: (id: numb
       >
         {task.done ? '✓' : ''}
       </button>
-      <span className="gg-task-text">{task.text}</span>
+      <span className="gg-task-text">
+        {task.text}
+        {/* §7.3 ТЗ: у пункта видно, откуда он взялся, когда заведён, с чем связан
+            и чем подтверждено закрытие. Без этого системный пункт неотличим от
+            личного, а «закрыто» — от «закрыто по доказательству». */}
+        <span className="gg-task-meta">
+          {task.source === 'system' ? 'Verstak' : 'вы'}
+          {' · '}
+          {new Date(task.createdAt).toLocaleDateString('ru-RU')}
+          {task.planId != null && <> {' · '} план #{task.planId}</>}
+          {task.evidence && <> {' · '} подтверждено: {task.evidence}</>}
+        </span>
+      </span>
       <button className="gg-task-remove" onClick={() => { void onRemove(task.id) }} title="Удалить">×</button>
     </div>
   )

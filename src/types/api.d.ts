@@ -74,7 +74,20 @@ export interface ChatSession {
   kind: ChatKind
   parentChatId: number | null
 }
-export interface Task { id: number; text: string; done: boolean; createdAt: number; doneAt: number | null }
+/** Пункт чек-листа проекта. Блок C: у пункта видно происхождение, связь с планом
+ *  (необязательную) и доказательство закрытия — системный пункт закрывается
+ *  только по нему. */
+export interface Task {
+  id: number
+  text: string
+  done: boolean
+  createdAt: number
+  doneAt: number | null
+  source: 'manual' | 'system'
+  planId: number | null
+  planStepId: number | null
+  evidence: string | null
+}
 export type JournalKind = 'manual' | 'session' | 'tool' | 'note'
 export interface JournalEntry { id: number; kind: JournalKind; title: string; detail: string | null; createdAt: number }
 export interface WorktreeGitStateDTO { dirty: boolean; unpushed: boolean; clean: boolean; dirtyFiles?: number; unpushedCommits?: number }

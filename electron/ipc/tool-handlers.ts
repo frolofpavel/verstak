@@ -52,6 +52,7 @@ import type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, ToolHandler }
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
 import { replanPlanHandler, reportStepOutcomeHandler, submitTaskContractHandler } from './tool-handlers/outcome'
+import { checklistAddHandler, checklistCompleteHandler, checklistListHandler } from './tool-handlers/checklist'
 
 // Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
 // write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
@@ -79,6 +80,10 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'submit_task_contract': submitTaskContractHandler,
   'report_step_outcome': reportStepOutcomeHandler,
   'replan_plan': replanPlanHandler,
+  // Чек-лист проекта (§9 блока C) — плоский пользовательский список, НЕ session todos
+  'checklist_add': checklistAddHandler,
+  'checklist_complete': checklistCompleteHandler,
+  'checklist_list': checklistListHandler,
   // TodoGate (Фаза 3) — оркестрационный todo-лист сессии
   'todo_create': todoCreateHandler,
   'todo_update': todoUpdateHandler,

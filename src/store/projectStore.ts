@@ -13,6 +13,7 @@ import {
   type PendingWrite,
   type PendingCommand,
   type PendingPlanCard,
+  type PlanCreatedCard,
   type ActivityEntry,
   type TouchKind,
   type SessionUsage,
@@ -171,6 +172,10 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   applyAgentProgressEvent: (event: { type: string; [k: string]: unknown }) => void
   /** Добавить preflight-карточку (агент объявил план). */
   pushPreflight: (card: PreflightCard) => void
+  /** §7.2: карточка созданного плана в поток КОНКРЕТНОГО чата (событие может
+   *  прийти по фоновому прогону). Повторное событие того же плана обновляет
+   *  карточку на месте, а не плодит вторую. */
+  pushPlanCard: (chatId: number, card: PlanCreatedCard) => void
   /** Upsert sub-agent run card по callId (running → done/error). */
   upsertSubagentRun: (card: SubagentRunCard) => void
   /** Record that the AI just touched a file (read / write / list). Upgrades
@@ -646,7 +651,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   updateActivity: (id, patch) => get().updateChatBundle(get().activeChatId, b => ({
     activity: b.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
-  clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [] })),
+  clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [], planCards: [] })),
   setAgentProgress: (entries) => get().updateChatBundle(get().activeChatId, () => ({ agentProgress: entries })),
   pushAgentProgress: (entry) => get().updateChatBundle(get().activeChatId, b => ({ agentProgress: upsertAgentProgress(b.agentProgress ?? [], entry) })),
   applyAgentProgressEvent: (event) => get().updateChatBundle(get().activeChatId, b => {
@@ -655,6 +660,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return next === current ? null : { agentProgress: next }
   }),
   pushPreflight: (card) => get().updateChatBundle(get().activeChatId, b => ({ preflights: [...b.preflights, card] })),
+  pushPlanCard: (chatId, card) => get().updateChatBundle(chatId, b => {
+    const idx = b.planCards.findIndex(c => c.planId === card.planId)
+    if (idx === -1) return { planCards: [...b.planCards, card] }
+    const next = b.planCards.slice()
+    next[idx] = { ...next[idx], ...card }
+    return { planCards: next }
+  }),
   upsertSubagentRun: (card) => get().updateChatBundle(get().activeChatId, b => {
     const idx = b.subagentRuns.findIndex(r => r.callId === card.callId)
     if (idx === -1) return { subagentRuns: [...b.subagentRuns, card] }

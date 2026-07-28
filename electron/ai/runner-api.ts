@@ -134,6 +134,7 @@ export interface AgentRunContext {
   recordPlan: ToolContext['recordPlan']
   getPlan?: ToolContext['getPlan']
   plans?: ToolContext['plans']
+  tasks?: ToolContext['tasks']
   planOutcomes?: ToolContext['planOutcomes']
   agentJobs?: ToolContext['agentJobs']
   agentJobScheduler?: ToolContext['agentJobScheduler']
@@ -196,7 +197,7 @@ export interface AgentRunContext {
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
+    recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
@@ -1078,7 +1079,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-        recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+        recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,
       // §10 хвост: отпустить чекпойнт прогона, с которого сняли план (доработка
       // переносит якорь на текущий прогон — прежний иначе осиротел бы).

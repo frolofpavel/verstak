@@ -264,6 +264,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const projectAgentProgress = activeBundle?.agentProgress ?? []
   const projectSessionUsage = activeBundle?.sessionUsage ?? EMPTY_SESSION_USAGE
   const preflights = activeBundle?.preflights ?? []
+  const planCards = activeBundle?.planCards ?? []
   const subagentRuns = activeBundle?.subagentRuns ?? []
   const isHelpChat = helpMode
   const [skillSuggestionsEnabled, setSkillSuggestionsEnabled] = useState(() => readSkillSuggestionsEnabled(activePath))
@@ -1222,6 +1223,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       if (event.type === 'plan-approval') {
         const planChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
         if (planChatId != null) {
+          // §7.2: карточка в потоке честно показывает, что план ждёт решения.
+          store.pushPlanCard(planChatId, {
+            planId: event.planId,
+            title: String(event.title ?? 'План'),
+            stepCount: Number(event.stepCount ?? 0),
+            awaitingApproval: true,
+          })
           store.setChatPendingPlan(planChatId, {
             callId: event.callId,
             planId: event.planId,
@@ -1493,14 +1501,18 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         })
       }
       else if (event.type === 'plan-created') {
-        store.pushActivity({
-          id: `plan-${event.planId}`,
-          kind: 'write',
-          label: `📋 План: ${event.title}`,
-          detail: `${event.stepCount} шагов — открой вкладку Plan`,
-          status: 'ok',
-          timestamp: Date.now()
-        })
+        // §7.2 ТЗ: план — пользовательская карточка в потоке, а не техническая
+        // строка activity. Кладём в bundle СВОЕГО чата (событие может прийти по
+        // фоновому прогону), статус уточнит следующее событие plan-approval.
+        const planChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
+        if (planChatId != null) {
+          store.pushPlanCard(planChatId, {
+            planId: event.planId,
+            title: String(event.title ?? 'План'),
+            stepCount: Number(event.stepCount ?? 0),
+            awaitingApproval: false,
+          })
+        }
         if (store.path) {
           void window.api.journal.append(store.path, 'tool',
             `Создан план: ${event.title}`,
@@ -3011,6 +3023,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           helpMode={helpMode}
           activity={activity}
           preflights={preflights}
+          planCards={planCards}
+          onOpenPlan={() => setActiveView('plan')}
           subagentRuns={subagentRuns}
           agentProgress={agentProgress}
           agentProgressDurationMs={agentProgressDurationMs}

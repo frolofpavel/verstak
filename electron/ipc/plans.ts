@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type { Plans, NewStep, PlanStatus, StepStatus } from '../storage/plans'
 import type { AgentRuns } from '../storage/agent-runs'
 import { planDecisionOutsideRun, type PlanContinuation } from '../ai/plan-await'
+import { planApprovalVerdict } from '../ai/plan-threshold'
 import { clearPlanAwaitingApproval } from '../ai/runner-shared'
 import type { PlanDecision } from '../ai/plan-gate'
 
@@ -68,10 +69,19 @@ export function registerPlansIpc(plans: Plans, agentRuns?: AgentRuns): void {
     const plan = plans.get(planId)
     if (!plan) return { planStatus: null, continuation: null }
 
+    // Правило 2 цикла: пауза одна — перед ответственным действием. Какие шаги
+    // ответственные, знает тот же порог §4.2, что решал про карточку; здесь мы
+    // берём его вердикт и называем эти шаги в продолжении поимённо.
+    const verdict = planApprovalVerdict(plan.steps.map(step => ({
+      title: step.title,
+      detail: step.detail,
+      spec: step.spec,
+    })))
     const outcome = planDecisionOutsideRun(decision, feedback, {
       id: plan.id,
       title: plan.title,
       agentRunId: plan.agentRunId,
+      ...(verdict.reason === 'responsible-action' ? { responsibleSteps: verdict.triggeredBy } : {}),
     })
     plans.updatePlanStatus(plan.id, outcome.planStatus)
     if (outcome.releaseCheckpoint && plan.agentRunId) {

@@ -52,6 +52,9 @@ export interface AwaitingPlan {
   id: number
   title: string
   agentRunId: string | null
+  /** Шаги, которые порог признал ОТВЕТСТВЕННЫМИ (платёж, отправка, публикация,
+   *  удаление, права). Пусто — пауз внутри плана не нужно. */
+  responsibleSteps?: string[]
 }
 
 /**
@@ -105,7 +108,15 @@ export function planDecisionOutsideRun(
   return {
     planStatus: 'running',
     continuation: {
-      text: gate.result,
+      // Правило 2 цикла (§1 ТЗ): после approve выполнение идёт БЕЗ остановок
+      // между шагами, и единственная пауза — перед ответственным действием.
+      // Поэтому режим остаётся accept-edits (правки не переспрашиваются), а
+      // ответственные шаги называются поимённо: остановка нужна ровно там.
+      text: plan.responsibleSteps && plan.responsibleSteps.length > 0
+        ? `${gate.result} Шаги по порядку и без остановок, КРОМЕ ответственных: ` +
+          `${plan.responsibleSteps.join('; ')}. Перед каждым таким шагом остановись и спроси ` +
+          'одно короткое подтверждение; отказ — пропусти шаг и продолжай остальные.'
+        : gate.result,
       resumeFromRunId: plan.agentRunId,
       agentMode: gate.newMode,
     },

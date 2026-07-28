@@ -26,7 +26,7 @@ export function PlanView() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [outcomes, setOutcomes] = useState<StoredStepOutcome[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
-  const [composer, setComposer] = useState<{ title: string; rawSteps: string }>({ title: '', rawSteps: '' })
+  const [composer, setComposer] = useState<{ title: string; brief: string }>({ title: '', brief: '' })
   const [autopilot, setAutopilot] = useState({ enabled: false, maxSteps: 5, verifyCmd: '' })
   const [autopilotLog, setAutopilotLog] = useState<string[]>([])
   /** Set to true to cancel an in-flight Autopilot run (waits + loop). */
@@ -53,14 +53,33 @@ export function PlanView() {
     )
   }
 
-  async function createPlan() {
+  /**
+   * §7.1 ТЗ: генератор плана вместо ручного ввода шагов. Пользователь описывает
+   * задачу словами — шаги формирует AI и сохраняет их ЧЕРЕЗ `create_plan`, тем
+   * же путём, что и план из чата: с контекстом проекта, порогом согласования и
+   * проверкой качества ТЗ. Прямой `plans.create` здесь больше не вызывается
+   * СОЗНАТЕЛЬНО: он кладёт в БД ровно то, что напечатал человек, минуя и
+   * планирование, и гейт.
+   */
+  function generatePlan() {
     const title = composer.title.trim()
-    if (!title) return
-    const steps = composer.rawSteps.split('\n').map(s => s.trim()).filter(Boolean).map(s => ({ title: s }))
-    if (steps.length === 0) return
-    await window.api.plans.create(path!, title, steps)
-    setComposer({ title: '', rawSteps: '' })
-    await refresh()
+    const brief = composer.brief.trim()
+    if (!title || !brief) return
+    const prompt = [
+      `Составь план работы «${title}».`,
+      '',
+      'Что нужно сделать (словами пользователя):',
+      brief,
+      '',
+      'Изучи контекст проекта, при необходимости добери недостающее чтением файлов,',
+      'и сохрани результат ОДНИМ вызовом create_plan. Шаги — с конкретными файлами',
+      'и критерием готовности. Полотно плана в чат не выводи: подробности живут в разделе «Планы».',
+    ].join('\n')
+    setComposer({ title: '', brief: '' })
+    // Работа идёт в чате — переключаемся туда, иначе прогон уедет «в никуда» с
+    // точки зрения пользователя.
+    setActiveView('chat')
+    window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: { text: prompt } }))
   }
 
   async function toggleStep(step: PlanStep) {
@@ -245,24 +264,24 @@ ${remaining || '— нет —'}
           />
           <textarea
             className="gg-input gg-plan-steps-textarea"
-            placeholder="Шаги, по одному на строку"
-            value={composer.rawSteps}
+            placeholder="Что нужно сделать"
+            value={composer.brief}
             rows={3}
-            onChange={e => setComposer(c => ({ ...c, rawSteps: e.target.value }))}
+            onChange={e => setComposer(c => ({ ...c, brief: e.target.value }))}
           />
           <button
             className="gg-btn gg-btn-primary"
-            onClick={() => void createPlan()}
-            disabled={!composer.title.trim() || !composer.rawSteps.trim()}
+            onClick={() => generatePlan()}
+            disabled={!composer.title.trim() || !composer.brief.trim()}
             style={{ alignSelf: 'flex-end' }}
           >
-            Создать план
+            Сгенерировать план
           </button>
         </div>
 
         {plans.length === 0 && (
           <div className="gg-panel-empty">
-            Планов ещё нет. Создай первый сверху или попроси AI: «составь план для X».
+            Опишите задачу здесь или поставьте её в чате — Verstak сам сформирует план.
           </div>
         )}
 

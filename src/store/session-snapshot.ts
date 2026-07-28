@@ -24,6 +24,16 @@ export interface PendingCommand {
   sendId?: number
 }
 
+/** §7.2 ТЗ: карточка «план создан» в потоке чата — вместо технической строки
+ *  activity. Показывает название, число шагов и честный статус. */
+export interface PlanCreatedCard {
+  planId: number
+  title: string
+  stepCount: number
+  /** Ждёт ли план решения человека — карточка честно показывает статус. */
+  awaitingApproval: boolean
+}
+
 /** Карточка плана, ждущего решения человека (§10). Живёт в bundle СВОЕГО чата:
  *  до хвоста §10 это было одно глобальное поле, и вторая карточка молча
  *  затирала первую, а продолжение уезжало в активный чат вместо своего. */
@@ -112,6 +122,9 @@ export interface SessionSnapshot {
   pendingCommand: PendingCommand | null
   /** §10: план этого чата, ожидающий решения человека. */
   pendingPlan: PendingPlanCard | null
+  /** §7.2: созданные в этом чате планы — пользовательские карточки в потоке,
+   *  а не техническая строка activity. Эфемерные: чистятся на новом send. */
+  planCards: PlanCreatedCard[]
   activity: ActivityEntry[]
   agentProgress: AgentProgressEntry[]
   sessionUsage: SessionUsage
@@ -172,6 +185,7 @@ export function freshSnapshot(): SessionSnapshot {
     pendingWrites: [],
     pendingCommand: null,
     pendingPlan: null,
+    planCards: [],
     activity: [],
     agentProgress: [],
     sessionUsage: emptySessionUsage(),

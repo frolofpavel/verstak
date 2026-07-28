@@ -21887,3 +21887,46 @@ html[data-theme="light"] .gg-connectors-page {
 @media (max-width: 700px) {
   .gg-runtime-flag-row { flex-direction: column; align-items: stretch; }
 }
+
+/* Чек-лист, блок C §7.3: строка происхождения пункта — источник, дата, связь с
+   планом и доказательство закрытия. Отдельной секцией в конце, как принято в
+   этом файле; существующие классы не переименованы. */
+.gg-task-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* §7.2 блока B: карточка созданного плана в потоке чата — вместо технической
+   строки activity. Стиль опирается на существующие переменные темы; новых
+   компонентов интерфейса не вводится, композицию утверждает Павел отдельно. */
+.gg-plan-card {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-secondary);
+}
+.gg-plan-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gg-plan-card-title {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+.gg-plan-card-status {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-plan-card-meta {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-plan-card-open {
+  margin-top: 6px;
+}

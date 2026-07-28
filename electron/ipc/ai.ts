@@ -105,6 +105,7 @@ export interface AiDeps {
   recordPlan: ToolContext['recordPlan']
   getPlan?: ToolContext['getPlan']
   plans?: ToolContext['plans']
+  tasks?: ToolContext['tasks']
   planOutcomes?: ToolContext['planOutcomes']
   agentJobs?: ToolContext['agentJobs']
   agentJobScheduler?: ToolContext['agentJobScheduler']
@@ -1045,7 +1046,7 @@ export function registerAiIpc(deps: AiDeps): void {
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
         recordWrite: deps.recordWrite, recordPlan: deps.recordPlan, getPlan: deps.getPlan,
-        plans: deps.plans, planOutcomes: deps.planOutcomes,
+        plans: deps.plans, planOutcomes: deps.planOutcomes, tasks: deps.tasks,
         agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,

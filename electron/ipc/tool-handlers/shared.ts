@@ -1,6 +1,7 @@
 // Общие типы и хелперы для модулей tool-handlers/*.
 // Вынесено из electron/ipc/tool-handlers.ts при распиле монолита — поведение не меняется.
 import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
+import type { Tasks } from '../../storage/tasks'
 import type { FileTools } from '../../ai/tools'
 import type { VerifyRun } from '../../ai/review-gate'
 import type { AgentMode } from '../../ai/mode-policy'
@@ -45,6 +46,8 @@ export interface ToolContext {
   getPlan?: (id: number) => Plan | null
   plans?: Plans
   planOutcomes?: PlanOutcomes
+  /** Чек-лист проекта (§9 блока C): плоский список контрольных пунктов. */
+  tasks?: Tasks
   /** Durable execution truth for delegate/parallel/orchestrate/swarm. */
   agentJobs?: AgentJobs
   agentJobScheduler?: AgentJobScheduler

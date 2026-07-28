@@ -21,7 +21,7 @@
 
 import { Fragment, type Dispatch, type SetStateAction } from 'react'
 import { useProject } from '../../store/projectStore'
-import type { PreflightCard, SubagentRunCard, ActivityEntry } from '../../store/session-snapshot'
+import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry } from '../../store/session-snapshot'
 import { Markdown } from '../Markdown'
 import { AgentProgressPanel } from '../AgentProgressPanel'
 import { MessageActions, AttachmentPreview } from './message-parts'
@@ -63,6 +63,9 @@ export interface ChatStreamMessagesProps {
   helpMode: boolean
   activity: ActivityEntry[]
   preflights: PreflightCard[]
+  /** §7.2: карточки созданных планов — пользовательский вид вместо строки activity. */
+  planCards: PlanCreatedCard[]
+  onOpenPlan: () => void
   subagentRuns: SubagentRunCard[]
   agentProgress: AgentProgressEntry[]
   agentProgressDurationMs: number | null
@@ -85,7 +88,7 @@ export interface ChatStreamMessagesProps {
 
 export function ChatStreamMessages(props: ChatStreamMessagesProps) {
   const {
-    messages, isStreaming, provider, t, activeChatId, helpMode, activity, preflights,
+    messages, isStreaming, provider, t, activeChatId, helpMode, activity, preflights, planCards, onOpenPlan,
     subagentRuns, agentProgress, agentProgressDurationMs, agentProgressFinishedAt,
     handleAgentProgressToggle, resumableRuns, lastAssistantInfo, lastAssistantAnimationKey,
     animatedAssistantText, streamStartedAt, tickNow, crossVerify, cvExpanded, setCvExpanded,
@@ -101,6 +104,7 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
           // Render activity rows just before the (last) assistant message
           const showActivity = isLast && m.role === 'assistant' && activity.length > 0
           const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
+          const showPlanCards = isLast && m.role === 'assistant' && planCards.length > 0
           const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
             ? activity.filter(a => a.kind === 'write' && a.status === 'ok').map(a => a.detail ?? '')
@@ -193,6 +197,20 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                   ))}
                 </div>
               )}
+              {showPlanCards && planCards.map(card => (
+                <div key={`plan-${card.planId}`} className="gg-plan-card">
+                  <div className="gg-plan-card-head">
+                    <span className="gg-plan-card-title">📋 {card.title}</span>
+                    <span className="gg-plan-card-status">
+                      {card.awaitingApproval ? 'ждёт вашего решения' : 'сохранён'}
+                    </span>
+                  </div>
+                  <div className="gg-plan-card-meta">{card.stepCount} шаг(ов)</div>
+                  <button className="gg-btn gg-btn-ghost gg-plan-card-open" type="button" onClick={onOpenPlan}>
+                    Открыть план
+                  </button>
+                </div>
+              ))}
               {showPreflights && preflights.map(pf => {
                 const riskLabel = pf.risk === 'high' ? 'высокий риск' : pf.risk === 'medium' ? 'средний риск' : 'низкий риск'
                 return (
