@@ -7,6 +7,7 @@
 // Fail-closed сохранён дословно: любая непроверенная комбинация pipeline/phase/step
 // бросает ту же ошибку с тем же префиксом (рендерер различает их по префиксу).
 
+import { pickNextStep } from '../../ai/plan-step-order'
 import type { ToolContext } from '../tool-handlers'
 
 const OUTCOME_READ_TOOLS = [
@@ -78,9 +79,13 @@ export function preflightOutcome(
 
   const plan = pipeline.planId ? deps.plans?.get(pipeline.planId) : null
   const requestedStepId = outcome.planStepId
+  // Блок D §4.4: следующий шаг — первый КАНДИДАТ, чьи зависимости готовы.
+  // Прежний `find(status !== done)` возвращал провалившийся или пропущенный шаг
+  // снова и снова (план упирался в него навсегда) и не смотрел на dependsOn
+  // вовсе — тот проверялся только quality-гейтом при СОЗДАНИИ плана.
   const step = requestedStepId
     ? plan?.steps.find(item => item.id === requestedStepId)
-    : plan?.steps.find(item => item.status !== 'done')
+    : (plan ? pickNextStep(plan.steps) ?? undefined : undefined)
   let resolved = outcome
   if (step && !outcome.planStepId) {
     const attempts = deps.planOutcomes?.list(plan?.id ?? 0)
