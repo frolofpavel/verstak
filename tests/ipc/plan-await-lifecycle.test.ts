@@ -61,7 +61,11 @@ function makeCtx(plans: ReturnType<typeof createPlans>) {
   return {
     ctx: {
       projectPath: '/p', sendId: 1, runId: RUN_ID, parentChatId: 7,
-      agentMode: 'plan', setAgentMode: vi.fn(),
+      // Режим фикстуры сменён с 'plan' на 'ask' при переворачивании матрицы §5:
+      // по ТЗ в режиме планирования карточки нет вовсе, а карточка — предмет
+      // этой сетки. Ни одно утверждение файла при этом не изменилось: §10 не
+      // про режим, а про то, что ожидание живёт снаружи прогона.
+      agentMode: 'ask', setAgentMode: vi.fn(),
       getSecretForDelegate: (k: string) => (k === 'plan_approval_gate' ? 'true' : null),
       recordPlan: (p: string, title: string, steps: never[], meta: never) => plans.create(p, title, steps, meta),
       getPlan: (id: number) => plans.get(id),

@@ -9,6 +9,7 @@ import { scorePlanQuality } from '../../ai/plan-quality'
 import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contracts/outcome'
 import { getPlanForRun, rememberPlanForRun, markPlanAwaitingApproval } from '../../ai/runner-shared'
 import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
+import { planGateApplies } from '../../ai/plan-gate-modes'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
 // способ прогнать 50 команд разом. Ручные проверки сверх лимита не режем.
@@ -256,8 +257,13 @@ export const createPlanHandler: ToolHandler = {
       // себя read-only и попытавшийся писать, упирается в обычный
       // mode-policy.decide и останавливается — неверная самооценка модели даёт
       // лишний вопрос, а не тихую запись.
-      const gateApplies = ctx.outcome?.phase === 'plan'
-        || (ctx.agentMode === 'plan' && ctx.getSecretForDelegate?.('plan_approval_gate') === 'true')
+      // §5: кто спрашивает — решает матрица режимов; что в плане — порог ниже.
+      const gateApplies = planGateApplies({
+        agentMode: ctx.agentMode,
+        outcomePhase: ctx.outcome?.phase ?? null,
+        planApprovalSetting: ctx.getSecretForDelegate?.('plan_approval_gate') === 'true',
+        delegationDepth: ctx.delegationDepth,
+      })
       const verdict = planApprovalVerdict(steps.map((step, index) => ({
         title: step.title,
         detail: step.detail,

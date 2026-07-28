@@ -42,7 +42,10 @@ describe('plan-gate: resolvePlanGate', () => {
 describe('plan-gate: createPlanHandler (ожидание снаружи прогона)', () => {
   function makeCtx(over: Record<string, unknown> = {}) {
     return {
-      agentMode: 'plan',
+      // Режим сменён с 'plan' на 'ask' при переворачивании матрицы §5: по ТЗ в
+      // режиме планирования карточки нет, а этот блок — про поведение карточки.
+      // Утверждения кейсов не менялись.
+      agentMode: 'ask',
       pendingPlans: new Map(),
       setAgentMode: vi.fn(),
       getSecretForDelegate: (k: string) => (k === 'plan_approval_gate' ? 'true' : null),
@@ -84,7 +87,10 @@ describe('plan-gate: createPlanHandler (ожидание снаружи прог
   // Рантайм, а не просьба в тексте: пока решение не принято, прогон работает в
   // режиме plan, где mode-policy блокирует любую запись.
   it('на время ожидания режим прогона ПОНИЖЕН до plan', async () => {
-    const ctx = makeCtx({ agentMode: 'plan' })
+    // Явное переопределение режима на 'plan' убрано вместе с переворотом §5:
+    // ожидание теперь живёт в ask/accept-edits, а в plan карточки нет. Само
+    // утверждение кейса не изменилось.
+    const ctx = makeCtx()
     await createPlanHandler.handle(call, ctx)
     expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode).toHaveBeenCalledWith('plan')
     expect((ctx as { setAgentMode: ReturnType<typeof vi.fn> }).setAgentMode)

@@ -1,17 +1,21 @@
-// Блок B-2 (ТЗ §5, матрица режимов) — characterization НЫНЕШНЕГО условия гейта,
-// снятая ДО переворота.
+// Блок B-2 (ТЗ §5, матрица режимов) — гейт согласования ПОСЛЕ переворота.
 //
-// Зачем именно characterization. §5 не настраивает текущее поведение, а
-// переворачивает его: сегодня карточка согласования появляется РОВНО в одном
-// режиме (`plan`, и только при включённой настройке), а по ТЗ в этом режиме её не
-// должно быть вообще, зато она обязана появляться в `ask` и `accept-edits`, где
-// сейчас гейта нет вовсе. Переворот такого рода легко сделать «почти правильно» и
-// не заметить, что заодно поехало что-то третье. Эти пины фиксируют «как есть»,
-// чтобы после переворота было чем доказать: сломано ровно предназначенное.
+// ИСТОРИЯ ЭТОГО ФАЙЛА ВАЖНА. Он был снят как characterization «как есть» ДО
+// правок (коммит d1925d0): тогда карточка появлялась РОВНО в одном режиме —
+// `plan`, и только при включённой настройке. §5 требует обратного: в `plan`
+// согласовывать нечего (выполнение там запрещено всегда), зато карточка обязана
+// появляться в `ask` и `accept-edits`, где гейта не было вовсе.
 //
-// Пины ниже намеренно описывают поведение, часть которого будет ОТМЕНЕНА. Их
-// правка при реализации §5 — ожидаемая и обязательная; отменённый кейс переходит
-// в противоположный, а не удаляется молча. Это и есть смысл снимка «до».
+// Шесть кейсов ниже переписаны из «как есть» в «как стало» — ровно те, чьё
+// поведение §5 отменяет. Отменённый кейс переходит в противоположный, а не
+// исчезает молча: снимок «до» лежит в истории git и сравним построчно. Все
+// остальные кейсы файла остались дословно теми же и зелёными — доказательство,
+// что переворот сломал ровно предназначенное.
+//
+// Рубильник чат-контекста — настройка `plan_approval_gate` («Ждать одобрения
+// плана»). Она выключена по умолчанию, поэтому при выключенном тумблере поведение
+// осталось прежним байт в байт, а §5 включается вместе с ним. Почему матрицу
+// нельзя включить по умолчанию прямо сейчас — разобрано в аудите (хвост §10).
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPlanHandler } from '../../electron/ipc/tool-handlers/verification'
 import { __resetPlanForRunForTests, __resetAwaitingPlansForTests } from '../../electron/ai/runner-shared'
@@ -94,16 +98,19 @@ beforeEach(() => {
   __resetAwaitingPlansForTests()
 })
 
-describe('КАК ЕСТЬ: карточка согласования появляется ровно в одном режиме', () => {
-  // Ядро снимка. По ТЗ §5 эта таблица должна стать почти обратной.
-  it.each(ALL_MODES)('режим %s + настройка ВКЛ: карточка только в plan', async mode => {
+describe('КАК СТАЛО: карточка в ask и accept-edits, в plan её нет', () => {
+  // Ядро матрицы §5. Раньше эта таблица была обратной: true стоял только у plan.
+  const GATED: AgentMode[] = ['ask', 'accept-edits']
+  it.each(ALL_MODES)('режим %s + настройка ВКЛ', async mode => {
     const { ctx, sender } = makeCtx({ mode, gateSetting: true })
     const res = await createPlanHandler.handle(callWith(null), ctx) as { result: string }
-    if (mode === 'plan') {
-      expect(cardShown(sender), 'сегодня plan — единственный режим с карточкой').toBe(true)
+    if (GATED.includes(mode)) {
+      expect(cardShown(sender), `в режиме ${mode} карточка обязана появиться`).toBe(true)
       expect(res.result).toContain('согласование')
     } else {
-      expect(cardShown(sender), `в режиме ${mode} гейта сейчас нет вовсе`).toBe(false)
+      // plan — согласовывать нечего (выполнение запрещено всегда);
+      // auto — план автоутверждается целиком; bypass — без нового гейта.
+      expect(cardShown(sender), `в режиме ${mode} карточки быть не должно`).toBe(false)
       expect(res.result).toContain('Plan #42')
     }
   })
@@ -115,14 +122,25 @@ describe('КАК ЕСТЬ: карточка согласования появл�
     expect(res.result).toContain('Plan #42')
   })
 
-  // Настройка plan_approval_gate — тумблер, который сегодня решает всё в легаси-пути.
-  it('в режиме plan настройка и есть весь гейт: ВЫКЛ → карточки нет', async () => {
-    const on = makeCtx({ mode: 'plan', gateSetting: true })
-    const off = makeCtx({ mode: 'plan', gateSetting: false })
+  // Тумблер остался рубильником чат-контекста — сменился только режим, в котором
+  // он что-то включает. Раньше это был plan, теперь ask.
+  it('в режиме ask настройка и есть весь гейт: ВЫКЛ → карточки нет', async () => {
+    const on = makeCtx({ mode: 'ask', gateSetting: true })
+    const off = makeCtx({ mode: 'ask', gateSetting: false })
     await createPlanHandler.handle(callWith(null), on.ctx)
     await createPlanHandler.handle(callWith(null), off.ctx)
     expect(cardShown(on.sender)).toBe(true)
     expect(cardShown(off.sender)).toBe(false)
+  })
+
+  // Инверсия ТЗ отдельным пином, чтобы её нельзя было потерять молча.
+  it('в режиме plan карточки нет вовсе — одобрять нечем, кнопки не существует', async () => {
+    for (const gateSetting of [true, false]) {
+      const { ctx, sender } = makeCtx({ mode: 'plan', gateSetting })
+      const res = await createPlanHandler.handle(callWith(null), ctx) as { result: string }
+      expect(cardShown(sender), `настройка=${gateSetting}`).toBe(false)
+      expect(res.result).toContain('Plan #42')
+    }
   })
 })
 
@@ -145,13 +163,20 @@ describe('КАК ЕСТЬ: outcome-пайплайн включает гейт н
   })
 })
 
-describe('КАК ЕСТЬ: легаси-путь не умеет автоутверждать', () => {
+describe('ОСТАЛОСЬ КАК БЫЛО: легаси-путь не умеет автоутверждать', () => {
   // Порог требует structured spec у ВСЕХ шагов; у легаси-шага его нет → вердикт
-  // no-declaration → карточка. Значит автоутверждение сегодня достижимо ТОЛЬКО
-  // через outcome-пайплайн. Для §5 это существенно: в ask/accept-edits порог
-  // должен работать и на легаси-пути, иначе матрица упрётся в fail-safe.
-  it('шаг без spec в режиме plan всегда даёт карточку — автоутверждения нет', async () => {
-    const { ctx, sender } = makeCtx({ mode: 'plan', gateSetting: true })
+  // no-declaration → карточка. Значит автоутверждение достижимо ТОЛЬКО через
+  // outcome-пайплайн, и §5 этого НЕ изменил.
+  //
+  // Цена известна и названа честно: при включённом тумблере в ask карточка
+  // появится на КАЖДЫЙ многошаговый план, включая читающий, то есть правило §4.2
+  // «чтение не требует утверждения» на легаси-пути пока не работает. Починить
+  // выносом парсинга spec из-под `if (ctx.outcome)` НЕДОСТАТОЧНО: parsePlanStepSpec
+  // отдаёт значение только при нуле диагностик (нужны все 16 полей), а описание
+  // инструмента прямо разрешает легаси-планам spec не передавать. Разбор — в
+  // аудите; это отдельная позиция, а не строчка внутри §5.
+  it('шаг без spec в режиме ask всегда даёт карточку — автоутверждения нет', async () => {
+    const { ctx, sender } = makeCtx({ mode: 'ask', gateSetting: true })
     const res = await createPlanHandler.handle(callWith(null), ctx) as { result: string }
     expect(cardShown(sender)).toBe(true)
     expect(res.result).not.toContain('автоутверждён')
@@ -160,7 +185,7 @@ describe('КАК ЕСТЬ: легаси-путь не умеет автоутв�
 
 describe('КАК ЕСТЬ: инварианты §10, которые матрица обязана сохранить', () => {
   it('карточка понижает режим прогона до plan и НИКОГДА не повышает', async () => {
-    const { ctx, setAgentMode } = makeCtx({ mode: 'plan', gateSetting: true })
+    const { ctx, setAgentMode } = makeCtx({ mode: 'ask', gateSetting: true })
     await createPlanHandler.handle(callWith(null), ctx)
     expect(setAgentMode).toHaveBeenCalledWith('plan')
     for (const raising of ['accept-edits', 'auto', 'bypass']) {
