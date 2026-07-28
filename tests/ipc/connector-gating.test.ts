@@ -29,7 +29,16 @@ function harness(dir: string, mode: AgentMode, queryImpl?: (cid: string, args: R
     agentMode: mode,
     signal: controller.signal,
     sender: { send: () => {} },
-    pendingCommands: new Map(),
+    // ПРАВКА ФИКСТУРЫ (позиция 2, 29.07) — объявляю прямо. Предмет этих пинов —
+    // ГАРД ПУТЕЙ (эксфильтрация через send_document); режим 'auto' был лишь фоном
+    // «ничего не спрашивает». Пакет паузы этот фон отменил: отправка и публикация
+    // требуют подтверждения в ЛЮБОМ режиме, кроме bypass. Поэтому в auto-кейсах
+    // фикстура подтверждает сразу — пины продолжают стеречь ровно то, ради чего
+    // написаны, и ни одно их утверждение не изменилось. В ask-кейсах ответ
+    // по-прежнему даёт сам тест: там предмет проверки — реакция на ОТКАЗ.
+    pendingCommands: mode === 'auto'
+      ? { set: (_k: string, e: { resolve: (ok: boolean) => void }) => { e.resolve(true) }, delete: () => {} }
+      : new Map(),
     scopedKey: (sendId: unknown, callId: unknown) => `${sendId}:${callId}`,
     recordJournal: () => {},
     connectors: {

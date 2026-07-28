@@ -103,3 +103,37 @@ describe('блок D: чек-лист закрывается вместе с ш�
     expect(linked.evidence).toBeNull()
   })
 })
+
+// Позиция 2, требование (в): отказ ПОМЕЧАЕТ шаг, а не только возвращает строку.
+// До 29.07 статус 'skipped' не ставила ни одна строка кода в проекте — «отказ
+// пропускает шаг» существовало только на словах.
+describe('позиция 2 (в): заблокированный шаг помечается skipped, а не failed', () => {
+  it('blocked-исход ставит шагу skipped и не закрывает чек-лист', async () => {
+    const s = seed()
+    const blocked = {
+      id: 'c1', name: 'report_step_outcome',
+      args: {
+        status: 'blocked',
+        summary: 'Пользователь отказал в подтверждении отправки',
+        observations: [], changedFiles: [], checks: [], evidence: [],
+        assumptionFailures: [], recommendedAction: 'ask-user',
+      },
+    } as never
+
+    // Отказ = агент НИЧЕГО не писал. Если оставить 'тронутые файлы' из общей
+    // фикстуры, исход пересчитается в diverged (скрытая запись) — и тест будет
+    // проверять не то. Даём честный контекст отказа: файлов не тронуто.
+    const ctx = { ...(ctxOf(s, 'failed') as object), runFilesTouched: () => [] } as never
+    await reportStepOutcomeHandler.handle(blocked, ctx)
+
+    const step = s.plans.get(s.plan.id)!.steps[0]
+    expect(step.status, '«отказано» и «провалено» — разные вещи').toBe('skipped')
+    expect(s.tasks.list(dir).find(t => t.id === s.linked.id)!.done).toBe(false)
+  })
+
+  it('контроль: настоящий провал по-прежнему failed', async () => {
+    const s = seed()
+    await reportStepOutcomeHandler.handle(call('failed'), ctxOf(s, 'failed'))
+    expect(s.plans.get(s.plan.id)!.steps[0].status).toBe('failed')
+  })
+})

@@ -184,7 +184,12 @@ export const reportStepOutcomeHandler: ToolHandler = {
       decision,
     })
     ctx.plans.updateStep(step.id, {
-      status: outcome.status === 'succeeded' ? 'done' : 'failed',
+      // Правило 2 цикла: отказ от подтверждения ответственного действия ПРОПУСКАЕТ
+      // шаг, а не роняет план. До 29.07 статус 'skipped' не ставила ни одна строка
+      // кода — «отказ пропускает шаг» существовало только на словах, и ревью это
+      // назвало прямо. Теперь blocked-исход шага кладётся как 'skipped': работа не
+      // сделана, но и не провалена — остальные шаги идут дальше.
+      status: outcome.status === 'succeeded' ? 'done' : outcome.status === 'blocked' ? 'skipped' : 'failed',
       result: outcome.summary,
       runId: ctx.runId,
       verificationStatus: outcome.checks.every(check => check.status === 'passed') ? 'passed' : 'failed',

@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { decide, type AgentMode, type AutoApprove, type ToolDecision } from './mode-policy'
+import { classifyResponsibleAction } from './responsible-action'
 
 export type RuleDecision = 'allow' | 'deny' | 'ask'
 
@@ -392,6 +393,23 @@ export function resolveDecision(
     return { decision: 'block', reason: `Заблокировано правилом permissions: deny "${rule.rule.raw}".` }
   }
   if (base === 'block') return { decision: 'block' } // plan-режим строг, правила не ослабляют
+
+  // ПРАВИЛО 2 ЦИКЛА: пауза перед ОТВЕТСТВЕННЫМ действием (платёж, отправка,
+  // публикация, удаление, права). Стоит ВЫШЕ allow-правила, autoApprove и режима
+  // `auto` СОЗНАТЕЛЬНО: ревью 28.07 показало, что врезка в последний из не-deny
+  // выходов оставляет три обхода сразу. Здесь их нет — ответственное действие
+  // спрашивает всегда.
+  //
+  // `bypass` — единственное законное исключение, и оно записано явно: этот режим
+  // по определению «никаких диалогов» (см. AGENT_MODES), человек выбирает его
+  // осознанно и берёт ответственность на себя. Всё остальное — спрашиваем.
+  if (mode !== 'bypass') {
+    const responsible = classifyResponsibleAction(toolName, args)
+    if (responsible.responsible) {
+      return { decision: 'confirm', reason: responsible.why }
+    }
+  }
+
   if (rule?.decision === 'ask') return { decision: 'confirm' }
   if (rule?.decision === 'allow') return { decision: 'auto-accept' }
   return { decision: base }
