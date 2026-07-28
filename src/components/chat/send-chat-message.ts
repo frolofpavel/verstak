@@ -76,6 +76,10 @@ export interface SendChatMessageDeps {
   setCrossVerify: (v: null) => void
   /** Crash-resume Фаза 2: читает ref и обнуляет (однократное потребление). */
   consumeResumeFromRunId: () => string | null
+  /** §10 хвост: режим на ОДНУ отправку (одобренный план даёт права прогону, а
+   *  не чату). Читает ref и обнуляет. Необязателен: тесты и другие вызывающие
+   *  без него ведут себя как раньше — режим берётся у чата. */
+  consumeRunAgentMode?: () => AgentMode | null
   /** Pipeline outcome на одну отправку: читает ref и обнуляет. */
   consumePipelineOutcome: () => PipelineOutcomeRef | null
   getPipelineAutoSendStep: () => 'refine' | 'plan' | 'execute' | null
@@ -221,7 +225,12 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
     }
   }
   const modelMessages = withAppliedSkillContextForModel(allMessages, skillCatalog, autoBoundSkillDetails)
-  const sendAgentMode = await deps.readAgentMode(activeChatId, false)
+  // §10 хвост, дефект 2: режим одобренного плана действует ровно на эту
+  // отправку. Раньше он применялся через writeAgentMode (`agent_mode_chat_N`) —
+  // и один клик «Одобрить» переводил ЧАТ в accept-edits навсегда. Здесь он
+  // просто побеждает режим чата в overrides и никуда не сохраняется.
+  const runAgentMode = deps.consumeRunAgentMode?.() ?? null
+  const sendAgentMode = runAgentMode ?? await deps.readAgentMode(activeChatId, false)
   // Skill override: если активен скилл — system prompt берётся из его тела.
   // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
   // несовместим с тем что предлагает скилл. Например: скилл говорит 'claude'

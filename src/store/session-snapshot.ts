@@ -24,6 +24,18 @@ export interface PendingCommand {
   sendId?: number
 }
 
+/** Карточка плана, ждущего решения человека (§10). Живёт в bundle СВОЕГО чата:
+ *  до хвоста §10 это было одно глобальное поле, и вторая карточка молча
+ *  затирала первую, а продолжение уезжало в активный чат вместо своего. */
+export interface PendingPlanCard {
+  callId: string
+  planId: number
+  title: string
+  stepCount: number
+  sendId?: number
+  quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] }
+}
+
 export interface ActivityEntry {
   id: string
   // 2.1.3-CD: 'route' — видимая история переключений маршрута (ротация аккаунта /
@@ -98,6 +110,8 @@ export interface SessionSnapshot {
   streamStartedAt: number | null
   pendingWrites: PendingWrite[]
   pendingCommand: PendingCommand | null
+  /** §10: план этого чата, ожидающий решения человека. */
+  pendingPlan: PendingPlanCard | null
   activity: ActivityEntry[]
   agentProgress: AgentProgressEntry[]
   sessionUsage: SessionUsage
@@ -157,6 +171,7 @@ export function freshSnapshot(): SessionSnapshot {
     streamStartedAt: null,
     pendingWrites: [],
     pendingCommand: null,
+    pendingPlan: null,
     activity: [],
     agentProgress: [],
     sessionUsage: emptySessionUsage(),

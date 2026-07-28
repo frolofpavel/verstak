@@ -441,6 +441,14 @@ export function registerAiIpc(deps: AiDeps): void {
     const checkpointRun = overrides?.resumeFromRunId
       ? (deps.agentRuns?.get(overrides.resumeFromRunId) ?? null)
       : null
+    // §10 хвост: продолжение после «Доработать» приходит якорем на чекпойнт того
+    // прогона, чей план ещё ждёт решения. По этой же связи replan_plan на
+    // чат-пути узнаёт, какой именно план править — номер не спрашивается у
+    // модели. Approve переводит план в 'running', поэтому цель доработки
+    // пропадает сама, без отдельного снятия.
+    const revisePlanId = overrides?.resumeFromRunId
+      ? (deps.plans?.findDraftByRunId(overrides.resumeFromRunId)?.id ?? null)
+      : null
     // Ось интенсивности (Простой/Турбо). Простой = сегодняшнее поведение (standard
     // effort, без наслоения). Турбо = deep effort + подсказка «вся машинерия на
     // задачу». Явный overrides.effortLevel (из UI) имеет приоритет над пресетом.
@@ -1055,6 +1063,7 @@ export function registerAiIpc(deps: AiDeps): void {
         recipe: overrides?.recipe,
         outcome,
         pipelineRuns: deps.pipelineRuns,
+        revisePlanId,
       }).finally(cleanup)
     } else {
       logRuntime('ai.runner.start', {

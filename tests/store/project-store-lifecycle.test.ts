@@ -44,6 +44,9 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     streamStartedAt: 1000,
     pendingWrites: [{ callId: `w-${tag}`, path: 'a.ts', before: '', after: 'x' }],
     pendingCommand: { callId: `c-${tag}`, command: `cmd-${tag}` },
+    // §10 хвост: карточка согласования переехала в bundle чата — значит она тоже
+    // обязана переживать roundtrip перехода между чатами.
+    pendingPlan: { callId: `pc-${tag}`, planId: 1, title: `plan-card-${tag}`, stepCount: 2 },
     activity: [{ id: `act-${tag}`, kind: 'read', label: 'r', status: 'ok', timestamp: 1 }],
     agentProgress: [{ id: `progress-${tag}`, phase: 'tool', title: `progress-${tag}`, status: 'running', timestamp: 1 }],
     sessionUsage: { inputTokens: 11, outputTokens: 22, cachedInputTokens: 3 },

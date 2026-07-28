@@ -58,13 +58,26 @@ export interface CreatePlanMeta {
   agentRunId?: string | null
 }
 
+/** Что меняет доработка плана. quality/agentRunId необязательны: на чат-пути
+ *  Task Contract'а нет (некому считать quality), а прогон-якорь переезжает на
+ *  тот, чей чекпойнт понесёт продолжение. Пропущенное поле НЕ трогается. */
+export interface ReplacePendingMeta {
+  planRevision: number
+  quality?: PlanQualityV1
+  agentRunId?: string | null
+}
+
 export interface Plans {
   list: (projectPath: string) => Plan[]
   get: (id: number) => Plan | null
   create: (projectPath: string, title: string, steps: NewStep[], meta?: CreatePlanMeta) => Plan
   updatePlanStatus: (id: number, status: PlanStatus) => void
   updateStep: (id: number, patch: { status?: StepStatus; result?: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }) => void
-  replacePending: (id: number, steps: NewStep[], meta: { planRevision: number; quality: PlanQualityV1 }) => Plan
+  replacePending: (id: number, steps: NewStep[], meta: ReplacePendingMeta) => Plan
+  /** План, ждущий решения человека по этому прогону (§10). Продолжение после
+   *  «Доработать» приходит с якорем на чекпойнт того же прогона — по этой связи
+   *  рантайм узнаёт, какой план править, не спрашивая модель. */
+  findDraftByRunId: (runId: string) => Plan | null
   remove: (id: number) => void
 }
 
@@ -212,14 +225,28 @@ export function createPlans(db: Database): Plans {
         steps.forEach((step, index) => {
           insert.run(id, maxDoneIdx + index + 1, step.title, step.detail ?? null, 'pending', step.spec ? JSON.stringify(step.spec) : null)
         })
+        // Необязательные поля пишем только когда они заданы: чат-путь не считает
+        // quality (нет Task Contract'а), и затирать ею оценку outcome-плана нельзя.
+        const fields = ['plan_revision = ?']
+        const params: unknown[] = [meta.planRevision]
+        if (meta.quality !== undefined) { fields.push('quality_json = ?'); params.push(JSON.stringify(meta.quality)) }
+        if (meta.agentRunId !== undefined) { fields.push('agent_run_id = ?'); params.push(meta.agentRunId) }
+        params.push(id)
         db.prepare(
-          `UPDATE plans SET plan_revision=?, quality_json=?, status='draft', completed_at=NULL WHERE id=?`,
-        ).run(meta.planRevision, JSON.stringify(meta.quality), id)
+          `UPDATE plans SET ${fields.join(', ')}, status='draft', completed_at=NULL WHERE id=?`,
+        ).run(...params)
       })
       tx()
       const updated = this.get(id)
       if (!updated) throw new Error(`plan ${id} disappeared`)
       return updated
+    },
+    findDraftByRunId(runId) {
+      if (!runId) return null
+      const row = db.prepare(
+        `SELECT id FROM plans WHERE agent_run_id = ? AND status = 'draft' ORDER BY id DESC LIMIT 1`,
+      ).get(runId) as { id: number } | undefined
+      return row ? this.get(row.id) : null
     },
     remove(id) {
       // Чек-лист живёт своей жизнью: удаление плана НЕ уносит пункты. У связанных

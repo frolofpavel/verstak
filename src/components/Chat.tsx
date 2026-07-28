@@ -728,9 +728,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const flushQueueRef = useRef<() => void>(() => {})
   // Resume задачи (Фаза 4): взводится при gg-resume-send, эффект ниже шлёт send().
   const resumeAutoSendRef = useRef(false)
-  // §10: продолжение после approve приходит с режимом («выполняй правки»). Шлём
-  // только когда режим реально применился — иначе одобренный план поедет в
-  // прежнем режиме и переспросит на первой же записи.
+  // §10: продолжение после approve приходит с режимом («выполняй правки»).
+  // Дефект 2 хвоста §10: раньше режим применялся через setAgentMode, то есть
+  // писался в настройку `agent_mode_chat_N` — и одобрение ОДНОГО плана меняло
+  // режим чата навсегда. Теперь это одноразовый параметр прогона: send()
+  // консьюмит ref и кладёт режим в overrides ai:send, настройка не трогается.
   const resumeSendModeRef = useRef<AgentMode | null>(null)
   // Crash-resume Фаза 2: runId прерванного прогона для re-send с полным контекстом
   // (взводится из gg-resume-send с объектом-detail; консьюмится в send()).
@@ -1212,18 +1214,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         }
         return
       }
-      // #3 plan-gate: блокирующий plan-approval показываем ГЛОБАЛЬНО (модалка), даже
-      // если прогон в фоновом чате — иначе агент висит в await навсегда (нет UI для
-      // resolve → тихий дедлок). Решение маршрутизируется по sendId в нужный прогон.
+      // §10 хвост (дефект 4): карточка кладётся в bundle СВОЕГО чата, а не в одну
+      // глобальную ячейку. Прежнее обоснование глобальности («иначе агент висит в
+      // await навсегда») умерло вместе с §10: прогон больше не ждёт человека, он
+      // завершается сразу после показа карточки. А цена глобальности осталась —
+      // вторая карточка затирала первую, и продолжение уезжало в активный чат.
       if (event.type === 'plan-approval') {
-        store.setPendingPlan({
-          callId: event.callId,
-          planId: event.planId,
-          title: String(event.title ?? 'План'),
-          stepCount: Number(event.stepCount ?? 0),
-          sendId: id,
-          quality: event.quality,
-        })
+        const planChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
+        if (planChatId != null) {
+          store.setChatPendingPlan(planChatId, {
+            callId: event.callId,
+            planId: event.planId,
+            title: String(event.title ?? 'План'),
+            stepCount: Number(event.stepCount ?? 0),
+            sendId: id,
+            quality: event.quality,
+          })
+        }
         return
       }
       if (event.type === 'task-contract-created') {
@@ -2093,13 +2100,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   // resumeFromRunIdRef). Флаг гасим сразу, чтобы обычный ввод не уезжал в авто-send.
   useEffect(() => {
     if (resumeAutoSendRef.current && input.trim() && !isStreaming) {
-      // §10: продолжение с режимом («выполняй правки») сначала применяет режим и
-      // только потом шлёт. Ставим его здесь, а не в обработчике события: этот
-      // эффект пересобирается каждый рендер, значит setAgentMode тут свежий и
-      // пишет в настройку ТЕКУЩЕГО чата, а не того, что был при подписке.
-      const wantMode = resumeSendModeRef.current
-      if (wantMode && agentMode !== wantMode) { void setAgentMode(wantMode); return }
-      resumeSendModeRef.current = null
+      // §10 (дефект 2): режим продолжения НЕ применяется к чату. Раньше здесь
+      // стоял setAgentMode + ожидание, пока настройка чата станет нужной, —
+      // одобрение одного плана оставляло чат в accept-edits навсегда. Теперь
+      // режим уезжает одноразовым параметром: send() заберёт его из ref'а.
       resumeAutoSendRef.current = false
       void send()
     }
@@ -2651,6 +2655,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         setExhausted,
         setCrossVerify,
         consumeResumeFromRunId: () => { const v = resumeFromRunIdRef.current; resumeFromRunIdRef.current = null; return v },
+        consumeRunAgentMode: () => { const v = resumeSendModeRef.current; resumeSendModeRef.current = null; return v },
         consumePipelineOutcome: () => { const v = pipelineOutcomeRef.current; pipelineOutcomeRef.current = null; return v },
         getPipelineAutoSendStep: () => pipelineAutoSendStepRef.current,
         setPipelineExecuteSendId: (id) => { pipelineExecuteSendIdRef.current = id },
@@ -2807,7 +2812,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const cur = useProject.getState()
     const curPending = cur.activeChatId != null ? cur.chats[cur.activeChatId]?.pendingCommand : null
     if (curPending?.sendId === id) cur.setPendingCommand(null)
-    if (cur.pendingPlan?.sendId === id) cur.setPendingPlan(null) // #3 plan-gate: снять модалку плана при Stop
+    // §10 хвост: карточка этого прогона снимается ВМЕСТЕ с освобождением
+    // чекпойнта — Stop означает «продолжения не будет», а раньше уходила только
+    // карточка и снапшот истории оставался в БД навсегда.
+    cur.dismissPendingPlanForSend(id)
     if (currentSendIdRef.current === id) currentSendIdRef.current = null
     flushQueueRef.current()
   }

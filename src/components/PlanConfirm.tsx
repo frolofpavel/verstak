@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
+import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import type { Plan } from '../types/api'
 
 /**
@@ -9,10 +9,11 @@ import type { Plan } from '../types/api'
  * замечаниями) / Отклонить. «Высокий контроль»: человек одобряет план ДО старта.
  */
 export function PlanConfirm() {
-  const { pendingPlan, setPendingPlan } = useProject(useShallow(s => ({
-    pendingPlan: s.pendingPlan,
-    setPendingPlan: s.setPendingPlan,
-  })))
+  // §10 хвост (дефект 4): карточка берётся из bundle АКТИВНОГО чата, а не из
+  // одной глобальной ячейки. Отсюда и главное свойство: решение принимается в
+  // том же чате, где висела карточка, и продолжение уезжает туда же.
+  const pendingPlan = useActiveChatField('pendingPlan') ?? null
+  const setPendingPlan = useProject(s => s.setPendingPlan)
   const [feedback, setFeedback] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
   const planId = pendingPlan?.planId ?? null
@@ -56,7 +57,12 @@ export function PlanConfirm() {
   }
 
   return (
-    <div className="gg-modal-backdrop" onClick={() => void resolve('reject')}>
+    // §10 хвост (дефект 3): фон РЕШЕНИЯ НЕ ПРИНИМАЕТ. Раньше клик мимо окна шёл
+    // как reject, а reject — это отмена плана и удаление чекпойнта прогона:
+    // промах мышью необратимо убивал продолжение. Отказ остался только на
+    // явной кнопке; закрыть карточку, ничего не решив, нельзя — решение по ней
+    // всё равно нужно, а «спрятать и забыть» удерживало бы чекпойнт молча.
+    <div className="gg-modal-backdrop">
       <div className="gg-modal gg-plan-confirm-full" onClick={e => e.stopPropagation()}>
         <div className="gg-modal-header">
           <div>

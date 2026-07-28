@@ -12,6 +12,7 @@ import {
   TOUCH_PRIORITY,
   type PendingWrite,
   type PendingCommand,
+  type PendingPlanCard,
   type ActivityEntry,
   type TouchKind,
   type SessionUsage,
@@ -68,8 +69,6 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   tree: FileNode[]
   chatHasMoreBefore: boolean
   chatTotalCount: number
-  /** #3 plan-gate: план, ожидающий одобрения (foreground, top-level). */
-  pendingPlan: { callId: string; planId: number; title: string; stepCount: number; sendId?: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } } | null
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
   /** Sub-agent runs текущей сессии (fan-out V1). Эфемерные — чистятся на send. */
   /** Per-session "the AI has touched these files" map — feeds Sidebar markers
@@ -149,7 +148,18 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
-  setPendingPlan: (p: ProjectState['pendingPlan']) => void
+  /** §10: карточка плана АКТИВНОГО чата. */
+  setPendingPlan: (p: PendingPlanCard | null) => void
+  /** §10 хвост: карточка КОНКРЕТНОГО чата — событие может прийти по фоновому
+   *  прогону, и класть его карточку в активный чат нельзя (там своя работа). */
+  setChatPendingPlan: (chatId: number, p: PendingPlanCard | null) => void
+  /** §10 хвост: снять карточку БЕЗ решения (Stop, Shift+Esc, закрытие проекта) и
+   *  освободить удержанный чекпойнт прогона — продолжения уже не будет. */
+  dismissPendingPlan: (chatId: number) => void
+  /** Аварийные выходы (Shift+Esc, закрытие проекта) — по всем чатам сразу. */
+  dismissAllPendingPlans: () => void
+  /** Stop прогона: снять карточку ИМЕННО его плана, в каком бы чате она ни висела. */
+  dismissPendingPlanForSend: (sendId: number) => void
   /** T1.3 Inbox: снять pendingCommand конкретного чата (активного или фонового
    *  снапшота) — резолв approval из общего Inbox, не заходя в чат. */
   clearChatPendingCommand: (chatId: number) => void
@@ -343,7 +353,6 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   streamStartedAt: null,
   pendingWrites: [],
   pendingCommand: null,
-  pendingPlan: null,
   activity: [],
   agentProgress: [],
   preflights: [],
@@ -513,7 +522,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   // 5.3 (review P0): нет проекта = чистый лист. Полный сброс эфемерного
   // состояния сессии/чата — единая форма в chat-lifecycle.ts (срез 3).
   // projectList/composerDrafts — кросс-проектные, не трогаем.
-  closeProject: () => set(buildCloseProjectPatch()),
+  closeProject: () => {
+    // §10 хвост: карточки уходят вместе с проектом, решения по ним не будет —
+    // освобождаем удержанные чекпойнты, иначе снапшоты истории висят вечно.
+    get().dismissAllPendingPlans()
+    set(buildCloseProjectPatch())
+  },
   refreshProjectList: async () => {
     const projectList = await window.api.projects.list()
     set({ projectList })
@@ -598,7 +612,26 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   resolvePendingWrite: (callId) => get().updateChatBundle(get().activeChatId, b => ({ pendingWrites: b.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => get().updateChatBundle(get().activeChatId, () => ({ pendingWrites: [] })),
   setPendingCommand: (c) => get().updateChatBundle(get().activeChatId, () => ({ pendingCommand: c })),
-  setPendingPlan: (p) => set({ pendingPlan: p }),
+  setPendingPlan: (p) => get().updateChatBundle(get().activeChatId, () => ({ pendingPlan: p })),
+  setChatPendingPlan: (chatId, p) => get().updateChatBundle(chatId, () => ({ pendingPlan: p })),
+  dismissPendingPlan: (chatId) => {
+    const card = get().chats[chatId]?.pendingPlan
+    if (!card) return
+    // Решения не было — статус плана не трогаем, он остаётся в «Планах». Но
+    // продолжение запускала карточка, а её больше нет: чекпойнт освобождаем.
+    // Мост может отсутствовать (тестовое окружение, ранний teardown) — уборка
+    // чекпойнта не повод уронить закрытие проекта.
+    void window.api?.plans?.releaseApproval?.(card.planId)?.catch(() => {})
+    get().updateChatBundle(chatId, () => ({ pendingPlan: null }))
+  },
+  dismissAllPendingPlans: () => {
+    for (const id of Object.keys(get().chats)) get().dismissPendingPlan(Number(id))
+  },
+  dismissPendingPlanForSend: (sendId) => {
+    for (const [id, snap] of Object.entries(get().chats)) {
+      if (snap?.pendingPlan?.sendId === sendId) get().dismissPendingPlan(Number(id))
+    }
+  },
   clearChatPendingCommand: (chatId) => get().updateChatBundle(chatId, b =>
     b.pendingCommand ? { pendingCommand: null } : null
   ),

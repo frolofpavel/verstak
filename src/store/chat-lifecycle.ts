@@ -111,7 +111,8 @@ export function buildCloseProjectPatch() {
     tree: [],
     chatHasMoreBefore: false,
     chatTotalCount: 0,
-    pendingPlan: null, // #3 plan-gate: проект закрыт → снять модалку плана
+    // §10 хвост: карточка плана лежит в bundle своего чата, а `chats: {}` ниже
+    // сносит их все — отдельного сброса ей больше не нужно.
     activeChatId: null,
     chatSessions: [],
     chats: {},

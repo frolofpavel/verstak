@@ -58,6 +58,11 @@ export interface ToolContext {
     attempt?: number
   }
   pipelineRuns?: PipelineRuns
+  /** §10 хвост: план, который этот прогон дорабатывает. Ставится РАНТАЙМОМ —
+   *  продолжение после «Доработать» приходит с якорем на чекпойнт прогона, чей
+   *  план ещё в draft, и id считается из этой связи, а не из аргументов модели
+   *  (та же логика, что у идемпотентности create_plan). Вне доработки — null. */
+  revisePlanId?: number | null
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   /** Read recent journal entries — used by the `read_journal` AI tool for self-reflection. */
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>

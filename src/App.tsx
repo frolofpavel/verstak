@@ -210,14 +210,14 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan, setProject } = useProject(useShallow(s => ({
+  const { path, activeView, setActiveView, setStreaming, clearPendingWrites, setPendingCommand, dismissAllPendingPlans, setProject } = useProject(useShallow(s => ({
     path: s.path,
     activeView: s.activeView,
     setActiveView: s.setActiveView,
     setStreaming: s.setStreaming,
     clearPendingWrites: s.clearPendingWrites,
     setPendingCommand: s.setPendingCommand,
-    setPendingPlan: s.setPendingPlan,
+    dismissAllPendingPlans: s.dismissAllPendingPlans,
     setProject: s.setProject,
   })))
   const isStreaming = useActiveChatField('isStreaming') ?? false
@@ -358,12 +358,15 @@ export function App() {
         setStreaming(false)
         clearPendingWrites()
         setPendingCommand(null)
-        setPendingPlan(null)
+        // §10 хвост: аварийный выход снимает карточки планов ВМЕСТЕ с
+        // освобождением удержанных чекпойнтов — решения не будет, а снапшоты
+        // истории иначе оставались бы в БД навсегда.
+        dismissAllPendingPlans()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand, setPendingPlan])
+  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand, dismissAllPendingPlans])
 
   // Mouse-drag resize handle on the sidebar's right edge.
   function startDrag(e: React.MouseEvent) {

@@ -11,7 +11,13 @@ import {
   type PlanStepSpecV1,
   type TaskContractV1,
 } from '../../../shared/contracts/outcome'
-import type { ToolHandler } from './shared'
+import { planSpecFeedback } from '../../ai/task-spec-check'
+import { awaitingApprovalResult } from '../../ai/plan-await'
+import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
+import { planGateApplies } from '../../ai/plan-gate-modes'
+import { markPlanAwaitingApproval } from '../../ai/runner-shared'
+import type { ToolContext, ToolHandler } from './shared'
+import type { ToolCall, ToolResult } from '../../ai/types'
 
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : []
 
@@ -213,10 +219,112 @@ export const reportStepOutcomeHandler: ToolHandler = {
   },
 }
 
+/**
+ * Доработка плана на ЧАТ-ПУТИ (§10 хвост, дефект 1).
+ *
+ * Отличий от outcome-ветки ровно три, и все три — про то, чего на этом пути не
+ * существует: нет Task Contract'а (значит нет quality-скоринга), нет пайплайна
+ * (значит некуда двигать фазу) и нет structured spec как обязательного условия —
+ * `create_plan` на чат-пути его тоже не требует, и доработка обязана принимать
+ * ровно то, что принимало создание. Всё остальное совпадает: тот же planId, та
+ * же замена НЕзавершённых шагов, тот же рост ревизии.
+ *
+ * Цель доработки берётся из `ctx.revisePlanId` — рантайм считает её из якоря
+ * продолжения. Модель id не выбирает: ошибись она номером, правка ушла бы в
+ * чужой план.
+ */
+async function replanOnChatPath(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  if (!ctx.plans) {
+    return { id: call.id, name: call.name, result: '', error: 'REPLAN_STORAGE_UNAVAILABLE' }
+  }
+  const planId = ctx.revisePlanId ?? null
+  const plan = planId != null ? ctx.plans.get(planId) : null
+  if (!plan) {
+    // Честная ошибка вместо тихой правки соседнего плана: без якоря продолжения
+    // мы не знаем, что именно человек просил доработать.
+    return { id: call.id, name: call.name, result: '', error: 'REPLAN_TARGET_REQUIRED' }
+  }
+  const reason = String(call.args.reason ?? '').trim()
+  const steps = list(call.args.steps).flatMap(raw => {
+    if (typeof raw !== 'object' || raw === null) return []
+    const item = raw as Record<string, unknown>
+    const title = String(item.title ?? '').trim()
+    if (!title) return []
+    const parsed = item.spec === undefined ? null : parsePlanStepSpec(item.spec).value
+    return [{ title, detail: item.detail == null ? null : String(item.detail), ...(parsed ? { spec: parsed } : {}) }]
+  })
+  if (!reason || steps.length === 0) {
+    return { id: call.id, name: call.name, result: '', error: 'REPLAN_INVALID: reason и steps обязательны' }
+  }
+  // Та же планка к описанию шага, что у create_plan на этом пути: доработка не
+  // должна быть способом протащить тонкое ТЗ мимо проверки.
+  const specFeedback = planSpecFeedback(steps)
+  if (specFeedback) {
+    return { id: call.id, name: call.name, result: `План не обновлён: требуется доработка.${specFeedback}` }
+  }
+
+  // История ревизий — best-effort: на чат-пути её может не быть, и это не повод
+  // терять саму доработку.
+  try { ctx.planOutcomes?.saveRevision(plan.id, plan.planRevision, reason, plan) } catch { /* история не критична */ }
+  const updated = ctx.plans.replacePending(plan.id, steps, {
+    planRevision: plan.planRevision + 1,
+    // Якорь переезжает на ТЕКУЩИЙ прогон: продолжение после нового approve
+    // должно реплеить разговор с замечаниями, а не исходный план без них.
+    agentRunId: ctx.runId ?? null,
+  })
+  ctx.sender.send('ai:event', {
+    id: ctx.sendId,
+    event: { type: 'plan-replanned', planId: plan.id, revision: updated.planRevision, reason, preservedSteps: updated.steps.filter(s => s.status === 'done').length },
+  })
+
+  // Новая ревизия — новое решение человека (§4.3: выполнение не начинается до
+  // approve). Порог и матрица режимов те же, что у create_plan: план, который
+  // только читает, автоутверждается и здесь.
+  const gateApplies = planGateApplies({
+    agentMode: ctx.agentMode,
+    outcomePhase: null,
+    planApprovalSetting: ctx.getSecretForDelegate?.('plan_approval_gate') === 'true',
+    delegationDepth: ctx.delegationDepth,
+  })
+  const verdict = planApprovalVerdict(updated.steps.map(step => ({ title: step.title, detail: step.detail, spec: step.spec })))
+  if (gateApplies && verdict.needsCard) {
+    ctx.sender.send('ai:event', {
+      id: ctx.sendId,
+      event: {
+        type: 'plan-approval',
+        callId: call.id,
+        planId: plan.id,
+        title: updated.title,
+        stepCount: updated.steps.length,
+      },
+    })
+    markPlanAwaitingApproval(ctx.runId, plan.id)
+    if (ctx.setAgentMode) ctx.setAgentMode('plan'); else ctx.agentMode = 'plan'
+    return { id: call.id, name: call.name, result: awaitingApprovalResult({ id: plan.id, stepCount: updated.steps.length }) }
+  }
+  if (gateApplies) {
+    return {
+      id: call.id, name: call.name,
+      result: `План #${plan.id} обновлён до ревизии ${updated.planRevision} и автоутверждён: ${explainVerdict(verdict)} ` +
+        'Права на запись НЕ выданы: попытка изменить файлы или внешнюю систему пройдёт обычную проверку режима.',
+    }
+  }
+  return {
+    id: call.id, name: call.name,
+    result: `План #${plan.id} обновлён до ревизии ${updated.planRevision}; шагов: ${updated.steps.length}.`,
+  }
+}
+
 export const replanPlanHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
-    if (!ctx.outcome || ctx.outcome.phase !== 'replan' || !ctx.pipelineRuns || !ctx.plans || !ctx.planOutcomes) {
+    // §10 хвост, дефект 1. Карточка согласования говорит модели: «правь план
+    // через replan_plan». Продолжение после «Доработать» — обычная отправка в
+    // чат, outcome в ней нет и быть не может, поэтому проверка ниже отвергала
+    // ЛЮБУЮ доработку на чат-пути. Своя ветка: тот же инструмент, тот же план,
+    // только без Task Contract'а и пайплайна, которых на этом пути не бывает.
+    if (!ctx.outcome) return replanOnChatPath(call, ctx)
+    if (ctx.outcome.phase !== 'replan' || !ctx.pipelineRuns || !ctx.plans || !ctx.planOutcomes) {
       return { id: call.id, name: call.name, result: '', error: 'OUTCOME_REPLAN_CONTEXT_REQUIRED' }
     }
     const pipeline = ctx.pipelineRuns.get(ctx.outcome.pipelineId)

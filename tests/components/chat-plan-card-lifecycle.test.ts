@@ -54,14 +54,17 @@ function showCard(sendId: number, planId = 42) {
   })
 }
 
-const card = () => useProject.getState().pendingPlan
+// §10 хвост (дефект 4): карточка переехала в bundle своего чата — читаем её
+// оттуда. Утверждения файла не изменились: смотрим на ту же карточку того же
+// прогона, просто через её новое (и единственное) хранилище.
+const card = (chatId = 7) => useProject.getState().chats[chatId]?.pendingPlan ?? null
 
 beforeEach(() => {
   mock = makeApiMock(CHAT_API_DEFAULTS)
   vi.stubGlobal('window', Object.assign(globalThis.window, { api: mock.api }))
   useProject.setState({
     path: '/p', activeChatId: 7,
-    sendOwners: {}, chatSessions: [{ id: 7 }] as never, helpMode: false, pendingPlan: null,
+    sendOwners: {}, chatSessions: [{ id: 7 }, { id: 9 }] as never, helpMode: false,
   }, false)
   seedActive(useProject, { messages: [], isStreaming: false })
 })
@@ -94,16 +97,17 @@ describe('карточка согласования переживает зав�
     expect(card()).not.toBeNull()
   })
 
-  // Второе место снятия: карточка показывается ГЛОБАЛЬНО даже для фонового чата
-  // на другом проекте, а `done` такого чата уходил в отдельную ветку дисперчера,
-  // где стояло своё снятие.
-  it('фоновый чат на другом проекте: done не снимает глобальную карточку', () => {
+  // Второе место снятия: карточка фонового чата на другом проекте — его `done`
+  // уходил в отдельную ветку дисперчера, где стояло своё снятие. После §10-хвоста
+  // карточка лежит в bundle СВОЕГО чата (дефект 4), поэтому и читаем её оттуда;
+  // проверяемое поведение прежнее — чужое завершение её не трогает.
+  it('фоновый чат на другом проекте: done не снимает его карточку', () => {
     mountChat()
     startRun(203, 9, '/other')
     showCard(203, 77)
-    expect(card()?.planId).toBe(77)
+    expect(card(9)?.planId).toBe(77)
     act(() => { mock.aiEvents.emit({ id: 203, event: { type: 'done' } }) })
-    expect(card(), 'карточка фонового плана снята чужим завершением').not.toBeNull()
+    expect(card(9), 'карточка фонового плана снята чужим завершением').not.toBeNull()
   })
 
   // Снимает карточку только решение человека — это делает PlanConfirm.

@@ -189,6 +189,8 @@ export interface AgentRunContext {
   nudgeBudgetUsed?: number
   outcome?: ToolContext['outcome']
   pipelineRuns?: ToolContext['pipelineRuns']
+  /** §10 хвост: план, который этот прогон дорабатывает (см. ToolContext). */
+  revisePlanId?: ToolContext['revisePlanId']
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -200,7 +202,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
-    processRegistry = globalProcessRegistry, outcome, pipelineRuns,
+    processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
   const startedAt = Date.now()
@@ -1077,7 +1079,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
-        outcome, pipelineRuns,
+        outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,
         runChecks: () => Array.from(executedChecks, ([command, exitCode]) => ({ command, exitCode })),
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,

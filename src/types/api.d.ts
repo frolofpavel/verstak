@@ -792,6 +792,8 @@ declare global {
           planStatus: PlanStatus | null
           continuation: { text: string; resumeFromRunId: string | null; agentMode: AgentModeId | null } | null
         }>
+        /** §10 хвост: карточка снята без решения — освободить удержанный чекпойнт. */
+        releaseApproval: (id: number) => Promise<void>
       }
       /** Proof Pack — доказательство выполнения прогона (proof.json + proof.html + proof.md). */
       proof: {

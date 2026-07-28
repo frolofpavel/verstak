@@ -377,7 +377,10 @@ contextBridge.exposeInMainWorld('api', {
     remove: (id: number) => ipcRenderer.invoke('plans:remove', id),
     // §10: решение по карточке согласования принимается снаружи прогона.
     resolveApproval: (id: number, decision: 'approve' | 'revise' | 'reject', feedback?: string) =>
-      ipcRenderer.invoke('plans:resolve-approval', id, decision, feedback)
+      ipcRenderer.invoke('plans:resolve-approval', id, decision, feedback),
+    // §10 хвост: карточка снята БЕЗ решения (Stop / Shift+Esc / закрытие проекта) —
+    // продолжения не будет, удержанный чекпойнт прогона можно освободить.
+    releaseApproval: (id: number) => ipcRenderer.invoke('plans:release-approval', id)
   },
   proof: {
     generate: (runId: string) => ipcRenderer.invoke('proof:generate', runId) as Promise<
