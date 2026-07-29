@@ -130,6 +130,53 @@ describe('верхняя граница по времени', () => {
     expect(res.error ?? '').toContain('отменена')
   })
 
+  // ПЯТЫЙ ЗАХОД: на одной постановке Gemini укладывается, DeepSeek нет. Причины
+  // разной природы — «медленная модель» и «модель тратит раунды впустую» — и
+  // лечатся по-разному. Отказ обязан нести ЗАМЕР, иначе выбор константы снова
+  // станет угадыванием.
+  it('отказ по времени печатает, сколько раундов модель успела пройти', async () => {
+    const { explainTimeout } = await import('../../electron/ipc/plans-generate')
+    const slow = explainTimeout({ iterations: 3 })
+    const spinning = explainTimeout({ iterations: 22 })
+
+    expect(slow).toContain('3 из ' + PLAN_GENERATION_MAX_TURNS)
+    expect(spinning).toContain('22 из ' + PLAN_GENERATION_MAX_TURNS)
+    expect(slow, 'два разных случая дают одинаковый текст').not.toBe(spinning)
+  })
+
+  it('замера нет — текст остаётся связным, без «undefined»', async () => {
+    const { explainTimeout } = await import('../../electron/ipc/plans-generate')
+    const t = explainTimeout({})
+    expect(t).not.toContain('undefined')
+    expect(t).toContain('минут')
+  })
+
+  it('раунды считаются по НАЧАТЫМ, оборванный до модели прогон даёт ноль', async () => {
+    const aborted = new AbortController()
+    aborted.abort()
+    const res = await runSubAgentLoop({
+      provider: endlessProvider({ n: 0 }),
+      messages: [{ role: 'user', content: 'план' }],
+      allowedToolNames: ['read_file'],
+      ctx: loopCtx(),
+      signal: aborted.signal,
+    })
+    expect(res.iterations, 'прогон, не дошедший до модели, отчитался о работе').toBe(0)
+  })
+
+  it('пройденные раунды совпадают с числом обращений к модели', async () => {
+    const rounds = { n: 0 }
+    const res = await runSubAgentLoop({
+      provider: endlessProvider(rounds),
+      messages: [{ role: 'user', content: 'план' }],
+      allowedToolNames: ['read_file'],
+      ctx: loopCtx(),
+      signal: new AbortController().signal,
+      maxIterations: 4,
+    })
+    expect(res.iterations).toBe(rounds.n)
+  })
+
   it('бюджет времени соразмерен человеческому ожиданию, а не бесконечности', () => {
     expect(PLAN_GENERATION_TIME_BUDGET_MS).toBeGreaterThanOrEqual(60_000)
     expect(PLAN_GENERATION_TIME_BUDGET_MS).toBeLessThanOrEqual(300_000)

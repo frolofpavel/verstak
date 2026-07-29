@@ -278,6 +278,8 @@ export async function runScheduledHeadless(
   ok: boolean; text: string; error?: string
   /** Сколько инструментов реально выполнил прогон (диагностика вызывающего). */
   toolCallCount?: number
+  /** Сколько раундов «модель → инструменты» прогон успел пройти. */
+  iterations?: number
   /** Чем закончился цикл: completed / max-iterations / aborted / error. */
   exitReason?: 'completed' | 'max-iterations' | 'aborted' | 'error'
 }> {
@@ -383,7 +385,7 @@ export async function runScheduledHeadless(
     // вызвала инструмент», «модель работала, но результата не сохранила» и
     // «модель не уложилась в лимит шагов» сливались в одно сообщение — а лечатся
     // они по-разному. Для scheduled поля просто игнорируются.
-    const trace = { toolCallCount: result.toolCallCount, exitReason: result.exitReason }
+    const trace = { toolCallCount: result.toolCallCount, iterations: result.iterations, exitReason: result.exitReason }
     if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error, ...trace }
     // EF-R1 Б3: успех подтверждён реальным ответом — отмечаем аккаунт, выбранный
     // pre-flight (у scheduled нет agent_run, accountId взят из resolver'а напрямую).

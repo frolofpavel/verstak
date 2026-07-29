@@ -56,6 +56,11 @@ export interface SubAgentLoopResult {
   text: string
   /** Сколько tool-вызовов выполнил субагент (для журнала/индикации). */
   toolCallCount: number
+  /** Сколько РАУНДОВ «модель → инструменты» цикл успел пройти. Отличать от
+   *  toolCallCount: в одном раунде вызовов может быть несколько. Нужен, чтобы
+   *  «модель медленная» и «модель тратит много раундов» различались замером, а
+   *  не на глаз (29.07: Gemini укладывается в бюджет времени, DeepSeek нет). */
+  iterations: number
   /** Почему цикл завершился. */
   exitReason: 'completed' | 'max-iterations' | 'aborted' | 'error'
   /** Сообщение об ошибке если exitReason==='error'. */
@@ -85,15 +90,19 @@ export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAg
   const convo: ChatMessage[] = [...messages]
   let lastText = ''
   let toolCallCount = 0
+  let iterations = 0
 
   for (let iter = 0; iter < maxIterations; iter++) {
-    if (signal.aborted) return { text: lastText, toolCallCount, exitReason: 'aborted' }
+    if (signal.aborted) return { text: lastText, toolCallCount, iterations, exitReason: 'aborted' }
+    // Считаем НАЧАТЫЕ раунды: прогон, оборванный до первого обращения к модели,
+    // честно показывает ноль, а не единицу.
+    iterations = iter + 1
 
     const toolCalls: ToolCall[] = []
     let assistantText = ''
     try {
       for await (const event of provider.send(convo, subToolDefs, undefined, signal)) {
-        if (signal.aborted) return { text: lastText, toolCallCount, exitReason: 'aborted' }
+        if (signal.aborted) return { text: lastText, toolCallCount, iterations, exitReason: 'aborted' }
         if (event.type === 'text' && typeof event.text === 'string') {
           assistantText += event.text
         } else if (event.type === 'tool-call') {
@@ -113,31 +122,31 @@ export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAg
               event.usage.cacheWriteTokens ?? event.usage.cacheCreationInputTokens ?? null,
             )
             if (check.exceeded) {
-              return { text: lastText, toolCallCount, exitReason: 'error', error: check.message ?? 'cost cap exceeded' }
+              return { text: lastText, toolCallCount, iterations, exitReason: 'error', error: check.message ?? 'cost cap exceeded' }
             }
           }
         } else if (event.type === 'error') {
-          return { text: assistantText || lastText, toolCallCount, exitReason: 'error', error: event.message }
+          return { text: assistantText || lastText, toolCallCount, iterations, exitReason: 'error', error: event.message }
         } else if (event.type === 'done') {
           break
         }
       }
     } catch (err) {
-      return { text: lastText, toolCallCount, exitReason: 'error', error: err instanceof Error ? err.message : String(err) }
+      return { text: lastText, toolCallCount, iterations, exitReason: 'error', error: err instanceof Error ? err.message : String(err) }
     }
 
     if (assistantText) lastText = assistantText
 
     // Модель ничего не зовёт — субагент закончил.
     if (toolCalls.length === 0) {
-      return { text: lastText, toolCallCount, exitReason: 'completed' }
+      return { text: lastText, toolCallCount, iterations, exitReason: 'completed' }
     }
 
     convo.push({ role: 'assistant', content: assistantText, toolCalls })
 
     const toolResults: ToolResult[] = []
     for (const call of toolCalls) {
-      if (signal.aborted) return { text: lastText, toolCallCount, exitReason: 'aborted' }
+      if (signal.aborted) return { text: lastText, toolCallCount, iterations, exitReason: 'aborted' }
       // Двойная защита: даже если модель как-то вызвала не-whitelisted tool —
       // отказываем (не выполняем).
       if (!allowed.has(call.name)) {
@@ -167,5 +176,5 @@ export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAg
   }
 
   // Исчерпали итерации — отдаём что есть.
-  return { text: lastText, toolCallCount, exitReason: 'max-iterations' }
+  return { text: lastText, toolCallCount, iterations, exitReason: 'max-iterations' }
 }

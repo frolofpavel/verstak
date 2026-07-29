@@ -63,6 +63,9 @@ export type PlanGenerateRunner = (opts: {
   ok: boolean; text: string; error?: string
   /** Диагностика прогона — чтобы отказ назвал СВОЮ причину (см. explainNoPlan). */
   toolCallCount?: number
+  /** Раунды «модель → инструменты». Отличает «модель медленная» от «модель
+   *  тратит много раундов»: одинаковый исход по времени, разные причины. */
+  iterations?: number
   exitReason?: 'completed' | 'max-iterations' | 'aborted' | 'error'
 }>
 
@@ -162,6 +165,29 @@ export function explainNoPlan(run: { toolCallCount?: number; exitReason?: string
     + 'Попробуйте ещё раз или уточните описание задачи.'
 }
 
+/**
+ * Отказ по времени, который НЕСЁТ ЗАМЕР (29.07, пятый заход).
+ *
+ * На одной и той же постановке в одном и том же проекте Gemini укладывается в
+ * бюджет, а DeepSeek — нет. Причины у этого РАЗНЫЕ и лечатся по-разному: модель
+ * медленнее по токенам либо тратит больше раундов на ту же работу. Одинаковое
+ * сообщение их сливало, а поднимать константу «потому что не хватило» — то самое
+ * подбирание на глаз, которого мы избегаем весь день.
+ *
+ * Поэтому отказ печатает, сколько раундов модель успела пройти за отведённое
+ * время. Мало раундов — модель медленная; много — она их тратит впустую. Замер
+ * приходит с настоящего прогона, лишних запусков и трат не требует.
+ */
+export function explainTimeout(run: { iterations?: number }): string {
+  const minutes = Math.round(PLAN_GENERATION_TIME_BUDGET_MS / 60_000)
+  const rounds = run.iterations
+  const measured = rounds != null
+    ? ` За это время модель успела пройти шагов: ${rounds} из ${PLAN_GENERATION_MAX_TURNS}.`
+    : ''
+  return `Не удалось сформировать план: работа заняла больше ${minutes} минут и была остановлена.${measured} `
+    + 'Опишите задачу конкретнее или разбейте её на части.'
+}
+
 export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequest): Promise<PlanGenerateResult> {
   const projectPath = (req.projectPath ?? '').trim()
   const title = (req.title ?? '').trim()
@@ -209,10 +235,7 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
     if (ctrl.signal.aborted) {
       return {
         ok: false,
-        error: timedOut
-          ? `Не удалось сформировать план: работа заняла больше ${Math.round(PLAN_GENERATION_TIME_BUDGET_MS / 60_000)} минут и была остановлена. `
-            + 'Опишите задачу конкретнее или разбейте её на части.'
-          : 'Генерация отменена. План не создан.',
+        error: timedOut ? explainTimeout(run) : 'Генерация отменена. План не создан.',
         notice,
       }
     }
