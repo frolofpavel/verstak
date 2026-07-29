@@ -1,6 +1,7 @@
 // Verification-хендлеры: attest_verification / create_plan / preflight. Вынесено при распиле.
-import type { ToolHandler } from './shared'
+import type { ToolHandler, ToolContext } from './shared'
 import { emitActivity } from './shared'
+import { runCommandHandler } from './command'
 import { planSpecFeedback, planSpecBlockers } from '../../ai/task-spec-check'
 import { awaitingApprovalResult } from '../../ai/plan-await'
 import { scanText } from '../../ai/secret-scanner'
@@ -16,6 +17,47 @@ import { planGateApplies } from '../../ai/plan-gate-modes'
 const MAX_VERIFICATION_CHECKS = 10
 // Сколько символов вывода (stdout+stderr) сохраняем в артефакт.
 const VERIFICATION_TAIL_CHARS = 800
+
+/**
+ * Прогон одной проверки — ЧЕРЕЗ ОБЩИЙ ГЕЙТ КОМАНД (SEC-CMD-04, 30.07).
+ *
+ * Раньше здесь стоял прямой `ctx.tools.runCommand(command)` — сырой spawn, перед
+ * которым был только денилист. Команды приходят из аргументов МОДЕЛИ, поэтому
+ * мимо гейта проходило всё сразу: классификация ответственного действия, режим
+ * агента (включая `plan`, где команды запрещены всегда), тумблер autoApprove,
+ * permission-правила — в том числе `deny`, объявленный АБСОЛЮТНЫМ, —
+ * bash_allowlist, smart-approve и модалка подтверждения. Комментарий «перепрогон
+ * через тот же runCommand (denylist+scanner внутри)» описывал предпосылку,
+ * которая была верна лишь пока гейтом БЫЛ денилист.
+ *
+ * ЗОВЁМ ИМЕННО `runCommandHandler`, а не `resolveDecision` напрямую. Вызов
+ * `resolveDecision('attest_verification', …)` был бы пустышкой: `decide()`
+ * считает командами только run_command/connector_query/execute_code, а
+ * `classifyResponsibleAction` разбирает аргументы для того же короткого списка —
+ * гейт выглядел бы поставленным и не срабатывал никогда. Через хендлер команда
+ * судится под своим настоящим именем и наследует ВЕСЬ путь run_command разом,
+ * включая гард Agent Job, редакцию секретов в выводе и события Timeline.
+ *
+ * callId уникальный на проверку: резолв подтверждения ключуется по нему, и общий
+ * id привёл бы к тому, что ответ на одну модалку закрывал бы чужую.
+ */
+async function runCheckThroughGate(
+  ctx: ToolContext,
+  callId: string,
+  index: number,
+  command: string,
+): Promise<{ ok: true; exitCode: number; stdout: string; stderr: string } | { ok: false; reason: string }> {
+  const res = await runCommandHandler.handle(
+    { id: `${callId}#check${index}`, name: 'run_command', args: { command } },
+    ctx,
+  )
+  if (res.error) return { ok: false, reason: res.error }
+  const r = res.result as { stdout?: string; stderr?: string; exitCode?: number } | undefined
+  if (!r || typeof r.exitCode !== 'number') {
+    return { ok: false, reason: 'команда не вернула код возврата' }
+  }
+  return { ok: true, exitCode: r.exitCode, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+}
 
 export const attestVerificationHandler: ToolHandler = {
   mode: 'sequential',
@@ -35,9 +77,10 @@ export const attestVerificationHandler: ToolHandler = {
         : []
       const rawChecks = Array.isArray(call.args.checks) ? call.args.checks : []
 
-      // --- Проверки: перепрогон команд через тот же runCommand (denylist+scanner внутри).
+      // --- Проверки: перепрогон команд через ОБЩИЙ гейт команд (см. runCheckThroughGate).
       const checks: VerificationCheck[] = []
       let commandRuns = 0
+      let checkIndex = 0
       for (const raw of rawChecks) {
         if (typeof raw !== 'object' || raw === null) continue
         const c = raw as Record<string, unknown>
@@ -50,17 +93,6 @@ export const attestVerificationHandler: ToolHandler = {
           continue
         }
 
-        // Денилист: классифицируем ДО запуска. Заблокированная команда → not_run+manual,
-        // причина в summary (агент сам решит, что с ней делать).
-        const verdict = ctx.tools.classifyCommand(command)
-        if (!verdict.allowed) {
-          checks.push({
-            command, status: 'not_run', manual: true,
-            summary: summary ? `${summary} · заблокирована: ${verdict.reason ?? 'denylist'}` : `Заблокирована политикой: ${verdict.reason ?? 'denylist'}`
-          })
-          continue
-        }
-
         // Cap: сверх лимита команды не прогоняем — фиксируем как not_run.
         if (commandRuns >= MAX_VERIFICATION_CHECKS) {
           checks.push({ command, status: 'not_run', manual: true, summary: summary ? `${summary} · не запущена (лимит проверок)` : 'Не запущена — превышен лимит проверок' })
@@ -68,26 +100,34 @@ export const attestVerificationHandler: ToolHandler = {
         }
         commandRuns++
 
-        try {
-          const r = await ctx.tools.runCommand(command)
-          // Доктрина: статус по exitCode, не по слову модели.
-          const status: VerificationCheck['status'] = r.exitCode === 0 ? 'passed' : 'failed'
-          // runCommand редактирует через secret-scanner на своём пути, но прогоняем
-          // ещё раз на всякий случай — tail попадает в артефакт/контекст.
-          const combined = scanText(`${r.stdout}\n${r.stderr}`).redacted.trim()
-          const tail = combined.length > VERIFICATION_TAIL_CHARS
-            ? combined.slice(-VERIFICATION_TAIL_CHARS)
-            : (combined || undefined)
-          checks.push({ command, status, manual: false, summary, exitCode: r.exitCode, tail })
-          // Эфемерный фидбек в Timeline чата — видно что проверка прогнана.
-          ctx.sender.send('ai:event', {
-            id: ctx.sendId,
-            event: { type: 'tool-activity', callId: call.id, name: 'attest_verification', label: `проверка: ${status === 'passed' ? 'OK' : 'FAIL'}`, detail: `${command} · exit ${r.exitCode}`, status: status === 'passed' ? 'ok' : 'error' }
+        const outcome = await runCheckThroughGate(ctx, call.id, checkIndex++, command)
+
+        // Гейт не пропустил (денилист, режим, deny-правило, отказ человека,
+        // ответственное действие без подтверждения) — проверка НЕ прогонялась.
+        // Статус not_run, причина едет человеку и модели: раньше так отвечал
+        // только денилист, теперь так отвечает весь гейт.
+        if (!outcome.ok) {
+          checks.push({
+            command, status: 'not_run', manual: true,
+            summary: summary ? `${summary} · заблокирована: ${outcome.reason}` : `Заблокирована политикой: ${outcome.reason}`
           })
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          checks.push({ command, status: 'failed', manual: false, summary, tail: scanText(msg).redacted.slice(0, VERIFICATION_TAIL_CHARS) })
+          continue
         }
+
+        // Доктрина: статус по exitCode, не по слову модели.
+        const status: VerificationCheck['status'] = outcome.exitCode === 0 ? 'passed' : 'failed'
+        // Путь run_command уже редактирует оба потока secret-scanner'ом, но
+        // прогоняем ещё раз: tail попадает в артефакт и в контекст.
+        const combined = scanText(`${outcome.stdout}\n${outcome.stderr}`).redacted.trim()
+        const tail = combined.length > VERIFICATION_TAIL_CHARS
+          ? combined.slice(-VERIFICATION_TAIL_CHARS)
+          : (combined || undefined)
+        checks.push({ command, status, manual: false, summary, exitCode: outcome.exitCode, tail })
+        // Эфемерный фидбек в Timeline чата — видно что проверка прогнана.
+        ctx.sender.send('ai:event', {
+          id: ctx.sendId,
+          event: { type: 'tool-activity', callId: call.id, name: 'attest_verification', label: `проверка: ${status === 'passed' ? 'OK' : 'FAIL'}`, detail: `${command} · exit ${outcome.exitCode}`, status: status === 'passed' ? 'ok' : 'error' }
+        })
       }
 
       // --- changed_files: сверка claimed (из args) vs actual (реально записано прогоном).

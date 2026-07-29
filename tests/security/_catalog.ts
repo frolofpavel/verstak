@@ -8,6 +8,8 @@ export type SecurityCategory =
   // Уничтожение секрета собственным инструментом отката — не утечка: утечку
   // отзывают сменой ключа, затёртое значение восстановить неоткуда.
   | 'secret-destruction'
+  // Исполнение команды в обход общего гейта: не «что запущено», а КЕМ разрешено.
+  | 'command-exec'
   | 'prompt-injection'
 
 export interface SecurityRule {
@@ -193,6 +195,16 @@ export const SECURITY_RULES: SecurityRule[] = [
     status: 'active',
     testFile: './undo-list-no-content.test.ts',
     source: 'Verstak 2026-07-29: raw before-content became a real secret once the write path stopped reading through the scanner'
+  },
+  {
+    id: 'SEC-CMD-04',
+    cwe: 'CWE-77',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'Verification checks run through the shared command gate, so mode, permissions (including deny), the responsible-action pause and the allowlist all apply',
+    status: 'active',
+    testFile: './attest-verification-gate.test.ts',
+    source: 'Verstak audit 2026-07-30: attest_verification piped model-supplied commands straight into the raw spawn behind a denylist only'
   },
   {
     id: 'SEC-SECRET-04',

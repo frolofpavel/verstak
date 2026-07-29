@@ -200,8 +200,15 @@
   накрывает ТОЛЬКО тех, кто зовёт `resolveDecision`: `command.ts`, `process.ts`,
   `file-ops.ts`, `connectors.ts`, `files.ts`, `execute-code.ts`. Каналы, которые
   до него не доходят и потому паузы не дают ни в одном режиме, включая `plan`:
-  · `attest_verification` (`ipc/tool-handlers/verification.ts:72`) исполняет
-    команды МОДЕЛИ через `tools.runCommand`, имея гейтом только денилист;
+  · ~~`attest_verification`~~ — **ЗАКРЫТО 30.07** (SEC-CMD-04): проверки идут
+    через настоящий `runCommandHandler`, то есть судятся под именем
+    `run_command` и наследуют весь гейт разом. Гейт под собственным именем
+    инструмента был бы ПУСТЫШКОЙ: `decide` и `classifyResponsibleAction`
+    разбирают аргументы только для run_command/connector_query/execute_code.
+    Список разрешённых verify-команд отвергнут осознанно — оба существующих
+    списка знают лишь JS-стек (+pytest/ruff/mypy) и сделали бы DoD недостижимым
+    для Go/Rust/.NET/Java, которые описание `run_command` само предлагает
+    модели; трение в `ask` снимает пользовательский `bash_allowlist`;
   · `browser_click` / `browser_navigate` (`ipc/tool-handlers/browser.ts`) —
     клик по «Отправить»/«Оплатить»/«Удалить» в залогиненном webview.
   Плюс дыры покрытия самого классификатора: `git -C … push`, `npm run deploy`,

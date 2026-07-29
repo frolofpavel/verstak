@@ -31,6 +31,15 @@ function ctxFor(projectPath: string, o: CtxOverrides = {}): ToolContext {
     sendId: 't',
     sender: { send: () => {} },
     pendingAttachments: [],
+    // agentMode добавлен 30.07 (SEC-CMD-04): проверки идут через общий гейт
+    // команд, а он спрашивает режим. `auto` = поведение этой сетки до правки
+    // (команды прогонялись без подтверждения) — утверждения кейсов не менялись.
+    // Мок tools остаётся: предмет ЭТОЙ сетки — артефакт DoD, а не сам гейт;
+    // гейт пинится отдельно, на настоящих FileTools —
+    // tests/security/attest-verification-gate.test.ts.
+    agentMode: 'auto',
+    pendingCommands: new Map(),
+    scopedKey: (s: unknown, c: unknown) => `${s}::${c}`,
     tools: {
       classifyCommand: o.classify ?? (() => ({ allowed: true })),
       runCommand: o.run ?? (async () => ({ exitCode: 0, stdout: '', stderr: '' }))
