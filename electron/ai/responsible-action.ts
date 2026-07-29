@@ -27,6 +27,8 @@
  * вопроса, пропуск — необратимого действия без спроса.
  */
 
+import { canonicalConnectorId } from './connector-id'
+
 export type ResponsibleKind = 'payment' | 'send' | 'publish' | 'delete' | 'permissions'
 
 export interface ResponsibleVerdict {
@@ -83,7 +85,10 @@ const RESPONSIBLE_CONNECTORS: Record<string, { kind: ResponsibleKind; why: strin
   unisender: { kind: 'send', why: 'рассылка подписчикам' },
   bitrix24: { kind: 'send', why: 'изменение в CRM видно другим людям' },
   amocrm: { kind: 'send', why: 'изменение в CRM видно другим людям' },
-  'yandex-disk': { kind: 'publish', why: 'файл станет доступен по ссылке' },
+  // ВНИМАНИЕ: ключи — РЕАЛЬНЫЕ id из реестра коннекторов, не человеческие имена.
+  // `yandex_disk` здесь стоял через дефис и не совпадал ни с чем: правило было
+  // мёртвым, публикация файла по ссылке паузы не давала (аудит 30.07).
+  yandex_disk: { kind: 'publish', why: 'файл станет доступен по ссылке' },
   yookassa: { kind: 'payment', why: 'операция с платежами' },
 }
 
@@ -106,8 +111,9 @@ export function classifyResponsibleAction(
     return { responsible: false }
   }
   if (toolName === 'connector_query') {
-    const id = asText(args?.connector) || asText(args?.id)
-    const hit = RESPONSIBLE_CONNECTORS[id.toLowerCase()]
+    // Имя берём ровно там же, где его возьмёт исполнитель (SEC-CMD-05): иначе
+    // вердикт выносится про один коннектор, а запрос уходит в другой.
+    const hit = RESPONSIBLE_CONNECTORS[canonicalConnectorId(args)]
     return hit ? { responsible: true, kind: hit.kind, why: hit.why } : { responsible: false }
   }
   // Запись файла и патч ответственными НЕ считаются — см. шапку модуля.

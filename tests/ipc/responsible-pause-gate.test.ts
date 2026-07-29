@@ -27,8 +27,16 @@ const RESPONSIBLE = [
   { tool: 'run_command', args: { command: 'curl -X POST https://api.example.com/send' }, kind: 'send' },
   { tool: 'run_command', args: { command: 'scp report.pdf user@host:/tmp' }, kind: 'send' },
   { tool: 'run_command', args: { command: 'chmod 777 secrets' }, kind: 'permissions' },
-  { tool: 'connector_query', args: { connector: 'telegram', entity: 'sendMessage' }, kind: 'send' },
-  { tool: 'connector_query', args: { connector: 'social-publish' }, kind: 'publish' },
+  // Форма аргументов — ПРОДОВАЯ (`id`): схема connector_query другого поля не
+  // объявляет (tools.ts, required:['id']), и именно `id` исполняет хендлер.
+  // Прежняя запись через `connector` держалась на defensive-алиасе в гейтах;
+  // алиас снят 30.07 (SEC-CMD-05), потому что он и позволял судить один
+  // коннектор, а исполнять другой. Утверждения кейсов не менялись.
+  { tool: 'connector_query', args: { id: 'telegram', entity: 'sendMessage' }, kind: 'send' },
+  { tool: 'connector_query', args: { id: 'social-publish' }, kind: 'publish' },
+  // Я.Диск: до 30.07 правило было мёртвым — ключ в таблице стоял через дефис,
+  // а реальный id коннектора с подчёркиванием.
+  { tool: 'connector_query', args: { id: 'yandex_disk', op: 'get_public_url' }, kind: 'publish' },
 ]
 
 const ORDINARY = [
@@ -36,7 +44,7 @@ const ORDINARY = [
   { tool: 'run_command', args: { command: 'git status' } },
   { tool: 'write_file', args: { path: 'src/index.html', content: '<h1/>' } },
   { tool: 'apply_patch', args: { path: 'src/a.ts' } },
-  { tool: 'connector_query', args: { connector: 'yandex-metrika' } },
+  { tool: 'connector_query', args: { id: 'yandex_metrika' } },
 ]
 
 describe('ответственное действие спрашивает в ЛЮБОМ режиме, кроме bypass', () => {

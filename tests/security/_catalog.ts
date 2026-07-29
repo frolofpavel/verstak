@@ -207,6 +207,16 @@ export const SECURITY_RULES: SecurityRule[] = [
     source: 'Verstak audit 2026-07-30: attest_verification piped model-supplied commands straight into the raw spawn behind a denylist only'
   },
   {
+    id: 'SEC-CMD-05',
+    cwe: 'CWE-807',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'The connector gate and the connector executor resolve the same identifier from one source, and ambiguous arguments are refused instead of silently resolved',
+    status: 'active',
+    testFile: './connector-id-integrity.test.ts',
+    source: 'Verstak audit 2026-07-30: {id:telegram, connector:onec} was judged as onec and executed as telegram; aliases were canonicalised after the verdict'
+  },
+  {
     id: 'SEC-SECRET-04',
     cwe: 'CWE-200',
     category: 'secret-leak',

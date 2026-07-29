@@ -7,6 +7,7 @@ import { relative, resolve, isAbsolute, join } from 'path'
 import { realpath } from 'fs/promises'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
+import { canonicalConnectorId, connectorIdConflict } from '../../ai/connector-id'
 import { isReadOnlyConnectorOp } from '../../ai/connector-readonly'
 import { summarizeToolCall } from './shared'
 import { randomUUID } from 'crypto'
@@ -38,14 +39,19 @@ export const connectorQueryHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
-      let cid = String(call.args.id ?? '')
-      const connectorAliases: Record<string, string> = {
-        ywordstat: 'yandex_wordstat',
-        yandex_wordstat_api: 'yandex_wordstat'
-      }
-      cid = connectorAliases[cid] ?? cid
+      // Имя коннектора — из ЕДИНОГО источника, того же, которым судит гейт
+      // (SEC-CMD-05). Раньше алиасы разворачивались здесь, ПОСЛЕ resolveDecision,
+      // и правило на канонический id обходилось написанием алиаса.
+      const cid = canonicalConnectorId(call.args)
       if (!cid) {
         return { id: call.id, name: call.name, result: '', error: 'connector_query: id обязателен' }
+      }
+      // Аргументы, называющие разные коннекторы, отклоняем ЦЕЛИКОМ и объясняем.
+      // Молча взять один из них — значит вернуться к расхождению «судили одного,
+      // исполнили другого», только с другой стороны.
+      const conflict = connectorIdConflict(call.args)
+      if (conflict) {
+        return { id: call.id, name: call.name, result: '', error: conflict }
       }
       // NL-cron: unattended-прогон читает внешние данные, но НЕ пишет/выполняет. Гейтим
       // op по kind через op-level политику (fail-safe). ssh run_remote / telegram send /

@@ -23,6 +23,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { decide, type AgentMode, type AutoApprove, type ToolDecision } from './mode-policy'
 import { classifyResponsibleAction } from './responsible-action'
+import { canonicalConnectorId } from './connector-id'
 
 export type RuleDecision = 'allow' | 'deny' | 'ask'
 
@@ -363,7 +364,9 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
     case 'read_document':
       return String(args.path ?? '')
     case 'connector_query':
-      return String(args.connector ?? args.id ?? '')
+      // Ровно то имя, которое будет исполнено (SEC-CMD-05): единый источник
+      // закрывает и подделку лишним ключом, и обход правила через алиас.
+      return canonicalConnectorId(args)
     default:
       return ''
   }
