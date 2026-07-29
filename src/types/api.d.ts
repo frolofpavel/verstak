@@ -810,7 +810,7 @@ declare global {
         /** VSK-PLAN-GEN-A2: сформировать план по названию и описанию задачи.
          *  Промпт, провайдер и режим — забота main; renderer передаёт намерение. */
         generate: (req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) =>
-          Promise<{ ok: boolean; planId?: number; error?: string }>
+          Promise<{ ok: boolean; planId?: number; error?: string; notice?: string }>
         /** Отмена активной генерации проекта (штатный stop прогона). */
         cancelGenerate: (projectPath: string) => Promise<boolean>
       }

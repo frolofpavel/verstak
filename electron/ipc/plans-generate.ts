@@ -25,6 +25,8 @@ import { ipcMain } from 'electron'
 import type { Plans } from '../storage/plans'
 import type { ToolContext } from './tool-handlers/shared'
 import { getPlanForRun } from '../ai/runner-shared'
+import type { ProviderId } from '../ai/registry'
+import type { PlanProviderChoice } from '../ai/plan-generation-provider'
 
 /** Итог генерации для renderer'а. */
 export interface PlanGenerateResult {
@@ -32,6 +34,9 @@ export interface PlanGenerateResult {
   planId?: number
   /** Причина отказа человеческим языком (§5.1: не голое «не удалось»). */
   error?: string
+  /** Дефект 1 живой приёмки: план собран НЕ на активном провайдере — человек
+   *  обязан узнать об этом сам, а не догадаться по счёту за токены. */
+  notice?: string
 }
 
 export interface PlanGenerateRequest {
@@ -51,6 +56,9 @@ export type PlanGenerateRunner = (opts: {
   prompt: string
   sendId: number
   signal: AbortSignal
+  /** Решение принимает `choosePlanProvider`, а не активный чат: у CLI-подписки
+   *  инструментов нет, и генерация на ней невозможна физически. */
+  providerId: ProviderId
 }) => Promise<{ ok: boolean; text: string; error?: string }>
 
 export interface PlanGenerateDeps {
@@ -58,6 +66,8 @@ export interface PlanGenerateDeps {
   runPlanning: PlanGenerateRunner
   /** Проверка, что путь принадлежит открытому проекту (§3.2). */
   isKnownProject: (projectPath: string) => boolean
+  /** На чём генерировать (см. ai/plan-generation-provider.ts). */
+  choosePlanProvider: () => PlanProviderChoice
 }
 
 /**
@@ -132,6 +142,13 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
   if (activeByProject.has(projectPath)) {
     return { ok: false, error: 'Генерация плана для этого проекта уже идёт.' }
   }
+  // Провайдер выбирается ДО захвата guard'а и до единого сетевого байта: если
+  // генерировать не на чем, человек получает инструкцию, а не занятый слот.
+  const choice = deps.choosePlanProvider()
+  if (!choice.providerId) {
+    return { ok: false, error: choice.error ?? 'Нет провайдера, на котором можно собрать план.' }
+  }
+  const notice = choice.notice ?? undefined
 
   const ctrl = new AbortController()
   activeByProject.set(projectPath, ctrl)
@@ -142,19 +159,20 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
       prompt: buildGenerationPrompt({ ...req, projectPath, title, taskDescription: task }),
       sendId,
       signal: ctrl.signal,
+      providerId: choice.providerId,
     })
     // Создан ли план — спрашиваем РЕЕСТР ПРОГОНА, а не текст модели. Тот же
     // реестр закрывает §5.4: повторный create_plan вернул бы существующий id.
     const planId = getPlanForRun(sendId)
     if (planId != null && deps.plans.get(planId)) {
       // Отмена уже после сохранения плана — план настоящий, врать о нём нельзя.
-      return { ok: true, planId }
+      return { ok: true, planId, notice }
     }
     if (ctrl.signal.aborted) {
-      return { ok: false, error: 'Генерация отменена. План не создан.' }
+      return { ok: false, error: 'Генерация отменена. План не создан.', notice }
     }
     if (!run.ok) {
-      return { ok: false, error: run.error?.trim() || 'Не удалось сформировать план.' }
+      return { ok: false, error: run.error?.trim() || 'Не удалось сформировать план.', notice }
     }
     // §5.1: агент закончил без create_plan. Ноль строк в БД и ЧЕЛОВЕЧЕСКАЯ
     // причина — короткое объяснение самой модели, а не голое «не удалось».
@@ -162,9 +180,10 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
     return {
       ok: false,
       error: why ? `Не удалось сформировать план. ${why}` : 'Не удалось сформировать план: модель не создала план.',
+      notice,
     }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: err instanceof Error ? err.message : String(err), notice }
   } finally {
     activeByProject.delete(projectPath)
   }

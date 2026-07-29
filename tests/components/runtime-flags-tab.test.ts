@@ -53,9 +53,12 @@ beforeEach(() => { store = {}; stubApi() })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('вкладка «Поведение агента» — состав', () => {
-  it('рисует все пять флагов, каждый с подписью и тумблером', async () => {
+  // Число обновлено с пяти до шести осознанно (29.07): состав вкладки — предмет
+  // сегодняшнего изменения, а не охраняемый контракт. Утверждение осталось той же
+  // силы: лишняя строка по-прежнему даёт красный.
+  it('рисует все шесть флагов, каждый с подписью и тумблером', async () => {
     await mountTab()
-    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(5)
+    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(6)
     for (const f of RUNTIME_FLAGS) {
       const r = row(f.key)
       expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain(f.title)
@@ -134,5 +137,55 @@ describe('вкладка «Поведение агента» — запись', 
     expect(toggleOf('memory_lifecycle').getAttribute('aria-checked')).toBe('true')
     expect(document.querySelector('.gg-settings-hint.is-error')?.textContent)
       .toContain('диск только для чтения')
+  })
+})
+
+// ДЕФЕКТ 2 ЖИВОЙ ПРИЁМКИ (29.07). Настройка `plan_approval_gate` существовала с
+// самого начала, её читают `verification.ts` и `outcome.ts`, она покрыта десятком
+// тестов — и при этом ЧЕЛОВЕК НЕ МОГ ЕЁ ВКЛЮЧИТЬ: единственный переключатель был
+// спрятан в свёрнутом блоке «Дополнительные настройки» чужой вкладки. Пять пунктов
+// приёмки сорвались об это.
+//
+// Поэтому пины ниже проверяют не «строка отрисовалась», а путь пользователя
+// целиком: тумблер ВИДЕН на вкладке поведения, по умолчанию выключен, и клик
+// записывает ровно ту строку, которую main читает как «включено».
+describe('согласование плана видно и включается человеком', () => {
+  it('строка есть на вкладке «Поведение агента», с подписью и пометкой дефолта', async () => {
+    await mountTab()
+    const r = row('plan_approval_gate')
+    expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain('Согласование плана')
+    expect(r.querySelector('.gg-runtime-flag-off')?.textContent).toContain('Если выключить')
+    expect(r.querySelector('.gg-runtime-flag-tag'), 'дефолт «выключено» обязан быть виден').toBeTruthy()
+  })
+
+  it('на чистой установке выключен — вывод в интерфейс дефолта не поменял', async () => {
+    await mountTab()
+    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('клик пишет ровно ту строку, которую main читает как «включено»', async () => {
+    await mountTab()
+    await act(async () => { fireEvent.click(toggleOf('plan_approval_gate')) })
+    // main: getSecretForDelegate('plan_approval_gate') === 'true'
+    expect(setKey).toHaveBeenCalledWith('plan_approval_gate', 'true')
+    expect(store.plan_approval_gate).toBe('true')
+    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('включённый гейт переживает пересборку вкладки', async () => {
+    store = { plan_approval_gate: 'true' }
+    await mountTab()
+    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('true')
+  })
+
+  // КОНТРОЛЬ: включается ТОЛЬКО явной строкой true — иначе тумблер врал бы о
+  // состоянии гейта, а он решает, спрашивать человека или нет.
+  it('контроль: посторонние значения гейт не включают', async () => {
+    for (const v of ['false', '1', 'yes', 'TRUE', '']) {
+      store = { plan_approval_gate: v }
+      await mountTab()
+      expect(toggleOf('plan_approval_gate').getAttribute('aria-checked'), v).toBe('false')
+      cleanup()
+    }
   })
 })

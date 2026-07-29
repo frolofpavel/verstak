@@ -39,7 +39,6 @@ export function PolicyTab() {
   const [dodMode, setDodMode] = useState<string>('warn')
   const [allowlist, setAllowlist] = useState<string>('')
   const [allowedWriteRoots, setAllowedWriteRoots] = useState<string>('')
-  const [planGate, setPlanGate] = useState(false)
   const [autoEdits, setAutoEdits] = useState(false)
   const [autoCommands, setAutoCommands] = useState(false)
   const [hooksOn, setHooksOn] = useState(false)
@@ -58,8 +57,6 @@ export function PolicyTab() {
       setAllowlist(al || '')
       const awr = await window.api.settings.getKey('allowed_write_roots')
       setAllowedWriteRoots(awr || '')
-      const pg = await window.api.settings.getKey('plan_approval_gate')
-      setPlanGate(pg === 'true')
       setAutoEdits((await window.api.settings.getKey('auto_approve_edits')) === 'true')
       setAutoCommands((await window.api.settings.getKey('auto_approve_commands')) === 'true')
       setHooksOn((await window.api.settings.getKey('hooks_enabled')) === 'true')
@@ -80,11 +77,6 @@ export function PolicyTab() {
   const changeDod = async (v: string) => {
     setDodMode(v)
     await window.api.settings.setKey('dod_mode', v)
-  }
-
-  const changePlanGate = async (v: boolean) => {
-    setPlanGate(v)
-    await window.api.settings.setKey('plan_approval_gate', v ? 'true' : 'false')
   }
 
   const changeAllowlist = async (v: string) => {
@@ -226,15 +218,10 @@ export function PolicyTab() {
             </select>
           </section>
 
-          <section className="gg-policy-advanced-card">
-            <div className="gg-settings-section-title">Одобрение плана</div>
-            <p>В режиме планирования агент будет ждать решения перед выполнением</p>
-            <label className="gg-theme-square">
-              <input type="checkbox" checked={planGate} onChange={e => void changePlanGate(e.target.checked)} />
-              <span>Ждать одобрения плана</span>
-            </label>
-          </section>
-
+          {/* «Одобрение плана» переехало во вкладку «Поведение агента» (29.07).
+              Здесь оно жило внутри свёрнутого блока и на живой приёмке его не нашли.
+              Второй переключатель рядом не оставлен сознательно: два контрола на один
+              ключ не имеют общего состояния и начинают показывать разное. */}
           <section className="gg-policy-advanced-card">
             <div className="gg-settings-section-title">Авто-одобрение</div>
             <p>Тонкая настройка поверх выбранного режима</p>

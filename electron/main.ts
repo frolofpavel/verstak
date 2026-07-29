@@ -23,6 +23,7 @@ import { registerProjectMapIpc } from './ipc/project-map'
 import { registerFilesIpc } from './ipc/files'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerPlanGenerateIpc, PLAN_GENERATION_MODE, PLAN_GENERATION_TOOLS } from './ipc/plans-generate'
+import { choosePlanGenerationProvider } from './ai/plan-generation-provider'
 import { isWithinKnownRoots } from './ai/path-policy'
 import { registerJournalIpc } from './ipc/journal'
 import { registerRemindersIpc } from './ipc/reminders'
@@ -874,10 +875,17 @@ app.whenReady().then(() => {
   registerPlanGenerateIpc({
     plans,
     isKnownProject: (projectPath) => isWithinKnownRoots(projectPath, aiDeps.getKnownRoots()),
-    runPlanning: ({ projectPath, prompt, sendId, signal }) => runScheduledHeadless(aiDeps, {
+    // Дефект 1 живой приёмки (29.07): активный провайдер может быть CLI-подпиской,
+    // а она инструментов наружу не отдаёт — `create_plan` вызвать нечем. Выбор
+    // провайдера вынесен в чистый модуль; фолбэк осознанный и объявлен человеку.
+    choosePlanProvider: () => choosePlanGenerationProvider({
+      active: aiDeps.getProviderId(),
+      hasSecret: (key) => !!getSecret(key),
+    }),
+    runPlanning: ({ projectPath, prompt, sendId, signal, providerId }) => runScheduledHeadless(aiDeps, {
       projectPath,
       prompt,
-      providerId: aiDeps.getProviderId(),
+      providerId,
       model: null,
       signal,
       sendId,

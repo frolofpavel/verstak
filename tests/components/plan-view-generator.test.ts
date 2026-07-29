@@ -17,7 +17,7 @@ const { PlanView } = await import('../../src/components/PlanView')
 const plansCreate = vi.fn(async () => ({ id: 1 }))
 const plansList = vi.fn(async () => [])
 // Пакет A2: форма зовёт продуктовый метод main, а не собирает промпт сама.
-let generateResult: { ok: boolean; planId?: number; error?: string } = { ok: true, planId: 7 }
+let generateResult: { ok: boolean; planId?: number; error?: string; notice?: string } = { ok: true, planId: 7 }
 const plansGenerate = vi.fn(async (_req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) => generateResult)
 const plansCancelGenerate = vi.fn(async () => true)
 
@@ -174,5 +174,68 @@ describe('A2 §4: состояния формы генерации', () => {
 
     expect((titleInput as HTMLInputElement).value).toBe('')
     expect((brief as HTMLTextAreaElement).value).toBe('')
+  })
+})
+
+// ДЕФЕКТ 1 ЖИВОЙ ПРИЁМКИ (29.07). У пользователя с подпиской (`codex-cli`)
+// генерация физически не может идти на его провайдере: инструменты у CLI живут
+// внутри бинаря, и вызов `create_plan` наружу не выходит. Раньше это давало отказ
+// с внутренним термином; теперь — фолбэк на настроенный API-провайдер.
+//
+// Правило дня применено буквально: «зелёные тесты ≠ работающая функция». Главный
+// процесс может отдавать `notice` идеально, а человек не увидит ничего. Поэтому
+// проверяется ЭКРАН.
+describe('дефект 1: подмена провайдера объясняется на экране', () => {
+  function fill(container: HTMLElement) {
+    const [titleInput] = Array.from(container.querySelectorAll('input'))
+    const [brief] = Array.from(container.querySelectorAll('textarea'))
+    act(() => { type(titleInput, 'Настройка Директа') })
+    act(() => { type(brief, 'Проверь кампании') })
+    return { titleInput: titleInput as HTMLInputElement, brief: brief as HTMLTextAreaElement }
+  }
+  const press = async (container: HTMLElement) => {
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find(b => b.textContent === 'Сгенерировать план')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+  }
+  const notice = (container: HTMLElement) =>
+    container.querySelector('[data-testid="plan-gen-notice"]')?.textContent ?? null
+
+  it('план собран на другом провайдере → объяснение видно человеку', async () => {
+    generateResult = { ok: true, planId: 7, notice: 'План собран на «ChatGPT»: «Codex» работает по подписке.' }
+    const { container } = mount()
+    fill(container)
+    await press(container)
+
+    expect(notice(container), 'подмена провайдера прошла молча').toContain('ChatGPT')
+    generateResult = { ok: true, planId: 7 }
+  })
+
+  // КОНТРОЛЬ: без него первый кейс был бы зелёным и от «показываем всегда».
+  it('контроль: подмены не было → на экране никакого объяснения', async () => {
+    generateResult = { ok: true, planId: 7 }
+    const { container } = mount()
+    fill(container)
+    await press(container)
+
+    expect(notice(container), 'объяснение показано там, где подмены не было').toBeNull()
+  })
+
+  it('генерировать не на чем → инструкция на экране, текст задачи цел', async () => {
+    generateResult = {
+      ok: false,
+      error: 'Откройте Настройки → Провайдеры и добавьте ключ любого из: Gemini, Claude, ChatGPT.',
+    }
+    const { container } = mount()
+    const { titleInput, brief } = fill(container)
+    await press(container)
+
+    expect(container.textContent).toContain('Настройки')
+    expect(container.textContent, 'внутренний термин показан человеку').not.toContain('unattended')
+    expect(titleInput.value, 'название потеряно').toBe('Настройка Директа')
+    expect(brief.value, 'описание потеряно').toBe('Проверь кампании')
+    generateResult = { ok: true, planId: 7 }
   })
 })

@@ -31,6 +31,9 @@ export function PlanView() {
   // повторный запуск во время работы заблокирован.
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // Дефект 1 живой приёмки: план мог быть собран НЕ на активном провайдере.
+  // Молчаливая подмена — обман, поэтому объяснение показывается рядом с формой.
+  const [genNotice, setGenNotice] = useState<string | null>(null)
   const [clarification, setClarification] = useState('')
   const [autopilot, setAutopilot] = useState({ enabled: false, maxSteps: 5, verifyCmd: '' })
   const [autopilotLog, setAutopilotLog] = useState<string[]>([])
@@ -76,6 +79,7 @@ export function PlanView() {
     if (!title || !brief || generating) return
     setGenerating(true)
     setGenError(null)
+    setGenNotice(null)
     try {
       const res = await window.api.plans.generate({
         projectPath: path!,
@@ -83,6 +87,9 @@ export function PlanView() {
         taskDescription: brief,
         ...(clarification.trim() ? { clarification: clarification.trim() } : {}),
       })
+      // Объяснение показываем в ЛЮБОМ исходе: подмена провайдера состоялась и
+      // тогда, когда план в итоге не собрался.
+      setGenNotice(res.notice ?? null)
       if (!res.ok || res.planId == null) {
         // §4 A2: текст формы НЕ теряется при ошибке — человек дописывает и повторяет.
         setGenError(res.error ?? 'Не удалось сформировать план.')
@@ -292,6 +299,9 @@ ${remaining || '— нет —'}
             rows={3}
             onChange={e => setComposer(c => ({ ...c, brief: e.target.value }))}
           />
+          {genNotice && (
+            <div className="gg-plan-gen-notice" data-testid="plan-gen-notice">{genNotice}</div>
+          )}
           {genError && (
             <div className="gg-plan-gen-error" role="alert">
               {genError}

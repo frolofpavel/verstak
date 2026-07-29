@@ -24,7 +24,11 @@ import {
 const ROOT = process.cwd()
 
 describe('RUNTIME_FLAGS — состав', () => {
-  it('в таблице ровно пять флагов из плана, без дублей', () => {
+  // СОСТАВ ИЗМЕНЁН ОСОЗНАННО (29.07), и это объявляется прямо здесь: пятёрка была
+  // не контрактом, а перечнем того, что успели вывести 27.07. Шестым добавлен
+  // `plan_approval_gate` — настройка существовала, но её единственный тумблер был
+  // спрятан в свёрнутом блоке чужой вкладки, и живая приёмка встала на этом.
+  it('в таблице ровно шесть флагов, без дублей', () => {
     const keys = RUNTIME_FLAGS.map(f => f.key)
     expect(keys).toEqual([
       'memory_lifecycle',
@@ -32,6 +36,7 @@ describe('RUNTIME_FLAGS — состав', () => {
       'smart_routing',
       'smart_fallback',
       'auto_capture_memory',
+      'plan_approval_gate',
     ])
     expect(new Set(keys).size).toBe(keys.length)
   })
@@ -59,6 +64,9 @@ describe('RUNTIME_FLAGS — дефолты', () => {
     smart_fallback: true,
     // opt-in — решение Павла от 26.07 (2.1.13). Мутация в true = красный.
     auto_capture_memory: false,
+    // opt-in и остаётся им: тумблер согласования включается ОСОЗНАННО, вывод его в
+    // интерфейс дефолта не меняет. Мутация в true = красный.
+    plan_approval_gate: false,
   }
 
   for (const [key, defaultOn] of Object.entries(EXPECTED) as Array<[RuntimeFlagKey, boolean]>) {
