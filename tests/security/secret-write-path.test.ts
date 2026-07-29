@@ -22,7 +22,7 @@
 // настоящие. Мок — только sender и recordWrite, и оба лишь ЗАПИСЫВАЮТ то, что им
 // отдали: именно их содержимое и есть предмет проверки.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { writeFileHandler, applyPatchHandler, proposeEditsHandler } from '../../electron/ipc/tool-handlers/file-ops'
@@ -353,13 +353,19 @@ describe('SEC-SECRET-01 · контроль: обычный файл прави�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SEC-SECRET-02 · маска для экрана.
+// SEC-SECRET-02 · маска на ГРАНИЦЕ MAIN, а не перед отрисовкой.
 //
-// Сырое «до» нужно ТОЛЬКО main-процессу — для записи и для отката. В renderer
-// уходит маскированный, но информативный дифф: renderer — это ровно тот периметр,
-// откуда содержимое утекает наружу (запись экрана, демонстрация, RDP, DevTools и
-// DOM, логи, буфер обмена). Без маски починка выше СОЗДАЛА БЫ новый путь наружу:
-// apply_patch по файлу с секретом отдаёт в модалку весь сырой файл.
+// Сырое «до» нужно ТОЛЬКО main-процессу — для записи на диск и для стека отката.
+// Без маски починка выше СОЗДАЛА БЫ новый путь наружу: apply_patch по файлу с
+// секретом отдаёт в модалку весь сырой файл.
+//
+// ПОЧЕМУ ПРОВЕРЯЕТСЯ СОБЫТИЕ, А НЕ ЭКРАН. Содержимое диффа уходит не только на
+// экран: `src/App.tsx` форвардит КАЖДОЕ событие прогона, запущенного с
+// телефона, целиком — `mobile.sendRunEvent(id, event)` → `mobile:run-event` →
+// `mobileBridge.emit('run.event')` → HTTP POST на внешний relay. То есть
+// `before`/`after` покидают МАШИНУ. Маска, поставленная в `DiffView`, этот путь
+// не закрывает вовсе, и проверка отрисованного диффа его тоже не покрыла бы.
+// Поэтому пины ниже смотрят на событие, каким его отдал main.
 //
 // ЧЕСТНО О КРАСНОТЕ. Эти три пина на коде ДО починки краснеют НЕ своим
 // утверждением: apply_patch по файлу с секретом там отвергается гардом, модалка
@@ -368,7 +374,7 @@ describe('SEC-SECRET-01 · контроль: обычный файл прави�
 // — прежний дефект воспроизводят пины SEC-SECRET-01 выше. Записано прямо, чтобы
 // никто не принял их красноту за доказательство утечки в старом коде.
 // ─────────────────────────────────────────────────────────────────────────────
-describe('SEC-SECRET-02 · маска секрета в диффе, уходящем на экран', () => {
+describe('SEC-SECRET-02 · маска секрета в диффе, покидающем main', () => {
   let dir: string
   let file: string
   beforeEach(() => {
@@ -392,16 +398,25 @@ describe('SEC-SECRET-02 · маска секрета в диффе, уходящ
     return ev!
   }
 
-  it('сырое значение секрета в renderer не уходит НИ в «до», НИ в «после»', async () => {
+  // ГЛАВНЫЙ пин блока: смотрим на событие, каким его ОТДАЛ MAIN, — оно же
+  // уезжает на внешний relay по мобильному пути. Проверка отрисованного диффа
+  // здесь была бы проверкой не того периметра.
+  it('сырое значение секрета не покидает main НИ в «до», НИ в «после»', async () => {
     const h = harness(dir, 'ask')
-    const ev = await pendingWriteEvent(h, patchCall('config.ts', PATCH_AWAY_FROM_SECRET))
+    await pendingWriteEvent(h, patchCall('config.ts', PATCH_AWAY_FROM_SECRET))
 
-    expect(ev!.before, 'сырой секрет уехал в renderer').not.toContain(SECRET)
-    expect(ev!.after, 'сырой секрет уехал в renderer').not.toContain(SECRET)
-    // Инвариант жёстче простого «не содержит эту строку»: в маскированном тексте
-    // сканер не должен находить ВООБЩЕ ничего.
-    expect(scanText(ev!.before).hits).toEqual([])
-    expect(scanText(ev!.after).hits).toEqual([])
+    // Проверяем КАЖДОЕ событие, а не первое: иначе второй эмиттер, добавленный
+    // рядом с замаскированным, проехал бы незамеченным.
+    const all = h.events.filter(e => e.type === 'pending-write') as unknown as Array<{ before: string; after: string }>
+    expect(all.length).toBeGreaterThan(0)
+    for (const ev of all) {
+      expect(ev.before, 'сырой секрет вышел за границу main').not.toContain(SECRET)
+      expect(ev.after, 'сырой секрет вышел за границу main').not.toContain(SECRET)
+      // Инвариант жёстче простого «не содержит эту строку»: в маскированном
+      // тексте сканер не должен находить ВООБЩЕ ничего.
+      expect(scanText(ev.before).hits).toEqual([])
+      expect(scanText(ev.after).hits).toEqual([])
+    }
   })
 
   it('маска информативна: тип секрета, отпечаток и что с ним происходит', async () => {
@@ -422,6 +437,94 @@ describe('SEC-SECRET-02 · маска секрета в диффе, уходящ
     const ev = await pendingWriteEvent(h, patchCall('config.ts', PATCH_AWAY_FROM_SECRET))
     expect(ev!.before).toContain('name: \'verstak\'')
     expect(ev!.before).toContain('key: ')
+  })
+
+  // Вторая ветка diffConfirmWrite. Содержимого в ней нет вовсе — уходит только
+  // путь. Пин на случай, если однажды «для наглядности» решат показывать дифф и
+  // при авто-приёме: тогда это станет вторым выходом содержимого из main.
+  it('ветка auto-accept не выносит содержимое вообще — только путь', async () => {
+    const h = harness(dir, 'accept-edits')
+    await applyPatchHandler.handle(patchCall('config.ts', PATCH_AWAY_FROM_SECRET), h.ctx)
+
+    expect(h.events.some(e => e.type === 'pending-write'), 'авто-приём показал дифф').toBe(false)
+    const dump = JSON.stringify(h.events)
+    expect(dump, 'сырой секрет уехал через tool-activity').not.toContain(SECRET)
+    expect(dump, 'содержимое файла уехало через tool-activity').not.toContain('name: \'verstak\'')
+  })
+})
+
+// Структурный периметр. Пины выше проверяют ОДИН вызов; эти — что второго
+// выхода содержимого из main не завели, и что маска стоит именно в нём.
+describe('SEC-SECRET-02 · содержимое покидает main ровно из одной точки', () => {
+  const ROOT = process.cwd()
+
+  function tsFiles(dir: string, acc: string[] = []): string[] {
+    for (const e of readdirSync(dir)) {
+      if (['node_modules', '.git', 'out', 'release', 'dist', '.vite'].includes(e)) continue
+      const p = join(dir, e)
+      if (statSync(p).isDirectory()) tsFiles(p, acc)
+      else if (p.endsWith('.ts')) acc.push(p)
+    }
+    return acc
+  }
+
+  /** Строки main, которые ЭМИТИРУЮТ pending-write (объявление типа не в счёт). */
+  function emitLines(): Array<{ where: string; line: string }> {
+    const out: Array<{ where: string; line: string }> = []
+    for (const f of tsFiles(join(ROOT, 'electron'))) {
+      readFileSync(f, 'utf8').split(/\r?\n/).forEach((line, i) => {
+        if (/'pending-write'/.test(line) && /\.send\(/.test(line)) {
+          out.push({ where: `${f.slice(ROOT.length + 1).split('\\').join('/')}:${i + 1}`, line: line.trim() })
+        }
+      })
+    }
+    return out
+  }
+
+  /**
+   * Сырой прокид: шорткат `{ …, before, after }` или явное `before: before`.
+   *
+   * Проверять надо ИМЕННО форму свойства, а не подстроку `before, after`: в
+   * правильной строке `before: shown.before, after: shown.after` эта подстрока
+   * тоже есть, и наивный детектор объявляет нарушением как раз починенный код
+   * (наступил на это здесь же).
+   *
+   * ГРАНИЦА ЧЕСТНО: детектор ловит очевидный возврат к прокиду, но не поймает
+   * псевдоним (`before: raw`). Настоящий страж — поведенческий пин выше, где
+   * событие проверяется на отсутствие секрета; этот блок стережёт от ВТОРОЙ
+   * точки выхода, которую поведенческий пин не увидел бы вовсе.
+   */
+  const passesRaw = (line: string) =>
+    /[,{]\s*before\s*[,}]/.test(line) || /\bbefore\s*:\s*before\b/.test(line) ||
+    /[,{]\s*after\s*[,}]/.test(line) || /\bafter\s*:\s*after\b/.test(line)
+
+  it('точка эмиссии ровно одна', () => {
+    expect(emitLines().map(e => e.where)).toHaveLength(1)
+  })
+
+  it('в ней подставлена маска, а не сырые before/after', () => {
+    const [emit] = emitLines()
+    expect(passesRaw(emit.line), `сырое содержимое уходит из main: ${emit.where}`).toBe(false)
+    expect(readFileSync(join(ROOT, 'electron/ipc/tool-handlers/file-ops.ts'), 'utf8'))
+      .toContain('maskSecretsForDiff(')
+  })
+
+  // КОНТРОЛЬ: без него пустой список выше означал бы лишь то, что искать не умеем.
+  it('контроль: прежняя форма строки распознаётся как нарушение', () => {
+    const old = "    ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-write', callId: call.id, path, before, after } })"
+    expect(/'pending-write'/.test(old) && /\.send\(/.test(old)).toBe(true)
+    expect(passesRaw(old), 'детектор не видит сырой прокид').toBe(true)
+  })
+
+  // ПОЧЕМУ ГРАНИЦА ИМЕННО ЗДЕСЬ. Это характеризация чужого кода, а не второй
+  // страж: renderer форвардит событие ЦЕЛИКОМ на внешний relay, поэтому маска
+  // перед отрисовкой не закрыла бы ничего. Если форвард однажды станет
+  // выборочным, пин покраснеет — это сигнал перечитать границу, а не подгонять
+  // утверждение.
+  it('мобильный мост форвардит событие целиком — маска перед отрисовкой была бы поздней', () => {
+    const app = readFileSync(join(ROOT, 'src/App.tsx'), 'utf8')
+    expect(app, 'форвард событий прогона на мост исчез — границу пересмотреть')
+      .toMatch(/mobile\.sendRunEvent\(\s*id\s*,\s*event\s*\)/)
   })
 })
 

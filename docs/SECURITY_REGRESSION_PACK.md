@@ -63,7 +63,7 @@ quick focused gate for agent-safety work.
 - URL query and fragment secrets are redacted before log or trace use.
 - The write path takes the file's previous state raw, so neither an edit nor its undo can write a scanner placeholder over a live secret.
 - Whole-file writes (`write_file`, `propose_edits`) are refused on files that contain secrets; `apply_patch` stays available because its SEARCH/REPLACE lands on the raw text.
-- The confirmation diff leaving the main process carries the secret's type, a four-character fingerprint and its direction (added / changed / removed / unchanged), never the value.
+- The confirmation diff leaving the main process carries the secret's type, a four-character fingerprint and its direction (added / changed / removed / unchanged), never the value. The mask is applied to the emitted event itself, not before rendering: `src/App.tsx` forwards every event of a phone-started run verbatim to an external relay over HTTP, so a renderer-side mask would let raw secrets leave the machine. File content leaves main from exactly one place, and that is pinned.
 
 ## Next Rules
 

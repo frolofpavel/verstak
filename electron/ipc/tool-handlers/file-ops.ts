@@ -115,10 +115,24 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
     // для суба это taskAc.signal (per-task таймаут/отмена), для главного агента —
     // ctrl.signal. Раньше Promise не слушал abort → суб-executor с write в
     // ask-режиме висел, и per-task таймаут его не разрывал (до 50 модалок).
-    // Сырое «до» дальше main не идёт: renderer — ровно тот периметр, откуда
-    // содержимое утекает наружу (запись экрана, демонстрация, RDP, DevTools и
-    // DOM, логи, буфер обмена). В модалку уходит маска: тип секрета, отпечаток
-    // и что с ним происходит — добавлен / изменён / удалён / без изменений.
+    // ЕДИНСТВЕННАЯ точка, где содержимое файла покидает main, — поэтому маска
+    // подставляется В САМО СОБЫТИЕ, а не перед отрисовкой диффа.
+    //
+    // Маска в renderer НЕ ЗАКРЫЛА БЫ этот путь, и это не осторожность, а
+    // трассировка (29.07): `src/App.tsx` форвардит КАЖДОЕ событие прогона,
+    // запущенного с телефона, целиком — `window.api.mobile.sendRunEvent(id,
+    // event)` → `mobile:run-event` (main.ts) → `mobileBridge.emit('run.event')`
+    // → HTTP POST на внешний relay. То есть `before`/`after` УХОДЯТ С МАШИНЫ ПО
+    // СЕТИ, когда заданы VERSTAK_MOBILE_RELAY_URL/TOKEN. Сырое содержимое здесь
+    // означало бы отправку живых секретов пользователя на чужой сервер.
+    //
+    // Renderer и без моста тот периметр, откуда содержимое утекает наружу:
+    // запись экрана, демонстрация, RDP, DevTools и DOM, буфер обмена.
+    //
+    // В событие уходит маска: тип секрета, отпечаток и что с ним происходит —
+    // добавлен / изменён / удалён / без изменений. Сырое `before`/`after` живёт
+    // только внутри main и только для двух дел: записи на диск и записи в стек
+    // отката.
     const shown = maskSecretsForDiff(before, after)
     ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-write', callId: call.id, path, before: shown.before, after: shown.after } })
     const key = ctx.scopedKey(ctx.sendId, call.id)

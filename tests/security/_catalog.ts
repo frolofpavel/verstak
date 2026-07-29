@@ -179,9 +179,9 @@ export const SECURITY_RULES: SecurityRule[] = [
     cwe: 'CWE-200',
     category: 'secret-leak',
     severity: 'block',
-    title: 'The confirmation diff sent to the renderer carries a masked secret with type, fingerprint and direction — never the value',
+    title: 'File content leaves the main process from exactly one place, and it carries a masked secret with type, fingerprint and direction — never the value',
     status: 'active',
     testFile: './secret-write-path.test.ts',
-    source: 'Verstak incident 2026-07-29: raw before-content is main-process only'
+    source: 'Verstak incident 2026-07-29: pending-write events of a phone-started run are forwarded verbatim to an external relay'
   }
 ]
