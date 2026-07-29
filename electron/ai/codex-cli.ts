@@ -7,6 +7,7 @@ import { normalizedUsage } from '../../shared/contracts/usage'
 import type { AgentMode } from './mode-policy'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
+import { safeStderrTail } from './cli-stderr'
 
 interface CodexCliOptions {
   binary?: string
@@ -284,7 +285,7 @@ export function createCodexCliProvider(opts: CodexCliOptions = {}): ChatProvider
       child.on('close', (code) => {
         if (stdoutBuffer.length > 0) processLine(stdoutBuffer)
         if (code !== 0 && !doneEmitted && !queue.some(e => e.type === 'done' || e.type === 'error')) {
-          queue.push({ type: 'error', message: `Codex CLI exit ${code}. ${stderrBuffer.slice(0, 400)}` })
+          queue.push({ type: 'error', message: `Codex CLI exit ${code}. ${safeStderrTail(stderrBuffer)}` })
         } else if (!doneEmitted && !queue.some(e => e.type === 'error')) {
           // Чистый выход без turn.completed (некоторые версии codex закрываются
           // сразу после agent_message). Отдаём reasoning-fallback если ответа не

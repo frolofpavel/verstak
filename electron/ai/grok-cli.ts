@@ -11,6 +11,7 @@ import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
 import type { ModelGateResult } from './model-catalog-service'
 import { logRuntime } from '../runtime-log'
+import { safeStderrTail } from './cli-stderr'
 
 /**
  * Grok-4 / Grok Build (xAI) в режиме `streaming-json` стримит ВСЁ как обычный
@@ -487,12 +488,12 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
                 'Используйте Grok API вместо CLI: открой Settings → Провайдеры → Grok (API) → ' +
                 'добавь ключ от console.x.ai. Альтернативно — обнови grok CLI ' +
                 'с сайта xAI, иногда помогает.' +
-                (stderrBuffer ? '\n\nstderr: ' + stderrBuffer.slice(0, 400) : '')
+                (stderrBuffer ? '\n\nstderr: ' + safeStderrTail(stderrBuffer) : '')
             })
           } else {
             queue.push({
               type: 'error',
-              message: `Grok CLI exit ${code}.${stderrBuffer ? ' ' + stderrBuffer.slice(0, 400) : ''}`
+              message: `Grok CLI exit ${code}.${stderrBuffer ? ' ' + safeStderrTail(stderrBuffer) : ''}`
             })
           }
         }

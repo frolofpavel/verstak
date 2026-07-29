@@ -7,6 +7,7 @@ import { normalizedUsage } from '../../shared/contracts/usage'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
+import { safeStderrTail } from './cli-stderr'
 
 /**
  * Аудит M7: gemini-cli шлёт assistant-сообщение accumulated (каждое событие —
@@ -244,7 +245,7 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
       child.on('close', (code) => {
         if (stdoutBuffer.length > 0) processLine(stdoutBuffer)
         if (code !== 0 && !events.some(e => e.type === 'done')) {
-          events.push({ type: 'error', message: `Gemini CLI вышел с кодом ${code}.${stderrBuffer ? ' ' + stderrBuffer.slice(0, 400) : ''}` })
+          events.push({ type: 'error', message: `Gemini CLI вышел с кодом ${code}.${stderrBuffer ? ' ' + safeStderrTail(stderrBuffer) : ''}` })
         }
         done = true
         wake()

@@ -7,6 +7,7 @@ import { normalizedUsage } from '../../shared/contracts/usage'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
+import { safeStderrTail } from './cli-stderr'
 
 interface ClaudeCliOptions {
   binary?: string
@@ -358,7 +359,7 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
           if (suspectHeadlessAuth) {
             queue.push({ type: 'error', message: HEADLESS_NO_AUTH_HINT })
           } else {
-            queue.push({ type: 'error', message: `Claude CLI exit ${code}. ${stderrBuffer.slice(0, 400)}` })
+            queue.push({ type: 'error', message: `Claude CLI exit ${code}. ${safeStderrTail(stderrBuffer)}` })
           }
         }
         done = true; wake()
