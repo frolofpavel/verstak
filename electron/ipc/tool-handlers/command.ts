@@ -107,7 +107,7 @@ export const runCommandHandler: ToolHandler = {
     }
     // Mode policy: plan blocks, ask confirms, auto/bypass auto-accept,
     // accept-edits still confirms commands (only edits auto-pass).
-    const { decision, reason: denyReason } = resolveDecision('run_command', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+    const { decision, reason: denyReason, confirmCause } = resolveDecision('run_command', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
     if (decision === 'block') {
       const reason = denyReason ?? blockReason('run_command', ctx.agentMode)
       ctx.sender.send('ai:event', {
@@ -116,11 +116,15 @@ export const runCommandHandler: ToolHandler = {
       })
       return { id: call.id, name: call.name, result: '', error: reason }
     }
-    // Tier-2 #4: доверенная команда (настройка bash_allowlist) авто-аппрувится в
-    // confirm-режимах — без модалки. plan (block) НЕ перекрывается (вышли выше);
-    // denylist (classifyCommand) уже отработал; цепочки/подстановки matchesAllowlist
-    // отсекает сам.
+    // Tier-2 #4: доверенная команда (настройка bash_allowlist) авто-аппрувится —
+    // но ТОЛЬКО когда подтверждения требует РЕЖИМ (confirmCause === 'mode').
+    // Ответственное действие и явное ask-правило пользователя allowlist не гасит:
+    // совпадение префиксное, и `git` в списке ради `git status` иначе молча
+    // пропускал бы `git push` (обход №4, 30.07). plan (block) НЕ перекрывается
+    // (вышли выше); denylist (classifyCommand) уже отработал; цепочки/подстановки
+    // matchesAllowlist отсекает сам.
     const allowlisted = decision !== 'auto-accept'
+      && confirmCause === 'mode'
       && matchesAllowlist(command, parseAllowlist(ctx.getSecretForDelegate?.('bash_allowlist') ?? null))
     let forceConfirm = false
     if (isSmartApproveEnabled(ctx)) {

@@ -44,7 +44,7 @@ async function authorizeProcessCommand(call: Parameters<ToolHandler['handle']>[0
     return `Blocked by safety policy: ${verdict.reason ?? 'denylist'}`
   }
 
-  const { decision, reason: denyReason } = resolveDecision('run_command', { command }, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+  const { decision, reason: denyReason, confirmCause } = resolveDecision('run_command', { command }, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
   if (decision === 'block') {
     const reason = denyReason ?? blockReason('run_command', ctx.agentMode)
     ctx.sender.send('ai:event', {
@@ -68,7 +68,10 @@ async function authorizeProcessCommand(call: Parameters<ToolHandler['handle']>[0
     }
   }
 
+  // Allowlist гасит только режимный confirm (confirmCause === 'mode') — зеркально
+  // command.ts: ответственное действие и ask-правило не перебиваются (обход №4).
   const allowlisted = decision !== 'auto-accept'
+    && confirmCause === 'mode'
     && matchesAllowlist(command, parseAllowlist(ctx.getSecretForDelegate?.('bash_allowlist') ?? null))
   if (!forceConfirm && (decision === 'auto-accept' || allowlisted)) {
     ctx.sender.send('ai:event', {

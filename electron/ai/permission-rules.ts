@@ -370,6 +370,18 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
 }
 
 /**
+ * ПОЧЕМУ у confirm есть ПРИЧИНА (30.07, обход №4). Когда bash_allowlist писали,
+ * `confirm` значил ровно одно — «так велит режим», и перебивать его доверенной
+ * командой было верно. Потом у confirm появились другие причины (ответственное
+ * действие, ask-правило), а перебивание в хендлерах осталось прежним и проглотило
+ * заодно и их: bash_allowlist=git молча пропускал `git push origin main` в auto.
+ * Переиспользование правильного кода не переносит его предпосылок; предпосылкой
+ * было единственное значение слова confirm. Теперь причина явная, и allowlist
+ * вправе гасить ТОЛЬКО 'mode' — режимную рутину, ради которой он и заведён.
+ */
+export type ConfirmCause = 'mode' | 'responsible-action' | 'ask-rule'
+
+/**
  * Итоговое решение по вызову с учётом режима И permission-правил.
  * Заменяет голый decide() в хендлерах. Семантика:
  *   - deny-правило → block ВСЕГДА (бьёт даже bypass);
@@ -377,6 +389,8 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
  *   - ask-правило → confirm (понижает auto→confirm);
  *   - allow-правило → auto-accept (повышает confirm→auto);
  *   - иначе → решение режима (с учётом per-tool auto-approve).
+ * confirm всегда приходит с confirmCause — потребитель, снимающий модалку
+ * (bash_allowlist), обязан смотреть на причину, а не на сам вердикт.
  */
 export function resolveDecision(
   toolName: string,
@@ -384,7 +398,7 @@ export function resolveDecision(
   mode: AgentMode,
   autoApprove: AutoApprove | undefined,
   rules: CompiledPermissionRules | undefined
-): { decision: ToolDecision; reason?: string } {
+): { decision: ToolDecision; reason?: string; confirmCause?: ConfirmCause } {
   const base = decide(toolName, mode, autoApprove)
   const argText = extractArgText(toolName, args)
   const rule = applyPermissionRules(toolName, argText, rules)
@@ -406,11 +420,11 @@ export function resolveDecision(
   if (mode !== 'bypass') {
     const responsible = classifyResponsibleAction(toolName, args)
     if (responsible.responsible) {
-      return { decision: 'confirm', reason: responsible.why }
+      return { decision: 'confirm', reason: responsible.why, confirmCause: 'responsible-action' }
     }
   }
 
-  if (rule?.decision === 'ask') return { decision: 'confirm' }
+  if (rule?.decision === 'ask') return { decision: 'confirm', confirmCause: 'ask-rule' }
   if (rule?.decision === 'allow') return { decision: 'auto-accept' }
-  return { decision: base }
+  return base === 'confirm' ? { decision: base, confirmCause: 'mode' } : { decision: base }
 }

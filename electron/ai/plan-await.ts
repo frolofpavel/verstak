@@ -108,13 +108,19 @@ export function planDecisionOutsideRun(
   return {
     planStatus: 'running',
     continuation: {
-      // ВНИМАНИЕ (ревью 28.07): это ТЕКСТ, а не механизм. Он называет модели
-      // ответственные шаги, но паузой не является и не может ею быть: обходится
-      // режимами auto/bypass, allow-правилом permissions, тумблером
-      // авто-подтверждения команд и обычным write_file в accept-edits. Настоящая
-      // пауза требует рантайм-гейта перед ответственным инструментом (по образцу
-      // mode-policy.decide) — она НЕ построена, и в аудите записана как таковая.
-      // Здесь текст оставлен как подсказка модели, не как гарантия.
+      // Это ТЕКСТ-подсказка модели, не гарантия — но рантайм-пауза перед
+      // ответственным действием с 29.07 ПОСТРОЕНА и живёт не здесь, а в
+      // `resolveDecision` (permission-rules.ts): classifyResponsibleAction стоит
+      // выше режима auto, autoApprove, allow-правила и bash_allowlist
+      // (confirmCause, обход №4 закрыт 30.07); внутри resolveDecision исключение
+      // одно — bypass. Сетка — tests/ipc/responsible-pause-gate.test.ts.
+      // ГРАНИЦА: гейт накрывает только тех, кто ЗОВЁТ resolveDecision. Мимо него
+      // идут attest_verification (tool-handlers/verification.ts) и browser_*
+      // (tool-handlers/browser.ts) — там паузы нет ни в одном режиме; плюс дыры
+      // покрытия классификатора. Перечень — STATUS.md, блок B-2 (аудит 30.07).
+      // Прежняя редакция комментария (ревью 28.07) утверждала «пауза НЕ
+      // построена» — на тот момент верно, после 29.07 неверно; текст ниже
+      // оставлен как дублирующая подсказка модели.
       text: plan.responsibleSteps && plan.responsibleSteps.length > 0
         ? `${gate.result} Шаги по порядку и без остановок, КРОМЕ ответственных: ` +
           `${plan.responsibleSteps.join('; ')}. Перед каждым таким шагом остановись и спроси ` +
