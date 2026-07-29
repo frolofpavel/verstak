@@ -1,7 +1,7 @@
 // Verification-хендлеры: attest_verification / create_plan / preflight. Вынесено при распиле.
 import type { ToolHandler } from './shared'
 import { emitActivity } from './shared'
-import { planSpecFeedback } from '../../ai/task-spec-check'
+import { planSpecFeedback, planSpecBlockers } from '../../ai/task-spec-check'
 import { awaitingApprovalResult } from '../../ai/plan-await'
 import { scanText } from '../../ai/secret-scanner'
 import type { VerificationArtifact, VerificationCheck, VerificationChangedFile } from '../../ai/verification'
@@ -230,9 +230,17 @@ export const createPlanHandler: ToolHandler = {
 
       // Legacy и Outcome проходят quality ДО persistence/approval. Это закрывает
       // исторический bypass: plan-mode раньше возвращался из approval раньше feedback.
+      //
+      // 29.07, ЖИВАЯ ПРОВЕРКА: здесь запрет стоял на ПОЛНОМ фидбэке, а в него
+      // входило «нет конкретных файлов/путей». У задач вне программирования
+      // (реклама, отчёты, переписка) путей нет и быть не должно, поэтому их план
+      // не сохранялся НИКОГДА — человек видел «модель не создала план». Теперь
+      // запрещают только настоящие пробелы (нет критерия готовности, описание в
+      // одну строку), а совет про пути едет вместе с сохранённым планом.
       const specFeedback = planSpecFeedback(steps)
-      if (!ctx.outcome && specFeedback) {
-        return { id: call.id, name: call.name, result: `План не сохранён: требуется доработка.${specFeedback}` }
+      const specBlockers = ctx.outcome ? '' : planSpecBlockers(steps)
+      if (specBlockers) {
+        return { id: call.id, name: call.name, result: `План не сохранён: требуется доработка.${specBlockers}` }
       }
 
       let quality: ReturnType<typeof scorePlanQuality> | null = null

@@ -12,16 +12,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { Database } from 'better-sqlite3'
-import { openDb } from '../../electron/storage/db'
-import { createPlans } from '../../electron/storage/plans'
-import { generatePlan, __resetPlanGenerationForTests } from '../../electron/ipc/plans-generate'
+import type { createPlans } from '../../electron/storage/plans'
+import { generatePlan, explainNoPlan, __resetPlanGenerationForTests } from '../../electron/ipc/plans-generate'
 import { choosePlanGenerationProvider } from '../../electron/ai/plan-generation-provider'
 import { PROVIDERS, providerCapabilities } from '../../electron/ai/registry'
 import { rememberPlanForRun, __resetPlanForRunForTests } from '../../electron/ai/runner-shared'
 
 let dir: string
-let db: Database | undefined
 
 /** Подписочные провайдеры Павла — именно на них всё и сломалось. */
 const SUBSCRIPTION_PROVIDERS = ['codex-cli', 'claude-cli', 'gemini-cli', 'grok-cli'] as const
@@ -34,7 +31,7 @@ beforeEach(() => {
   __resetPlanForRunForTests()
   __resetPlanGenerationForTests()
 })
-afterEach(() => { db?.close(); db = undefined; rmSync(dir, { recursive: true, force: true }) })
+afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ ВООБЩЕ ФОЛБЭК. Это не вкусовщина, а свойство рантайма, и оно закреплено
@@ -106,9 +103,20 @@ describe('сквозной сценарий приёмки: активен codex
     taskDescription: 'Проверь кампании и составь порядок исправлений.',
   })
 
+  /** Поддельное хранилище: `generatePlan` трогает только get/create/list.
+   *  Настоящая БД здесь ничего не доказывает, а нативный модуль бывает занят
+   *  запущенным приложением — тест про выбор провайдера от этого зависеть не должен. */
   function stores() {
-    db = openDb(join(dir, 'verstak.db'))
-    return createPlans(db)
+    const rows: Array<{ id: number; projectPath: string; title: string }> = []
+    return {
+      create: (projectPath: string, title: string) => {
+        const row = { id: rows.length + 1, projectPath, title }
+        rows.push(row)
+        return row
+      },
+      get: (id: number) => rows.find(r => r.id === id) ?? null,
+      list: (projectPath: string) => rows.filter(r => r.projectPath === projectPath),
+    } as never as ReturnType<typeof createPlans>
   }
 
   it('план СОБИРАЕТСЯ, прогон идёт на API-провайдере, человек видит почему', async () => {
@@ -161,6 +169,94 @@ describe('сквозной сценарий приёмки: активен codex
     expect(res.ok).toBe(false)
     expect(res.notice ?? '', 'подмена была, а объяснения нет').not.toBe('')
     expect(res.error ?? '').toContain('доступа к кабинету')
+  })
+})
+
+// ДЕФЕКТ ЖИВОЙ ПРОВЕРКИ (29.07, второй заход). Активен «Свой провайдер
+// (OpenAI-совместимый)» — фолбэка не произошло вовсе, на экране «укажи Base URL».
+// Причина та же ловушка, что с `ollama`: ключ у него ЕСТЬ, значит предикат
+// «ключ задан» считал его настроенным. Провайдер, которому кроме ключа нужен
+// адрес, без адреса не настроен.
+describe('готовность провайдера — это ВСЕ обязательные поля, а не только ключ', () => {
+  it('custom-openai без Base URL не считается настроенным: фолбэк происходит', () => {
+    const c = choosePlanGenerationProvider({
+      active: 'custom-openai',
+      hasSecret: withKeys('custom_openai_api_key', 'openai_api_key'),
+    })
+    expect(c.providerId, 'остались на неработоспособном провайдере').toBe('openai')
+    expect(c.notice ?? '').toContain(PROVIDERS['custom-openai'].name)
+  })
+
+  // КОНТРОЛЬ: с адресом он полноценный выбор человека и подмене не подлежит.
+  it('контроль: с Base URL custom-openai работает и НЕ подменяется', () => {
+    const c = choosePlanGenerationProvider({
+      active: 'custom-openai',
+      hasSecret: withKeys('custom_openai_api_key', 'custom_openai_baseurl', 'openai_api_key'),
+    })
+    expect(c.providerId).toBe('custom-openai')
+    expect(c.notice).toBeNull()
+  })
+
+  it('custom-openai без адреса не берётся и КАНДИДАТОМ на подмену', () => {
+    const c = choosePlanGenerationProvider({
+      active: 'codex-cli',
+      hasSecret: withKeys('custom_openai_api_key'),
+    })
+    expect(c.providerId, 'подменили на провайдера без адреса').toBeNull()
+    expect(c.error ?? '').toContain('Настройки')
+  })
+
+  it('контроль: с адресом он кандидатом становится', () => {
+    const c = choosePlanGenerationProvider({
+      active: 'codex-cli',
+      hasSecret: withKeys('custom_openai_api_key', 'custom_openai_baseurl'),
+    })
+    expect(c.providerId).toBe('custom-openai')
+  })
+
+  // Тот же класс у провайдеров со вторым секретом — закрыт той же картой.
+  it('yandex-gpt без folder id и gigachat без client secret кандидатами не считаются', () => {
+    expect(choosePlanGenerationProvider({ active: 'codex-cli', hasSecret: withKeys('yandex_api_key') }).providerId).toBeNull()
+    expect(choosePlanGenerationProvider({ active: 'codex-cli', hasSecret: withKeys('gigachat_client_id') }).providerId).toBeNull()
+    // Контроль: со вторым полем — становятся.
+    expect(choosePlanGenerationProvider({
+      active: 'codex-cli', hasSecret: withKeys('yandex_api_key', 'yandex_folder_id'),
+    }).providerId).toBe('yandex-gpt')
+  })
+})
+
+// ДИАГНОСТИКА ОТКАЗА. Постановка: «инструмент не дали» и «модель не захотела»
+// лечатся по-разному, а сообщение было одинаковым. Теперь причину называет сам
+// прогон, а не догадка: цифры приходят из runSubAgentLoop.
+describe('отказ называет свою причину', () => {
+  it('модель не тронула ни одного инструмента — так и сказано', () => {
+    const t = explainNoPlan({ toolCallCount: 0, exitReason: 'completed' })
+    expect(t).toContain('не обратилась ни к одному инструменту')
+  })
+
+  it('модель работала с проектом, но плана не сохранила — другой текст', () => {
+    const t = explainNoPlan({ toolCallCount: 5, exitReason: 'completed' })
+    expect(t).toContain('изучила проект')
+    expect(t, 'два разных случая слились в один текст').not.toContain('ни к одному инструменту')
+  })
+
+  it('модель не уложилась в шаги — третий текст, с советом', () => {
+    const t = explainNoPlan({ toolCallCount: 8, exitReason: 'max-iterations' })
+    expect(t).toContain('не уложилась')
+    expect(t).toContain('разбейте')
+  })
+
+  it('во всех случаях — человеческий язык, без внутренних терминов', () => {
+    for (const run of [
+      { toolCallCount: 0, exitReason: 'completed' },
+      { toolCallCount: 5, exitReason: 'completed' },
+      { toolCallCount: 8, exitReason: 'max-iterations' },
+    ]) {
+      const t = explainNoPlan(run).toLowerCase()
+      for (const term of ['exitreason', 'toolcall', 'max-iterations', 'unattended']) {
+        expect(t, term).not.toContain(term)
+      }
+    }
   })
 })
 

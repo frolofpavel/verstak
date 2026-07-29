@@ -59,7 +59,12 @@ export type PlanGenerateRunner = (opts: {
   /** Решение принимает `choosePlanProvider`, а не активный чат: у CLI-подписки
    *  инструментов нет, и генерация на ней невозможна физически. */
   providerId: ProviderId
-}) => Promise<{ ok: boolean; text: string; error?: string }>
+}) => Promise<{
+  ok: boolean; text: string; error?: string
+  /** Диагностика прогона — чтобы отказ назвал СВОЮ причину (см. explainNoPlan). */
+  toolCallCount?: number
+  exitReason?: 'completed' | 'max-iterations' | 'aborted' | 'error'
+}>
 
 export interface PlanGenerateDeps {
   plans: Plans
@@ -127,6 +132,27 @@ export function buildGenerationPrompt(req: PlanGenerateRequest): string {
   return lines.join('\n')
 }
 
+/**
+ * Отказ, который НАЗЫВАЕТ СВОЮ ПРИЧИНУ (29.07, живая проверка).
+ *
+ * До этого «инструмент не дали», «модель не захотела» и «модель работала, но
+ * плана не сохранила» давали человеку одну и ту же строку «модель не создала
+ * план» — а лечатся они по-разному. Диагностику отдаёт сам прогон
+ * (`toolCallCount` / `exitReason`), догадки здесь не строятся.
+ */
+export function explainNoPlan(run: { toolCallCount?: number; exitReason?: string }): string {
+  if (run.exitReason === 'max-iterations') {
+    return 'Не удалось сформировать план: модель не уложилась в отведённые шаги. '
+      + 'Опишите задачу конкретнее или разбейте её на части.'
+  }
+  if ((run.toolCallCount ?? 0) === 0) {
+    return 'Не удалось сформировать план: модель не обратилась ни к одному инструменту и плана не сохранила. '
+      + 'Попробуйте ещё раз или уточните описание задачи.'
+  }
+  return 'Не удалось сформировать план: модель изучила проект, но план не сохранила. '
+    + 'Попробуйте ещё раз или уточните описание задачи.'
+}
+
 export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequest): Promise<PlanGenerateResult> {
   const projectPath = (req.projectPath ?? '').trim()
   const title = (req.title ?? '').trim()
@@ -179,7 +205,7 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
     const why = run.text.trim().replace(/\s+/g, ' ').slice(0, 400)
     return {
       ok: false,
-      error: why ? `Не удалось сформировать план. ${why}` : 'Не удалось сформировать план: модель не создала план.',
+      error: why ? `Не удалось сформировать план. ${why}` : explainNoPlan(run),
       notice,
     }
   } catch (err) {

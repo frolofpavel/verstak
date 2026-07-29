@@ -42,14 +42,31 @@ export interface PlanProviderInput {
   hasSecret: (settingsKey: string) => boolean
 }
 
+/**
+ * Что, КРОМЕ ключа, обязано быть настроено, иначе провайдер неработоспособен.
+ *
+ * Дефект живой проверки 29.07: у «Своего провайдера» ключ есть, значит он
+ * проходил предикат «ключ задан» и считался настроенным — а без Base URL
+ * `createProvider` бросает «укажи Base URL в Settings → Провайдеры», и фолбэка
+ * не происходило вовсе. Тот же класс, что с `ollama`: «ключ есть» — такое же
+ * «мы не знаем, настроен ли он», если провайдеру нужен ещё и адрес.
+ */
+const EXTRA_REQUIRED_SETTINGS: Partial<Record<ProviderId, readonly string[]>> = {
+  'custom-openai': ['custom_openai_baseurl'],
+  'yandex-gpt': ['yandex_folder_id'],
+  gigachat: ['gigachat_client_secret'],
+}
+
 /** Почему провайдер не годится для генерации плана. null — годится. */
-type Unfit = 'no-tools' | 'no-key' | 'unknown'
+type Unfit = 'no-tools' | 'no-key' | 'not-configured' | 'unknown'
 
 function unfitReason(d: ProviderDescriptor | undefined, hasSecret: (k: string) => boolean): Unfit | null {
   if (!d) return 'unknown'
   // Инструменты — не украшение: без них `create_plan` не вызвать, а плана не будет.
   if (!providerCapabilities(d).tools) return 'no-tools'
   if (d.secretKey && !hasSecret(d.secretKey)) return 'no-key'
+  const extra = EXTRA_REQUIRED_SETTINGS[d.id]
+  if (extra && !extra.every(hasSecret)) return 'not-configured'
   return null
 }
 
@@ -69,7 +86,9 @@ function unfitReason(d: ProviderDescriptor | undefined, hasSecret: (k: string) =
 function fallbackCandidates(hasSecret: (k: string) => boolean): ProviderDescriptor[] {
   return (Object.keys(PROVIDERS) as ProviderId[])
     .map(id => PROVIDERS[id])
-    .filter(d => providerCapabilities(d).tools && !!d.secretKey && hasSecret(d.secretKey))
+    // Ключ обязателен ИМЕННО для автоподмены, плюс все прочие обязательные поля:
+    // провайдер, которому кроме ключа нужен адрес, без адреса не настроен.
+    .filter(d => !!d.secretKey && hasSecret(d.secretKey) && unfitReason(d, hasSecret) === null)
 }
 
 /** Имена провайдеров, которым достаточно добавить ключ, — для подсказки «что сделать». */
@@ -94,7 +113,9 @@ export function choosePlanGenerationProvider(input: PlanProviderInput): PlanProv
     const names = candidateNames().join(', ')
     const why = reason === 'no-tools'
       ? `«${activeName}» выполняет инструменты внутри себя, и Verstak не может попросить его сохранить план.`
-      : `Ключ для «${activeName}» пока не задан.`
+      : reason === 'not-configured'
+        ? `Для «${activeName}» заполнены не все обязательные поля.`
+        : `Ключ для «${activeName}» пока не задан.`
     return {
       providerId: null,
       notice: null,
@@ -107,7 +128,9 @@ export function choosePlanGenerationProvider(input: PlanProviderInput): PlanProv
   const notice = reason === 'no-tools'
     ? `План собран на «${fallback.name}»: «${activeName}» работает по подписке через свой интерфейс `
       + 'и не отдаёт Verstak вызовы инструментов, которыми план сохраняется. На вашей работе в чате это никак не сказывается.'
-    : `План собран на «${fallback.name}»: ключ для «${activeName}» пока не задан.`
+    : reason === 'not-configured'
+      ? `План собран на «${fallback.name}»: у «${activeName}» заполнены не все обязательные поля — проверьте Настройки → Провайдеры.`
+      : `План собран на «${fallback.name}»: ключ для «${activeName}» пока не задан.`
 
   return { providerId: fallback.id, notice, error: null }
 }

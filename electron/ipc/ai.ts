@@ -272,7 +272,13 @@ export async function runScheduledHeadless(
     sendId?: number
     role?: 'scheduled' | 'plan-generation'
   }
-): Promise<{ ok: boolean; text: string; error?: string }> {
+): Promise<{
+  ok: boolean; text: string; error?: string
+  /** Сколько инструментов реально выполнил прогон (диагностика вызывающего). */
+  toolCallCount?: number
+  /** Чем закончился цикл: completed / max-iterations / aborted / error. */
+  exitReason?: 'completed' | 'max-iterations' | 'aborted' | 'error'
+}> {
   // Гейт пути как в ai:send: unattended-прогон не должен получить файловый доступ к
   // незарегистрированной/системной папке (напр. осиротевшая задача после удаления проекта).
   if (!isWithinKnownRoots(opts.projectPath, deps.getKnownRoots())) {
@@ -347,7 +353,12 @@ export async function runScheduledHeadless(
       provider, messages, allowedToolNames: [...(opts.allowedTools ?? SCHEDULED_READONLY_TOOLS)], ctx,
       signal: opts.signal, role: opts.role ?? 'scheduled',
     })
-    if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error }
+    // Диагностика хода прогона отдаётся ВЫЗЫВАЮЩЕМУ (29.07). Без неё «модель не
+    // вызвала инструмент», «модель работала, но результата не сохранила» и
+    // «модель не уложилась в лимит шагов» сливались в одно сообщение — а лечатся
+    // они по-разному. Для scheduled поля просто игнорируются.
+    const trace = { toolCallCount: result.toolCallCount, exitReason: result.exitReason }
+    if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error, ...trace }
     // EF-R1 Б3: успех подтверждён реальным ответом — отмечаем аккаунт, выбранный
     // pre-flight (у scheduled нет agent_run, accountId взят из resolver'а напрямую).
     if (sub && !('blocked' in sub) && !('allBlocked' in sub) && !('unavailable' in sub)) {
@@ -355,7 +366,7 @@ export async function runScheduledHeadless(
         deps.markSubscriptionAccountSuccess?.(sub.accountId)
       } catch { /* best-effort */ }
     }
-    return { ok: true, text: result.text }
+    return { ok: true, text: result.text, ...trace }
   } catch (err) {
     return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) }
   }

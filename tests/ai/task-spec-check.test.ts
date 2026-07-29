@@ -5,7 +5,9 @@ describe('scoreTaskSpec — серверная проверка ТЗ (v3 Шаг 
   it('хорошее ТЗ (пути + критерий + детальность) → ok', () => {
     const good = 'В src/lib/auth.ts добавить функцию validateToken(token): проверяет подпись JWT. ' +
       'Готово, когда tests/auth.test.ts зелёный и tsc без ошибок.'
-    expect(scoreTaskSpec(good)).toEqual({ ok: true, missing: [] })
+    // Поле `blocking` добавлено 29.07: «что советуем» и «что запрещает сохранение»
+    // разделены. Утверждение прежнее — у хорошего ТЗ пусто и там, и там.
+    expect(scoreTaskSpec(good)).toEqual({ ok: true, missing: [], blocking: [] })
   })
 
   it('заглушка без путей и критерия → not ok, перечисляет нехватку', () => {
