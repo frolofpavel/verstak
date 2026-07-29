@@ -140,7 +140,7 @@ npm run dist:win     # NSIS + portable .exe
 
 **Перед коммитом обязательно:** `npm run type && npm run test:fast`. Если type-check падает — НЕ коммитим.
 
-**Известный shum в тестах:** 8 sqlite-тестов (`settings`, `chat-sessions`, `projects`) падают по `NODE_MODULE_VERSION 137 vs 143` — это better-sqlite3 скомпилирован под Electron, а vitest идёт под Node. **НЕ путать с реальными регрессиями.** Если падений становится больше 8 — смотреть что сломал.
+**Шума в тестах НЕТ: ЛЮБОЕ падение — регрессия.** Прежняя запись про «8 ожидаемых sqlite-падений по `NODE_MODULE_VERSION`» была ложной нормой и в головном Verstak удалена: `pretest:fast` гоняет `scripts/safe-rebuild.cjs`, который сам приводит better-sqlite3 под нужный ABI (проверено и в этом дереве: `settings`, `chat-sessions`, `projects` — 18 из 18 зелёных). Массовые sqlite-падения по `NODE_MODULE_VERSION` всё же случаются — но это УСЛОВИЕ ПРОГОНА, а не свойство кода: открытое приложение Verstak (`npm run dev`) держит `better_sqlite3.node`, и rebuild не проходит. Закрыть приложение и перезапустить прогон, а не записывать падения в «ожидаемые».
 
 ---
 
