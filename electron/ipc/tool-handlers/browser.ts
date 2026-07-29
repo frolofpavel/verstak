@@ -3,6 +3,8 @@ import type { ToolHandler, ToolContext } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 import { emitActivity, summarizeToolCall } from './shared'
 import { addProofFrame } from '../../ai/proof-frames'
+import { resolveDecision } from '../../ai/permission-rules'
+import { blockReason } from '../../ai/mode-policy'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -40,6 +42,29 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
 export const browserHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
+    // ГЕЙТ РЕЖИМА (SEC-CMD-06). До 30.07 этот файл не звал ни resolveDecision,
+    // ни decide — клик исполнялся во всех пяти режимах, включая `plan`, где
+    // запрещено даже писать файл. Клик меняет ЧУЖУЮ систему: страница
+    // залогинена, нажатие может отправить, опубликовать, удалить, оплатить.
+    //
+    // Звать resolveDecision было бы мало: mode-policy перехватывала незнакомое
+    // имя раньше switch по режиму и отдавала auto-accept — врезка выглядела бы
+    // поставленной и не срабатывала. Категория заведена в самой mode-policy
+    // (MUTATING_BROWSER_TOOLS), поэтому гейт работает и для будущих
+    // мутирующих браузерных инструментов, а не только для клика.
+    //
+    // Порог для остальных режимов здесь НЕ решается: сегодня блокируется только
+    // `plan`. Спрашивать ли в `ask`/`auto` — выбор человека по фактическим
+    // цифрам, которые копит наблюдаемость клика (b13e9e1).
+    const { decision, reason: denyReason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+    if (decision === 'block') {
+      const reason = denyReason ?? blockReason(call.name, ctx.agentMode)
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'tool-blocked', callId: call.id, name: call.name, command: String(call.args.selector ?? call.args.url ?? ''), reason }
+      })
+      return { id: call.id, name: call.name, result: '', error: reason }
+    }
     const result = await dispatchBrowser(call, ctx)
     // Journal what AI looked at on the web
     try {

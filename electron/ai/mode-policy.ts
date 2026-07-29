@@ -46,16 +46,36 @@ export interface AutoApprove {
  * Telegram, Битрикс24, публикация) дают side-effects на внешних системах, поэтому
  * в plan-режиме («только чтение») они должны блокироваться, а в ask — подтверждаться.
  */
+/**
+ * Браузерные инструменты, МЕНЯЮЩИЕ чужую систему. Список, а не литерал в
+ * условии, — намеренно: `browser_click` проехал мимо гейта именно потому, что
+ * категории для него не существовало, и следующий `browser_type` проехал бы так
+ * же. Новый мутирующий инструмент попадает под режим, как только его имя
+ * появится здесь, а не когда автор правки о нём вспомнит.
+ *
+ * Читающие (`browser_read_page`, `browser_screenshot`) сюда НЕ входят: режим
+ * `plan` существует ради чтения, и запрет смотреть страницу сделал бы его
+ * бесполезным.
+ */
+export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click']
+
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
   // execute_code (PTC) исполняет произвольный JS — vm НЕ граница безопасности, поэтому
   // trust = run_command: confirm в ask, block в plan. Без эскалации привилегий.
   const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
+  // Клик в залогиненном браузере меняет ЧУЖУЮ систему, а не рабочее дерево,
+  // поэтому это своя категория, а не edit и не command: в `plan` блокируется
+  // (там «только чтение»), в остальных режимах порог сегодня НЕ ужесточается —
+  // его выберет человек по фактическим цифрам, когда они наберутся.
+  const isBrowserMutation = MUTATING_BROWSER_TOOLS.includes(toolName)
 
   // reads + операции с СОБСТВЕННОЙ памятью агента (memory_save/memory_invalidate/
   // core_memory_*) всегда проходят: plan-режим гейтит изменения ПРОЕКТА (файлы/команды),
   // а не курирование агентом своей памяти (дёшево, обратимо, не трогает рабочее дерево).
-  if (!isEdit && !isCommand) return 'auto-accept'
+  if (!isEdit && !isCommand && !isBrowserMutation) return 'auto-accept'
+  // Браузерная мутация: строгость только там, где режим означает «ничего не менять».
+  if (isBrowserMutation) return mode === 'plan' ? 'block' : 'auto-accept'
 
   let decision: ToolDecision
   switch (mode) {
@@ -77,6 +97,12 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
 /** Human-readable rejection message for the model when a tool is blocked by mode. */
 export function blockReason(toolName: string, mode: AgentMode): string {
   if (mode === 'plan') {
+    if (MUTATING_BROWSER_TOOLS.includes(toolName)) {
+      return `Активен режим "Режим планирования" — действия в браузере, меняющие страницу (клик по кнопке или ссылке), запрещены: ` +
+             `страница залогинена, и нажатие может отправить, опубликовать, удалить или оплатить. ` +
+             `Смотреть страницу можно: browser_navigate, browser_read_page и browser_screenshot работают. ` +
+             `Пользователь сам переключит режим, когда захочет разрешить действия.`
+    }
     if (toolName === 'connector_query') {
       return `Активен режим "Режим планирования" — запросы к коннекторам (внешние системы: SSH, HTTP, Telegram, Битрикс24 и т.п.) запрещены, ` +
              `так как они могут менять состояние внешних систем. ` +
