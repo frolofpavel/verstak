@@ -293,13 +293,28 @@ export const delegateParallelHandler: ToolHandler = {
           if (!trimmed) { finalizeSub('error'); throw new Error('sub-agent вернул пустой ответ') }
           emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
           finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
-          let result = trimmed
+          // Б1: ОБРЫВ — НЕ ЗАВЕРШЕНИЕ, и родитель обязан это видеть (29.07).
+          //
+          // Проверялся только `exitReason === 'error'`. Обрыв по времени
+          // (`aborted`, лимит SUB_TASK_TIMEOUT_MS) и упор в потолок раундов
+          // (`max-iterations`) с НЕПУСТЫМ частичным текстом уходили родителю по
+          // ветке успеха: главный агент получал половину ответа и считал её целым.
+          //
+          // Причина указывается ЯВНО, потому что лечатся они по-разному: время —
+          // разбить задачу, раунды — сузить её. Сами лимиты здесь НЕ трогаются:
+          // чинится честность отчёта, а не размер бюджета.
+          const incompleteNote = res.exitReason === 'aborted'
+            ? `⚠️ ЧАСТИЧНЫЙ РЕЗУЛЬТАТ: под-агент остановлен по времени (лимит ${Math.round(SUB_TASK_TIMEOUT_MS / 1000)} с), ответ неполный.`
+            : res.exitReason === 'max-iterations'
+              ? '⚠️ ЧАСТИЧНЫЙ РЕЗУЛЬТАТ: под-агент упёрся в потолок раундов, ответ неполный.'
+              : ''
+          let result = incompleteNote ? `${incompleteNote}\n\n${trimmed}` : trimmed
           if (worktree) {
             const diff = worktreeDiff(worktree)
             result = `${trimmed}\n\n--- ИЗМЕНЕНИЯ В ИЗОЛИРОВАННОМ WORKTREE ---\n${diff || '(изменений нет)'}`
           }
           finishDurableJob(ctx, durableJob, res.exitReason === 'aborted' ? 'cancelled' : 'succeeded', result)
-          return { id: task.id, result }
+          return { id: task.id, result, incomplete: incompleteNote.length > 0 }
         } catch (taskErr) {
           // Любой неожиданный throw (createProvider, abort/timeout) — карточка
           // не должна застрять на 'running'. Rethrow → Promise.allSettled reject.
@@ -339,7 +354,51 @@ export const delegateParallelHandler: ToolHandler = {
       const capNote = batchCapped
         ? `\n\n---\n\n⚠️ Батч остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)} на один delegate_parallel. Оставшиеся задачи не выполнены.`
         : ''
-      return { id: call.id, name: call.name, result: output + capNote }
+
+      // Б2: ИТОГ БАТЧА НАЗЫВАЕТСЯ ЧИСЛОМ, А ПРОВАЛ ВСЕГО — ОШИБКОЙ (29.07).
+      //
+      // Раньше отсюда всегда уходил `{id,name,result}` без поля `error`, даже
+      // когда не выжила НИ ОДНА задача: провайдеры ставят `is_error` только по
+      // `error`, поэтому модель видела обычный успешный tool_result с крестиками
+      // внутри, а процедурная память записывала вызов как удавшийся.
+      //
+      // Частичный провал для параллельного запуска — законный исход, поэтому
+      // счётчик стоит в тексте ВСЕГДА, а `error` взводится только при нуле
+      // выживших (так же, как это делает соседний `swarm`).
+      const incompleteCount = results.filter(
+        r => r.status === 'fulfilled' && (r.value as { incomplete?: boolean }).incomplete,
+      ).length
+      const summary = `Выполнено ${successCount} из ${tasks.length}.`
+        + (incompleteCount > 0 ? ` Из них с неполным ответом: ${incompleteCount}.` : '')
+      const result = `${summary}\n\n${output}${capNote}`
+
+      // Б3: ШАПКА ПЕРЕПИСЫВАЕТСЯ ФАКТОМ. Событие батча эмитится ДО запуска со
+      // `status:'ok'` — и раньше больше не обновлялось, поэтому на экране стояло
+      // «выполнено» при упавших под-агентах. Событие того же типа с тем же callId
+      // и именем идёт через `upsertAgentProgress` (ключ `tool-<callId>-<name>`),
+      // то есть ОБНОВЛЯЕТ карточку, а не заводит вторую: ни контракт события, ни
+      // разметка не меняются.
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: {
+          type: 'tool-activity',
+          callId: call.id,
+          name: 'delegate_parallel',
+          label: 'delegate_parallel',
+          detail: `${successCount}/${tasks.length} выполнено`
+            + (incompleteCount > 0 ? `, неполных: ${incompleteCount}` : '')
+            + (batchCapped ? ', стоп по cost-cap' : ''),
+          status: successCount === tasks.length && incompleteCount === 0 ? 'ok' : 'error',
+        },
+      })
+
+      if (successCount === 0) {
+        return {
+          id: call.id, name: call.name, result,
+          error: `delegate_parallel: ни одна из ${tasks.length} задач не выполнена`,
+        }
+      }
+      return { id: call.id, name: call.name, result }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
