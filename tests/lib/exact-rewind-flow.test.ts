@@ -3,7 +3,7 @@
 // при частичном сбое. disabled → зовущий падает в обычный undo-путь.
 import { describe, expect, it } from 'vitest'
 import { runExactRewindFlow, type ExactRewindFlowDeps } from '../../src/lib/exact-rewind-flow'
-import type { ExactRewindExecuteDTO, ExactRewindPreflightDTO } from '../../src/types/api'
+import type { ExactRewindExecuteSummaryDTO, ExactRewindPreflightDTO } from '../../src/types/api'
 
 function deps(patch: Partial<ExactRewindFlowDeps> = {}): ExactRewindFlowDeps {
   return {
@@ -23,11 +23,12 @@ const fullPreflight: ExactRewindPreflightDTO = {
   ],
 }
 
-const okExecute: ExactRewindExecuteDTO = {
+// Контракт с 30.07 (SEC-SECRET-04): содержимого бэкапов в ответе нет, есть токен.
+const okExecute: ExactRewindExecuteSummaryDTO = {
   ok: true,
   restored: ['a.ts', 'b.ts'],
   failed: [],
-  backups: { 'a.ts': 'старое a', 'b.ts': null },
+  backupToken: 'tok-1',
   coverage: { level: 'complete', tracedFiles: 2, hasUntracedWriters: false, staleFiles: 0 },
 }
 
@@ -76,8 +77,8 @@ describe('runExactRewindFlow — UI-сценарий Exact Rewind', () => {
     expect(executeCalled).toBe(0)
   })
 
-  it('частичный сбой execute + пользователь выбрал отмену → unrevert с бэкапами', async () => {
-    let unrevertArg: Record<string, string | null> | null = null
+  it('частичный сбой execute + пользователь выбрал отмену → unrevert с токеном из execute', async () => {
+    let unrevertArg: string | null = null
     const result = await runExactRewindFlow(5, deps({
       preflight: async () => fullPreflight,
       execute: async () => ({
@@ -86,11 +87,11 @@ describe('runExactRewindFlow — UI-сценарий Exact Rewind', () => {
         restored: ['a.ts'],
         failed: [{ filePath: 'b.ts', reason: 'EBUSY' }],
       }),
-      unrevert: async (backups) => { unrevertArg = backups; return { ok: true } },
+      unrevert: async (backupToken) => { unrevertArg = backupToken; return { ok: true } },
       confirm: () => true, // «да, вернуть как было»
     }))
     expect(result).toEqual({ kind: 'reverted-back', restored: 1, failed: 1 })
-    expect(unrevertArg).toEqual({ 'a.ts': 'старое a', 'b.ts': null })
+    expect(unrevertArg).toBe('tok-1')
   })
 
   it('частичный сбой execute + пользователь оставил как есть → done-with-failures, unrevert НЕ зовём', async () => {

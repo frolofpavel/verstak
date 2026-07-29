@@ -3,15 +3,16 @@
 // window.confirm, здесь — только оркестрация и честные тексты. Фича за флагом
 // exact_rewind_enabled: disabled на любом шаге → зовущий падает в обычный undo-путь.
 import type {
-  ExactRewindExecuteDTO,
+  ExactRewindExecuteSummaryDTO,
   ExactRewindPreflightDTO,
   RewindCoverageDTO,
 } from '../types/api'
 
 export interface ExactRewindFlowDeps {
   preflight: (checkpointId: number) => Promise<ExactRewindPreflightDTO>
-  execute: (checkpointId: number) => Promise<ExactRewindExecuteDTO>
-  unrevert: (backups: Record<string, string | null>) => Promise<{ ok: boolean } | { disabled: true }>
+  execute: (checkpointId: number) => Promise<ExactRewindExecuteSummaryDTO>
+  /** Содержимое бэкапов не покидает main (SEC-SECRET-04) — ссылаемся токеном из execute. */
+  unrevert: (backupToken: string) => Promise<{ ok: boolean } | { disabled: true }>
   /** Синхронный confirm (window.confirm). Текст формирует сценарий. */
   confirm: (message: string) => boolean
 }
@@ -74,7 +75,7 @@ export async function runExactRewindFlow(
     'Отменить откат целиком — вернуть всё как было до отката?',
   )
   if (undoIt) {
-    await deps.unrevert(res.backups)
+    await deps.unrevert(res.backupToken)
     return { kind: 'reverted-back', restored: res.restored.length, failed: res.failed.length }
   }
   return { kind: 'done-with-failures', restored: res.restored.length, failed: res.failed.length }

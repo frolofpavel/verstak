@@ -305,7 +305,8 @@ contextBridge.exposeInMainWorld('api', {
   exactRewind: {
     preflight: (checkpointId: number) => ipcRenderer.invoke('exact-rewind:preflight', checkpointId),
     execute: (checkpointId: number) => ipcRenderer.invoke('exact-rewind:execute', checkpointId),
-    unrevert: (backups: Record<string, string | null>) => ipcRenderer.invoke('exact-rewind:unrevert', backups)
+    // Содержимое бэкапов живёт в main (SEC-SECRET-04); renderer ссылается токеном.
+    unrevert: (backupToken: string) => ipcRenderer.invoke('exact-rewind:unrevert', backupToken)
   },
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),

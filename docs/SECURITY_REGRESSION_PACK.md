@@ -47,6 +47,7 @@ quick focused gate for agent-safety work.
 | SEC-SECRET-01 | secret-destruction | CWE-212 | block | `tests/security/secret-write-path.test.ts` | active |
 | SEC-SECRET-02 | secret-leak | CWE-200 | block | `tests/security/secret-write-path.test.ts` | active |
 | SEC-SECRET-03 | secret-leak | CWE-200 | block | `tests/security/undo-list-no-content.test.ts` | active |
+| SEC-SECRET-04 | secret-leak | CWE-200 | block | `tests/security/exact-rewind-no-content.test.ts` | active |
 
 ## Covered Classes
 
@@ -66,6 +67,7 @@ quick focused gate for agent-safety work.
 - Whole-file writes (`write_file`, `propose_edits`) are refused on files that contain secrets; `apply_patch` stays available because its SEARCH/REPLACE lands on the raw text.
 - The confirmation diff leaving the main process carries the secret's type, a four-character fingerprint and its direction (added / changed / removed / unchanged), never the value. The mask is applied to the emitted event itself, not before rendering: `src/App.tsx` forwards every event of a phone-started run verbatim to an external relay over HTTP, so a renderer-side mask would let raw secrets leave the machine. File content leaves main from exactly one place, and that is pinned.
 - The undo stack keeps raw content because that is the only way undo restores a live secret; `undo:list` therefore hands the renderer a summary with no content at all. Refusal rather than masking, because nothing displays it — every undo path reads the stack inside main. A control pin keeps the stack itself raw, so the leak cannot be "fixed" by dropping the content and reviving the original data-loss bug.
+- Exact-rewind backups stay inside main under a one-shot token; the renderer never sees or supplies file content. Same refusal criterion as `undo:list` — the flow shows only counts and paths. This also closed the reverse primitive: `exact-rewind:unrevert` used to accept an arbitrary path→content record from the renderer, i.e. an unconfirmed write into any project file. A control pin proves the backup is alive in main (unrevert by token restores the file), so the leak cannot be "fixed" by dropping the backups.
 
 ## Next Rules
 

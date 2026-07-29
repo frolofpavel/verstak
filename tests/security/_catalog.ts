@@ -193,5 +193,15 @@ export const SECURITY_RULES: SecurityRule[] = [
     status: 'active',
     testFile: './undo-list-no-content.test.ts',
     source: 'Verstak 2026-07-29: raw before-content became a real secret once the write path stopped reading through the scanner'
+  },
+  {
+    id: 'SEC-SECRET-04',
+    cwe: 'CWE-200',
+    category: 'secret-leak',
+    severity: 'block',
+    title: 'Exact-rewind backups never cross the main boundary — the renderer holds a one-shot token, and unrevert no longer accepts file content from outside',
+    status: 'active',
+    testFile: './exact-rewind-no-content.test.ts',
+    source: 'Verstak 2026-07-30: execute shipped raw backups of every rewound file to the renderer and took them back verbatim'
   }
 ]

@@ -54,10 +54,11 @@ const execute = (checkpointId: number) =>
     ok?: boolean
     restored?: string[]
     failed?: Array<{ filePath: string; reason: string }>
-    backups?: Record<string, string | null>
+    // Контракт с 30.07 (SEC-SECRET-04): содержимое бэкапов остаётся в main, наружу токен.
+    backupToken?: string
   }>
-const unrevert = (backups: Record<string, string | null>) =>
-  handlers.get('exact-rewind:unrevert')!({}, backups) as Promise<{ ok?: boolean }>
+const unrevert = (backupToken: string) =>
+  handlers.get('exact-rewind:unrevert')!({}, backupToken) as Promise<{ ok?: boolean }>
 
 describe('Exact Rewind — Windows smoke (флаг ON, реальные IPC+fs)', () => {
   it('CRLF + юникод + килобайты текста: execute→unrevert байт-в-байт', async () => {
@@ -74,7 +75,7 @@ describe('Exact Rewind — Windows smoke (флаг ON, реальные IPC+fs)'
     expect(exec.failed).toEqual([])
     expect(readFileSync(join(dir, 'crlf.ts'), 'utf8')).toBe(before) // CRLF вернулись как были
 
-    await unrevert(exec.backups!)
+    await unrevert(exec.backupToken!)
     expect(readFileSync(join(dir, 'crlf.ts'), 'utf8')).toBe(after) // и обратно байт-в-байт
   })
 
@@ -97,7 +98,7 @@ describe('Exact Rewind — Windows smoke (флаг ON, реальные IPC+fs)'
     // Readonly-файл вернуть нельзя (тот же EPERM) — но он НЕ должен ронять возврат
     // остальных: ok.ts восстановлен, про locked.ts — честная ошибка (раньше unrevert
     // умирал на первом сбойном, бросая остальные в откаченном состоянии).
-    const back = await unrevert(exec.backups!) as { ok?: boolean; error?: string }
+    const back = await unrevert(exec.backupToken!) as { ok?: boolean; error?: string }
     expect(back.ok).toBe(false)
     expect(back.error).toContain('locked.ts')
     expect(readFileSync(join(dir, 'ok.ts'), 'utf8')).toBe('ok-new')
@@ -117,7 +118,7 @@ describe('Exact Rewind — Windows smoke (флаг ON, реальные IPC+fs)'
     expect(readFileSync(join(nested, 'changed.ts'), 'utf8')).toBe('old')
     expect(existsSync(join(nested, 'created.ts'))).toBe(false)
 
-    await unrevert(exec.backups!)
+    await unrevert(exec.backupToken!)
     expect(readFileSync(join(nested, 'changed.ts'), 'utf8')).toBe('new')
     expect(readFileSync(join(nested, 'created.ts'), 'utf8')).toBe('created')
   })

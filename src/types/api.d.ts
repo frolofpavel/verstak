@@ -29,9 +29,11 @@ export interface RewindPreflightFileDTO { filePath: string; action: 'restore' | 
 export type ExactRewindPreflightDTO =
   | { disabled: true }
   | { disabled?: false; coverage: RewindCoverageDTO; files: RewindPreflightFileDTO[] }
-export type ExactRewindExecuteDTO =
+// Summary намеренно: содержимого файлов здесь НЕТ (SEC-SECRET-04). Бэкапы отката живут
+// в main; renderer получает одноразовый backupToken и возвращает его в unrevert.
+export type ExactRewindExecuteSummaryDTO =
   | { disabled: true }
-  | { ok: boolean; restored: string[]; failed: Array<{ filePath: string; reason: string }>; backups: Record<string, string | null>; coverage: RewindCoverageDTO }
+  | { ok: boolean; restored: string[]; failed: Array<{ filePath: string; reason: string }>; backupToken: string; coverage: RewindCoverageDTO }
   | { ok: false; error: string }
 
 // ── 2.0.11-B: ручная компакция контекста (mirror форм из electron/ai/compaction-service.ts
@@ -732,8 +734,8 @@ declare global {
       // 2.0.11-F: Exact Rewind (за флагом exact_rewind_enabled). disabled=true → фича выключена.
       exactRewind: {
         preflight: (checkpointId: number) => Promise<ExactRewindPreflightDTO>
-        execute: (checkpointId: number) => Promise<ExactRewindExecuteDTO>
-        unrevert: (backups: Record<string, string | null>) => Promise<{ ok: boolean } | { disabled: true }>
+        execute: (checkpointId: number) => Promise<ExactRewindExecuteSummaryDTO>
+        unrevert: (backupToken: string) => Promise<{ ok: boolean } | { disabled: true }>
       }
       skills: {
         list: () => Promise<Skill[]>

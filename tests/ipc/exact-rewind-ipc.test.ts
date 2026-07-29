@@ -78,29 +78,30 @@ describe('Exact Rewind IPC — за флагом', () => {
   })
 
   // Полный цикл под включённым флагом: preflight → execute → файл откачен → unrevert вернул.
-  it('флаг ON → execute откатывает, unrevert возвращает (round-trip через IPC)', async () => {
+  // Контракт с 30.07 (SEC-SECRET-04): бэкапы живут в main, renderer ссылается токеном.
+  it('флаг ON → execute откатывает, unrevert по токену возвращает (round-trip через IPC)', async () => {
     writeFileSync(join(dir, 'a.ts'), 'новое')
     undo.push(dir, 'a.ts', 'старое', 'новое', { runId: 'r', chatId: 1, messageId: 1 })
     flag = 'true'
     register()
 
-    const exec = await handlers.get('exact-rewind:execute')!({}, 0) as { ok?: boolean; backups?: Record<string, string | null> }
+    const exec = await handlers.get('exact-rewind:execute')!({}, 0) as { ok?: boolean; backupToken?: string }
     expect(readFileSync(join(dir, 'a.ts'), 'utf8')).toBe('старое') // откат применён
 
-    await handlers.get('exact-rewind:unrevert')!({}, exec.backups)
+    await handlers.get('exact-rewind:unrevert')!({}, exec.backupToken)
     expect(readFileSync(join(dir, 'a.ts'), 'utf8')).toBe('новое') // unrevert вернул
   })
 
-  it('флаг ON, создание файла → execute удаляет, unrevert воссоздаёт', async () => {
+  it('флаг ON, создание файла → execute удаляет, unrevert по токену воссоздаёт', async () => {
     writeFileSync(join(dir, 'new.ts'), 'создано')
     undo.push(dir, 'new.ts', null, 'создано', { runId: 'r', chatId: 1, messageId: 1 })
     flag = 'true'
     register()
 
-    const exec = await handlers.get('exact-rewind:execute')!({}, 0) as { backups?: Record<string, string | null> }
+    const exec = await handlers.get('exact-rewind:execute')!({}, 0) as { backupToken?: string }
     expect(existsSync(join(dir, 'new.ts'))).toBe(false) // удалён откатом
 
-    await handlers.get('exact-rewind:unrevert')!({}, exec.backups)
+    await handlers.get('exact-rewind:unrevert')!({}, exec.backupToken)
     expect(readFileSync(join(dir, 'new.ts'), 'utf8')).toBe('создано') // воссоздан
   })
 })
