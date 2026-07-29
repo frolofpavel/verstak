@@ -26,7 +26,7 @@ import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress }
 import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 // Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
 import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
-import { selectSendProvider, selectSendModel, decideSmartRouting, resolveCodexHome } from './ai-send/route-selection'
+import { selectSendProvider, selectSendModel, decideSmartRouting } from './ai-send/route-selection'
 import { preflightSubscriptionAccount } from './ai-send/account-preflight'
 import { isSmartFallbackAllowed, createFallbackAttemptFactory, createLimitAccountSwitcher, buildFallbackOpts } from './ai-send/fallback-route'
 import { openAgentRun, linkDevTaskRun, startRunTimeout } from './ai-send/run-bookkeeping'
@@ -315,11 +315,34 @@ export async function runScheduledHeadless(
   const model = opts.model ?? descriptor.defaultModel
 
   try {
-    // 2.0.8-C: scheduled/NL-cron прогон на openai-codex-oauth тоже обязан идти в изолированный
-    // CODEX_HOME активного аккаунта (третий createProvider-сайт; ревью F1). Без этого unattended
-    // прогон читал/рефрешил дефолтный ~/.codex/auth.json чужого аккаунта — дыра изоляции.
-    const codexHome = resolveCodexHome(opts.providerId, deps.resolveSubscriptionAccount)
-    const provider = createProvider(opts.providerId, { apiKey, model, cwd: opts.projectPath, signal: opts.signal, codexHome })
+    // ОПЦИИ ПРОВАЙДЕРА СОБИРАЕТ ОБЩИЙ БИЛДЕР, А НЕ ЭТОТ ВЫЗОВ (29.07).
+    //
+    // Раньше здесь был свой, урезанный набор — apiKey/model/cwd/codexHome. Он писался
+    // под расписанные прогоны, где провайдеру довольно ключа. Провайдерам со ВТОРЫМ
+    // обязательным полем (custom-openai → Base URL, yandex-gpt → folder id, gigachat →
+    // client secret) это поле не передавалось вовсе: НАСТРОЕННЫЙ провайдер падал на
+    // создании, будто он не настроен. Живая проверка увидела это как «Custom
+    // OpenAI-compatible: укажи Base URL» на кнопке «Сгенерировать план».
+    //
+    // `ai:send` этой болезнью не болел, потому что звал `buildProviderRuntimeOptions`.
+    // Второго набора опций больше нет — он тот же самый. codexHome билдер считает сам
+    // (2.0.8-C: изоляция CODEX_HOME аккаунта прогона сохранена, она внутри билдера).
+    const runtimeOptions = buildProviderRuntimeOptions({
+      providerId: opts.providerId,
+      account: null,
+      getSecret: deps.getSecret,
+      resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
+    })
+    const provider = createProvider(opts.providerId, {
+      apiKey, model, cwd: opts.projectPath, signal: opts.signal,
+      codexHome: runtimeOptions.codexHome,
+      customBaseUrl: runtimeOptions.customBaseUrl,
+      customModels: runtimeOptions.customModels,
+      yandexFolderId: runtimeOptions.yandexFolderId,
+      gigachatClientSecret: runtimeOptions.gigachatClientSecret,
+      gigachatTlsVerify: runtimeOptions.gigachatTlsVerify,
+      checkModel: runtimeOptions.checkModel,
+    })
     const userMsg: ChatMessage = { role: 'user', content: opts.prompt }
     const composed = await prepareSystemContext({
       projectPath: opts.projectPath,
