@@ -178,8 +178,23 @@ export function redactUrlSecrets(url: string): string {
   }
 }
 
-/** Scan text and return a redacted copy + names of patterns that matched. */
-export function scanText(input: string): ScanResult {
+/** Одно найденное значение: как его назвать, чем оно окружено и что скрывать. */
+interface SecretOccurrence {
+  /** Имя для человека и модели. auth-keyword-value → 'auth-value' (историческое). */
+  label: string
+  /** Ключевое слово рядом (api_key, --token) — по нему «до» и «после» сопоставляются. */
+  key: string
+  /** Само значение секрета. */
+  value: string
+}
+
+/**
+ * ЕДИНСТВЕННЫЙ обход PATTERNS. И редакция для модели (scanText), и маскировка
+ * для экрана (maskSecretsForDiff) обязаны видеть ОДИН И ТОТ ЖЕ набор значений:
+ * стоит маске покрыть меньше редакции — и секрет уедет в renderer. Поэтому обход
+ * здесь один, а различается только то, чем заменяют найденное.
+ */
+function transformSecrets(input: string, replace: (occ: SecretOccurrence) => string): ScanResult {
   if (!input) return { redacted: input, hits: [] }
   let out = input
   const hitSet = new Set<string>()
@@ -188,19 +203,33 @@ export function scanText(input: string): ScanResult {
       hitSet.add(name)
       // Reset lastIndex (global regex state) and replace
       re.lastIndex = 0
-      out = out.replace(re, (m) => {
-        if (name === 'http-basic-auth') return m.replace(/(https?:\/\/)[^@]+@/, '$1[REDACTED:basic-auth]@')
+      out = out.replace(re, (m: string, ...groups: unknown[]) => {
+        if (name === 'http-basic-auth') {
+          return m.replace(/(https?:\/\/)([^@]+)@/, (_full, scheme: string, cred: string) =>
+            `${scheme}${replace({ label: 'basic-auth', key: 'basic-auth', value: cred })}@`)
+        }
         // auth-keyword-value: оставляем ключевое слово/разделитель, гасим только
         // сам секрет (он в конце совпадения после auth-ключа).
-        if (name === 'auth-keyword-value') return m.replace(/([A-Za-z0-9._\-+/]{16,})$/, '[REDACTED:auth-value]')
+        if (name === 'auth-keyword-value') {
+          const key = String(groups[0] ?? '').toLowerCase()
+          return m.replace(/[A-Za-z0-9._\-+/]{16,}$/, (value: string) => replace({ label: 'auth-value', key, value }))
+        }
         // cli-secret-flag: оставляем флаг+разделитель, гасим value в конце совпадения.
-        if (name === 'cli-secret-flag') return m.replace(/([A-Za-z0-9._\-+/]{10,})$/, '[REDACTED:cli-secret]')
-        return `[REDACTED:${name}]`
+        if (name === 'cli-secret-flag') {
+          const key = String(groups[0] ?? '').toLowerCase()
+          return m.replace(/[A-Za-z0-9._\-+/]{10,}$/, (value: string) => replace({ label: 'cli-secret', key, value }))
+        }
+        return replace({ label: name, key: name, value: m })
       })
     }
     re.lastIndex = 0
   }
   return { redacted: out, hits: [...hitSet] }
+}
+
+/** Scan text and return a redacted copy + names of patterns that matched. */
+export function scanText(input: string): ScanResult {
+  return transformSecrets(input, (occ) => `[REDACTED:${occ.label}]`)
 }
 
 // URL внутри произвольного текста (для редакции query-токенов, которые scanText
@@ -221,4 +250,123 @@ export function redactForDisplay(input: string): string {
   if (!input) return input
   const scanned = scanText(input).redacted
   return scanned.replace(EMBEDDED_URL_RE, (u) => redactUrlSecrets(u))
+}
+
+// ─── Маска секрета для ДИФФА, уходящего на экран ─────────────────────────────
+//
+// Путь записи работает с СЫРЫМ содержимым файла (иначе откат затирает секрет —
+// см. tool-handlers/file-ops.ts). Но renderer — это ровно тот периметр, откуда
+// содержимое утекает наружу: запись экрана, демонстрация, RDP, DevTools и DOM,
+// логи, буфер обмена. Поэтому в renderer уходит маска, а не значение.
+//
+// Маска обязана быть ИНФОРМАТИВНОЙ: подтверждение, из которого не видно, что
+// подтверждаешь, — не подтверждение. Показываем факт, тип, отпечаток и то, что
+// с секретом происходит: добавлен / изменён / удалён / без изменений. Отпечаток
+// в четыре символа — та же практика, что последние цифры карты.
+
+/** Сколько последних символов значения показываем как отпечаток. */
+const FINGERPRINT_LEN = 4
+
+const fingerprint = (value: string): string => '…' + value.slice(-FINGERPRINT_LEN)
+
+type SecretVerdict =
+  | { kind: 'unchanged'; fp: string }
+  | { kind: 'changed'; was: string; now: string }
+  | { kind: 'removed'; was: string }
+  | { kind: 'added'; now: string }
+
+/**
+ * Токен маски. Стороны «до» и «после» РАЗНЫЕ у изменённого секрета — иначе дифф
+ * счёл бы строку неизменившейся и подмена ключа прошла бы незаметно, а это как
+ * раз тот случай, ради которого подтверждение и показывают.
+ */
+function maskToken(label: string, verdict: SecretVerdict, side: 'before' | 'after'): string {
+  switch (verdict.kind) {
+    case 'unchanged': return `[SECRET: ${label} · без изменений · ${verdict.fp}]`
+    case 'changed': return side === 'before'
+      ? `[SECRET: ${label} · изменён · было ${verdict.was}]`
+      : `[SECRET: ${label} · изменён · стало ${verdict.now}]`
+    case 'removed': return `[SECRET: ${label} · удалён · было ${verdict.was}]`
+    case 'added': return `[SECRET: ${label} · добавлен · стало ${verdict.now}]`
+  }
+}
+
+/** Секреты одной стороны в порядке обхода. Замена — как у scanText, чтобы обход
+ *  совпадал с ним байт в байт (иначе порядок вердиктов разъедется). */
+function collectSecrets(text: string): SecretOccurrence[] {
+  const found: SecretOccurrence[] = []
+  transformSecrets(text, (occ) => { found.push(occ); return `[REDACTED:${occ.label}]` })
+  return found
+}
+
+function renderMasked(text: string, verdicts: Array<SecretVerdict | undefined>, side: 'before' | 'after'): string {
+  let i = 0
+  const masked = transformSecrets(text, (occ) => {
+    const verdict = verdicts[i++]
+    // Вердикта нет — обходы разошлись. Значение всё равно скрыто, но врать про
+    // него нельзя: отдаём безымянную маску.
+    return verdict ? maskToken(occ.label, verdict, side) : `[SECRET: ${occ.label} · скрыт]`
+  }).redacted
+  // Последний рубеж. Renderer не должен получить НИ ОДНОГО живого секрета: если в
+  // маскированном тексте сканер всё ещё что-то видит, отдаём обычную редакцию —
+  // менее информативно, зато без утечки.
+  return scanText(masked).hits.length === 0 ? masked : scanText(text).redacted
+}
+
+/**
+ * Маскирует обе стороны диффа. Сопоставление «до»↔«после» — по паре (тип,
+ * ключевое слово рядом): совпавшие значения объявляются неизменными, остаток
+ * попарно — изменёнными, хвосты — удалёнными и добавленными.
+ */
+export function maskSecretsForDiff(before: string, after: string): { before: string; after: string } {
+  const b = collectSecrets(before)
+  const a = collectSecrets(after)
+  if (b.length === 0 && a.length === 0) return { before, after }
+
+  const verdictsB: Array<SecretVerdict | undefined> = new Array(b.length).fill(undefined)
+  const verdictsA: Array<SecretVerdict | undefined> = new Array(a.length).fill(undefined)
+
+  const groupOf = (occ: SecretOccurrence) => occ.label + '|' + occ.key
+  const groups = new Map<string, { b: number[]; a: number[] }>()
+  const bucket = (name: string) => {
+    let g = groups.get(name)
+    if (!g) { g = { b: [], a: [] }; groups.set(name, g) }
+    return g
+  }
+  b.forEach((occ, i) => bucket(groupOf(occ)).b.push(i))
+  a.forEach((occ, i) => bucket(groupOf(occ)).a.push(i))
+
+  for (const group of groups.values()) {
+    const takenB = new Set<number>()
+    // 1) то же самое значение с обеих сторон — секрет не тронут.
+    for (const ia of group.a) {
+      const ib = group.b.find((i) => !takenB.has(i) && b[i].value === a[ia].value)
+      if (ib === undefined) continue
+      takenB.add(ib)
+      const fp = fingerprint(a[ia].value)
+      verdictsA[ia] = { kind: 'unchanged', fp }
+      verdictsB[ib] = { kind: 'unchanged', fp }
+    }
+    // 2) остаток пары по порядку — значение подменено.
+    const restB = group.b.filter((i) => !takenB.has(i))
+    const restA = group.a.filter((i) => verdictsA[i] === undefined)
+    const paired = Math.min(restB.length, restA.length)
+    for (let k = 0; k < paired; k++) {
+      const verdict: SecretVerdict = {
+        kind: 'changed',
+        was: fingerprint(b[restB[k]].value),
+        now: fingerprint(a[restA[k]].value)
+      }
+      verdictsB[restB[k]] = verdict
+      verdictsA[restA[k]] = verdict
+    }
+    // 3) хвосты. «Удалён» — главный случай: правка сносит живой секрет.
+    for (const ib of restB.slice(paired)) verdictsB[ib] = { kind: 'removed', was: fingerprint(b[ib].value) }
+    for (const ia of restA.slice(paired)) verdictsA[ia] = { kind: 'added', now: fingerprint(a[ia].value) }
+  }
+
+  return {
+    before: renderMasked(before, verdictsB, 'before'),
+    after: renderMasked(after, verdictsA, 'after')
+  }
 }

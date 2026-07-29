@@ -44,6 +44,8 @@ quick focused gate for agent-safety work.
 | SEC-SSRF-02 | ssrf | CWE-918 | block | `tests/security/ssrf.test.ts` | active |
 | SEC-SSRF-03 | ssrf | CWE-918 | block | `tests/security/ssrf.test.ts` | active |
 | SEC-SSRF-04 | secret-leak | CWE-200 | block | `tests/security/ssrf.test.ts` | active |
+| SEC-SECRET-01 | secret-destruction | CWE-212 | block | `tests/security/secret-write-path.test.ts` | active |
+| SEC-SECRET-02 | secret-leak | CWE-200 | block | `tests/security/secret-write-path.test.ts` | active |
 
 ## Covered Classes
 
@@ -59,6 +61,9 @@ quick focused gate for agent-safety work.
 - Literal private, loopback, link-local, and metadata web hosts are blocked.
 - Redirect hops are revalidated before fetch continues.
 - URL query and fragment secrets are redacted before log or trace use.
+- The write path takes the file's previous state raw, so neither an edit nor its undo can write a scanner placeholder over a live secret.
+- Whole-file writes (`write_file`, `propose_edits`) are refused on files that contain secrets; `apply_patch` stays available because its SEARCH/REPLACE lands on the raw text.
+- The confirmation diff leaving the main process carries the secret's type, a four-character fingerprint and its direction (added / changed / removed / unchanged), never the value.
 
 ## Next Rules
 

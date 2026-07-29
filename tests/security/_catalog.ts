@@ -5,6 +5,9 @@ export type SecurityCategory =
   | 'config-mutation'
   | 'dotenv-guard'
   | 'secret-leak'
+  // Уничтожение секрета собственным инструментом отката — не утечка: утечку
+  // отзывают сменой ключа, затёртое значение восстановить неоткуда.
+  | 'secret-destruction'
   | 'prompt-injection'
 
 export interface SecurityRule {
@@ -160,5 +163,25 @@ export const SECURITY_RULES: SecurityRule[] = [
     status: 'active',
     testFile: './ssrf.test.ts',
     source: 'OpenClaw security/opengrep/precise.yml:3831'
+  },
+  {
+    id: 'SEC-SECRET-01',
+    cwe: 'CWE-212',
+    category: 'secret-destruction',
+    severity: 'block',
+    title: 'The write path reads raw content, so an edit and its undo never overwrite a live secret with a scanner placeholder',
+    status: 'active',
+    testFile: './secret-write-path.test.ts',
+    source: 'Verstak incident 2026-07-29: undo restored [REDACTED:...] over the real value'
+  },
+  {
+    id: 'SEC-SECRET-02',
+    cwe: 'CWE-200',
+    category: 'secret-leak',
+    severity: 'block',
+    title: 'The confirmation diff sent to the renderer carries a masked secret with type, fingerprint and direction — never the value',
+    status: 'active',
+    testFile: './secret-write-path.test.ts',
+    source: 'Verstak incident 2026-07-29: raw before-content is main-process only'
   }
 ]

@@ -10,6 +10,7 @@ import { resolveDecision } from '../../ai/permission-rules'
 import { applySearchReplaceBlocks } from '../../ai/tools'
 import { markFileDirty } from '../../ai/project-map'
 import { decideWriteScope } from '../../ai/write-scope'
+import { maskSecretsForDiff, scanText } from '../../ai/secret-scanner'
 
 export const readHandler: ToolHandler = {
   mode: 'parallel-read',
@@ -69,6 +70,29 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
       return { id: call.id, name: call.name, result: '', error: scope.reason ?? 'Запись вне write scope.' }
     }
   }
+  // Anti-redacted-writeback. Модель видит файл через read_file, то есть с
+  // `[REDACTED:…]` вместо секретов. Инструмент, отдающий файл ЦЕЛИКОМ, собирает
+  // содержимое из этого вида — и перезапись затёрла бы реальные значения. У
+  // apply_patch проблемы нет: его SEARCH/REPLACE ложится на сырое «до», блок с
+  // заглушкой просто не найдёт совпадения и будет отвергнут штатной ошибкой
+  // поиска. Поэтому условие — «пишет файл целиком», а не имя конкретной тулзы:
+  // propose_edits НЕ проходит через writeFileHandler, он собирает синтетические
+  // write_file-вызовы и зовёт diffConfirmWrite напрямую, так что гард в
+  // обработчике закрыл бы один вход из двух.
+  //
+  // Проверяем СЫРОЕ «до» сканером, а не наличие подстроки `[REDACTED:` — «до»
+  // теперь настоящее, и заглушек в нём нет по построению.
+  if (call.name !== 'apply_patch') {
+    const scan = scanText(before)
+    if (scan.hits.length > 0) {
+      return {
+        id: call.id,
+        name: call.name,
+        result: '',
+        error: `${call.name} заблокирован: файл содержит секреты (${scan.hits.join(', ')}), а модель видит их как [REDACTED:...] — полная перезапись затёрла бы реальные значения. Используй apply_patch: точечная правка ложится на настоящее содержимое и секрет не трогает.`
+      }
+    }
+  }
   // permissionName — ИСХОДНОЕ имя тула для permission-правил. propose_edits фанит
   // правки в синтетические write_file-subCall'ы; без этого deny/ask на Edit/
   // propose_edits молча игнорировались бы (ревью: правило обходится). Исполнение
@@ -91,7 +115,12 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
     // для суба это taskAc.signal (per-task таймаут/отмена), для главного агента —
     // ctrl.signal. Раньше Promise не слушал abort → суб-executor с write в
     // ask-режиме висел, и per-task таймаут его не разрывал (до 50 модалок).
-    ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-write', callId: call.id, path, before, after } })
+    // Сырое «до» дальше main не идёт: renderer — ровно тот периметр, откуда
+    // содержимое утекает наружу (запись экрана, демонстрация, RDP, DevTools и
+    // DOM, логи, буфер обмена). В модалку уходит маска: тип секрета, отпечаток
+    // и что с ним происходит — добавлен / изменён / удалён / без изменений.
+    const shown = maskSecretsForDiff(before, after)
+    ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-write', callId: call.id, path, before: shown.before, after: shown.after } })
     const key = ctx.scopedKey(ctx.sendId, call.id)
     accepted = await new Promise<boolean>(resolve => {
       let settled = false
@@ -138,16 +167,21 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
   }
 }
 
+/**
+ * Исходное состояние файла для пути записи — СЫРОЕ, минуя read_file.
+ *
+ * read_file отдаёт содержимое, пропущенное через scanText: секреты заменены на
+ * `[REDACTED:…]`. Для контекста модели это правильно, для пути записи — нет: то
+ * же содержимое ложилось в стек отката, и кнопка «откатить» писала на диск
+ * заглушку ВМЕСТО живого секрета. Не утечка, а уничтожение данных — затёртое
+ * значение восстановить неоткуда.
+ *
+ * Сырое «до» не покидает main: в файл и в откат идёт оно, в renderer —
+ * маска (см. diffConfirmWrite), модели — ничего.
+ */
 async function readBeforeContent(ctx: ToolContext, path: string): Promise<string> {
   try {
-    let before = await ctx.tools.execute('read_file', { path }) as string
-    // Strip the secret-scanner header line from read_file output before
-    // computing the patch — it isn't actually in the file.
-    if (before.startsWith('[secret-scanner: redacted')) {
-      const nl = before.indexOf('\n')
-      if (nl >= 0) before = before.slice(nl + 1)
-    }
-    return before
+    return await ctx.tools.readRaw(path)
   } catch { return '' }
 }
 
@@ -165,14 +199,18 @@ export const applyPatchHandler: ToolHandler = {
   mode: 'confirm-write',
   async handle(call, ctx) {
     const path = String(call.args.path)
+    // Гарда здесь больше нет и он не нужен: «до» сырое, патч ложится на
+    // настоящий текст. SEARCH-блок, собранный поверх `[REDACTED:…]`, просто не
+    // найдёт совпадения и будет отвергнут штатной ошибкой поиска ниже. Заодно
+    // перестали быть нередактируемыми полтора десятка исходников, которые сканер
+    // считает секретными ошибочно — там, где auth-слово стоит рядом с длинным
+    // значением обычного кода (реестр провайдеров, делегирование). Общий гард на
+    // запись файла ЦЕЛИКОМ — в diffConfirmWrite.
+    //
+    // ПРИМЕРА такой строки здесь намеренно НЕТ: он сработал бы сам и запер этот
+    // файл для write_file. Живой перечень снимается прогоном scanText по
+    // electron/ и src/.
     const before = await readBeforeContent(ctx, path)
-    // Anti-redacted-writeback: read_file отдаёт модели [REDACTED:...] вместо
-    // реальных секретов. Если модель строит патч поверх такого «before», она
-    // перепишет реальные значения плейсхолдерами. Блокируем — пусть правит
-    // файл вручную вне приложения.
-    if (before.includes('[REDACTED:')) {
-      return { id: call.id, name: call.name, result: '', error: 'apply_patch заблокирован: файл содержит секреты, скрытые secret-scanner ([REDACTED:...]). Патч переписал бы плейсхолдеры поверх реальных значений. Отредактируй файл вручную вне приложения.' }
-    }
     const anchorHash = call.args.anchor_hash ? String(call.args.anchor_hash) : undefined
     let after: string
     try {

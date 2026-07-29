@@ -1128,6 +1128,19 @@ export function hashLine(line: string): string {
 
 export interface FileTools {
   execute: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  /**
+   * ВНУТРЕННЕЕ сырое чтение — БЕЗ scanText. Только для пути записи: патч обязан
+   * ложиться на настоящий текст файла, а стек отката обязан хранить настоящее
+   * «до», иначе откат пишет на диск `[REDACTED:…]` вместо живого секрета и
+   * уничтожает значение пользователя (см. tool-handlers/file-ops.ts).
+   *
+   * Модели НЕ доступно: это не tool, имени в TOOL_DEFS нет, через execute() не
+   * маршрутизируется. Права те же, что у записи: isForbiddenPath + resolver
+   * записи (safeRealJoin для относительных путей), — сырое «до» отдаётся только
+   * для того пути, куда и так разрешено писать. Всё, что уходит модели или в
+   * renderer, обязано пройти scanText/маску ОТДЕЛЬНО.
+   */
+  readRaw: (path: string) => Promise<string>
   /** Pure execution — used by the IPC layer after user has confirmed the command. */
   runCommand: (command: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
   classifyCommand: typeof classifyCommand
@@ -1442,6 +1455,26 @@ export function createFileTools(root: string, signal?: AbortSignal, opts: FileTo
     classifyCommand,
     runCommand,
 
+    async readRaw(relPath: string) {
+      if (isForbiddenPath(relPath)) {
+        throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+      }
+      // Резолвер ЗАПИСИ, не чтения: сырое «до» существует только ради записи и
+      // отката, поэтому и границы у него должны быть записи (read_file пускает
+      // абсолютные пути куда угодно read-only — здесь это было бы дырой).
+      const abs = await resolveWritablePath(root, relPath, { allowedRoots: opts.allowedWriteRoots })
+      const realRel = relative(root, abs)
+      if (isForbiddenPath(abs) || isForbiddenPath(realRel)) {
+        throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+      }
+      const st = await stat(abs)
+      if (!st.isFile()) throw new Error(`Не файл: ${relPath}`)
+      if (st.size > MAX_READ_BYTES) {
+        throw new Error(`Файл слишком большой: ${st.size} байт (лимит ${MAX_READ_BYTES})`)
+      }
+      return readFile(abs, 'utf8')
+    },
+
     async execute(name, args) {
       if (name === 'read_file') {
         const relPath = String(args.path)
@@ -1629,6 +1662,15 @@ export function createSshFileTools(backend: SshBackend): FileTools {
     async runCommand(command: string) {
       const r = await backend.runCommand(command)
       return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode ?? 1 }
+    },
+    // Сырое «до» для пути записи — симметрично локальной ветке. Escape-guard
+    // remote-дерева стоит в самом backend; isForbiddenPath дублируем здесь, как
+    // и в read_file/write_file этой ветки.
+    async readRaw(path: string) {
+      if (isForbiddenPath(path)) {
+        throw new Error(`Доступ запрещён политикой безопасности: ${path} (secrets/credentials)`)
+      }
+      return backend.readFile(path)
     },
     async execute(name, args) {
       if (name === 'read_file') {
