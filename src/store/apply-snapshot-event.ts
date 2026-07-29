@@ -34,7 +34,16 @@ export function applySnapshotEvent(snap: SessionSnapshot, event: SnapshotEvent):
     const messages = (t === 'error' && typeof event.message === 'string')
       ? appendToLastAssistant(baseSnap.messages, `\n\n[Ошибка: ${event.message}]`)
       : baseSnap.messages
-    const base = { ...baseSnap, messages }
+    // Прогон кончился → снимаем ЕГО ожидания записи. У команд эту роль играет
+    // событие command-result (ветка ниже), у записей события-аналога в системе
+    // нет вовсе, а три экшена стора, которые их снимают, работают только по
+    // АКТИВНОМУ чату — поэтому запись фонового чата висела в памяти до
+    // перезапуска приложения. Ждать тут нечего по построению: прогон не
+    // завершается, пока tool-ход ждёт подтверждения, так что к done/error main
+    // все свои ожидания уже разрешил. Пустой массив не пересоздаём — лишняя
+    // ссылка будит подписчиков стора на каждом финале.
+    const pendingWrites = baseSnap.pendingWrites.length > 0 ? [] : baseSnap.pendingWrites
+    const base = { ...baseSnap, messages, pendingWrites }
     return { ...base, ...stampDurationOnStreamEnd(base) }
   }
   // command-result → команда зарезолвлена в main ЛЮБЫМ путём (подтверждение/stop/

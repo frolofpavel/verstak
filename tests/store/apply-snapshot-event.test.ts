@@ -98,6 +98,73 @@ describe('applySnapshotEvent — общее ядро роутинга стрим
     ])
   })
 
+  // ЗАВЕРШЕНИЕ ПРОГОНА СНИМАЕТ ЕГО ОЖИДАНИЯ ЗАПИСИ (30.07).
+  //
+  // Дефект: у команд событие-аналог есть — `command-result` снимает
+  // pendingCommand выше по файлу; у ЗАПИСЕЙ такого события в системе нет вовсе
+  // (grep по electron/: только command-result). Снимали их лишь три экшена
+  // стора, и все три работают по АКТИВНОМУ чату (resolvePendingWrite,
+  // clearPendingWrites, addPendingWrite — projectStore.ts:616-618). Ядро на
+  // done/error массив не трогало, поэтому запись ФОНОВОГО чата переживала свой
+  // прогон и висела в памяти до перезапуска приложения.
+  //
+  // Почему именно done/error: к этому моменту main уже разрешил все свои
+  // ожидания — прогон не может завершиться, пока tool-ход ждёт подтверждения.
+  // Значит висящая запись после финала мертва по построению.
+  //
+  // Утечка ПАМЯТИ, не секрета: с 29.07 в before/after лежат маски
+  // (maskSecretsForDiff), а не значения.
+  it('done снимает ожидания записи — прогон завершён, подтверждать нечего', () => {
+    const s = snap([{ role: 'assistant', content: 'готово' }], {
+      pendingWrites: [{ callId: 'w1', path: 'a.ts', before: 'x', after: 'y' }]
+    })
+
+    const r = applySnapshotEvent(s, { type: 'done' })
+
+    expect(r.pendingWrites, 'запись пережила свой прогон и висит в памяти').toEqual([])
+  })
+
+  it('error снимает их так же — оборванный прогон ждать подтверждения тоже не может', () => {
+    const s = snap([{ role: 'assistant', content: 'частичный' }], {
+      pendingWrites: [
+        { callId: 'w1', path: 'a.ts', before: 'x', after: 'y' },
+        { callId: 'w2', path: 'b.ts', before: '', after: 'z' }
+      ]
+    })
+
+    const r = applySnapshotEvent(s, { type: 'error', message: 'обрыв' })
+
+    expect(r.pendingWrites).toEqual([])
+  })
+
+  // КОНТРОЛЬ. Без него пин выше был бы зелёным и у реализации, которая чистит
+  // записи ВСЕГДА, — то есть гасила бы живую модалку подтверждения на любом
+  // событии стрима, и человек не смог бы ответить.
+  it('контроль: до финала прогона ожидания записи ЖИВЫ', () => {
+    const s = snap([{ role: 'assistant', content: 'идёт' }], {
+      pendingWrites: [{ callId: 'w1', path: 'a.ts', before: 'x', after: 'y' }]
+    })
+
+    for (const event of [
+      { type: 'text', text: 'ещё' },
+      { type: 'thought', text: 'думаю' },
+      { type: 'usage', usage: { inputTokens: 1 } },
+      { type: 'command-result', callId: 'c1' },
+      { type: 'pending-write', callId: 'w2' }
+    ]) {
+      expect(applySnapshotEvent(s, event).pendingWrites, `${event.type} погасил живое ожидание`)
+        .toEqual(s.pendingWrites)
+    }
+  })
+
+  // Пустой массив не пересоздаём: лишняя ссылка будит подписчиков стора на
+  // КАЖДОМ done, а их в мульти-чате столько же, сколько прогонов.
+  it('нечего снимать — ссылка на массив не меняется', () => {
+    const s = snap([{ role: 'assistant', content: 'x' }], { pendingWrites: [] })
+    const r = applySnapshotEvent(s, { type: 'done' })
+    expect(r.pendingWrites).toBe(s.pendingWrites)
+  })
+
   it('сохраняет hasUnread и прочие поля снапшота при text', () => {
     const s = snap([], { hasUnread: true, runningPlanStep: { planId: 1, stepId: 2, title: 't' } })
     const r = applySnapshotEvent(s, { type: 'text', text: 'x' })

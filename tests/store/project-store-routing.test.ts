@@ -47,6 +47,54 @@ beforeEach(() => {
   agentRunsListSpy.mockResolvedValue([] as Array<{ runId: string }>)
 })
 
+// Со стороны пользователя: фоновый чат, чей прогон закончился, не держит
+// ожидание записи. Ядро (applySnapshotEvent) кроет ОБА фоновых пути, и оба
+// проверяются здесь — иначе «покрыт один» выглядело бы как «покрыты все».
+describe('ожидания записи фонового чата не переживают свой прогон', () => {
+  const write = { callId: 'w1', path: 'a.ts', before: 'до', after: 'после' }
+
+  it('applyEventToChat: done снимает ожидание фонового чата', () => {
+    useProject.setState({
+      activeChatId: 1,
+      chats: {
+        1: { ...freshSnapshot(), chatId: 1 },
+        2: { ...freshSnapshot(), chatId: 2, pendingWrites: [write] }
+      }
+    }, false)
+
+    useProject.getState().applyEventToChat(2, { type: 'done' })
+
+    expect(useProject.getState().chats[2].pendingWrites,
+      'фоновый чат держит ожидание записи после конца прогона').toEqual([])
+  })
+
+  it('applyEventToSession: то же для фоновой ПРОЕКТНОЙ сессии', () => {
+    useProject.setState({
+      sessions: { 'C:/other': { ...freshSnapshot(), pendingWrites: [write] } }
+    }, false)
+
+    useProject.getState().applyEventToSession('C:/other', { type: 'error', message: 'обрыв' })
+
+    expect(useProject.getState().sessions['C:/other'].pendingWrites).toEqual([])
+  })
+
+  // КОНТРОЛЬ: пока прогон идёт, ожидание живо и модалка при переключении в чат
+  // всплывёт — иначе main зависнет на resolveWrite без единого способа ответить.
+  it('контроль: до done ожидание фонового чата ЖИВО', () => {
+    useProject.setState({
+      activeChatId: 1,
+      chats: {
+        1: { ...freshSnapshot(), chatId: 1 },
+        2: { ...freshSnapshot(), chatId: 2, pendingWrites: [write] }
+      }
+    }, false)
+
+    useProject.getState().applyEventToChat(2, { type: 'text', text: 'ещё пишу' })
+
+    expect(useProject.getState().chats[2].pendingWrites).toEqual([write])
+  })
+})
+
 describe('reconcileStreamingState', () => {
   it('снимает ложный streaming, если в БД ещё running, но живого sendOwner уже нет', async () => {
     agentRunsListSpy.mockImplementation(async (_path?: string, opts?: { status?: string }) => (
