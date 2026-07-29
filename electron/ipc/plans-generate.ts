@@ -179,6 +179,9 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
   const ctrl = new AbortController()
   activeByProject.set(projectPath, ctrl)
   const sendId = nextGenerationSendId()
+  // Верхняя граница по времени: обрываем сами, но НЕ выдаём это за отмену человеком.
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort() }, PLAN_GENERATION_TIME_BUDGET_MS)
   try {
     const run = await deps.runPlanning({
       projectPath,
@@ -195,7 +198,14 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
       return { ok: true, planId, notice }
     }
     if (ctrl.signal.aborted) {
-      return { ok: false, error: 'Генерация отменена. План не создан.', notice }
+      return {
+        ok: false,
+        error: timedOut
+          ? `Не удалось сформировать план: работа заняла больше ${Math.round(PLAN_GENERATION_TIME_BUDGET_MS / 60_000)} минут и была остановлена. `
+            + 'Опишите задачу конкретнее или разбейте её на части.'
+          : 'Генерация отменена. План не создан.',
+        notice,
+      }
     }
     if (!run.ok) {
       return { ok: false, error: run.error?.trim() || 'Не удалось сформировать план.', notice }
@@ -211,6 +221,7 @@ export async function generatePlan(deps: PlanGenerateDeps, req: PlanGenerateRequ
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err), notice }
   } finally {
+    clearTimeout(timer)
     activeByProject.delete(projectPath)
   }
 }
@@ -232,3 +243,41 @@ export const PLAN_GENERATION_TOOLS = [
 /** Режим прогона генерации. Вынесено константой, чтобы страж мог проверить: это
  *  `plan`, значит `mode-policy.decide` блокирует любые изменения. */
 export const PLAN_GENERATION_MODE: ToolContext['agentMode'] = 'plan'
+
+/**
+ * БЮДЖЕТ РАУНДОВ ГЕНЕРАЦИИ — ЗАМЕРЕН, НЕ ПОДОБРАН НА ГЛАЗ (29.07).
+ *
+ * ПОЧЕМУ НЕ ОБЩИЙ `MAX_SUB_ITERATIONS` (8). Тот дефолт написан под узкую
+ * подзадачу — «прочитать пару файлов, применить патч, проверить», это сказано в
+ * его же комментарии. Генерация плана начинается с ОСМОТРА проекта, и восьми
+ * раундов ей не хватает: живая проверка на постановке «какие тесты в проекте
+ * самые долгие и в каком порядке их чинить» упёрлась ровно в этот лимит
+ * (exitReason = max-iterations, плана нет).
+ *
+ * ЗАМЕР. Ту же постановку прошли теми же read-only инструментами, считая
+ * ЗАВИСИМЫЕ раунды (независимые вызовы идут в одном раунде):
+ *   1) ориентация: дерево tests/ + счёт файлов (482 файла, 15 подкаталогов)
+ *   2) конфигурация: vitest.config.ts + явные бюджеты `it(…, N)` в тестах
+ *   3) кандидаты: поиск тестов с реальными субпроцессами (15 файлов)
+ *   4) чтение двух-трёх найденных файлов, чтобы не гадать
+ *   5) create_plan
+ * Пол — 5 раундов, и это для исполнителя, который НИ РАЗУ не тратит раунд зря и
+ * всегда батчит независимые вызовы. Живая модель на той же задаче израсходовала
+ * 8 и не закончила. Значит бюджет должен отличаться КРАТНО, а не на единицу.
+ *
+ * 24 = 3× от израсходованных-и-недостаточных 8, почти 5× от измеренного пола.
+ * Настоящая верхняя граница здесь — не раунды, а время (см. ниже); этот счётчик
+ * остаётся страховкой от спирали.
+ */
+export const PLAN_GENERATION_MAX_TURNS = 24
+
+/**
+ * ВЕРХНЯЯ ГРАНИЦА ПО ВРЕМЕНИ. Генерация идёт при живом человеке у экрана, поэтому
+ * «много раундов» не должно превращаться в «висит непонятно сколько». Три минуты —
+ * граница, после которой ожидание перестаёт читаться как работа и начинает
+ * читаться как поломка. Кнопка «Отменить» остаётся, но полагаться на неё нельзя:
+ * человек не обязан догадываться, что процесс уже не закончится.
+ *
+ * Исход по времени НЕ выдаётся за отмену человеком — у него свой текст.
+ */
+export const PLAN_GENERATION_TIME_BUDGET_MS = 180_000

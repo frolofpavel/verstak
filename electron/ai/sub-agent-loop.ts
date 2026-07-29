@@ -23,6 +23,12 @@ import { lookupHandler, type ToolContext } from '../ipc/tool-handlers'
 // MAX_SUB_ITERATIONS — сколько раундов «модель зовёт tools → выполняем» допускаем.
 // 8 хватает для узкой подзадачи (прочитать пару файлов, применить патч, проверить),
 // но не даёт субагенту уйти в спираль и жечь токены/деньги.
+//
+// ЭТО ДЕФОЛТ ДЛЯ УЗКОЙ ПОДЗАДАЧИ, А НЕ ОБЩИЙ ЗАКОН (29.07). Вызывающий с другим
+// сценарием обязан задать свой бюджет параметром `maxIterations`: генерация плана
+// сначала ОСМАТРИВАЕТ проект, и восьми раундов ей не хватает — живая проверка
+// упёрлась ровно в это. Класс ошибки тот же, что с unattended-гейтом и с
+// требованием путей в ТЗ: ограничение исходного вызывающего, применённое ко всем.
 export const MAX_SUB_ITERATIONS = 8
 
 export interface SubAgentLoopParams {
@@ -41,6 +47,8 @@ export interface SubAgentLoopParams {
   /** Вызывается при каждом выполненном tool-вызове — для индикации
    *  tool-активности в карточке subagent-run (UI). */
   onToolActivity?: (toolName: string) => void
+  /** Свой бюджет раундов. Без него — MAX_SUB_ITERATIONS (узкая подзадача). */
+  maxIterations?: number
 }
 
 export interface SubAgentLoopResult {
@@ -61,6 +69,7 @@ export interface SubAgentLoopResult {
  */
 export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAgentLoopResult> {
   const { provider, messages, allowedToolNames, ctx, signal, role, onToolActivity } = params
+  const maxIterations = params.maxIterations ?? MAX_SUB_ITERATIONS
 
   // Фильтруем TOOL_DEFS по whitelist роли. Субагент физически НЕ видит
   // запрещённые tools — модель не сможет их вызвать.
@@ -77,7 +86,7 @@ export async function runSubAgentLoop(params: SubAgentLoopParams): Promise<SubAg
   let lastText = ''
   let toolCallCount = 0
 
-  for (let iter = 0; iter < MAX_SUB_ITERATIONS; iter++) {
+  for (let iter = 0; iter < maxIterations; iter++) {
     if (signal.aborted) return { text: lastText, toolCallCount, exitReason: 'aborted' }
 
     const toolCalls: ToolCall[] = []

@@ -51,7 +51,7 @@ export interface PlanProviderInput {
  * не происходило вовсе. Тот же класс, что с `ollama`: «ключ есть» — такое же
  * «мы не знаем, настроен ли он», если провайдеру нужен ещё и адрес.
  */
-const EXTRA_REQUIRED_SETTINGS: Partial<Record<ProviderId, readonly string[]>> = {
+export const EXTRA_REQUIRED_SETTINGS: Partial<Record<ProviderId, readonly string[]>> = {
   'custom-openai': ['custom_openai_baseurl'],
   'yandex-gpt': ['yandex_folder_id'],
   gigachat: ['gigachat_client_secret'],

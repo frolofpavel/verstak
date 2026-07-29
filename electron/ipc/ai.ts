@@ -271,6 +271,8 @@ export async function runScheduledHeadless(
     allowedTools?: readonly string[]
     sendId?: number
     role?: 'scheduled' | 'plan-generation'
+    /** Свой бюджет раундов агентного цикла. Без него — дефолт узкой подзадачи. */
+    maxIterations?: number
   }
 ): Promise<{
   ok: boolean; text: string; error?: string
@@ -352,6 +354,7 @@ export async function runScheduledHeadless(
     const result = await runSubAgentLoop({
       provider, messages, allowedToolNames: [...(opts.allowedTools ?? SCHEDULED_READONLY_TOOLS)], ctx,
       signal: opts.signal, role: opts.role ?? 'scheduled',
+      ...(opts.maxIterations != null ? { maxIterations: opts.maxIterations } : {}),
     })
     // Диагностика хода прогона отдаётся ВЫЗЫВАЮЩЕМУ (29.07). Без неё «модель не
     // вызвала инструмент», «модель работала, но результата не сохранила» и

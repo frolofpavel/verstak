@@ -22,7 +22,7 @@ import { registerProjectIpc } from './ipc/projects'
 import { registerProjectMapIpc } from './ipc/project-map'
 import { registerFilesIpc } from './ipc/files'
 import { registerTasksIpc } from './ipc/tasks'
-import { registerPlanGenerateIpc, PLAN_GENERATION_MODE, PLAN_GENERATION_TOOLS } from './ipc/plans-generate'
+import { registerPlanGenerateIpc, PLAN_GENERATION_MODE, PLAN_GENERATION_TOOLS, PLAN_GENERATION_MAX_TURNS } from './ipc/plans-generate'
 import { choosePlanGenerationProvider } from './ai/plan-generation-provider'
 import { isWithinKnownRoots } from './ai/path-policy'
 import { registerJournalIpc } from './ipc/journal'
@@ -892,6 +892,9 @@ app.whenReady().then(() => {
       agentMode: PLAN_GENERATION_MODE,
       allowedTools: PLAN_GENERATION_TOOLS,
       role: 'plan-generation',
+      // Свой бюджет раундов: общий дефолт написан под узкую подзадачу и осмотра
+      // проекта не выдерживает (замер — в шапке константы).
+      maxIterations: PLAN_GENERATION_MAX_TURNS,
     }),
   })
   registerWorkflowsIpc({
