@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { writeFile, unlink, stat } from 'fs/promises'
-import type { UndoStack } from '../storage/undo'
+import type { UndoEntry, UndoStack } from '../storage/undo'
 import { safeRealJoin } from '../ai/path-policy'
 
 /** Результат отката к чекпоинту (shape совпадает с api.d.ts undo.revertToCheckpoint). */
@@ -82,8 +82,60 @@ export async function revertToCheckpoint(
   return { ok: true, restored, count: restored.length }
 }
 
+/**
+ * Undo-запись БЕЗ содержимого файла — то, что видит renderer.
+ *
+ * Стек отката хранит СЫРОЕ «до» и «после»: с 29.07 путь записи читает файл
+ * мимо secret-scanner, иначе откат писал бы на диск `[REDACTED:…]` вместо
+ * живого секрета. Значит содержимое в стеке — настоящие секреты пользователя, и
+ * отдавать его в renderer нельзя: это тот периметр, откуда содержимое утекает
+ * наружу (запись экрана, демонстрация, RDP, DevTools и DOM, буфер обмена).
+ *
+ * ПОЧЕМУ ОТКАЗ, А НЕ МАСКА, КАК В ДИФФЕ. Дифф маскируют потому, что его ПОКАЗЫВАЮТ
+ * — человек по нему принимает решение. Здесь показывать нечего: содержимое из
+ * этого канала не читает никто (ни одного вызова `undo.list` в renderer), а весь
+ * откат — `undo:revert`, `undo:revertToCheckpoint`, exact-rewind, dev-task —
+ * работает со стеком внутри main напрямую. Маскировать неиспользуемое значило бы
+ * гонять файл целиком через IPC без пользы и оставить сигнал «это безопасно
+ * показывать», приглашая будущего потребителя отрисовать блоб не думая. Появится
+ * экран истории отката — там и решать, что показывать; механика маски уже есть.
+ */
+export interface UndoEntrySummary {
+  id: number
+  filePath: string
+  createdAt: number
+  /**
+   * Существовал ли файл ДО записи. Единственное, что решение об откате берёт из
+   * содержимого: не существовал → откат УДАЛЯЕТ файл, а не восстанавливает его
+   * пустым (B4). Поэтому отдаём флагом, а не текстом.
+   *
+   * Из `beforeHash === null` это НЕ выводится: миграция провенанса append-only,
+   * у legacy-записей хеши null при живом содержимом.
+   */
+  existedBefore: boolean
+  runId: string | null
+  chatId: number | null
+  messageId: number | null
+  beforeHash: string | null
+  afterHash: string | null
+}
+
+export function summarizeUndoEntry(entry: UndoEntry): UndoEntrySummary {
+  return {
+    id: entry.id,
+    filePath: entry.filePath,
+    createdAt: entry.createdAt,
+    existedBefore: entry.beforeContent !== null,
+    runId: entry.runId,
+    chatId: entry.chatId,
+    messageId: entry.messageId,
+    beforeHash: entry.beforeHash,
+    afterHash: entry.afterHash
+  }
+}
+
 export function registerUndoIpc(stack: UndoStack): void {
-  ipcMain.handle('undo:list', (_e, projectPath: string) => stack.list(projectPath))
+  ipcMain.handle('undo:list', (_e, projectPath: string) => stack.list(projectPath).map(summarizeUndoEntry))
   ipcMain.handle('undo:count', (_e, projectPath: string) => stack.count(projectPath))
   ipcMain.handle('undo:clear', (_e, projectPath: string) => { stack.clearProtection(projectPath); return stack.clear(projectPath) })
 

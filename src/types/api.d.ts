@@ -121,7 +121,25 @@ export interface Reminder {
   deliveredAt: number | null
   dismissedAt: number | null
 }
-export interface UndoEntry { id: number; filePath: string; beforeContent: string | null; afterContent: string | null; createdAt: number }
+/**
+ * Undo-запись БЕЗ содержимого файла (mirror `UndoEntrySummary` из
+ * `electron/ipc/undo.ts`). Стек отката хранит СЫРОЕ содержимое — настоящие
+ * секреты пользователя, — и в renderer оно не выходит: `undo:list` отдаёт
+ * проекцию. `existedBefore: false` означает «файла не было, откат его УДАЛИТ».
+ * Понадобится показать содержимое отката — маскировать в main, как это уже
+ * сделано для диффа подтверждения (`maskSecretsForDiff`).
+ */
+export interface UndoEntrySummary {
+  id: number
+  filePath: string
+  createdAt: number
+  existedBefore: boolean
+  runId: string | null
+  chatId: number | null
+  messageId: number | null
+  beforeHash: string | null
+  afterHash: string | null
+}
 export type PlanStatus = 'draft' | 'running' | 'done' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
 export interface PlanStep { id: number; planId: number; idx: number; title: string; detail: string | null; status: StepStatus; result: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null; spec?: PlanStepSpecV1 | null }
@@ -695,7 +713,7 @@ declare global {
         remove: (id: number) => Promise<void>
       }
       undo: {
-        list: (projectPath: string) => Promise<UndoEntry[]>
+        list: (projectPath: string) => Promise<UndoEntrySummary[]>
         count: (projectPath: string) => Promise<number>
         clear: (projectPath: string) => Promise<number>
         revert: (projectPath: string, id?: number) => Promise<{ ok: boolean; filePath?: string; reason?: string }>

@@ -183,5 +183,15 @@ export const SECURITY_RULES: SecurityRule[] = [
     status: 'active',
     testFile: './secret-write-path.test.ts',
     source: 'Verstak incident 2026-07-29: pending-write events of a phone-started run are forwarded verbatim to an external relay'
+  },
+  {
+    id: 'SEC-SECRET-03',
+    cwe: 'CWE-200',
+    category: 'secret-leak',
+    severity: 'block',
+    title: 'The undo stack keeps raw file content inside main only — undo:list hands the renderer a summary with no content at all',
+    status: 'active',
+    testFile: './undo-list-no-content.test.ts',
+    source: 'Verstak 2026-07-29: raw before-content became a real secret once the write path stopped reading through the scanner'
   }
 ]
