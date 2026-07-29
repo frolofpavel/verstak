@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai'
 import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { normalizedUsage } from '../../shared/contracts/usage'
+import { scanText } from './secret-scanner'
 
 interface GeminiOptions {
   apiKey: string
@@ -275,7 +276,18 @@ export function createGeminiProvider(opts: GeminiOptions): ChatProvider {
             const sample = sampleChunks[0] ?? '(нет данных)'
             reason = `⚠ Gemini вернул пустой ответ (${chunkCount} chunks, output_tokens=${lastUsage.output ?? '?'}). Первый chunk: ${sample.slice(0, 200)}`
           }
-          yield { type: 'text', text: reason }
+          // ОЧИСТКА В ТОЧКЕ ВЫДАЧИ, а не там, где собирается образец (29.07).
+          //
+          // Сюда попадает СЫРОЙ ответ модели: ветка «пустой ответ» показывает
+          // человеку первый чанк, и это правильно — без образца сообщение
+          // бесполезно. Но чанк мог содержать что угодно, включая ключ, а на
+          // экран он шёл мимо `scanText`. Это опаснее убранной строки в логе:
+          // лог никто не читает, а сюда смотрят.
+          //
+          // Обработка стоит на самом `yield`, а не на `sample`, СОЗНАТЕЛЬНО:
+          // следующий, кто допишет ещё одну ветку `reason`, попадёт под неё
+          // автоматически и не должен будет помнить об этом правиле.
+          yield { type: 'text', text: scanText(reason).redacted }
         }
         if (lastUsage.prompt !== undefined || lastUsage.output !== undefined) {
           yield {
