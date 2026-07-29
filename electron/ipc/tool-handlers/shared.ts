@@ -308,6 +308,20 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
   if (name === 'browser_screenshot') {
     return { label: 'browser_screenshot', detail: '' }
   }
+  // Клик — единственное браузерное действие, меняющее чужую систему, и до 30.07
+  // он был единственным без ветки здесь: сводка возвращала null, значит
+  // emitActivity не звался и следа не оставалось ВООБЩЕ (ни Timeline, ни audit).
+  // В detail идёт и цель, и адрес страницы: без адреса потом видно «сколько
+  // кликов», но не «куда», а именно второе нужно, чтобы выбрать порог гейта по
+  // фактам. URL берём из результата (страница возвращает { ok, url }); нет
+  // результата — отдаём хотя бы цель.
+  if (name === 'browser_click') {
+    const target = String(args.selector ?? '')
+    const url = (result && typeof result === 'object' && 'url' in result)
+      ? String((result as { url?: unknown }).url ?? '')
+      : ''
+    return { label: 'browser_click', detail: url ? `${target} · ${url}` : target }
+  }
   if (name === 'get_project_map' || name === 'refresh_project_map') {
     return { label: name, detail: '' }
   }

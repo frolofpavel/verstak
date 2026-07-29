@@ -45,10 +45,19 @@ export const browserHandler: ToolHandler = {
     try {
       if (!result.error) {
         const url = String(call.args.url ?? '')
+        // Метка ПОИМЁННАЯ, а не «всё остальное — скриншот». Прежний тернарник
+        // знал navigate и read_page, а клик записывал в журнал проекта как
+        // скриншот: журнал не молчал о клике, он о нём ВРАЛ. Отсутствие следа
+        // человек ещё может заметить, ложный след — нет.
         const label = call.name === 'browser_navigate' ? `Браузер → ${url}`
                     : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
+                    : call.name === 'browser_click' ? `Браузер: клик по «${String(call.args.selector ?? '')}»`
                     : `Браузер: скриншот`
-        ctx.recordJournal(ctx.projectPath, 'tool', label, null)
+        // Для клика в журнал едет и адрес страницы — см. summarizeToolCall.
+        const clicked = call.name === 'browser_click' && result.result && typeof result.result === 'object'
+          ? String((result.result as { url?: unknown }).url ?? '')
+          : ''
+        ctx.recordJournal(ctx.projectPath, 'tool', label, clicked || null)
       }
     } catch { /* journal not critical */ }
     // Screenshot → queue as attachment for next user message
@@ -70,7 +79,8 @@ export const browserHandler: ToolHandler = {
         }
       }
     }
-    const s = summarizeToolCall(call.name, call.args, undefined)
+    // Результат передаём ЯВНО: у клика адрес страницы живёт только в нём.
+    const s = summarizeToolCall(call.name, call.args, result.result)
     if (s) emitActivity(ctx, call, result.error ? 'error' : 'ok', s.label, s.detail)
     return result
   }

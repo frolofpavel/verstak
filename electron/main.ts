@@ -205,8 +205,17 @@ function createWindow(settings: Settings): BrowserWindow {
  * Skipped in dev: Vite's HMR client uses inline scripts, eval-based module
  * evaluation, and a websocket to localhost — a strict CSP breaks all of it
  * and you get a blank window. In a packaged build there's no HMR, so we
- * can lock things down. webview content runs in its own session and is
- * NOT affected by this CSP either way.
+ * can lock things down.
+ *
+ * ПРО СЕССИЮ WEBVIEW — ИСПРАВЛЕНО 30.07. Здесь стояло «webview content runs in
+ * its own session», и это неправда: `partition` не задан ни в одном месте
+ * репозитория (см. элемент `<webview>` в `src/components/BrowserView.tsx`),
+ * поэтому webview живёт в `session.defaultSession` — той же персистентной
+ * сессии, что и приложение, и туда же смотрят `installMediaPermissions` и
+ * `installCSP`. Комментарий пережил свою правду и утверждал изоляцию, которой
+ * нет. Что периметр РЕАЛЬНО ужимает — принудительные `nodeIntegration:false`,
+ * `contextIsolation:true`, снятый preload на `will-attach-webview` и запрет
+ * попапов ниже по файлу; это про процесс, а не про куки и не про смысл клика.
  */
 /**
  * Allow microphone access for VoiceInput.
