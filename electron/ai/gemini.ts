@@ -114,8 +114,14 @@ export function createGeminiProvider(opts: GeminiOptions): ChatProvider {
           if (sampleChunks.length < 3) {
             try {
               const dump = JSON.stringify(chunk, (_k, v) => typeof v === 'function' ? '[fn]' : v)
+              // ТОЛЬКО В ПАМЯТЬ. Рядом стоял безусловный `console.error` с этим же
+              // дампом (до 1500 символов сырого ответа модели на первых трёх чанках
+              // КАЖДОГО запроса) — и в dev, и в собранной сборке, мимо
+              // secret-scanner. Это обходило §8 регламента на каждом запросе, молча.
+              // Диагностику «все чанки пустые» держит сам sampleChunks (см. ниже,
+              // где берётся sampleChunks[0]), поэтому печать удалена, а не спрятана
+              // под флаг: живого потребителя у неё не было.
               sampleChunks.push(dump.slice(0, 400))
-              console.error(`[gemini chunk ${chunkCount - 1}]`, dump.slice(0, 1500))
             } catch { /* ignore */ }
           }
           const c = chunk as {

@@ -625,9 +625,34 @@ export function registerReleaseNotesIpc(): void {
   })
 }
 
+/**
+ * Заглушка состояния обновлений для dev (29.07).
+ *
+ * В dev канала обновлений нет ПО ЗАМЫСЛУ — `initAutoUpdater` выходит до создания
+ * сервиса. Но renderer зовёт `update:get-state` вслепую, и вместо «в dev
+ * недоступно» получал необработанную ошибку «No handler registered», дважды за
+ * старт. Дефекта в автообновлении тут нет (собранная сборка канал регистрирует),
+ * некрасив только шум в консоли и повод для ложной тревоги.
+ *
+ * Отдаём ровно то, что отдал бы сервис при пустом состоянии, — контракт preload и
+ * `api.d.ts` не меняется, у renderer'а не появляется нового случая.
+ */
+let devUpdateStubRegistered = false
+function registerDevUpdateStateStub(): void {
+  if (devUpdateStubRegistered || updaterIpcRegistered) return
+  devUpdateStubRegistered = true
+  ipcMain.handle('update:get-state', async () => ({
+    ...toUiSnapshot(null),
+    installedVersion: app.getVersion(),
+  }))
+}
+
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   registerReleaseNotesIpc()
-  if (!app.isPackaged) return
+  if (!app.isPackaged) {
+    registerDevUpdateStateStub()
+    return
+  }
   new AutoUpdateService(mainWindow).init()
 }
 
