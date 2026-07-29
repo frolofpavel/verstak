@@ -8,7 +8,7 @@
 // Запуск: node scripts/release-gate.mjs   (exit 0 = зелёный, exit 1 = красный)
 // Используется внутри release:publish — опубликовать в обход гейта нельзя.
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
@@ -144,6 +144,29 @@ const run = (label, cmd, args) => {
 const type = run('type', 'npm', ['run', 'type'])
 check('проверка типов без ошибок', type.ok)
 
+// ПАРАЛЛЕЛИЗМ ТЕСТОВ — ЗАМЕРЕН, НЕ ПОДОБРАН НА ГЛАЗ (29.07).
+//
+// Ограничивает НЕ процессор, а ПАМЯТЬ. На этой машине 16 ГБ, из них свободно ~2:
+// остальное держат редакторы, браузеры и сам агент. Полный прогон при разном
+// maxWorkers — минимум свободной ОЗУ за прогон / время (json-отчёты, 4 прогона):
+//   default (11) — 129 МБ / 108 с  ← запаса нет вовсе
+//   6            — 1361 МБ / 118 с
+//   4            — 2371 МБ / 142 с ← колено: ниже запас уже не растёт
+//   3            — 2261 МБ / 150 с
+// Набор во всех четырёх собрался ПОЛНОСТЬЮ (4212) и без падений: на разгруженной
+// машине число воркеров не решает ничего. Ограничение нужно ради ЗАПАСА под
+// нагрузкой — при 11 воркерах прогон упирается в остаток памяти, Windows уходит в
+// пейджинг, тесты массово выбивает глобальным таймаутом 20 000, а часть файлов не
+// доходит до сбора. Так дважды отменялась публикация 2.2.21 (4179 и 4172 теста
+// вместо 4212). Четыре воркера покупают ~2.2 ГБ форы ценой +34 с.
+const GATE_MAX_WORKERS = 4
+
+// Эталон полноты набора: столько тестов собирает ПОЛНЫЙ прогон (29.07: 4212 =
+// 4198 passed + 14 skipped). Растёт вместе с проектом — сверка на «не меньше»,
+// поэтому новые тесты её не ломают; уменьшать число можно только вместе с
+// осознанным удалением тестов.
+const EXPECTED_TOTAL_TESTS = 4212
+
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
 // бесполезен → держим порт ОТДЕЛЬНЫМ процессом (в самом гейте spawnSync блокирует
@@ -152,11 +175,67 @@ const { spawn } = await import('node:child_process')
 const holderProc = spawn('node', ['-e', 'require("http").createServer((q,r)=>r.end("busy")).listen(11434,"127.0.0.1")'], { detached: false, stdio: 'ignore' })
 await new Promise(r => setTimeout(r, 800)) // дать порту забиндиться (или упасть на EADDRINUSE — тоже ок)
 
-const tests = run('tests', 'npm', ['run', 'test:fast'])
+const reportPath = join(ROOT, 'release', 'gate-tests.json')
+mkdirSync(join(ROOT, 'release'), { recursive: true })
+// Сносим отчёт прошлого прогона: иначе прогон, который до записи отчёта не дожил,
+// сверялся бы по ЧУЖИМ числам — ровно тот класс ошибки, ради которого проверка и
+// заводится.
+rmSync(reportPath, { force: true })
+const tests = run('tests', 'npm', [
+  'run', 'test:fast', '--',
+  `--maxWorkers=${GATE_MAX_WORKERS}`,
+  '--reporter=default', '--reporter=json', `--outputFile=${reportPath}`,
+])
 try { holderProc.kill() } catch { /* уже мёртв */ }
 const failedLine = /Tests\s+(\d+)\s+failed/.exec(tests.out)
 const passedLine = /Tests\s+.*?(\d+)\s+passed/.exec(tests.out)
 const zeroFailed = !failedLine
+
+// УЛИКА СОХРАНЯЕТСЯ НА ДИСК (29.07). Гейт печатал только сводку «N failed», а
+// полный вывод vitest держал в памяти — имя упавшего теста терялось безвозвратно,
+// и разобрать падение можно было только повторным прогоном, который его же и
+// затирал. Дважды за релиз 2.2.21 это стоило получаса каждый раз.
+//
+// Пишем ВЕСЬ вывод в файл и печатаем путь. Правило «личность фиксируется ДО
+// перезапуска» перестаёт зависеть от того, догадался ли исполнитель.
+if (!zeroFailed) {
+  const logPath = join(ROOT, 'release', 'gate-tests-failure.log')
+  try {
+    mkdirSync(join(ROOT, 'release'), { recursive: true })
+    writeFileSync(logPath, tests.out, 'utf8')
+    // Имена падений вытаскиваем сразу: в выводе vitest они идут строками «× имя».
+    const names = [...tests.out.matchAll(/^\s*×\s+(.+?)\s*$/gm)].map(m => m[1])
+    console.log(`  ℹ полный вывод тестов сохранён: ${logPath}`)
+    if (names.length > 0) {
+      console.log('  ℹ упавшие тесты:')
+      for (const n of [...new Set(names)]) console.log(`      × ${n}`)
+    }
+  } catch (err) {
+    console.log(`  ℹ не удалось сохранить вывод тестов: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+// ПОЛНОТА НАБОРА — отдельная проверка, ПЕРЕД вердиктом о падениях (29.07).
+//
+// Прогон, собравший меньше тестов, чем эталон, ничего не говорит о коде: часть
+// файлов до сбора не дошла. Раньше такой прогон читался как обычный красный —
+// и полдня ушло на поиск «дефекта», которого не было. Хуже другое: оборванный
+// прогон, где всё собранное прошло, гейт объявил бы ЗЕЛЁНЫМ и выпустил недо-
+// проверенную сборку. Обе дыры закрывает одна сверка.
+let collected = null
+try { collected = JSON.parse(readFileSync(reportPath, 'utf8')).numTotalTests } catch { /* отчёта нет */ }
+if (typeof collected === 'number') {
+  check(
+    `набор собран полностью (эталон ${EXPECTED_TOTAL_TESTS})`,
+    collected >= EXPECTED_TOTAL_TESTS,
+    collected >= EXPECTED_TOTAL_TESTS
+      ? `${collected} тестов`
+      : `собрано ${collected} из ${EXPECTED_TOTAL_TESTS} — ЭТО ОБОРВАННЫЙ ЗАПУСК, а не вердикт о коде: разгрузи машину и прогони заново`,
+  )
+} else {
+  notes.push('json-отчёт тестов не прочитан — полнота набора не проверена')
+}
+
 check('все тесты зелёные (0 падений)', tests.ok && zeroFailed, zeroFailed ? `${passedLine?.[1] ?? '?'} passed` : `${failedLine[1]} failed`)
 
 // ─── Вердикт ─────────────────────────────────────────────────────────────────
