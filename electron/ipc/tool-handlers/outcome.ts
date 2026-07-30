@@ -17,6 +17,7 @@ import { planSpecFeedback } from '../../ai/task-spec-check'
 import { awaitingApprovalResult } from '../../ai/plan-await'
 import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
 import { planGateApplies } from '../../ai/plan-gate-modes'
+import { isPlanApprovalGateOn } from '../../../shared/contracts/runtime-flag-policy'
 import { markPlanAwaitingApproval, clearPlanAwaitingApproval } from '../../ai/runner-shared'
 import type { ToolContext, ToolHandler } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
@@ -345,7 +346,8 @@ async function replanOnChatPath(call: ToolCall, ctx: ToolContext): Promise<ToolR
   const gateApplies = planGateApplies({
     agentMode: ctx.agentMode,
     outcomePhase: null,
-    planApprovalSetting: ctx.getSecretForDelegate?.('plan_approval_gate') === 'true',
+    // Единая полярность на оба слоя — см. verification.ts и A3 §2.1.
+    planApprovalSetting: isPlanApprovalGateOn(ctx.getSecretForDelegate?.('plan_approval_gate')),
     delegationDepth: ctx.delegationDepth,
   })
   const verdict = planApprovalVerdict(updated.steps.map(step => ({ title: step.title, detail: step.detail, spec: step.spec })))

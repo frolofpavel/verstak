@@ -105,8 +105,11 @@ describe('plan-gate: createPlanHandler (ожидание снаружи прог
       expect.objectContaining({ agentRunId: 'run-42' }))
   })
 
-  it('гейт ВЫКЛ (plan_approval_gate≠true) → НЕ блокирует, обычный план', async () => {
-    const ctx = makeCtx({ getSecretForDelegate: () => null })
+  // ПРАВКА ФИКСТУРЫ, НЕ УТВЕРЖДЕНИЯ (A3 §2.1, 30.07): «гейт выключен» теперь
+  // выражается строкой 'false', а не отсутствием значения — цикл планов работает
+  // по умолчанию. Проверяемое поведение прежнее: выключенный гейт не блокирует.
+  it('гейт ВЫКЛ (plan_approval_gate=false) → НЕ блокирует, обычный план', async () => {
+    const ctx = makeCtx({ getSecretForDelegate: () => 'false' })
     const res = await createPlanHandler.handle(call, ctx) as { result: string }
     expect((ctx as { pendingPlans: Map<string, unknown> }).pendingPlans.size).toBe(0)
     expect(res.result).toContain('Plan #7')

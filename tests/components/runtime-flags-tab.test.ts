@@ -147,44 +147,63 @@ describe('вкладка «Поведение агента» — запись', 
 // приёмки сорвались об это.
 //
 // Поэтому пины ниже проверяют не «строка отрисовалась», а путь пользователя
-// целиком: тумблер ВИДЕН на вкладке поведения, по умолчанию выключен, и клик
-// записывает ровно ту строку, которую main читает как «включено».
-describe('согласование плана видно и включается человеком', () => {
-  it('строка есть на вкладке «Поведение агента», с подписью и пометкой дефолта', async () => {
+// целиком: тумблер ВИДЕН на вкладке поведения, показывает верное состояние по
+// умолчанию, и клик записывает ровно ту строку, которую читает main.
+//
+// ДЕФОЛТ ПЕРЕВЁРНУТ 30.07 (A3 §2.1) — решение Павла, контракт отменён. Прежние
+// утверждения «на чистой установке выключен» стерегли продуктовую логику,
+// которая сама оказалась дефектом: человек не пойдёт включать то, о чём не
+// знает. Утверждения переписаны под новый дефолт; проверяемый ПУТЬ тот же —
+// видно, состояние верное, клик пишет строку, которую понимает main.
+describe('согласование плана видно и управляется человеком', () => {
+  it('строка есть на вкладке «Поведение агента», с подписью', async () => {
     await mountTab()
     const r = row('plan_approval_gate')
     expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain('Согласование плана')
     expect(r.querySelector('.gg-runtime-flag-off')?.textContent).toContain('Если выключить')
-    expect(r.querySelector('.gg-runtime-flag-tag'), 'дефолт «выключено» обязан быть виден').toBeTruthy()
+    // Пометки «по умолчанию выключено» здесь БОЛЬШЕ НЕТ, и это верно: с 30.07
+    // флаг включён по умолчанию, и прежняя пометка стала бы ложью. Интерфейс не
+    // трогали — она рисуется только для opt-in флагов (`!defaultOn`).
+    expect(r.querySelector('.gg-runtime-flag-tag'), 'пометка «выключено» на включённом флаге — ложь').toBeNull()
   })
 
-  it('на чистой установке выключен — вывод в интерфейс дефолта не поменял', async () => {
+  // КОНТРОЛЬ к предыдущему: пометка не исчезла из интерфейса вообще, иначе пин
+  // выше был бы зелёным и у сломанного рендера. Единственный оставшийся opt-in —
+  // сырой автозахват памяти.
+  it('контроль: у opt-in флага пометка дефолта по-прежнему видна', async () => {
+    await mountTab()
+    expect(row('auto_capture_memory').querySelector('.gg-runtime-flag-tag')?.textContent)
+      .toContain('по умолчанию выключено')
+  })
+
+  it('на чистой установке ВКЛЮЧЁН — цикл планов работает без настройки', async () => {
+    await mountTab()
+    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('клик выключает и пишет ровно ту строку, которую main читает как «выключено»', async () => {
+    await mountTab()
+    await act(async () => { fireEvent.click(toggleOf('plan_approval_gate')) })
+    // main: isPlanApprovalGateOn(stored) === false ровно при 'false'
+    expect(setKey).toHaveBeenCalledWith('plan_approval_gate', 'false')
+    expect(store.plan_approval_gate).toBe('false')
+    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('выключенный гейт переживает пересборку вкладки', async () => {
+    store = { plan_approval_gate: 'false' }
     await mountTab()
     expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('false')
   })
 
-  it('клик пишет ровно ту строку, которую main читает как «включено»', async () => {
-    await mountTab()
-    await act(async () => { fireEvent.click(toggleOf('plan_approval_gate')) })
-    // main: getSecretForDelegate('plan_approval_gate') === 'true'
-    expect(setKey).toHaveBeenCalledWith('plan_approval_gate', 'true')
-    expect(store.plan_approval_gate).toBe('true')
-    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('true')
-  })
-
-  it('включённый гейт переживает пересборку вкладки', async () => {
-    store = { plan_approval_gate: 'true' }
-    await mountTab()
-    expect(toggleOf('plan_approval_gate').getAttribute('aria-checked')).toBe('true')
-  })
-
-  // КОНТРОЛЬ: включается ТОЛЬКО явной строкой true — иначе тумблер врал бы о
-  // состоянии гейта, а он решает, спрашивать человека или нет.
-  it('контроль: посторонние значения гейт не включают', async () => {
-    for (const v of ['false', '1', 'yes', 'TRUE', '']) {
+  // КОНТРОЛЬ, зеркальный прежнему: выключается ТОЛЬКО явной строкой false.
+  // Иначе мусор в настройках тихо снял бы согласование, а оно решает,
+  // спрашивать человека или нет.
+  it('контроль: посторонние значения гейт не выключают', async () => {
+    for (const v of ['true', '1', 'yes', 'FALSE', '']) {
       store = { plan_approval_gate: v }
       await mountTab()
-      expect(toggleOf('plan_approval_gate').getAttribute('aria-checked'), v).toBe('false')
+      expect(toggleOf('plan_approval_gate').getAttribute('aria-checked'), v).toBe('true')
       cleanup()
     }
   })

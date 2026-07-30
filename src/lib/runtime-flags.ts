@@ -20,6 +20,8 @@
 // тест tests/lib/runtime-flags.test.ts — он парсит исходники electron/ и падает,
 // если полярность разъехалась или чтение флага исчезло.
 
+import { PLAN_APPROVAL_GATE_DEFAULT_ON } from '../../shared/contracts/runtime-flag-policy'
+
 export type RuntimeFlagKey =
   | 'memory_lifecycle'
   | 'auto_capture_memory'
@@ -87,9 +89,14 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     key: 'plan_approval_gate',
     // Подпись по правилу Павла: говорит, что человек ПОЛУЧАЕТ, и не начинается с «не».
     title: 'Согласование плана перед работой',
-    what: 'Агент показывает готовый план и ждёт вашего решения — одобрить, отправить на доработку или отклонить, — и берётся за дело только после него.',
-    whenOff: 'Агент приступает к работе сразу, как только составил план. Это состояние по умолчанию.',
-    defaultOn: false,
+    what: 'Агент показывает готовый план и ждёт вашего решения — одобрить, отправить на доработку или отклонить, — и берётся за дело только после него. Это состояние по умолчанию.',
+    whenOff: 'Агент приступает к работе сразу, как только составил план, — плана вы всё равно увидите в чате и в разделе «Планы».',
+    // A3 §2.1 (30.07): цикл планов включён ПО УМОЛЧАНИЮ. Прежде был opt-in, и это
+    // была неверная продуктовая логика — человек не пойдёт включать то, о чём не
+    // знает. Полярность живёт в shared/contracts/runtime-flag-policy.ts, одна на
+    // main и renderer; здесь она только повторяется для таблицы интерфейса, а
+    // согласованность стережёт tests/lib/plan-approval-default.test.ts.
+    defaultOn: PLAN_APPROVAL_GATE_DEFAULT_ON,
     readAt: 'electron/ipc/tool-handlers/verification.ts',
   },
 ] as const

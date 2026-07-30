@@ -197,6 +197,11 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                   ))}
                 </div>
               )}
+              {/* A3 §2.2: карточка показывается для КАЖДОГО плана, включая
+                  автоутверждённый читающий. Её задача во втором случае — не
+                  спросить, а сообщить, что план есть и где он живёт: человек не
+                  знал про раздел «Планы» вовсе. Тексты утверждены Павлом
+                  дословно, композиция прежняя. */}
               {showPlanCards && planCards.map(card => (
                 <div key={`plan-${card.planId}`} className="gg-plan-card">
                   <div className="gg-plan-card-head">
@@ -205,7 +210,11 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                       {card.awaitingApproval ? 'ждёт вашего решения' : 'сохранён'}
                     </span>
                   </div>
-                  <div className="gg-plan-card-meta">{card.stepCount} шаг(ов)</div>
+                  <div className="gg-plan-card-meta">
+                    {card.awaitingApproval
+                      ? `План готов: ${card.stepCount} шагов. Начну, когда одобрите.`
+                      : `Работаю по плану из ${card.stepCount} шагов — его видно в разделе «Планы».`}
+                  </div>
                   <button className="gg-btn gg-btn-ghost gg-plan-card-open" type="button" onClick={onOpenPlan}>
                     Открыть план
                   </button>

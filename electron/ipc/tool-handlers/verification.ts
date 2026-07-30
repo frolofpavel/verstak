@@ -11,6 +11,7 @@ import { parsePlanStepSpec, type PlanStepSpecV1 } from '../../../shared/contract
 import { getPlanForRun, rememberPlanForRun, markPlanAwaitingApproval } from '../../ai/runner-shared'
 import { planApprovalVerdict, explainVerdict } from '../../ai/plan-threshold'
 import { planGateApplies } from '../../ai/plan-gate-modes'
+import { isPlanApprovalGateOn } from '../../../shared/contracts/runtime-flag-policy'
 
 // Потолок проверок-с-командой на один attest — чтобы агент не превратил его в
 // способ прогнать 50 команд разом. Ручные проверки сверх лимита не режем.
@@ -330,7 +331,11 @@ export const createPlanHandler: ToolHandler = {
       const gateApplies = planGateApplies({
         agentMode: ctx.agentMode,
         outcomePhase: ctx.outcome?.phase ?? null,
-        planApprovalSetting: ctx.getSecretForDelegate?.('plan_approval_gate') === 'true',
+        // Полярность НЕ дублируем сравнением строки: она живёт одна на main и
+        // renderer (shared/contracts/runtime-flag-policy.ts). Собственное
+        // `=== 'true'` здесь означало бы, что смена дефолта покажет человеку
+        // «включено», пока main читает «выключено» (A3 §2.1).
+        planApprovalSetting: isPlanApprovalGateOn(ctx.getSecretForDelegate?.('plan_approval_gate')),
         delegationDepth: ctx.delegationDepth,
       })
       // §4.2 живой порог: сырой spec отдаём порогу ВСЕГДА. `specs` заполняется

@@ -20,6 +20,7 @@ import {
   runtimeFlagByKey,
   type RuntimeFlagKey,
 } from '../../src/lib/runtime-flags'
+import { PLAN_APPROVAL_GATE_DEFAULT_ON } from '../../shared/contracts/runtime-flag-policy'
 
 const ROOT = process.cwd()
 
@@ -64,9 +65,12 @@ describe('RUNTIME_FLAGS — дефолты', () => {
     smart_fallback: true,
     // opt-in — решение Павла от 26.07 (2.1.13). Мутация в true = красный.
     auto_capture_memory: false,
-    // opt-in и остаётся им: тумблер согласования включается ОСОЗНАННО, вывод его в
-    // интерфейс дефолта не меняет. Мутация в true = красный.
-    plan_approval_gate: false,
+    // ДЕФОЛТ ПЕРЕВЁРНУТ 30.07 (A3 §2.1) — контракт отменён решением Павла, а не
+    // подогнан под правку. Прежняя запись «включается ОСОЗНАННО» описывала
+    // неверную продуктовую логику: человек не пойдёт включать то, о чём не знает,
+    // и не откроет раздел, про который не слышал. Теперь цикл планов работает
+    // сразу, а осознанное ВЫКЛЮЧЕНИЕ уважается (stored === 'false').
+    plan_approval_gate: true,
   }
 
   for (const [key, defaultOn] of Object.entries(EXPECTED) as Array<[RuntimeFlagKey, boolean]>) {
@@ -113,6 +117,14 @@ describe('RUNTIME_FLAGS — анти-дрейф с main', () => {
     const src = readFileSync(join(ROOT, file), 'utf8')
     const optOut = new RegExp(`getSecret[^\\n]*['\`"]${key}['\`"]\\s*\\)?\\s*!==\\s*'false'`)
     const optIn = new RegExp(`getSecret[^\\n]*['\`"]${key}['\`"]\\s*\\)?\\s*===\\s*'true'`)
+    // A3 §2.1: у plan_approval_gate полярности в main БОЛЬШЕ НЕТ — он читается
+    // общим хелпером из shared/, единым для main и renderer. Дублировать
+    // сравнение строки стало нечем, и это сильнее любого стража: расходиться
+    // теперь физически нечему. Здесь остаётся проверка, что чтение НЕ ИСЧЕЗЛО.
+    const viaSharedHelper = new RegExp(`isPlanApprovalGateOn\\([^\\n]*${key}`)
+    if (key === 'plan_approval_gate' && viaSharedHelper.test(src)) {
+      return PLAN_APPROVAL_GATE_DEFAULT_ON
+    }
     // memory-hooks читает через вынесенную константу — разбираем и этот вид.
     const optInViaConst = /getSecret\?\.\(AUTO_CAPTURE_SETTING_KEY\)\s*===\s*'true'/
     if (optOut.test(src)) return true

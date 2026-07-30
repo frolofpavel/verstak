@@ -56,8 +56,13 @@ function makeCtx(opts: CtxOpts) {
   const ctx = {
     projectPath: '/p', sendId: 1, runId: 'run-1', parentChatId: 7,
     agentMode: opts.mode, setAgentMode,
+    // ПРАВКА ФИКСТУРЫ, НЕ УТВЕРЖДЕНИЙ (A3 §2.1, 30.07). «Настройка выключена»
+    // раньше выражалась ОТСУТСТВИЕМ значения; теперь цикл планов работает по
+    // умолчанию, и отсутствие означает ВКЛЮЧЕНО. Выключенное состояние теперь
+    // записывается явной строкой 'false' — ровно так его пишет и сам тумблер.
+    // Проверяемое поведение во всех кейсах ниже прежнее.
     getSecretForDelegate: (k: string) =>
-      (k === 'plan_approval_gate' ? (opts.gateSetting ? 'true' : null) : null),
+      (k === 'plan_approval_gate' ? (opts.gateSetting ? 'true' : 'false') : null),
     recordPlan: vi.fn(() => ({ id: 42, planRevision: 1 })),
     getPlan: vi.fn(() => null),
     recordJournal: vi.fn(),
