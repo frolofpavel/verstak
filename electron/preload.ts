@@ -382,6 +382,9 @@ contextBridge.exposeInMainWorld('api', {
     // §10 хвост: карточка снята БЕЗ решения (Stop / Shift+Esc / закрытие проекта) —
     // продолжения не будет, удержанный чекпойнт прогона можно освободить.
     releaseApproval: (id: number) => ipcRenderer.invoke('plans:release-approval', id),
+    // §2.3: карточки согласования, потерянные вместе с памятью renderer.
+    pendingCards: (projectPath: string, chatId?: number) =>
+      ipcRenderer.invoke('plans:pending-cards', projectPath, chatId),
     // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Renderer передаёт
     // намерение (название + описание), а не промпт: сборка промпта, выбор
     // провайдера и режим — в main.

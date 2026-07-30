@@ -154,6 +154,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** §10 хвост: карточка КОНКРЕТНОГО чата — событие может прийти по фоновому
    *  прогону, и класть его карточку в активный чат нельзя (там своя работа). */
   setChatPendingPlan: (chatId: number, p: PendingPlanCard | null) => void
+  /** §2.3: вернуть карточки согласования из БД после перезапуска/открытия проекта. */
+  restorePlanCards: (projectPath: string) => Promise<void>
   /** §10 хвост: снять карточку БЕЗ решения (Stop, Shift+Esc, закрытие проекта) и
    *  освободить удержанный чекпойнт прогона — продолжения уже не будет. */
   dismissPendingPlan: (chatId: number) => void
@@ -496,6 +498,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSessions,
       activeChatId,
     }))
+    // §2.3: карточки согласования этого проекта — обратно на экран. Не блокирует
+    // открытие проекта: приезжают, когда приедут.
+    void get().restorePlanCards(path)
     if (needsDbHydrate && activeChatId != null) {
       const hydrateChatId = activeChatId
       void (async () => {
@@ -619,6 +624,39 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   setPendingCommand: (c) => get().updateChatBundle(get().activeChatId, () => ({ pendingCommand: c })),
   setPendingPlan: (p) => get().updateChatBundle(get().activeChatId, () => ({ pendingPlan: p })),
   setChatPendingPlan: (chatId, p) => get().updateChatBundle(chatId, () => ({ pendingPlan: p })),
+  /**
+   * §2.3: вернуть карточки согласования, потерянные вместе с памятью renderer.
+   *
+   * Карточку рождало ЖИВОЕ событие прогона, поэтому перезапуск (и закрытие
+   * проекта) терял её безвозвратно: план оставался `draft` с удержанным
+   * чекпойнтом, а одобрить его было нечем. Состояние всё это время лежало в БД —
+   * здесь оно просто читается обратно.
+   *
+   * Раскладываем ПОКАРТОЧНО в bundle СВОЕГО чата, а не в общую ячейку: иначе
+   * вернётся дефект 4 §10 (28.07) — вторая карточка затирала первую, и
+   * продолжение уезжало в чужой чат. Живую карточку не трогаем: если в чате уже
+   * висит своя, восстановленная её не подменяет.
+   */
+  restorePlanCards: async (projectPath) => {
+    let cards: Array<{ planId: number; chatId: number; title: string; stepCount: number; resumable: boolean }>
+    try {
+      cards = await window.api.plans.pendingCards(projectPath)
+    } catch { return }
+    if (get().path !== projectPath) return
+    for (const c of cards) {
+      if (get().chats[c.chatId]?.pendingPlan) continue
+      get().updateChatBundle(c.chatId, () => ({
+        pendingPlan: {
+          // callId нужен форме карточки; у восстановленной живого вызова нет.
+          callId: `restored-${c.planId}`,
+          planId: c.planId,
+          title: c.title,
+          stepCount: c.stepCount,
+          resumable: c.resumable,
+        },
+      }))
+    }
+  },
   dismissPendingPlan: (chatId) => {
     const card = get().chats[chatId]?.pendingPlan
     if (!card) return

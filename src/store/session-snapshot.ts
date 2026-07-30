@@ -44,6 +44,10 @@ export interface PendingPlanCard {
   stepCount: number
   sendId?: number
   quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] }
+  /** §2.3: есть ли чем продолжать. `false` — план жив, а чекпойнт освобождён:
+   *  кнопки согласования показывать нельзя, они ничего не сделают. Не указано —
+   *  карточка из живого события, продолжение на месте. */
+  resumable?: boolean
 }
 
 export interface ActivityEntry {

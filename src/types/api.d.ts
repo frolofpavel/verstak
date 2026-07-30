@@ -827,6 +827,16 @@ declare global {
         }>
         /** §10 хвост: карточка снята без решения — освободить удержанный чекпойнт. */
         releaseApproval: (id: number) => Promise<void>
+        /** §2.3: карточки согласования, которые надо вернуть после перезапуска.
+         *  `resumable: false` — план жив, а продолжать нечем: чекпойнт освобождён,
+         *  и кнопки согласования показывать нельзя. */
+        pendingCards: (projectPath: string, chatId?: number) => Promise<Array<{
+          planId: number
+          chatId: number
+          title: string
+          stepCount: number
+          resumable: boolean
+        }>>
         /** VSK-PLAN-GEN-A2: сформировать план по названию и описанию задачи.
          *  Промпт, провайдер и режим — забота main; renderer передаёт намерение. */
         generate: (req: { projectPath: string; title: string; taskDescription: string; clarification?: string }) =>

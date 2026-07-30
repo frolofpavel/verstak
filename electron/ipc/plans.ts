@@ -4,6 +4,7 @@ import type { AgentRuns } from '../storage/agent-runs'
 import { planDecisionOutsideRun, type PlanContinuation } from '../ai/plan-await'
 import { planApprovalVerdict } from '../ai/plan-threshold'
 import { clearPlanAwaitingApproval } from '../ai/runner-shared'
+import { restorablePlanCards, restorablePlanCardsForChat } from '../ai/plan-restore'
 import type { PlanDecision } from '../ai/plan-gate'
 
 /** Ответ на решение по плану: что стало с планом и чем продолжать работу. */
@@ -54,6 +55,38 @@ export function registerPlansIpc(plans: Plans, agentRuns?: AgentRuns): void {
   /** §10 хвост: карточка снята без решения. Освобождает удержанный чекпойнт. */
   ipcMain.handle('plans:release-approval', (_e, planId: number) => {
     releasePlanApproval(plans, agentRuns, planId)
+  })
+
+  /**
+   * §2.3 A3: карточки согласования, которые надо вернуть на экран.
+   *
+   * Карточка рождалась ЖИВЫМ событием прогона и жила только в памяти renderer —
+   * значит перезапуск (и просто закрытие проекта) терял её безвозвратно, а план
+   * оставался `draft` с удержанным чекпойнтом: одобрить его было НЕЧЕМ. Здесь
+   * состояние читается из БД, где оно и так лежит: статус плана, его чат, его
+   * прогон и снимок истории. Новых таблиц не понадобилось.
+   *
+   * `chatId` необязателен: без него отдаём все карточки проекта (например, для
+   * восстановления при открытии проекта), с ним — только своего чата. Второе
+   * существенно: карточка принадлежит чату, а не глобальной ячейке, иначе
+   * вернётся дефект 4 §10, когда вторая карточка затирала первую и продолжение
+   * уезжало в чужой чат.
+   */
+  ipcMain.handle('plans:pending-cards', (_e, projectPath: string, chatId?: number) => {
+    const all = plans.list(projectPath).map(p => ({
+      id: p.id,
+      title: p.title,
+      status: p.status as string,
+      chatId: p.chatId,
+      agentRunId: p.agentRunId,
+      stepCount: plans.get(p.id)?.steps.length ?? 0,
+    }))
+    const hasCheckpoint = (runId: string) => {
+      try { return agentRuns?.latestCheckpoint(runId) != null } catch { return false }
+    }
+    return typeof chatId === 'number'
+      ? restorablePlanCardsForChat(all, hasCheckpoint, chatId)
+      : restorablePlanCards(all, hasCheckpoint)
   })
 
   /**
