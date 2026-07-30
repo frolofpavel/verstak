@@ -4,6 +4,8 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { mkdirSync } from 'fs'
 import { logRuntime, logRuntimeError, registerRuntimeLogIpc, runtimeLogsDir } from './runtime-log'
+import { decidePopupNavigation } from './ai/popup-policy'
+import { loadPermissionRules } from './ai/permission-rules'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
 // AppImage не может создать sandbox namespace. Electron падает с:
@@ -340,9 +342,19 @@ app.whenReady().then(() => {
     // но и не роняем навигацию: ре-ревью 2.0.0 — глухой deny ломал target=_blank/
     // window.open (BrowserView ставит allowpopups). Редиректим http(s)-попап в тот же
     // webview; всё остальное деним. Главное окно не трогаем (свои внешние ссылки/OAuth).
+    //
+    // SEC-CMD-08: редирект попапа проходит ТЕ ЖЕ правила пользователя, что и
+    // обычная навигация, и под тем же именем инструмента. Раньше здесь стояла
+    // проверка одной лишь схемы — рядом с гейтованным `browser_navigate`
+    // (SEC-CMD-07) оставалась негейтованная дверь, и цепочка «клик по ссылке с
+    // target=_blank → новое окно → любой URL» проходила молча.
+    // Правила читаем на КАЖДОМ попапе, а не кешируем: файл человек правит между
+    // событиями, и устаревший снимок означал бы «запрет написан, но не действует».
     if (contents.getType() === 'webview') {
       contents.setWindowOpenHandler(({ url }) => {
-        if (/^https?:\/\//i.test(url)) { void contents.loadURL(url) }
+        const verdict = decidePopupNavigation(url, loadPermissionRules(null))
+        if (verdict.allow) { void contents.loadURL(url) }
+        else if (verdict.reason) { logRuntime(`[popup] ${verdict.reason}`) }
         return { action: 'deny' }
       })
     }

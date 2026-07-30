@@ -207,6 +207,16 @@ export const SECURITY_RULES: SecurityRule[] = [
     source: 'Verstak audit 2026-07-30: attest_verification piped model-supplied commands straight into the raw spawn behind a denylist only'
   },
   {
+    id: 'SEC-CMD-08',
+    cwe: 'CWE-863',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'A popup opened by the page goes through the same user rules as ordinary navigation, under the same tool name',
+    status: 'active',
+    testFile: './popup-navigation.test.ts',
+    source: 'Verstak 2026-07-30: setWindowOpenHandler redirected any http(s) popup into the webview after checking the scheme only, leaving an ungated door next to the gated browser_navigate'
+  },
+  {
     id: 'SEC-CMD-07',
     cwe: 'CWE-863',
     category: 'command-exec',
