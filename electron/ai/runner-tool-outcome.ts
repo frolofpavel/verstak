@@ -11,7 +11,25 @@ export interface ToolTurnOutcome {
   attested: boolean
   outcomeContractSubmitted: boolean
   stepOutcomeReported: boolean
+  /**
+   * §2.4 A3: человек отказал хотя бы одному вызову в этом ходе.
+   *
+   * Нужен, чтобы отличить ОТКАЗ от УСПЕХА на стороне интерфейса. Отказ
+   * завершает прогон штатно — инструмент возвращает результат, модель его
+   * читает и заканчивает ход, — поэтому renderer видит обычный `done` и до сих
+   * пор помечал шаг плана ВЫПОЛНЕННЫМ. Шаг, который человек запретил,
+   * записывался сделанным; молчание было бы честнее такой записи.
+   */
+  userRejected: boolean
 }
+
+/**
+ * Текст, которым все спрашивающие инструменты сообщают об отказе человека:
+ * command, connectors, file-ops, files, mcp, process, browser — ровно эта
+ * строка. Сверено по коду; если появится восьмой инструмент со своей
+ * формулировкой, отказ по нему потеряется молча — поэтому строка одна и здесь.
+ */
+const USER_REJECTED = 'User rejected'
 
 interface CollectToolTurnOutcomeInput {
   toolCalls: ToolCall[]
@@ -94,6 +112,7 @@ export function collectToolTurnOutcome(input: CollectToolTurnOutcomeInput): Tool
     attested: false,
     outcomeContractSubmitted: false,
     stepOutcomeReported: false,
+    userRejected: false,
   }
 
   for (let i = 0; i < input.toolCalls.length; i++) {
@@ -104,6 +123,9 @@ export function collectToolTurnOutcome(input: CollectToolTurnOutcomeInput): Tool
     const written = collectWrittenFiles(result, input.filesTouched)
     outcome.acceptedWrites += written.acceptedWrites
     outcome.tsWrites += written.tsWrites
+    // Отказ человека — не сбой инструмента: сравнение точное, иначе любая
+    // ошибка маскировалась бы под решение человека (и наоборот).
+    if (result.error === USER_REJECTED) outcome.userRejected = true
     if (result.error) continue
     collectSuccessfulCall(call, input, outcome)
     recordExecutedCheck(call, result, input.executedChecks)

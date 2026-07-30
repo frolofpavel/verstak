@@ -1358,6 +1358,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         // команду (ревью 24.06; фоновые чаты уже покрыты applySnapshotEvent).
         if (getActiveChatBundle()?.pendingCommand?.callId === event.callId) store.setPendingCommand(null)
         const status: 'ok' | 'error' | 'rejected' = event.status
+        // §2.4: запоминаем ОТКАЗ на время прогона. Финал прогона наступает
+        // штатно (модель читает «User rejected» как обычный результат и
+        // заканчивает ход), поэтому по одному лишь `done` отказ неотличим от
+        // успеха — и шаг плана до сих пор помечался ВЫПОЛНЕННЫМ.
+        if (status === 'rejected') store.markRefusalInRun(owner.chatId)
         store.updateActivity(event.callId, {
           status,
           detail: status === 'error' ? event.error ?? event.command : event.command
@@ -1565,12 +1570,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         const running = getActiveChatBundle()?.runningPlanStep ?? null
         if (running) {
           const result = lastAssistant?.role === 'assistant' ? (lastAssistant.content || '') : ''
+          // §2.4: человек отказал ответственному действию → шаг НЕ выполнен.
+          // Пишем 'skipped' — тем же значением, что уже кладёт пайплайн-ось
+          // (outcome.ts): работа не сделана, но и не провалена, остальные шаги
+          // идут дальше. Разные статусы на двух осях для одного исхода стали бы
+          // заготовкой дрейфа.
+          const refused = getActiveChatBundle()?.refusedInRun === true
           void window.api.plans.updateStep(running.stepId, {
-            status: 'done',
-            result: result.length > 2000 ? result.slice(0, 2000) + '…' : result
+            status: refused ? 'skipped' : 'done',
+            result: refused
+              ? 'Шаг не выполнен: вы отказали в подтверждении действия.'
+              : (result.length > 2000 ? result.slice(0, 2000) + '…' : result)
           })
           store.setRunningPlanStep(null)
         }
+        store.clearRefusalInRun(owner.chatId)
         const pendingPipelineStep = pipelineAutoSendStepRef.current
         if (pendingPipelineStep === 'refine' || pendingPipelineStep === 'plan' || pendingPipelineStep === 'execute') {
           pipelineAutoSendStepRef.current = null

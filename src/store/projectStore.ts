@@ -156,6 +156,10 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   setChatPendingPlan: (chatId: number, p: PendingPlanCard | null) => void
   /** §2.3: вернуть карточки согласования из БД после перезапуска/открытия проекта. */
   restorePlanCards: (projectPath: string) => Promise<void>
+  /** §2.4: человек отказал ответственному действию в текущем прогоне чата. */
+  markRefusalInRun: (chatId: number) => void
+  /** §2.4: снять отметку отказа — прогон закончился, следующий начинается чистым. */
+  clearRefusalInRun: (chatId: number) => void
   /** §10 хвост: снять карточку БЕЗ решения (Stop, Shift+Esc, закрытие проекта) и
    *  освободить удержанный чекпойнт прогона — продолжения уже не будет. */
   dismissPendingPlan: (chatId: number) => void
@@ -637,6 +641,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
    * продолжение уезжало в чужой чат. Живую карточку не трогаем: если в чате уже
    * висит своя, восстановленная её не подменяет.
    */
+  markRefusalInRun: (chatId) => get().updateChatBundle(chatId, () => ({ refusedInRun: true })),
+  clearRefusalInRun: (chatId) => get().updateChatBundle(chatId, b => (
+    b.refusedInRun ? { refusedInRun: false } : {}
+  )),
   restorePlanCards: async (projectPath) => {
     let cards: Array<{ planId: number; chatId: number; title: string; stepCount: number; resumable: boolean }>
     try {
