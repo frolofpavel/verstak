@@ -1,7 +1,7 @@
 // Browser-хендлер: navigate / read_page / screenshot. Вынесено при распиле.
 import type { ToolHandler, ToolContext } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
-import { emitActivity, summarizeToolCall } from './shared'
+import { emitActivity, summarizeToolCall, awaitCommandConfirm } from './shared'
 import { addProofFrame } from '../../ai/proof-frames'
 import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
@@ -64,6 +64,26 @@ export const browserHandler: ToolHandler = {
         event: { type: 'tool-blocked', callId: call.id, name: call.name, command: String(call.args.selector ?? call.args.url ?? ''), reason }
       })
       return { id: call.id, name: call.name, result: '', error: reason }
+    }
+    // ВЕРДИКТ confirm ТОЖЕ ОБЯЗАН ОСТАНАВЛИВАТЬ (SEC-CMD-07). До этой ветки
+    // хендлер знал единственный вердикт — `block`, а `confirm` молча
+    // проваливался в исполнение ниже. Значит правило `ask` пользователя не
+    // работало, и любой будущий классификатор URL был бы ложно-зелёным: вердикт
+    // верный, навигация всё равно происходит. Тот же класс, что bash_allowlist,
+    // где вердикт был верен, а хендлер его перебивал.
+    // Поток подтверждения переиспользуем у коннекторов (pending-command +
+    // awaitCommandConfirm): другого канала «спросить человека про не-команду» в
+    // системе нет. ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ: модалка озаглавлена как команда —
+    // текст в зоне интерфейса, записан в долг (STATUS.md).
+    if (decision === 'confirm') {
+      const target = String(call.args.url ?? call.args.selector ?? '')
+      const summary = call.name === 'browser_navigate' ? `Переход в браузере: ${target}` : `Клик в браузере: ${target}`
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary, sendId: ctx.sendId } })
+      const accepted = await awaitCommandConfirm(ctx, call.id)
+      if (!accepted) {
+        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })
+        return { id: call.id, name: call.name, result: '', error: 'User rejected' }
+      }
     }
     const result = await dispatchBrowser(call, ctx)
     // Journal what AI looked at on the web

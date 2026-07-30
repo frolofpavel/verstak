@@ -207,6 +207,26 @@ export const SECURITY_RULES: SecurityRule[] = [
     source: 'Verstak audit 2026-07-30: attest_verification piped model-supplied commands straight into the raw spawn behind a denylist only'
   },
   {
+    id: 'SEC-CMD-07',
+    cwe: 'CWE-863',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'Browser rules see the argument that will actually run (URL, selector) and a confirm verdict really stops the call',
+    status: 'active',
+    testFile: './browser-url-rules.test.ts',
+    source: 'Verstak 2026-07-30: extractArgText was blind to browser tools, so even an absolute deny rule silently matched nothing; the handler knew only block and let confirm fall through'
+  },
+  {
+    id: 'SEC-CMD-06',
+    cwe: 'CWE-862',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'Plan mode does not click in the browser; the mutating-browser category is a list, so future browser tools are gated by default',
+    status: 'active',
+    testFile: './browser-plan-mode.test.ts',
+    source: 'Verstak audit 2026-07-30: browser_click ran in every mode including plan, with no gate at all'
+  },
+  {
     id: 'SEC-CMD-05',
     cwe: 'CWE-807',
     category: 'command-exec',

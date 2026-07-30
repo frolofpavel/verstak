@@ -367,6 +367,17 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
       // Ровно то имя, которое будет исполнено (SEC-CMD-05): единый источник
       // закрывает и подделку лишним ключом, и обход правила через алиас.
       return canonicalConnectorId(args)
+    // Браузер (SEC-CMD-07). Без этих веток `default` отдавал пустую строку, и
+    // правило с паттерном — `deny: ["browser_navigate(*logout*)"]` — не
+    // матчилось НИКОГДА: пользователь писал запрет, файл читался, правило
+    // компилировалось и молча ничего не делало. Ложным оказывалось самое
+    // сильное обещание модуля — что `deny` абсолютен.
+    // Берём тот же аргумент, который реально исполнится: у навигации адрес,
+    // у клика — цель.
+    case 'browser_navigate':
+      return String(args.url ?? '')
+    case 'browser_click':
+      return String(args.selector ?? '')
     default:
       return ''
   }
