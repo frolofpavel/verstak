@@ -1,6 +1,27 @@
 import type { ToolContext } from '../shared'
 import type { ProviderId, CreateOptions } from '../../../ai/registry'
-import { isCodexAuthProvider } from '../../../ai/registry'
+import { isCodexAuthProvider, PROVIDERS } from '../../../ai/registry'
+
+/**
+ * Модель суб-агента — цепочка из трёх звеньев (наблюдение 30.07).
+ *
+ *   явная модель задачи ?? модель родительского чата ?? дефолт дескриптора
+ *
+ * Явная сильнее всего — роль или вызывающий по-прежнему могут задать свою.
+ * Наследование родителя стоит вторым: провайдер уже наследуется, модель обязана
+ * так же, иначе на custom-openai (у которого defaultModel пуст по построению — их
+ * задаёт юзер в настройках) в шлюз уходит пустая строка и он отвечает 503. Дефолт
+ * дескриптора остаётся последним и продолжает работать для gemini/claude/grok.
+ * Пробелы на любом звене считаются пустотой.
+ */
+export function resolveSubModel(
+  explicit: string | null | undefined,
+  currentModel: string | null | undefined,
+  descriptorDefault: string,
+): string {
+  const clean = (s: string | null | undefined): string => (typeof s === 'string' && s.trim() ? s.trim() : '')
+  return clean(explicit) || clean(currentModel) || clean(descriptorDefault)
+}
 
 export const MAX_WORKTREE_DIFF_CHARS = 6000
 
@@ -84,9 +105,26 @@ export function buildSubCreateOptions(
       codexHome = sub && 'configDir' in sub ? (sub.configDir || null) : null
     }
   }
+  // Цепочка наследования модели + ГАРД (наблюдение 30.07). Единая точка: через
+  // buildSubCreateOptions идут ВСЕ четыре пути делегирования (parallel, swarm,
+  // orchestrate, delegate-task), поэтому и наследование, и запрет пустого имени
+  // ставим здесь, а не в четырёх литералах — новый путь закроется по умолчанию.
+  const descriptorDefault = PROVIDERS[providerId]?.defaultModel ?? ''
+  const resolvedModel = resolveSubModel(model, ctx.currentModel, descriptorDefault)
+  if (!resolvedModel) {
+    // Пустая модель — НАША ошибка, и назвать её должны мы, а не чужой шлюз своим
+    // 503. Это ровно тот класс, что чинили весь день: система говорит о себе
+    // неправду в сообщении, которое уводит человека в сторону.
+    const providerName = PROVIDERS[providerId]?.name ?? providerId
+    throw new Error(
+      `Делегирование остановлено: для «${providerName}» не задана модель. ` +
+      'Укажи её в задаче делегирования, в роли, или выбери модель в чате — ' +
+      'пустой запрос к провайдеру не отправляем.'
+    )
+  }
   return {
     apiKey,
-    model,
+    model: resolvedModel,
     cwd: ctx.projectPath,
     signal,
     claudeOauthToken,

@@ -15,6 +15,7 @@ import {
   MAX_WORKTREE_DIFF_CHARS,
   SUB_TASK_TIMEOUT_MS,
   buildSubCreateOptions,
+  resolveSubModel,
   dedupeTaskIds,
 } from './common'
 
@@ -85,6 +86,10 @@ export const swarmHandler: ToolHandler = {
       if (!descriptor) {
         return { id: call.id, name: call.name, result: '', error: `swarm: неизвестный provider ${baseProviderId}` }
       }
+      // Модель роя = цепочка наследования (наблюдение 30.07): у swarm своей
+      // per-member модели нет, все идут на одной. Без currentModel на custom-openai
+      // (пустой defaultModel) в шлюз уходила пустая модель → 503.
+      const swarmModel = resolveSubModel(null, ctx.currentModel, descriptor.defaultModel)
       const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
       if (descriptor.secretKey && !apiKey) {
         return { id: call.id, name: call.name, result: '', error: `swarm: нет API key для ${baseProviderId}` }
@@ -119,7 +124,7 @@ export const swarmHandler: ToolHandler = {
           role: m.role,
           goal,
           providerId: baseProviderId,
-          model: descriptor.defaultModel,
+          model: swarmModel,
           callId: subCallId,
           groupId: groupTag,
           readScope: ['**'],
@@ -139,7 +144,7 @@ export const swarmHandler: ToolHandler = {
             subSessionId = ctx.subSessions.create({
               projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
               role: m.role, task: `[swarm] ${goal}`, group: groupTag, callId: subCallId,
-              providerId: baseProviderId, model: descriptor.defaultModel,
+              providerId: baseProviderId, model: swarmModel,
               depth: depth + 1, parentCallId: ctx.parentCallId ?? call.id
             })
             ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', goal)
@@ -200,7 +205,7 @@ export const swarmHandler: ToolHandler = {
         try {
           const provider = createProvider(
             baseProviderId,
-            buildSubCreateOptions(baseProviderId, apiKey, descriptor.defaultModel, taskAc.signal, { ...ctx, projectPath: memberRoot })
+            buildSubCreateOptions(baseProviderId, apiKey, swarmModel, taskAc.signal, { ...ctx, projectPath: memberRoot })
           )
           const rolePrompt = getRolePrompt(m.role) ?? 'Ты — sub-agent с доступом к инструментам.'
           // Угол/стратегия члена роя + общая стратегия-подсказка → разнообразие попыток.
@@ -209,7 +214,7 @@ export const swarmHandler: ToolHandler = {
           const allowedTools = getRoleToolset(m.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
             ...ctx, projectPath: memberRoot, tools: memberTools, signal: taskAc.signal,
-            subProviderId: baseProviderId, subModel: descriptor.defaultModel,
+            subProviderId: baseProviderId, subModel: swarmModel,
             delegationDepth: depth + 1, parentCallId: subCallId,
             parentJobId: durableJob?.id ?? ctx.parentJobId ?? null
           }
@@ -290,7 +295,7 @@ export const swarmHandler: ToolHandler = {
         role: 'critic',
         goal: `Арбитраж ${variants.length} вариантов: ${goal}`,
         providerId: baseProviderId,
-        model: descriptor.defaultModel,
+        model: swarmModel,
         callId: arbiterCallId,
         groupId: groupTag,
         readScope: ['**'],
@@ -305,7 +310,7 @@ export const swarmHandler: ToolHandler = {
           arbiterSessionId = ctx.subSessions.create({
             projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
             role: 'arbiter', task: `[swarm-arbiter] ${goal}`, group: groupTag, callId: arbiterCallId,
-            providerId: baseProviderId, model: descriptor.defaultModel,
+            providerId: baseProviderId, model: swarmModel,
             depth: depth + 1, parentCallId: ctx.parentCallId ?? call.id
           })
           ctx.subSessions.appendMessage(arbiterSessionId, ctx.projectPath, 'user', arbiterUser)
@@ -330,14 +335,14 @@ export const swarmHandler: ToolHandler = {
         }
         const arbiterProvider = createProvider(
           baseProviderId,
-          buildSubCreateOptions(baseProviderId, apiKey, descriptor.defaultModel, arbAc.signal, ctx)
+          buildSubCreateOptions(baseProviderId, apiKey, swarmModel, arbAc.signal, ctx)
         )
         // Арбитр — read-only (никаких правок при синтезе).
         const res = await runSubAgentLoop({
           provider: arbiterProvider,
           messages: [{ role: 'system', content: arbiterSystem }, { role: 'user', content: arbiterUser }],
           allowedToolNames: getRoleToolset('critic', { depth: depth + 1 }),
-          ctx: { ...ctx, subProviderId: baseProviderId, subModel: descriptor.defaultModel, delegationDepth: depth + 1, parentCallId: arbiterCallId, parentJobId: arbiterJob?.id ?? ctx.parentJobId ?? null },
+          ctx: { ...ctx, subProviderId: baseProviderId, subModel: swarmModel, delegationDepth: depth + 1, parentCallId: arbiterCallId, parentJobId: arbiterJob?.id ?? ctx.parentJobId ?? null },
           signal: arbAc.signal, role: 'critic'
         })
         consensus = res.text.trim()

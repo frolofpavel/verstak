@@ -370,7 +370,7 @@ export async function runScheduledHeadless(
       plans: deps.plans, getPlan: deps.getPlan,
       resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
       permissionRules: loadPermissionRules(opts.projectPath),
-      currentProviderId: opts.providerId, mcpClient: deps.mcpClient,
+      currentProviderId: opts.providerId, currentModel: opts.model ?? undefined, mcpClient: deps.mcpClient,
       subCostGuard: createCostGuard(null), parentChatId: null,
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),
       agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,

@@ -127,6 +127,10 @@ export interface ToolContext {
   resolveSubscriptionAccount?: (providerId: string, chatId?: number, opts?: { accountId?: number | null }) => ResolvedSubscription | null
   /** ID текущего провайдера чата — используется как fallback в delegate_task. */
   currentProviderId?: string
+  /** Модель текущего чата — fallback для суб-агента (наблюдение 30.07): провайдер
+   *  наследовался, а модель нет, и на custom-openai (пустой defaultModel) в шлюз
+   *  уходила пустая модель → 503. Симметрия к currentProviderId. */
+  currentModel?: string
   /** MCP client для роутинга вызовов внешних MCP-инструментов. */
   mcpClient?: McpClient
   /** Опциональный аппендер в audit_log — вызывается после каждого tool call. */

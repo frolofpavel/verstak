@@ -15,6 +15,7 @@ import {
 import {
   SUB_TASK_TIMEOUT_MS,
   buildSubCreateOptions,
+  resolveSubModel,
 } from './common'
 
 export const delegateTaskHandler: ToolHandler = {
@@ -154,7 +155,9 @@ export const delegateTaskHandler: ToolHandler = {
 
       // Per-task signal: проброс родительского abort + таймаут на весь loop.
       // 180с (было 60с для one-shot) — loop с tool-вызовами требует больше времени.
-      const resolvedModel = subModel ?? descriptor.defaultModel
+      // Цепочка наследования модели (наблюдение 30.07) — та же, что в
+      // buildSubCreateOptions; считаем здесь для совпадения показа и исполнения.
+      const resolvedModel = resolveSubModel(subModel, ctx.currentModel, descriptor.defaultModel)
       const scopes = scopesFromArgs(call.args)
       durableJob = startDurableJob(ctx, {
         kind: 'delegate',

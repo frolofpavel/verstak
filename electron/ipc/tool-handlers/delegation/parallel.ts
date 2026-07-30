@@ -16,6 +16,7 @@ import {
   DEFAULT_BATCH_COST_CAP_CENTS,
   SUB_TASK_TIMEOUT_MS,
   buildSubCreateOptions,
+  resolveSubModel,
   dedupeTaskIds,
 } from './common'
 
@@ -109,7 +110,7 @@ export const delegateParallelHandler: ToolHandler = {
           role: task.role ?? 'executor',
           goal: task.prompt,
           providerId,
-          model: task.model ?? descriptor?.defaultModel ?? '',
+          model: resolveSubModel(task.model, ctx.currentModel, descriptor?.defaultModel ?? ''),
           callId: `${call.id}:${task.id}`,
           groupId: groupTag,
           dependsOn: (task.depends_on ?? []).map(id => parallelJobIds.get(id)).filter(Boolean) as string[],
@@ -191,7 +192,10 @@ export const delegateParallelHandler: ToolHandler = {
 
         // Per-task AbortController. Таймаут поднят с 60с до 180с — субагент
         // теперь крутит tool-loop. Родительский signal прерывает подзадачу.
-        const subModel = task.model ?? descriptor.defaultModel
+        // Цепочка наследования (наблюдение 30.07): та же, что применит
+        // buildSubCreateOptions — считаем здесь, чтобы карточка суба показывала
+        // реальную модель, а не пустую при работе на модели родителя.
+        const subModel = resolveSubModel(task.model, ctx.currentModel, descriptor.defaultModel)
         durableJob = linkDurableJob(ctx, durableJob, { subSessionId })
         emitSubagent('running')
 

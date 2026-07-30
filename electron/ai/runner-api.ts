@@ -1101,6 +1101,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       permissionRules,
       processRegistry,
       currentProviderId: providerId,
+      // §наблюдение-30.07: модель родителя доезжает до суб-агента (симметрия к
+      // currentProviderId). На custom-openai без неё в шлюз шла пустая модель.
+      currentModel: model ?? undefined,
       mcpClient: mcpClientRef,
       appendAudit: appendAuditFn,
       // Cost guard сессии — субагенты (delegate_task/delegate_parallel) учитывают

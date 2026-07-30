@@ -14,6 +14,7 @@ import {
   DEFAULT_BATCH_COST_CAP_CENTS,
   SUB_TASK_TIMEOUT_MS,
   buildSubCreateOptions,
+  resolveSubModel,
   dedupeTaskIds,
 } from './common'
 
@@ -132,7 +133,7 @@ export const orchestrateHandler: ToolHandler = {
       })
 
       // 1) Декомпозиция через модель-планировщик (дешёвая модель достаточна).
-      const plannerModel = recommendModel(baseProviderId, 'moderate') ?? descriptor.defaultModel
+      const plannerModel = resolveSubModel(recommendModel(baseProviderId, 'moderate'), ctx.currentModel, descriptor.defaultModel)
       const subtasks = await decomposeGoal(goal, maxSubtasks, baseProviderId, apiKey, plannerModel, ctx, ctx.signal)
       // Дедуп id подзадач — планировщик-модель может выдать одинаковые id, а
       // subCallId = `${call.id}:${task.id}` должен быть уникальным (см. dedupeTaskIds).
@@ -170,7 +171,7 @@ export const orchestrateHandler: ToolHandler = {
         // Smart-router: оцениваем сложность подзадачи по её промпту → модель.
         // Простую → дешёвая модель, сложную → дорогая (полный verstak recommendModel).
         const complexity = estimateComplexity([{ role: 'user', content: task.prompt }], [])
-        const subModel = recommendModel(baseProviderId, complexity) ?? descriptor.defaultModel
+        const subModel = resolveSubModel(recommendModel(baseProviderId, complexity), ctx.currentModel, descriptor.defaultModel)
 
         const subCallId = `${call.id}:${task.id}`
         let toolCount = 0
