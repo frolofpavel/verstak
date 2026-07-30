@@ -207,6 +207,16 @@ export const SECURITY_RULES: SecurityRule[] = [
     source: 'Verstak audit 2026-07-30: attest_verification piped model-supplied commands straight into the raw spawn behind a denylist only'
   },
   {
+    id: 'SEC-CMD-09',
+    cwe: 'CWE-693',
+    category: 'command-exec',
+    severity: 'block',
+    title: 'The responsible-action classifier matches the deobfuscated command as its denylist twin does, covers everyday publishing forms, and judges universal connectors by operation',
+    status: 'active',
+    testFile: './responsible-coverage.test.ts',
+    source: 'Verstak audit 2026-07-30: the regex approach was copied from the denylist without its normalisation, so quoted or caret-split commands skipped the pause; npm run deploy, docker push, gh pr create, aws s3 cp and ssh/http/gsheets write ops were not covered at all'
+  },
+  {
     id: 'SEC-CMD-08',
     cwe: 'CWE-863',
     category: 'command-exec',
