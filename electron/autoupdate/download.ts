@@ -116,10 +116,22 @@ export async function downloadInstaller(
   // пересчитывается по уже лежащей части (feedFileIntoHash) — иначе sha512 не сойдётся.
   // Ретраи внутри: один reset не должен выбрасывать пользователя в «нужна повторная проверка».
   // ─────────────────────────────────────────────────────────────────────────────
+  // Прогресс НЕ УБЫВАЕТ — зажим поверх всех попыток. Внутри попытки `transferred`
+  // растёт из ПАМЯТИ, а следующая попытка стартует с `existing` = размера `.part`
+  // на ДИСКЕ. Последние байты к моменту обрыва на диск сброшены не всегда, поэтому
+  // resume берёт меньшее значение, и без зажима процент откатывался бы (33%→22%
+  // или →0%) — гонка «память против диска», видимая полосой, едущей назад.
+  // Клампим по максимуму: пользователю полоса назад не едет, а тест монотонности
+  // становится детерминированным (гонки в наблюдаемом больше нет). Финальные 100%
+  // проходят всегда (100 >= max).
+  let maxPercent = -1
+  const monotonicProgress = onProgress
+    ? (p: DownloadProgress) => { if (p.percent < maxPercent) return; maxPercent = p.percent; onProgress(p) }
+    : undefined
   let lastError: unknown = null
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
     try {
-      return await attemptDownload(meta, url, tmp, target, dir, attempt, onProgress)
+      return await attemptDownload(meta, url, tmp, target, dir, attempt, monotonicProgress)
     } catch (err) {
       lastError = err
       const retriable = isRetriableFailure(err)
