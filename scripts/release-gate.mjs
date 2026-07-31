@@ -11,6 +11,8 @@ import { execSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import asar from '@electron/asar'
 
 const ROOT = process.cwd()
 const failures = []
@@ -131,6 +133,60 @@ if (check('latest.yml собран (триггер автообновления)
   // обновление (или поставит битое). Это самая частая причина «обновление не приходит».
   check('размер в latest.yml == реальному Setup.exe', ymlSize === realSize, `${ymlSize} vs ${realSize}`)
   check('sha512 в latest.yml == реальному Setup.exe', ymlSha === realSha, ymlSha === realSha ? 'совпал' : 'НЕ совпал')
+}
+
+// ─── 3.5 Полнота собранного asar (31.07) ─────────────────────────────────────
+// Гейт тестирует ИСХОДНИКИ, а не собранный артефакт, и дважды подряд пропустил
+// сборку, где node_modules недоупаковался в asar: 34 пакета вместо 324, транзитив
+// `p-retry` отсутствовал, приложение падало на старте `ERR_MODULE_NOT_FOUND:
+// Cannot find package 'p-retry'`. Причина — junction в release-build.mjs
+// (electron-builder обходил node_modules через reparse-point только на глубину 1).
+// ОБА раза гейт был ЗЕЛЁНЫМ, а артефакт нерабочим — ловил только человек на
+// установке (шаг update-path). Тесты по исходникам этого класса не видят по
+// построению. Поэтому гейт теперь смотрит В САМ asar готового установщика.
+console.log('\n[3.5] Полнота собранного asar')
+// Порог — из РАБОЧЕЙ сборки: 2.2.21 и починенная 2.3.0 дают 324 уникальных пакета
+// node_modules в asar. Берём 300 с запасом на дедуп/разброс версий между сборками
+// — и это заведомо выше 34, которые давал junction. Маркер `p-retry` — ровно та
+// транзитивная зависимость (@google/genai → p-retry), на которой падало: junction
+// её отсекал, полная упаковка включает.
+const MIN_ASAR_PACKAGES = 300
+if (haveSetup) {
+  const asarTmp = join(tmpdir(), `verstak-gate-asar-${version}`)
+  try {
+    rmSync(asarTmp, { recursive: true, force: true })
+    mkdirSync(asarTmp, { recursive: true })
+    const sevenZip = join(ROOT, 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe')
+    const un = (archive, name) => spawnSync(sevenZip, ['e', archive, `-o${asarTmp}`, name, '-y'], { encoding: 'utf8' })
+    // Кастомный установщик (build-setup.cjs) прячет реальный app.asar во вложенный
+    // resources/app-payload.7z; у стандартного он лежит в Setup напрямую. Пробуем
+    // сперва payload, иначе — asar из Setup напрямую.
+    // Паттерн 7za — с ПРЯМЫМИ слэшами: через spawnSync без shell обратный слэш
+    // не матчит записи NSIS-архива (проверено: `resources\app…` даёт 0 файлов,
+    // `resources/app…` — извлекает).
+    un(setup, 'resources/app-payload.7z')
+    const payload = join(asarTmp, 'app-payload.7z')
+    if (existsSync(payload)) un(payload, 'resources/app.asar')
+    else un(setup, 'resources/app.asar')
+    const asarPath = join(asarTmp, 'app.asar')
+    if (check('app.asar извлечён из установщика', existsSync(asarPath))) {
+      const files = asar.listPackage(asarPath).map(f => f.split('\\').join('/'))
+      const pkgs = new Set()
+      for (const f of files) {
+        const i = f.indexOf('node_modules/')
+        if (i === -1) continue
+        const parts = f.slice(i + 'node_modules/'.length).split('/')
+        const name = parts[0].startsWith('@') ? `${parts[0]}/${parts[1] ?? ''}` : parts[0]
+        if (name) pkgs.add(name)
+      }
+      check(`в asar не меньше ${MIN_ASAR_PACKAGES} пакетов`, pkgs.size >= MIN_ASAR_PACKAGES, `${pkgs.size} пакетов`)
+      check('транзитивная p-retry в asar (маркер полноты)', pkgs.has('p-retry'), pkgs.has('p-retry') ? 'на месте' : 'ОТСУТСТВУЕТ — node_modules недоупакован (junction?)')
+    }
+  } catch (e) {
+    check('asar проверен на полноту', false, String(e).slice(0, 120))
+  } finally {
+    try { rmSync(asarTmp, { recursive: true, force: true }) } catch { /* ignore */ }
+  }
 }
 
 // ─── 4. Объективные проверки кода ────────────────────────────────────────────

@@ -39,8 +39,8 @@ const wt = join(tmpdir(), `verstak-release-${short}`)
 const nm = join(wt, 'node_modules')
 
 function cleanup() {
-  // Снять junction (именно junction, НЕ его цель — иначе снесёт общий node_modules).
-  try { if (existsSync(nm)) spawnSync('cmd', ['/c', 'rmdir', nm], { stdio: 'ignore' }) } catch { /* ignore */ }
+  // node_modules теперь РЕАЛЬНАЯ КОПИЯ (не junction) — удаляем весь worktree
+  // целиком одной командой; отдельного снятия junction больше нет.
   try { sh(`git worktree remove --force "${wt}"`) } catch { /* ignore */ }
 }
 
@@ -58,10 +58,23 @@ try {
     process.exit(1)
   }
 
-  console.log('[2/4] подключаю node_modules (junction, без копирования гигабайтов)')
-  const link = spawnSync('cmd', ['/c', 'mklink', '/J', nm, join(ROOT, 'node_modules')], { encoding: 'utf8' })
-  if (link.status !== 0) {
-    console.error('✗ не удалось создать junction на node_modules:', (link.stdout || '') + (link.stderr || ''))
+  // node_modules — РЕАЛЬНОЙ КОПИЕЙ, а НЕ junction'ом. Junction ломал упаковку:
+  // electron-builder, обходя node_modules через reparse-point, брал только
+  // зависимости ГЛУБИНЫ 1 (34 пакета вместо 324) — транзитивные (p-retry и др.)
+  // в asar не попадали, приложение падало на старте `ERR_MODULE_NOT_FOUND:
+  // Cannot find package 'p-retry'`. Гейт этого не ловил (тестирует исходники, а
+  // не asar), поймал человек на установке (2.3.0, 31.07). Замер при СТАБИЛЬНОМ
+  // node_modules: тот же каталог через junction → 34 пакета, реальным деревом →
+  // 324. Копируем robocopy'ем: он тянет длинные пути (cmd rmdir/glob — нет) и
+  // переиспользует уже скачанные пребилды, без обращения к сети (в отличие от
+  // npm ci). Провенанс не страдает: исходники worktree — из коммита, копируется
+  // лишь gitignored-дерево зависимостей.
+  console.log('[2/4] копирую node_modules в чистую копию (robocopy, реальное дерево; 2-3 мин)…')
+  const copy = spawnSync('robocopy', [join(ROOT, 'node_modules'), nm, '/E', '/MT', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  // robocopy: коды выхода 0-7 — успех (битовые флаги «скопировано/пропущено»),
+  // >=8 — реальная ошибка. null (не запустился) трактуем как ошибку.
+  if ((copy.status ?? 8) >= 8) {
+    console.error('✗ robocopy node_modules упал (код ' + copy.status + '):\n' + ((copy.stdout || '') + (copy.stderr || '')).slice(-2000))
     process.exit(1)
   }
 
