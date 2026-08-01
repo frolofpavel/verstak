@@ -10,7 +10,7 @@
 
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { Document, Paragraph, HeadingLevel, TextRun, Packer } from 'docx'
+import { Document, Paragraph, HeadingLevel, TextRun, Packer, Table, TableRow, TableCell, WidthType } from 'docx'
 import { renderVerificationHtml, type VerificationArtifact } from './verification'
 import { defaultDownloadsDir, isWithinKnownRoots } from './path-policy'
 import { isForbiddenPath } from './secret-scanner'
@@ -111,11 +111,41 @@ ${body}
 
 // ----------------------------------------------------------------- DOCX
 
+interface TableInput {
+  /** Строка заголовков (жирная, помечается tableHeader). Необязательна. */
+  header?: string[]
+  /** Строки данных: массив ячеек-строк. */
+  rows: string[][]
+}
+
 interface SectionInput {
   heading?: string
   level?: number
   paragraphs?: string[]
   bullets?: string[]
+  /** Настоящая Word-таблица (для «таблицы выводов»), а не подделка булитами. */
+  table?: TableInput
+}
+
+/** Собрать настоящую таблицу Word из header + rows. */
+function buildTable(t: TableInput): Table {
+  const rows: TableRow[] = []
+  if (t.header?.length) {
+    rows.push(new TableRow({
+      tableHeader: true,
+      children: t.header.map(h => new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: String(h), bold: true })] })]
+      }))
+    }))
+  }
+  for (const r of t.rows ?? []) {
+    rows.push(new TableRow({
+      children: (r ?? []).map(c => new TableCell({
+        children: [new Paragraph({ children: [new TextRun(String(c))] })]
+      }))
+    }))
+  }
+  return new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } })
 }
 
 export async function generateDocx(
@@ -140,7 +170,7 @@ export async function generateDocx(
   }
   await mkdir(dir, { recursive: true })
 
-  const children: Paragraph[] = []
+  const children: (Paragraph | Table)[] = []
   if (args.title) {
     children.push(new Paragraph({
       heading: HeadingLevel.TITLE,
@@ -164,6 +194,9 @@ export async function generateDocx(
         bullet: { level: 0 },
         children: [new TextRun(b)]
       }))
+    }
+    if (sec.table && (sec.table.rows?.length || sec.table.header?.length)) {
+      children.push(buildTable(sec.table))
     }
   }
 

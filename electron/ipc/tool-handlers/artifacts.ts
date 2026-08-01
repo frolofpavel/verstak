@@ -76,7 +76,7 @@ export const generateDocxHandler: ToolHandler = {
       const { generateDocx } = await import('../../ai/artifacts')
       const filename = String(call.args.filename ?? 'untitled')
       const title = call.args.title ? String(call.args.title) : undefined
-      const sections = Array.isArray(call.args.sections) ? call.args.sections as Array<{ heading?: string; level?: number; paragraphs?: string[]; bullets?: string[] }> : []
+      const sections = Array.isArray(call.args.sections) ? call.args.sections as Array<{ heading?: string; level?: number; paragraphs?: string[]; bullets?: string[]; table?: { header?: string[]; rows: string[][] } }> : []
       if (sections.length === 0) return { id: call.id, name: call.name, result: '', error: 'generate_docx: sections обязательны (>= 1)' }
       const saveTo = call.args.save_to != null ? String(call.args.save_to) : undefined
       const res = await generateDocx(ctx.projectPath, { filename, title, sections, save_to: saveTo })

@@ -131,3 +131,28 @@ describe('generateDocx save_to (назначение перечнем)', () => {
     expect(r.filename).not.toMatch(/[/\\]/)
   })
 })
+
+// VSK-PRODUCT-A1 шероховатость 1 (поправка 2): «таблица выводов» — НАСТОЯЩАЯ
+// Word-таблица (<w:tbl>), а не подделка булитами.
+describe('generateDocx table', () => {
+  it('таблица секции превращается в настоящую <w:tbl> с текстом ячеек', async () => {
+    const JSZip = (await import('jszip')).default
+    const r = await generateDocx(projectPath, {
+      filename: 'with-table',
+      sections: [{
+        heading: 'Выводы',
+        paragraphs: ['Короткий вывод'],
+        table: { header: ['Показатель', 'Значение'], rows: [['CTR', '2.3%'], ['Расход', '15000']] }
+      }]
+    })
+    const buf = await readFile(r.path)
+    const zip = await JSZip.loadAsync(buf)
+    const xml = await zip.file('word/document.xml')!.async('string')
+    // Настоящая таблица, а не булиты/параграфы:
+    expect(xml).toContain('<w:tbl>')
+    // Текст ячеек (заголовок и данные) на месте:
+    for (const cell of ['Показатель', 'Значение', 'CTR', '2.3%', 'Расход', '15000']) {
+      expect(xml).toContain(cell)
+    }
+  })
+})

@@ -1073,6 +1073,15 @@ export const TOOL_DEFS: ToolDefinition[] = [
                 type: 'array',
                 description: 'Опциональный bulleted список после параграфов.',
                 items: { type: 'string' }
+              },
+              table: {
+                type: 'object',
+                description: 'Настоящая Word-таблица (для «таблицы выводов»). НЕ подделывай таблицу булитами — используй это поле.',
+                properties: {
+                  header: { type: 'array', description: 'Строка заголовков столбцов (жирная).', items: { type: 'string' } },
+                  rows: { type: 'array', description: 'Строки данных: массив строк, каждая — массив ячеек.', items: { type: 'array', items: { type: 'string' } } }
+                },
+                required: ['rows']
               }
             },
             required: ['paragraphs']
