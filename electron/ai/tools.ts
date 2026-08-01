@@ -17,6 +17,20 @@ import { parseSshProjectPath, makeSshExec, createSshBackend, type SshBackend } f
 const execFileAsync = promisify(execFile)
 
 const MAX_READ_BYTES = 2 * 1024 * 1024  // 2 MB
+
+/**
+ * Похоже ли содержимое на БИНАРНОЕ (не текст). Нулевой байт в первых 8 КБ —
+ * надёжный признак: текстовые файлы его почти никогда не содержат, а PDF,
+ * изображения, архивы и office-форматы (docx/xlsx — это zip) содержат. read_file
+ * отдаёт ТЕКСТ; без этой проверки utf8-декод бинаря дал бы молчаливый мусор, и
+ * пользователь не узнал бы, что файл не прочитан (A1 шер.3).
+ */
+function looksBinary(buf: Buffer): boolean {
+  const n = Math.min(buf.length, 8192)
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true
+  return false
+}
+
 const MAX_SEARCH_HITS = 80
 const MAX_LINE_CHARS = 220
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'out', 'dist', '.next', '.vite', '.verstak-data', '.superpowers', '__pycache__', 'venv', '.venv', 'target', 'build'])
@@ -1515,7 +1529,16 @@ export function createFileTools(root: string, signal?: AbortSignal, opts: FileTo
         if (st.size > MAX_READ_BYTES) {
           throw new Error(`Файл слишком большой: ${st.size} байт (лимит ${MAX_READ_BYTES})`)
         }
-        const raw = await readFile(abs, 'utf8')
+        const buf = await readFile(abs)
+        // Честная ошибка вместо молчаливого мусора: бинарь read_file не читает.
+        if (looksBinary(buf)) {
+          const lower = relPath.toLowerCase()
+          const hint = lower.endsWith('.docx') ? ' Для .docx используй read_document.'
+            : lower.endsWith('.xlsx') ? ' Для .xlsx используй read_spreadsheet.'
+            : ' Для не-текстовых форматов используй профильный инструмент (read_document/read_spreadsheet) или convert_file.'
+          throw new Error(`Файл "${relPath}" не текстовый (бинарные данные) — read_file читает только текст.${hint}`)
+        }
+        const raw = buf.toString('utf8')
         const scan = scanText(raw)
         if (scan.hits.length > 0) {
           // Add a header note so the AI knows redaction happened
