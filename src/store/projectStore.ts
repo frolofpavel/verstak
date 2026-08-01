@@ -94,6 +94,12 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   /** 2.0.7-F: маршрут модели на ОДНУ следующую отправку (не меняет дефолт чата).
    *  Сбрасывается после отправки (one-shot) и при switchChatSession (не течёт между чатами). */
   promptRouteOverride: PromptRouteOverride | null
+  /** VSK-PRODUCT-A1 (композер): «Папка с документами» выбрана — код-сводка чтения
+   *  материалов вооружена на СЛЕДУЮЩУЮ отправку (one-shot). Держать её на каждой
+   *  отправке нельзя: тогда «не открывал N» кричало бы на любом follow-up, где модель
+   *  не перечитала все документы, — ровно тот шум, ради устранения которого сводка
+   *  и молчит на «прочитано N из N». Снимается после отправки и при смене проекта. */
+  materialsFolder: { path: string; name: string; docCount: number } | null
   /** 2.1.3-CD: причина раннего маршрутного стопа (pin/one-shot на удалённый/остывающий/
    *  требующий входа аккаунт). main шлёт её событием id=0 БЕЗ owner'а — до появления
    *  sendId, поэтому обычный роутер событий её не несёт. Диспетчер кладёт сюда (только
@@ -237,6 +243,8 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   switchChatSession: (id: number) => Promise<void>
   /** 2.0.7-F: задать/снять one-shot маршрут модели для следующей отправки. */
   setPromptRouteOverride: (route: PromptRouteOverride | null) => void
+  /** VSK-PRODUCT-A1: вооружить/снять код-сводку материалов на следующую отправку. */
+  setMaterialsFolder: (folder: { path: string; name: string; docCount: number } | null) => void
   /** 2.1.3-CD: запомнить/снять причину раннего маршрутного стопа (см. earlyRouteStop). */
   setEarlyRouteStop: (stop: { chatId: number; message: string; at: number } | null) => void
   /** Refresh the chat sessions list (after create/rename/delete). */
@@ -384,6 +392,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   chatSessions: [],
   activeChatId: null,
   promptRouteOverride: null,
+  materialsFolder: null,
   earlyRouteStop: null,
   helpChatId: null,
   helpMode: false,
@@ -422,6 +431,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   setProject: async (path) => {
     const myToken = ++setProjectToken
     const s = get()
+    // VSK-PRODUCT-A1: смена проекта снимает вооружённую код-сводку материалов (её
+    // папка относится к ПРЕДЫДУЩЕМУ проекту). Выбор «Папки с документами» вооружает
+    // сводку ПОСЛЕ этого setProject (см. Chat.pickMaterialsFolder), поэтому не гасит себя.
+    if (s.materialsFolder && s.path !== path) set({ materialsFolder: null })
     const wasHelp = s.helpMode
     if (wasHelp) get().leaveHelpMode()
     // Вернулись из справки в тот же проект — leaveHelpMode уже восстановил чат.
@@ -787,6 +800,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     return { sessions: { ...s.sessions, [projectPath]: { ...existing, hasUnread: false } } }
   }),
   setPromptRouteOverride: (route) => set({ promptRouteOverride: route }),
+  setMaterialsFolder: (folder) => set({ materialsFolder: folder }),
   setEarlyRouteStop: (stop) => set({ earlyRouteStop: stop }),
   switchChatSession: async (id) => {
     const myToken = ++switchChatSessionToken
@@ -794,6 +808,8 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     if (!s.path) return
     // 2.0.7-F: one-shot маршрут не течёт между чатами — сбрасываем при переключении.
     if (s.promptRouteOverride) set({ promptRouteOverride: null })
+    // VSK-PRODUCT-A1: вооружённая код-сводка материалов тоже one-shot — не течёт в другой чат.
+    if (s.materialsFolder) set({ materialsFolder: null })
     get().leaveHelpMode()
     // Единый leaveChat: снять уходящий чат в фон + привести стрим-флаг к реальности
     // (drift-класс #3 — раньше двухшаг был продублирован здесь и в newChatSession).

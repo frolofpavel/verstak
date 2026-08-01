@@ -76,6 +76,30 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
     return picked
   })
 
+  // VSK-PRODUCT-A1 (композер): «Папка с документами». Решение постановщика — выбор
+  // папки ОТКРЫВАЕТ её как проект (вариант «а»): гейт known-roots проходится штатно,
+  // materialsFolder = projectPath, читалки уже работают, нового периметра нет. Отдаём
+  // ещё имя и число документов В КОРНЕ — для подписи после выбора (B1).
+  ipcMain.handle('materials:pick-folder', async (): Promise<{ path: string; name: string; docCount: number } | null> => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: 'Папка с документами'
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const picked = result.filePaths[0]
+    projects.upsert(picked)
+    setActiveProjectPath(picked)
+    void ensureUserLayer(picked).catch(() => { /* non-critical */ })
+    void warmProjectMaps(picked).catch(() => { /* non-critical, фон */ })
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { listFolderMaterials } = require('../ai/materials-context') as typeof import('../ai/materials-context')
+    let docCount = 0
+    try { docCount = listFolderMaterials(picked).length } catch { /* счётчик не критичен */ }
+    return { path: picked, name: basename(picked), docCount }
+  })
+
   // Добавить удалённый проект: git-репо (клонируем локально) или ssh-сервер
   // (регистрируем, файлы остаются на сервере — правки через ssh-backend, фаза B).
   ipcMain.handle('projects:add-remote', async (_e, input: string): Promise<

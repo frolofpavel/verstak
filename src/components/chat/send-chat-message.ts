@@ -28,6 +28,8 @@ export interface ChatSendProjectState {
   agentProgress: AgentProgressEntry[]
   effortLevel: 'quick' | 'standard' | 'deep'
   promptRouteOverride: PromptRouteOverride | null
+  /** VSK-PRODUCT-A1: вооружённая на след. отправку папка материалов (one-shot). */
+  materialsFolder: { path: string; name: string; docCount: number } | null
   earlyRouteStop: { chatId: number; message: string; at: number } | null
   hasActiveChatLane: (chatId: number, isHelp?: boolean) => boolean
   clearActivity: () => void
@@ -37,6 +39,7 @@ export interface ChatSendProjectState {
   updateLastAssistant: (text: string) => void
   autoTitleChatSession: (chatId: number, firstUserText: string) => Promise<void>
   setPromptRouteOverride: (route: PromptRouteOverride | null) => void
+  setMaterialsFolder: (folder: { path: string; name: string; docCount: number } | null) => void
   setEarlyRouteStop: (stop: { chatId: number; message: string; at: number } | null) => void
   applyAgentProgressEvent: (event: { type: string; [k: string]: unknown }) => void
 }
@@ -256,6 +259,11 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   // СРАЗУ снимаем после отправки (one-shot). requested пишется в agent_run (main).
   const oneShotRoute = deps.getProjectState().promptRouteOverride
   const routeOverride = oneShotRoute ? { promptRoute: oneShotRoute } : {}
+  // VSK-PRODUCT-A1: «Папка с документами» вооружает код-сводку на ОДНУ отправку.
+  // materialsFolder = абсолютный путь папки (= projectPath, вариант «а»). One-shot:
+  // на follow-up сводка не вооружена, иначе «не открывал» кричало бы на каждом ходу.
+  const armedMaterialsFolder = deps.getProjectState().materialsFolder
+  const materialsOverride = armedMaterialsFolder ? { materialsFolder: armedMaterialsFolder.path } : {}
   const pipelineOutcome = deps.consumePipelineOutcome()
   const outcomeOverride = pipelineOutcome ? { outcome: pipelineOutcome } : {}
   // Хвост ревью 2.0.11-B: chatId ОБЯЗАН доехать до ai:send. От него в main зависят три
@@ -295,7 +303,8 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...(resumeFromRunId ? { resumeFromRunId } : {}),
         ...selectedRoute,
         ...outcomeOverride,
-        ...routeOverride
+        ...routeOverride,
+        ...materialsOverride
       }, sendChatId)
     } else if (resumeFromRunId) {
       // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
@@ -306,7 +315,8 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...(effort !== 'standard' ? { effortLevel: effort } : {}),
         ...selectedRoute,
         ...outcomeOverride,
-        ...routeOverride
+        ...routeOverride,
+        ...materialsOverride
       }, sendChatId)
     } else {
       const effort = deps.getProjectState().effortLevel
@@ -315,7 +325,8 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         agentMode: sendAgentMode,
         ...selectedRoute,
         ...outcomeOverride,
-        ...routeOverride
+        ...routeOverride,
+        ...materialsOverride
       }, sendChatId)
     }
   } catch (err) {
@@ -329,10 +340,13 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
     store.setStreaming(false)
     deps.setCurrentSendId(null)
     if (oneShotRoute) deps.getProjectState().setPromptRouteOverride(null)
+    if (armedMaterialsFolder) deps.getProjectState().setMaterialsFolder(null)
     return { kind: 'send-failed' }
   }
   // one-shot: маршрут действовал только на эту отправку — снимаем.
   if (oneShotRoute) deps.getProjectState().setPromptRouteOverride(null)
+  // one-shot: код-сводка материалов вооружена ровно на эту отправку — снимаем.
+  if (armedMaterialsFolder) deps.getProjectState().setMaterialsFolder(null)
   deps.setCurrentSendId(sendId)
   if (sendId <= 0) {
     // 2.1.3-CD: если причина — ранний маршрутный стоп (pin/one-shot на неготовый

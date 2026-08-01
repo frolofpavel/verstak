@@ -234,6 +234,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setComposerDraft,
     clearComposerDraft,
     setActiveView,
+    materialsFolder,
   } = useProject(useShallow(s => ({
     helpMode: s.helpMode,
     help: s.help,
@@ -254,6 +255,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setComposerDraft: s.setComposerDraft,
     clearComposerDraft: s.clearComposerDraft,
     setActiveView: s.setActiveView,
+    materialsFolder: s.materialsFolder,
   })))
   // Chat.tsx и так подписан на весь store — гранулярность рендера не меняется.
   const activeBundle = useActiveChatBundle()
@@ -1111,7 +1113,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       }
       const att = await blobToAttachment(blob, nameHint, MAX_BYTES_PER_FILE)
       if (!att) {
-        flashWarning(`${nameHint}: формат не поддерживается, пропущен`)
+        // C1 (утверждено Павлом): со списком форматов — человек знает, чем заменить.
+        flashWarning(`${nameHint}: пропущен — не документ (поддерживаю docx, xlsx, pdf, txt, md, csv)`)
         continue
       }
       added.push(att)
@@ -2203,6 +2206,26 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }
   }
 
+  // VSK-PRODUCT-A1 «Папка с документами». Решение постановщика (вариант «а»): выбор
+  // папки ОТКРЫВАЕТ её как проект. После открытия вооружаем код-сводку материалов на
+  // ОДНУ следующую отправку (one-shot: на follow-up сводка не вооружена — иначе шум).
+  async function pickMaterialsFolder() {
+    let res: { path: string; name: string; docCount: number } | null = null
+    try {
+      res = await window.api.materials.pickFolder()
+    } catch (err) {
+      flashWarning('Не удалось открыть папку')
+      console.warn('[materials] pickFolder failed:', err)
+      return
+    }
+    if (!res) return  // человек отменил диалог
+    // Открыть выбранную папку как проект (гейт known-roots пройдёт: main её
+    // зарегистрировал). setProject снимает прежнее вооружение — поэтому вооружаем ПОСЛЕ.
+    await useProject.getState().setProject(res.path)
+    await useProject.getState().refreshProjectList()
+    useProject.getState().setMaterialsFolder(res)
+  }
+
   function onFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files
     if (!list) return
@@ -3226,6 +3249,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           }}
           onPaste={onPaste}
           onFilesPicked={onFilesPicked}
+          onPickMaterialsFolder={() => { void pickMaterialsFolder() }}
+          materialsFolder={materialsFolder}
           send={() => { void send() }}
           stop={asSuspend => { void stop(asSuspend) }}
           queueFollowUp={queueFollowUp}

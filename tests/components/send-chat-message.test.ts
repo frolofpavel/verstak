@@ -46,6 +46,7 @@ function makeHarness(opts: {
   mentionsBlock?: string
   agentMode?: AgentMode
   promptRouteOverride?: PromptRouteOverride | null
+  materialsFolder?: { path: string; name: string; docCount: number } | null
   earlyRouteStop?: { chatId: number; message: string; at: number } | null
   resumeFromRunId?: string | null
   pipelineOutcome?: PipelineOutcomeRef | null
@@ -57,6 +58,7 @@ function makeHarness(opts: {
     agentProgress: [],
     effortLevel: opts.effort ?? 'standard',
     promptRouteOverride: opts.promptRouteOverride ?? null,
+    materialsFolder: opts.materialsFolder ?? null,
     earlyRouteStop: opts.earlyRouteStop ?? null,
     hasActiveChatLane: vi.fn(() => opts.laneActive ?? false),
     clearActivity: vi.fn(() => { calls.push('clearActivity') }),
@@ -66,6 +68,7 @@ function makeHarness(opts: {
     updateLastAssistant: vi.fn(() => { calls.push('updateLastAssistant') }),
     autoTitleChatSession: vi.fn(async (chatId, text) => { calls.push(`autoTitle:${chatId}:${text}`) }),
     setPromptRouteOverride: vi.fn((r) => { calls.push(`setPromptRouteOverride:${r}`); state.promptRouteOverride = r }),
+    setMaterialsFolder: vi.fn((f) => { calls.push(`setMaterialsFolder:${f ? f.path : 'null'}`); state.materialsFolder = f }),
     setEarlyRouteStop: vi.fn((s) => { calls.push(`setEarlyRouteStop:${s}`); state.earlyRouteStop = s }),
     applyAgentProgressEvent: vi.fn((e) => { calls.push(`applyAgentProgressEvent:${e.type}:${e.message}`) }),
   }
@@ -402,5 +405,33 @@ describe('sendChatMessage — characterization бывшего основного
     expect(h.calls).toContain('setStreaming:false')
     expect(h.calls).toContain('setCurrentSendId:null')
     expect(h.calls.some(c => c.startsWith('registerOwner'))).toBe(false)
+  })
+
+  // VSK-PRODUCT-A1 (композер): «Папка с документами» вооружает код-сводку на ОДНУ
+  // отправку. materialsFolder.path → overrides.materialsFolder, потом снимается (one-shot).
+  it('вооружённая папка материалов → overrides.materialsFolder + one-shot снятие', async () => {
+    const folder = { path: '/p/docs', name: 'docs', docCount: 3 }
+    const h = makeHarness({ materialsFolder: folder })
+    const res = await sendChatMessage(baseInput, h.deps)
+    expect(res).toEqual({ kind: 'sent', sendId: 7 })
+    expect(h.sentCalls).toHaveLength(1)
+    expect(h.sentCalls[0].overrides).toMatchObject({ materialsFolder: '/p/docs' })
+    expect(h.state.materialsFolder).toBeNull()       // снята после отправки
+    expect(h.calls).toContain('setMaterialsFolder:null')
+  })
+
+  it('без вооружения — materialsFolder НЕ уходит в overrides (follow-up без сводки)', async () => {
+    const h = makeHarness()
+    await sendChatMessage(baseInput, h.deps)
+    expect(h.sentCalls[0].overrides).not.toHaveProperty('materialsFolder')
+  })
+
+  // Провал запуска тоже снимает вооружение (симметрично promptRoute).
+  it('провал send → вооружение материалов снято', async () => {
+    const folder = { path: '/p/docs', name: 'docs', docCount: 1 }
+    const h = makeHarness({ materialsFolder: folder, sendThrows: 'boom' })
+    await sendChatMessage(baseInput, h.deps)
+    expect(h.state.materialsFolder).toBeNull()
+    expect(h.calls).toContain('setMaterialsFolder:null')
   })
 })

@@ -22,6 +22,14 @@ import { EffortPicker } from '../EffortPicker'
 import { buildSystemSlashCommands } from './system-slash-commands'
 import { CHAT_FILE_ACCEPT } from '../../lib/chat-attachments'
 
+/** документ / документа / документов — для подписи B1. */
+function pluralDocs(n: number): string {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return 'документ'
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'документа'
+  return 'документов'
+}
+
 export interface ComposerInputRowProps {
   input: string
   setInput: (next: string | ((prev: string) => string)) => void
@@ -41,6 +49,10 @@ export interface ComposerInputRowProps {
   placeholders: { streaming: string; home: string; idle: string }
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
   onFilesPicked: (e: ChangeEvent<HTMLInputElement>) => void
+  /** VSK-PRODUCT-A1: «Папка с документами» — открыть папку как проект. */
+  onPickMaterialsFolder: () => void
+  /** Вооружённая на следующую отправку папка материалов (для подписи B1). */
+  materialsFolder: { path: string; name: string; docCount: number } | null
   send: () => void
   /** asSuspend=true — пауза с сохранением прогресса. */
   stop: (asSuspend?: boolean) => void
@@ -55,9 +67,13 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
   const {
     input, setInput, textareaRef, fileInputRef, activePath, isHelpChat, isHome,
     helpMode, isStreaming, canSend, providerLabel, providerSupportsTools, placeholders,
-    onPaste, onFilesPicked, send, stop, queueFollowUp, appendToCurrentContext,
+    onPaste, onFilesPicked, onPickMaterialsFolder, materialsFolder, send, stop, queueFollowUp, appendToCurrentContext,
     injectTemplate, newChatSession, clearActiveSkill,
   } = props
+  // B1 (утверждено Павлом): граница «в корне» названа явно — тем же языком, что сводка.
+  const materialsNote = materialsFolder
+    ? `${materialsFolder.name}: ${materialsFolder.docCount} ${pluralDocs(materialsFolder.docCount)} в корне`
+    : null
   return (
     <div className="gg-composer-inner">
       {!isHelpChat && (
@@ -119,6 +135,14 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
               : placeholders.idle
         }
       />
+      {/* B1 (утверждено Павлом): что показано после выбора папки. Граница «в корне»
+          названа явно, тем же языком, что код-сводка; вооружена на след. отправку. */}
+      {materialsNote && !isHelpChat && (
+        <div className="gg-materials-armed" title={materialsFolder!.path}>
+          <span className="gg-materials-armed-icon">📁</span>
+          <span className="gg-materials-armed-text">{materialsNote}</span>
+        </div>
+      )}
       <div className="gg-composer-actions">
         <button
           type="button"
@@ -132,6 +156,22 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
             <path d="m21.44 11.05 -9.19 9.19a6 6 0 0 1 -8.49 -8.49l9.19 -9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1 -2.83 -2.83l8.49 -8.48" />
           </svg>
         </button>
+        {/* A1 (утверждено Павлом): «Папка с документами» — называет назначение.
+            Не в чате справки. Выбор открывает папку как проект (вариант «а»). */}
+        {!isHelpChat && (
+          <button
+            type="button"
+            className="gg-attach-btn gg-materials-btn"
+            onClick={onPickMaterialsFolder}
+            disabled={isStreaming}
+            title="Папка с документами"
+            aria-label="Папка с документами"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z" />
+            </svg>
+          </button>
+        )}
         <VoiceInput
           disabled={isStreaming}
           onTranscript={chunk => setInput(prev => prev + chunk)}

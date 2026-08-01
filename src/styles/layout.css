@@ -9898,6 +9898,23 @@ html[data-theme="light"] .gg-mp-row-hidden-pill {
 .gg-attach-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .gg-attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* VSK-PRODUCT-A1 (композер): «Папка с документами» + подпись после выбора (B1). */
+.gg-materials-armed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  max-width: 100%;
+}
+.gg-materials-armed-icon { flex: 0 0 auto; }
+.gg-materials-armed-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Voice input — mic icon, стиль как attach-btn */
 .gg-voice-btn {
   width: 30px; height: 30px;

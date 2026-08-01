@@ -113,6 +113,35 @@ describe('композер — гарды отправки', () => {
   })
 })
 
+// VSK-PRODUCT-A1 (композер): «Папка с документами» + подпись после выбора (B1).
+describe('композер — папка с документами', () => {
+  it('кнопка «Папка с документами» присутствует в композере', () => {
+    mountChat()
+    const btn = document.querySelector('.gg-materials-btn')
+    expect(btn).toBeTruthy()
+    expect(btn?.getAttribute('title')).toBe('Папка с документами')
+  })
+
+  it('вооружённая папка → подпись B1 «{имя}: N документов в корне» с явной границей', () => {
+    act(() => { useProject.setState({ materialsFolder: { path: '/p/Договоры', name: 'Договоры', docCount: 3 } }, false) })
+    mountChat()
+    const note = document.querySelector('.gg-materials-armed') as HTMLElement
+    expect(note).toBeTruthy()
+    expect(note.textContent).toContain('Договоры: 3 документа в корне')
+    expect(note.getAttribute('title')).toBe('/p/Договоры')   // полный путь в подсказке
+  })
+
+  it('подпись склоняет «документ» по числу (1 / 2 / 5)', () => {
+    act(() => { useProject.setState({ materialsFolder: { path: '/p/a', name: 'a', docCount: 1 } }, false) })
+    const r1 = mountChat()
+    expect(document.querySelector('.gg-materials-armed')?.textContent).toContain('1 документ в корне')
+    r1.unmount()
+    act(() => { useProject.setState({ materialsFolder: { path: '/p/b', name: 'b', docCount: 5 } }, false) })
+    mountChat()
+    expect(document.querySelector('.gg-materials-armed')?.textContent).toContain('5 документов в корне')
+  })
+})
+
 describe('композер во время стрима', () => {
   it('Enter не стартует второй прогон, а ставит сообщение в очередь и чистит поле', () => {
     mountChat()

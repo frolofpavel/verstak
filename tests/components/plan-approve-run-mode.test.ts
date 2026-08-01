@@ -31,6 +31,7 @@ function makeHarness(opts: { chatMode: AgentMode; runMode?: AgentMode | null }) 
     agentProgress: [],
     effortLevel: 'standard',
     promptRouteOverride: null,
+    materialsFolder: null,
     earlyRouteStop: null,
     hasActiveChatLane: vi.fn(() => false),
     clearActivity: vi.fn(),
@@ -40,6 +41,7 @@ function makeHarness(opts: { chatMode: AgentMode; runMode?: AgentMode | null }) 
     updateLastAssistant: vi.fn(),
     autoTitleChatSession: vi.fn(async () => {}),
     setPromptRouteOverride: vi.fn(),
+    setMaterialsFolder: vi.fn(),
     setEarlyRouteStop: vi.fn(),
     applyAgentProgressEvent: vi.fn(),
   }

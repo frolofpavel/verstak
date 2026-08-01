@@ -4,6 +4,11 @@ import type { PromptRouteOverride } from '../shared/contracts/provider'
 import type { ChatSubscriptionBindingDTO } from '../shared/contracts/subscription'
 
 contextBridge.exposeInMainWorld('api', {
+  // VSK-PRODUCT-A1 (композер): «Папка с документами» — открывает папку как проект
+  // и возвращает имя + число документов в корне для подписи после выбора.
+  materials: {
+    pickFolder: () => ipcRenderer.invoke('materials:pick-folder') as Promise<{ path: string; name: string; docCount: number } | null>,
+  },
   projects: {
     pick: () => ipcRenderer.invoke('projects:pick'),
     addRemote: (input: string) => ipcRenderer.invoke('projects:add-remote', input),

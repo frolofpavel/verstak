@@ -467,6 +467,10 @@ export type ChatEvent =
 declare global {
   interface Window {
     api: {
+      /** VSK-PRODUCT-A1 (композер): «Папка с документами» — открыть папку как проект. */
+      materials: {
+        pickFolder: () => Promise<{ path: string; name: string; docCount: number } | null>
+      }
       projects: {
         pick: () => Promise<string | null>
         /** Добавить удалённый проект: https/git@…/repo (клон) или user@host:/path (ssh-live). */
@@ -624,7 +628,7 @@ declare global {
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
-          overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
+          overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }; materialsFolder?: string },
           chatId?: string
         ) => Promise<number>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
