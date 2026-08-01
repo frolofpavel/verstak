@@ -3,7 +3,7 @@
 // VSK-BROWSER-B1 этап 1: ядро структурного снимка с нумерацией + клик по номеру.
 // Прогоняется в jsdom — тот же исходник, что инжектится в страницу (§3.1).
 import { describe, it, expect, beforeEach } from 'vitest'
-import { vskSnapshot, vskResolveNumbered, VSK_GEN_ATTR, VSK_EL_ATTR } from '../../shared/browser-snapshot'
+import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, VSK_GEN_ATTR, VSK_EL_ATTR } from '../../shared/browser-snapshot'
 
 beforeEach(() => {
   document.documentElement.removeAttribute(VSK_GEN_ATTR)
@@ -90,5 +90,64 @@ describe('vskResolveNumbered — разрешение номера + ПРОТУ�
     const r = vskResolveNumbered(1)
     expect(r.ok).toBe(false)
     expect((r as { ok: false; error: string }).error).toContain('Нет активного снимка')
+  })
+})
+
+describe('vskFill — ввод по номеру (browser_type_by_number)', () => {
+  it('input/textarea → выставляет value + событие input', () => {
+    document.body.innerHTML = `<input id="q"><textarea id="t"></textarea>`
+    const input = document.getElementById('q') as HTMLInputElement
+    let fired = false
+    input.addEventListener('input', () => { fired = true })
+    const r = vskFill(input, 'привет')
+    expect(r.ok).toBe(true)
+    expect(input.value).toBe('привет')
+    expect(fired, 'событие input не сработало — фреймворк не увидит ввод').toBe(true)
+    const ta = document.getElementById('t') as HTMLTextAreaElement
+    vskFill(ta, 'строки')
+    expect(ta.value).toBe('строки')
+  })
+
+  it('contenteditable → пишет текст', () => {
+    document.body.innerHTML = `<div id="c" contenteditable="true"></div>`
+    const el = document.getElementById('c')!
+    expect(vskFill(el, 'редактируемо').ok).toBe(true)
+    expect(el.textContent).toBe('редактируемо')
+  })
+
+  it('НЕ текстовое поле (кнопка) → честная ошибка, не молча', () => {
+    document.body.innerHTML = `<button id="b">Жми</button>`
+    const r = vskFill(document.getElementById('b')!, 'x')
+    expect(r.ok).toBe(false)
+    expect((r as { ok: false; error: string }).error).toContain('не текстовое поле')
+  })
+
+  // Клик/ввод по номеру используют ОДИН резолвер: протухший номер → ошибка (не ввод).
+  it('ввод по устаревшему номеру не проходит (резолвер тот же)', () => {
+    document.body.innerHTML = `<input>`
+    vskSnapshot('g1')
+    document.documentElement.removeAttribute(VSK_GEN_ATTR)  // навигация
+    const r = vskResolveNumbered(1)
+    expect(r.ok).toBe(false)  // до vskFill дело не дойдёт — честная ошибка резолвера
+  })
+})
+
+describe('vskMatchTarget — ожидание элемента (browser_wait_for)', () => {
+  it('находит по CSS-селектору', () => {
+    document.body.innerHTML = `<div class="loaded">готово</div>`
+    expect(vskMatchTarget('.loaded')).toBe(true)
+    expect(vskMatchTarget('.missing')).toBe(false)
+  })
+
+  it('находит по видимому тексту (когда селектор не подошёл)', () => {
+    document.body.innerHTML = `<button>Оформить заказ</button>`
+    expect(vskMatchTarget('Оформить заказ')).toBe(true)
+    expect(vskMatchTarget('Отменить')).toBe(false)
+  })
+
+  it('пустой запрос → false, невалидный селектор не бросает', () => {
+    document.body.innerHTML = `<div>текст</div>`
+    expect(vskMatchTarget('')).toBe(false)
+    expect(vskMatchTarget(':::нелепый:::')).toBe(false)  // не бросок — вернёт false
   })
 })

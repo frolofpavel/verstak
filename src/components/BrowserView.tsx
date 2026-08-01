@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 // VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
 // §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
-import { vskSnapshot, vskResolveNumbered, type PageSnapshot } from '../../shared/browser-snapshot'
+import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, type PageSnapshot } from '../../shared/browser-snapshot'
 
 /**
  * In-app browser. Uses Electron's <webview> tag (enabled via webviewTag: true
@@ -43,6 +43,10 @@ declare global {
       snapshot: () => Promise<PageSnapshot | { error: string }>
       /** Клик по номеру из последнего снимка; устаревший номер → честная ошибка. */
       clickByNumber: (n: number) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
+      /** Ввод текста по номеру поля из последнего снимка (заполнение форм). */
+      typeByNumber: (n: number, text: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
+      /** Ждать элемент (селектор/текст) с честным таймаутом. */
+      waitFor: (query: string, timeoutMs?: number) => Promise<{ ok: true } | { ok: false; error: string }>
       screenshot: () => Promise<string>  // data:image/png;base64,...
       getURL: () => string | null
       getTitle: () => string | null
@@ -181,6 +185,42 @@ export function BrowserView() {
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }
         }
+      },
+      async typeByNumber(n, text) {
+        const wv = webviewRef.current
+        if (!wv) return { ok: false, error: 'Browser view не активен' }
+        // Тот же резолвер, что у клика (пин §3.1); заполнение — vskFill в странице.
+        const code = `(() => {
+          const resolve = ${vskResolveNumbered.toString()};
+          const fill = ${vskFill.toString()};
+          const r = resolve(${JSON.stringify(n)});
+          if (!r.ok) return r;
+          const f = fill(r.el, ${JSON.stringify(text)});
+          if (!f.ok) return f;
+          return { ok: true, url: location.href };
+        })()`
+        try {
+          const r = await wv.executeJavaScript(code) as { ok: true; url: string | null } | { ok: false; error: string }
+          return r && typeof r === 'object' ? r : { ok: false, error: 'нет ответа' }
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
+      },
+      async waitFor(query, timeoutMs) {
+        const wv = webviewRef.current
+        if (!wv) return { ok: false, error: 'Browser view не активен' }
+        // Опрос ОДНОГО момента (vskMatchTarget) во времени, с ЧЕСТНЫМ таймаутом.
+        // Слепых пауз не заводим: не появился за бюджет → явная ошибка.
+        const budget = Math.min(Math.max(500, timeoutMs ?? 10_000), 30_000)
+        const started = Date.now()
+        const check = `(${vskMatchTarget.toString()})(${JSON.stringify(query)})`
+        while (Date.now() - started < budget) {
+          try {
+            if (await wv.executeJavaScript(check) === true) return { ok: true }
+          } catch { /* страница между переходами — повторим */ }
+          await new Promise(r => setTimeout(r, 200))
+        }
+        return { ok: false, error: `Элемент «${query}» не появился за ${Math.round(budget / 1000)} с.` }
       },
       async screenshot() {
         const wv = webviewRef.current

@@ -386,6 +386,30 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'browser_type_by_number',
+    description: 'Ввести текст в поле (input/textarea/contenteditable) из ПОСЛЕДНЕГО browser_snapshot по его номеру — для заполнения форм. Если номер устарел или элемент не текстовое поле — честная ошибка. Требует открытую вкладку Browser.',
+    parameters: {
+      type: 'object',
+      properties: {
+        n: { type: 'number', description: 'Номер поля из последнего browser_snapshot.' },
+        text: { type: 'string', description: 'Текст для ввода.' }
+      },
+      required: ['n', 'text']
+    }
+  },
+  {
+    name: 'browser_wait_for',
+    description: 'Дождаться появления элемента на странице (по CSS-селектору ИЛИ видимому тексту) с таймаутом — после навигации/клика, пока страница догружается. Появился → ok. Не появился за отведённое время → честная ошибка (не тихая пауза). Требует открытую вкладку Browser.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'CSS-селектор (#id, .class) или видимый текст элемента.' },
+        timeout_ms: { type: 'number', description: 'Максимум ожидания в мс (по умолчанию 10000, потолок 30000).' }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'web_search',
     description: 'Искать в вебе по запросу и получить список результатов (заголовок, URL, сниппет). Для актуальной информации, документации, версий библиотек, новостей — того, чего нет в проекте и в твоих знаниях. Дальше выбери релевантный URL и прочитай его через web_fetch. Доступен, только если включён веб-доступ агента в настройках.',
     parameters: {

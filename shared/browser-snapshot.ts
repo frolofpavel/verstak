@@ -131,3 +131,51 @@ export function vskResolveNumbered(n: number): NumberedResolve {
   }
   return { ok: true, el }
 }
+
+/** Результат ввода текста в элемент. */
+export type FillResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Ввести текст в элемент (input/textarea/contenteditable) с событиями input/change,
+ * чтобы фреймворки страницы увидели ввод. Не текстовое поле → честная ошибка.
+ * Исполняется в странице над элементом от vskResolveNumbered (клик/ввод по номеру).
+ * Самодостаточна (DOM + Event глобальны) — инжектится .toString().
+ */
+export function vskFill(el: Element, text: string): FillResult {
+  const tag = el.tagName ? el.tagName.toLowerCase() : ''
+  const h = el as HTMLElement
+  if (tag === 'input' || tag === 'textarea') {
+    if (typeof h.focus === 'function') h.focus()
+    ;(el as HTMLInputElement).value = text
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true }
+  }
+  if (el.getAttribute('contenteditable') === 'true') {
+    if (typeof h.focus === 'function') h.focus()
+    h.textContent = text
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return { ok: true }
+  }
+  return { ok: false, error: 'Элемент не текстовое поле (input/textarea/contenteditable) — ввод невозможен. Проверь номер снимком.' }
+}
+
+/**
+ * Есть ли на странице цель ожидания: CSS-селектор ИЛИ видимый текст. Чистая проверка
+ * ОДНОГО момента — опрос во времени делает вызывающий (BrowserView), с честным
+ * таймаутом. Слепых пауз не заводим. Исполняется в странице; самодостаточна.
+ */
+export function vskMatchTarget(query: string): boolean {
+  const q = query.trim()
+  if (!q) return false
+  try {
+    if (document.querySelector(q)) return true
+  } catch { /* не валидный селектор — пробуем как текст ниже */ }
+  const needle = q.toLowerCase()
+  const els = document.querySelectorAll('a,button,[role=button],input,label,h1,h2,h3,h4,span,div,p,li,td,th')
+  for (const el of Array.from(els)) {
+    const t = ((el as HTMLElement).innerText || el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (t && t.indexOf(needle) !== -1) return true
+  }
+  return false
+}

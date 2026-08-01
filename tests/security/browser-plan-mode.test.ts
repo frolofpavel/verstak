@@ -126,4 +126,21 @@ describe('SEC-CMD-06 · plan не кликает', () => {
     expect(exec, 'снимок заблокирован в plan').toHaveBeenCalled()
     expect(res.error, 'снимок отвергнут').toBeFalsy()
   })
+
+  // VSK-BROWSER-B1 A: ВВОД по номеру — мутация (заполнение формы меняет чужую
+  // систему), в plan до страницы не доходит; ОЖИДАНИЕ — чтение, доходит.
+  it('НОВЫЙ ПУТЬ: browser_type_by_number в plan НЕ доходит до страницы', async () => {
+    const { ctx, exec } = ctxFor('plan')
+    const res = await browserHandler.handle(call('browser_type_by_number', { n: 1, text: 'x' }), ctx)
+    expect(exec, 'ввод исполнился в режиме «только чтение»').not.toHaveBeenCalled()
+    expect(res.error, 'отказ назван').toBeTruthy()
+    expect(decide('browser_type_by_number', 'plan')).toBe('block')
+  })
+
+  it('НОВЫЙ ПУТЬ: browser_wait_for в plan работает (ожидание — чтение)', async () => {
+    const { ctx, exec } = ctxFor('plan')
+    const res = await browserHandler.handle(call('browser_wait_for', { query: '.ready' }), ctx)
+    expect(exec, 'ожидание заблокировано в plan').toHaveBeenCalled()
+    expect(res.error).toBeFalsy()
+  })
 })

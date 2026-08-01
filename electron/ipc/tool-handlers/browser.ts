@@ -25,6 +25,12 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
       // Клик по номеру ИЗ ПОСЛЕДНЕГО снимка. Устаревший номер (после навигации) →
       // честная ошибка из api.clickByNumber, а не угадывание.
       action = `return await api.clickByNumber(Number(a.n));`
+    } else if (call.name === 'browser_type_by_number') {
+      // Ввод по номеру (заполнение форм). Устаревший номер / не поле → честная ошибка.
+      action = `return await api.typeByNumber(Number(a.n), String(a.text ?? ''));`
+    } else if (call.name === 'browser_wait_for') {
+      // Ожидание элемента с честным таймаутом (не слепая пауза).
+      action = `return await api.waitFor(String(a.query ?? ''), a.timeout_ms != null ? Number(a.timeout_ms) : undefined);`
     } else if (call.name === 'browser_click') {
       action = `return await api.click(String(a.selector ?? ''));`
     } else {
@@ -108,6 +114,8 @@ export const browserHandler: ToolHandler = {
                     : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
                     : call.name === 'browser_snapshot' ? `Браузер: снимок страницы`
                     : call.name === 'browser_click_by_number' ? `Браузер: клик по элементу №${String(call.args.n ?? '')}`
+                    : call.name === 'browser_type_by_number' ? `Браузер: ввод в элемент №${String(call.args.n ?? '')}`
+                    : call.name === 'browser_wait_for' ? `Браузер: ожидание «${String(call.args.query ?? '')}»`
                     : call.name === 'browser_click' ? `Браузер: клик по «${String(call.args.selector ?? '')}»`
                     : `Браузер: скриншот`
         // Для клика (обоих видов) в журнал едет и адрес страницы — см. summarizeToolCall.
