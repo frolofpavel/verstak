@@ -581,15 +581,15 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
-    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon, soon: true, soonReason: 'Расписание пока дорабатывается: нужно довести создание, запуск и статусы задач' },
-    { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon, soon: true, soonReason: 'Агенты пока служебная панель мультиагентов и очередей' },
+    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
+    { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },
     { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока требуют понятного пользовательского сценария' },
   ]
 
   const PROJECT_NAV: NavItem[] = [
     { id: 'files', label: t.sidebar.files, icon: FilesIcon },
-    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon, soon: true, soonReason: 'Карта проекта пока требует доработки для разных типов проектов' },
-    { id: 'brain', label: t.sidebar.brain, icon: BrainIcon, soon: true, soonReason: 'Мозг проекта пока техническая диагностика памяти' },
+    { id: 'project-map', label: t.sidebar.projectMap, icon: ProjectMapIcon },
+    { id: 'brain', label: t.sidebar.brain, icon: BrainIcon },
   ]
 
   const TOOLS_NAV: NavItem[] = [
