@@ -17,6 +17,14 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     } else if (call.name === 'browser_read_page') {
       action = `const text = await api.readPage(a.selector ? String(a.selector) : undefined);
                 return { url: api.getURL(), title: api.getTitle(), text };`
+    } else if (call.name === 'browser_snapshot') {
+      // VSK-BROWSER-B1 этап 1: структурный снимок с пронумерованными элементами.
+      action = `const snap = await api.snapshot();
+                return { url: api.getURL(), title: api.getTitle(), ...snap };`
+    } else if (call.name === 'browser_click_by_number') {
+      // Клик по номеру ИЗ ПОСЛЕДНЕГО снимка. Устаревший номер (после навигации) →
+      // честная ошибка из api.clickByNumber, а не угадывание.
+      action = `return await api.clickByNumber(Number(a.n));`
     } else if (call.name === 'browser_click') {
       action = `return await api.click(String(a.selector ?? ''));`
     } else {
@@ -94,12 +102,16 @@ export const browserHandler: ToolHandler = {
         // знал navigate и read_page, а клик записывал в журнал проекта как
         // скриншот: журнал не молчал о клике, он о нём ВРАЛ. Отсутствие следа
         // человек ещё может заметить, ложный след — нет.
+        // Метка ПОИМЁННАЯ: журнал не должен ВРАТЬ, что снимок/клик-по-номеру —
+        // «скриншот» (тот же класс ошибки, что закрыт для самого клика ниже).
         const label = call.name === 'browser_navigate' ? `Браузер → ${url}`
                     : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
+                    : call.name === 'browser_snapshot' ? `Браузер: снимок страницы`
+                    : call.name === 'browser_click_by_number' ? `Браузер: клик по элементу №${String(call.args.n ?? '')}`
                     : call.name === 'browser_click' ? `Браузер: клик по «${String(call.args.selector ?? '')}»`
                     : `Браузер: скриншот`
-        // Для клика в журнал едет и адрес страницы — см. summarizeToolCall.
-        const clicked = call.name === 'browser_click' && result.result && typeof result.result === 'object'
+        // Для клика (обоих видов) в журнал едет и адрес страницы — см. summarizeToolCall.
+        const clicked = (call.name === 'browser_click' || call.name === 'browser_click_by_number') && result.result && typeof result.result === 'object'
           ? String((result.result as { url?: unknown }).url ?? '')
           : ''
         ctx.recordJournal(ctx.projectPath, 'tool', label, clicked || null)

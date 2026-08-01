@@ -1,0 +1,94 @@
+// @vitest-environment jsdom
+//
+// VSK-BROWSER-B1 этап 1: ядро структурного снимка с нумерацией + клик по номеру.
+// Прогоняется в jsdom — тот же исходник, что инжектится в страницу (§3.1).
+import { describe, it, expect, beforeEach } from 'vitest'
+import { vskSnapshot, vskResolveNumbered, VSK_GEN_ATTR, VSK_EL_ATTR } from '../../shared/browser-snapshot'
+
+beforeEach(() => {
+  document.documentElement.removeAttribute(VSK_GEN_ATTR)
+  document.body.innerHTML = ''
+})
+
+describe('vskSnapshot — нумерация интерактивных элементов', () => {
+  it('нумерует ссылки/кнопки/поля, отдаёт роль и подпись, метит data-vsk-el', () => {
+    document.body.innerHTML = `
+      <a href="/x">Открыть</a>
+      <button>Сохранить</button>
+      <input type="text" aria-label="Имя">
+      <p>просто текст</p>
+    `
+    const snap = vskSnapshot('g1')
+    expect(snap.count).toBe(3)
+    expect(snap.elements.map(e => e.n)).toEqual([1, 2, 3])
+    expect(snap.elements[0]).toMatchObject({ tag: 'a', role: 'link', name: 'Открыть' })
+    expect(snap.elements[1]).toMatchObject({ tag: 'button', role: 'button', name: 'Сохранить' })
+    expect(snap.elements[2]).toMatchObject({ tag: 'input', role: 'textbox', name: 'Имя' })
+    expect(document.querySelector('a')?.getAttribute(VSK_EL_ATTR)).toBe('g1:1')
+    expect(document.documentElement.getAttribute(VSK_GEN_ATTR)).toBe('g1')
+  })
+
+  it('скрытые элементы (hidden / display:none / aria-hidden) не нумеруются', () => {
+    document.body.innerHTML = `
+      <button>Видимая</button>
+      <button hidden>Скрытая hidden</button>
+      <button style="display:none">Скрытая display</button>
+      <button aria-hidden="true">Скрытая aria</button>
+      <div style="display:none"><button>Внутри скрытого</button></div>
+    `
+    const snap = vskSnapshot('g1')
+    expect(snap.count).toBe(1)
+    expect(snap.elements[0].name).toBe('Видимая')
+  })
+})
+
+describe('vskResolveNumbered — разрешение номера + ПРОТУХАНИЕ (требование №1)', () => {
+  it('валидный номер текущего снимка → элемент', () => {
+    document.body.innerHTML = `<button>Один</button><button>Два</button>`
+    vskSnapshot('g1')
+    const r = vskResolveNumbered(2)
+    expect(r.ok).toBe(true)
+    expect((r as { ok: true; el: Element }).el.textContent).toBe('Два')
+  })
+
+  // КЛЮЧЕВОЙ ПИН: навигация (новый документ без поколения) → клик по номеру честно
+  // отказывает, а НЕ кликает наугад. Ошибка в сторону молчания, не ложного действия.
+  it('после «навигации» (сброс data-vsk-gen) номер протухает → честная ошибка', () => {
+    document.body.innerHTML = `<button>Кнопка</button>`
+    vskSnapshot('g1')
+    expect(vskResolveNumbered(1).ok).toBe(true)
+    // Навигация: новый документ. Эмулируем сбросом поколения + перерисовкой тела.
+    document.documentElement.removeAttribute(VSK_GEN_ATTR)
+    document.body.innerHTML = `<button>Другая страница</button>`
+    const r = vskResolveNumbered(1)
+    expect(r.ok).toBe(false)
+    expect((r as { ok: false; error: string }).error).toContain('Нет активного снимка')
+  })
+
+  it('новый снимок меняет поколение → номер из прежнего снимка не находится', () => {
+    document.body.innerHTML = `<button>A</button><button>B</button>`
+    vskSnapshot('g1')
+    // Прежний снимок дал номера под g1. Новый снимок с иным поколением:
+    document.body.innerHTML = `<button>C</button>`  // страница изменилась
+    vskSnapshot('g2')
+    // Клиент помнит «№2» из g1 — под g2 такого нет (в g2 только №1).
+    const r = vskResolveNumbered(2)
+    expect(r.ok).toBe(false)
+    expect((r as { ok: false; error: string }).error).toContain('№2')
+  })
+
+  it('элемент исчез из DOM при том же поколении → номер не находится (не старый ref)', () => {
+    document.body.innerHTML = `<button id="a">A</button><button id="b">B</button>`
+    vskSnapshot('g1')
+    document.getElementById('b')!.remove()   // элемент №2 удалён, поколение то же
+    const r = vskResolveNumbered(2)
+    expect(r.ok).toBe(false)
+  })
+
+  it('нет снимка вовсе → честная ошибка, не бросок', () => {
+    document.body.innerHTML = `<button>X</button>`
+    const r = vskResolveNumbered(1)
+    expect(r.ok).toBe(false)
+    expect((r as { ok: false; error: string }).error).toContain('Нет активного снимка')
+  })
+})

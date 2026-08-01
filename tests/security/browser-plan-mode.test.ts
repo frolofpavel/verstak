@@ -106,4 +106,24 @@ describe('SEC-CMD-06 · plan не кликает', () => {
       expect(res.error).toBeFalsy()
     }
   })
+
+  // VSK-BROWSER-B1 этап 1: SEC-CMD-06 на НОВОМ пути. Клик ПО НОМЕРУ — та же мутация
+  // чужой системы, и он обязан быть ЗЕЛЁНЫМ (заблокирован в plan) ПОТОМУ, что новый
+  // путь под тем же гейтом (категория-список), а не потому, что старый ещё жив.
+  it('НОВЫЙ ПУТЬ: browser_click_by_number в plan НЕ доходит до страницы', async () => {
+    const { ctx, exec } = ctxFor('plan')
+    const res = await browserHandler.handle(call('browser_click_by_number', { n: 2 }), ctx)
+    expect(exec, 'клик по номеру исполнился в режиме «только чтение»').not.toHaveBeenCalled()
+    expect(res.error, 'отказ назван').toBeTruthy()
+    expect(String(res.error)).toMatch(/планирован|plan/i)
+    expect(decide('browser_click_by_number', 'plan')).toBe('block')
+  })
+
+  // КОНТРОЛЬ НОВОГО ПУТИ: снимок — ЧТЕНИЕ, в plan обязан работать (ради него режим и есть).
+  it('НОВЫЙ ПУТЬ: browser_snapshot в plan работает (это чтение, не мутация)', async () => {
+    const { ctx, exec } = ctxFor('plan')
+    const res = await browserHandler.handle(call('browser_snapshot', {}), ctx)
+    expect(exec, 'снимок заблокирован в plan').toHaveBeenCalled()
+    expect(res.error, 'снимок отвергнут').toBeFalsy()
+  })
 })

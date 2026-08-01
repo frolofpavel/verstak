@@ -57,7 +57,11 @@ export interface AutoApprove {
  * `plan` существует ради чтения, и запрет смотреть страницу сделал бы его
  * бесполезным.
  */
-export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click']
+// VSK-BROWSER-B1 этап 1: клик ПО НОМЕРУ — тот же класс мутации чужой системы, что и
+// browser_click, поэтому в ТУ ЖЕ категорию (иначе новый путь проехал бы мимо
+// SEC-CMD-06 ровно как когда-то проезжал сам клик — расширяемость сторожит пин
+// «категория — СПИСОК» в tests/security/browser-plan-mode.test.ts).
+export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'browser_click_by_number']
 
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'

@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+// VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
+// §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
+import { vskSnapshot, vskResolveNumbered, type PageSnapshot } from '../../shared/browser-snapshot'
 
 /**
  * In-app browser. Uses Electron's <webview> tag (enabled via webviewTag: true
@@ -36,6 +39,10 @@ declare global {
       navigate: (url: string) => Promise<{ ok: true; url: string } | { ok: false; error: string }>
       readPage: (selector?: string) => Promise<string>
       click: (selector: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
+      /** VSK-BROWSER-B1 этап 1: структурный снимок с пронумерованными элементами. */
+      snapshot: () => Promise<PageSnapshot | { error: string }>
+      /** Клик по номеру из последнего снимка; устаревший номер → честная ошибка. */
+      clickByNumber: (n: number) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
       screenshot: () => Promise<string>  // data:image/png;base64,...
       getURL: () => string | null
       getTitle: () => string | null
@@ -133,6 +140,39 @@ export function BrowserView() {
           if (!el) return { ok: false, error: 'элемент не найден: ' + ${sel} };
           el.scrollIntoView({ block: 'center' });
           el.click();
+          return { ok: true, url: location.href };
+        })()`
+        try {
+          const r = await wv.executeJavaScript(code) as { ok: true; url: string | null } | { ok: false; error: string }
+          return r && typeof r === 'object' ? r : { ok: false, error: 'нет ответа' }
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
+      },
+      async snapshot() {
+        const wv = webviewRef.current
+        if (!wv) return { error: 'Browser view не активен' }
+        // Нонс поколения генерим здесь (renderer), внутрь страницы — как аргумент.
+        const gen = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        const code = `(${vskSnapshot.toString()})(${JSON.stringify(gen)})`
+        try {
+          const r = await wv.executeJavaScript(code)
+          return (r && typeof r === 'object') ? r as PageSnapshot : { error: 'снимок не удался' }
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) }
+        }
+      },
+      async clickByNumber(n) {
+        const wv = webviewRef.current
+        if (!wv) return { ok: false, error: 'Browser view не активен' }
+        // Инжектим ТОТ ЖЕ vskResolveNumbered (пин §3.1); клик над найденным el —
+        // здесь же, в странице, т.к. DOM-ссылку наружу не отдать.
+        const code = `(() => {
+          const resolve = ${vskResolveNumbered.toString()};
+          const r = resolve(${JSON.stringify(n)});
+          if (!r.ok) return r;
+          try { r.el.scrollIntoView({ block: 'center' }); } catch (e) {}
+          r.el.click();
           return { ok: true, url: location.href };
         })()`
         try {
