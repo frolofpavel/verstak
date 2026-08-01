@@ -122,6 +122,11 @@ export type ChatEvent =
   | { type: 'subagent-run'; callId: string; jobId?: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
   | { type: 'agent-job-finished'; jobId: string; parentCallId: string | null; status: import('../../shared/contracts/agent-job').AgentJobStatus; summary: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
+  /** VSK-PRODUCT-A1 3b: код-сводка чтения материалов прогона. Эмитится ТОЛЬКО когда
+   *  есть что сказать (что-то не прочиталось или не открывалось) — «прочитано N из N»
+   *  на каждом прогоне это шум. `line` — готовая строка для потока; поля структурны
+   *  для будущего UI. `notOpened` осмыслен только для source='folder'. */
+  | { type: 'materials-read'; source: 'attachments' | 'folder'; total: number; read: number; failed: { path: string; reason: string }[]; notOpened: string[]; readOutside: number; line: string }
   /** Verification attested: attest_verification перепрогнал проверки и собрал DoD-артефакт.
    *  Эфемерный бейдж для UI (overall + N/M); БД-персист — Фаза 3. */
   | { type: 'verification-attested'; callId: string; overall: 'passed' | 'failed' | 'partial' | 'not_run'; checksTotal: number; checksPassed: number; changedFilesCount: number }

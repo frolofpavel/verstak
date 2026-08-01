@@ -48,6 +48,8 @@ import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
 import type { SwitchResult } from '../storage/subscription-accounts'
 import type { CooldownReason } from '../../shared/contracts/subscription'
 import { expandOfficeAttachments } from '../ai/attachment-text'
+import { deriveAttachmentMaterials, listFolderMaterials } from '../ai/materials-context'
+import type { MaterialsRunContext } from '../ai/runner-api'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { registerAiCountTokensIpc } from './ai-count-tokens'
 
@@ -447,6 +449,10 @@ export function registerAiIpc(deps: AiDeps): void {
     promptRoute?: PromptRouteOverride
     /** Server validates this against durable pipeline state before exposing it to tools. */
     outcome?: OutcomeRequest
+    /** VSK-PRODUCT-A1 3b: абсолютный путь ОТКРЫТОЙ папки материалов (человек выбрал
+     *  каталог с документами). Когда задан — источник материалов = «папка», M = документы
+     *  в его КОРНЕ. Композер выбора папки идёт следующим пакетом; поле — готовый шов. */
+    materialsFolder?: string
   }
 
   ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
@@ -1094,6 +1100,20 @@ export function registerAiIpc(deps: AiDeps): void {
         detail: `Модель может отвечать текстом или вызывать инструменты. Лимит шагов: ${turnsBudget}.`,
         status: 'running'
       })
+      // VSK-PRODUCT-A1 3b: набор материалов прогона + источник. Папка (явный
+      // materialsFolder, гейт как projectPath) побеждает вложения. Вложения берём из
+      // ИСХОДНОГО последнего user-хода (до expandOfficeAttachments — он выносит docx из
+      // attachments в текст). base = runRoot: read-пути тулзов резолвятся относительно него.
+      let materials: MaterialsRunContext | null = null
+      const materialsFolder = overrides?.materialsFolder ?? null
+      if (materialsFolder && isWithinKnownRoots(materialsFolder, deps.getKnownRoots())) {
+        const items = listFolderMaterials(materialsFolder)
+        if (items.length > 0) materials = { source: 'folder', base: runRoot, items }
+      } else {
+        const lastUserOriginal = [...incomingMessages].reverse().find(m => m.role === 'user') ?? null
+        const att = await deriveAttachmentMaterials(lastUserOriginal)
+        if (att) materials = { source: 'attachments', base: runRoot, items: att.items, attachmentOutcomes: att.outcomes }
+      }
       void runApiConversation({
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,
         initialMessages: messagesWithSystem, signal: ctrl.signal,
@@ -1117,6 +1137,7 @@ export function registerAiIpc(deps: AiDeps): void {
         outcome,
         pipelineRuns: deps.pipelineRuns,
         revisePlanId,
+        materials,
       }).finally(cleanup)
     } else {
       logRuntime('ai.runner.start', {

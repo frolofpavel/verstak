@@ -53,9 +53,30 @@ import { createApiFallbackController } from './runner-attempt'
 import { dispatchToolTurn } from './runner-tool-turn'
 import { collectToolTurnOutcome, reviewGatePassedInTurn } from './runner-tool-outcome'
 import { buildTurnVerificationHint } from './runner-verification'
+import { summarizeMaterials, formatMaterialsLine, type ReadOutcome } from './materials-summary'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
+
+/**
+ * VSK-PRODUCT-A1 3b: набор материалов прогона + источник. Строится на старте send'а
+ * (ipc/ai.ts), где виден конвейер вложений и открытая папка. Для 'folder' исходы
+ * трекаются read-вызовами ЗДЕСЬ; для 'attachments' — предвычислены (attachmentOutcomes),
+ * read-вызовы для набора игнорируются (иначе сводка соврала бы «не открывал» на
+ * прочитанных моделью материалах — главная ошибка этого куска).
+ */
+export interface MaterialsRunContext {
+  source: 'attachments' | 'folder'
+  /** База для разрешения относительных read-путей (корень прогона). */
+  base: string
+  /** |M| — набор материалов (вложения — имена; папка — абсолютные пути). */
+  items: string[]
+  /** Только 'attachments': исход конвейера по каждому вложению. */
+  attachmentOutcomes?: ReadOutcome[]
+}
+
+/** Инструменты чтения, чьи исходы попадают в набор материалов папки. */
+const MATERIAL_READ_TOOLS = new Set(['read_file', 'read_document', 'read_spreadsheet', 'read_pdf'])
 // 1.9.7 #7: троттлинг crash-resume чекпойнтов (только API-путь).
 const checkpointThrottle = new Map<string, CheckpointThrottleState>()
 
@@ -192,6 +213,8 @@ export interface AgentRunContext {
   pipelineRuns?: ToolContext['pipelineRuns']
   /** §10 хвост: план, который этот прогон дорабатывает (см. ToolContext). */
   revisePlanId?: ToolContext['revisePlanId']
+  /** VSK-PRODUCT-A1 3b: набор материалов прогона + источник. null → нечего сводить. */
+  materials?: MaterialsRunContext | null
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -206,6 +229,11 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
+  // VSK-PRODUCT-A1 3b: захватываем ДО петли — внутри неё `ctx` затеняется ToolContext.
+  const materialsCtx = ctx.materials ?? null
+  // Исходы read-вызовов набора «папка» за прогон (для 'attachments' не используются —
+  // там исход из конвейера). Несопоставленный успех уйдёт в «вне набора», не в тревогу.
+  const materialReadOutcomes: ReadOutcome[] = []
   const startedAt = Date.now()
   logRuntime('ai.runner.loop_start', {
     sendId,
@@ -1169,6 +1197,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       const call = toolCalls[i]
       const result = toolResults[i]
       if (!result) continue
+      // VSK-PRODUCT-A1 3b: трекинг read-исходов набора «папка». Только для folder —
+      // у вложений исход из конвейера, а не из tool-вызовов (иначе ложная тревога).
+      if (materialsCtx?.source === 'folder' && MATERIAL_READ_TOOLS.has(call.name)) {
+        const p = typeof call.args.path === 'string' ? call.args.path : ''
+        if (p) materialReadOutcomes.push({ path: p, ok: !result.error, reason: result.error })
+      }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(
         saveMemory,
@@ -1439,6 +1473,43 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
+    // VSK-PRODUCT-A1 3b: код-сводка чтения материалов — ОДНО место на норму/ошибку/
+    // отмену. Не на handed-off кадре: его работу продолжает рекурсивный фрейм (тот и
+    // эмитит; иначе на fallback был бы дубль). Сводку в контекст модели НЕ инжектим —
+    // она верна независимо от того, что модель захочет сказать. Строка показывается
+    // ТОЛЬКО когда есть что сказать (formatMaterialsLine != null).
+    // Ограничение: при fallback внутри folder-прогона трекинг read-исходов не
+    // переносится в дочерний кадр (folder-источник пока не имеет живого UI-триггера —
+    // композер выбора папки идёт следующим пакетом); при его включении — дотянуть.
+    if (!handedOff && materialsCtx) {
+      try {
+        const outcomes = materialsCtx.source === 'attachments'
+          ? (materialsCtx.attachmentOutcomes ?? [])
+          : materialReadOutcomes
+        const summary = summarizeMaterials({
+          materials: materialsCtx.items,
+          base: materialsCtx.base,
+          outcomes,
+          source: materialsCtx.source,
+        })
+        const line = formatMaterialsLine(summary)
+        if (line) {
+          sender.send('ai:event', {
+            id: sendId,
+            event: {
+              type: 'materials-read',
+              source: summary.source === 'none' ? 'attachments' : summary.source,
+              total: summary.total,
+              read: summary.read.length,
+              failed: summary.failed,
+              notOpened: summary.notOpened,
+              readOutside: summary.readOutside.length,
+              line,
+            },
+          })
+        }
+      } catch { /* сводка материалов не критична — не ломаем финализацию прогона */ }
+    }
     unregisterConversationSupplements(sendId)
     // F1: Stop-хук — завершение прогона (для side-effects: коммит/нотификация/синк).
     // Best-effort, не ждём additionalContext (прогон закончен). Не на handed-off

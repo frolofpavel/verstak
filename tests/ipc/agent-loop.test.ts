@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync } from 'fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ChatProvider, ChatEvent, ChatMessage } from '../../electron/ai/types'
@@ -49,6 +49,7 @@ type Overrides = {
   processRegistry?: unknown
   outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }
   pipelineRuns?: unknown
+  materials?: unknown
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -73,6 +74,7 @@ function args(dir: string, o: Overrides): unknown[] {
     processRegistry: o.processRegistry,
     outcome: o.outcome,
     pipelineRuns: o.pipelineRuns,
+    materials: o.materials,
   }
   return [ctx]
 }
@@ -959,5 +961,110 @@ describe('EF-R2 Б2: account lineage при fallback (API-loop)', () => {
       costGuard: createCostGuard(100), agentRuns: runs, runId: 'rAL2', fallbackOpts,
     }) as Parameters<typeof runApiConversation>))
     expect(updateActualAccount).toHaveBeenCalledWith('rAL2', null)
+  }, 15000)
+
+  // ── VSK-PRODUCT-A1 3b: код-сводка чтения материалов (проводка ядра) ──
+  // Помощник: последнее событие materials-read из sender'а (null — не эмитилось).
+  function materialsEvent(sender: ReturnType<typeof makeSender>): { line: string; notOpened: string[]; failed: { path: string; reason: string }[]; total: number; read: number; readOutside: number; source: string } | null {
+    const calls = sender.send.mock.calls
+    for (let i = calls.length - 1; i >= 0; i--) {
+      const ev = (calls[i][1] as { event?: { type?: string } })?.event
+      if (ev?.type === 'materials-read') return ev as never
+    }
+    return null
+  }
+
+  it('папка: непрочитанный документ → materials-read с «не открывал», граница названа', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'первый документ')
+    writeFileSync(join(dir, 'b.md'), '# второй')
+    const sender = makeSender()
+    const p = provider('p1', (turn) => turn === 1
+      ? [{ type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'a.txt' } } }, { type: 'done' }]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), sender,
+      materials: { source: 'folder', base: dir, items: [join(dir, 'a.txt'), join(dir, 'b.md')] },
+    }) as Parameters<typeof runApiConversation>))
+    const ev = materialsEvent(sender)
+    expect(ev).not.toBeNull()
+    expect(ev!.notOpened).toEqual([join(dir, 'b.md')])
+    expect(ev!.line).toContain('не открывал')
+    expect(ev!.line).toContain('В корне папки')
+    expect(ev!.read).toBe(1)
+  }, 15000)
+
+  it('папка: всё прочитано → materials-read НЕ эмитится (нечего сказать)', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'один')
+    const sender = makeSender()
+    const p = provider('p1', (turn) => turn === 1
+      ? [{ type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'a.txt' } } }, { type: 'done' }]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), sender,
+      materials: { source: 'folder', base: dir, items: [join(dir, 'a.txt')] },
+    }) as Parameters<typeof runApiConversation>))
+    expect(materialsEvent(sender)).toBeNull()
+  }, 15000)
+
+  // ВТОРАЯ ЛОВУШКА: read вне набора НЕ становится «не открывал» (ошибка в сторону
+  // тревоги про наш собственный успех дороже молчания).
+  it('папка: read вне набора → «вне набора», НЕ «не открывал»', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'в наборе')
+    writeFileSync(join(dir, 'b.md'), '# в наборе, но не прочитан')
+    writeFileSync(join(dir, 'c.log'), 'вне набора')
+    const sender = makeSender()
+    const p = provider('p1', (turn) => turn === 1
+      ? [
+          { type: 'tool-call', call: { id: 'c1', name: 'read_file', args: { path: 'a.txt' } } },
+          { type: 'tool-call', call: { id: 'c2', name: 'read_file', args: { path: 'c.log' } } },
+          { type: 'done' },
+        ]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), sender,
+      materials: { source: 'folder', base: dir, items: [join(dir, 'a.txt'), join(dir, 'b.md')] },
+    }) as Parameters<typeof runApiConversation>))
+    const ev = materialsEvent(sender)
+    expect(ev).not.toBeNull()
+    expect(ev!.notOpened).toEqual([join(dir, 'b.md')])   // c.log сюда НЕ попал
+    expect(ev!.readOutside).toBe(1)
+  }, 15000)
+
+  // ГЛАВНЫЙ ПИН ЭТОЙ ЧАСТИ: приложены файлы, модель НЕ звала ни одного read —
+  // сводка НЕ говорит «не открывал». Исход берётся из конвейера, а не из tool-вызовов.
+  it('ГЛАВНЫЙ ПИН: вложения, битый docx, БЕЗ read-вызовов → «не удалось», но НИКОГДА «не открывал»', async () => {
+    const sender = makeSender()
+    // Модель отвечает прозой, не вызывая ни одного инструмента.
+    const p = provider('p1', () => [{ type: 'text', text: 'вот выводы по вашим документам' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), sender,
+      materials: {
+        source: 'attachments', base: dir, items: ['report.docx', 'notes.txt'],
+        attachmentOutcomes: [
+          { path: 'report.docx', ok: false, reason: 'битый файл' },
+          { path: 'notes.txt', ok: true },
+        ],
+      },
+    }) as Parameters<typeof runApiConversation>))
+    const ev = materialsEvent(sender)
+    expect(ev).not.toBeNull()
+    expect(ev!.source).toBe('attachments')
+    expect(ev!.line).toContain('не удалось')
+    expect(ev!.line).toContain('report.docx')
+    expect(ev!.notOpened).toEqual([])          // ← пин: тревоги «не открывал» нет
+    expect(ev!.line).not.toContain('не открывал')
+  }, 15000)
+
+  it('вложения: все доставлены (без read-вызовов) → materials-read НЕ эмитится', async () => {
+    const sender = makeSender()
+    const p = provider('p1', () => [{ type: 'text', text: 'готово' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), sender,
+      materials: {
+        source: 'attachments', base: dir, items: ['a.pdf', 'b.txt'],
+        attachmentOutcomes: [{ path: 'a.pdf', ok: true }, { path: 'b.txt', ok: true }],
+      },
+    }) as Parameters<typeof runApiConversation>))
+    expect(materialsEvent(sender)).toBeNull()
   }, 15000)
 })

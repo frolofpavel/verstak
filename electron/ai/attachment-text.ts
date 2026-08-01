@@ -9,6 +9,19 @@ export function isDocxAttachment(att: Attachment): boolean {
   return /\.docx$/i.test(att.name)
 }
 
+/** Исход конвейера по ОДНОМУ docx-вложению — единый источник и для инлайна текста
+ *  (expandOfficeAttachments), и для код-сводки материалов (materials-context). */
+export type DocxExtraction = { ok: true; text: string } | { ok: false; reason: string }
+
+export async function extractDocxAttachment(att: Attachment): Promise<DocxExtraction> {
+  try {
+    const text = await extractDocxTextFromBuffer(Buffer.from(att.data, 'base64'))
+    return { ok: true, text }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 /**
  * DOCX во вложениях чата → текст в content (mammoth).
  * Бинарник docx убираем из attachments — провайдеры его не читают.
@@ -23,13 +36,9 @@ export async function expandOfficeAttachments(messages: ChatMessage[]): Promise<
     const docxAtts = m.attachments.filter(isDocxAttachment)
     const blocks: string[] = []
     for (const att of docxAtts) {
-      try {
-        const text = await extractDocxTextFromBuffer(Buffer.from(att.data, 'base64'))
-        blocks.push(`--- Содержимое вложения «${att.name}» ---\n${text}`)
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        blocks.push(`--- Вложение «${att.name}»: не удалось извлечь текст (${msg}) ---`)
-      }
+      const res = await extractDocxAttachment(att)
+      if (res.ok) blocks.push(`--- Содержимое вложения «${att.name}» ---\n${res.text}`)
+      else blocks.push(`--- Вложение «${att.name}»: не удалось извлечь текст (${res.reason}) ---`)
     }
     const prefix = blocks.join('\n\n')
     const content = m.content ? `${prefix}\n\n${m.content}` : prefix
