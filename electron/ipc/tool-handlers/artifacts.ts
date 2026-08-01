@@ -78,7 +78,8 @@ export const generateDocxHandler: ToolHandler = {
       const title = call.args.title ? String(call.args.title) : undefined
       const sections = Array.isArray(call.args.sections) ? call.args.sections as Array<{ heading?: string; level?: number; paragraphs?: string[]; bullets?: string[] }> : []
       if (sections.length === 0) return { id: call.id, name: call.name, result: '', error: 'generate_docx: sections обязательны (>= 1)' }
-      const res = await generateDocx(ctx.projectPath, { filename, title, sections })
+      const saveTo = call.args.save_to != null ? String(call.args.save_to) : undefined
+      const res = await generateDocx(ctx.projectPath, { filename, title, sections, save_to: saveTo })
       try { ctx.recordJournal(ctx.projectPath, 'tool', `📄 Артефакт DOCX: ${res.filename}`, `${res.sizeBytes} bytes → ${res.path}`) } catch { /* */ }
       ctx.sender.send('ai:event', {
         id: ctx.sendId,

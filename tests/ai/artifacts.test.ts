@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, rm, readFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { generateHtml, generateDocx, artifactsDir } from '../../electron/ai/artifacts'
+import { generateHtml, generateDocx, artifactsDir, resolveDocxDir } from '../../electron/ai/artifacts'
+import { sep } from 'path'
 
 let projectPath: string
 
@@ -83,5 +84,50 @@ describe('generateDocx', () => {
     // живёт на handler уровне, не на generator. Это OK.
     const r = await generateDocx(projectPath, { filename: 'empty', sections: [] })
     expect(r.sizeBytes).toBeGreaterThan(0)
+  })
+})
+
+// VSK-PRODUCT-A1 шероховатость 1: «сохрани рядом»/«в загрузки» исполняются
+// СРАЗУ, из ЗАКРЫТОГО перечня. Свободный путь в аргументе — примитив записи куда
+// угодно; перечень + расчёт пути нашим кодом закрывают этот класс.
+describe('generateDocx save_to (назначение перечнем)', () => {
+  const sec = [{ paragraphs: ['x'] }]
+
+  it('project (по умолчанию) → .verstak/artifacts/{дата}/', async () => {
+    const r = await generateDocx(projectPath, { filename: 'p', sections: sec })
+    expect(r.path.startsWith(artifactsDir(projectPath))).toBe(true)
+  })
+
+  it('alongside → корень открытой папки, НЕ .verstak', async () => {
+    const r = await generateDocx(projectPath, { filename: 'a', sections: sec, save_to: 'alongside' })
+    expect(r.path).toBe(join(projectPath, 'a.docx'))
+    expect(r.path).not.toContain('.verstak')
+  })
+
+  it('downloads → переданная папка Загрузок', async () => {
+    const dl = await mkdtemp(join(tmpdir(), 'gg-dl-'))
+    try {
+      const r = await generateDocx(projectPath, { filename: 'd', sections: sec, save_to: 'downloads' }, { downloadsDir: dl })
+      expect(r.path).toBe(join(dl, 'd.docx'))
+    } finally { await rm(dl, { recursive: true, force: true }) }
+  })
+
+  // ПИН БЕЗОПАСНОСТИ: произвольная строка в save_to НЕ становится путём — она вне
+  // перечня, значит схлопывается в 'project'. Иначе параметр был бы записью куда угодно.
+  it('произвольная строка save_to отвергается — схлопывается в project, не в путь', async () => {
+    for (const evil of ['../../../etc', 'C:\\Windows\\System32', '/tmp/evil', 'downloads/../..']) {
+      expect(resolveDocxDir(evil, { projectPath, downloadsDir: '/dl' })).toBe(artifactsDir(projectPath))
+      const r = await generateDocx(projectPath, { filename: 'safe', sections: sec, save_to: evil })
+      // файл лёг в артефакты проекта, а НЕ по «evil»-пути
+      expect(r.path.startsWith(artifactsDir(projectPath))).toBe(true)
+      expect(r.path).not.toContain('..' + sep)
+    }
+  })
+
+  // filename с разделителями не выводит файл из каталога назначения (санитайз).
+  it('filename с путём санитайзен — из каталога не выйти', async () => {
+    const r = await generateDocx(projectPath, { filename: '../../evil', sections: sec, save_to: 'alongside' })
+    expect(r.path.startsWith(projectPath + sep)).toBe(true)
+    expect(r.filename).not.toMatch(/[/\\]/)
   })
 })

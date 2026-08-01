@@ -12,6 +12,8 @@ import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Document, Paragraph, HeadingLevel, TextRun, Packer } from 'docx'
 import { renderVerificationHtml, type VerificationArtifact } from './verification'
+import { defaultDownloadsDir, isWithinKnownRoots } from './path-policy'
+import { isForbiddenPath } from './secret-scanner'
 
 export interface ArtifactResult {
   path: string
@@ -27,6 +29,31 @@ export function artifactsDir(projectPath: string): string {
   const m = String(today.getMonth() + 1).padStart(2, '0')
   const d = String(today.getDate()).padStart(2, '0')
   return join(projectPath, '.verstak', 'artifacts', `${y}-${m}-${d}`)
+}
+
+/**
+ * Назначение DOCX — ЗАКРЫТЫЙ ПЕРЕЧЕНЬ, а НЕ свободный путь. Свободная строка пути
+ * в аргументе инструмента была бы примитивом записи куда угодно (класс, который
+ * закрывали в unrevert). Модель выбирает одно из трёх; конкретный каталог считает
+ * НАШ код, поэтому неизвестное значение схлопывается в 'project' — никогда в путь.
+ *   · project (по умолчанию) — .verstak/artifacts/{дата}/ внутри проекта;
+ *   · alongside — корень открытой папки: рядом с материалами, которые ЧЕЛОВЕК
+ *     открыл, а не то, что назвала модель;
+ *   · downloads — папка Загрузок.
+ */
+export type DocxSaveTo = 'project' | 'alongside' | 'downloads'
+
+export function resolveDocxDir(
+  saveTo: DocxSaveTo | string | undefined,
+  ctx: { projectPath: string; downloadsDir?: string }
+): string {
+  switch (saveTo) {
+    case 'downloads': return ctx.downloadsDir ?? defaultDownloadsDir()
+    case 'alongside': return ctx.projectPath
+    case 'project':
+    case undefined:
+    default: return artifactsDir(ctx.projectPath)
+  }
 }
 
 export function sanitizeFilename(name: string): string {
@@ -93,12 +120,25 @@ interface SectionInput {
 
 export async function generateDocx(
   projectPath: string,
-  args: { filename: string; title?: string; sections: SectionInput[] }
+  args: { filename: string; title?: string; sections: SectionInput[]; save_to?: DocxSaveTo | string },
+  opts?: { downloadsDir?: string }
 ): Promise<ArtifactResult> {
-  const dir = artifactsDir(projectPath)
-  await mkdir(dir, { recursive: true })
+  const downloadsDir = opts?.downloadsDir ?? defaultDownloadsDir()
+  const dir = resolveDocxDir(args.save_to, { projectPath, downloadsDir })
   const filename = `${sanitizeFilename(args.filename)}.docx`
   const path = join(dir, filename)
+  // Проверка путей стоит и на этом пути (назначение открывает запись за пределы
+  // .verstak). Проверяем КАТАЛОГ: он считается нашим кодом из перечня и обязан
+  // лежать в проекте ИЛИ в Downloads. Файл из каталога не выйдет — sanitizeFilename
+  // убирает разделители (проверять здесь полный путь нельзя: имя, санитайзенное из
+  // «../../x», начинается с точек и наивная строковая проверка сочла бы его выходом).
+  if (!isWithinKnownRoots(dir, [projectPath, downloadsDir])) {
+    throw new Error(`Каталог DOCX вне разрешённых папок (проект / Загрузки): ${dir}`)
+  }
+  if (isForbiddenPath(path) || isForbiddenPath(filename)) {
+    throw new Error(`Запись артефакта запрещена политикой безопасности: ${path}`)
+  }
+  await mkdir(dir, { recursive: true })
 
   const children: Paragraph[] = []
   if (args.title) {

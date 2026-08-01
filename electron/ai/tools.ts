@@ -1045,12 +1045,17 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'generate_docx',
-    description: 'Сохранить артефакт в формате Word (.docx). Файл попадает в .verstak/artifacts/{YYYY-MM-DD}/. Принимает структуру секций — каждая с heading и параграфами.',
+    description: 'Сохранить артефакт в формате Word (.docx). Принимает структуру секций — каждая с heading и параграфами. Куда сохранить — задаётся параметром save_to (по умолчанию — папка артефактов проекта).',
     parameters: {
       type: 'object',
       properties: {
         filename: { type: 'string', description: 'Имя файла без расширения.' },
         title: { type: 'string', description: 'Заголовок документа (большой шрифт сверху).' },
+        save_to: {
+          type: 'string',
+          enum: ['project', 'alongside', 'downloads'],
+          description: 'Куда сохранить: project — папка артефактов проекта (.verstak/artifacts/{дата}/, по умолчанию); alongside — рядом с материалами (корень открытой папки); downloads — папка Загрузок. Если пользователь просит «сохрани рядом» — alongside, «в загрузки» — downloads. Свободный путь НЕ принимается: только одно из трёх.',
+        },
         sections: {
           type: 'array',
           description: 'Секции документа в порядке появления.',
