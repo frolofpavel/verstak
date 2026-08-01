@@ -34,6 +34,15 @@ export interface PlanCreatedCard {
   awaitingApproval: boolean
 }
 
+/** VSK-PRODUCT-A1 3b: код-сводка чтения материалов — эфемерная строка в потоке.
+ *  Показывается ТОЛЬКО когда есть что сказать (что-то не прочиталось/не открывалось);
+ *  `line` — готовая строка из main (сводку строит НАШ код, не модель). Эфемерная:
+ *  чистится на новом send как planCards/preflights, в БД не пишется. */
+export interface MaterialsNote {
+  source: 'attachments' | 'folder'
+  line: string
+}
+
 /** Карточка плана, ждущего решения человека (§10). Живёт в bundle СВОЕГО чата:
  *  до хвоста §10 это было одно глобальное поле, и вторая карточка молча
  *  затирала первую, а продолжение уезжало в активный чат вместо своего. */
@@ -153,6 +162,8 @@ export interface SessionSnapshot {
   /** Эфемерные карточки активности чата — путешествуют с ним (per-chat). */
   preflights: PreflightCard[]
   subagentRuns: SubagentRunCard[]
+  /** VSK-PRODUCT-A1 3b: код-сводки чтения материалов этого чата (эфемерные). */
+  materialsNotes: MaterialsNote[]
   /** True when bg session got new content since user last viewed it. */
   hasUnread: boolean
 }
@@ -208,6 +219,7 @@ export function freshSnapshot(): SessionSnapshot {
     checkpointMessageId: null,
     preflights: [],
     subagentRuns: [],
+    materialsNotes: [],
     hasUnread: false
   }
 }

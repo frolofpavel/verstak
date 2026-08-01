@@ -269,6 +269,37 @@ describe('поток — карточки под последним ответо
     expect(sa.querySelector('.gg-subagent-result-body')?.textContent).toBe('всё чисто')
   })
 
+  // VSK-PRODUCT-A1 3b: код-сводка чтения материалов — строка в потоке.
+  it('materials-read из seed рендерит строку сводки под ответом', () => {
+    mountChat()
+    seedActive(useProject, {
+      messages: [{ role: 'user', content: 'вопрос' }, { role: 'assistant', content: 'ответ' }],
+      materialsNotes: [{ source: 'folder', line: 'В корне папки 3 документа: прочитано 1, не открывал 2 (b.pdf, c.txt).' }],
+    })
+    act(() => { useProject.setState({}, false) })
+    const note = stream().querySelector('.gg-materials-note') as HTMLElement
+    expect(note).toBeTruthy()
+    expect(note.querySelector('.gg-materials-note-line')?.textContent).toContain('не открывал 2')
+  })
+
+  // ОРДЕРИНГ: событие приходит в finally прогона, ПОСЛЕ done (owner уже забыт).
+  // Обработчик обязан класть строку в активный чат, а не терять её молча.
+  it('materials-read ПОСЛЕ done всё равно рендерит строку (owner уже забыт)', () => {
+    mountChat()
+    startRun(11, 7)
+    emit(11, { type: 'text', text: 'вот выводы' })
+    emit(11, { type: 'done' })                 // ← забывает owner(11)
+    emit(11, { type: 'materials-read', source: 'attachments', total: 2, read: 1,
+      failed: [{ path: 'report.docx', reason: 'битый файл' }], notOpened: [], readOutside: 0,
+      line: 'Приложено 2 файла: прочитано 1, не удалось 1 (report.docx — битый файл).' })
+    act(() => { useProject.setState({}, false) })
+    const note = stream().querySelector('.gg-materials-note') as HTMLElement
+    expect(note).toBeTruthy()
+    expect(note.querySelector('.gg-materials-note-line')?.textContent).toContain('не удалось 1')
+    // Пин направления ошибки: на вложениях «не открывал» не появляется.
+    expect(note.textContent).not.toContain('не открывал')
+  })
+
   it('размышление модели свёрнуто при видимом ответе и развёрнуто без него', () => {
     mountChat()
     seedActive(useProject, {

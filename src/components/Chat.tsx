@@ -265,6 +265,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const projectSessionUsage = activeBundle?.sessionUsage ?? EMPTY_SESSION_USAGE
   const preflights = activeBundle?.preflights ?? []
   const planCards = activeBundle?.planCards ?? []
+  const materialsNotes = activeBundle?.materialsNotes ?? []
   const subagentRuns = activeBundle?.subagentRuns ?? []
   const isHelpChat = helpMode
   const [skillSuggestionsEnabled, setSkillSuggestionsEnabled] = useState(() => readSkillSuggestionsEnabled(activePath))
@@ -1158,6 +1159,21 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         // Игнорируем все остальные event types для ревью (thought / usage /
         // tool-* — ревьюер работает в plain mode, тулзов не должно быть, а
         // thoughts нам в pill не нужны).
+        return
+      }
+      // VSK-PRODUCT-A1 3b: код-сводка чтения материалов. Эмитится в finally прогона,
+      // то есть ПОСЛЕ 'done', который уже забыл owner'а — поэтому обрабатываем её ДО
+      // owner-гейта ниже (иначе строка молча терялась бы). Кладём в СВОЙ чат, если
+      // owner ещё жив (не-терминальный путь), иначе — в активный, чей прогон только
+      // что закончился. Строка эфемерная, показывается лишь когда есть что сказать.
+      if (event.type === 'materials-read') {
+        const noteChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
+        if (noteChatId != null) {
+          store.pushMaterialsNote(noteChatId, {
+            source: (event as { source: 'attachments' | 'folder' }).source,
+            line: String((event as { line?: unknown }).line ?? ''),
+          })
+        }
         return
       }
       const chatOwnerProjectPath = owner?.kind === 'chat' && !owner.isHelp
@@ -3038,6 +3054,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           activity={activity}
           preflights={preflights}
           planCards={planCards}
+          materialsNotes={materialsNotes}
           onOpenPlan={() => setActiveView('plan')}
           subagentRuns={subagentRuns}
           agentProgress={agentProgress}

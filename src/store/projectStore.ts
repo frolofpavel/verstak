@@ -20,7 +20,8 @@ import {
   type RunningPlanStep,
   type SessionSnapshot,
   type PreflightCard,
-  type SubagentRunCard
+  type SubagentRunCard,
+  type MaterialsNote
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
 import { applyBundleUpdate, type BundleUpdater } from './chat-bundle-update'
@@ -182,6 +183,9 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
    *  прийти по фоновому прогону). Повторное событие того же плана обновляет
    *  карточку на месте, а не плодит вторую. */
   pushPlanCard: (chatId: number, card: PlanCreatedCard) => void
+  /** VSK-PRODUCT-A1 3b: код-сводка чтения материалов в поток КОНКРЕТНОГО чата
+   *  (приходит в finally прогона, после done). Эфемерная строка. */
+  pushMaterialsNote: (chatId: number, note: MaterialsNote) => void
   /** Upsert sub-agent run card по callId (running → done/error). */
   upsertSubagentRun: (card: SubagentRunCard) => void
   /** Record that the AI just touched a file (read / write / list). Upgrades
@@ -368,6 +372,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   agentProgress: [],
   preflights: [],
   subagentRuns: [],
+  materialsNotes: [],
   touchedFiles: {},
   checkpointId: null, checkpointMessageId: null,
   activeDevTaskId: null,
@@ -697,7 +702,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   updateActivity: (id, patch) => get().updateChatBundle(get().activeChatId, b => ({
     activity: b.activity.map(a => a.id === id ? { ...a, ...patch } : a)
   })),
-  clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [], planCards: [] })),
+  clearActivity: () => get().updateChatBundle(get().activeChatId, () => ({ activity: [], agentProgress: [], preflights: [], subagentRuns: [], planCards: [], materialsNotes: [] })),
   setAgentProgress: (entries) => get().updateChatBundle(get().activeChatId, () => ({ agentProgress: entries })),
   pushAgentProgress: (entry) => get().updateChatBundle(get().activeChatId, b => ({ agentProgress: upsertAgentProgress(b.agentProgress ?? [], entry) })),
   applyAgentProgressEvent: (event) => get().updateChatBundle(get().activeChatId, b => {
@@ -713,6 +718,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     next[idx] = { ...next[idx], ...card }
     return { planCards: next }
   }),
+  pushMaterialsNote: (chatId, note) => get().updateChatBundle(chatId, b => ({
+    materialsNotes: [...(b.materialsNotes ?? []), note]
+  })),
   upsertSubagentRun: (card) => get().updateChatBundle(get().activeChatId, b => {
     const idx = b.subagentRuns.findIndex(r => r.callId === card.callId)
     if (idx === -1) return { subagentRuns: [...b.subagentRuns, card] }

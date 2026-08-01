@@ -21,7 +21,7 @@
 
 import { Fragment, type Dispatch, type SetStateAction } from 'react'
 import { useProject } from '../../store/projectStore'
-import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry } from '../../store/session-snapshot'
+import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry, MaterialsNote } from '../../store/session-snapshot'
 import { Markdown } from '../Markdown'
 import { AgentProgressPanel } from '../AgentProgressPanel'
 import { MessageActions, AttachmentPreview } from './message-parts'
@@ -65,6 +65,8 @@ export interface ChatStreamMessagesProps {
   preflights: PreflightCard[]
   /** §7.2: карточки созданных планов — пользовательский вид вместо строки activity. */
   planCards: PlanCreatedCard[]
+  /** VSK-PRODUCT-A1 3b: код-сводки чтения материалов (эфемерные строки). */
+  materialsNotes: MaterialsNote[]
   onOpenPlan: () => void
   subagentRuns: SubagentRunCard[]
   agentProgress: AgentProgressEntry[]
@@ -88,7 +90,7 @@ export interface ChatStreamMessagesProps {
 
 export function ChatStreamMessages(props: ChatStreamMessagesProps) {
   const {
-    messages, isStreaming, provider, t, activeChatId, helpMode, activity, preflights, planCards, onOpenPlan,
+    messages, isStreaming, provider, t, activeChatId, helpMode, activity, preflights, planCards, materialsNotes, onOpenPlan,
     subagentRuns, agentProgress, agentProgressDurationMs, agentProgressFinishedAt,
     handleAgentProgressToggle, resumableRuns, lastAssistantInfo, lastAssistantAnimationKey,
     animatedAssistantText, streamStartedAt, tickNow, crossVerify, cvExpanded, setCvExpanded,
@@ -105,6 +107,7 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
           const showActivity = isLast && m.role === 'assistant' && activity.length > 0
           const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
           const showPlanCards = isLast && m.role === 'assistant' && planCards.length > 0
+          const showMaterialsNotes = isLast && m.role === 'assistant' && materialsNotes.length > 0
           const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
             ? activity.filter(a => a.kind === 'write' && a.status === 'ok').map(a => a.detail ?? '')
@@ -137,6 +140,7 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
             && !showActivity
             && !showPreflights
             && !showSubagents
+            && !showMaterialsNotes
           if (isEmptyInterruptedAssistant) {
             if (resumableRuns.length > 0) return null
             return (
@@ -218,6 +222,15 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                   <button className="gg-btn gg-btn-ghost gg-plan-card-open" type="button" onClick={onOpenPlan}>
                     Открыть план
                   </button>
+                </div>
+              ))}
+              {/* VSK-PRODUCT-A1 3b: код-сводка чтения материалов. Строка от НАШЕГО
+                  кода (не модели): что прочитано / не удалось / не открывал. Видна
+                  лишь когда есть что сказать — тихий успех сюда не попадает. */}
+              {showMaterialsNotes && materialsNotes.map((note, ni) => (
+                <div key={`materials-${ni}`} className="gg-materials-note">
+                  <span className="gg-materials-note-icon">📎</span>
+                  <span className="gg-materials-note-line">{note.line}</span>
                 </div>
               ))}
               {showPreflights && preflights.map(pf => {

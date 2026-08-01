@@ -57,6 +57,7 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     checkpointId: 500, checkpointMessageId: 501,
     preflights: [{ callId: `pf-${tag}`, summary: `s-${tag}`, affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
     subagentRuns: [{ callId: `sr-${tag}`, label: `l-${tag}`, task: 't', status: 'running' }],
+    materialsNotes: [{ source: 'folder', line: `materials-${tag}` }],
     hasUnread: false,
   }
 }
