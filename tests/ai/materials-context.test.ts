@@ -61,6 +61,16 @@ describe('deriveAttachmentMaterials — исход из КОНВЕЙЕРА', () 
     expect(res.outcomes[0].ok).toBe(false)
     expect(res.outcomes[0].reason).toBeTruthy()
   })
+
+  // xlsx — office-вложение: исход из конвейера (exceljs), а НЕ «доставлено инлайном».
+  it('битый xlsx → исход конвейера ok=false (разворачивается, а не инлайнится как есть)', async () => {
+    const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    const m: ChatMessage = { role: 'user', content: 'x', attachments: [att('broken.xlsx', XLSX, 'not-a-zip')] }
+    const res = (await deriveAttachmentMaterials(m))!
+    expect(res.items).toEqual(['broken.xlsx'])
+    expect(res.outcomes[0].ok).toBe(false)
+    expect(res.outcomes[0].reason).toBeTruthy()
+  })
 })
 
 describe('listFolderMaterials — только КОРЕНЬ, только документы', () => {

@@ -53,16 +53,10 @@ function clampCell(s: string): string {
  * имя листа + строки в markdown-подобной таблице. Большие листы обрезаются
  * с пометкой.
  */
-export async function readSpreadsheet(projectPath: string, relPath: string): Promise<string> {
-  if (isForbiddenPath(relPath)) {
-    throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
-  }
-  const abs = await safeRealJoin(projectPath, relPath)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ExcelJS = require('exceljs') as typeof import('exceljs')
-  const wb = new ExcelJS.Workbook()
-  await wb.xlsx.readFile(abs)
-
+/** Сериализовать книгу exceljs в markdown-подобный текст (листы + строки), с
+ *  обрезкой больших листов и redaction секретов. Общий низ для чтения с диска
+ *  (readSpreadsheet) и из буфера вложения (extractXlsxTextFromBuffer). */
+function serializeWorkbook(wb: import('exceljs').Workbook): string {
   const out: string[] = []
   wb.eachSheet((sheet) => {
     out.push(`### Лист: ${sheet.name}`)
@@ -97,6 +91,30 @@ export async function readSpreadsheet(projectPath: string, relPath: string): Pro
   return scan.hits.length > 0
     ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`
     : scan.redacted
+}
+
+export async function readSpreadsheet(projectPath: string, relPath: string): Promise<string> {
+  if (isForbiddenPath(relPath)) {
+    throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+  }
+  const abs = await safeRealJoin(projectPath, relPath)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ExcelJS = require('exceljs') as typeof import('exceljs')
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(abs)
+  return serializeWorkbook(wb)
+}
+
+/** Извлечь текст из буфера .xlsx (вложения чата, не на диске) — симметрично
+ *  extractDocxTextFromBuffer. Тот же сериализатор, что у чтения с диска. */
+export async function extractXlsxTextFromBuffer(buf: Buffer): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ExcelJS = require('exceljs') as typeof import('exceljs')
+  const wb = new ExcelJS.Workbook()
+  // exceljs типизирует load как Buffer<ArrayBuffer>, node даёт Buffer<ArrayBufferLike>
+  // — рантайм идентичен, расхождение только в generic-теге toStringTag. Каст безопасен.
+  await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0])
+  return serializeWorkbook(wb)
 }
 
 /** Извлечь текст из буфера .docx (вложения чата, не на диске). */

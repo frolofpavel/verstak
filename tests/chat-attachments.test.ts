@@ -16,6 +16,23 @@ describe('chat-attachments', () => {
     ).toBe(true)
   })
 
+  // VSK-PRODUCT-A1 (композер): .xlsx — приёмка требует таблицы.
+  it('принимает .xlsx по расширению и по mime', () => {
+    expect(isAcceptableAttachment('application/octet-stream', 'смета.xlsx')).toBe(true)
+    expect(
+      isAcceptableAttachment(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'a.xlsx',
+      ),
+    ).toBe(true)
+  })
+
+  it('resolveAttachmentMime подставляет mime для xlsx без типа', () => {
+    expect(resolveAttachmentMime('', 'file.xlsx')).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+  })
+
   it('отклоняет старый .doc', () => {
     expect(isLegacyDoc('brief.doc')).toBe(true)
     expect(isAcceptableAttachment('application/msword', 'brief.doc')).toBe(false)

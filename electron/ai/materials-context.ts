@@ -15,7 +15,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import type { ChatMessage } from './types'
 import type { ReadOutcome } from './materials-summary'
-import { extractDocxAttachment, isDocxAttachment } from './attachment-text'
+import { extractOfficeAttachment, isOfficeAttachment } from './attachment-text'
 
 /** Документные расширения набора (общие для папки и вложений). Совпадает с accept
  *  композера по документам; изображения материалами НЕ считаются. */
@@ -30,17 +30,18 @@ export function isDocumentName(name: string): boolean {
 export async function deriveAttachmentMaterials(
   lastUser: ChatMessage | null | undefined,
 ): Promise<{ items: string[]; outcomes: ReadOutcome[] } | null> {
-  const atts = (lastUser?.attachments ?? []).filter(a => isDocxAttachment(a) || isDocumentName(a.name))
+  const atts = (lastUser?.attachments ?? []).filter(a => isOfficeAttachment(a) || isDocumentName(a.name))
   if (atts.length === 0) return null
   const items: string[] = []
   const outcomes: ReadOutcome[] = []
   for (const a of atts) {
     items.push(a.name)
-    if (isDocxAttachment(a)) {
-      const res = await extractDocxAttachment(a)
+    if (isOfficeAttachment(a)) {
+      // docx/xlsx разворачиваются на сервере (mammoth/exceljs) — исход из конвейера.
+      const res = await extractOfficeAttachment(a)
       outcomes.push(res.ok ? { path: a.name, ok: true } : { path: a.name, ok: false, reason: res.reason })
     } else {
-      // pdf/txt/md/csv/xlsx доставляются модели инлайном — считаем прочитанными.
+      // pdf/txt/md/csv доставляются модели инлайном — считаем прочитанными.
       outcomes.push({ path: a.name, ok: true })
     }
   }

@@ -1,16 +1,18 @@
 import type { Attachment } from '../types/api'
 
 export const CHAT_FILE_ACCEPT =
-  'image/*,application/pdf,text/*,.json,.md,.csv,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  'image/*,application/pdf,text/*,.json,.md,.csv,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 const ACCEPTED_MIME_PREFIXES = ['image/', 'text/', 'application/pdf', 'application/json'] as const
 
 const ACCEPTED_MIME_EXACT = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ])
 
 const EXT_TO_MIME: Record<string, string> = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.pdf': 'application/pdf',
   '.json': 'application/json',
   '.md': 'text/markdown',
@@ -26,7 +28,7 @@ export function isLegacyDoc(filename: string): boolean {
 export function isAcceptableAttachment(mime: string, filename: string): boolean {
   if (isLegacyDoc(filename)) return false
   const lower = filename.toLowerCase()
-  if (lower.endsWith('.docx')) return true
+  if (lower.endsWith('.docx') || lower.endsWith('.xlsx')) return true
   if (ACCEPTED_MIME_EXACT.has(mime)) return true
   if (ACCEPTED_MIME_PREFIXES.some(p => mime.startsWith(p))) return true
   if (!mime || mime === 'application/octet-stream') {
