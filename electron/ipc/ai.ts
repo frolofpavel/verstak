@@ -247,7 +247,7 @@ export function abortSend(sendId: number): boolean {
 // connector_query оставлен намеренно — это ЧТЕНИЕ коннектора (не запись).
 export const SCHEDULED_READONLY_TOOLS = [
   'read_file', 'list_directory', 'search_project', 'find_files', 'get_project_map', 'impact_analysis',
-  'read_journal', 'conversation_search', 'memory_search', 'read_spreadsheet', 'read_document', 'convert_file',
+  'read_journal', 'conversation_search', 'memory_search', 'read_spreadsheet', 'read_document', 'read_pdf', 'convert_file',
   'find_definition', 'find_references', 'list_connectors', 'connector_query',
 ]
 

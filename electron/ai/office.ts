@@ -10,6 +10,7 @@
  */
 
 import { Buffer } from 'node:buffer'
+import { stat, readFile } from 'node:fs/promises'
 import { isForbiddenPath, scanText } from './secret-scanner'
 import { safeRealJoin } from './path-policy'
 
@@ -18,6 +19,10 @@ const MAX_ROWS = 200
 const MAX_COLS = 40
 const MAX_CELL_CHARS = 200
 const MAX_DOC_CHARS = 40_000
+// PDF — недоверенный вход и классическая поверхность атаки. Размер ограничиваем
+// как у read_file, разбор — таймаутом (см. readPdf).
+const MAX_PDF_BYTES = 2 * 1024 * 1024
+const PDF_PARSE_TIMEOUT_MS = 30_000
 
 /** Привести значение ячейки exceljs к читаемой строке. */
 function cellToText(value: unknown): string {
@@ -125,6 +130,60 @@ export async function readDocument(projectPath: string, relPath: string): Promis
   const raw = res.value ?? ''
   const text = raw.length > MAX_DOC_CHARS ? raw.slice(0, MAX_DOC_CHARS) + '\n…(документ обрезан)' : raw
   // Редактируем содержимое документа через secret-scanner перед отдачей модели.
+  const scan = scanText(text)
+  return scan.hits.length > 0
+    ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`
+    : scan.redacted
+}
+
+/**
+ * Прочитать .pdf и вернуть текстовый слой (unpdf → своя стриппнутая pdfjs, БЕЗ
+ * нативных и без сторонних зависимостей). Три страховки, потому что PDF —
+ * недоверенный вход:
+ *  · лимит РАЗМЕРА до чтения (как read_file);
+ *  · ТАЙМАУТ разбора — битый/злонамеренный PDF не держит главный процесс
+ *    бесконечно. unpdf/pdfjs асинхронны и уступают event loop'у, поэтому гонка с
+ *    таймером возвращает честную ошибку, а процесс продолжает отвечать. (Жёсткий
+ *    kill CPU-петли — worker/child — сознательно НЕ строим: office-разбор
+ *    docx/xlsx тоже in-process, а packaging worker'а в asar — отдельная работа;
+ *    residual-риск назван в отчёте.)
+ *  · СКАН без текстового слоя → ЯВНАЯ ошибка, а не пустая строка (пустота
+ *    неотличима от «в файле ничего нет» — тихая деградация).
+ */
+export async function readPdf(projectPath: string, relPath: string): Promise<string> {
+  if (isForbiddenPath(relPath)) {
+    throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+  }
+  const abs = await safeRealJoin(projectPath, relPath)
+  const st = await stat(abs)
+  if (st.size > MAX_PDF_BYTES) {
+    throw new Error(`Файл слишком большой: ${st.size} байт (лимит ${MAX_PDF_BYTES})`)
+  }
+  const buf = await readFile(abs)
+  const { extractText, getDocumentProxy } = await import('unpdf')
+  const parse = (async () => {
+    const pdf = await getDocumentProxy(new Uint8Array(buf))
+    const { text } = await extractText(pdf, { mergePages: true })
+    // mergePages:true даёт строку; каст защищает от расхождения типов unpdf с рантаймом.
+    const t = text as unknown as string | string[]
+    return Array.isArray(t) ? t.join('\n') : String(t ?? '')
+  })()
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error(
+      `Разбор PDF превысил ${PDF_PARSE_TIMEOUT_MS / 1000} c и остановлен — файл слишком сложный или битый.`
+    )), PDF_PARSE_TIMEOUT_MS)
+  })
+  let raw: string
+  try {
+    raw = await Promise.race([parse, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+  if (!raw.trim()) {
+    throw new Error(`В "${relPath}" нет текстового слоя — вероятно, скан или изображение. Распознавание (OCR) не поддерживается.`)
+  }
+  const text = raw.length > MAX_DOC_CHARS ? raw.slice(0, MAX_DOC_CHARS) + '\n…(документ обрезан)' : raw
   const scan = scanText(text)
   return scan.hits.length > 0
     ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`

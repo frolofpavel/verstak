@@ -362,6 +362,7 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
     case 'edit_spreadsheet':
     case 'read_spreadsheet':
     case 'read_document':
+    case 'read_pdf':
       return String(args.path ?? '')
     case 'connector_query':
       // Ровно то имя, которое будет исполнено (SEC-CMD-05): единый источник

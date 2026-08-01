@@ -1124,6 +1124,15 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'read_pdf',
+    description: 'Прочитать PDF (.pdf) и вернуть текстовый слой. Используй когда пользователь просит разобрать pdf-документ, счёт, договор, отчёт. Читается ТОЛЬКО текст (не изображения/формы). Скан без текстового слоя вернёт явную ошибку — распознавания (OCR) нет.',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Относительный путь к .pdf от корня проекта.' } },
+      required: ['path']
+    }
+  },
+  {
     name: 'edit_spreadsheet',
     description: 'Записать значения в ячейки Excel-файла (.xlsx). Читает файл, меняет указанные ячейки, сохраняет на место. Требует подтверждения пользователя как обычный write. Используй для точечной правки таблицы (исправить цену, заполнить столбец, обновить значение).',
     parameters: {
@@ -1535,7 +1544,8 @@ export function createFileTools(root: string, signal?: AbortSignal, opts: FileTo
           const lower = relPath.toLowerCase()
           const hint = lower.endsWith('.docx') ? ' Для .docx используй read_document.'
             : lower.endsWith('.xlsx') ? ' Для .xlsx используй read_spreadsheet.'
-            : ' Для не-текстовых форматов используй профильный инструмент (read_document/read_spreadsheet) или convert_file.'
+            : lower.endsWith('.pdf') ? ' Для .pdf используй read_pdf.'
+            : ' Для не-текстовых форматов используй профильный инструмент (read_document/read_spreadsheet/read_pdf) или convert_file.'
           throw new Error(`Файл "${relPath}" не текстовый (бинарные данные) — read_file читает только текст.${hint}`)
         }
         const raw = buf.toString('utf8')
@@ -1663,6 +1673,10 @@ export function createFileTools(root: string, signal?: AbortSignal, opts: FileTo
       if (name === 'read_document') {
         const { readDocument } = await import('./office')
         return readDocument(root, String(args.path ?? ''))
+      }
+      if (name === 'read_pdf') {
+        const { readPdf } = await import('./office')
+        return readPdf(root, String(args.path ?? ''))
       }
       throw new Error(`Неизвестный tool: ${name}`)
     }

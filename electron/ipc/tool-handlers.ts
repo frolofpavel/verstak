@@ -133,6 +133,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Office «beyond code» — чтение parallel-read (через readHandler), правка confirm-write
   'read_spreadsheet': readHandler,
   'read_document': readHandler,
+  'read_pdf': readHandler,
   'edit_spreadsheet': editSpreadsheetHandler
 }
 

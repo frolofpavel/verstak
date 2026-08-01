@@ -38,6 +38,7 @@ const RESEARCH_READ_TOOLS = [
   'memory_search',
   'read_spreadsheet',
   'read_document',
+  'read_pdf',
   'convert_file',
   'list_connectors',
   'connector_query',
