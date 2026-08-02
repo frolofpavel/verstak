@@ -46,7 +46,10 @@ const DevTaskPanel = lazy(() => import('./components/DevTaskPanel').then(m => ({
 const ProjectMapPanel = lazy(() => import('./components/ProjectMapPanel').then(m => ({ default: m.ProjectMapPanel })))
 const DecisionsPanel = lazy(() => import('./components/DecisionsPanel').then(m => ({ default: m.DecisionsPanel })))
 const BrainPanel = lazy(() => import('./components/BrainPanel').then(m => ({ default: m.BrainPanel })))
-const BrowserView = lazy(() => import('./components/BrowserView').then(m => ({ default: m.BrowserView })))
+// Браузер монтируется ВСЕГДА (см. PersistentBrowser): его инструменты должны
+// работать до открытия вкладки — требование №5/№2 ТЗ. Lazy, чтобы не утяжелять старт;
+// всегда-рендер ниже сам подтянет чанк на первом кадре.
+const PersistentBrowser = lazy(() => import('./components/PersistentBrowser').then(m => ({ default: m.PersistentBrowser })))
 const DesignView = lazy(() => import('./components/DesignView').then(m => ({ default: m.DesignView })))
 const SkillsView = lazy(() => import('./components/SkillsView').then(m => ({ default: m.SkillsView })))
 const AgentRunInspector = lazy(() => import('./components/AgentRunInspector').then(m => ({ default: m.AgentRunInspector })))
@@ -542,9 +545,13 @@ export function App() {
           </div>
         )}
         {activeView === 'feedback' && <Suspense fallback={<ViewFallback />}><FeedbackView /></Suspense>}
-        {activeView === 'browser' && (
-          <Suspense fallback={<ViewFallback />}><BrowserView /></Suspense>
-        )}
+        {/* Браузер рендерится БЕЗУСЛОВНО и скрыт, когда его вкладка не выбрана, —
+            иначе window.verstakBrowser нет и browser_navigate падает «вкладка не
+            открыта», пока человек сам не откроет вкладку. fallback=null: пока чанк
+            грузится, слот невидим и не мигает поверх активной вкладки. */}
+        <Suspense fallback={null}>
+          <PersistentBrowser active={activeView === 'browser'} />
+        </Suspense>
         {activeView === 'skills' && (
           <Suspense fallback={<ViewFallback />}>
           <SkillsView
