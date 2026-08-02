@@ -5,6 +5,7 @@ import { emitActivity, summarizeToolCall, awaitCommandConfirm } from './shared'
 import { addProofFrame } from '../../ai/proof-frames'
 import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
+import { execAwaitingBrowserApi, isBrowserNotReady } from './browser-ready'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -37,13 +38,20 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
       action = `const dataUrl = await api.screenshot();
                 return { url: api.getURL(), dataUrl };`
     }
+    // __vskNotReady (не __err): браузер ещё монтируется, window.verstakBrowser нет.
+    // Отличаем от настоящей ошибки, чтобы execAwaitingBrowserApi дождался готовности,
+    // а не сдался с первого раза (устранение стартовой гонки — browser-ready.ts).
     const snippet = `(async () => {
       const api = window.verstakBrowser;
-      if (!api) return { __err: 'Вкладка Browser не открыта — попроси пользователя открыть её' };
+      if (!api) return { __vskNotReady: true };
       const a = JSON.parse(${argsLiteral});
       ${action}
     })()`
-    const result = await ctx.sender.exec(snippet)
+    const result = await execAwaitingBrowserApi(snippet, { exec: (code) => ctx.sender.exec(code) })
+    if (isBrowserNotReady(result)) {
+      // API не появился за предел — браузер не поднялся (редкий отказ рендера, не «вкладка закрыта»).
+      return { id: call.id, name: call.name, result: '', error: 'Браузер ещё поднимался и не успел стать готов за отведённое время — повтори попытку.' }
+    }
     if (result && typeof result === 'object' && '__err' in result) {
       return { id: call.id, name: call.name, result: '', error: String((result as { __err: unknown }).__err) }
     }
