@@ -151,3 +151,45 @@ describe('vskMatchTarget — ожидание элемента (browser_wait_for
     expect(vskMatchTarget(':::нелепый:::')).toBe(false)  // не бросок — вернёт false
   })
 })
+
+// Домашняя страница стала about:blank (02.08, после 2.4.0): вкладка «Браузер»
+// открывается пустой, как browser-панель Claude Code, а не на Google. Пустой DOM —
+// штатный вход, а не край: инструменты обязаны реагировать ОСМЫСЛЕННО, а не падать.
+describe('about:blank — пустая страница: инструменты не падают, отвечают осмысленно', () => {
+  it('снимок пустого тела → count 0, список пуст, поколение помечено (не бросок)', () => {
+    document.body.innerHTML = ''  // about:blank: <body> пустой
+    const snap = vskSnapshot('g0')
+    expect(snap.count).toBe(0)
+    expect(snap.elements).toEqual([])
+    expect(document.documentElement.getAttribute(VSK_GEN_ATTR)).toBe('g0')
+  })
+
+  it('клик/ввод по номеру на пустой странице → честная ошибка «сделай снимок», не действие наугад', () => {
+    document.body.innerHTML = ''
+    vskSnapshot('g0')                       // снимок есть, но элементов нет
+    const r = vskResolveNumbered(1)         // общий резолвер клика И ввода по номеру
+    expect(r.ok).toBe(false)
+    expect((r as { ok: false; error: string }).error).toContain('№1')
+  })
+
+  it('ожидание любого элемента на пустой странице → false (не бросок, не зависание)', () => {
+    document.body.innerHTML = ''
+    expect(vskMatchTarget('button')).toBe(false)
+    expect(vskMatchTarget('готово')).toBe(false)
+  })
+
+  // browser_navigate уводит с about:blank как обычно: новый документ с контентом →
+  // новое поколение → инструменты снова работают в полную силу.
+  it('уход с about:blank на страницу с контентом → снимок и номер снова работают', () => {
+    document.body.innerHTML = ''
+    vskSnapshot('g0')
+    expect(vskResolveNumbered(1).ok).toBe(false)  // на blank номеров нет
+    // «Навигация»: пришла реальная страница, новое поколение.
+    document.body.innerHTML = `<button>Оформить</button>`
+    const snap = vskSnapshot('g1')
+    expect(snap.count).toBe(1)
+    const r = vskResolveNumbered(1)
+    expect(r.ok).toBe(true)
+    expect((r as { ok: true; el: Element }).el.textContent).toBe('Оформить')
+  })
+})

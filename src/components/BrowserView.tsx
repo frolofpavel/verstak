@@ -14,7 +14,12 @@ import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, type PageSnap
  * extension point — see useEffect below.
  */
 
-const HOMEPAGE = 'https://www.google.com/'
+// Пустая домашняя страница — как browser-панель Claude Code, а не поисковик.
+// Стартового Google быть не должно: он в одиночку создавал впечатление «это просто
+// хром», ради снятия которого построен весь браузер-пакет (VSK-BROWSER-B1).
+const HOMEPAGE = 'about:blank'
+// SEARCH_URL остаётся: он для РУЧНОГО ввода не-URL в адресную строку (удобство
+// человека), а не для стартового экрана. Убрать значит отнять функцию.
 const SEARCH_URL = 'https://www.google.com/search?q='
 
 // Minimal subset of the Electron webview API we use.
@@ -64,8 +69,10 @@ function normalizeUrl(input: string): string {
 
 export function BrowserView() {
   const webviewRef = useRef<Webview | null>(null)
-  const [urlInput, setUrlInput] = useState(HOMEPAGE)
-  const [currentUrl, setCurrentUrl] = useState(HOMEPAGE)
+  // Адресная строка пустая на старте (виден плейсхолдер) — «about:blank» в поле
+  // выглядел бы артефактом; browser-панель Claude Code тоже открывается пустой.
+  const [urlInput, setUrlInput] = useState('')
+  const [currentUrl, setCurrentUrl] = useState('')
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const [canBack, setCanBack] = useState(false)
