@@ -24,6 +24,7 @@ import { readFile } from 'fs/promises'
 import { basename } from 'path'
 import type { Connector, ConnectorInfo, ConnectorContext } from './types'
 import { scanText } from '../ai/secret-scanner'
+import { checkLocalRead } from './local-read'
 
 const TG_API = 'https://api.telegram.org'
 const RATE_LIMIT_WINDOW_MS = 60_000
@@ -142,6 +143,11 @@ async function sendDocument(token: string, args: Record<string, unknown>, ctx: C
   }
   const whitelistCheck = checkWhitelist(chatId, ctx)
   if (whitelistCheck) return whitelistCheck
+  // Блок №6: путь приходит от модели — гейт ДО чтения и до любого вызова Bot API.
+  if (documentPath) {
+    const denied = checkLocalRead(documentPath, ctx)
+    if (denied) return denied
+  }
   recordSend(chatId)
   if (documentPath) {
     const file = await readFile(documentPath)

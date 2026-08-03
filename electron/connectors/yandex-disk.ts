@@ -23,6 +23,7 @@
 import { readFile } from 'fs/promises'
 import { basename } from 'path'
 import type { Connector, ConnectorInfo, ConnectorContext } from './types'
+import { checkLocalRead } from './local-read'
 
 const API_BASE = 'https://cloud-api.yandex.net/v1/disk'
 const DEFAULT_ROOT = '/Verstak'
@@ -74,6 +75,10 @@ export function createYandexDiskConnector(): Connector {
 async function uploadFile(token: string, args: Record<string, unknown>, ctx: ConnectorContext): Promise<unknown> {
   const localPath = String(args.local_path ?? '')
   if (!localPath) return { error: 'bad-args', message: 'local_path обязателен' }
+  // Блок №6: путь приходит от модели — гейт ДО ensureDir/upload (иначе канал наружу
+  // уже открыт к моменту отказа).
+  const denied = checkLocalRead(localPath, ctx)
+  if (denied) return denied
   const root = String(args.root ?? DEFAULT_ROOT).replace(/\/+$/, '')
   const today = new Date().toISOString().slice(0, 10)
   const remoteName = String(args.remote_name ?? basename(localPath))

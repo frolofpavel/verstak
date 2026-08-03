@@ -215,6 +215,12 @@ export interface AgentRunContext {
   revisePlanId?: ToolContext['revisePlanId']
   /** VSK-PRODUCT-A1 3b: набор материалов прогона + источник. null → нечего сводить. */
   materials?: MaterialsRunContext | null
+  /** Этап 1а headless: unattended-прогон — коннекторы только на чтение (op-политика
+   *  connector-readonly.ts в handler'е). Десктопный ai:send поле не передаёт (undefined). */
+  readOnlyConnectors?: boolean
+  /** Этап 1а headless: куда класть артефакты с save_to='downloads' — на сервере
+   *  homedir сервис-юзера не годится. undefined → прежний defaultDownloadsDir(). */
+  artifactsDownloadsDir?: string
 }
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
@@ -231,6 +237,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   } = ctx
   // VSK-PRODUCT-A1 3b: захватываем ДО петли — внутри неё `ctx` затеняется ToolContext.
   const materialsCtx = ctx.materials ?? null
+  // Этап 1а headless: те же поля, тот же захват до петли (затенение ctx).
+  const readOnlyConnectorsCtx = ctx.readOnlyConnectors
+  const artifactsDownloadsDirCtx = ctx.artifactsDownloadsDir
   // Исходы read-вызовов набора «папка» за прогон (для 'attachments' не используются —
   // там исход из конвейера). Несопоставленный успех уйдёт в «вне набора», не в тревогу.
   const materialReadOutcomes: ReadOutcome[] = []
@@ -1116,6 +1125,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
+      // Этап 1а headless: read-only политика коннекторов + серверный каталог «downloads».
+      readOnlyConnectors: readOnlyConnectorsCtx, artifactsDownloadsDir: artifactsDownloadsDirCtx,
       // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
       resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.

@@ -98,6 +98,9 @@ export interface ToolContext {
    *  (op-level политика). Пишущие/выполняющие коннекторы (ssh/telegram send/вебхуки)
    *  блокируются без надзора. См. connector-readonly.ts. */
   readOnlyConnectors?: boolean
+  /** Этап 1а headless: каталог для артефактов save_to='downloads' на сервере
+   *  (undefined → defaultDownloadsDir десктопа). */
+  artifactsDownloadsDir?: string
   /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
    *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
   autoApprove?: import('../../ai/mode-policy').AutoApprove

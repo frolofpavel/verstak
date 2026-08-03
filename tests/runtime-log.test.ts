@@ -1,9 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
-import { tmpdir } from 'os'
+import { describe, it, expect } from 'vitest'
 
-// runtime-log тянет electron (app/ipcMain) на загрузке — мокаем.
-vi.mock('electron', () => ({ app: { getPath: () => tmpdir() }, ipcMain: { handle: () => {} } }))
-
+// Мок electron снят вместе с его причиной (Этап 1а headless): runtime-log больше не
+// тянет electron на загрузке — это стережёт tests/runtime-log-headless.test.ts.
 const { sanitize } = await import('../electron/runtime-log')
 
 describe('runtime-log sanitize — редакция ЗНАЧЕНИЙ, не только по имени ключа (1.9.8 #6)', () => {

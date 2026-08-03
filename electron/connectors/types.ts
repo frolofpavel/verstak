@@ -46,6 +46,14 @@ export interface ConnectorContext {
   getSecret: (key: string) => string | null
   /** Get the abort signal so a long-running query can be cancelled. */
   signal: AbortSignal
+  /**
+   * Корни, внутри которых коннектору разрешено читать ЛОКАЛЬНЫЕ файлы по пути из
+   * аргументов модели (telegram send_document, yandex-disk upload_file). Задан —
+   * путь обязан лежать внутри (см. assertLocalReadAllowed). Не задан (десктоп) —
+   * ограничения по корням нет: пользователь шлёт свой файл откуда угодно. Секрето-
+   * файлы (.env, *.key, creds*.json) запрещены ВСЕГДА, независимо от этого поля.
+   */
+  allowedReadRoots?: string[]
 }
 
 export interface Connector {

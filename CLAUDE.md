@@ -41,6 +41,10 @@
 electron/                  ← main process (Node.js)
 ├── main.ts                ← entry: window, IPC регистрация, db open
 ├── preload.ts             ← contextBridge: window.api для renderer
+├── runtime-log.ts         ← ЛОГГЕР БЕЗ ELECTRON (ленивый app.getPath + configureRuntimeLogDir).
+│                             Его импортируют runner'ы — держать свободным от top-level
+│                             `import ... from 'electron'`, иначе ядро не грузится в чистом Node
+├── runtime-log-ipc.ts     ← ipcMain-часть логгера (только десктоп)
 ├── ai/                    ← провайдеры + ядро агентной логики
 │   ├── skills/              ← V3: skill loader + frontmatter + 3 built-in + loaders registry
 │   ├── artifacts.ts         ← generate_html / generate_docx (docx npm)
@@ -104,7 +108,20 @@ electron/                  ← main process (Node.js)
     ├── telegram.ts          ← Telegram Bot API
     ├── bitrix24.ts          ← Битрикс24 incoming webhook
     ├── yandex-direct.ts     ← Я.Директ OAuth + Reports API (sync polling)
-    └── yandex-disk.ts       ← Я.Диск OAuth для шеринга артефактов с клиентами
+    ├── yandex-disk.ts       ← Я.Диск OAuth для шеринга артефактов с клиентами
+    └── local-read.ts        ← гейт локальных чтений по пути ИЗ АРГУМЕНТОВ МОДЕЛИ
+                                (telegram send_document, yandex-disk upload_file):
+                                ctx.allowedReadRoots + вечный запрет секрето-файлов
+
+electron/headless/         ← ВТОРОЙ потребитель ядра: Node-сервис без Electron (Этап 1а
+│                             облачного Verstak; карта — docs/headless-core-recon-2026-08-04.md)
+├── host.ts                ← bootstrap: openDb(per-user) + AiDeps-аналог + startTask →
+│                             ПОЛНЫЙ runApiConversation. Десктоп и electron/ipc/* не трогает
+├── server.ts              ← HTTP/SSE: POST /tasks, GET /tasks/{runId}[/events|/timeline],
+│                             POST .../stop|suspend|resolve. Канал по runId, не sendId
+├── secure-storage.ts      ← замена safeStorage: AES-256-GCM, мастер-ключ из env/KMS
+├── tenants.ts             ← мульти-тенантность: sqlite на пользователя + HKDF-ключ на тенанта
+└── stage1.ts              ← allowlist Этапа 1 (fail-closed) + deny ssh-коннектора
 
 src/                      ← renderer (React 19)
 ├── App.tsx                ← composition root + Onboarding + Toast + Preview
@@ -260,8 +277,8 @@ npm run dist:win     # NSIS + portable .exe
   Третий аргумент `it()` — исключение: он для того и существует, чтобы превышать
   глобальный.
 - **Прогон, собравший МЕНЬШЕ тестов, чем эталон, — не вердикт, а оборванный
-  запуск.** Эталон: `numTotalTests` = **4567**
-  (4553 passed + 14 skipped); до него 4558, 4553, 4544, 4536, 4529, 4527, 4515, 4509, 4506, 4503, 4502, 4497, 4487, 4479, 4469, 4448, 4426, 4418, 4406, 4400, 4395, 4385, 4377, 4370, 4364, 4358, 4353, 4348, 4321, 4310, 4290, 4285, 4278, 4274, 4267, 4256, 4237, 4212.
+  запуск.** Эталон: `numTotalTests` = **4653**
+  (4638 passed + 15 skipped, Этап 1а headless); до него 4606, 4567, 4558, 4553, 4544, 4536, 4529, 4527, 4515, 4509, 4506, 4503, 4502, 4497, 4487, 4479, 4469, 4448, 4426, 4418, 4406, 4400, 4395, 4385, 4377, 4370, 4364, 4358, 4353, 4348, 4321, 4310, 4290, 4285, 4278, 4274, 4267, 4256, 4237, 4212.
   (Пик 4501 держался недолго: пин `plan-directive-in-prompt` снят вместе с
   отменой аудит-директивы — см. §4.1, коммит снятия.)
   Эталон живёт константой

@@ -17,8 +17,11 @@ import { pushConversationSupplement } from '../ai/runner-supplements'
  * Резолв pending-подтверждения. Если рендерер знает sendId (Chat.tsx хранит его после
  * ai:send) — строгий поиск по скоуп-ключу: параллельные прогоны не резолвят чужое.
  * Иначе — обратная совместимость со старыми путями рендерера: скан по суффиксу callId.
+ *
+ * export (Этап 1а headless): headless-сервер резолвит те же pending-реестры через HTTP —
+ * алгоритм обязан остаться ровно одним (см. шапку файла), поэтому экспорт, а не копия.
  */
-function resolvePending<T>(
+export function resolvePending<T>(
   map: Map<string, { sendId: number; resolve: (value: T) => void }>,
   callId: string,
   sendId: number | undefined,

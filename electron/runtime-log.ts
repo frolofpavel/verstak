@@ -1,7 +1,14 @@
-import { app, ipcMain } from 'electron'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { createRequire } from 'module'
 import { redactForDisplay } from './ai/secret-scanner'
+
+// Headless-контур (Этап 1а, docs/headless-core-recon-2026-08-04.md §1): этот модуль
+// импортируют runner-api/runner-plain, поэтому он обязан грузиться в чистом Node без
+// electron. app.getPath берём ЛЕНИВО через createRequire: в headless require('electron')
+// либо кидает (пакета нет), либо отдаёт строку-путь к бинарю — оба случая уходят в
+// фолбэк. ipcMain-регистрация вынесена в runtime-log-ipc.ts тем же движением.
+const nodeRequire = createRequire(import.meta.url)
 
 const MAX_LOG_BYTES = 10 * 1024 * 1024
 const RETENTION_DAYS = 14
@@ -10,12 +17,26 @@ const REDACT_KEY = /api[_-]?key|token|secret|password|authorization|cookie|crede
 type LogLevel = 'info' | 'warn' | 'error'
 type LogData = Record<string, unknown>
 
-function baseDir(): string {
+let configuredBaseDir: string | null = null
+
+/** Явная конфигурация каталога логов (headless-хост). Побеждает electron-путь. */
+export function configureRuntimeLogDir(dir: string): void {
+  configuredBaseDir = dir
+}
+
+function electronLogsDir(): string | null {
   try {
-    return join(app.getPath('userData'), 'logs')
+    const electron = nodeRequire('electron') as { app?: { getPath: (name: string) => string } } | string
+    if (typeof electron === 'string' || !electron?.app) return null
+    return join(electron.app.getPath('userData'), 'logs')
   } catch {
-    return join(process.env.APPDATA || process.cwd(), 'Verstak', 'logs')
+    return null
   }
+}
+
+function baseDir(): string {
+  if (configuredBaseDir) return configuredBaseDir
+  return electronLogsDir() ?? join(process.env.APPDATA || process.cwd(), 'Verstak', 'logs')
 }
 
 export function runtimeLogsDir(): string {
@@ -105,10 +126,11 @@ export function logRuntimeError(event: string, error: unknown, data: LogData = {
   logRuntime(event, { ...data, error }, 'error')
 }
 
-export function registerRuntimeLogIpc(): void {
-  ipcMain.handle('runtime-logs:info', () => ({
+/** Пути лог-файлов для UI-вкладки логов; IPC-обёртка живёт в runtime-log-ipc.ts. */
+export function runtimeLogFiles(): { dir: string; runtime: string; errors: string } {
+  return {
     dir: runtimeLogsDir(),
     runtime: logFile('info'),
     errors: logFile('error')
-  }))
+  }
 }
