@@ -8,6 +8,7 @@ import { parseRemoteSource, isRemoteSource, remoteProjectPath } from '../project
 import { runRemoteDoctor } from '../projects/remote-doctor'
 import { setActiveProjectPath } from '../state/project-state'
 import { ensureUserLayer, inspectUserLayer, PROJECT_RULE_CANDIDATES } from '../ai/user-layer'
+import { ensureCoreMemoryFiles } from '../ai/core-memory'
 import { warmProjectMaps } from '../ai/project-map'
 import type { Database } from 'better-sqlite3'
 import type { Projects } from '../storage/projects'
@@ -137,6 +138,10 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
       // (e.g. restored from last_project_path without going through pick()).
       projects.upsert(path)
       void ensureUserLayer(path).catch(() => { /* non-critical */ })
+      // VSK п.6: заводим файлы памяти (.verstak/MEMORY.md + USER.md) при открытии/
+      // создании проекта — раньше их не было до первого core_memory_* агента, и память
+      // «не работала». Идемпотентно (существующие не трогаем). Та же единая точка хука.
+      try { ensureCoreMemoryFiles(path, basename(path)) } catch { /* non-critical */ }
       // Открытие/смена активного проекта → фоном строим обе карты. Единая точка
       // хука: renderer setProject всегда зовёт setCurrent. Идемпотентно.
       void warmProjectMaps(path).catch(() => { /* non-critical, фон */ })

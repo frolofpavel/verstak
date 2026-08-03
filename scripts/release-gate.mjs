@@ -239,9 +239,11 @@ const GATE_MAX_WORKERS = 4
 // (маска auth-заголовков, URL-секретов; тела не уходят): +9 пинов (redact 6,
 // handler-на-пути 2, plan-mode 1) → 4594.
 // 03.08, VSK-BROWSER-B2 блок 3: dev_server по конфигу через gated process-registry:
-// +10 пинов (core 7: парс/резолв/URL/реюз; handler 3: SEC-CMD на пути + отказы) → 4604
-// = 4590 passed + 14 skipped (эталоны до: 4594, 4585, 4577, 4574, 4571, 4567).
-const EXPECTED_TOTAL_TESTS = 4604
+// +10 пинов (core 7: парс/резолв/URL/реюз; handler 3: SEC-CMD на пути + отказы) → 4604.
+// 03.08, VSK п.6: память заводится при создании проекта (ensureCoreMemoryFiles):
+// +2 пина (создаёт MEMORY.md+USER.md; идемпотентна — не затирает) → 4606
+// = 4592 passed + 14 skipped (эталоны до: 4604, 4594, 4585, 4577, 4574, 4571).
+const EXPECTED_TOTAL_TESTS = 4606
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

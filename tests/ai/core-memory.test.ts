@@ -8,7 +8,36 @@ import {
   loadCoreMemory,
   saveCoreMemoryBlock,
   replaceCoreMemory,
+  ensureCoreMemoryFiles,
 } from '../../electron/ai/core-memory'
+
+// VSK п.6: файлы памяти ЗАВОДЯТСЯ при создании/открытии проекта (раньше их не было
+// до первого core_memory_* агента — память «не работала»). Идемпотентно: существующую
+// память не затираем.
+describe('ensureCoreMemoryFiles — память заводится при создании проекта', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gg-core-seed-')) })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('на чистом проекте создаёт MEMORY.md + USER.md, и они читаются loadCoreMemory', () => {
+    const r = ensureCoreMemoryFiles(dir, 'Мой проект')
+    expect(r.created.sort()).toEqual(['MEMORY.md', 'USER.md'])
+    const files = readdirSync(join(dir, '.verstak'))
+    expect(files).toContain('MEMORY.md')
+    expect(files).toContain('USER.md')
+    const blocks = loadCoreMemory(dir)
+    expect(blocks.memory).toContain('Память проекта — Мой проект')
+    expect(blocks.user).toContain('О пользователе')
+  })
+
+  it('идемпотентна: существующую память НЕ затирает', () => {
+    saveCoreMemoryBlock(dir, 'memory', 'ВАЖНЫЙ ФАКТ проекта')
+    const r = ensureCoreMemoryFiles(dir, 'X')
+    expect(r.created).not.toContain('MEMORY.md')   // не пересоздан
+    expect(loadCoreMemory(dir).memory).toBe('ВАЖНЫЙ ФАКТ проекта')  // цел
+    expect(r.created).toContain('USER.md')          // а недостающий — завёлся
+  })
+})
 
 describe('core-memory — атомарный batch', () => {
   let dir: string

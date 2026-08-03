@@ -25,6 +25,37 @@ export interface CoreMemoryBlocks {
   user: string     // содержимое USER.md
 }
 
+/**
+ * VSK п.6: ЗАВЕСТИ файлы памяти при создании/регистрации проекта.
+ *
+ * ФАКТ (03.08): раньше `.verstak/MEMORY.md` и `USER.md` появлялись ТОЛЬКО когда агент
+ * впервые звал core_memory_* — до этого loadCoreMemory отдавал пустые строки, и память
+ * «не работала» с точки зрения человека. Теперь при заведении проекта файлы создаются
+ * сразу (с человекочитаемой шапкой-подсказкой), и агенту есть куда дописывать с первого
+ * хода. Идемпотентно: существующий файл НЕ трогаем (память не затираем).
+ */
+export function ensureCoreMemoryFiles(projectPath: string, projectName?: string): { created: string[] } {
+  const dir = join(projectPath, '.verstak')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const created: string[] = []
+  const memPath = join(dir, MEMORY_FILE)
+  if (!existsSync(memPath)) {
+    writeFileSync(memPath,
+      `# Память проекта${projectName ? ` — ${projectName}` : ''}\n\n` +
+      `<!-- Заметки агента о проекте: конвенции, находки, контекст окружения.\n` +
+      `     Наполняется по мере работы (core_memory_append/replace/remove). -->\n`, 'utf-8')
+    created.push(MEMORY_FILE)
+  }
+  const userPath = join(dir, USER_FILE)
+  if (!existsSync(userPath)) {
+    writeFileSync(userPath,
+      `# О пользователе\n\n` +
+      `<!-- Предпочтения, стиль общения, правила. Наполняется по мере работы. -->\n`, 'utf-8')
+    created.push(USER_FILE)
+  }
+  return { created }
+}
+
 export type CoreMemoryOperation =
   | { op: 'add'; text: string }
   | { op: 'replace'; oldText: string; newText: string }
