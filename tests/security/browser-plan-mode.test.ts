@@ -154,4 +154,16 @@ describe('SEC-CMD-06 · plan не кликает', () => {
     expect(exec, 'ожидание заблокировано в plan').toHaveBeenCalled()
     expect(res.error).toBeFalsy()
   })
+
+  // VSK-BROWSER-B2 блок 2: чтение консоли и сети — ЧТЕНИЕ, в plan работают. Зелёные
+  // ПОТОМУ, что идут через тот же browserHandler и НЕ в MUTATING_BROWSER_TOOLS.
+  it('НОВЫЙ ПУТЬ: browser_console_errors и browser_network в plan работают (чтение)', async () => {
+    for (const name of ['browser_console_errors', 'browser_network']) {
+      const { ctx, exec } = ctxFor('plan')
+      const res = await browserHandler.handle(call(name, {}), ctx)
+      expect(exec, `${name} заблокирован в plan`).toHaveBeenCalled()
+      expect(res.error, `${name} отвергнут`).toBeFalsy()
+      expect(MUTATING_BROWSER_TOOLS.includes(name), `${name} НЕ мутация`).toBe(false)
+    }
+  })
 })

@@ -6,6 +6,7 @@ import { addProofFrame } from '../../ai/proof-frames'
 import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
 import { execAwaitingBrowserApi, isBrowserNotReady } from './browser-ready'
+import { capConsoleErrors, capNetwork } from './browser-redact'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -37,6 +38,12 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     } else if (call.name === 'browser_wait_for') {
       // Ожидание элемента с честным таймаутом (не слепая пауза).
       action = `return await api.waitFor(String(a.query ?? ''), a.timeout_ms != null ? Number(a.timeout_ms) : undefined);`
+    } else if (call.name === 'browser_console_errors') {
+      // B2: сырой буфер консоли; фильтр «error/warning» + редакция — в main ниже.
+      action = `const raw = await api.consoleMessages(); return { url: api.getURL(), __raw: raw };`
+    } else if (call.name === 'browser_network') {
+      // B2: сырые записи сети; ограничение + редакция (маска auth-заголовков) — в main ниже.
+      action = `const raw = await api.networkRequests(); return { url: api.getURL(), __raw: raw };`
     } else if (call.name === 'browser_click') {
       action = `return await api.click(String(a.selector ?? ''));`
     } else {
@@ -59,6 +66,15 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     }
     if (result && typeof result === 'object' && '__err' in result) {
       return { id: call.id, name: call.name, result: '', error: String((result as { __err: unknown }).__err) }
+    }
+    // B2: РЕДАКЦИЯ консоли/сети в main (secret-scanner здесь, не в renderer) — сырьё
+    // модели не отдаём (требование №4). Ограниченный список ошибок/предупреждений.
+    if ((call.name === 'browser_console_errors' || call.name === 'browser_network') && result && typeof result === 'object') {
+      const r = result as { url?: unknown; __raw?: unknown }
+      const limit = call.args.limit != null ? Number(call.args.limit) : (call.name === 'browser_console_errors' ? 20 : 30)
+      const raw = Array.isArray(r.__raw) ? r.__raw : []
+      const safe = call.name === 'browser_console_errors' ? capConsoleErrors(raw, limit) : capNetwork(raw, limit)
+      return { id: call.id, name: call.name, result: { url: r.url ?? null, ...safe } }
     }
     return { id: call.id, name: call.name, result: result ?? '' }
   } catch (err) {
@@ -130,6 +146,8 @@ export const browserHandler: ToolHandler = {
                     : call.name === 'browser_click_by_number' ? `Браузер: клик по элементу №${String(call.args.n ?? '')}`
                     : call.name === 'browser_type_by_number' ? `Браузер: ввод в элемент №${String(call.args.n ?? '')}`
                     : call.name === 'browser_wait_for' ? `Браузер: ожидание «${String(call.args.query ?? '')}»`
+                    : call.name === 'browser_console_errors' ? `Браузер: чтение консоли`
+                    : call.name === 'browser_network' ? `Браузер: чтение сети`
                     : call.name === 'browser_click' ? `Браузер: клик по «${String(call.args.selector ?? '')}»`
                     : `Браузер: скриншот`
         // Для клика (обоих видов) в журнал едет и адрес страницы — см. summarizeToolCall.

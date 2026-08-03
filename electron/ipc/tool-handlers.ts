@@ -78,6 +78,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'browser_click_by_number': browserHandler,   // VSK-BROWSER-B1 этап 1
   'browser_type_by_number': browserHandler,    // VSK-BROWSER-B1 этап 1 (A)
   'browser_wait_for': browserHandler,          // VSK-BROWSER-B1 этап 1 (A)
+  'browser_console_errors': browserHandler,    // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
+  'browser_network': browserHandler,           // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
   'create_proof_video': createProofVideoHandler,  // Tier-2 #5
   'list_connectors': listConnectorsHandler,
   'connector_query': connectorQueryHandler,

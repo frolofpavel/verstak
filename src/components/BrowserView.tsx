@@ -56,6 +56,10 @@ declare global {
       typeByNumber: (n: number, text: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
       /** Ждать элемент (селектор/текст) с честным таймаутом. */
       waitFor: (query: string, timeoutMs?: number) => Promise<{ ok: true } | { ok: false; error: string }>
+      /** VSK-BROWSER-B2: сырой буфер консоли (редакция/фильтр в main). */
+      consoleMessages: () => Promise<Array<{ level: number; message: string; line?: number; source?: string }>>
+      /** VSK-BROWSER-B2: сырые записи сети из страницы (редакция в main). */
+      networkRequests: () => Promise<Array<Record<string, unknown>>>
       screenshot: () => Promise<string>  // data:image/png;base64,...
       getURL: () => string | null
       getTitle: () => string | null
@@ -71,8 +75,40 @@ function normalizeUrl(input: string): string {
   return SEARCH_URL + encodeURIComponent(trimmed)
 }
 
+// VSK-BROWSER-B2 блок 2: рекордер сети в СТРАНИЦЕ — оборачивает fetch/XHR, копит
+// метаданные запросов в window.__vskNet (метод/URL/статус/заголовки/длительность,
+// БЕЗ тел). Идемпотентен (гард __vskNetHooked — переинжект на dom-ready не двоит).
+// Сырьё читается networkRequests() и РЕДАКТИРУЕТСЯ в main (browser-redact) до модели.
+const NET_RECORDER = `(() => {
+  if (window.__vskNetHooked) return; window.__vskNetHooked = true;
+  window.__vskNet = window.__vskNet || [];
+  var CAP = 100;
+  var push = function(e){ window.__vskNet.push(e); if (window.__vskNet.length > CAP) window.__vskNet.splice(0, window.__vskNet.length - CAP); };
+  var now = function(){ return (window.performance && performance.now) ? performance.now() : 0; };
+  var hdrs = function(h){ var o = {}; try { if (h) { if (h.forEach) h.forEach(function(v,k){ o[k]=v; }); else for (var k in h) o[k]=h[k]; } } catch(e){} return o; };
+  var of = window.fetch;
+  if (of) window.fetch = function(input, init){
+    var url = (typeof input === 'string') ? input : (input && input.url) || '';
+    var method = (init && init.method) || (input && input.method) || 'GET';
+    var headers = hdrs((init && init.headers) || (input && input.headers));
+    var t0 = now();
+    return of.apply(this, arguments).then(function(res){ try { push({ method: method, url: url, status: res.status, headers: headers, durationMs: t0 ? now()-t0 : null }); } catch(e){} return res; },
+      function(err){ try { push({ method: method, url: url, status: 0, headers: headers, durationMs: t0 ? now()-t0 : null }); } catch(e){} throw err; });
+  };
+  var OX = window.XMLHttpRequest;
+  if (OX) {
+    var op = OX.prototype.open, se = OX.prototype.send, sh = OX.prototype.setRequestHeader;
+    OX.prototype.open = function(m,u){ this.__vsk = { method: m, url: u, headers: {} }; return op.apply(this, arguments); };
+    OX.prototype.setRequestHeader = function(k,v){ try { if (this.__vsk) this.__vsk.headers[k]=v; } catch(e){} return sh.apply(this, arguments); };
+    OX.prototype.send = function(){ var x = this, t0 = now(); this.addEventListener('loadend', function(){ try { if (x.__vsk) push({ method: x.__vsk.method, url: x.__vsk.url, status: x.status, headers: x.__vsk.headers, durationMs: t0 ? now()-t0 : null }); } catch(e){} }); return se.apply(this, arguments); };
+  }
+})()`
+
 export function BrowserView() {
   const webviewRef = useRef<Webview | null>(null)
+  // B2: буфер консоли — событие webview 'console-message' (без CDP). Хранит сырое,
+  // редакция и фильтр «только error/warning» — в main. Чистится на новой навигации.
+  const consoleBufRef = useRef<Array<{ level: number; message: string; line?: number; source?: string }>>([])
   // Адресная строка пустая на старте (виден плейсхолдер) — «about:blank» в поле
   // выглядел бы артефактом; browser-панель Claude Code тоже открывается пустой.
   const [urlInput, setUrlInput] = useState('')
@@ -104,13 +140,29 @@ export function BrowserView() {
       setError(ev.errorDescription ?? 'Не удалось загрузить страницу')
       setLoading(false)
     }
+    // B2: захват консоли + чистка на новой странице + (пере)инжект рекордера сети.
+    const CONSOLE_CAP = 200
+    const onConsole = (e: Event) => {
+      const ev = e as Event & { level?: number; message?: string; line?: number; sourceId?: string }
+      const buf = consoleBufRef.current
+      buf.push({ level: ev.level ?? 0, message: String(ev.message ?? ''), line: ev.line, source: ev.sourceId })
+      if (buf.length > CONSOLE_CAP) buf.splice(0, buf.length - CONSOLE_CAP)
+    }
+    const onNav = () => { consoleBufRef.current = [] }   // новая страница — свой лог
+    const onDomReady = () => { try { void wv.executeJavaScript(NET_RECORDER) } catch { /* страница между переходами */ } }
     wv.addEventListener('did-start-loading', onStart)
+    wv.addEventListener('did-start-loading', onNav)
     wv.addEventListener('did-stop-loading', onStop)
     wv.addEventListener('did-fail-load', onFail)
+    wv.addEventListener('console-message', onConsole)
+    wv.addEventListener('dom-ready', onDomReady)
     return () => {
       wv.removeEventListener('did-start-loading', onStart)
+      wv.removeEventListener('did-start-loading', onNav)
       wv.removeEventListener('did-stop-loading', onStop)
       wv.removeEventListener('did-fail-load', onFail)
+      wv.removeEventListener('console-message', onConsole)
+      wv.removeEventListener('dom-ready', onDomReady)
     }
   }, [])
 
@@ -259,6 +311,19 @@ export function BrowserView() {
           await new Promise(r => setTimeout(r, 200))
         }
         return { ok: false, error: `Элемент «${query}» не появился за ${Math.round(budget / 1000)} с.` }
+      },
+      // B2: сырой буфер консоли (renderer) — фильтр «error/warning» + редакция в main.
+      async consoleMessages() {
+        return consoleBufRef.current.slice()
+      },
+      // B2: сырые записи сети из window.__vskNet (страница) — редакция в main.
+      async networkRequests() {
+        const wv = webviewRef.current
+        if (!wv) return []
+        try {
+          const r = await wv.executeJavaScript('(window.__vskNet || [])')
+          return Array.isArray(r) ? r : []
+        } catch { return [] }
       },
       async screenshot() {
         const wv = webviewRef.current
