@@ -3,7 +3,7 @@
 // VSK-BROWSER-B1 этап 1: ядро структурного снимка с нумерацией + клик по номеру.
 // Прогоняется в jsdom — тот же исходник, что инжектится в страницу (§3.1).
 import { describe, it, expect, beforeEach } from 'vitest'
-import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, VSK_GEN_ATTR, VSK_EL_ATTR } from '../../shared/browser-snapshot'
+import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, VSK_GEN_ATTR, VSK_EL_ATTR } from '../../shared/browser-snapshot'
 
 beforeEach(() => {
   document.documentElement.removeAttribute(VSK_GEN_ATTR)
@@ -191,5 +191,84 @@ describe('about:blank — пустая страница: инструменты 
     const r = vskResolveNumbered(1)
     expect(r.ok).toBe(true)
     expect((r as { ok: true; el: Element }).el.textContent).toBe('Оформить')
+  })
+})
+
+// VSK-BROWSER-B2: browser_find — ОСНОВНОЙ способ адресации (замер 02.08: экономит
+// 91–99% против полного снимка). Ищет по снятому снимку, отдаёт совпадения с ИХ
+// номерами — годными для клика/ввода через ТОТ ЖЕ vskResolveNumbered (второго нет).
+describe('vskFind — поиск элементов по запросу (основной путь адресации)', () => {
+  it('находит по видимой подписи → совпадение с номером, годным для клика (тот же резолвер)', () => {
+    document.body.innerHTML = `
+      <a href="/x">Открыть</a>
+      <button>Сохранить черновик</button>
+      <button>Отправить</button>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'сохранить', 10)
+    expect(r.count).toBe(1)
+    expect(r.matches[0].name).toBe('Сохранить черновик')
+    // Номер совпадения адресуется тем же резолвером — без второго резолвера (требование).
+    const resolved = vskResolveNumbered(r.matches[0].n)
+    expect(resolved.ok).toBe(true)
+    expect((resolved as { ok: true; el: Element }).el.textContent).toBe('Сохранить черновик')
+  })
+
+  it('находит по роли (link) — несколько совпадений', () => {
+    document.body.innerHTML = `<a href="/a">A</a><a href="/b">B</a><button>C</button>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'link', 10)
+    expect(r.count).toBe(2)
+    expect(r.matches.every(m => m.role === 'link')).toBe(true)
+  })
+
+  it('ничего не нашлось → честный пустой результат с подсказкой сделать снимок (не молчание)', () => {
+    document.body.innerHTML = `<button>Сохранить</button>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'оплатить', 10)
+    expect(r.count).toBe(0)
+    expect(r.matches).toEqual([])
+    expect(r.hint).toContain('browser_snapshot')
+  })
+
+  it('пустой запрос → 0 совпадений + подсказка, не бросок', () => {
+    document.body.innerHTML = `<button>Сохранить</button>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, '   ', 10)
+    expect(r.count).toBe(0)
+    expect(r.hint).toBeTruthy()
+  })
+
+  it('совпадений больше лимита → truncated + отдаём ровно limit, totalHits честный', () => {
+    document.body.innerHTML = Array.from({ length: 8 }, (_, i) => `<button>Пункт ${i}</button>`).join('')
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'пункт', 3)
+    expect(r.count).toBe(3)
+    expect(r.totalHits).toBe(8)
+    expect(r.truncated).toBe(true)
+  })
+})
+
+describe('vskCapSnapshot — top-N выдачи, но нумерация в DOM полная', () => {
+  it('элементов больше N → truncated, shown=N, но элемент за пределами N ВСЁ РАВНО кликается', () => {
+    document.body.innerHTML = Array.from({ length: 200 }, (_, i) => `<button>Кнопка ${i}</button>`).join('')
+    const snap = vskSnapshot('g1')     // нумерует ВСЕ 200
+    const capped = vskCapSnapshot(snap, VSK_SNAPSHOT_TOP_N)   // 150
+    expect(snap.count).toBe(200)
+    expect(capped.count).toBe(200)     // всего честно
+    expect(capped.shown).toBe(150)     // отдали top-N
+    expect(capped.truncated).toBe(true)
+    expect(capped.elements.length).toBe(150)
+    // Ключевое: элемент №180 не в выдаче, но в DOM пронумерован → резолвится (find/клик достанут).
+    const r = vskResolveNumbered(180)
+    expect(r.ok).toBe(true)
+    expect((r as { ok: true; el: Element }).el.textContent).toBe('Кнопка 179')
+  })
+
+  it('элементов ≤ N → truncated=false, показаны все', () => {
+    document.body.innerHTML = `<button>A</button><button>B</button>`
+    const snap = vskSnapshot('g1')
+    const capped = vskCapSnapshot(snap, VSK_SNAPSHOT_TOP_N)
+    expect(capped.truncated).toBe(false)
+    expect(capped.shown).toBe(2)
   })
 })

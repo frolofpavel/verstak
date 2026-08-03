@@ -179,3 +179,71 @@ export function vskMatchTarget(query: string): boolean {
   }
   return false
 }
+
+// VSK-BROWSER-B2: ПОРОГ top-N полного снимка. Число НЕ с потолка — из замера 03.08
+// (scratchpad-бенчмарк, три класса страниц: httpbin-форма 13 эл., alfa «Аккорд» 173,
+// M.Video-каталог 1091). Константа снимка ≈ 65 символов на элемент, поэтому:
+//   150 элементов ≈ 10k символов ≈ ~2.5k токенов — верхняя граница, ещё дешёвая.
+// Полный снимок каталога (1091 эл. → 73k символов ≈ ~18k токенов) слать каждый ход
+// разорительно и размывает внимание дешёвой модели. Поэтому МОДЕЛИ отдаём top-N с
+// `truncated`, а адресуется через browser_find (основной путь; замер: find экономит
+// 91–99% против полного снимка). При этом в СТРАНИЦЕ пронумерованы ВСЕ элементы —
+// клик/ввод по номеру и find работают за пределами N, обрезается только выдача.
+export const VSK_SNAPSHOT_TOP_N = 150
+
+/** Обрезанный для модели вид снимка: первые topN элементов + честный `truncated`.
+ *  DOM-нумерация НЕ трогается (обрезается только возвращаемый список) — поэтому
+ *  vskResolveNumbered находит и элемент с номером > topN. Чистая функция. */
+export interface CappedSnapshot {
+  gen: string
+  count: number        // всего интерактивных на странице
+  shown: number        // сколько вернули (≤ topN)
+  truncated: boolean   // count > topN → есть непоказанные, ищи через browser_find
+  elements: SnapshotElement[]
+}
+export function vskCapSnapshot(snap: PageSnapshot, topN: number): CappedSnapshot {
+  const n = Math.max(1, topN | 0)
+  const elements = snap.elements.slice(0, n)
+  return { gen: snap.gen, count: snap.count, shown: elements.length, truncated: snap.count > n, elements }
+}
+
+/** Результат browser_find: подходящие элементы с их НОМЕРАМИ из снимка (годны для
+ *  клика/ввода через тот же vskResolveNumbered). Пустой результат несёт подсказку. */
+export interface FindResult {
+  query: string
+  count: number        // сколько совпадений вернули (≤ limit)
+  totalHits: number    // сколько всего совпало (до обрезки limit)
+  total: number        // всего интерактивных на странице
+  truncated: boolean   // совпадений больше, чем вернули
+  matches: SnapshotElement[]
+  hint?: string
+}
+/**
+ * ОСНОВНОЙ способ адресации (замер 02.08: экономит 91–99% против полного снимка).
+ * Ищет по уже снятому снимку (все элементы пронумерованы) — совпадение по видимой
+ * подписи / роли / тегу. Номера совпадений — те же, что в снимке, поэтому
+ * browser_click_by_number / browser_type_by_number работают без второго резолвера.
+ * Ничего не нашлось → ЧЕСТНЫЙ пустой результат с подсказкой, а не молчание.
+ * Чистая функция (принимает результат vskSnapshot) — тестируется в jsdom, а в
+ * странице инжектится рядом с vskSnapshot.
+ */
+export function vskFind(snap: PageSnapshot, query: string, limit: number): FindResult {
+  const q = String(query || '').trim().toLowerCase()
+  const lim = Math.max(1, limit | 0)
+  if (!q) {
+    return { query: String(query || ''), count: 0, totalHits: 0, total: snap.count, truncated: false, matches: [],
+      hint: 'Пустой запрос: укажи, что искать (подпись/роль), или сделай browser_snapshot для полной карты.' }
+  }
+  const hits = snap.elements.filter(e =>
+    (e.name || '').toLowerCase().includes(q) ||
+    (e.role || '').toLowerCase().includes(q) ||
+    (e.tag || '').toLowerCase().includes(q))
+  const matches = hits.slice(0, lim)
+  return {
+    query: String(query), count: matches.length, totalHits: hits.length, total: snap.count,
+    truncated: hits.length > matches.length, matches,
+    hint: matches.length === 0
+      ? 'Ничего не нашлось по запросу — уточни подпись или сделай browser_snapshot для полной карты страницы.'
+      : undefined,
+  }
+}

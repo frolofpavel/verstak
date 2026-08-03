@@ -127,6 +127,17 @@ describe('SEC-CMD-06 · plan не кликает', () => {
     expect(res.error, 'снимок отвергнут').toBeFalsy()
   })
 
+  // VSK-BROWSER-B2: browser_find — ЧТЕНИЕ (основной путь адресации), в plan обязан
+  // работать. Зелёный ПОТОМУ, что find идёт через тот же browserHandler и НЕ в
+  // MUTATING_BROWSER_TOOLS (гейт на пути, просто вердикт для чтения — auto-accept).
+  it('НОВЫЙ ПУТЬ: browser_find в plan работает (чтение), но идёт через тот же гейт', async () => {
+    const { ctx, exec } = ctxFor('plan')
+    const res = await browserHandler.handle(call('browser_find', { query: 'отправить' }), ctx)
+    expect(exec, 'поиск заблокирован в plan').toHaveBeenCalled()
+    expect(res.error, 'поиск отвергнут').toBeFalsy()
+    expect(MUTATING_BROWSER_TOOLS.includes('browser_find'), 'find НЕ мутация — не должен быть в списке').toBe(false)
+  })
+
   // VSK-BROWSER-B1 A: ВВОД по номеру — мутация (заполнение формы меняет чужую
   // систему), в plan до страницы не доходит; ОЖИДАНИЕ — чтение, доходит.
   it('НОВЫЙ ПУТЬ: browser_type_by_number в plan НЕ доходит до страницы', async () => {

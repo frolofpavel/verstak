@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 // VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
 // §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
-import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, type PageSnapshot } from '../../shared/browser-snapshot'
+import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, type PageSnapshot, type CappedSnapshot, type FindResult } from '../../shared/browser-snapshot'
 
 /**
  * In-app browser. Uses Electron's <webview> tag (enabled via webviewTag: true
@@ -44,8 +44,12 @@ declare global {
       navigate: (url: string) => Promise<{ ok: true; url: string } | { ok: false; error: string }>
       readPage: (selector?: string) => Promise<string>
       click: (selector: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
-      /** VSK-BROWSER-B1 этап 1: структурный снимок с пронумерованными элементами. */
-      snapshot: () => Promise<PageSnapshot | { error: string }>
+      /** VSK-BROWSER-B1: структурный снимок. B2: отдаётся top-N с `truncated`
+       *  (в DOM пронумерованы ВСЕ — клик/find работают за пределами N). */
+      snapshot: () => Promise<CappedSnapshot | { error: string }>
+      /** VSK-BROWSER-B2: ОСНОВНОЙ путь адресации — найти элементы по запросу,
+       *  вернуть их номера (годны для клика/ввода). Пусто → подсказка. */
+      find: (query: string, limit?: number) => Promise<FindResult | { error: string }>
       /** Клик по номеру из последнего снимка; устаревший номер → честная ошибка. */
       clickByNumber: (n: number) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
       /** Ввод текста по номеру поля из последнего снимка (заполнение форм). */
@@ -165,10 +169,37 @@ export function BrowserView() {
         if (!wv) return { error: 'Browser view не активен' }
         // Нонс поколения генерим здесь (renderer), внутрь страницы — как аргумент.
         const gen = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-        const code = `(${vskSnapshot.toString()})(${JSON.stringify(gen)})`
+        // B2: нумеруем ВСЕ элементы (vskSnapshot), но модели отдаём top-N (vskCapSnapshot)
+        // с `truncated` — за пределами N адресуется через browser_find. Инжектим обе
+        // рядом (compose локальными именами — минификация имён не ломает инжект).
+        const code = `(() => {
+          const snapshot = ${vskSnapshot.toString()};
+          const cap = ${vskCapSnapshot.toString()};
+          return cap(snapshot(${JSON.stringify(gen)}), ${VSK_SNAPSHOT_TOP_N});
+        })()`
         try {
           const r = await wv.executeJavaScript(code)
-          return (r && typeof r === 'object') ? r as PageSnapshot : { error: 'снимок не удался' }
+          return (r && typeof r === 'object') ? r as CappedSnapshot : { error: 'снимок не удался' }
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) }
+        }
+      },
+      async find(query, limit) {
+        const wv = webviewRef.current
+        if (!wv) return { error: 'Browser view не активен' }
+        // ОСНОВНОЙ путь адресации: снимаем снимок (нумерует все) и фильтруем по запросу.
+        // Номера совпадений — те же, что в снимке → click/type по номеру работают через
+        // тот же vskResolveNumbered, второго резолвера нет. Инжектим vskSnapshot+vskFind.
+        const gen = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        const lim = Math.min(Math.max(1, limit ?? 30), 100)
+        const code = `(() => {
+          const snapshot = ${vskSnapshot.toString()};
+          const find = ${vskFind.toString()};
+          return find(snapshot(${JSON.stringify(gen)}), ${JSON.stringify(query)}, ${lim});
+        })()`
+        try {
+          const r = await wv.executeJavaScript(code)
+          return (r && typeof r === 'object') ? r as FindResult : { error: 'поиск не удался' }
         } catch (e) {
           return { error: e instanceof Error ? e.message : String(e) }
         }

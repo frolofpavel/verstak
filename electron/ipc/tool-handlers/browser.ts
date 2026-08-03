@@ -22,6 +22,11 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
       // VSK-BROWSER-B1 этап 1: структурный снимок с пронумерованными элементами.
       action = `const snap = await api.snapshot();
                 return { url: api.getURL(), title: api.getTitle(), ...snap };`
+    } else if (call.name === 'browser_find') {
+      // VSK-BROWSER-B2: ОСНОВНОЙ путь адресации — найти элементы по запросу и вернуть
+      // их номера (годны для клика/ввода). Дешевле полного снимка на 91–99% (замер 02.08).
+      action = `const r = await api.find(String(a.query ?? ''), a.limit != null ? Number(a.limit) : undefined);
+                return { url: api.getURL(), title: api.getTitle(), ...r };`
     } else if (call.name === 'browser_click_by_number') {
       // Клик по номеру ИЗ ПОСЛЕДНЕГО снимка. Устаревший номер (после навигации) →
       // честная ошибка из api.clickByNumber, а не угадывание.
@@ -121,6 +126,7 @@ export const browserHandler: ToolHandler = {
         const label = call.name === 'browser_navigate' ? `Браузер → ${url}`
                     : call.name === 'browser_read_page' ? `Браузер: прочитан текст`
                     : call.name === 'browser_snapshot' ? `Браузер: снимок страницы`
+                    : call.name === 'browser_find' ? `Браузер: поиск «${String(call.args.query ?? '')}»`
                     : call.name === 'browser_click_by_number' ? `Браузер: клик по элементу №${String(call.args.n ?? '')}`
                     : call.name === 'browser_type_by_number' ? `Браузер: ввод в элемент №${String(call.args.n ?? '')}`
                     : call.name === 'browser_wait_for' ? `Браузер: ожидание «${String(call.args.query ?? '')}»`
