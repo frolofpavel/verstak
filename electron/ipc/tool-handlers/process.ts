@@ -14,8 +14,14 @@ import {
   recordSmartApproveAudit,
 } from './command'
 
-function registry(ctx: Parameters<ToolHandler['handle']>[1]) {
+// Экспортированы для VSK-BROWSER-B2 блок 3 (dev_server): дев-сервер поднимается через
+// ТОТ ЖЕ gated путь, что spawn_process — реестр + резолв cwd + авторизация команды
+// (denylist + resolveDecision + confirm). Новый канал не строим, переиспользуем этот.
+export function processRegistryFor(ctx: Parameters<ToolHandler['handle']>[1]) {
   return ctx.processRegistry ?? globalProcessRegistry
+}
+function registry(ctx: Parameters<ToolHandler['handle']>[1]) {
+  return processRegistryFor(ctx)
 }
 
 function sameOrInside(parent: string, child: string): boolean {
@@ -23,7 +29,7 @@ function sameOrInside(parent: string, child: string): boolean {
   return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
 }
 
-function resolveProcessCwd(ctx: Parameters<ToolHandler['handle']>[1], cwd?: unknown): string {
+export function resolveProcessCwd(ctx: Parameters<ToolHandler['handle']>[1], cwd?: unknown): string {
   const root = realpathSync(ctx.projectPath)
   const raw = cwd ? String(cwd) : ctx.projectPath
   const candidate = isAbsolute(raw) ? raw : resolve(ctx.projectPath, raw)
@@ -34,7 +40,7 @@ function resolveProcessCwd(ctx: Parameters<ToolHandler['handle']>[1], cwd?: unkn
   return real
 }
 
-async function authorizeProcessCommand(call: Parameters<ToolHandler['handle']>[0], ctx: Parameters<ToolHandler['handle']>[1], command: string) {
+export async function authorizeProcessCommand(call: Parameters<ToolHandler['handle']>[0], ctx: Parameters<ToolHandler['handle']>[1], command: string) {
   const verdict = ctx.tools.classifyCommand(command)
   if (!verdict.allowed) {
     ctx.sender.send('ai:event', {

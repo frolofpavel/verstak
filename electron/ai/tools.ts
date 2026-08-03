@@ -165,6 +165,17 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'dev_server',
+    description: 'Поднять (или переиспользовать, если уже слушает порт) локальный dev-сервер ПО ИМЕНИ из конфига .verstak/dev-servers.json ([{name,command,port}]) и вернуть его URL (http://localhost:порт). Дальше проверяй его через browser_navigate + browser_console_errors. Запуск идёт через те же command safety gates, что run_command. Если сервер не начал слушать порт вовремя — вернётся ошибка с логом сборки. Имени нет в конфиге → честная ошибка с перечнем доступных.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Имя dev-сервера из .verstak/dev-servers.json.' }
+      },
+      required: ['name']
+    }
+  },
+  {
     name: 'process_status',
     description: 'Получить статус фонового процесса: running/completed/failed/killed, exitCode, runtimeMs и redacted outputTail.',
     parameters: {
