@@ -54,6 +54,7 @@ export type { SendId, TaggedSender, ConnectorRegistry, ToolContext, ToolMode, To
 import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './tool-handlers/artifacts'
 import { replanPlanHandler, reportStepOutcomeHandler, submitTaskContractHandler } from './tool-handlers/outcome'
 import { checklistAddHandler, checklistCompleteHandler, checklistListHandler } from './tool-handlers/checklist'
+import { spawnTaskSessionHandler } from './tool-handlers/spawn-task-session'
 
 // Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
 // write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
@@ -108,6 +109,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   // Verification Artifact (DoD) — перепрогон проверок, статус по exitCode
   'attest_verification': attestVerificationHandler,
   'delegate_task': delegateTaskHandler,
+  'spawn_task_session': spawnTaskSessionHandler,  // Задача 10 (оркестратор) — гейт по orchestrator_default в runner-api
   'oracle': oracleHandler,
   'review_diff': reviewDiffHandler,  // F5: git-diff-scoped review через критика
   'review_before_commit': reviewBeforeCommitHandler,  // Этап 4 E: гейт verify+ревью+autofix перед коммитом

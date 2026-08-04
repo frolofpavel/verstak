@@ -738,6 +738,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if (getSecretForDelegate?.('web_access') !== 'true') {
       allToolDefs = allToolDefs.filter(t => t.name !== 'web_fetch' && t.name !== 'web_search')
     }
+    // Задача 10 (оркестратор): spawn_task_session предлагается модели только при
+    // включённом orchestrator_default. Полярность opt-in (=== 'true') совпадает с
+    // defaultOn:false в src/lib/runtime-flags.ts — стережёт tests/lib/runtime-flags.test.ts.
+    // Флип дефолта в ON — последним коммитом, когда весь поток (спавн + карточка + возврат)
+    // собран; тогда это выражение станет !== 'false'.
+    const orchestratorDefaultOn = getSecretForDelegate?.('orchestrator_default') === 'true'
+    if (!orchestratorDefaultOn) {
+      allToolDefs = allToolDefs.filter(t => t.name !== 'spawn_task_session')
+    }
     // 2.0.8-F cache-диагностика: набор инструментов входит в кэшируемый префикс, поэтому его
     // дрейф инвалидирует кэш. Фиксируем сигнатуру ОДИН раз — на первом туре с инструментами
     // (последний тур намеренно без них, он не показателен).
