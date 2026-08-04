@@ -11862,6 +11862,47 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
 }
 
 /* === Memory Governance === */
+/* Задача 5: «Память ИИ» — постоянные заметки (core-файлы) + архив + указатель на откат. */
+.gg-memgov-undo-hint {
+  display: flex; gap: 9px; align-items: flex-start;
+  background: var(--accent-muted); border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md); padding: 10px 13px; margin-bottom: 16px;
+  font-size: var(--text-sm); color: var(--text-secondary);
+}
+.gg-memgov-undo-link {
+  background: transparent; border: none; padding: 0;
+  color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit;
+}
+.gg-memgov-undo-key {
+  display: inline-block; border: 1px solid var(--border-strong); border-radius: 4px;
+  padding: 0 5px; color: var(--text-primary); background: var(--bg-base);
+}
+.gg-memgov-section { margin-bottom: 20px; }
+.gg-memgov-section-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); margin-bottom: 3px;
+}
+.gg-memgov-section-count { color: var(--text-tertiary); font-weight: 400; font-size: var(--text-xs); }
+.gg-memgov-refresh { margin-left: auto; padding: 2px 8px; }
+.gg-memgov-section-hint { color: var(--text-tertiary); font-size: var(--text-xs); margin-bottom: 10px; }
+.gg-memgov-section-empty { color: var(--text-tertiary); font-size: var(--text-sm); padding: 10px 0; }
+.gg-corenotes { display: flex; flex-direction: column; gap: 10px; }
+.gg-corenote {
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); padding: 11px 13px;
+}
+.gg-corenote-head { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+.gg-corenote-file { font-size: var(--text-sm); color: var(--text-secondary); }
+.gg-corenote-badge {
+  font-size: 10.5px; padding: 1px 7px; border-radius: 20px;
+  border: 1px solid rgba(163,190,140,.4); color: var(--green);
+}
+.gg-corenote-edit { margin-left: auto; padding: 2px 9px; }
+.gg-corenote-textarea { width: 100%; font-family: var(--font-mono); font-size: var(--text-xs); }
+.gg-corenote-actions { display: flex; gap: 8px; margin-top: 8px; }
+.gg-corenote-body { font-size: var(--text-xs); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+.gg-corenote-body.is-empty { color: var(--text-tertiary); font-style: italic; }
+
 .gg-memgov-list { display: flex; flex-direction: column; gap: 10px; }
 
 .gg-memgov-card {
