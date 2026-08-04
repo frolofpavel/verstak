@@ -52,7 +52,6 @@ const BrainPanel = lazy(() => import('./components/BrainPanel').then(m => ({ def
 const PersistentBrowser = lazy(() => import('./components/PersistentBrowser').then(m => ({ default: m.PersistentBrowser })))
 const DesignView = lazy(() => import('./components/DesignView').then(m => ({ default: m.DesignView })))
 const SkillsView = lazy(() => import('./components/SkillsView').then(m => ({ default: m.SkillsView })))
-const AgentRunInspector = lazy(() => import('./components/AgentRunInspector').then(m => ({ default: m.AgentRunInspector })))
 const ProjectRulesView = lazy(() => import('./components/ProjectRulesView').then(m => ({ default: m.ProjectRulesView })))
 const MemoryGovernance = lazy(() => import('./components/MemoryGovernance').then(m => ({ default: m.MemoryGovernance })))
 const WorkflowView = lazy(() => import('./components/WorkflowView').then(m => ({ default: m.WorkflowView })))
@@ -518,8 +517,11 @@ export function App() {
         {activeView === 'tasks' && <Suspense fallback={<ViewFallback />}><TasksView /></Suspense>}
         {activeView === 'journal' && <Suspense fallback={<ViewFallback />}><JournalView /></Suspense>}
         {activeView === 'reminders' && <Suspense fallback={<ViewFallback />}><RemindersView /></Suspense>}
+        {/* Задача 1: «Прогоны» и «История работы AI» слиты в один раздел «История работы»
+            (AgentRunsPanel со вкладками Обзор/Диагностика). Старый роут `inspector`
+            ведёт на тот же слитый раздел — на случай сохранённых deep-link'ов. */}
         {activeView === 'inspector' && (
-          <Suspense fallback={<ViewFallback />}><AgentRunInspector /></Suspense>
+          <Suspense fallback={<ViewFallback />}><AgentRunsPanel /></Suspense>
         )}
         {activeView === 'project-rules' && (
           <Suspense fallback={<ViewFallback />}><ProjectRulesView /></Suspense>

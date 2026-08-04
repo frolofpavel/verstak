@@ -6,6 +6,7 @@ import type { AgentJob, AgentRun, AgentRunEvent, AgentRunDetail, SubSession, Ses
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
 import { summarizeAgentRunPipeline } from '../lib/agent-run-pipeline'
 import { EmptyState } from './EmptyState'
+import { RunDiagnostics } from './RunDiagnostics'
 
 function fmtDuration(start: number, end: number | null): string {
   const ms = (end ?? Date.now()) - start
@@ -338,6 +339,11 @@ function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onR
   onResume: (runId: string, status: string) => void
 }) {
   const t = useT()
+  // Слияние задачи 1: раскрытый прогон = две вкладки. «Обзор» — операционка (что делал:
+  // конвейер, таймлайн, суб-агенты, файлы, DoD, Proof Pack). «Диагностика» — форензика
+  // (маршрут requested/actual, откат к git-якорю, что реально ушло в модель) — переехала
+  // из бывшего раздела «История работы AI». Ленивая: пакет тянется при открытии вкладки.
+  const [tab, setTab] = useState<'overview' | 'diagnostics'>('overview')
   const cost = fmtCost(run.costCents)
   const liveProgress = formatLiveProgress(run, t)
   const lastActivityAge = fmtDuration(lastRunActivityAt(run), null)
@@ -403,7 +409,29 @@ function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onR
         </div>
       )}
       {run.error && <div className="gg-run-card-error" title={run.error}>⛔ {run.error}</div>}
-      {expanded && <RunDetail runId={run.runId} providerLabel={providerLabel} />}
+      {expanded && (
+        <div className="gg-run-detail-tabs">
+          <div className="gg-run-tabbar" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'overview'}
+              className={`gg-run-tab ${tab === 'overview' ? 'is-active' : ''}`}
+              onClick={() => setTab('overview')}
+            >Обзор</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'diagnostics'}
+              className={`gg-run-tab ${tab === 'diagnostics' ? 'is-active' : ''}`}
+              onClick={() => setTab('diagnostics')}
+            >Диагностика</button>
+          </div>
+          {tab === 'overview'
+            ? <RunDetail runId={run.runId} providerLabel={providerLabel} />
+            : <RunDiagnostics run={run} />}
+        </div>
+      )}
     </div>
   )
 }
@@ -520,7 +548,10 @@ export function AgentRunsPanel() {
   return (
     <div className="gg-panel">
       <div className="gg-panel-header">
-        <h2 className="gg-panel-title">{t.agentRuns.title}</h2>
+        {/* Слияние задачи 1: раздел «История работы» (бывшие «Прогоны» + «История работы AI»).
+            Заголовок захардкожен, как соседний «Расписание» в Sidebar и бывший заголовок
+            инспектора — чтобы не трогать общие i18n-файлы, которые сейчас правит другая линия. */}
+        <h2 className="gg-panel-title">История работы</h2>
         <div className="gg-panel-meta">
           {t.agentRuns.meta.replace('{total}', String(runs.length)).replace('{active}', String(activeCount))}
         </div>

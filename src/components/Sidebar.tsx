@@ -423,8 +423,11 @@ function NavButtons({ items, activeView, onSelect }: {
   )
 }
 
-const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'tasks-manager', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'skills', 'project-rules', 'memory-gov', 'inspector', 'agents', 'decisions'])
+// Задача 1: «История работы» (view `tasks-manager`) переехала из WORK в CONTROL, рядом
+// с «Журналом». `inspector` оставлен в наборе для подсветки секции при старых deep-link'ах
+// (роут инспектора теперь ведёт на тот же слитый раздел — см. App.tsx).
+const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'workflow'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'skills', 'project-rules', 'memory-gov', 'inspector', 'tasks-manager', 'agents', 'decisions'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -495,10 +498,12 @@ const DesignIcon = (
     <circle cx="11" cy="11" r="2" />
   </svg>
 )
-const InspectorIcon = (
+// «История работы» (слияние задачи 1: «Прогоны» + «История работы AI») — часы со стрелкой.
+const HistoryIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    <path d="M3 3v5h5" />
+    <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+    <path d="M12 7v5l3 2" />
   </svg>
 )
 const MemoryIcon = (
@@ -513,16 +518,6 @@ const AgentsIcon = (
     <circle cx="5" cy="17" r="2.5" />
     <circle cx="19" cy="17" r="2.5" />
     <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
-  </svg>
-)
-const TasksManagerIcon = (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="4" width="18" height="4" rx="1" />
-    <rect x="3" y="10" width="18" height="4" rx="1" />
-    <rect x="3" y="16" width="18" height="4" rx="1" />
-    <line x1="7" y1="6" x2="7" y2="6" />
-    <line x1="7" y1="12" x2="7" y2="12" />
-    <line x1="7" y1="18" x2="7" y2="18" />
   </svg>
 )
 const DecisionsIcon = (
@@ -570,16 +565,19 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   const WORK_NAV: NavItem[] = [
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
-    { id: 'tasks-manager', label: t.sidebar.tasksManager, icon: TasksManagerIcon },
     { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon, soon: true, soonReason: 'Пайплайны пока дорабатываются: нужен понятный сценарий создания, запуска и статусов задач' },
   ]
 
+  // Задача 1: один пункт «История работы» (прогоны агента) вместо двух — бывших
+  // «Прогоны» (WORK) и «История работы AI» (CONTROL). Стоит рядом с «Журналом»
+  // (действия над файлами): два имени различимы на слух — «работа» vs «журнал».
+  // Label захардкожен (как «Расписание») — общие i18n сейчас правит другая линия.
   const CONTROL_NAV: NavItem[] = [
     { id: 'reminders', label: t.sidebar.reminders, icon: CalendarIcon },
     { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },
     { id: 'project-rules', label: t.sidebar.projectRules, icon: ProjectRulesIcon },
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
-    { id: 'inspector', label: t.sidebar.inspector, icon: InspectorIcon },
+    { id: 'tasks-manager', label: 'История работы', icon: HistoryIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
     { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
     { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },
