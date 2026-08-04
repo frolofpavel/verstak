@@ -171,7 +171,9 @@ export interface PlanQualityV1 { score: number; status: 'pass' | 'revise' | 'blo
 export interface Plan { id: number; title: string; status: PlanStatus; createdAt: number; completedAt: number | null; contractRevision?: number | null; planRevision?: number; quality?: PlanQualityV1 | null; steps: PlanStep[] }
 
 /** Agency Workflows — каталожная карточка workflow'а. */
-export interface WorkflowSummary { id: string; name: string; description: string; icon: string | null; stepCount: number }
+export interface WorkflowSummary { id: string; name: string; description: string; icon: string | null; stepCount: number; source: 'built-in' | 'user'; userId: number | null }
+/** Результат workflows:save-from-run. */
+export type WorkflowSaveResult = { ok: true; id: number; name: string; stepCount: number } | { error: string; message: string }
 /** Состояние одного прогона workflow. */
 export interface WorkflowRunState { workflowId: string; status: 'pending' | 'running' | 'done' | 'error'; currentStep: number; startedAt: number; planId?: number; brief?: string }
 /** Результат workflows:start — готовый промпт + созданный план + состояние прогона. */
@@ -859,6 +861,8 @@ declare global {
       workflows: {
         list: () => Promise<WorkflowSummary[]>
         start: (workflowId: string, projectPath: string, brief: string) => Promise<WorkflowStartResult | { error: string; message: string }>
+        saveFromRun: (runId: string) => Promise<WorkflowSaveResult>
+        removeUser: (id: number) => Promise<{ ok: true }>
       }
       memory: {
         save(projectPath: string, type: string, content: string, tags: string[]): Promise<Memory>

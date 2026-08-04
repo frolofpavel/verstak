@@ -411,7 +411,10 @@ contextBridge.exposeInMainWorld('api', {
   workflows: {
     list: () => ipcRenderer.invoke('workflows:list'),
     start: (workflowId: string, projectPath: string, brief: string) =>
-      ipcRenderer.invoke('workflows:start', workflowId, projectPath, brief)
+      ipcRenderer.invoke('workflows:start', workflowId, projectPath, brief),
+    // Задача 7A: сохранить прогон как повторяемый workflow / удалить пользовательский.
+    saveFromRun: (runId: string) => ipcRenderer.invoke('workflows:save-from-run', runId),
+    removeUser: (id: number) => ipcRenderer.invoke('workflows:remove-user', id)
   },
   memory: {
     save: (projectPath: string, type: string, content: string, tags: string[]) =>

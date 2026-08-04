@@ -19789,6 +19789,14 @@ html[data-theme="light"] .gg-policy {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+/* Задача 7A: бейдж пользовательского workflow (сохранённого из прогона). */
+.gg-wfcat-card-badge {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
 .gg-wfcat-card-desc {
   font-size: var(--text-xs);
   color: var(--text-secondary);

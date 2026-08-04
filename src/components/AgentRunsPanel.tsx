@@ -72,6 +72,8 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   const [proofBusy, setProofBusy] = useState(false)
   const [captureMsg, setCaptureMsg] = useState<string | null>(null)
   const [captureBusy, setCaptureBusy] = useState(false)
+  const [wfMsg, setWfMsg] = useState<string | null>(null)
+  const [wfBusy, setWfBusy] = useState(false)
   const setPreviewArtifact = useProject(s => s.setPreviewArtifact)
 
   // Proof Pack — собрать доказательство прогона (proof.json + .html) и показать
@@ -136,6 +138,22 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
     }
     setCaptureBusy(false)
   }, [detail])
+
+  // Задача 7A: СОХРАНИТЬ прогон как повторяемый workflow (три глагола плана 7:
+  // сохранить у прогона → запустить из каталога → статусы из конвейера). Имя из
+  // прогона, шаги из его плана. Пустой план → честный отказ из main.
+  const saveAsWorkflow = useCallback(async () => {
+    setWfBusy(true); setWfMsg(null)
+    try {
+      const res = await window.api.workflows.saveFromRun(runId)
+      setWfMsg('error' in res
+        ? (res.message ?? 'Не удалось сохранить')
+        : `✓ Workflow «${res.name}» сохранён (${res.stepCount} ${res.stepCount === 1 ? 'шаг' : 'шагов'}) — запусти из раздела Workflows`)
+    } catch {
+      setWfMsg('Не удалось сохранить workflow')
+    }
+    setWfBusy(false)
+  }, [runId])
 
   const load = useCallback(async () => {
     try {
@@ -207,8 +225,18 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
         >
           ⭐ {captureBusy ? 'Сохраняю…' : 'В скилл'}
         </button>
+        <button
+          type="button"
+          className="gg-btn gg-btn-sm"
+          onClick={() => void saveAsWorkflow()}
+          disabled={wfBusy}
+          title="Сохранить этот прогон как повторяемый workflow (имя из прогона, шаги из его плана) — потом запускается из раздела Workflows одной кнопкой"
+        >
+          ⟳ {wfBusy ? 'Сохраняю…' : 'В workflow'}
+        </button>
         {proofMsg && <span className="gg-run-proof-msg">{proofMsg}</span>}
         {captureMsg && <span className="gg-run-proof-msg">{captureMsg}</span>}
+        {wfMsg && <span className="gg-run-proof-msg">{wfMsg}</span>}
       </div>
       <div className="gg-run-pipeline" aria-label="Agency pipeline">
         {pipelineStages.map((stage, index) => (
