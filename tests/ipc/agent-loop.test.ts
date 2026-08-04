@@ -151,6 +151,68 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
   })
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ЗАДАЧА 1 (a)+(в), main-side ДИСКРИМИНАТОР гипотезы (05.08).
+  //
+  // Гипотеза штаба: стрим, оборвавшийся ПОСЛЕ первого yield (with-retry.ts:173 —
+  // повтора нет, ошибка летит наружу), оставляет строку прогона 'running'; смерть
+  // якобы записывается лишь reconcileStale на следующем старте, оттого findResumable
+  // пуст и карточка врёт. Тест ПРОВЕРЯЕТ гипотезу на реальном loop'е, не подгоняя:
+  // спрашивает, ЧЕМ именно finish завершает прогон при mid-stream обрыве.
+  it('mid-stream обрыв ПОСЛЕ первого yield → finish("failed") в момент смерти, не running', async () => {
+    const runs = mockRuns()
+    const err = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })
+    const midBreak: ChatProvider = {
+      id: 'custom-openai', name: 'custom-openai', models: ['custom-openai'],
+      async *send(): AsyncGenerator<ChatEvent> {
+        yield { type: 'text', text: 'частичный ответ' }
+        throw err
+      },
+    }
+    await runApiConversation(...(args(dir, {
+      provider: midBreak, providerId: 'custom-openai', model: 'claude-opus-4-8',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'rmid',
+      // fallbackOpts НЕ задаём → без handoff, чистый путь обрыва
+    }) as Parameters<typeof runApiConversation>))
+    // ДИСКРИМИНАНТ: finish('failed') означает, что смерть записана В МОМЕНТ смерти —
+    // строка НЕ остаётся 'running', и findResumable её увидит. Тогда корень не в
+    // «статус остался running», а в стейл-списке resumableRuns рендера.
+    expect(runs.finish).toHaveBeenCalledTimes(1)
+    const [rid, status] = runs.finish.mock.calls[0]
+    expect(rid).toBe('rmid')
+    expect(status).toBe('failed')
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ЗАДАЧА 1 (a)+(в), A2: терминальный сигнал run-finalized + ПИН НА ПОРЯДОК.
+  //
+  // Гонка найдена рассуждением по номерам строк: finish() пишет статус в finally
+  // ПОСЛЕ того, как в рендер ушли 'error'/'done'. Сигнал перечитывания обязан
+  // уйти СТРОГО ПОСЛЕ finish() — иначе рендер перечитает БД со статусом 'running'
+  // и снова получит пусто. Этот пин падает, если кто-то подвинет эмиссию сигнала
+  // раньше finish(): стережём сам порядок, а не только «сигнал ушёл».
+  it('run-finalized эмитится СТРОГО ПОСЛЕ finish() — гонка «сигнал раньше статуса» под пином', async () => {
+    const runs = mockRuns()
+    const sender = makeSender()
+    const p = provider('p1', () => [{ type: 'text', text: 'привет' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1', sender,
+    }) as Parameters<typeof runApiConversation>))
+    const idx = sender.send.mock.calls.findIndex(
+      ([ch, pl]) => ch === 'ai:event' && (pl as { event?: { type?: string } })?.event?.type === 'run-finalized'
+    )
+    expect(idx, 'run-finalized должен эмититься на финализации').toBeGreaterThanOrEqual(0)
+    const ev = sender.send.mock.calls[idx][1] as { event: { type: string; runId: string; projectPath: string } }
+    expect(ev.event.runId).toBe('r1')
+    expect(ev.event.projectPath).toBe(dir)
+    // ПОРЯДОК: finish() записал статус ДО эмиссии сигнала.
+    expect(runs.finish).toHaveBeenCalledTimes(1)
+    const finishOrder = runs.finish.mock.invocationCallOrder[0]
+    const signalOrder = sender.send.mock.invocationCallOrder[idx]
+    expect(finishOrder, 'finish() обязан быть вызван ДО эмиссии run-finalized').toBeLessThan(signalOrder)
+  })
+
   it('Outcome refine gives one corrective turn, then fails closed without Task Contract', async () => {
     const runs = mockRuns()
     const sender = makeSender()

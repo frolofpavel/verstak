@@ -1590,6 +1590,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         costCents: costGuard?.current() ?? 0,
         clearCheckpointThrottle: id => checkpointThrottle.delete(id),
       })
+      // ЗАДАЧА 1 (a)+(в): терминальный сигнал СТРОГО ПОСЛЕ finalizeApiRun — то есть
+      // после agentRuns.finish(), который уже записал статус в БД. Рендер по нему
+      // перечитывает resumableRuns (findResumable). Без этого прогон, умерший в
+      // сессии, лежит в БД восстановимым, а список на экране остаётся стейл с
+      // открытия проекта → пустая карточка вместо баннера. Шлём на КАЖДУЮ
+      // финализацию (не только failed): одно правило, один источник правды —
+      // нормально завершённый прогон findResumable не вернёт сам. Порядок
+      // «сигнал после статуса» закреплён пином в tests/ipc/agent-loop.test.ts.
+      if (runId) {
+        sender.send('ai:event', { id: sendId, event: { type: 'run-finalized', runId, projectPath } })
+      }
     }
   }
 }

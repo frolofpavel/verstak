@@ -250,7 +250,11 @@ const GATE_MAX_WORKERS = 4
 // 04.08, оркестратор (spawn_task_session + seed + 7-й рантайм-флаг) → 4744.
 // 04.08, задача 1 дефект (b): честная карточка прерванного ответа
 // (buildInterruptedAnswerProgress не выдумывает причину) +4 пина → 4748.
-const EXPECTED_TOTAL_TESTS = 4748
+// 05.08, задача 1 (a)+(в) A2: run-finalized перечитывает resumableRuns без рестарта.
+// +2 харнес (mid-stream→finish('failed'); порядок «сигнал после статуса»),
+// +2 диспетчер (run-finalized → listResumable проекта / фолбэк на store.path),
+// +2 storage findResumable (done не предлагается; упавший в сессии предлагается) → 4754.
+const EXPECTED_TOTAL_TESTS = 4754
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
