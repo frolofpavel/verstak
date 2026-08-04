@@ -572,7 +572,6 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'tasks-manager', label: 'История работы', icon: HistoryIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
-    { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
     { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока требуют понятного пользовательского сценария' },
   ]
 

@@ -36,8 +36,8 @@ const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then
 const TasksView = lazy(() => import('./components/TasksView').then(m => ({ default: m.TasksView })))
 const FilesView = lazy(() => import('./components/FilesView').then(m => ({ default: m.FilesView })))
 const JournalView = lazy(() => import('./components/JournalView').then(m => ({ default: m.JournalView })))
-const ScheduledTasksView = lazy(() => import('./components/ScheduledTasksView').then(m => ({ default: m.ScheduledTasksView })))
-const RemindersView = lazy(() => import('./components/RemindersView').then(m => ({ default: m.RemindersView })))
+// Задача 8: «Напоминания» и «Расписание» слиты в один раздел с двумя вкладками.
+const ScheduleView = lazy(() => import('./components/ScheduleView').then(m => ({ default: m.ScheduleView })))
 const PlanView = lazy(() => import('./components/PlanView').then(m => ({ default: m.PlanView })))
 const FeedbackView = lazy(() => import('./components/FeedbackView').then(m => ({ default: m.FeedbackView })))
 const AgentsPanel = lazy(() => import('./components/AgentsPanel').then(m => ({ default: m.AgentsPanel })))
@@ -532,7 +532,7 @@ export function App() {
         </div>
         {activeView === 'tasks' && <Suspense fallback={<ViewFallback />}><TasksView /></Suspense>}
         {activeView === 'journal' && <Suspense fallback={<ViewFallback />}><JournalView /></Suspense>}
-        {activeView === 'reminders' && <Suspense fallback={<ViewFallback />}><RemindersView /></Suspense>}
+        {activeView === 'reminders' && <Suspense fallback={<ViewFallback />}><ScheduleView /></Suspense>}
         {/* Задача 1: «Прогоны» и «История работы AI» слиты в один раздел «История работы»
             (AgentRunsPanel со вкладками Обзор/Диагностика). Старый роут `inspector`
             ведёт на тот же слитый раздел — на случай сохранённых deep-link'ов. */}
@@ -552,7 +552,7 @@ export function App() {
           <Suspense fallback={<ViewFallback />}><MemoryGovernance /></Suspense>
         )}
         {activeView === 'plan' && <Suspense fallback={<ViewFallback />}><PlanView /></Suspense>}
-        {activeView === 'scheduler' && <Suspense fallback={<ViewFallback />}><ScheduledTasksView /></Suspense>}
+        {activeView === 'scheduler' && <Suspense fallback={<ViewFallback />}><ScheduleView /></Suspense>}
         {activeView === 'workflow' && (
           <div className="gg-workflow-scroll">
             <Suspense fallback={<ViewFallback />}>

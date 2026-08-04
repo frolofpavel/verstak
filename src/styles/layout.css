@@ -11376,6 +11376,17 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
 .gg-run-diagnostics { padding: 12px 14px; }
 .gg-run-diag-route { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* Задача 8: слитый раздел «Напоминания + Расписание» — вкладки над вложенной панелью. */
+.gg-schedule-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.gg-schedule-tabbar {
+  display: flex; gap: 2px; flex: none;
+  padding: 10px 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+.gg-schedule-body { flex: 1; min-height: 0; overflow: auto; }
+.gg-schedule-body > .gg-panel { min-height: 100%; }
+
 /* === Debug Packet === */
 .gg-run-head-row { display: flex; align-items: stretch; }
 .gg-run-head-row .gg-run-head { flex: 1; min-width: 0; }
