@@ -12,7 +12,7 @@
  *    read-вызовами в самом прогоне (runner-api), «не открывал» здесь осмысленно.
  */
 import { readdirSync, statSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import type { ChatMessage } from './types'
 import type { ReadOutcome } from './materials-summary'
 import { extractOfficeAttachment, isOfficeAttachment } from './attachment-text'
@@ -61,4 +61,50 @@ export function listFolderMaterials(root: string): string[] {
     try { if (statSync(abs).isFile()) out.push(abs) } catch { /* недоступный элемент пропускаем */ }
   }
   return out.sort()
+}
+
+function pluralDocs(n: number): string {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return 'документ'
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'документа'
+  return 'документов'
+}
+
+/**
+ * ЗАДАЧА 2, пункт 2: НАБОР материалов как ЯВНЫЙ ПЕРЕЧЕНЬ-ФАКТ для инъекции в контекст.
+ *
+ * Различие директива/данные — несущее (штаб): «прочитай все» — просьба, модели ей не
+ * следуют (доказано на автопланах, §4.1); а вот ФАКТ «материалы задачи: эти пять, с
+ * именами/типами/размерами» модель не может «не выполнить». Раньше файлы папки были
+ * растворены в карте проекта наравне с чем угодно — модель не знала, что вот эти пять
+ * назначены. Это не непослушание, а отсутствие информации; чиним информацией.
+ *
+ * СОДЕРЖИМОЕ файлов сюда НЕ кладём: на большой папке это разнесло бы контекст и деньги
+ * (а счётчик расхода на дешёвых моделях врёт — docs/cache-audit-2026-08-05.md). Контент
+ * читается read_file'ом, как сейчас. Строка-подсказка в конце — НЕ несущая: если модель
+ * читает набор и без неё, её можно снять без последствий; гарантию даёт не она, а пункт 3
+ * (недочитанное видно в сводке), см. materials-summary.ts.
+ */
+export function buildMaterialsManifest(items: string[]): string {
+  if (items.length === 0) return ''
+  const lines = [`## Материалы задачи (${items.length} ${pluralDocs(items.length)} в корне выбранной папки)`, '']
+  for (const abs of items) {
+    let sizeNote = ''
+    try { sizeNote = ` · ${(statSync(abs).size / 1024).toFixed(1)} КБ` } catch { /* недоступен — без размера */ }
+    const type = extname(abs).replace('.', '').toUpperCase() || '?'
+    lines.push(`- ${basename(abs)} · ${type}${sizeNote}`)
+  }
+  lines.push('')
+  // Подсказка НЕ несущая (см. док-строку выше): факт-перечень выше — вот что решает.
+  lines.push('_Это назначенный набор материалов задачи — прочитай их (read_file) перед сборкой отчёта. Чего не прочтёшь, будет отмечено в сводке._')
+  return lines.join('\n')
+}
+
+/** Дописать перечень-факт к ПОСЛЕДНЕМУ user-сообщению (первому, что увидит модель на
+ *  этом ходе). Пусто/нет user — возвращаем как есть. Чистая функция для пина. */
+export function appendMaterialsManifest(messages: ChatMessage[], manifest: string): ChatMessage[] {
+  if (!manifest) return messages
+  const idx = messages.map(m => m.role).lastIndexOf('user')
+  if (idx < 0) return messages
+  return messages.map((m, i) => i === idx ? { ...m, content: `${m.content}\n\n${manifest}` } : m)
 }

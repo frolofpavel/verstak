@@ -1123,6 +1123,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
 
     // Dispatch via tool-handlers registry. Each handler knows its own scheduling
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
+    // ЗАДАЧА 2: дефолт места сохранения артефакта — «туда, где человек найдёт».
+    // Папка материалов → её корень (alongside); вложения → Загрузки (downloads);
+    // без материалов → прежний project. Это ДЕФОЛТ на молчание модели (пропуск
+    // save_to), а не классификатор поверх неё: явный save_to модели перекрывает
+    // (см. generateDocxHandler). Половину развилки (вложения) добавил штаб —
+    // иначе A1-сценарий с приложенными файлами снова падал бы в .verstak.
+    const defaultDocxSaveTo =
+      materialsCtx?.source === 'folder' ? 'alongside' as const
+      : materialsCtx?.source === 'attachments' ? 'downloads' as const
+      : undefined
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
@@ -1136,6 +1146,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       // Этап 1а headless: read-only политика коннекторов + серверный каталог «downloads».
       readOnlyConnectors: readOnlyConnectorsCtx, artifactsDownloadsDir: artifactsDownloadsDirCtx,
+      defaultDocxSaveTo,
       // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
       resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.
