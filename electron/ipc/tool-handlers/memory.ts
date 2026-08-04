@@ -67,6 +67,8 @@ export const saveDecisionHandler: ToolHandler = {
       const revisitDays = typeof a.revisit_days === 'number' && a.revisit_days > 0 ? a.revisit_days : null
       const saved = ctx.saveDecision(ctx.projectPath, {
         sourceMessageId: null,
+        // Задача 7B: привязка решения к прогону — Решения становятся журналом «почему» у прогона.
+        runId: ctx.runId ?? null,
         title,
         userRequest: a.user_request ? String(a.user_request) : null,
         finalDecision: decision,

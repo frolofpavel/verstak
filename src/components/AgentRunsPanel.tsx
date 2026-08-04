@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
 import { useT } from '../i18n'
 import type { Translations } from '../i18n'
-import type { AgentJob, AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO } from '../types/api'
+import type { AgentJob, AgentRun, AgentRunEvent, AgentRunDetail, SubSession, SessionTodo, ProviderDescriptorDTO, DecisionRecord } from '../types/api'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
 import { summarizeAgentRunPipeline } from '../lib/agent-run-pipeline'
 import { EmptyState } from './EmptyState'
@@ -155,11 +155,18 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
     setWfBusy(false)
   }, [runId])
 
+  // Задача 7B: решения, привязанные к этому прогону (Решения = журнал «почему» у прогона).
+  const [runDecisions, setRunDecisions] = useState<DecisionRecord[]>([])
+
   const load = useCallback(async () => {
     try {
       const d = await window.api.agentRuns.get(runId)
       setDetail(d)
     } catch { /* IPC недоступен в dev */ }
+    try {
+      const decs = await window.api.brain.decisionsList()
+      setRunDecisions(decs.filter(x => x.runId === runId))
+    } catch { /* нет решений/IPC */ }
     setLoading(false)
   }, [runId])
 
@@ -348,6 +355,24 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
                   {todo.status === 'done' ? '✅' : todo.status === 'in_progress' ? '⏳' : todo.status === 'blocked' ? '⛔' : '○'}
                 </span>
                 <span className="gg-todo-title">{todo.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Задача 7B: Решения = журнал «почему», привязанный к прогону. Что агент решил
+          по ходу этого прогона и почему — видно здесь же, у прогона. */}
+      {runDecisions.length > 0 && (
+        <div className="gg-run-section">
+          <div className="gg-run-section-title">Решения прогона · {runDecisions.length}</div>
+          <div className="gg-run-decisions">
+            {runDecisions.map(d => (
+              <div key={d.id} className="gg-run-decision">
+                <div className="gg-run-decision-title">⚖️ {d.title}</div>
+                {d.finalDecision && <div className="gg-run-decision-what">{d.finalDecision}</div>}
+                {d.why && <div className="gg-run-decision-why">Почему: {d.why}</div>}
+                {d.confidence && <span className={`gg-run-decision-conf is-${d.confidence}`}>{d.confidence}</span>}
               </div>
             ))}
           </div>

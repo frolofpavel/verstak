@@ -1576,6 +1576,8 @@ export interface DecisionRecord {
   id: number
   projectPath: string
   sourceMessageId: string | null
+  /** Задача 7B: прогон, породивший решение (Решения = журнал «почему» у прогона). */
+  runId: string | null
   title: string
   userRequest: string | null
   finalDecision: string | null
@@ -1590,7 +1592,7 @@ export interface DecisionRecord {
   createdAt: number
   updatedAt: number
 }
-export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'projectPath' | 'createdAt' | 'updatedAt'>
+export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'projectPath' | 'createdAt' | 'updatedAt' | 'runId'> & { runId?: string | null }
 export interface PipelineBrief {
   goal: string
   constraints: string
