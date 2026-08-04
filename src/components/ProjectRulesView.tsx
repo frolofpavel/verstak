@@ -400,7 +400,6 @@ export function ProjectRulesView() {
             </svg>
           </div>
           <div>
-            <div className="gg-rules-kicker">Центр поведения AI</div>
             <h3>Настрой, как AI должен работать именно здесь</h3>
             <p>
               Этот раздел не запускает задачу. Он сохраняет постоянные инструкции проекта, которые Verstak будет добавлять к новым сообщениям в этом проекте
@@ -412,10 +411,15 @@ export function ProjectRulesView() {
         </button>
       </section>
 
+      {/* Задача 6: онбординг + готовые шаблоны свёрнуты в один ящик — важны один раз,
+          не должны весить как редактор (главная зона). Принцип: один экран — одно
+          главное действие, остальное тише и по требованию. */}
+      <details className="gg-rules-drawer">
+        <summary>➕ Добавить готовый блок из шаблона <span className="gg-rules-drawer-hint">— безопасный старт, стиль кода, границы</span></summary>
+
       <section className="gg-rules-section-card gg-rules-onboarding">
         <div className="gg-rules-section-head">
           <div>
-            <div className="gg-rules-kicker">Как начать</div>
             <h3>Безопасный сценарий для первого входа</h3>
           </div>
           <button type="button" className="gg-rules-outline-action" onClick={() => applyTemplate('base')}>
@@ -438,7 +442,6 @@ export function ProjectRulesView() {
       <section className="gg-rules-section-card">
         <div className="gg-rules-section-head">
           <div>
-            <div className="gg-rules-kicker">Быстрый старт</div>
             <h3>Выбери готовый блок</h3>
           </div>
           <span className="gg-rules-muted">Сначала можно посмотреть текст, потом добавить его в рабочие инструкции</span>
@@ -482,11 +485,12 @@ export function ProjectRulesView() {
           <pre className="gg-rules-preview is-template">{TEMPLATE_BLOCKS[selectedTemplate].content.trim()}</pre>
         </div>
       </section>
+      </details>
 
-      <section className="gg-rules-editor-card">
+      {/* Главная зона — редактор рабочих инструкций (то, ради чего заходят). */}
+      <section className="gg-rules-editor-card gg-rules-editor-primary">
         <div className="gg-rules-editor-head">
           <div>
-            <div className="gg-rules-kicker">Редактор</div>
             <h3>Рабочие инструкции</h3>
             <p>{editableSource ? `${editableSource.path} — всё, что написано в поле ниже, будет добавляться к новым задачам AI` : 'Файл будет создан в проекте'}</p>
           </div>
@@ -535,6 +539,9 @@ export function ProjectRulesView() {
         />
       </section>
 
+      {/* Проверка/предпросмотр/пояснения — вторичны, свёрнуты по требованию. */}
+      <details className="gg-rules-drawer">
+        <summary>Проверка, предпросмотр и как это работает</summary>
       <div className="gg-rules-review-grid">
         <section className="gg-rules-section-card">
           <div className="gg-rules-section-head">
@@ -582,6 +589,7 @@ export function ProjectRulesView() {
           <div><span>3</span>AI учитывает правила, скиллы, источники и ограничения</div>
         </div>
       </section>
+      </details>
 
       {message && <div className="gg-prov-toast is-ok" role="status">{message}</div>}
 

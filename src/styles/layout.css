@@ -6192,12 +6192,28 @@ body.gg-rail-toggling .gg-msg-actions {
 .gg-rules-identity-card,
 .gg-rules-section-card,
 .gg-rules-editor-card,
+.gg-rules-drawer,
 .gg-rules-advanced {
   border: 1px solid var(--rules-card-border);
   border-radius: 18px;
   background: var(--connector-identity-card, color-mix(in srgb, var(--bg-raised, var(--bg-surface)) 94%, var(--bg-base) 6%));
   box-shadow: var(--shadow-sm);
 }
+/* Задача 6: ящики (шаблоны, проверка) — свёрнуты по умолчанию; поведение как у
+   «Расширенных источников». Редактор — главная зона, выделен рамкой-акцентом. */
+.gg-rules-drawer { margin: 12px 0; overflow: hidden; }
+.gg-rules-drawer > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 13px 16px; color: var(--text-primary); font-weight: 600; cursor: pointer; list-style: none;
+}
+.gg-rules-drawer > summary::-webkit-details-marker { display: none; }
+.gg-rules-drawer > summary::before {
+  content: "›"; color: var(--accent); font-family: var(--font-mono); transition: transform 150ms ease;
+}
+.gg-rules-drawer[open] > summary::before { transform: rotate(90deg); }
+.gg-rules-drawer > section:first-of-type, .gg-rules-drawer > .gg-rules-review-grid { margin-top: 0; }
+.gg-rules-drawer-hint { color: var(--text-tertiary); font-weight: 400; font-size: var(--text-xs); }
+.gg-rules-editor-primary { border-color: var(--accent-border); }
 .gg-rules-identity-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
