@@ -60,6 +60,7 @@ function makeFakeHost() {
     },
     getSecret: () => null,
     setSecret: () => undefined,
+    deleteSecret: () => undefined,
     listRunEvents: (runId) => runId === 'run-fake-1'
       ? [{ kind: 'user_msg', label: null, detail: 'задача', createdAt: 1 }]
       : [],

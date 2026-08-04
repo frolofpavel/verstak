@@ -35,6 +35,10 @@ import { redactUrlSecrets } from '../ai/secret-scanner'
 const MAX_ENDPOINTS = 4
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
 
+/** Ключи эндпоинтов, кроме `_base` (он в requiresAnyOf и решает статус). */
+const HTTP_OPTIONAL_KEYS: string[] = Array.from({ length: MAX_ENDPOINTS }, (_, i) => i + 1)
+  .flatMap(i => [`http_endpoint_${i}_name`, `http_endpoint_${i}_auth`, `http_endpoint_${i}_paths`])
+
 interface EndpointConfig {
   name: string
   base: string
@@ -79,6 +83,9 @@ export function createHttpConnector(): Connector {
         label: 'Generic HTTP (REST)',
         kind: 'http-rest',
         requiresAnyOf: ['http_endpoint_1_base', 'http_endpoint_2_base', 'http_endpoint_3_base', 'http_endpoint_4_base'],
+        // На статус не влияют, но без `_name` эндпоинт не собирается (loadEndpoints),
+        // поэтому поверхность ключей объявлена целиком — иначе снаружи её не задать.
+        optional: HTTP_OPTIONAL_KEYS,
         status: 'ready',
         detail: 'до 4 пользовательских эндпоинтов'
       }

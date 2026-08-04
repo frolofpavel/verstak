@@ -7,6 +7,12 @@ import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import type { HeadlessHost, StartTaskOptions } from './host'
 import type { TenantRegistry } from './tenants'
 import { listWorkspaceFiles, resolveArtifactPath } from './artifacts'
+import {
+  applyConnectorSecrets,
+  clearConnectorSecrets,
+  listConnectorSecretViews,
+  type ConnectorSecretsResult
+} from './connector-secrets'
 
 // HTTP/SSE-транспорт headless-хоста (Этап 1а, блок №3 постановки; отчёт §3в).
 // Канал наружу ключуется runId (durable UUID), а не sendId (эфемерный int процесса):
@@ -132,6 +138,40 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     }
     const host = resolved.host
     const tenantKey = String(req.headers['x-verstak-tenant'] ?? '').trim() || '@single'
+
+    // --- Ключи коннекторов тенанта (задача W5) ---------------------------------
+    // Наружу ходят только ИМЕНА ключей. Тенант берётся из того же X-Verstak-Tenant,
+    // что и всё остальное, поэтому чужие ключи недостижимы по построению: хост уже
+    // выбран по заголовку, а sqlite у тенантов разные.
+
+    // GET /connectors — состав и готовность источников этого тенанта.
+    if (req.method === 'GET' && parts.length === 1 && parts[0] === 'connectors') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ connectors: listConnectorSecretViews(host) }))
+      return
+    }
+
+    // POST|DELETE /connectors/{id}/secrets — задать / снять ключи.
+    if (parts.length === 3 && parts[0] === 'connectors' && parts[2] === 'secrets'
+      && (req.method === 'POST' || req.method === 'DELETE')) {
+      const id = decodeURIComponent(parts[1])
+      const body = await readJsonBody(req)
+      const result: ConnectorSecretsResult = req.method === 'POST'
+        ? applyConnectorSecrets(host, id, body)
+        : clearConnectorSecrets(host, id, body)
+      if (result.ok) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(result.view))
+        return
+      }
+      // Запрещённый на сервере коннектор отвечает тем же 404, что несуществующий:
+      // разные коды сообщали бы, что ssh на сервере есть, просто закрыт.
+      const status = result.reason === 'not-found' ? 404 : 400
+      const error = result.reason === 'not-found' ? 'unknown connector' : result.message
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error }))
+      return
+    }
 
     // GET /tasks — задачи тенанта (durable, из agent_runs).
     if (req.method === 'GET' && parts.length === 1 && parts[0] === 'tasks') {

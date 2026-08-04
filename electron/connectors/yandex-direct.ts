@@ -36,6 +36,8 @@ export function createYandexDirectConnector(): Connector {
         label: 'Яндекс.Директ',
         kind: 'yandex_direct',
         requires: ['yandex_direct_token'],
+        // Логин клиента агентства: query() его читает, но без него работает свой аккаунт.
+        optional: ['yandex_direct_login'],
         status: 'ready',
         detail: 'OAuth token в settings (yandex_direct_token). Reports API — sync polling до 30s.'
       }

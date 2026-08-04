@@ -30,6 +30,7 @@ export function createSocialPublishConnector(): Connector {
         label: 'Social Publish',
         kind: 'social-publish',
         requiresAnyOf: ['telegram_bot_token', 'social_publish_vk_token', 'social_publish_webhooks'],
+        optional: ['social_publish_telegram_channels', 'social_publish_vk_group_id'],
         status: 'ready',
         detail: 'Постинг в Telegram-каналы, VK-группу, generic webhooks'
       }

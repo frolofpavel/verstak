@@ -44,6 +44,8 @@ export function createDaDataConnector(): Connector {
         label: 'DaData',
         kind: 'dadata',
         requires: ['dadata_api_key'],
+        // Нужен только для clean_address (Cleaner API); остальные операции без него.
+        optional: ['dadata_secret'],
         status: 'ready',
         detail: 'Контрагенты по ИНН, подсказки адресов/банков. Token в settings (dadata_api_key).'
       }

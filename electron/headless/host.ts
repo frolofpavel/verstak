@@ -129,6 +129,11 @@ export interface HeadlessHost {
   startTask: (opts: StartTaskOptions) => Promise<StartedTask>
   getSecret: (key: string) => string | null
   setSecret: (key: string, value: string) => void
+  /**
+   * Снять ключ тенанта. Именно удаление строки, а не запись пустого значения: иначе в
+   * settings оставался бы шифротекст снятого ключа, и «снял» отличалось бы от «нет».
+   */
+  deleteSecret: (key: string) => void
   /** Читает durable-таймлайн прогона из БД (переживает рестарт процесса). */
   listRunEvents: (runId: string) => Array<{ kind: string; label: string | null; detail: string | null; createdAt: number }>
   getRunStatus: (runId: string) => string | null
@@ -356,6 +361,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     startTask,
     getSecret,
     setSecret: (key, value) => settings.setSecret(key, value),
+    deleteSecret: (key) => { db.prepare('DELETE FROM settings WHERE key = ?').run(key) },
     listRunEvents: (runId) => (db.prepare(
       'SELECT kind, label, detail, created_at as createdAt FROM agent_run_events WHERE run_id = ? ORDER BY id'
     ).all(runId) as Array<{ kind: string; label: string | null; detail: string | null; createdAt: number }>),

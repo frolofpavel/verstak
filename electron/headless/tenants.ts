@@ -4,8 +4,7 @@ import { join } from 'path'
 
 import { createAesGcmSafeStorage } from './secure-storage'
 import { createHeadlessHost, type HeadlessHost, type HeadlessHostOptions } from './host'
-import { createConnectorRegistry } from '../connectors/registry'
-import { STAGE1_CONNECTOR_DENY } from './stage1'
+import { listConnectorSecretViews } from './connector-secrets'
 
 // Мульти-тенантность headless-сервиса (Этап 1а, блок №7; рабочая гипотеза отчёта §3а):
 // у каждого пользователя СВОЙ sqlite-файл и СВОЙ ключ шифрования, выведенный из общего
@@ -81,20 +80,10 @@ export function createTenantRegistry(opts: TenantRegistryOptions): TenantRegistr
     get,
     async connectorStatus(tenantId) {
       const { host } = await get(tenantId)
-      const registry = createConnectorRegistry(host.getSecret)
-      return registry.list()
-        .filter(c => !STAGE1_CONNECTOR_DENY.has(c.id))
-        .map(c => {
-          const info = registry.get(c.id)?.info()
-          const required = [...(info?.requires ?? []), ...(info?.requiresAnyOf ?? [])]
-          return {
-            id: c.id,
-            label: c.label,
-            status: c.status,
-            // Только ИМЕНА недостающих ключей — значения секретов наружу не выходят.
-            missingKeys: required.filter(k => !host.getSecret(k))
-          }
-        })
+      // Одна реализация на весь сервис (connector-secrets.ts): вторая копия правила
+      // разошлась бы с ручкой GET /connectors при первой же правке.
+      return listConnectorSecretViews(host)
+        .map(({ id, label, status, missingKeys }) => ({ id, label, status, missingKeys }))
     },
     closeAll() {
       for (const handle of hosts.values()) handle.host.close()

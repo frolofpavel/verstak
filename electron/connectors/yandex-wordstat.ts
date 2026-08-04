@@ -41,6 +41,8 @@ export function createYandexWordstatConnector(): Connector {
         label: 'Яндекс.Wordstat',
         kind: 'yandex_wordstat',
         requires: ['yandex_wordstat_token', 'yandex_wordstat_folder_id'],
+        // api-key | iam — как трактовать токен; без ключа тип выводится из его формы.
+        optional: ['yandex_wordstat_auth_type'],
         status: 'ready',
         detail: 'Частотность ключевых слов через Yandex Search API. Нужны API-ключ Yandex AI Studio или IAM-токен и идентификатор каталога. Операции: get_top_requests { phrase, regions?, num_phrases? }, get_wordstat { phrases[], regions? }.'
       }

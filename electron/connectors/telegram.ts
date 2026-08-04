@@ -41,6 +41,7 @@ export function createTelegramConnector(): Connector {
         label: 'Telegram (bot)',
         kind: 'telegram',
         requires: ['telegram_bot_token'],
+        optional: ['telegram_chat_whitelist', 'telegram_notify_chat_id'],
         status: 'ready',
         detail: 'Bot token + whitelist chat_ids в settings. Read через ssh+Telethon.'
       }
