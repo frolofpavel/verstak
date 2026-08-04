@@ -35,6 +35,37 @@ function splitList(value: string | undefined): string[] {
   return (value ?? '').split(',').map(s => s.trim()).filter(Boolean)
 }
 
+/**
+ * Остановка сервиса. Вынесена из main(), чтобы её можно было проверить на НАСТОЯЩЕМ
+ * сервере с живым стримом: внутри main() провайдера не подменить, а без живого прогона
+ * незавершённого ответа не бывает — и весь дефект был бы недосягаем для теста.
+ *
+ * Порядок здесь и есть содержание правки:
+ * 1) перестаём ПРИНИМАТЬ запросы — иначе новая задача стартует во время остановки;
+ * 2) дожидаемся уже идущих задач (host.close() ждёт их и дописывает статусы);
+ * 3) и только теперь рвём остаток соединений.
+ *
+ * Ждать ДРЕНАЖ соединений на шаге 1 нельзя. `httpServer.close()` перестаёт слушать
+ * сразу, а его промис резолвится, когда закрылось последнее открытое соединение.
+ * Idle-соединения Node закрывает сам, но НЕЗАВЕРШЁННЫЙ ответ — нет, а SSE-подписчик
+ * `/tasks/{runId}/events` живёт ровно столько, сколько задача. Во время деплоя это
+ * норма: кабинет смотрит свои задачи. Дождись мы дренажа первым — до шага 2 очередь бы
+ * не дошла вовсе, прогоны оборвались бы на полуслове ровно так, как если бы фикса не
+ * было, и systemd добил бы процесс по SIGKILL. Фолбэк, который не может сработать,
+ * снаружи неотличим от работающего — потому он и закреплён пином.
+ */
+export async function shutdownService(
+  server: ReturnType<typeof createHeadlessServer>,
+  closeHosts: () => Promise<void>
+): Promise<void> {
+  const drained = server.close()
+  await closeHosts()
+  // Прогоны отпущены и статусы дописаны — теперь остаток можно рвать. Раньше нельзя:
+  // клиент потерял бы хвост стрима до того, как исход задачи осел в БД.
+  server.httpServer.closeAllConnections()
+  await drained
+}
+
 export async function main(): Promise<{ port: number; close: () => Promise<void> }> {
   const dataRoot = resolve(process.env.VERSTAK_DATA_ROOT || join(process.cwd(), 'verstak-agent-data'))
   const port = Number(process.env.VERSTAK_AGENT_PORT || 8020)
@@ -89,12 +120,7 @@ export async function main(): Promise<{ port: number; close: () => Promise<void>
     console.warn('[verstak-headless] VERSTAK_AGENT_TOKEN не задан — сервис отвечает БЕЗ авторизации (только для локальной отладки)')
   }
 
-  const close = async (): Promise<void> => {
-    // Сначала перестаём принимать запросы, потом дожидаемся уже идущих задач —
-    // обратный порядок дал бы новым задачам стартовать во время остановки.
-    await server.close()
-    await closeExtra()
-  }
+  const close = (): Promise<void> => shutdownService(server, closeExtra)
   for (const sig of ['SIGTERM', 'SIGINT'] as const) {
     process.on(sig, () => {
       logRuntime('headless.service.stopping', { signal: sig })
