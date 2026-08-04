@@ -207,6 +207,46 @@ export interface WarmupResult {
   packs: Array<{ type: ContextPack['type']; tokenEstimate: number | null }>
 }
 
+// Авто-прогрев: сколько Brain считается «свежим». Смена проекта туда-обратно в
+// пределах TTL не гоняет скан заново (ручная кнопка force=true — прогревает всегда).
+const DEFAULT_WARM_TTL_MS = 15 * 60 * 1000
+// In-flight дедуп по проекту — как warmProjectMaps в project-map.ts. Два
+// одновременных set-current не запускают два скана.
+const inFlightWarm = new Map<string, Promise<WarmupResult | null>>()
+
+export interface WarmBrainOptions {
+  /** Прогреть даже если Brain свежий (ручная кнопка). По умолчанию false. */
+  force?: boolean
+  /** Окно свежести для авто-пути. По умолчанию 15 мин. */
+  ttlMs?: number
+}
+
+/**
+ * Прогрев Brain с дедупом in-flight и троттлингом свежести. Единая точка для
+ * ручной кнопки (force=true) и авто-хука в projects:set-current (force=false).
+ * Возвращает WarmupResult при прогреве, null — если пропущено по свежести.
+ */
+export function warmBrainOnce(
+  projectPath: string,
+  deps: WarmupDeps,
+  opts: WarmBrainOptions = {},
+  maxFiles = 40,
+): Promise<WarmupResult | null> {
+  const existing = inFlightWarm.get(projectPath)
+  if (existing) return existing
+
+  if (!opts.force) {
+    const ttl = opts.ttlMs ?? DEFAULT_WARM_TTL_MS
+    const last = deps.store.getBrain(projectPath)?.lastWarmupAt ?? null
+    if (last != null && Date.now() - last < ttl) return Promise.resolve(null)
+  }
+
+  const p = runWarmup(projectPath, deps, maxFiles)
+    .finally(() => { inFlightWarm.delete(projectPath) })
+  inFlightWarm.set(projectPath, p)
+  return p
+}
+
 /** Оркестратор прогрева: скан → summary → overview → packs → сохранить в Brain. */
 export async function runWarmup(projectPath: string, deps: WarmupDeps, maxFiles = 40): Promise<WarmupResult> {
   const all = await deps.listFiles()

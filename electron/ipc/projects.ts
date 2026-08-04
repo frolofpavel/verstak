@@ -10,6 +10,7 @@ import { setActiveProjectPath } from '../state/project-state'
 import { ensureUserLayer, inspectUserLayer, PROJECT_RULE_CANDIDATES } from '../ai/user-layer'
 import { ensureCoreMemoryFiles } from '../ai/core-memory'
 import { warmProjectMaps } from '../ai/project-map'
+import { warmProjectBrain } from './project-brain'
 import type { Database } from 'better-sqlite3'
 import type { Projects } from '../storage/projects'
 import type { ProjectGroups, ProjectGroupPatch } from '../storage/project-groups'
@@ -145,6 +146,9 @@ export function registerProjectIpc(projects: Projects, projectGroups: ProjectGro
       // Открытие/смена активного проекта → фоном строим обе карты. Единая точка
       // хука: renderer setProject всегда зовёт setCurrent. Идемпотентно.
       void warmProjectMaps(path).catch(() => { /* non-critical, фон */ })
+      // …и авто-прогрев Brain рядом (троттлится по свежести). Раньше прогрев был
+      // только ручной — панель «Мозг» стояла пустой, пока пользователь сам не жал.
+      void warmProjectBrain(path).catch(() => { /* non-critical, фон */ })
     }
   })
 

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   isExcludedPath, selectImportantFiles, summarizeFileStub, buildContextPack, estimateTokens, runWarmup, pickPackType,
+  warmBrainOnce,
 } from '../../electron/ai/project-brain/warmup'
-import type { ProjectBrainStore, FileSummary, ContextPack } from '../../electron/storage/project-brain'
+import type { ProjectBrainStore, ProjectBrain, FileSummary, ContextPack } from '../../electron/storage/project-brain'
 
 describe('warmup — выбор файлов', () => {
   it('исключает мусор (node_modules/.git/dist/lock/бинарники)', () => {
@@ -107,6 +108,62 @@ describe('runWarmup — оркестратор (моки)', () => {
       store: m.store,
     })
     expect(res.filesSummarized).toBe(1)
+  })
+})
+
+describe('warmBrainOnce — авто-прогрев: дедуп + троттл + force', () => {
+  function warmStore(brain: Partial<ProjectBrain> | null) {
+    const listFiles = vi.fn(async (): Promise<string[]> => ['README.md', 'src/index.ts'])
+    const store = {
+      saveFileSummary: vi.fn(), saveContextPack: vi.fn(), updateBrain: vi.fn(), createBrain: vi.fn(),
+      getBrain: vi.fn(() => (brain ? (brain as ProjectBrain) : null)),
+      getFileSummaries: vi.fn(() => []), getContextPacks: vi.fn(() => []), getContextPack: vi.fn(),
+      saveDecisionRecord: vi.fn(), getDecisionRecords: vi.fn(),
+    } as unknown as ProjectBrainStore
+    return { store, listFiles }
+  }
+  const deps = (store: ProjectBrainStore, listFiles: () => Promise<string[]>) => ({
+    listFiles, readFile: async (rel: string) => `// ${rel}\nexport const z = 1`, store,
+  })
+
+  it('дедуп: два одновременных вызова прогревают ОДИН раз', async () => {
+    const { store, listFiles } = warmStore(null)
+    const root = 'C:/proj-dedup'
+    const [a, b] = await Promise.all([
+      warmBrainOnce(root, deps(store, listFiles)),
+      warmBrainOnce(root, deps(store, listFiles)),
+    ])
+    expect(listFiles).toHaveBeenCalledTimes(1)
+    expect(a).not.toBeNull()
+    expect(b).toBe(a) // тот же in-flight промис
+  })
+
+  it('троттл: свежий Brain (lastWarmupAt только что) → пропуск, скана нет', async () => {
+    const { store, listFiles } = warmStore({ lastWarmupAt: Date.now() })
+    const res = await warmBrainOnce('C:/proj-fresh', deps(store, listFiles))
+    expect(res).toBeNull()
+    expect(listFiles).not.toHaveBeenCalled()
+  })
+
+  it('force: свежий Brain, но force=true → прогрев всё равно идёт', async () => {
+    const { store, listFiles } = warmStore({ lastWarmupAt: Date.now() })
+    const res = await warmBrainOnce('C:/proj-force', deps(store, listFiles), { force: true })
+    expect(res).not.toBeNull()
+    expect(listFiles).toHaveBeenCalledTimes(1)
+  })
+
+  it('устаревший Brain (lastWarmupAt давно) → прогрев идёт', async () => {
+    const { store, listFiles } = warmStore({ lastWarmupAt: Date.now() - 60 * 60 * 1000 })
+    const res = await warmBrainOnce('C:/proj-stale', deps(store, listFiles), { ttlMs: 15 * 60 * 1000 })
+    expect(res).not.toBeNull()
+    expect(listFiles).toHaveBeenCalledTimes(1)
+  })
+
+  it('никогда не прогревался (lastWarmupAt=null) → прогрев идёт', async () => {
+    const { store, listFiles } = warmStore({ lastWarmupAt: null })
+    const res = await warmBrainOnce('C:/proj-never', deps(store, listFiles))
+    expect(res).not.toBeNull()
+    expect(listFiles).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -8,7 +8,7 @@ import { readFile, readdir } from 'fs/promises'
 import { join } from 'path'
 import { safeRealJoin } from '../ai/path-policy'
 import { getProjectMap } from '../ai/project-map'
-import { runWarmup, isExcludedPath } from '../ai/project-brain/warmup'
+import { warmBrainOnce, isExcludedPath, type WarmupDeps, type WarmupResult } from '../ai/project-brain/warmup'
 import type { ProjectBrainStore, NewDecisionRecord } from '../storage/project-brain'
 
 export interface BrainDeps {
@@ -30,22 +30,46 @@ async function walkFiles(root: string, rel = '', acc: string[] = [], depth = 0):
   return acc
 }
 
+// Store захватывается при регистрации — чтобы авто-прогрев (warmProjectBrain,
+// хук в projects:set-current) мог работать без прокидывания store через все слои.
+let brainStoreRef: ProjectBrainStore | null = null
+
+// Собрать IO-зависимости прогрева для проекта: список файлов, чтение (через
+// path-policy) и символы из project-map. Map тянем один раз на прогрев.
+async function buildWarmupDeps(root: string, store: ProjectBrainStore): Promise<WarmupDeps> {
+  const map = await getProjectMap(root).catch(() => null)
+  const symbolsFor = (rel: string): string[] | undefined =>
+    map?.files.find(f => f.path === rel)?.symbols.map(s => s.name)
+  return {
+    listFiles: () => walkFiles(root),
+    readFile: async (rel) => {
+      try { return await readFile(await safeRealJoin(root, rel), 'utf8') } catch { return null }
+    },
+    symbolsFor,
+    store,
+  }
+}
+
+/**
+ * Авто-прогрев Brain — вызывается из projects:set-current (открытие/смена
+ * проекта), рядом с warmProjectMaps. Троттлится по свежести (см. warmBrainOnce),
+ * так что смена проекта туда-обратно бесплатна. Раньше прогрев был ТОЛЬКО ручной
+ * (кнопка brain:warmup) — оттого панель «Мозг» стояла пустой у большинства.
+ */
+export async function warmProjectBrain(root: string, opts: { force?: boolean } = {}): Promise<WarmupResult | null> {
+  if (!brainStoreRef) return null
+  const deps = await buildWarmupDeps(root, brainStoreRef)
+  return warmBrainOnce(root, deps, opts)
+}
+
 export function registerBrainIpc(deps: BrainDeps): void {
+  brainStoreRef = deps.store
   // Прогрев проекта: скан → summaries → overview → context-packs → Brain.
+  // Ручная кнопка — force=true (прогреваем всегда, игнорируя троттл свежести).
   ipcMain.handle('brain:warmup', async () => {
     const root = deps.getProjectRoot()
     if (!root) return null
-    const map = await getProjectMap(root).catch(() => null)
-    const symbolsFor = (rel: string): string[] | undefined =>
-      map?.files.find(f => f.path === rel)?.symbols.map(s => s.name)
-    return runWarmup(root, {
-      listFiles: () => walkFiles(root),
-      readFile: async (rel) => {
-        try { return await readFile(await safeRealJoin(root, rel), 'utf8') } catch { return null }
-      },
-      symbolsFor,
-      store: deps.store,
-    })
+    return warmProjectBrain(root, { force: true })
   })
 
   // Состояние мозга (для UI: есть ли прогрев, когда, overview).
