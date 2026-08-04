@@ -51,6 +51,9 @@ export interface PrepareSystemInput {
    *  специализации, а НЕ заменяет его. Скилл уточняет роль агента, но базовый
    *  протокол выполнения (7-шаговый цикл, работа с тулзами) остаётся в силе. */
   skillPrompt?: string | null
+  /** Базовый протокол агента. Не задан → десктопный SYSTEM_LAYER_PROMPT (сборка
+   *  десктопа не меняется). Облачный headless передаёт свой слой. */
+  systemLayer?: string
   /** v3 Шаг D: режим агента — для beast-пресета автономности (auto/bypass). */
   agentMode?: AgentMode
   /** Project Brain (Итер.4): прогретый ContextPack проекта (грузит вызывающий). */
@@ -76,7 +79,7 @@ export interface PreparedParts {
  */
 export async function prepareSystemContext(input: PrepareSystemInput): Promise<ComposedPrompt> {
   const parts = await prepareParts(input)
-  return composeSystemPrompt(parts.userLayer, parts.contextPack, input.skillPrompt ?? undefined)
+  return composeSystemPrompt(parts.userLayer, parts.contextPack, input.skillPrompt ?? undefined, input.systemLayer)
 }
 
 /**

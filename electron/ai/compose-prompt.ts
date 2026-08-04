@@ -60,7 +60,14 @@ function escapeLayerContent(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skillPrompt = ''): ComposedPrompt {
+/**
+ * systemLayer — базовый протокол агента. По умолчанию десктопный SYSTEM_LAYER_PROMPT;
+ * headless-сервис облачного Verstak подставляет свой (electron/headless/cloud-layer.ts),
+ * потому что там нет ни проекта, ни кода — и десктопная самоидентификация заставляла
+ * агента отказываться от обычных деловых задач. Десктопный путь параметр не передаёт,
+ * поэтому его сборка не меняется.
+ */
+export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skillPrompt = '', systemLayer: string = SYSTEM_LAYER_PROMPT): ComposedPrompt {
   const trimmedUser = userLayer.content.trim()
   const trimmedPack = contextPack.trim()
   const trimmedSkill = skillPrompt.trim()
@@ -84,7 +91,7 @@ export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skil
   // → маркер → ИЗМЕНЧИВОЕ (context-pack). Раньше packBlock стоял в СЕРЕДИНЕ (перед
   // skill) — это ломало бы кэш (изменчивое инвалидирует всё после). context-pack —
   // это данные проекта, порядок после skill-специализации семантически безвреден.
-  const stablePrefix = `${SYSTEM_LAYER_PROMPT}${userBlock}${skillBlock}${preflightHint}`
+  const stablePrefix = `${systemLayer}${userBlock}${skillBlock}${preflightHint}`
   const system = packBlock
     ? `${stablePrefix}${CACHE_BREAKPOINT}${packBlock}`
     : stablePrefix

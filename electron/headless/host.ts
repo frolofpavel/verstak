@@ -25,6 +25,7 @@ import type { ChatProvider, ChatMessage } from '../ai/types'
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import { buildProviderRuntimeOptions } from '../ipc/ai-send/provider-options'
 import { STAGE1_TOOLS_ALLOW, STAGE1_CONNECTOR_DENY } from './stage1'
+import { CLOUD_SYSTEM_LAYER_PROMPT } from './cloud-layer'
 import type { AgentMode } from '../ai/mode-policy'
 import type { NewStep, CreatePlanMeta } from '../storage/plans'
 import type { JournalKind } from '../storage/journal'
@@ -157,6 +158,23 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     return env[key.toUpperCase()] ?? null
   }
 
+  /**
+   * Секреты для прогона. Отличие от getSecret одно: гейт web_access.
+   *
+   * На десктопе веб-доступ — opt-in (по умолчанию выключен), и это верно: там агент
+   * работает с проектом. В облаке веб-чтение — ЗАЯВЛЕННАЯ часть Этапа 1, web_search и
+   * web_fetch уже в stage1-allowlist. Без согласования флага получалось худшее из двух:
+   * инструмент разрешён, а гейт его гасит — и агент отвечал «веб-доступ выключен»
+   * (живая приёмка 04.08). Явная настройка тенанта (web_access='false') побеждает.
+   */
+  const getSecretForRun = (key: string): string | null => {
+    if (key === 'web_access') {
+      const explicit = getSecret(key)
+      return explicit === null || explicit === '' ? 'true' : explicit
+    }
+    return getSecret(key)
+  }
+
   const agentRuns = createAgentRuns(db)
   const undoStack = createUndoStack(db)
   const plans = createPlans(db)
@@ -238,6 +256,9 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     const tools = createToolsForProject(workspace, ctrl.signal, {})
     const userMsg: ChatMessage = { role: 'user', content: task.prompt }
     const composed = await prepareSystemContext({
+      // Облачная персона вместо десктопной: в облаке нет проекта и кода, а десктопный
+      // слой заставлял агента отказываться от обычных деловых задач.
+      systemLayer: CLOUD_SYSTEM_LAYER_PROMPT,
       projectPath: workspace,
       messages: [userMsg],
       recentWrites: undoStack.list(workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
@@ -306,7 +327,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
             }))
           }
         : undefined,
-      getSecretForDelegate: getSecret,
+      getSecretForDelegate: getSecretForRun,
       costGuard: createCostGuard(task.costCapUsd ?? 5),
       providerId: task.providerId,
       model,
