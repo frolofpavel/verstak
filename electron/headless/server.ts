@@ -173,20 +173,24 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       return
     }
 
-    // GET /tasks — задачи тенанта (durable, из agent_runs).
+    // GET /tasks — задачи тенанта (durable, из agent_runs). Строка = ТРЕД, а не прогон:
+    // после уточнения задача остаётся одной строкой, у которой сменился последний ход.
     if (req.method === 'GET' && parts.length === 1 && parts[0] === 'tasks') {
       const limit = Number(url.searchParams.get('limit') ?? 50)
-      const runs = host.listRuns({ limit: Number.isFinite(limit) ? limit : 50 })
+      const tasks = host.listTasks({ limit: Number.isFinite(limit) ? limit : 50 })
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
-        tasks: runs.map(r => ({ ...r, live: channels.get(r.runId)?.done === false }))
+        tasks: tasks.map(t => ({ ...t, live: channels.get(t.runId)?.done === false }))
       }))
       return
     }
 
-    // POST /tasks — поставить задачу.
-    if (req.method === 'POST' && parts.length === 1 && parts[0] === 'tasks') {
-      const body = await readJsonBody(req)
+    /**
+     * Общий запуск прогона: и первая постановка, и продолжение треда. Разница ровно
+     * одна — threadId; всё остальное (гейт allowlist, канал, реестр stop) обязано
+     * работать одинаково, поэтому путь один, а не два похожих.
+     */
+    async function startAndRespond(body: Record<string, unknown>, threadId: number | undefined): Promise<void> {
       const channel: RunChannel = { sendId: 0, tenant: tenantKey, subscribers: new Set(), buffer: [], seq: 0, done: false }
       // Поля берём ЯВНО, а не спредом тела. Слепой спред позволял клиенту прислать
       // "toolsAllow": null и снять allowlist Этапа 1 — то есть включить себе shell.
@@ -197,7 +201,9 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
         providerId: body.providerId as StartTaskOptions['providerId'],
         model: body.model === undefined ? undefined : String(body.model),
         agentMode: body.agentMode as StartTaskOptions['agentMode'],
-        workspace: body.workspace === undefined ? undefined : String(body.workspace),
+        // workspace продолжения задаёт тред, а не клиент (см. host.startTask).
+        workspace: threadId !== undefined || body.workspace === undefined ? undefined : String(body.workspace),
+        threadId,
         turnsBudget: body.turnsBudget === undefined ? undefined : Number(body.turnsBudget),
         costCapUsd: body.costCapUsd === undefined ? undefined : Number(body.costCapUsd),
         sender: channelSender(channel)
@@ -213,13 +219,18 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       channel.sendId = task.sendId
       channels.set(task.runId, channel)
       stops.set(task.runId, task.stop)
-      void task.completion.finally(() => {
+      void task.completion.catch(() => undefined).finally(() => {
         channel.done = true
         for (const sub of channel.subscribers) { try { sub.end() } catch { /* закрыт */ } }
         stops.delete(task.runId)
       })
       res.writeHead(202, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ runId: task.runId }))
+      res.end(JSON.stringify({ runId: task.runId, threadId: task.threadId }))
+    }
+
+    // POST /tasks — поставить задачу (новый тред).
+    if (req.method === 'POST' && parts.length === 1 && parts[0] === 'tasks') {
+      await startAndRespond(await readJsonBody(req), undefined)
       return
     }
 
@@ -290,6 +301,41 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
           'content-disposition': `attachment; filename="${encodeURIComponent(name)}"`
         })
         createReadStream(file).pipe(res)
+        return
+      }
+
+      // POST /tasks/{runId}/continue — дописать сообщение в тред этого прогона.
+      // Новый прогон, ТОТ ЖЕ workspace, история треда в контексте. runId в пути — любой
+      // прогон треда: клиент всегда держит его из GET /tasks и не обязан знать threadId.
+      if (req.method === 'POST' && tail === 'continue') {
+        const body = await readJsonBody(req)
+        const threadId = host.getRunThreadId(runId)
+        if (threadId == null) {
+          // Прогон вне тредовой модели (легаси) — продолжать нечего: истории нет.
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'run has no thread' }))
+          return
+        }
+        await startAndRespond(body, threadId)
+        return
+      }
+
+      // GET /tasks/{runId}/thread — задача ЦЕЛИКОМ: сообщения по порядку + все ходы
+      // со своими таймлайнами. /timeline осознанно оставлен пер-прогонным: он читается
+      // рядом с SSE одного хода, и расширять его до треда значило бы менять смысл
+      // ручки под уже написанным клиентом.
+      if (req.method === 'GET' && tail === 'thread') {
+        const thread = host.getThread(runId)
+        if (!thread) {
+          res.writeHead(404, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'run not found' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          ...thread,
+          runs: thread.runs.map(r => ({ ...r, live: channels.get(r.runId)?.done === false }))
+        }))
         return
       }
 

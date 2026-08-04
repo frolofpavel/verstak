@@ -157,7 +157,7 @@ describe('providerId из inference', () => {
         inference: { baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'tok' }
       } as Parameters<typeof host.startTask>[0])
       await task.completion
-      expect(host.listRuns()[0].providerId).toBe('custom-openai')
+      expect(host.listTasks()[0].providerId).toBe('custom-openai')
 
       await expect(host.startTask({ prompt: 'x' } as Parameters<typeof host.startTask>[0]))
         .rejects.toThrow(/неизвестный провайдер/)

@@ -147,7 +147,7 @@ describe('per-task маршрут инференса (запрос №5)', () =>
     await task.completion
     const events = JSON.stringify(host.listRunEvents(task.runId))
     expect(events).not.toContain(RUN_TOKEN)
-    const runs = JSON.stringify(host.listRuns())
+    const runs = JSON.stringify(host.listTasks())
     expect(runs).not.toContain(RUN_TOKEN)
     expect(runs).toContain(task.runId) // контроль: данные о прогоне вообще есть
   }, 30_000)

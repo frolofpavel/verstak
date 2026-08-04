@@ -9,7 +9,8 @@ import { createUndoStack } from '../storage/undo'
 import { createPlans } from '../storage/plans'
 import { createJournal } from '../storage/journal'
 import { saveMemory, invalidateMemory, searchMemories } from '../storage/memories'
-import { searchConversations } from '../storage/chats'
+import { searchConversations, createChats } from '../storage/chats'
+import { createChatSessions } from '../storage/chat-sessions'
 
 import { createConnectorRegistry } from '../connectors/registry'
 import { PROVIDERS, createProvider, type ProviderId } from '../ai/registry'
@@ -82,8 +83,16 @@ export interface StartTaskOptions {
    * Workspace задачи — абсолютный путь внутри одного из workspaceRoots. Не задан →
    * ядро само заводит каталог задачи в первом корне. Клиент (кабинет, шлюз) не обязан
    * знать серверные пути и не должен их придумывать.
+   *
+   * При продолжении треда (threadId) ИГНОРИРУЕТСЯ: workspace берётся у треда, иначе
+   * «продолжить» означало бы начать в пустом каталоге — без файлов прошлых ходов.
    */
   workspace?: string
+  /**
+   * Продолжить существующий тред: новый прогон в ТОМ ЖЕ workspace и с историей
+   * предыдущих ходов в контексте. Не задан → заводится новый тред.
+   */
+  threadId?: number
   prompt: string
   /** Не обязателен, если задан inference (тогда выводится custom-openai). */
   providerId?: ProviderId
@@ -106,23 +115,70 @@ export interface StartTaskOptions {
 
 export interface StartedTask {
   runId: string
+  /** Тред, которому принадлежит прогон. Им продолжают задачу. */
+  threadId: number
   sendId: number
   /** Резолвится по завершении прогона (любой исход; ошибки уже ушли событиями/в agent_runs). */
   completion: Promise<void>
   stop: () => void
 }
 
-/** Строка списка задач тенанта. Источник — agent_runs, а не внешний индекс. */
-export interface HeadlessRunSummary {
+/**
+ * Строка списка задач тенанта. Задача = ТРЕД, а не отдельный прогон: после первого
+ * же уточнения список иначе удваивался бы, и человек переставал понимать, что перед
+ * ним — новая задача или продолжение старой.
+ *
+ * Источник — agent_runs (+ заголовок треда из chat_sessions), а не внешний индекс.
+ */
+export interface HeadlessTaskSummary {
+  /** Идентификатор треда (chat_sessions.id). null — легаси-прогон до тредовой модели. */
+  threadId: number | null
+  /** ПОСЛЕДНИЙ прогон треда: его статус и есть статус задачи, им же продолжают тред. */
   runId: string
-  /** Постановка задачи (title прогона). */
+  /** Постановка задачи — первое сообщение треда, а не последнее уточнение. */
   prompt: string
   workspace: string
   providerId: string | null
   model: string | null
   status: string
+  /** Время постановки задачи (первый ход треда). */
   createdAt: number
+  /** Конец последнего прогона; null — идёт прямо сейчас. */
   endedAt: number | null
+  /** Начало последнего хода — по нему список и отсортирован. */
+  lastActivityAt: number
+  /** Сколько ходов в треде (первый + уточнения). */
+  runCount: number
+}
+
+/** Сообщение треда. Роли те же, что у чата десктопа. */
+export interface HeadlessThreadMessage {
+  id: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: number
+}
+
+/** Один ход треда: прогон + его durable-таймлайн. */
+export interface HeadlessThreadRun {
+  runId: string
+  status: string
+  providerId: string | null
+  model: string | null
+  startedAt: number
+  endedAt: number | null
+  events: Array<{ kind: string; label: string | null; detail: string | null; createdAt: number }>
+}
+
+/** Задача целиком: сообщения по порядку + ходы по порядку. Всё из БД (переживает рестарт). */
+export interface HeadlessThread {
+  threadId: number | null
+  title: string
+  workspace: string
+  createdAt: number
+  lastActivityAt: number
+  messages: HeadlessThreadMessage[]
+  runs: HeadlessThreadRun[]
 }
 
 export interface HeadlessHost {
@@ -138,11 +194,15 @@ export interface HeadlessHost {
   listRunEvents: (runId: string) => Array<{ kind: string; label: string | null; detail: string | null; createdAt: number }>
   getRunStatus: (runId: string) => string | null
   /**
-   * Задачи этого тенанта, новые сверху. БД у тенанта своя, поэтому фильтровать по
-   * пользователю не нужно — здесь только его прогоны. Потребителю (кабинет, шлюз)
-   * больше не нужен собственный индекс задач: список durable и переживает рестарт.
+   * Задачи этого тенанта, новые сверху — ПО ОДНОЙ СТРОКЕ НА ТРЕД. БД у тенанта своя,
+   * поэтому фильтровать по пользователю не нужно — здесь только его задачи. Потребителю
+   * (кабинет, шлюз) не нужен собственный индекс: список durable и переживает рестарт.
    */
-  listRuns: (opts?: { limit?: number }) => HeadlessRunSummary[]
+  listTasks: (opts?: { limit?: number }) => HeadlessTaskSummary[]
+  /** Тред прогона целиком (сообщения + ходы + таймлайны). null, если прогона нет. */
+  getThread: (runId: string) => HeadlessThread | null
+  /** Тред, которому принадлежит прогон. null — прогона нет либо он вне тредовой модели. */
+  getRunThreadId: (runId: string) => number | null
   /** Workspace прогона — по нему выдаются файлы задачи. null, если прогона нет. */
   getRunWorkspace: (runId: string) => string | null
   close: () => void
@@ -182,6 +242,10 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   }
 
   const agentRuns = createAgentRuns(db)
+  // Тред задачи = чат-сессия ядра. Отдельной сущности «тред» не заводим: agent_runs.chat_id
+  // существует с Manager V1 и уже означает ровно это — «прогоны одного разговора».
+  const chatSessions = createChatSessions(db)
+  const chats = createChats(db)
   const undoStack = createUndoStack(db)
   const plans = createPlans(db)
   const journal = createJournal(db)
@@ -199,7 +263,12 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   let nextSendId = 1
 
   async function startTask(task: StartTaskOptions): Promise<StartedTask> {
-    let workspace = task.workspace
+    // Продолжение треда: workspace НАСЛЕДУЕТСЯ, а не берётся из запроса. Иначе клиент
+    // мог бы «продолжить» задачу в чужом каталоге — и тем увести файлы треда наружу.
+    const existingThread = task.threadId != null ? chatSessions.get(task.threadId) : null
+    if (task.threadId != null && !existingThread) throw new Error('тред задачи не найден')
+
+    let workspace = existingThread?.projectPath ?? task.workspace
     if (!workspace) {
       // Каталог задачи заводит ядро: имя от времени+случайности, внутри корня тенанта.
       workspace = join(opts.workspaceRoots[0], `task-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`)
@@ -220,11 +289,20 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       throw new Error(`headless-хост Этапа 1 поддерживает только API-провайдеры (${providerId}: ${descriptor.transport})`)
     }
 
+    // Один живой прогон на тред. Два агента в одном каталоге писали бы друг поверх
+    // друга, а история второго не содержала бы хода первого — «продолжение» вышло бы
+    // не продолжением, а гонкой.
+    if (existingThread && db.prepare(
+      'SELECT 1 FROM agent_runs WHERE chat_id = ? AND ended_at IS NULL LIMIT 1'
+    ).get(existingThread.id)) {
+      throw new Error('в треде уже идёт прогон — дождитесь завершения или остановите его')
+    }
+
     const ctrl = new AbortController()
     const sendId = nextSendId++
     const runId = randomUUID()
     const model = task.model ?? descriptor.defaultModel
-    const sender = task.sender ?? NOOP_SENDER
+    const baseSender = task.sender ?? NOOP_SENDER
 
     let provider = task.providerOverride
       ?? opts.providerFactory?.(providerId, model, ctrl.signal, workspace)
@@ -264,31 +342,72 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     }
 
     const tools = createToolsForProject(workspace, ctrl.signal, {})
+
+    // Тред: существующий продолжаем, иначе заводим. Заголовок треда = ПЕРВАЯ постановка
+    // (уточнения его не переписывают — иначе в списке задача меняла бы имя после
+    // каждого «а теперь то же самое, но за июль»).
+    const thread = existingThread ?? chatSessions.create(workspace, {
+      title: task.prompt.slice(0, 200), providerId, model
+    })
+    // История треда идёт в контекст ходом ранее записанными сообщениями — той же
+    // формой user/assistant, какую десктопный renderer шлёт в ai:send. Роль 'system'
+    // отсеиваем: системный слой собирается заново на каждый прогон.
+    const priorMessages: ChatMessage[] = chats.listBySession(thread.id)
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content }))
     const userMsg: ChatMessage = { role: 'user', content: task.prompt }
+    chats.appendToSession(thread.id, workspace, 'user', task.prompt)
+
     const composed = await prepareSystemContext({
       // Облачная персона вместо десктопной: в облаке нет проекта и кода, а десктопный
       // слой заставлял агента отказываться от обычных деловых задач.
       systemLayer: CLOUD_SYSTEM_LAYER_PROMPT,
       projectPath: workspace,
-      messages: [userMsg],
+      messages: [...priorMessages, userMsg],
       recentWrites: undoStack.list(workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
     })
     const agentMode = task.agentMode ?? 'auto'
 
     // Продовая форма старта прогона (openAgentRun, ipc/ai-send/run-bookkeeping.ts):
-    // строка agent_runs + user_msg первым событием таймлайна.
+    // строка agent_runs + user_msg первым событием таймлайна. chatId = тред: связь
+    // прогона с разговором ядро держит этой колонкой с Manager V1.
     agentRuns.create({
-      runId, projectPath: workspace, chatId: null, owner: 'main',
+      runId, projectPath: workspace, chatId: thread.id, owner: 'main',
       title: task.prompt.slice(0, 200), providerId, model,
       requestedProviderId: providerId, requestedModel: model,
       sendId, agentMode, accountId: null
     })
     agentRuns.appendEvent(runId, 'user_msg', { detail: task.prompt.slice(0, 500) })
-    logRuntime('headless.task.start', { runId, sendId, providerId, model, workspace })
+    logRuntime('headless.task.start', { runId, sendId, threadId: thread.id, providerId, model, workspace })
+
+    // Ответ агента копим из text-событий — того же источника, из которого десктопный
+    // renderer собирает сообщение ассистента. В agent_run_events он лежит обрезанным
+    // до 500 символов, а в чекпойнте — только пока прогон не завершился чисто; ни то,
+    // ни другое следующим ходом читать нельзя.
+    let assistantText = ''
+    const sender: TaggedSender = {
+      send: (channel, payload) => {
+        const event = payload.event as { type?: string; text?: string } | undefined
+        if (event?.type === 'text' && typeof event.text === 'string') assistantText += event.text
+        baseSender.send(channel, payload)
+      },
+      exec: (code: string) => baseSender.exec(code)
+    }
+    const persistAssistant = (): void => {
+      if (!assistantText.trim()) return
+      try {
+        chats.appendToSession(thread.id, workspace, 'assistant', assistantText)
+      } catch (err) {
+        // Тред без ответа агента хуже упавшего прогона — оставляем след, а не тишину.
+        logRuntime('headless.thread.assistant-persist-failed', {
+          runId, threadId: thread.id, error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
 
     const completion = runApiConversation({
       sender, sendId, provider, tools, projectPath: workspace,
-      initialMessages: [{ role: 'system', content: composed.system }, userMsg],
+      initialMessages: [{ role: 'system', content: composed.system }, ...priorMessages, userMsg],
       signal: ctrl.signal,
       recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) =>
         undoStack.push(projectPath, filePath, before, after, provenance),
@@ -347,10 +466,15 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       toolsAllow: task.toolsAllow === undefined ? STAGE1_TOOLS_ALLOW : task.toolsAllow
       // Каст через unknown: опциональные фасады (subSessions, verifications, pipelineRuns…)
       // на Этапе 1 сознательно не поднимаются — им соответствуют выключенные инструменты.
-    } as unknown as Parameters<typeof runApiConversation>[0]).then(() => undefined)
+    } as unknown as Parameters<typeof runApiConversation>[0])
+      // Ответ пишем на ЛЮБОМ исходе: оборванный прогон, успевший что-то сказать, для
+      // следующего хода такой же контекст, как удачный. Ошибку пробрасываем дальше —
+      // семантика completion не меняется.
+      .then(() => { persistAssistant() }, (err: unknown) => { persistAssistant(); throw err })
 
     return {
       runId,
+      threadId: thread.id,
       sendId,
       completion,
       stop: () => ctrl.abort()
@@ -369,15 +493,77 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       const row = db.prepare('SELECT status FROM agent_runs WHERE run_id = ?').get(runId) as { status: string } | undefined
       return row?.status ?? null
     },
-    listRuns: (listOpts) => {
-      // rowid DESC — тай-брейк для прогонов одной миллисекунды (как в storage/agent-runs).
+    listTasks: (listOpts) => {
       const limit = Math.max(1, Math.min(listOpts?.limit ?? 50, 200))
+      // Одна строка на ТРЕД. Группируем по chat_id; прогоны без треда (легаси до этой
+      // модели) остаются каждый сам себе задачей — COALESCE(chat_id, -rowid) даёт им
+      // персональный ключ, а не сваливает в одну кучу (chat_id никогда не отрицателен).
+      // MAX(rowid) = последний вставленный прогон треда: тот же тай-брейк «вставлен
+      // позже = новее», что в storage/agent-runs.
       return db.prepare(
-        `SELECT run_id as runId, title as prompt, project_path as workspace,
-                provider_id as providerId, model, status,
-                started_at as createdAt, ended_at as endedAt
-         FROM agent_runs ORDER BY started_at DESC, rowid DESC LIMIT ?`
-      ).all(limit) as HeadlessRunSummary[]
+        `SELECT r.run_id as runId,
+                r.chat_id as threadId,
+                COALESCE(cs.title, r.title) as prompt,
+                r.project_path as workspace,
+                r.provider_id as providerId, r.model as model, r.status as status,
+                r.ended_at as endedAt, r.started_at as lastActivityAt,
+                t.createdAt as createdAt, t.runCount as runCount
+         FROM agent_runs r
+         JOIN (
+           SELECT COALESCE(chat_id, -rowid) as k,
+                  MIN(started_at) as createdAt,
+                  COUNT(*) as runCount,
+                  MAX(rowid) as lastRowid
+           FROM agent_runs WHERE owner = 'main' GROUP BY k
+         ) t ON r.rowid = t.lastRowid
+         LEFT JOIN chat_sessions cs ON cs.id = r.chat_id
+         ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`
+      ).all(limit) as HeadlessTaskSummary[]
+    },
+    getThread: (runId) => {
+      const anchor = db.prepare(
+        'SELECT chat_id as threadId, project_path as workspace, title FROM agent_runs WHERE run_id = ?'
+      ).get(runId) as { threadId: number | null; workspace: string; title: string } | undefined
+      if (!anchor) return null
+      const session = anchor.threadId != null ? chatSessions.get(anchor.threadId) : null
+      // Ходы треда по порядку. Легаси-прогон без chat_id — тред из самого себя: честнее
+      // отдать одну задачу, чем притвориться, что её нет.
+      const runs = (anchor.threadId != null
+        ? db.prepare(
+          `SELECT run_id as runId, status, provider_id as providerId, model,
+                  started_at as startedAt, ended_at as endedAt
+           FROM agent_runs WHERE chat_id = ? ORDER BY started_at ASC, rowid ASC`
+        ).all(anchor.threadId)
+        : db.prepare(
+          `SELECT run_id as runId, status, provider_id as providerId, model,
+                  started_at as startedAt, ended_at as endedAt
+           FROM agent_runs WHERE run_id = ?`
+        ).all(runId)) as Array<Omit<HeadlessThreadRun, 'events'>>
+      const eventsOf = db.prepare(
+        'SELECT kind, label, detail, created_at as createdAt FROM agent_run_events WHERE run_id = ? ORDER BY id'
+      )
+      const messages = anchor.threadId != null
+        ? chats.listBySession(anchor.threadId).map(m => ({
+          id: m.id, role: m.role, content: m.content, createdAt: m.createdAt
+        }))
+        : []
+      return {
+        threadId: anchor.threadId,
+        title: session?.title ?? anchor.title,
+        workspace: session?.projectPath ?? anchor.workspace,
+        createdAt: session?.createdAt ?? runs[0]?.startedAt ?? 0,
+        lastActivityAt: session?.lastMessageAt ?? runs[runs.length - 1]?.startedAt ?? 0,
+        messages,
+        runs: runs.map(r => ({
+          ...r,
+          events: eventsOf.all(r.runId) as HeadlessThreadRun['events']
+        }))
+      }
+    },
+    getRunThreadId: (runId) => {
+      const row = db.prepare('SELECT chat_id as threadId FROM agent_runs WHERE run_id = ?')
+        .get(runId) as { threadId: number | null } | undefined
+      return row?.threadId ?? null
     },
     getRunWorkspace: (runId) => {
       const row = db.prepare('SELECT project_path as workspace FROM agent_runs WHERE run_id = ?')

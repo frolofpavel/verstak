@@ -53,6 +53,7 @@ function makeFakeHost() {
       capturedSender = opts.sender ?? null
       return {
         runId: 'run-fake-1',
+        threadId: 7,
         sendId: 42,
         completion: new Promise<void>(r => { resolveCompletion = r }),
         stop
@@ -65,10 +66,20 @@ function makeFakeHost() {
       ? [{ kind: 'user_msg', label: null, detail: 'задача', createdAt: 1 }]
       : [],
     getRunStatus: (runId) => (runId === 'run-fake-1' ? 'running' : null),
-    listRuns: () => [{
-      runId: 'run-fake-1', prompt: 'задача', workspace: '/w', providerId: 'deepseek',
-      model: 'm', status: 'running', createdAt: 1, endedAt: null
+    listTasks: () => [{
+      threadId: 7, runId: 'run-fake-1', prompt: 'задача', workspace: '/w', providerId: 'deepseek',
+      model: 'm', status: 'running', createdAt: 1, endedAt: null, lastActivityAt: 1, runCount: 1
     }],
+    getThread: (runId) => (runId === 'run-fake-1' ? {
+      threadId: 7, title: 'задача', workspace: '/w', createdAt: 1, lastActivityAt: 1,
+      messages: [{ id: 1, role: 'user' as const, content: 'задача', createdAt: 1 }],
+      runs: [{
+        runId: 'run-fake-1', status: 'running', providerId: 'deepseek', model: 'm',
+        startedAt: 1, endedAt: null,
+        events: [{ kind: 'user_msg', label: null, detail: 'задача', createdAt: 1 }]
+      }]
+    } : null),
+    getRunThreadId: (runId) => (runId === 'run-fake-1' ? 7 : null),
     getRunWorkspace: (runId) => (runId === 'run-fake-1' ? '/w' : null),
     close: () => undefined
   }
