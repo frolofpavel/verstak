@@ -22,6 +22,8 @@ const { createTenantRegistry } = await import('../../electron/headless/tenants')
 /** ASCII-маркер: файлы читаются побайтно (latin1), кириллица так не сматчилась бы. */
 const ENDPOINT_AUTH = 'Bearer w5-connector-secret-QQZZ0123456789'
 const DIRECT_TOKEN = 'w5-yandex-direct-token-QQZZ0123456789'
+/** Значение НЕобязательного ключа: секретом не является, но наружу тоже не выдаётся. */
+const OPTIONAL_LOGIN = 'w5-agency-login-QQZZ0123456789'
 
 interface Call { status: number; body: string }
 
@@ -52,6 +54,7 @@ interface ConnectorView {
   kind: string
   status: string
   requiredKeys: string[]
+  optionalKeys: string[]
   missingKeys: string[]
   configuredKeys: string[]
 }
@@ -180,6 +183,57 @@ describe('ключи коннекторов тенанта — ручки /conne
     // Контрольный кейс к «значения не выдаются»: имена в ответе ЕСТЬ, то есть проверка
     // не зелена просто потому, что тело пустое.
     expect(after.body).toContain('yandex_direct_token')
+  })
+
+  it('optionalKeys: необязательные ключи объявлены ИМЕНАМИ — кабинету есть что предложить, готовность от них не зависит', async () => {
+    const port = await boot()
+    const direct = pick((await call(port, 'GET', '/connectors', 'user-a')).body, 'yandex_direct')!
+    // Кабинет обязан узнать про yandex_direct_login ДО того, как ключ задан: в requiredKeys
+    // его нет по смыслу, в configuredKeys — пока не задан, и предложить ввод нечем.
+    expect(direct.optionalKeys).toEqual(['yandex_direct_login'])
+    expect(direct.requiredKeys).not.toContain('yandex_direct_login')
+    expect(direct.missingKeys).not.toContain('yandex_direct_login')
+    expect(direct.configuredKeys).toEqual([])
+
+    // Готовность от необязательного ключа не зависит: хватило обязательного → ready, а
+    // optionalKeys продолжает называть НЕзаданный login.
+    const ready = JSON.parse((await call(port, 'POST', '/connectors/yandex_direct/secrets', 'user-a', {
+      yandex_direct_token: DIRECT_TOKEN
+    })).body) as ConnectorView
+    expect(ready.status).toBe('ready')
+    expect(ready.optionalKeys).toEqual(['yandex_direct_login'])
+    expect(ready.configuredKeys).toEqual(['yandex_direct_token'])
+
+    // Заданный необязательный ключ переезжает в configuredKeys, оставаясь объявленным
+    // необязательным; ЗНАЧЕНИЕ не выдаётся ни в ответе POST, ни в списке.
+    const withLogin = JSON.parse((await call(port, 'POST', '/connectors/yandex_direct/secrets', 'user-a', {
+      yandex_direct_login: OPTIONAL_LOGIN
+    })).body) as ConnectorView
+    expect(withLogin.optionalKeys).toEqual(['yandex_direct_login'])
+    expect(withLogin.configuredKeys.sort()).toEqual(['yandex_direct_login', 'yandex_direct_token'])
+    expect(withLogin.missingKeys).toEqual([])
+    expect(JSON.stringify(withLogin)).not.toContain(OPTIONAL_LOGIN)
+    const list = (await call(port, 'GET', '/connectors', 'user-a')).body
+    expect(list).not.toContain(OPTIONAL_LOGIN)
+    expect(list).not.toContain(DIRECT_TOKEN)
+    // Контрольный кейс к «значений нет»: ИМЯ ключа в теле есть — пин не зелен от пустоты.
+    expect(list).toContain('yandex_direct_login')
+  })
+
+  it('optionalKeys считается по коннектору, а не константа: у onec пуст, у telegram полон, с requiredKeys не пересекается', async () => {
+    const port = await boot()
+    const all = views((await call(port, 'GET', '/connectors', 'user-a')).body)
+    expect(all.find(c => c.id === 'onec')!.optionalKeys).toEqual([])
+    // Контрольный кейс: непустые optionalKeys в ТОМ ЖЕ ответе есть — иначе «у onec пусто»
+    // было бы зелено просто потому, что поле пусто у всех.
+    expect(all.find(c => c.id === 'telegram')!.optionalKeys)
+      .toEqual(['telegram_chat_whitelist', 'telegram_notify_chat_id'])
+    expect(all.filter(c => c.optionalKeys.length > 0).length).toBeGreaterThan(1)
+    // Обязательное и необязательное не пересекаются ни у одного коннектора: иначе кабинет
+    // предлагал бы один ключ дважды и с разным смыслом.
+    for (const c of all) {
+      expect([c.id, c.optionalKeys.filter(k => c.requiredKeys.includes(k))]).toEqual([c.id, []])
+    }
   })
 
   it('requiresAnyOf: заданного одного ключа достаточно, остальные НЕ считаются недостающими', async () => {

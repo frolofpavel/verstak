@@ -21,6 +21,14 @@ export interface ConnectorSecretsView {
   status: ConnectorInfo['status']
   /** Ключи, от которых зависит статус (requires + requiresAnyOf). */
   requiredKeys: string[]
+  /**
+   * Имена НЕобязательных ключей коннектора (`optional`): адаптер их читает, на статус они
+   * не влияют. Без этого списка кабинет физически не может предложить задать ещё не
+   * заданный необязательный ключ — он знает только requiredKeys и configuredKeys, а
+   * `yandex_direct_login` / `telegram_chat_whitelist` не входят ни в те, ни в другие,
+   * пока не заданы. Имена, не значения: как и все поля этой формы.
+   */
+  optionalKeys: string[]
   /** Из requiredKeys те, из-за которых статус НЕ ready. Пусто ⇔ status === 'ready'. */
   missingKeys: string[]
   /** Имена ключей коннектора, которые заданы у этого тенанта (значения не выдаются). */
@@ -69,6 +77,7 @@ function toView(info: ConnectorInfo, store: TenantSecretStore): ConnectorSecrets
     kind: info.kind,
     status: info.status,
     requiredKeys: [...new Set([...requires, ...anyOf])],
+    optionalKeys: [...new Set(info.optional ?? [])],
     missingKeys: missing,
     configuredKeys: connectorKeySurface(info).filter(k => filled(store, k))
   }

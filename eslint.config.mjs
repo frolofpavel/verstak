@@ -13,6 +13,10 @@ export default tseslint.config(
     ignores: [
       'node_modules/**',
       'out/**',
+      // Бандл headless-сервиса (npm run build:headless) — такой же генерируемый артефакт,
+      // как out/, и так же в .gitignore. В списке его не было: у всякого, кто собрал сервис
+      // ДО линта, `lint:full` краснел 10 ошибками ВНУТРИ сгенерированного файла.
+      'out-headless/**',
       'release/**',
       'dist/**',
       'coverage/**',
