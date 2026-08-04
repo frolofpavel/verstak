@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { platform } from 'os'
 import { existsSync, writeFileSync, unlinkSync } from 'fs'
+import { safeCliModelArg } from './model-arg-safety'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -266,7 +267,11 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
         : DEFAULT_GROK_CLI_MODEL
 
       const args = ['--output-format', 'streaming-json', '--no-alt-screen']
-      args.push('-m', selectedModel)
+      // Open Design #2: имя модели в argv дочернего CLI, начинающееся с «-», станет флагом.
+      // Небезопасное — откатываемся на дефолт (grok всегда передаёт -m).
+      const safeGrokModel = safeCliModelArg(selectedModel)
+      if (!safeGrokModel) logRuntime(`[grok-cli] небезопасное имя модели «${selectedModel}» отклонено — использую ${DEFAULT_GROK_CLI_MODEL}`)
+      args.push('-m', safeGrokModel ?? DEFAULT_GROK_CLI_MODEL)
       // Back to -p argv (this is what worked before parity changes). stdin
       // through cmd.exe wrapper on Windows turned out to be even more unstable.
       // Soft cap to 8KB so we never trip CreateProcess limits or grok's own

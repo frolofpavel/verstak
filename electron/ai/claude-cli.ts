@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { platform } from 'os'
 import { existsSync } from 'fs'
+import { safeCliModelArg } from './model-arg-safety'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { normalizedUsage } from '../../shared/contracts/usage'
@@ -183,7 +184,11 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
 
       const args = ['--print', '--output-format', 'stream-json', '--verbose']
       if (opts.model && opts.model !== 'auto') {
-        args.push('--model', opts.model)
+        // Open Design #2: имя модели идёт в argv дочернего CLI — если оно начинается с
+        // «-», CLI примет его за флаг. Небезопасное отклоняем, CLI берёт дефолт.
+        const safeModel = safeCliModelArg(opts.model)
+        if (safeModel) args.push('--model', safeModel)
+        else console.warn(`[claude-cli] небезопасное имя модели «${opts.model}» отклонено (могло стать флагом дочернему CLI) — использую дефолт`)
       }
       // Срез 5: режим прав (accept-edits/plan/bypass) + guard секретов. Должен
       // идти ПОСЛЕ --model — --disallowedTools variadic, ставим его последним.

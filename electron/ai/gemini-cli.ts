@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { platform } from 'os'
 import { existsSync } from 'fs'
+import { safeCliModelArg } from './model-arg-safety'
 import { join } from 'path'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { normalizedUsage } from '../../shared/contracts/usage'
@@ -114,7 +115,10 @@ export function createGeminiCliProvider(opts: GeminiCliOptions = {}): ChatProvid
 
       const args = ['--output-format', 'stream-json']
       if (opts.model && opts.model !== 'auto') {
-        args.push('-m', opts.model)
+        // Open Design #2: имя модели в argv дочернего CLI, начинающееся с «-», станет флагом.
+        const safeModel = safeCliModelArg(opts.model)
+        if (safeModel) args.push('-m', safeModel)
+        else console.warn(`[gemini-cli] небезопасное имя модели «${opts.model}» отклонено — использую дефолт`)
       }
       const child = spawn(binary, args, {
         cwd,
