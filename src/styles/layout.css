@@ -12472,6 +12472,26 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
   font-size: 16px; line-height: 1;
 }
 .gg-terminal-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* Задача 2: правый док инспектора суб-агентов внутри чата — колонка как терминал,
+   но у AgentsPanel свой заголовок, поэтому добавляем только плавающую кнопку закрытия. */
+.gg-agents-dock {
+  position: relative;
+  background: var(--bg-base);
+  border-left: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.gg-agents-dock > .gg-panel { flex: 1; min-height: 0; }
+.gg-agents-dock-close {
+  position: absolute; top: 8px; right: 10px; z-index: 2;
+  background: transparent; border: none;
+  color: var(--text-tertiary); cursor: pointer;
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
+  font-size: 16px; line-height: 1;
+}
+.gg-agents-dock-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 .gg-terminal-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--success);

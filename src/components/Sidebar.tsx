@@ -426,8 +426,9 @@ function NavButtons({ items, activeView, onSelect }: {
 // Задача 1: «История работы» (view `tasks-manager`) переехала из WORK в CONTROL, рядом
 // с «Журналом». `inspector` оставлен в наборе для подсветки секции при старых deep-link'ах
 // (роут инспектора теперь ведёт на тот же слитый раздел — см. App.tsx).
+// Задача 2: «Агенты» убраны из меню — инспектор суб-агентов стал правой панелью внутри чата.
 const WORK_VIEW_IDS = new Set<ViewId>(['chat', 'plan', 'tasks', 'workflow'])
-const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'skills', 'project-rules', 'memory-gov', 'inspector', 'tasks-manager', 'agents', 'decisions'])
+const CONTROL_VIEW_IDS = new Set<ViewId>(['journal', 'scheduler', 'reminders', 'skills', 'project-rules', 'memory-gov', 'inspector', 'tasks-manager', 'decisions'])
 const PROJECT_VIEW_IDS = new Set<ViewId>(['project-map', 'files', 'brain'])
 const TOOLS_VIEW_IDS = new Set<ViewId>(['browser', 'design', 'feedback'])
 
@@ -512,14 +513,6 @@ const MemoryIcon = (
     <path d="M12 2v16" />
   </svg>
 )
-const AgentsIcon = (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="7" r="3" />
-    <circle cx="5" cy="17" r="2.5" />
-    <circle cx="19" cy="17" r="2.5" />
-    <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
-  </svg>
-)
 const DecisionsIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
@@ -580,7 +573,6 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'tasks-manager', label: 'История работы', icon: HistoryIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
     { id: 'scheduler', label: 'Расписание', icon: CalendarIcon },
-    { id: 'agents',   label: t.sidebar.agents,   icon: AgentsIcon },
     { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока требуют понятного пользовательского сценария' },
   ]
 

@@ -204,7 +204,7 @@ function readAutoScrollPref(): boolean {
   return true
 }
 
-type RightPanel = 'none' | 'terminal' | 'sidechat' | 'file-preview'
+type RightPanel = 'none' | 'terminal' | 'sidechat' | 'file-preview' | 'agents'
 
 interface ChatProps {
   onOpenSettings: () => void
@@ -2972,6 +2972,23 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   <path d="M13 8h6a2 2 0 0 1 2 2v8l-3-2.5H13a2 2 0 0 1-2-2V8z" />
                 </svg>
                 <span>{t.chat.dockSideChat}</span>
+              </button>
+              {/* Задача 2: инспектор суб-агентов переехал из отдельного пункта меню
+                  «Агенты» СЮДА — рядом с прогоном. Живой список суб-сессий этого прогона
+                  и проекта: роль/провайдер/статус/задача, отмена, «притащить в чат». */}
+              <button
+                type="button"
+                className={`gg-terminal-bar-btn gg-terminal-bar-btn-agents ${rightPanel === 'agents' ? 'is-open' : ''}`}
+                onClick={() => onSelectRightPanel(rightPanel === 'agents' ? 'none' : 'agents')}
+                title="Агенты прогона — суб-агенты этого чата и проекта"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="7" r="3" />
+                  <circle cx="5" cy="17" r="2.5" />
+                  <circle cx="19" cy="17" r="2.5" />
+                  <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
+                </svg>
+                <span>Агенты</span>
               </button>
             </div>
           )}

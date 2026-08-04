@@ -111,7 +111,7 @@ export function App() {
   const [modelPromptRecheck, setModelPromptRecheck] = useState(0)
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectMeta | null>(null)
   // Right docked panel: terminal, file preview or parallel side-chat.
-  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat' | 'file-preview'>('none')
+  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'sidechat' | 'file-preview' | 'agents'>('none')
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
   // Side-chat session id — created on first sent message, not on panel open.
   const [sideChatId, setSideChatId] = useState<number | null>(null)
@@ -278,7 +278,7 @@ export function App() {
     if (!path) {
       setSideChatId(null)
       setPreviewFilePath(null)
-      setRightPanel(p => (p === 'sidechat' || p === 'file-preview' ? 'none' : p))
+      setRightPanel(p => (p === 'sidechat' || p === 'file-preview' || p === 'agents' ? 'none' : p))
       return
     }
     const saved = sideChatByProjectRef.current[path] ?? null
@@ -513,6 +513,22 @@ export function App() {
                 />
               </Suspense>
             )}
+            {/* Задача 2: инспектор суб-агентов — теперь правая панель ВНУТРИ чата,
+                рядом с прогоном (был отдельный пункт меню «Агенты»). Панель не
+                выброшена — переставлена: тот же AgentsPanel, новая точка входа.
+                У панели свой заголовок — добавляем только плавающую кнопку закрытия. */}
+            {effectiveRightPanel === 'agents' && (
+              <div className="gg-agents-dock" style={{ width: sideChatWidth }}>
+                <button
+                  className="gg-agents-dock-close"
+                  onClick={() => setRightPanel('none')}
+                  title={t.views.hide}
+                >×</button>
+                <Suspense fallback={<ViewFallback />}>
+                  <AgentsPanel />
+                </Suspense>
+              </div>
+            )}
         </div>
         {activeView === 'tasks' && <Suspense fallback={<ViewFallback />}><TasksView /></Suspense>}
         {activeView === 'journal' && <Suspense fallback={<ViewFallback />}><JournalView /></Suspense>}
@@ -526,7 +542,6 @@ export function App() {
         {activeView === 'project-rules' && (
           <Suspense fallback={<ViewFallback />}><ProjectRulesView /></Suspense>
         )}
-        {activeView === 'agents' && <Suspense fallback={<ViewFallback />}><AgentsPanel /></Suspense>}
         {activeView === 'tasks-manager' && <Suspense fallback={<ViewFallback />}><AgentRunsPanel /></Suspense>}
         {activeView === 'task' && <Suspense fallback={<ViewFallback />}><DevTaskPanel /></Suspense>}
         {activeView === 'project-map' && <Suspense fallback={<ViewFallback />}><ProjectMapPanel /></Suspense>}
