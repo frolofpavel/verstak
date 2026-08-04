@@ -85,7 +85,8 @@ export interface StartTaskOptions {
    */
   workspace?: string
   prompt: string
-  providerId: ProviderId
+  /** Не обязателен, если задан inference (тогда выводится custom-openai). */
+  providerId?: ProviderId
   model?: string
   agentMode?: AgentMode
   /** Allowlist инструментов прогона. По умолчанию — STAGE1_TOOLS_ALLOW (fail-closed);
@@ -202,12 +203,16 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     if (!isWithinKnownRoots(workspace, opts.workspaceRoots)) {
       throw new Error('workspace задачи вне разрешённых корней хоста')
     }
-    const descriptor = PROVIDERS[task.providerId]
+    // Маршрут инференса однозначно задаёт провайдера, поэтому providerId при нём
+    // необязателен: клиент не обязан дублировать то, что уже сказано блоком. Явно
+    // переданный providerId побеждает.
+    const providerId = (task.providerId ?? (task.inference ? 'custom-openai' : undefined)) as ProviderId
+    const descriptor = PROVIDERS[providerId]
     if (!descriptor) throw new Error(`неизвестный провайдер: ${task.providerId}`)
     const hasInjectedProvider = Boolean(task.providerOverride) || Boolean(opts.providerFactory) || Boolean(task.inference)
     if (!hasInjectedProvider && descriptor.transport !== 'API') {
       // Этап 1: только API-транспорт (CLI-провайдеры требуют интерактивного OAuth на машине).
-      throw new Error(`headless-хост Этапа 1 поддерживает только API-провайдеры (${task.providerId}: ${descriptor.transport})`)
+      throw new Error(`headless-хост Этапа 1 поддерживает только API-провайдеры (${providerId}: ${descriptor.transport})`)
     }
 
     const ctrl = new AbortController()
@@ -217,7 +222,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     const sender = task.sender ?? NOOP_SENDER
 
     let provider = task.providerOverride
-      ?? opts.providerFactory?.(task.providerId, model, ctrl.signal, workspace)
+      ?? opts.providerFactory?.(providerId, model, ctrl.signal, workspace)
       ?? undefined
     if (!provider && task.inference) {
       // Per-task маршрут: OpenAI-совместимый эндпоинт с токеном прогона. Секреты
@@ -234,11 +239,11 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     if (!provider) {
       const apiKey = descriptor.secretKey ? getSecret(descriptor.secretKey) : null
       const runtimeOptions = buildProviderRuntimeOptions({
-        providerId: task.providerId,
+        providerId,
         account: null,
         getSecret
       })
-      provider = createProvider(task.providerId, {
+      provider = createProvider(providerId, {
         apiKey: apiKey ?? undefined,
         model,
         cwd: workspace,
@@ -269,12 +274,12 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     // строка agent_runs + user_msg первым событием таймлайна.
     agentRuns.create({
       runId, projectPath: workspace, chatId: null, owner: 'main',
-      title: task.prompt.slice(0, 200), providerId: task.providerId, model,
-      requestedProviderId: task.providerId, requestedModel: model,
+      title: task.prompt.slice(0, 200), providerId, model,
+      requestedProviderId: providerId, requestedModel: model,
       sendId, agentMode, accountId: null
     })
     agentRuns.appendEvent(runId, 'user_msg', { detail: task.prompt.slice(0, 500) })
-    logRuntime('headless.task.start', { runId, sendId, providerId: task.providerId, model, workspace })
+    logRuntime('headless.task.start', { runId, sendId, providerId, model, workspace })
 
     const completion = runApiConversation({
       sender, sendId, provider, tools, projectPath: workspace,
@@ -329,7 +334,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         : undefined,
       getSecretForDelegate: getSecretForRun,
       costGuard: createCostGuard(task.costCapUsd ?? 5),
-      providerId: task.providerId,
+      providerId,
       model,
       agentRuns,
       runId,

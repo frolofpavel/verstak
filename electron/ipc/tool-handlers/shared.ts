@@ -1,5 +1,6 @@
 // Общие типы и хелперы для модулей tool-handlers/*.
 // Вынесено из electron/ipc/tool-handlers.ts при распиле монолита — поведение не меняется.
+import { scanText } from '../../ai/secret-scanner'
 import type { Attachment, ToolCall, ToolResult } from '../../ai/types'
 import type { Tasks } from '../../storage/tasks'
 import type { FileTools } from '../../ai/tools'
@@ -220,7 +221,11 @@ export interface ToolHandler {
 // list_directory/search_project/find_files/get_project_map и прочую read-only
 // мелочь — иначе Timeline раздувается. Команда/коннектор/делегирование значимы.
 const TIMELINE_TOOL_CALLS = new Set([
-  'run_command', 'connector_query', 'delegate_task', 'delegate_parallel', 'review_before_commit'
+  'run_command', 'connector_query', 'delegate_task', 'delegate_parallel', 'review_before_commit',
+  // Читающие инструменты (запрос №6): без них переоткрытая вкладка показывала итог без
+  // хода работы, и на вопрос «откуда цифры» ответить было нечем — в таймлайне не
+  // оставалось следа ни от одного запроса в интернет.
+  'web_search', 'web_fetch'
 ])
 
 export function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'error', label: string, detail: string): void {
@@ -240,7 +245,10 @@ export function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'e
   // со своим emitActivity, а не здесь. recordRunEvent best-effort (ai.ts оборачивает
   // в try/catch); вызываем только для «крупных» вызовов из TIMELINE_TOOL_CALLS.
   if (ctx.recordRunEvent && TIMELINE_TOOL_CALLS.has(call.name)) {
-    ctx.recordRunEvent('tool_call', { label: call.name, detail, status })
+    // Сводка аргументов идёт в durable-хранилище и наружу в кабинет — редактируем
+    // секреты ещё раз здесь (defense-in-depth: detail собирают разные хендлеры).
+    const safeDetail = detail ? scanText(detail).redacted : detail
+    ctx.recordRunEvent('tool_call', { label: call.name, detail: safeDetail, status })
   }
 }
 

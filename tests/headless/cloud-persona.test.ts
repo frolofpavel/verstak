@@ -35,6 +35,13 @@ describe('облачная персона headless-прогона', () => {
     expect(system.toLowerCase()).toContain('никогда не отказывайся')
   })
 
+  it('облачная сборка требует называть источники и помечать непроверенные оценки', () => {
+    const { system } = composeSystemPrompt(EMPTY_LAYER, '', '', CLOUD_SYSTEM_LAYER_PROMPT)
+    expect(system).toContain('ИСТОЧНИКИ ОБЯЗАТЕЛЬНЫ')
+    expect(system).toContain('URL')
+    expect(system).toContain('оценку модели без')
+  })
+
   it('облачная сборка честна о том, чего в облаке нет (shell/код/браузер)', () => {
     const { system } = composeSystemPrompt(EMPTY_LAYER, '', '', CLOUD_SYSTEM_LAYER_PROMPT)
     expect(system).toContain('Оболочки, выполнения кода и браузера у тебя нет')
@@ -96,4 +103,68 @@ describe('web_access в облачном хосте', () => {
       rmSync(ws, { recursive: true, force: true })
     }
   })
+})
+
+// ── Читающие инструменты в durable-таймлайне (запрос №6) ────────────────────
+// Раньше вызов web_search не оставлял следа: переоткрытая вкладка показывала итог
+// без хода работы, и на вопрос «откуда цифры» ответить было нечем.
+describe('tool_call в таймлайне', () => {
+  it('web_search/web_fetch пишутся в таймлайн, а сводка аргументов редактируется', async () => {
+    const { emitActivity } = await import('../../electron/ipc/tool-handlers/shared')
+    const events: Array<{ kind: string; payload: { label?: string | null; detail?: string | null } }> = []
+    const ctx = {
+      sender: { send: () => {}, exec: async () => undefined },
+      sendId: 1,
+      recordRunEvent: (kind: string, payload: { label?: string | null; detail?: string | null }) => {
+        events.push({ kind, payload })
+      }
+    } as unknown as import('../../electron/ipc/tool-handlers/shared').ToolContext
+
+    emitActivity(ctx, { id: 'c1', name: 'web_search', args: {} }, 'ok', 'web_search', 'погода Новосибирск')
+    emitActivity(ctx, { id: 'c2', name: 'web_fetch', args: {} }, 'ok', 'web_fetch', 'https://example.com/weather')
+    expect(events.map(e => e.payload.label)).toEqual(['web_search', 'web_fetch'])
+    expect(events[1].payload.detail).toContain('example.com')
+
+    // Секрет в сводке аргументов не доезжает до durable-хранилища.
+    emitActivity(ctx, { id: 'c3', name: 'web_fetch', args: {} }, 'ok', 'web_fetch',
+      'https://api.example.com/v1?api_key=sk-ant-abcdefghij0123456789klmno')
+    expect(events[2].payload.detail).not.toContain('sk-ant-abcdefghij0123456789klmno')
+
+    // Контрольный кейс: инструмент вне списка в таймлайн НЕ попадает.
+    emitActivity(ctx, { id: 'c4', name: 'read_file', args: {} }, 'ok', 'read_file', 'a.txt')
+    expect(events.length).toBe(3)
+  })
+})
+
+// ── providerId выводится из inference (хвост плана) ─────────────────────────
+describe('providerId из inference', () => {
+  it('без providerId, но с inference — прогон стартует; без обоих — прежняя ошибка', async () => {
+    const { mkdtempSync, rmSync } = await import('fs')
+    const { join } = await import('path')
+    const { tmpdir } = await import('os')
+    const { randomBytes } = await import('crypto')
+    const { createHeadlessHost } = await import('../../electron/headless/host')
+    const { createAesGcmSafeStorage } = await import('../../electron/headless/secure-storage')
+    const dir = mkdtempSync(join(tmpdir(), 'vsk-pid-'))
+    const ws = mkdtempSync(join(tmpdir(), 'vsk-pid-ws-'))
+    const host = await createHeadlessHost({
+      dataDir: dir, workspaceRoots: [ws],
+      safeStorage: createAesGcmSafeStorage(randomBytes(32)), env: {}
+    })
+    try {
+      const task = await host.startTask({
+        prompt: 'привет', agentMode: 'bypass',
+        inference: { baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'tok' }
+      } as Parameters<typeof host.startTask>[0])
+      await task.completion
+      expect(host.listRuns()[0].providerId).toBe('custom-openai')
+
+      await expect(host.startTask({ prompt: 'x' } as Parameters<typeof host.startTask>[0]))
+        .rejects.toThrow(/неизвестный провайдер/)
+    } finally {
+      host.close()
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(ws, { recursive: true, force: true })
+    }
+  }, 30_000)
 })
