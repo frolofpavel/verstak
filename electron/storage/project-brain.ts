@@ -49,6 +49,9 @@ export interface DecisionRecord {
   id: number
   projectPath: string
   sourceMessageId: string | null
+  /** Задача 7B: прогон, породивший решение (Решения = журнал «почему» у прогона).
+   *  null у решений до миграции 62 и заведённых вне прогона. */
+  runId: string | null
   title: string
   userRequest: string | null
   finalDecision: string | null
@@ -65,7 +68,7 @@ export interface DecisionRecord {
 }
 
 /** DecisionBrief — сжатая карта решения ДО сохранения (вход для save). */
-export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'projectPath' | 'createdAt' | 'updatedAt'>
+export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'projectPath' | 'createdAt' | 'updatedAt' | 'runId'> & { runId?: string | null }
 
 function arr(json: unknown): string[] {
   if (typeof json !== 'string' || !json) return []
@@ -176,10 +179,10 @@ export function createProjectBrainStore(db: Database): ProjectBrainStore {
     saveDecisionRecord(projectPath, rec) {
       const now = Date.now()
       const info = db.prepare(`INSERT INTO decision_record
-          (project_path, source_message_id, title, user_request, final_decision, why, key_arguments,
+          (project_path, source_message_id, run_id, title, user_request, final_decision, why, key_arguments,
            objections, risks, alternatives_rejected, next_actions, confidence, revisit_date, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(projectPath, rec.sourceMessageId, rec.title, rec.userRequest, rec.finalDecision, rec.why,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(projectPath, rec.sourceMessageId, rec.runId ?? null, rec.title, rec.userRequest, rec.finalDecision, rec.why,
              j(rec.keyArguments), j(rec.objections), j(rec.risks), j(rec.alternativesRejected),
              j(rec.nextActions), rec.confidence, rec.revisitDate, now, now)
       return this.getDecisionRecords(projectPath).find(d => d.id === Number(info.lastInsertRowid))!
@@ -188,6 +191,7 @@ export function createProjectBrainStore(db: Database): ProjectBrainStore {
       const rows = db.prepare('SELECT * FROM decision_record WHERE project_path = ? ORDER BY created_at DESC').all(projectPath) as Array<Record<string, unknown>>
       return rows.map(r => ({
         id: r.id as number, projectPath: r.project_path as string, sourceMessageId: (r.source_message_id as string) ?? null,
+        runId: (r.run_id as string) ?? null,
         title: r.title as string, userRequest: (r.user_request as string) ?? null, finalDecision: (r.final_decision as string) ?? null,
         why: (r.why as string) ?? null, keyArguments: arr(r.key_arguments), objections: arr(r.objections),
         risks: arr(r.risks), alternativesRejected: arr(r.alternatives_rejected), nextActions: arr(r.next_actions),

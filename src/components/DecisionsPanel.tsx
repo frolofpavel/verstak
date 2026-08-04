@@ -14,8 +14,15 @@ const CONF_LABEL: Record<string, string> = { low: 'низкая', medium: 'ср�
 
 export function DecisionsPanel() {
   const { path } = useProject()
+  const setActiveView = useProject(s => s.setActiveView)
   const [items, setItems] = useState<DecisionRecord[]>([])
   const [loading, setLoading] = useState(false)
+
+  // Задача 7B: решение привязано к прогону — прыжок к нему в «Историю работы».
+  function openRun(runId: string) {
+    setActiveView('tasks-manager')
+    setTimeout(() => window.dispatchEvent(new CustomEvent('gg-open-agent-run', { detail: runId })), 0)
+  }
 
   async function refresh() {
     setLoading(true)
@@ -55,6 +62,9 @@ export function DecisionsPanel() {
               <div className="gg-decision-head">
                 <span className="gg-decision-title">{d.title}</span>
                 {d.confidence && <span className="gg-decision-conf">{CONF_LABEL[d.confidence] ?? d.confidence}</span>}
+                {d.runId && (
+                  <button className="gg-decision-run" onClick={() => openRun(d.runId!)} title="Открыть прогон, в котором принято это решение">↗ прогон</button>
+                )}
                 <span className="gg-decision-date">{fmtDate(d.createdAt)}</span>
               </div>
               {d.finalDecision && <div className="gg-decision-row"><b>Решение:</b> {d.finalDecision}</div>}

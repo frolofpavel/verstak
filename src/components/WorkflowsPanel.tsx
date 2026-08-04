@@ -16,7 +16,7 @@ import type { WorkflowSummary } from '../types/api'
  * создаёт план → он появляется в WorkflowView ниже. Синергия.
  */
 
-function WorkflowCard({ wf, onLaunch }: { wf: WorkflowSummary; onLaunch: (id: string, brief: string) => Promise<void> }) {
+function WorkflowCard({ wf, onLaunch, onDelete }: { wf: WorkflowSummary; onLaunch: (id: string, brief: string) => Promise<void>; onDelete: (userId: number) => Promise<void> }) {
   const [brief, setBrief] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -35,12 +35,14 @@ function WorkflowCard({ wf, onLaunch }: { wf: WorkflowSummary; onLaunch: (id: st
       <div className="gg-wfcat-card-head">
         <span className="gg-wfcat-card-icon">{wf.icon ?? '⚙️'}</span>
         <span className="gg-wfcat-card-title">{wf.name}</span>
+        {/* Задача 7A: пользовательские workflow (сохранённые из прогона) помечены и удаляемы. */}
+        {wf.source === 'user' && <span className="gg-wfcat-card-badge">мой</span>}
         <span className="gg-wfcat-card-steps">{wf.stepCount} шагов</span>
       </div>
       <div className="gg-wfcat-card-desc">{wf.description}</div>
       <textarea
         className="gg-input gg-wfcat-brief"
-        placeholder="Бриф клиента: ниша, продукт, аудитория, гео, цель аудита…"
+        placeholder={wf.source === 'user' ? 'Бриф (необязательно) — уточни детали под этот запуск…' : 'Бриф клиента: ниша, продукт, аудитория, гео, цель аудита…'}
         value={brief}
         onChange={e => setBrief(e.target.value)}
         rows={3}
@@ -49,6 +51,9 @@ function WorkflowCard({ wf, onLaunch }: { wf: WorkflowSummary; onLaunch: (id: st
         <button className="gg-btn gg-btn-primary" onClick={() => void launch()} disabled={busy}>
           {busy ? 'Запуск…' : '▶ Запустить'}
         </button>
+        {wf.source === 'user' && wf.userId != null && (
+          <button className="gg-btn gg-btn-ghost" onClick={() => void onDelete(wf.userId!)} title="Удалить сохранённый workflow">Удалить</button>
+        )}
       </div>
     </div>
   )
@@ -59,11 +64,16 @@ export function WorkflowsPanel() {
   const setActiveView = useProject(s => s.setActiveView)
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
 
-  useEffect(() => {
-    void window.api.workflows.list()
-      .then(setWorkflows)
-      .catch(() => { /* IPC может быть недоступен в dev — каталог пустой */ })
-  }, [])
+  const refresh = () => window.api.workflows.list()
+    .then(setWorkflows)
+    .catch(() => { /* IPC может быть недоступен в dev — каталог пустой */ })
+
+  useEffect(() => { void refresh() }, [path])
+
+  async function remove(userId: number) {
+    await window.api.workflows.removeUser(userId).catch(() => {})
+    await refresh()
+  }
 
   async function launch(workflowId: string, brief: string) {
     if (!path) return
@@ -87,11 +97,11 @@ export function WorkflowsPanel() {
     <div className="gg-wfcat">
       <div className="gg-wfcat-head">
         <h2 className="gg-wfcat-title">Agency Workflows</h2>
-        <p className="gg-wfcat-subtitle">Готовые production-сценарии агентства. Заполни бриф и запусти — агент пройдёт все шаги и соберёт итоговый артефакт.</p>
+        <p className="gg-wfcat-subtitle">Готовые сценарии агентства + ваши сохранённые прогоны. Заполни бриф и запусти — агент пройдёт все шаги и соберёт итог. Свой workflow сохраняется из прогона в «Истории работы» кнопкой «В workflow».</p>
       </div>
       {workflows.length === 0 && <div className="gg-panel-empty">Каталог workflow'ов пуст.</div>}
       <div className="gg-wfcat-grid">
-        {workflows.map(wf => <WorkflowCard key={wf.id} wf={wf} onLaunch={launch} />)}
+        {workflows.map(wf => <WorkflowCard key={wf.id} wf={wf} onLaunch={launch} onDelete={remove} />)}
       </div>
     </div>
   )

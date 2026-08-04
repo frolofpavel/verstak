@@ -558,7 +558,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
   const WORK_NAV: NavItem[] = [
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
-    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon, soon: true, soonReason: 'Пайплайны пока дорабатываются: нужен понятный сценарий создания, запуска и статусов задач' },
+    { id: 'workflow', label: t.sidebar.workflow, icon: WorkflowIcon },
   ]
 
   // Задача 1: один пункт «История работы» (прогоны агента) вместо двух — бывших
@@ -572,7 +572,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
     { id: 'memory-gov', label: t.sidebar.memory, icon: MemoryIcon },
     { id: 'tasks-manager', label: 'История работы', icon: HistoryIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
-    { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon, soon: true, soonReason: 'Решения пока требуют понятного пользовательского сценария' },
+    { id: 'decisions', label: t.sidebar.decisions, icon: DecisionsIcon },
   ]
 
   const PROJECT_NAV: NavItem[] = [

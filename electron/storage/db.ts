@@ -1436,6 +1436,38 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_plan ON tasks(plan_id)')
       db.exec('CREATE INDEX IF NOT EXISTS idx_plans_chat ON plans(chat_id)')
     }
+  },
+  {
+    version: 61,
+    description: 'Задача 7A: user_workflows — пользовательские workflow, сохранённые из прогонов (workflow = сохранённый повторяемый прогон). ОТДЕЛЬНАЯ таблица, built-in WORKFLOWS в коде не трогаем: id / project_path / name / description / icon / brief_template / steps_json (JSON WorkflowStep[]) / created_at. Только append, старых данных нет — CREATE TABLE самый безопасный тип миграции.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_workflows (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          icon TEXT,
+          brief_template TEXT,
+          steps_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_user_workflows_project ON user_workflows(project_path)')
+    }
+  },
+  {
+    version: 62,
+    description: 'Задача 7B: decision_record.run_id — привязка решения к прогону, который его породил (Решения = журнал «почему» у прогона). Nullable ALTER, только append: старые решения без прогона остаются с run_id=NULL и читаются обратно совместимо.',
+    run: (db: DB) => {
+      const hasTable = Boolean(
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='decision_record'").get(),
+      )
+      if (!hasTable) return
+      const cols = (db.prepare('PRAGMA table_info(decision_record)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('run_id')) db.exec('ALTER TABLE decision_record ADD COLUMN run_id TEXT')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_decision_run ON decision_record(run_id)')
+    }
   }
 ]
 

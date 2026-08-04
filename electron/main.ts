@@ -87,6 +87,7 @@ import { createUndoStack } from './storage/undo'
 import { registerUndoIpc } from './ipc/undo'
 import { registerExactRewindIpc } from './ipc/exact-rewind-ipc'
 import { createPlans } from './storage/plans'
+import { createUserWorkflows } from './storage/user-workflows'
 import { createPlanOutcomes } from './storage/plan-outcomes'
 import { registerPlansIpc } from './ipc/plans'
 import { registerWorkflowsIpc } from './ipc/workflows'
@@ -949,11 +950,24 @@ app.whenReady().then(() => {
       maxIterations: PLAN_GENERATION_MAX_TURNS,
     }),
   })
+  const userWorkflows = createUserWorkflows(db)
   registerWorkflowsIpc({
     createPlan: (projectPath, title, steps) => {
       const plan = plans.create(projectPath, title, steps)
       return { id: plan.id }
-    }
+    },
+    // Задача 7A: СОХРАНИТЬ workflow из прогона — имя из прогона, шаги из его плана
+    // (plans связаны по agent_run_id).
+    getRun: (runId) => {
+      const run = agentRunsBase.get(runId)
+      return run ? { title: run.title } : null
+    },
+    getPlanSteps: (projectPath, runId) => {
+      const plan = plans.list(projectPath).find(p => p.agentRunId === runId)
+      return (plan?.steps ?? []).map(s => ({ title: s.title, detail: s.detail }))
+    },
+    userWorkflows,
+    getProjectRoot: getActiveProjectPath,
   })
   registerFeedbackIpc(feedback)
   registerUsageIpc(runUsage)
