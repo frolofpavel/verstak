@@ -6,6 +6,7 @@ import { mkdirSync } from 'fs'
 import { logRuntime, logRuntimeError, runtimeLogsDir } from './runtime-log'
 import { registerRuntimeLogIpc } from './runtime-log-ipc'
 import { decidePopupNavigation } from './ai/popup-policy'
+import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish } from './browser/network-capture'
 import { loadPermissionRules } from './ai/permission-rules'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
@@ -259,6 +260,27 @@ function installCSP(): void {
     }
     callback({ responseHeaders: details.responseHeaders })
   })
+
+  // Захват сети in-app браузера на уровне main. onHeadersReceived выше — единственный
+  // ПЕРЕХВАТЫВАЮЩИЙ слушатель (один на событие); наши — НЕблокирующие (onSendHeaders/
+  // onCompleted/onErrorOccurred), другое событие, конфликта нет. Фильтр по
+  // details.webContentsId (стор пишет только для webview браузера — см. trackWebview).
+  const ses = session.defaultSession
+  ses.webRequest.onSendHeaders(details => {
+    noteStart(details.webContentsId ?? -1, details.id, details.timestamp, details.requestHeaders as Record<string, string> | undefined)
+  })
+  ses.webRequest.onCompleted(details => {
+    noteFinish({
+      wcid: details.webContentsId ?? -1, requestId: details.id, ts: details.timestamp,
+      method: details.method, url: details.url, status: details.statusCode ?? null,
+    })
+  })
+  ses.webRequest.onErrorOccurred(details => {
+    noteFinish({
+      wcid: details.webContentsId ?? -1, requestId: details.id, ts: details.timestamp,
+      method: details.method, url: details.url, status: 0,
+    })
+  })
 }
 
 installAppIdentity()
@@ -358,6 +380,14 @@ app.whenReady().then(() => {
         else if (verdict.reason) { logRuntime(`[popup] ${verdict.reason}`) }
         return { action: 'deny' }
       })
+      // Захват сети: этот webContents — вкладка браузера. Регистрируем, чтобы
+      // webRequest-слушатели (выше) писали её запросы; новая страница (навигация
+      // главного фрейма) сбрасывает буфер; уничтожение webview — забываем.
+      trackWebview(contents.id)
+      contents.on('did-start-navigation', details => {
+        if (details.isMainFrame && !details.isSameDocument) resetTab(contents.id)
+      })
+      contents.once('destroyed', () => untrackWebview(contents.id))
     }
   })
   registerWindowIpc()

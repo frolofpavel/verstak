@@ -246,6 +246,35 @@ describe('vskFind — поиск элементов по запросу (осн�
     expect(r.totalHits).toBe(8)
     expect(r.truncated).toBe(true)
   })
+
+  it('ранжирование: навигационная ссылка ВЫШЕ поля-фильтра, хотя в DOM ниже', () => {
+    // Классический промах: query совпадает и с полем поиска, и с пунктом навигации.
+    // Модели почти всегда нужен переход, а не фильтр — ссылка обязана быть первой.
+    document.body.innerHTML = `
+      <input type="text" placeholder="Поиск по каталогу">
+      <a href="/catalog">Каталог</a>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'каталог', 10)
+    expect(r.count).toBe(2)
+    expect(r.matches[0].role).toBe('link')
+    expect(r.matches[0].name).toBe('Каталог')
+    expect(r.matches[1].role).toBe('textbox')
+  })
+
+  it('ранжирование: точное совпадение имени выше частичного (стабильно к DOM-порядку)', () => {
+    document.body.innerHTML = `<button>Сохранить как черновик</button><button>Сохранить</button>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'сохранить', 10)
+    expect(r.matches[0].name).toBe('Сохранить')             // точное — первым
+    expect(r.matches[1].name).toBe('Сохранить как черновик')
+  })
+
+  it('ранжирование стабильно: равный вес → сохраняется порядок DOM', () => {
+    document.body.innerHTML = `<a href="/a">Раздел A</a><a href="/b">Раздел B</a><a href="/c">Раздел C</a>`
+    const snap = vskSnapshot('g1')
+    const r = vskFind(snap, 'раздел', 10)
+    expect(r.matches.map(m => m.name)).toEqual(['Раздел A', 'Раздел B', 'Раздел C'])
+  })
 })
 
 describe('vskCapSnapshot — top-N выдачи, но нумерация в DOM полная', () => {

@@ -7,6 +7,7 @@ import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
 import { execAwaitingBrowserApi, isBrowserNotReady } from './browser-ready'
 import { capConsoleErrors, capNetwork } from './browser-redact'
+import { readCapture } from '../../browser/network-capture'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -72,9 +73,17 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     if ((call.name === 'browser_console_errors' || call.name === 'browser_network') && result && typeof result === 'object') {
       const r = result as { url?: unknown; __raw?: unknown }
       const limit = call.args.limit != null ? Number(call.args.limit) : (call.name === 'browser_console_errors' ? 20 : 30)
-      const raw = Array.isArray(r.__raw) ? r.__raw : []
-      const safe = call.name === 'browser_console_errors' ? capConsoleErrors(raw, limit) : capNetwork(raw, limit)
-      return { id: call.id, name: call.name, result: { url: r.url ?? null, ...safe } }
+      const pageRaw = Array.isArray(r.__raw) ? r.__raw : []
+      if (call.name === 'browser_console_errors') {
+        return { id: call.id, name: call.name, result: { url: r.url ?? null, ...capConsoleErrors(pageRaw, limit) } }
+      }
+      // browser_network: ОСНОВНОЙ источник — захват main (session.webRequest): полная
+      // сеть вкладки, включая запросы загрузки, которые page-рекордер (инжект на
+      // dom-ready) не видит — оттого сеть была пустой. Fallback на page __vskNet, если
+      // захват main пуст (среда без webRequest, например тесты). Редакция — та же.
+      const mainRaw = readCapture()
+      const raw = mainRaw.length > 0 ? mainRaw : pageRaw
+      return { id: call.id, name: call.name, result: { url: r.url ?? null, ...capNetwork(raw, limit) } }
     }
     return { id: call.id, name: call.name, result: result ?? '' }
   } catch (err) {

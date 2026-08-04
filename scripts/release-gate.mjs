@@ -243,7 +243,7 @@ const GATE_MAX_WORKERS = 4
 // 03.08, VSK п.6: память заводится при создании проекта (ensureCoreMemoryFiles):
 // +2 пина (создаёт MEMORY.md+USER.md; идемпотентна — не затирает) → 4606
 // = 4592 passed + 14 skipped (эталоны до: 4604, 4594, 4585, 4577, 4574, 4571).
-const EXPECTED_TOTAL_TESTS = 4658
+const EXPECTED_TOTAL_TESTS = 4669
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

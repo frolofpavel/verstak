@@ -228,6 +228,23 @@ export interface FindResult {
  * странице инжектится рядом с vskSnapshot.
  */
 export function vskFind(snap: PageSnapshot, query: string, limit: number): FindResult {
+  // matchScore инлайнится ВНУТРИ функции: vskFind инжектится в страницу через
+  // vskFind.toString() (BrowserView), поэтому обязан быть самодостаточным —
+  // модульные хелперы туда не попадут (как roleOf/nameOf живут внутри vskSnapshot).
+  // Вес совпадения: качество имени доминирует, навигации/действию — бонус над полем.
+  const matchScore = (e: SnapshotElement, needle: string): number => {
+    const name = (e.name || '').toLowerCase()
+    const role = (e.role || '').toLowerCase()
+    const tag = (e.tag || '').toLowerCase()
+    let s = 0
+    if (name === needle) s = 100
+    else if (name.startsWith(needle)) s = 70
+    else if (name.includes(needle)) s = 50
+    else if (role.includes(needle) || tag.includes(needle)) s = 20
+    // Роли действия/перехода (клик) выше полей ввода при равном совпадении.
+    if (role === 'link' || role === 'button' || role === 'tab' || role === 'menuitem') s += 5
+    return s
+  }
   const q = String(query || '').trim().toLowerCase()
   const lim = Math.max(1, limit | 0)
   if (!q) {
@@ -238,7 +255,16 @@ export function vskFind(snap: PageSnapshot, query: string, limit: number): FindR
     (e.name || '').toLowerCase().includes(q) ||
     (e.role || '').toLowerCase().includes(q) ||
     (e.tag || '').toLowerCase().includes(q))
-  const matches = hits.slice(0, lim)
+  // Ранжирование: качество совпадения ИМЕНИ доминирует (точное > префикс > вхождение >
+  // только роль/тег), плюс небольшой бонус навигационным/действующим ролям. Так пункт
+  // навигации (ссылка/кнопка) встаёт ВЫШЕ поля-фильтра при равном совпадении по запросу —
+  // модели почти всегда нужен переход, а не заполнение фильтра. Sort стабилен (ES2019):
+  // при равном весе порядок DOM сохраняется — старые пины на порядок остаются зелёными.
+  const ranked = hits
+    .map((e, i) => ({ e, i, s: matchScore(e, q) }))
+    .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+    .map(x => x.e)
+  const matches = ranked.slice(0, lim)
   return {
     query: String(query), count: matches.length, totalHits: hits.length, total: snap.count,
     truncated: hits.length > matches.length, matches,
