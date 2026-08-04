@@ -16828,6 +16828,40 @@ html[data-theme="light"] .gg-updates-page {
   align-items: start;
   gap: 14px;
 }
+
+/* Задача 6: фильтр-чипы по источнику + плоский список строк (вместо разреза на секции). */
+.gg-skills-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.gg-skills-chip {
+  font-size: var(--text-xs); padding: 4px 12px; border-radius: 16px;
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-tertiary); cursor: pointer; font-family: inherit; transition: all 120ms ease;
+}
+.gg-skills-chip:hover { color: var(--text-secondary); border-color: var(--border-strong); }
+.gg-skills-chip.is-on { background: var(--accent-muted); border-color: var(--accent-border); color: var(--accent); }
+.gg-skills-list { display: flex; flex-direction: column; gap: 6px; }
+.gg-skill-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: 9px;
+  background: var(--bg-base); transition: border-color 120ms ease, background 120ms ease;
+}
+.gg-skill-row:hover { border-color: var(--border-default); background: var(--bg-elevated); }
+.gg-skill-row.is-selected { border-color: var(--accent-border); }
+.gg-skill-row.is-archived { opacity: 0.82; }
+.gg-skill-row-main {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  background: transparent; border: none; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: inherit; color: inherit; padding: 0;
+}
+.gg-skill-row-icon { flex: none; width: 22px; text-align: center; font-size: 15px; }
+.gg-skill-row-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.gg-skill-row-name { display: flex; align-items: baseline; gap: 7px; color: var(--text-primary); font-size: var(--text-sm); }
+.gg-skill-row-desc { color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gg-skill-row-meta { display: flex; align-items: center; gap: 7px; flex: none; }
+.gg-skill-run {
+  background: transparent; border: 1px solid var(--accent-border); color: var(--accent);
+  border-radius: 6px; padding: 3px 11px; font: inherit; font-size: var(--text-xs); cursor: pointer;
+}
+.gg-skill-run:hover { background: var(--accent-muted); }
 .gg-skill-card {
   display: flex;
   flex-direction: column;

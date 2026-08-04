@@ -4,13 +4,6 @@ import { useSkills } from '../store/skillStore'
 import type { Skill, SkillImportPreviewResult, SkillUsageRecord } from '../types/api'
 import { normalizeSkillUserTags, withSkillsUserTags, writeSkillUserTags } from '../lib/skill-user-tags'
 
-const SOURCE_LABELS: Record<Skill['source'] | 'archived', string> = {
-  'built-in': 'Встроенные',
-  user: 'Пользовательские',
-  server: 'Серверные',
-  archived: 'Архив'
-}
-
 const SEARCH_ALIASES: Record<string, string[]> = {
   минусация: ['минус', 'минус-слова', 'negative', 'поисков', 'площадк', 'rsya', 'рся'],
   минус: ['минусация', 'negative', 'поисков', 'площадк', 'рся'],
@@ -222,6 +215,8 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
   const [usage, setUsage] = useState<SkillUsageRecord[]>([])
   const [filter, setFilter] = useState('')
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
+  // Задача 6: фильтр по источнику как ЧИП, а не разрез списка на секции.
+  const [sourceFilter, setSourceFilter] = useState<'all' | Skill['source'] | 'archived'>('all')
   const [preview, setPreview] = useState<Extract<SkillImportPreviewResult, { ok: true }> | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -252,14 +247,6 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
       .sort((a, b) => b.score - a.score || (a.skill.name ?? a.skill.id).localeCompare(b.skill.name ?? b.skill.id))
       .map(item => item.skill)
   }, [filter, skills])
-
-  // Наша governance: группировка по provenance (built-in / user / server).
-  const grouped = useMemo(
-    () => (['built-in', 'user', 'server'] as Skill['source'][])
-      .map(source => ({ source, skills: filtered.filter(s => s.source === source) }))
-      .filter(g => g.skills.length > 0),
-    [filtered]
-  )
 
   // Наша governance: архивные скиллы (в usage, но убраны из активного списка).
   const archived = useMemo(() => {
@@ -364,65 +351,66 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
       {notice && <div className="gg-skills-notice">{notice}</div>}
       <div className="gg-skills-layout">
         <div className="gg-skills-cards">
-          {grouped.map(group => (
-            <section className="gg-skills-section" key={group.source}>
-              <div className="gg-skills-section-title">{SOURCE_LABELS[group.source]}</div>
-              <div className="gg-skills-grid">
-                {group.skills.map(s => {
-                  const stat = usageById.get(s.id)
-                  return (
-                    <div key={s.id} className={`gg-skill-card${selectedSkill?.id === s.id ? ' is-selected' : ''}`}>
-                      <button
-                        type="button"
-                        className="gg-skill-card-main"
-                        onClick={() => setSelectedSkillId(s.id)}
-                        title="Открыть карточку скилла"
-                      >
-                        <div className="gg-skill-card-icon">{s.icon ?? '◆'}</div>
-                        <div className="gg-skill-card-body">
-                          <div className="gg-skill-card-name">{s.name ?? s.id}</div>
-                          <div className="gg-skill-card-desc">{s.description ?? ''}</div>
-                          {(s.user_tags?.length ?? 0) > 0 && (
-                            <div className="gg-skill-card-tags">
-                              {s.user_tags!.slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                      <div className="gg-skill-card-meta">
-                        {s.slash && <span className="gg-skill-slash">/{s.slash}</span>}
-                        <span className={`gg-skill-source gg-skill-source-${s.source}`}>{sourceLabel(s.source)}</span>
-                        {!!stat?.useCount && <span className="gg-skill-usage">{stat.useCount}×</span>}
-                        <button type="button" className="gg-skill-action" onClick={() => void archiveSkill(s.id)}>Архив</button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-          ))}
-          {archived.length > 0 && (
-            <section className="gg-skills-section">
-              <div className="gg-skills-section-title">{SOURCE_LABELS.archived}</div>
-              <div className="gg-skills-grid">
+          {/* Задача 6: единый плоский список + фильтр-чипы по источнику вместо жёсткого
+              разреза на секции. Источник — техническая ось (откуда файл); человек ищет по
+              смыслу «что умеет». Одна строка = один навык, primary-действие «Запустить». */}
+          <div className="gg-skills-chips" role="tablist">
+            {([['all', 'Все'], ['user', 'Мои'], ['built-in', 'Встроенные'], ['server', 'Серверные'], ['archived', 'Архив']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`gg-skills-chip ${sourceFilter === key ? 'is-on' : ''}`}
+                onClick={() => setSourceFilter(key)}
+              >{label}{key === 'archived' && archived.length > 0 ? ` ${archived.length}` : ''}</button>
+            ))}
+          </div>
+          {sourceFilter === 'archived' ? (
+            archived.length === 0 ? (
+              <div className="gg-skills-empty">В архиве пусто.</div>
+            ) : (
+              <div className="gg-skills-list">
                 {archived.map(u => (
-                  <div key={u.skillId} className="gg-skill-card is-archived">
-                    <div className="gg-skill-card-main">
-                      <div className="gg-skill-card-icon">📦</div>
-                      <div className="gg-skill-card-body">
-                        <div className="gg-skill-card-name">{u.skillId}</div>
-                        <div className="gg-skill-card-desc">Скрыт из активного списка</div>
-                      </div>
-                    </div>
-                    <div className="gg-skill-card-meta">
-                      <span className="gg-skill-source gg-skill-source-archived">archived</span>
-                      {!!u.useCount && <span className="gg-skill-usage">{u.useCount}×</span>}
-                      <button type="button" className="gg-skill-action" onClick={() => void restoreSkill(u.skillId)}>Вернуть</button>
-                    </div>
+                  <div key={u.skillId} className="gg-skill-row is-archived">
+                    <span className="gg-skill-row-icon" aria-hidden>📦</span>
+                    <span className="gg-skill-row-body">
+                      <span className="gg-skill-row-name">{u.skillId}</span>
+                      <span className="gg-skill-row-desc">Скрыт из активного списка</span>
+                    </span>
+                    {!!u.useCount && <span className="gg-skill-usage">{u.useCount}×</span>}
+                    <button type="button" className="gg-skill-action" onClick={() => void restoreSkill(u.skillId)}>Вернуть</button>
                   </div>
                 ))}
               </div>
-            </section>
+            )
+          ) : (
+            (() => {
+              const listed = filtered.filter(s => sourceFilter === 'all' || s.source === sourceFilter)
+              if (listed.length === 0) return <div className="gg-skills-empty">Ничего не нашлось — измени запрос или фильтр.</div>
+              return (
+                <div className="gg-skills-list">
+                  {listed.map(s => {
+                    const stat = usageById.get(s.id)
+                    return (
+                      <div key={s.id} className={`gg-skill-row${selectedSkill?.id === s.id ? ' is-selected' : ''}`}>
+                        <button type="button" className="gg-skill-row-main" onClick={() => setSelectedSkillId(s.id)} title="Открыть карточку скилла">
+                          <span className="gg-skill-row-icon" aria-hidden>{s.icon ?? '◆'}</span>
+                          <span className="gg-skill-row-body">
+                            <span className="gg-skill-row-name">{s.name ?? s.id}{s.slash && <span className="gg-skill-slash">/{s.slash}</span>}</span>
+                            <span className="gg-skill-row-desc">{s.description ?? ''}</span>
+                          </span>
+                        </button>
+                        <span className="gg-skill-row-meta">
+                          <span className={`gg-skill-source gg-skill-source-${s.source}`}>{sourceLabel(s.source)}</span>
+                          {!!stat?.useCount && <span className="gg-skill-usage">{stat.useCount}×</span>}
+                          {s.slash && <button type="button" className="gg-skill-run" onClick={() => onActivateSkill(s.slash!)}>Запустить</button>}
+                          <button type="button" className="gg-skill-action" onClick={() => void archiveSkill(s.id)}>Архив</button>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()
           )}
         </div>
         <aside className="gg-skill-detail" aria-live="polite">
@@ -534,11 +522,6 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
           )}
         </aside>
       </div>
-      {grouped.length === 0 && archived.length === 0 && (
-        <div className="gg-skills-empty">
-          <p>Скиллы не найдены. Попробуй другой запрос или установи скилл из файла, папки или архива.</p>
-        </div>
-      )}
       {preview && (
         <ImportPreviewModal
           preview={preview}
