@@ -4,6 +4,7 @@ import { pendingWrites, pendingCommands, suspendedSends } from '../ai/runner-sha
 import { resolvePending } from '../ipc/ai-resolve'
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import type { HeadlessHost, StartTaskOptions } from './host'
+import type { TenantRegistry } from './tenants'
 
 // HTTP/SSE-транспорт headless-хоста (Этап 1а, блок №3 постановки; отчёт §3в).
 // Канал наружу ключуется runId (durable UUID), а не sendId (эфемерный int процесса):
@@ -16,6 +17,8 @@ import type { HeadlessHost, StartTaskOptions } from './host'
 
 interface RunChannel {
   sendId: number
+  /** Владелец канала. Каналы живут в одной карте по runId, а тенанты — разные. */
+  tenant: string
   subscribers: Set<ServerResponse>
   /** Кольцевой буфер последних событий — догон для подписчика, пришедшего в течение прогона. */
   buffer: Array<{ seq: number; event: unknown }>
@@ -43,7 +46,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 }
 
 export interface HeadlessServerOptions {
-  host: HeadlessHost
+  /** Однопользовательский режим: один хост на весь сервер (dev, тесты, десктопный сценарий). */
+  host?: HeadlessHost
+  /**
+   * Многопользовательский режим: хост выбирается по заголовку `X-Verstak-Tenant`.
+   * Многотенантность — забота ядра: реестр (sqlite и ключ шифрования на пользователя)
+   * лежит здесь же, в tenants.ts, и прод-слою не нужно собирать роутинг заново.
+   */
+  tenants?: TenantRegistry
   /** Общий bearer-токен сервиса. Не задан → сервер отвечает только без Authorization-проверки (dev). */
   authToken?: string | null
 }
@@ -55,8 +65,26 @@ export interface HeadlessServer {
 }
 
 export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServer {
+  if (!opts.host && !opts.tenants) {
+    throw new Error('headless server: нужен host (одно-пользовательский) или tenants (много-пользовательский)')
+  }
   const channels = new Map<string, RunChannel>()
   const stops = new Map<string, () => void>()
+
+  /**
+   * Хост запроса. В многотенантном режиме тенант обязателен: без него сервер не
+   * угадывает пользователя, а отказывает (fail-closed) — иначе первый же запрос без
+   * заголовка увёл бы задачу в чужие данные.
+   */
+  async function hostFor(req: IncomingMessage): Promise<{ host: HeadlessHost } | { error: string }> {
+    if (opts.tenants) {
+      const tenant = String(req.headers['x-verstak-tenant'] ?? '').trim()
+      if (!tenant) return { error: 'x-verstak-tenant required' }
+      const handle = await opts.tenants.get(tenant)
+      return { host: handle.host }
+    }
+    return { host: opts.host! }
+  }
 
   function channelSender(channel: RunChannel): TaggedSender {
     return {
@@ -77,6 +105,14 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     const url = new URL(req.url ?? '/', 'http://internal')
     const parts = url.pathname.split('/').filter(Boolean)
 
+    // /health — ДО авторизации: это проба живости для systemd/деплоя, а не данные.
+    // Ничего о задачах и тенантах не раскрывает.
+    if (req.method === 'GET' && parts.length === 1 && parts[0] === 'health') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, service: 'verstak-headless', mode: opts.tenants ? 'multi-tenant' : 'single' }))
+      return
+    }
+
     if (opts.authToken) {
       const auth = req.headers.authorization ?? ''
       if (auth !== `Bearer ${opts.authToken}`) {
@@ -86,11 +122,31 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       }
     }
 
+    const resolved = await hostFor(req)
+    if ('error' in resolved) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: resolved.error }))
+      return
+    }
+    const host = resolved.host
+    const tenantKey = String(req.headers['x-verstak-tenant'] ?? '').trim() || '@single'
+
+    // GET /tasks — задачи тенанта (durable, из agent_runs).
+    if (req.method === 'GET' && parts.length === 1 && parts[0] === 'tasks') {
+      const limit = Number(url.searchParams.get('limit') ?? 50)
+      const runs = host.listRuns({ limit: Number.isFinite(limit) ? limit : 50 })
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        tasks: runs.map(r => ({ ...r, live: channels.get(r.runId)?.done === false }))
+      }))
+      return
+    }
+
     // POST /tasks — поставить задачу.
     if (req.method === 'POST' && parts.length === 1 && parts[0] === 'tasks') {
       const body = await readJsonBody(req)
-      const channel: RunChannel = { sendId: 0, subscribers: new Set(), buffer: [], seq: 0, done: false }
-      const task = await opts.host.startTask({
+      const channel: RunChannel = { sendId: 0, tenant: tenantKey, subscribers: new Set(), buffer: [], seq: 0, done: false }
+      const task = await host.startTask({
         ...(body as unknown as StartTaskOptions),
         sender: channelSender(channel)
       })
@@ -112,8 +168,18 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       const runId = parts[1]
       const tail = parts[2] ?? null
 
+      // Владение прогоном. В многотенантном режиме БД у тенантов разные, поэтому
+      // чужой runId не находится в agent_runs — этого достаточно и для durable-ручек,
+      // и (вторым фактом, ниже) для живого канала, который лежит в общей карте.
+      if (opts.tenants && host.getRunStatus(runId) === null) {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'run not found' }))
+        return
+      }
+
       if (req.method === 'GET' && tail === 'events') {
-        const channel = channels.get(runId)
+        const own = channels.get(runId)
+        const channel = own && own.tenant === tenantKey ? own : undefined
         res.writeHead(200, {
           'content-type': 'text/event-stream',
           'cache-control': 'no-cache',
@@ -135,12 +201,12 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
 
       if (req.method === 'GET' && tail === 'timeline') {
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ events: opts.host.listRunEvents(runId) }))
+        res.end(JSON.stringify({ events: host.listRunEvents(runId) }))
         return
       }
 
       if (req.method === 'GET' && tail === null) {
-        const status = opts.host.getRunStatus(runId)
+        const status = host.getRunStatus(runId)
         if (status === null) {
           res.writeHead(404, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ error: 'run not found' }))

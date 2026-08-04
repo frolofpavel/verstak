@@ -46,7 +46,8 @@
     "generate:icon": "node scripts/generate-app-icon.mjs",
     "eval:models": "node scripts/eval/index.mjs",
     "eval:arena": "node scripts/eval/arena.mjs",
-    "eval:policy": "node scripts/eval/policy.mjs"
+    "eval:policy": "node scripts/eval/policy.mjs",
+    "build:headless": "node scripts/build-headless.mjs"
   },
   "build": {
     "afterPack": "scripts/patch-exe-icon.cjs",

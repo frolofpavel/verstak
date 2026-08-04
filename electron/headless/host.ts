@@ -60,8 +60,12 @@ export interface HeadlessHostOptions {
 }
 
 export interface StartTaskOptions {
-  /** Workspace задачи — абсолютный путь внутри одного из workspaceRoots. */
-  workspace: string
+  /**
+   * Workspace задачи — абсолютный путь внутри одного из workspaceRoots. Не задан →
+   * ядро само заводит каталог задачи в первом корне. Клиент (кабинет, шлюз) не обязан
+   * знать серверные пути и не должен их придумывать.
+   */
+  workspace?: string
   prompt: string
   providerId: ProviderId
   model?: string
@@ -86,6 +90,19 @@ export interface StartedTask {
   stop: () => void
 }
 
+/** Строка списка задач тенанта. Источник — agent_runs, а не внешний индекс. */
+export interface HeadlessRunSummary {
+  runId: string
+  /** Постановка задачи (title прогона). */
+  prompt: string
+  workspace: string
+  providerId: string | null
+  model: string | null
+  status: string
+  createdAt: number
+  endedAt: number | null
+}
+
 export interface HeadlessHost {
   startTask: (opts: StartTaskOptions) => Promise<StartedTask>
   getSecret: (key: string) => string | null
@@ -93,6 +110,14 @@ export interface HeadlessHost {
   /** Читает durable-таймлайн прогона из БД (переживает рестарт процесса). */
   listRunEvents: (runId: string) => Array<{ kind: string; label: string | null; detail: string | null; createdAt: number }>
   getRunStatus: (runId: string) => string | null
+  /**
+   * Задачи этого тенанта, новые сверху. БД у тенанта своя, поэтому фильтровать по
+   * пользователю не нужно — здесь только его прогоны. Потребителю (кабинет, шлюз)
+   * больше не нужен собственный индекс задач: список durable и переживает рестарт.
+   */
+  listRuns: (opts?: { limit?: number }) => HeadlessRunSummary[]
+  /** Workspace прогона — по нему выдаются файлы задачи. null, если прогона нет. */
+  getRunWorkspace: (runId: string) => string | null
   close: () => void
 }
 
@@ -130,7 +155,13 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   let nextSendId = 1
 
   async function startTask(task: StartTaskOptions): Promise<StartedTask> {
-    if (!isWithinKnownRoots(task.workspace, opts.workspaceRoots)) {
+    let workspace = task.workspace
+    if (!workspace) {
+      // Каталог задачи заводит ядро: имя от времени+случайности, внутри корня тенанта.
+      workspace = join(opts.workspaceRoots[0], `task-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`)
+      mkdirSync(workspace, { recursive: true })
+    }
+    if (!isWithinKnownRoots(workspace, opts.workspaceRoots)) {
       throw new Error('workspace задачи вне разрешённых корней хоста')
     }
     const descriptor = PROVIDERS[task.providerId]
@@ -148,7 +179,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     const sender = task.sender ?? NOOP_SENDER
 
     let provider = task.providerOverride
-      ?? opts.providerFactory?.(task.providerId, model, ctrl.signal, task.workspace)
+      ?? opts.providerFactory?.(task.providerId, model, ctrl.signal, workspace)
       ?? undefined
     if (!provider) {
       const apiKey = descriptor.secretKey ? getSecret(descriptor.secretKey) : null
@@ -160,7 +191,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       provider = createProvider(task.providerId, {
         apiKey: apiKey ?? undefined,
         model,
-        cwd: task.workspace,
+        cwd: workspace,
         signal: ctrl.signal,
         codexHome: runtimeOptions.codexHome,
         customBaseUrl: runtimeOptions.customBaseUrl,
@@ -172,28 +203,28 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       })
     }
 
-    const tools = createToolsForProject(task.workspace, ctrl.signal, {})
+    const tools = createToolsForProject(workspace, ctrl.signal, {})
     const userMsg: ChatMessage = { role: 'user', content: task.prompt }
     const composed = await prepareSystemContext({
-      projectPath: task.workspace,
+      projectPath: workspace,
       messages: [userMsg],
-      recentWrites: undoStack.list(task.workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
+      recentWrites: undoStack.list(workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
     })
     const agentMode = task.agentMode ?? 'auto'
 
     // Продовая форма старта прогона (openAgentRun, ipc/ai-send/run-bookkeeping.ts):
     // строка agent_runs + user_msg первым событием таймлайна.
     agentRuns.create({
-      runId, projectPath: task.workspace, chatId: null, owner: 'main',
+      runId, projectPath: workspace, chatId: null, owner: 'main',
       title: task.prompt.slice(0, 200), providerId: task.providerId, model,
       requestedProviderId: task.providerId, requestedModel: model,
       sendId, agentMode, accountId: null
     })
     agentRuns.appendEvent(runId, 'user_msg', { detail: task.prompt.slice(0, 500) })
-    logRuntime('headless.task.start', { runId, sendId, providerId: task.providerId, model, workspace: task.workspace })
+    logRuntime('headless.task.start', { runId, sendId, providerId: task.providerId, model, workspace })
 
     const completion = runApiConversation({
-      sender, sendId, provider, tools, projectPath: task.workspace,
+      sender, sendId, provider, tools, projectPath: workspace,
       initialMessages: [{ role: 'system', content: composed.system }, userMsg],
       signal: ctrl.signal,
       recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) =>
@@ -227,14 +258,14 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
             return Promise.reject(new Error(`коннектор '${id}' отключён на сервере Этапа 1`))
           }
           // Блок №6: локальные чтения коннекторов заперты workspace задачи.
-          return connectorRegistry.query(id, args, { getSecret, signal, allowedReadRoots: [task.workspace] })
+          return connectorRegistry.query(id, args, { getSecret, signal, allowedReadRoots: [workspace] })
         }
       },
       agentMode,
       turnsBudget: task.turnsBudget ?? 8,
       // Этап 1: unattended — коннекторы read-only, артефакты «downloads» падают в workspace.
       readOnlyConnectors: true,
-      artifactsDownloadsDir: task.workspace,
+      artifactsDownloadsDir: workspace,
       skillRegistry: skillRegistry
         ? {
             list: () => skillRegistry!.list().map(s => ({
@@ -273,6 +304,21 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     getRunStatus: (runId) => {
       const row = db.prepare('SELECT status FROM agent_runs WHERE run_id = ?').get(runId) as { status: string } | undefined
       return row?.status ?? null
+    },
+    listRuns: (listOpts) => {
+      // rowid DESC — тай-брейк для прогонов одной миллисекунды (как в storage/agent-runs).
+      const limit = Math.max(1, Math.min(listOpts?.limit ?? 50, 200))
+      return db.prepare(
+        `SELECT run_id as runId, title as prompt, project_path as workspace,
+                provider_id as providerId, model, status,
+                started_at as createdAt, ended_at as endedAt
+         FROM agent_runs ORDER BY started_at DESC, rowid DESC LIMIT ?`
+      ).all(limit) as HeadlessRunSummary[]
+    },
+    getRunWorkspace: (runId) => {
+      const row = db.prepare('SELECT project_path as workspace FROM agent_runs WHERE run_id = ?')
+        .get(runId) as { workspace: string } | undefined
+      return row?.workspace ?? null
     },
     close: () => { try { db.close() } catch { /* уже закрыта */ } }
   }

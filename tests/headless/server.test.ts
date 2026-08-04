@@ -64,6 +64,11 @@ function makeFakeHost() {
       ? [{ kind: 'user_msg', label: null, detail: 'задача', createdAt: 1 }]
       : [],
     getRunStatus: (runId) => (runId === 'run-fake-1' ? 'running' : null),
+    listRuns: () => [{
+      runId: 'run-fake-1', prompt: 'задача', workspace: '/w', providerId: 'deepseek',
+      model: 'm', status: 'running', createdAt: 1, endedAt: null
+    }],
+    getRunWorkspace: (runId) => (runId === 'run-fake-1' ? '/w' : null),
     close: () => undefined
   }
   return {

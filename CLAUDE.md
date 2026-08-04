@@ -115,10 +115,15 @@ electron/                  ← main process (Node.js)
 
 electron/headless/         ← ВТОРОЙ потребитель ядра: Node-сервис без Electron (Этап 1а
 │                             облачного Verstak; карта — docs/headless-core-recon-2026-08-04.md)
+├── bin.ts                 ← ТОЧКА ВХОДА сервиса: env → конфиг → listen. Сборка —
+│                             `npm run build:headless` (esbuild, Node-таргет) → out-headless/.
+│                             По умолчанию многотенантный; VERSTAK_SINGLE_TENANT=1 — одиночный
 ├── host.ts                ← bootstrap: openDb(per-user) + AiDeps-аналог + startTask →
-│                             ПОЛНЫЙ runApiConversation. Десктоп и electron/ipc/* не трогает
-├── server.ts              ← HTTP/SSE: POST /tasks, GET /tasks/{runId}[/events|/timeline],
-│                             POST .../stop|suspend|resolve. Канал по runId, не sendId
+│                             ПОЛНЫЙ runApiConversation. listRuns() отдаёт задачи тенанта из
+│                             agent_runs; workspace задачи заводит сам. Десктоп не трогает
+├── server.ts              ← HTTP/SSE: GET|POST /tasks, GET /tasks/{runId}[/events|/timeline],
+│                             POST .../stop|suspend|resolve. Канал по runId, не sendId.
+│                             Принимает {host} ИЛИ {tenants} — тенант из X-Verstak-Tenant
 ├── secure-storage.ts      ← замена safeStorage: AES-256-GCM, мастер-ключ из env/KMS
 ├── tenants.ts             ← мульти-тенантность: sqlite на пользователя + HKDF-ключ на тенанта
 └── stage1.ts              ← allowlist Этапа 1 (fail-closed) + deny ssh-коннектора
@@ -277,8 +282,8 @@ npm run dist:win     # NSIS + portable .exe
   Третий аргумент `it()` — исключение: он для того и существует, чтобы превышать
   глобальный.
 - **Прогон, собравший МЕНЬШЕ тестов, чем эталон, — не вердикт, а оборванный
-  запуск.** Эталон: `numTotalTests` = **4658**
-  (4643 passed + 15 skipped, автопрогрев Brain); до него 4653, 4606, 4567, 4558, 4553, 4544, 4536, 4529, 4527, 4515, 4509, 4506, 4503, 4502, 4497, 4487, 4479, 4469, 4448, 4426, 4418, 4406, 4400, 4395, 4385, 4377, 4370, 4364, 4358, 4353, 4348, 4321, 4310, 4290, 4285, 4278, 4274, 4267, 4256, 4237, 4212.
+  запуск.** Эталон: `numTotalTests` = **4675**
+  (возврат Этапа 1б: bin + тенант-сервер + listRuns); до него 4669, 4658, 4653, 4606, 4567, 4558, 4553, 4544, 4536, 4529, 4527, 4515, 4509, 4506, 4503, 4502, 4497, 4487, 4479, 4469, 4448, 4426, 4418, 4406, 4400, 4395, 4385, 4377, 4370, 4364, 4358, 4353, 4348, 4321, 4310, 4290, 4285, 4278, 4274, 4267, 4256, 4237, 4212.
   (Пик 4501 держался недолго: пин `plan-directive-in-prompt` снят вместе с
   отменой аудит-директивы — см. §4.1, коммит снятия.)
   Эталон живёт константой
