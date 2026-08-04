@@ -152,6 +152,19 @@ describe('ПРИЁМКА Этапа 1а: POST → полный цикл → SSE 
     const files = dayDirs.flatMap(d => readdirSync(join(artifactsRoot, d)))
     expect(files.some(f => f.endsWith('.docx'))).toBe(true)
 
+    // 3b. Артефакт виден в ручке списка и СКАЧИВАЕТСЯ по HTTP — это и есть то, ради
+    // чего задача ставилась: файл забирают из кабинета, а не ищут на сервере руками.
+    const artifactsList = await get(port, `/tasks/${runId}/artifacts`)
+    const listed = JSON.parse(artifactsList.body).files as Array<{ path: string; size: number }>
+    const docx = listed.find(f => f.path.endsWith('.docx'))
+    expect(docx).toBeTruthy()
+    expect(docx!.size).toBeGreaterThan(0)
+    const downloaded = await get(port, `/tasks/${runId}/artifacts/${docx!.path.split('/').map(encodeURIComponent).join('/')}`)
+    expect(downloaded.status).toBe(200)
+    expect(downloaded.body.length).toBeGreaterThan(0)
+    // Негатив на той же ручке: выход за workspace не отдаётся.
+    expect((await get(port, `/tasks/${runId}/artifacts/..%2F..%2Fetc%2Fpasswd`)).status).toBe(404)
+
     // 4. Статус прогона и таймлайн доступны по HTTP.
     const status = await get(port, `/tasks/${runId}`)
     expect(JSON.parse(status.body).status).toBe('done')

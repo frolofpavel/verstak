@@ -1,10 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
+import { createReadStream } from 'fs'
 
 import { pendingWrites, pendingCommands, suspendedSends } from '../ai/runner-shared'
 import { resolvePending } from '../ipc/ai-resolve'
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import type { HeadlessHost, StartTaskOptions } from './host'
 import type { TenantRegistry } from './tenants'
+import { listWorkspaceFiles, resolveArtifactPath } from './artifacts'
 
 // HTTP/SSE-транспорт headless-хоста (Этап 1а, блок №3 постановки; отчёт §3в).
 // Канал наружу ключуется runId (durable UUID), а не sendId (эфемерный int процесса):
@@ -196,6 +198,40 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
         if (channel.done) { res.end(); return }
         channel.subscribers.add(res)
         req.on('close', () => channel.subscribers.delete(res))
+        return
+      }
+
+      // GET /tasks/{runId}/artifacts — файлы workspace задачи.
+      if (req.method === 'GET' && tail === 'artifacts' && parts.length === 3) {
+        const workspace = host.getRunWorkspace(runId)
+        if (!workspace) {
+          res.writeHead(404, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'run not found' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ files: listWorkspaceFiles(workspace) }))
+        return
+      }
+
+      // GET /tasks/{runId}/artifacts/{путь} — сам файл, строго внутри workspace.
+      if (req.method === 'GET' && tail === 'artifacts' && parts.length > 3) {
+        const workspace = host.getRunWorkspace(runId)
+        const rel = decodeURIComponent(parts.slice(3).join('/'))
+        const file = workspace ? await resolveArtifactPath(workspace, rel) : null
+        if (!file) {
+          // Один и тот же 404 и для «нет файла», и для «выход за workspace»:
+          // разные коды подсказывали бы, что за границей что-то есть.
+          res.writeHead(404, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'file not found' }))
+          return
+        }
+        const name = rel.split('/').pop() ?? 'file'
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${encodeURIComponent(name)}"`
+        })
+        createReadStream(file).pipe(res)
         return
       }
 

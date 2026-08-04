@@ -112,6 +112,9 @@ describe('headless server — многотенантный режим (возв�
     expect(listB.tasks).toEqual([])
     expect((await call(port, 'GET', `/tasks/${runId}`, 'user-b')).status).toBe(404)
     expect((await call(port, 'GET', `/tasks/${runId}/timeline`, 'user-b')).status).toBe(404)
+    // Артефакты чужой задачи — тот же периметр (запрос №4).
+    expect((await call(port, 'GET', `/tasks/${runId}/artifacts`, 'user-b')).status).toBe(404)
+    expect((await call(port, 'GET', `/tasks/${runId}/artifacts/out.md`, 'user-b')).status).toBe(404)
     // Контрольный кейс: у самого владельца тот же runId доступен — иначе тест
     // доказывал бы лишь то, что ручка всегда отвечает 404.
     expect((await call(port, 'GET', `/tasks/${runId}`, 'user-a')).status).toBe(200)
