@@ -98,7 +98,7 @@ describe('web_access в облачном хосте', () => {
       host.setSecret('web_access', 'false')
       expect(host.getSecret('web_access')).toBe('false')
     } finally {
-      host.close()
+      await host.close()
       rmSync(dir, { recursive: true, force: true })
       rmSync(ws, { recursive: true, force: true })
     }
@@ -162,7 +162,7 @@ describe('providerId из inference', () => {
       await expect(host.startTask({ prompt: 'x' } as Parameters<typeof host.startTask>[0]))
         .rejects.toThrow(/неизвестный провайдер/)
     } finally {
-      host.close()
+      await host.close()
       rmSync(dir, { recursive: true, force: true })
       rmSync(ws, { recursive: true, force: true })
     }

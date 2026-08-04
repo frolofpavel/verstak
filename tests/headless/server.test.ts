@@ -81,7 +81,7 @@ function makeFakeHost() {
     } : null),
     getRunThreadId: (runId) => (runId === 'run-fake-1' ? 7 : null),
     getRunWorkspace: (runId) => (runId === 'run-fake-1' ? '/w' : null),
-    close: () => undefined
+    close: async () => undefined
   }
   return {
     host, stop,

@@ -205,10 +205,22 @@ export interface HeadlessHost {
   getRunThreadId: (runId: string) => number | null
   /** Workspace прогона — по нему выдаются файлы задачи. null, если прогона нет. */
   getRunWorkspace: (runId: string) => string | null
-  close: () => void
+  /**
+   * Закрыть хост, НЕ оборвав живые прогоны. Ждёт их завершения до `timeoutMs`, затем
+   * прерывает и даёт финализации дописать статус. Асинхронный не для красоты: синхронное
+   * закрытие рвало sqlite под работающим агентом — финализация не доходила до диска, и
+   * задача оставалась 'running' до следующего reconcileStale. На деплое это ровно
+   * SIGTERM по живым задачам пользователей.
+   */
+  close: (opts?: { timeoutMs?: number }) => Promise<void>
 }
 
 const NOOP_SENDER: TaggedSender = { send: () => {}, exec: async () => undefined }
+
+/** Сколько ждать ЕСТЕСТВЕННОГО завершения прогонов при close(). */
+const CLOSE_WAIT_MS = 15_000
+/** Сколько ещё ждать финализации после принудительной остановки по таймауту. */
+const CLOSE_ABORT_GRACE_MS = 3_000
 
 export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<HeadlessHost> {
   mkdirSync(opts.dataDir, { recursive: true })
@@ -261,6 +273,24 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   agentRuns.reconcileStale()
 
   let nextSendId = 1
+
+  /**
+   * Живые прогоны хоста. Нужны ровно одному потребителю — close(): закрытая под
+   * работающим агентом sqlite обрывает финализацию (статус, чекпойнт, ответ в тред),
+   * и задача навсегда остаётся 'running'.
+   */
+  const active = new Map<string, { completion: Promise<void>; abort: () => void }>()
+
+  /** Ждёт завершения активных прогонов, но не дольше ms. */
+  function settleActive(ms: number): Promise<void> {
+    if (active.size === 0) return Promise.resolve()
+    const all = Promise.allSettled([...active.values()].map(e => e.completion)).then(() => undefined)
+    return Promise.race([all, new Promise<void>(resolve => {
+      // unref: недождавшийся таймер не должен держать процесс живым после close().
+      const timer = setTimeout(resolve, ms)
+      if (typeof timer.unref === 'function') timer.unref()
+    })])
+  }
 
   async function startTask(task: StartTaskOptions): Promise<StartedTask> {
     // Продолжение треда: workspace НАСЛЕДУЕТСЯ, а не берётся из запроса. Иначе клиент
@@ -472,6 +502,11 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       // семантика completion не меняется.
       .then(() => { persistAssistant() }, (err: unknown) => { persistAssistant(); throw err })
 
+    // Реестр живых прогонов для close(). Снимаем на ЛЮБОМ исходе — иначе упавший
+    // прогон держал бы закрытие хоста до самого таймаута.
+    active.set(runId, { completion, abort: () => ctrl.abort() })
+    void completion.catch(() => undefined).finally(() => { active.delete(runId) })
+
     return {
       runId,
       threadId: thread.id,
@@ -570,6 +605,27 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         .get(runId) as { workspace: string } | undefined
       return row?.workspace ?? null
     },
-    close: () => { try { db.close() } catch { /* уже закрыта */ } }
+    close: async (closeOpts) => {
+      const waitMs = closeOpts?.timeoutMs ?? CLOSE_WAIT_MS
+      if (active.size > 0) {
+        logRuntime('headless.host.close.waiting', { active: active.size, waitMs })
+        await settleActive(waitMs)
+        if (active.size > 0) {
+          // Время вышло. Прерываем прогоны и даём финализации дописать статус:
+          // прерванная задача с честным исходом лучше вечного 'running'.
+          logRuntime('headless.host.close.aborting', { active: active.size })
+          for (const entry of [...active.values()]) entry.abort()
+          await settleActive(CLOSE_ABORT_GRACE_MS)
+        }
+        if (active.size > 0) {
+          // Прогон не отпустил даже после abort (провайдер не слушает сигнал). Ставим
+          // честный терминальный статус ТЕМ ЖЕ механизмом, что и старт после краха —
+          // иначе на диске остаётся 'running', которого уже некому завершить.
+          const stuck = agentRuns.reconcileStale()
+          logRuntime('headless.host.close.reconciled', { active: active.size, stuck })
+        }
+      }
+      try { db.close() } catch { /* уже закрыта */ }
+    }
   }
 }

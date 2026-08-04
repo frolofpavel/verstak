@@ -23,8 +23,8 @@ describe('мульти-тенантность headless-сервиса (Этап 
     root = mkdtempSync(join(tmpdir(), 'vsk-tenants-'))
     registry = createTenantRegistry({ root, masterKey })
   })
-  afterEach(() => {
-    registry.closeAll()
+  afterEach(async () => {
+    await registry.closeAll()
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -69,7 +69,7 @@ describe('мульти-тенантность headless-сервиса (Этап 
       expect(t.host.getSecret('deepseek_api_key')).toBeNull()
     } finally {
       delete process.env.DEEPSEEK_API_KEY
-      withEnv.closeAll()
+      await withEnv.closeAll()
     }
   })
 

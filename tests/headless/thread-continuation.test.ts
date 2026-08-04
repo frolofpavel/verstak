@@ -80,7 +80,7 @@ describe('облачная задача = тред (W0): продолжение,
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'vsk-thread-')) })
   afterEach(async () => {
     if (server) { await server.close(); server = null }
-    if (registry) { registry.closeAll(); registry = null }
+    if (registry) { await registry.closeAll(); registry = null }
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -274,7 +274,7 @@ describe('облачная задача = тред (W0): продолжение,
 
     // Полный рестарт сервиса: новый реестр тенантов над ТЕМ ЖЕ каталогом данных.
     await server!.close(); server = null
-    registry!.closeAll(); registry = null
+    await registry!.closeAll(); registry = null
     const restartedPort = await boot(() => recordingProvider(seen, () => [{ type: 'text', text: 'x' }], turns))
 
     const thread = JSON.parse((await call(restartedPort, 'GET', `/tasks/${first.runId}/thread`, 'user-a')).body) as {

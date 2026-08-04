@@ -36,15 +36,16 @@ function scriptedProvider(): ChatProvider {
 describe('headless host bootstrap (Этап 1а, №2)', () => {
   let dataDir: string
   let wsRoot: string
-  let hosts: Array<{ close: () => void }>
+  let hosts: Array<{ close: () => Promise<void> }>
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'vsk-host-data-'))
     wsRoot = mkdtempSync(join(tmpdir(), 'vsk-host-ws-'))
     hosts = []
   })
-  afterEach(() => {
-    for (const h of hosts) h.close()
+  afterEach(async () => {
+    // await: close() ждёт живые прогоны, иначе teardown уносит sqlite из-под них.
+    for (const h of hosts) await h.close()
     rmSync(dataDir, { recursive: true, force: true })
     rmSync(wsRoot, { recursive: true, force: true })
   })
@@ -163,7 +164,7 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
       agentMode: 'bypass', providerOverride: scriptedProvider()
     })
     await task.completion
-    host.close()
+    await host.close()
     const reopened = await makeHost()
     expect(reopened.getRunStatus(task.runId)).toBe('done')
     expect(reopened.listRunEvents(task.runId)[0].kind).toBe('user_msg')

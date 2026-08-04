@@ -50,7 +50,12 @@ export interface TenantRegistry {
    * ключей, никогда значения (та же дисциплина, что withHonestStatus в registry.ts).
    */
   connectorStatus: (tenantId: string) => Promise<Array<{ id: string; label: string; status: string; missingKeys: string[] }>>
-  closeAll: () => void
+  /**
+   * Закрыть хосты всех тенантов, дождавшись их живых прогонов (host.close()).
+   * Асинхронный: на SIGTERM закрытие БД под работающими задачами оставляло их
+   * навсегда 'running'. `timeoutMs` — бюджет ожидания КАЖДОГО хоста.
+   */
+  closeAll: (opts?: { timeoutMs?: number }) => Promise<void>
 }
 
 export function createTenantRegistry(opts: TenantRegistryOptions): TenantRegistry {
@@ -85,9 +90,12 @@ export function createTenantRegistry(opts: TenantRegistryOptions): TenantRegistr
       return listConnectorSecretViews(host)
         .map(({ id, label, status, missingKeys }) => ({ id, label, status, missingKeys }))
     },
-    closeAll() {
-      for (const handle of hosts.values()) handle.host.close()
+    async closeAll(closeOpts) {
+      // Параллельно, а не по очереди: последовательное ожидание сложило бы бюджеты
+      // тенантов и вышло бы за отпущенное systemd время на остановку сервиса.
+      const handles = [...hosts.values()]
       hosts.clear()
+      await Promise.all(handles.map(h => h.host.close(closeOpts)))
     }
   }
 }

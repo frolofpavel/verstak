@@ -172,7 +172,7 @@ describe('ПРИЁМКА Этапа 1а: POST → полный цикл → SSE 
     expect(JSON.parse(timeline.body).events[0].kind).toBe('user_msg')
 
     // 5. «Рестарт процесса»: новый хост+сервер над тем же dataDir читает таймлайн из БД.
-    host.close()
+    await host.close()
     const restarted = await boot()
     const afterRestart = await get(restarted.port, `/tasks/${runId}/timeline`)
     const restoredEvents = JSON.parse(afterRestart.body).events as Array<{ kind: string }>

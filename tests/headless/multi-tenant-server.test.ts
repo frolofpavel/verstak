@@ -55,7 +55,7 @@ describe('headless server — многотенантный режим (возв�
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'vsk-mt-')) })
   afterEach(async () => {
     if (server) { await server.close(); server = null }
-    if (registry) { registry.closeAll(); registry = null }
+    if (registry) { await registry.closeAll(); registry = null }
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -131,7 +131,7 @@ describe('headless server — многотенантный режим (возв�
       dataDir, workspaceRoots: [ws], safeStorage: createAesGcmSafeStorage(randomBytes(32)), env: {}
     })
     const s = createHeadlessServer({ host })
-    server = { close: async () => { await s.close(); host.close() } }
+    server = { close: async () => { await s.close(); await host.close() } }
     const port = await s.listen(0)
     const r = await call(port, 'GET', '/tasks')
     expect(r.status).toBe(200)

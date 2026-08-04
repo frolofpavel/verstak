@@ -49,7 +49,9 @@ export async function main(): Promise<{ port: number; close: () => Promise<void>
   const masterKey = masterKeyFromEnv(process.env, 'VERSTAK_MASTER_KEY')
 
   let server: ReturnType<typeof createHeadlessServer>
-  let closeExtra: () => void = () => {}
+  // Асинхронный: закрытие хостов ждёт живые прогоны, иначе SIGTERM рвёт sqlite под
+  // работающими задачами пользователей и они остаются 'running' (см. host.close()).
+  let closeExtra: () => Promise<void> = async () => {}
 
   if (envFlag('VERSTAK_SINGLE_TENANT')) {
     const workspaceRoot = join(dataRoot, 'workspaces')
@@ -88,11 +90,16 @@ export async function main(): Promise<{ port: number; close: () => Promise<void>
   }
 
   const close = async (): Promise<void> => {
+    // Сначала перестаём принимать запросы, потом дожидаемся уже идущих задач —
+    // обратный порядок дал бы новым задачам стартовать во время остановки.
     await server.close()
-    closeExtra()
+    await closeExtra()
   }
   for (const sig of ['SIGTERM', 'SIGINT'] as const) {
-    process.on(sig, () => { void close().then(() => process.exit(0)) })
+    process.on(sig, () => {
+      logRuntime('headless.service.stopping', { signal: sig })
+      void close().then(() => process.exit(0), () => process.exit(1))
+    })
   }
   return { port: actualPort, close }
 }

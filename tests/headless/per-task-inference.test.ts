@@ -63,14 +63,14 @@ function readAllFiles(dir: string, depth = 0): string {
 describe('per-task маршрут инференса (запрос №5)', () => {
   let dataDir: string, wsRoot: string
   let gw: Awaited<ReturnType<typeof fakeGateway>> | null = null
-  const hosts: Array<{ close: () => void }> = []
+  const hosts: Array<{ close: () => Promise<void> }> = []
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'vsk-inf-data-'))
     wsRoot = mkdtempSync(join(tmpdir(), 'vsk-inf-ws-'))
   })
   afterEach(async () => {
-    for (const h of hosts.splice(0)) h.close()
+    for (const h of hosts.splice(0)) await h.close()
     if (gw) { await gw.close(); gw = null }
     rmSync(dataDir, { recursive: true, force: true })
     rmSync(wsRoot, { recursive: true, force: true })
@@ -105,7 +105,7 @@ describe('per-task маршрут инференса (запрос №5)', () =>
     expect(host.getSecret('custom_openai_api_key')).toBeNull()
     expect(host.getSecret('custom_openai_baseurl')).toBeNull()
     // …ни в одном файле хранилища (sqlite + логи + workspace).
-    host.close()
+    await host.close()
     const stored = readAllFiles(dataDir) + readAllFiles(wsRoot)
     expect(stored).not.toContain(RUN_TOKEN)
 

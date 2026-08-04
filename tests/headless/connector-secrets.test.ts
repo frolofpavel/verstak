@@ -135,7 +135,7 @@ describe('ключи коннекторов тенанта — ручки /conne
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'vsk-w5-')) })
   afterEach(async () => {
     if (server) { await server.close(); server = null }
-    if (registry) { registry.closeAll(); registry = null }
+    if (registry) { await registry.closeAll(); registry = null }
     if (endpoint) { await endpoint.close(); endpoint = null }
     rmSync(root, { recursive: true, force: true })
   })
@@ -383,7 +383,7 @@ describe('ключи коннекторов тенанта — ручки /conne
     expect(cleared.configuredKeys).toEqual([])
 
     // 5. Греп по ФАЙЛАМ тенанта (sqlite + логи + workspace): значения нет нигде.
-    registry!.closeAll(); registry = null
+    await registry!.closeAll(); registry = null
     const stored = readAllFiles(root)
     expect(stored).not.toContain(ENDPOINT_AUTH)
     // Контрольный кейс: греп по этим же файлам ВООБЩЕ что-то находит (иначе п.5 зелен
