@@ -465,6 +465,9 @@ export type ChatEvent =
   | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
   | { type: 'done' }
   | { type: 'error'; message: string }
+  // ЗАДАЧА 1 (a)+(в): терминальный сигнал прогона (статус уже записан в БД). Зеркало
+  // electron/ai/types.ts (§5 анти-дрейф). Рендер по нему перечитывает resumableRuns.
+  | { type: 'run-finalized'; runId: string; projectPath: string }
 
 declare global {
   interface Window {

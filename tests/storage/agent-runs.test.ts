@@ -509,6 +509,47 @@ describe('crash-resume (migration 19)', () => {
     db.close()
   })
 
+  // ЗАДАЧА 1 (a)+(в), контрольный кейс 2 к A2: нормально ЗАВЕРШЁННЫЙ прогон НЕ
+  // предлагается к восстановлению, даже если завершился в ЭТОЙ сессии (ended_at >=
+  // reconciledAt) и имеет сохранённый ввод. Иначе перечитывание по run-finalized
+  // предлагало бы «Возобновить» на успешный ответ — заменили бы одну ложь другой.
+  // Отсекает статус: 'done' не входит в ('interrupted','failed').
+  it('findResumable: успешно завершённый (done) прогон НЕ предлагается, даже свежий', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    const reconciledAt = Date.now() - 1000        // прогон завершится ПОЗЖЕ метки (в сессии)
+    runs.create({ runId: 'ok', projectPath: '/p', chatId: 1, title: 'Успех', agentMode: 'ask' })
+    runs.finish('ok', 'done')                     // ended_at = now > reconciledAt
+    saveRunInput(db, { runId: 'ok', projectPath: '/p', chatId: 1, timestamp: Date.now(), providerId: 'g', model: 'g', systemPrompt: 's', userMessage: 'запрос' })
+    const getUserReq = (runId: string) => {
+      const r = db.prepare('SELECT user_message FROM run_inputs WHERE run_id = ?').get(runId) as { user_message: string | null } | undefined
+      return r?.user_message || null
+    }
+    const list = runs.findResumable('/p', reconciledAt, getUserReq)
+    expect(list.find(r => r.runId === 'ok'), 'done-прогон не восстанавливаем').toBeUndefined()
+    db.close()
+  })
+
+  // ЗАДАЧА 1 (a)+(в), контрольный кейс 1 к A2: прогон, оборвавшийся В СЕССИИ
+  // (finish('failed'), ended_at > reconciledAt), ПРЕДЛАГАЕТСЯ к восстановлению
+  // без рестарта — данные для подбора в БД есть, их и не хватало на экране.
+  it('findResumable: прогон, упавший В СЕССИИ (ended_at > reconciledAt), предлагается', () => {
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    const reconciledAt = Date.now() - 1000
+    runs.create({ runId: 'mid', projectPath: '/p', chatId: 1, title: 'Оборвался', agentMode: 'ask' })
+    runs.tick('mid', { turnIndex: 3, lastToolName: 'read_file' })
+    runs.finish('mid', 'failed', { error: 'socket hang up' })   // ended_at = now > reconciledAt
+    saveRunInput(db, { runId: 'mid', projectPath: '/p', chatId: 1, timestamp: Date.now(), providerId: 'g', model: 'g', systemPrompt: 's', userMessage: 'длинный запрос' })
+    const getUserReq = (runId: string) => {
+      const r = db.prepare('SELECT user_message FROM run_inputs WHERE run_id = ?').get(runId) as { user_message: string | null } | undefined
+      return r?.user_message || null
+    }
+    const list = runs.findResumable('/p', reconciledAt, getUserReq)
+    expect(list.find(r => r.runId === 'mid'), 'оборванный в сессии прогон восстановим').toBeDefined()
+    db.close()
+  })
+
   // #2 per-session stats: агрегат по всем прогонам чата (cost-discipline).
   it('sessionStats: суммирует cost/tools/files по всем прогонам ОДНОГО чата', () => {
     const db = openDb(join(dir, 'test.db'))

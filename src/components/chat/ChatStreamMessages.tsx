@@ -39,14 +39,18 @@ import { type AgentProgressEntry } from '../../lib/agent-progress'
 import type { ChatMessage, ResumableRun } from '../../types/api'
 import type { Translations } from '../../i18n'
 
-function buildInterruptedAnswerProgress(createdAt: number | undefined, providerLabel: string): AgentProgressEntry[] {
+export function buildInterruptedAnswerProgress(createdAt: number | undefined, providerLabel: string): AgentProgressEntry[] {
   const timestamp = createdAt ?? Date.now()
   return [
     {
       id: 'interrupted-answer',
       phase: 'final',
-      title: 'Ответ прерван',
-      detail: `${providerLabel} начал отвечать, но приложение было закрыто до сохранения видимого ответа. Запуск не удалось восстановить автоматически — если задача ещё актуальна, повтори запрос.`,
+      title: 'Ответ не сохранён',
+      // §3.1: говорим ровно наблюдаемое — сохранённого текста ответа для этого
+      // запуска нет. Причину (закрытие приложения, обрыв связи, сбой запуска)
+      // рендер знать НЕ может: на custom-openai «приложение было закрыто»
+      // оказалось ложью — человек не закрывал приложение, а переключал чаты.
+      detail: `${providerLabel} начал отвечать, но сохранённого ответа для этого запуска нет. Если задача ещё актуальна, повтори запрос.`,
       status: 'error',
       timestamp
     }

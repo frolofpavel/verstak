@@ -56,9 +56,9 @@ describe('вкладка «Поведение агента» — состав', 
   // Число обновлено с пяти до шести осознанно (29.07): состав вкладки — предмет
   // сегодняшнего изменения, а не охраняемый контракт. Утверждение осталось той же
   // силы: лишняя строка по-прежнему даёт красный.
-  it('рисует все шесть флагов, каждый с подписью и тумблером', async () => {
+  it('рисует все семь флагов, каждый с подписью и тумблером', async () => {
     await mountTab()
-    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(6)
+    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(7)
     for (const f of RUNTIME_FLAGS) {
       const r = row(f.key)
       expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain(f.title)

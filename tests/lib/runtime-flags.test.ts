@@ -29,7 +29,7 @@ describe('RUNTIME_FLAGS — состав', () => {
   // не контрактом, а перечнем того, что успели вывести 27.07. Шестым добавлен
   // `plan_approval_gate` — настройка существовала, но её единственный тумблер был
   // спрятан в свёрнутом блоке чужой вкладки, и живая приёмка встала на этом.
-  it('в таблице ровно шесть флагов, без дублей', () => {
+  it('в таблице ровно семь флагов, без дублей', () => {
     const keys = RUNTIME_FLAGS.map(f => f.key)
     expect(keys).toEqual([
       'memory_lifecycle',
@@ -38,6 +38,7 @@ describe('RUNTIME_FLAGS — состав', () => {
       'smart_fallback',
       'auto_capture_memory',
       'plan_approval_gate',
+      'orchestrator_default',
     ])
     expect(new Set(keys).size).toBe(keys.length)
   })
@@ -71,6 +72,10 @@ describe('RUNTIME_FLAGS — дефолты', () => {
     // и не откроет раздел, про который не слышал. Теперь цикл планов работает
     // сразу, а осознанное ВЫКЛЮЧЕНИЕ уважается (stored === 'false').
     plan_approval_gate: true,
+    // Задача 10: собираем поток оркестратора под ВЫКЛЮЧЕННЫМ флагом; флип в true —
+    // отдельным последним коммитом, когда спавн+карточка+возврат готовы. Мутация здесь
+    // без флипа чтения в runner-api (!== 'false') = красный анти-дрейф.
+    orchestrator_default: false,
   }
 
   for (const [key, defaultOn] of Object.entries(EXPECTED) as Array<[RuntimeFlagKey, boolean]>) {

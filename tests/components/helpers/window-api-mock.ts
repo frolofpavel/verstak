@@ -163,7 +163,9 @@ export const CHAT_API_DEFAULTS: ApiOverrides = {
   // Оконная загрузка истории (фича Ильи, reapply-2.0.7).
   chats: { listWindow: async () => ({ messages: [], totalCount: 0, hasMoreBefore: false }), list: async () => [] },
   chatSessions: { list: async () => [], listReviews: async () => [] },
-  agentRuns: { list: async () => [], sessionStats: async () => null },
+  // listResumable отдаёт МАССИВ (форму читает loadResumableRuns → resumableRuns →
+  // ResumeBanner.length). undefined из прокси уронил бы баннер (задача 1 A2).
+  agentRuns: { list: async () => [], sessionStats: async () => null, listResumable: async () => [] },
   settings: { getKey: async () => null },
   // skillStore.refresh читает ФОРМУ ответа (status.lastRefreshAt / .serverReachable).
   // Без этого дефолта status() отдаёт undefined, refresh падает в catch — и стор уходит

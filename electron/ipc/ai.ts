@@ -48,7 +48,7 @@ import type { AgentRuns, AgentRunOwner } from '../storage/agent-runs'
 import type { SwitchResult } from '../storage/subscription-accounts'
 import type { CooldownReason } from '../../shared/contracts/subscription'
 import { expandOfficeAttachments } from '../ai/attachment-text'
-import { deriveAttachmentMaterials, listFolderMaterials } from '../ai/materials-context'
+import { deriveAttachmentMaterials, listFolderMaterials, buildMaterialsManifest, appendMaterialsManifest } from '../ai/materials-context'
 import type { MaterialsRunContext } from '../ai/runner-api'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { registerAiCountTokensIpc } from './ai-count-tokens'
@@ -1113,6 +1113,13 @@ export function registerAiIpc(deps: AiDeps): void {
         const lastUserOriginal = [...incomingMessages].reverse().find(m => m.role === 'user') ?? null
         const att = await deriveAttachmentMaterials(lastUserOriginal)
         if (att) materials = { source: 'attachments', base: runRoot, items: att.items, attachmentOutcomes: att.outcomes }
+      }
+      // ЗАДАЧА 2 пункт 2: набор папки — в контекст как ПЕРЕЧЕНЬ-ФАКТ (данные, не
+      // директива). Вложения не трогаем: их содержимое уже инжектит expandOfficeAttachments
+      // (модель их и так ВИДИТ). Папка — иначе: её файлы растворены в карте проекта, и
+      // модель не знает, что вот эти назначены; перечень это чинит информацией.
+      if (materials?.source === 'folder') {
+        messagesWithSystem = appendMaterialsManifest(messagesWithSystem, buildMaterialsManifest(materials.items))
       }
       void runApiConversation({
         sender: taggedSender, sendId, provider, tools, projectPath: runRoot,

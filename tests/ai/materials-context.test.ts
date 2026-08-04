@@ -7,6 +7,8 @@ import {
   deriveAttachmentMaterials,
   listFolderMaterials,
   isDocumentName,
+  buildMaterialsManifest,
+  appendMaterialsManifest,
 } from '../../electron/ai/materials-context'
 
 // Реальный docx-байт нужен только для проверки успеха извлечения; для набора
@@ -93,5 +95,52 @@ describe('listFolderMaterials — только КОРЕНЬ, только док
 
   it('несуществующая папка → пустой список, без броска', () => {
     expect(listFolderMaterials(join(dir, 'nope'))).toEqual([])
+  })
+})
+
+// ЗАДАЧА 2, пункт 2: набор папки уходит в контекст как ПЕРЕЧЕНЬ-ФАКТ (данные, не
+// директива). Модель ВИДИТ назначенный набор с именами/типами/размерами, а не
+// растворённые в карте проекта файлы. Содержимое НЕ инжектим (контекст/деньги).
+describe('buildMaterialsManifest — набор как перечень-факт', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mat-man-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  it('перечисляет имя+тип+размер каждого документа, обрамлён как «Материалы задачи»', () => {
+    writeFileSync(join(dir, 'a.docx'), 'x'.repeat(2048))
+    writeFileSync(join(dir, 'b.pdf'), 'y')
+    const md = buildMaterialsManifest(listFolderMaterials(dir))
+    expect(md).toContain('Материалы задачи (2 документа')
+    expect(md).toMatch(/a\.docx · DOCX · 2\.0 КБ/)
+    expect(md).toContain('b.pdf · PDF')
+    // Содержимого файлов в перечне НЕТ — только факт-метаданные.
+    expect(md).not.toContain('xxxx')
+  })
+
+  it('пустой набор → пустая строка (инжектить нечего)', () => {
+    expect(buildMaterialsManifest([])).toBe('')
+  })
+})
+
+describe('appendMaterialsManifest — дописывает к ПОСЛЕДНЕМУ user', () => {
+  it('перечень уходит в последнее user-сообщение; system/assistant/прошлый user не тронуты', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'старый' },
+      { role: 'assistant', content: 'ответ' },
+      { role: 'user', content: 'собери отчёт' },
+    ]
+    const out = appendMaterialsManifest(msgs, '## Материалы задачи (1 документ)')
+    expect(out[3].content).toContain('собери отчёт')
+    expect(out[3].content).toContain('Материалы задачи')
+    expect(out[1].content).toBe('старый')
+    expect(out[0].content).toBe('sys')
+    expect(msgs[3].content).toBe('собери отчёт')   // исходный массив не мутирован
+  })
+
+  it('пустой манифест → массив как есть; нет user → не падает', () => {
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }]
+    expect(appendMaterialsManifest(msgs, '')).toBe(msgs)
+    expect(appendMaterialsManifest([{ role: 'system', content: 's' }], 'M')[0].content).toBe('s')
   })
 })

@@ -246,4 +246,30 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
     expect(useProject.getState().earlyRouteStop).toBeNull()
     expect(active(useProject.getState()).messages).toHaveLength(0)
   })
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ЗАДАЧА 1 (a)+(в), A2: терминальный сигнал run-finalized перечитывает
+  // resumableRuns БЕЗ рестарта. До этого список наполнялся только на открытии
+  // проекта (projectStore:550), поэтому прогон, умерший в сессии, лежал в БД
+  // восстановимым, а на экране была пустая карточка. Проверяем ВЫЗОВ перечитывания
+  // синхронно (сам await списка — в store-тесте ниже, чтобы не ждать под jsdom).
+  describe('задача 1: run-finalized перечитывает resumableRuns', () => {
+    it('run-finalized активного проекта → listResumable вызван с этим проектом', () => {
+      mountChat() // path='/p'
+      act(() => {
+        mock.aiEvents.emit({ id: 60, event: { type: 'run-finalized', runId: 'rX', projectPath: '/p' } as never })
+      })
+      const calls = mock.calls.get('agentRuns.listResumable')?.mock.calls ?? []
+      expect(calls.some(c => c[0] === '/p'), 'сигнал обязан перечитать resumableRuns проекта').toBe(true)
+    })
+
+    it('без projectPath в событии — перечитывает по активному пути (store.path)', () => {
+      mountChat()
+      act(() => {
+        mock.aiEvents.emit({ id: 61, event: { type: 'run-finalized', runId: 'rY' } as never })
+      })
+      const calls = mock.calls.get('agentRuns.listResumable')?.mock.calls ?? []
+      expect(calls.some(c => c[0] === '/p')).toBe(true)
+    })
+  })
 })

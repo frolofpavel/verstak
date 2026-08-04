@@ -29,6 +29,7 @@ export type RuntimeFlagKey =
   | 'smart_fallback'
   | 'use_project_brain'
   | 'plan_approval_gate'
+  | 'orchestrator_default'
 
 export interface RuntimeFlagDef {
   key: RuntimeFlagKey
@@ -98,6 +99,18 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     // согласованность стережёт tests/lib/plan-approval-default.test.ts.
     defaultOn: PLAN_APPROVAL_GATE_DEFAULT_ON,
     readAt: 'electron/ipc/tool-handlers/verification.ts',
+  },
+  {
+    key: 'orchestrator_default',
+    // Задача 10. Подпись по правилу Павла: говорит, что человек ПОЛУЧАЕТ.
+    title: 'Отдельная сессия под задачу',
+    what: 'Когда по ходу разговора возникает самостоятельная задача, агент запускает её в СВОЕЙ видимой сессии (отдельный чат) и приносит результат обратно — этот чат остаётся местом мышления. Видно карточкой: задача ушла в сессию №N.',
+    whenOff: 'Все задачи выполняются прямо в текущем чате, отдельные сессии не создаются.',
+    // dev: собираем весь поток (спавн → карточка-след → возврат) под ВЫКЛЮЧЕННЫМ флагом;
+    // флип в ON (defaultOn:true + чтение !== 'false') — последним отдельным коммитом,
+    // когда поток готов и проверен. До флипа у пользователя ничего не меняется.
+    defaultOn: false,
+    readAt: 'electron/ai/runner-api.ts',
   },
 ] as const
 

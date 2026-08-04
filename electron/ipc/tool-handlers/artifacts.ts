@@ -78,13 +78,20 @@ export const generateDocxHandler: ToolHandler = {
       const title = call.args.title ? String(call.args.title) : undefined
       const sections = Array.isArray(call.args.sections) ? call.args.sections as Array<{ heading?: string; level?: number; paragraphs?: string[]; bullets?: string[]; table?: { header?: string[]; rows: string[][] } }> : []
       if (sections.length === 0) return { id: call.id, name: call.name, result: '', error: 'generate_docx: sections обязательны (>= 1)' }
-      const saveTo = call.args.save_to != null ? String(call.args.save_to) : undefined
+      // ЗАДАЧА 2: явный save_to модели побеждает; при его молчании — дефолт из
+      // источника материалов (папка→alongside, вложения→downloads), заполняющий
+      // пустоту, а не спорящий с моделью. Итог — «туда, где человек найдёт».
+      const saveTo = call.args.save_to != null ? String(call.args.save_to) : ctx.defaultDocxSaveTo
       const res = await generateDocx(ctx.projectPath, { filename, title, sections, save_to: saveTo },
         ctx.artifactsDownloadsDir ? { downloadsDir: ctx.artifactsDownloadsDir } : undefined)
       try { ctx.recordJournal(ctx.projectPath, 'tool', `📄 Артефакт DOCX: ${res.filename}`, `${res.sizeBytes} bytes → ${res.path}`) } catch { /* */ }
+      // ЗАДАЧА 2 (§3.1 видимый след): дефолт мог СМЕНИТЬ место записи (рядом/в
+      // Загрузки), поэтому строка активности называет ПОЛНЫЙ ПУТЬ, а не только имя —
+      // иначе «не нашёл файл» неотличимо от «файл не создан». Путь виден в таймлайне
+      // независимо от того, повторит ли его модель в тексте ответа.
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
-        event: { type: 'tool-activity', callId: call.id, name: 'generate_docx', label: 'generate_docx', detail: `${res.filename} · ${(res.sizeBytes / 1024).toFixed(1)}KB`, status: 'ok' }
+        event: { type: 'tool-activity', callId: call.id, name: 'generate_docx', label: 'generate_docx', detail: `${res.filename} · ${(res.sizeBytes / 1024).toFixed(1)}KB · ${res.path}`, status: 'ok' }
       })
       ctx.sender.send('ai:event', {
         id: ctx.sendId,

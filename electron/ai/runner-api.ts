@@ -738,6 +738,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     if (getSecretForDelegate?.('web_access') !== 'true') {
       allToolDefs = allToolDefs.filter(t => t.name !== 'web_fetch' && t.name !== 'web_search')
     }
+    // Задача 10 (оркестратор): spawn_task_session предлагается модели только при
+    // включённом orchestrator_default. Полярность opt-in (=== 'true') совпадает с
+    // defaultOn:false в src/lib/runtime-flags.ts — стережёт tests/lib/runtime-flags.test.ts.
+    // Флип дефолта в ON — последним коммитом, когда весь поток (спавн + карточка + возврат)
+    // собран; тогда это выражение станет !== 'false'.
+    const orchestratorDefaultOn = getSecretForDelegate?.('orchestrator_default') === 'true'
+    if (!orchestratorDefaultOn) {
+      allToolDefs = allToolDefs.filter(t => t.name !== 'spawn_task_session')
+    }
     // 2.0.8-F cache-диагностика: набор инструментов входит в кэшируемый префикс, поэтому его
     // дрейф инвалидирует кэш. Фиксируем сигнатуру ОДИН раз — на первом туре с инструментами
     // (последний тур намеренно без них, он не показателен).
@@ -1114,6 +1123,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
 
     // Dispatch via tool-handlers registry. Each handler knows its own scheduling
     // mode (parallel-read / sequential / confirm-write); the loop honours it.
+    // ЗАДАЧА 2: дефолт места сохранения артефакта — «туда, где человек найдёт».
+    // Папка материалов → её корень (alongside); вложения → Загрузки (downloads);
+    // без материалов → прежний project. Это ДЕФОЛТ на молчание модели (пропуск
+    // save_to), а не классификатор поверх неё: явный save_to модели перекрывает
+    // (см. generateDocxHandler). Половину развилки (вложения) добавил штаб —
+    // иначе A1-сценарий с приложенными файлами снова падал бы в .verstak.
+    const defaultDocxSaveTo =
+      materialsCtx?.source === 'folder' ? 'alongside' as const
+      : materialsCtx?.source === 'attachments' ? 'downloads' as const
+      : undefined
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
@@ -1127,6 +1146,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       // Этап 1а headless: read-only политика коннекторов + серверный каталог «downloads».
       readOnlyConnectors: readOnlyConnectorsCtx, artifactsDownloadsDir: artifactsDownloadsDirCtx,
+      defaultDocxSaveTo,
       // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
       resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.
@@ -1581,6 +1601,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         costCents: costGuard?.current() ?? 0,
         clearCheckpointThrottle: id => checkpointThrottle.delete(id),
       })
+      // ЗАДАЧА 1 (a)+(в): терминальный сигнал СТРОГО ПОСЛЕ finalizeApiRun — то есть
+      // после agentRuns.finish(), который уже записал статус в БД. Рендер по нему
+      // перечитывает resumableRuns (findResumable). Без этого прогон, умерший в
+      // сессии, лежит в БД восстановимым, а список на экране остаётся стейл с
+      // открытия проекта → пустая карточка вместо баннера. Шлём на КАЖДУЮ
+      // финализацию (не только failed): одно правило, один источник правды —
+      // нормально завершённый прогон findResumable не вернёт сам. Порядок
+      // «сигнал после статуса» закреплён пином в tests/ipc/agent-loop.test.ts.
+      if (runId) {
+        sender.send('ai:event', { id: sendId, event: { type: 'run-finalized', runId, projectPath } })
+      }
     }
   }
 }

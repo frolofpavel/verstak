@@ -1179,6 +1179,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         }
         return
       }
+      // ЗАДАЧА 1 (a)+(в): прогон финализирован в БД (статус записан ДО этого сигнала —
+      // порядок закреплён пином в runner-api). Перечитываем resumableRuns проекта,
+      // иначе прогон, умерший В СЕССИИ, лежит в БД восстановимым, но список на экране
+      // остаётся стейл с открытия проекта → пустая карточка вместо баннера, токены
+      // не подобрать (дефект «в»). owner к этому моменту уже забыт обработчиком 'done',
+      // поэтому projectPath берём из самого события. loadResumableRuns сам сверяет,
+      // что проект ещё активен (иначе список чужого проекта не трогаем).
+      if (event.type === 'run-finalized') {
+        const finalizedProject = typeof (event as { projectPath?: unknown }).projectPath === 'string'
+          ? (event as { projectPath: string }).projectPath
+          : store.path
+        if (finalizedProject) void store.loadResumableRuns(finalizedProject)
+        return
+      }
       const chatOwnerProjectPath = owner?.kind === 'chat' && !owner.isHelp
         ? (projectPath || owner.projectPath || null)
         : null

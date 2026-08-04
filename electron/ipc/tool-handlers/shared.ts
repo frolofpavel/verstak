@@ -102,6 +102,11 @@ export interface ToolContext {
   /** Этап 1а headless: каталог для артефактов save_to='downloads' на сервере
    *  (undefined → defaultDownloadsDir десктопа). */
   artifactsDownloadsDir?: string
+  /** ЗАДАЧА 2: дефолт места сохранения DOCX, ВЫВЕДЕННЫЙ из источника материалов
+   *  (папка→'alongside', вложения→'downloads'). Применяется ТОЛЬКО когда модель НЕ
+   *  указала save_to (её молчание, не решение). Явный save_to модели перекрывает.
+   *  undefined → прежний дефолт 'project' (.verstak/artifacts). */
+  defaultDocxSaveTo?: import('../../ai/artifacts').DocxSaveTo
   /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
    *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
   autoApprove?: import('../../ai/mode-policy').AutoApprove

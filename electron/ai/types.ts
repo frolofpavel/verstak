@@ -120,6 +120,11 @@ export type ChatEvent =
   /** Sub-agent run: delegate_task делегировал подзадачу другому скиллу/модели.
    *  Эфемерное — карточка в чате для видимости fan-out. В БД не пишется. */
   | { type: 'subagent-run'; callId: string; jobId?: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
+  /** Задача 10 (оркестратор): агент решил вынести задачу в ОТДЕЛЬНУЮ ВИДИМУЮ сессию.
+   *  Renderer создаёт дочерний чат (parentChatId = текущий), сеет seed, показывает
+   *  карточку-след. Эфемерное. За выключенным флагом orchestrator_default инструмент
+   *  модели не предлагается — событие не эмитится. */
+  | { type: 'spawn-task-session'; callId: string; title: string; seed: string }
   | { type: 'agent-job-finished'; jobId: string; parentCallId: string | null; status: import('../../shared/contracts/agent-job').AgentJobStatus; summary: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
   /** VSK-PRODUCT-A1 3b: код-сводка чтения материалов прогона. Эмитится ТОЛЬКО когда
@@ -147,6 +152,11 @@ export type ChatEvent =
   | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
   | { type: 'done' }
   | { type: 'error'; message: string }
+  // ЗАДАЧА 1 (a)+(в): терминальный сигнал прогона, эмитится ПОСЛЕ agentRuns.finish()
+  // (статус уже записан в БД). Чистый сигнал без флага восстановимости — рендер по
+  // нему перечитывает resumableRuns через findResumable (единственный источник
+  // правды). projectPath несём для роутинга: к этому моменту 'done' уже забыл owner.
+  | { type: 'run-finalized'; runId: string; projectPath: string }
 
 export interface ChatProvider {
   id: string
