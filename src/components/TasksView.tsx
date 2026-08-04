@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { Task } from '../types/api'
+import { formatTaskForChat } from '../lib/task-to-chat'
 
 export function TasksView() {
   const { path } = useProject()
+  const setActiveView = useProject(s => s.setActiveView)
   const [tasks, setTasks] = useState<Task[]>([])
   const [input, setInput] = useState('')
 
@@ -40,6 +42,18 @@ export function TasksView() {
     await refresh()
   }
 
+  // Задача 4: «В работу» — формируем из пункта чеклиста задачу и шлём в чат
+  // (gg-resume-send авто-отправляет), переключаясь на чат. setTimeout — чтобы
+  // переключение вида/рендер чата успели до диспатча (как в AgentRunsPanel.resume).
+  function sendToChat(task: Task) {
+    const prompt = formatTaskForChat(task.text)
+    if (!prompt) return
+    setActiveView('chat')
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gg-resume-send', { detail: prompt }))
+    }, 0)
+  }
+
   const open = tasks.filter(t => !t.done)
   const done = tasks.filter(t => t.done)
 
@@ -72,7 +86,7 @@ export function TasksView() {
 
         {open.length > 0 && (
           <div className="gg-task-list">
-            {open.map(t => <TaskRow key={t.id} task={t} onToggle={toggle} onRemove={remove} />)}
+            {open.map(t => <TaskRow key={t.id} task={t} onToggle={toggle} onRemove={remove} onSendToChat={sendToChat} />)}
           </div>
         )}
 
@@ -92,7 +106,7 @@ export function TasksView() {
   )
 }
 
-function TaskRow({ task, onToggle, onRemove }: { task: Task; onToggle: (id: number, done: boolean) => Promise<void>; onRemove: (id: number) => Promise<void> }) {
+function TaskRow({ task, onToggle, onRemove, onSendToChat }: { task: Task; onToggle: (id: number, done: boolean) => Promise<void>; onRemove: (id: number) => Promise<void>; onSendToChat?: (task: Task) => void }) {
   return (
     <div className={`gg-task-row ${task.done ? 'is-done' : ''}`}>
       <button
@@ -115,6 +129,13 @@ function TaskRow({ task, onToggle, onRemove }: { task: Task; onToggle: (id: numb
           {task.evidence && <> {' · '} подтверждено: {task.evidence}</>}
         </span>
       </span>
+      {!task.done && onSendToChat && (
+        <button
+          className="gg-task-send"
+          onClick={() => onSendToChat(task)}
+          title="Сформировать задачу из этого пункта и отправить в чат — агент возьмёт её в работу"
+        >В работу →</button>
+      )}
       <button className="gg-task-remove" onClick={() => { void onRemove(task.id) }} title="Удалить">×</button>
     </div>
   )

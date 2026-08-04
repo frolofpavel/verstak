@@ -10757,6 +10757,23 @@ html[data-theme="light"] .gg-msg-skill-note-pill {
 .gg-task-row:hover .gg-task-remove { opacity: 1; }
 .gg-task-remove:hover { background: var(--error-muted); color: var(--error); }
 
+/* Задача 4: «В работу» — отправить пункт чеклиста в чат. Проявляется на hover строки,
+   как и «удалить», чтобы не шуметь в спокойном состоянии. */
+.gg-task-send {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs); line-height: 1;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  transition: all 120ms ease;
+}
+.gg-task-row:hover .gg-task-send { opacity: 1; }
+.gg-task-send:hover { background: var(--accent-muted); border-color: var(--accent-border); color: var(--accent); }
+
 .gg-task-section { margin-top: 24px; }
 .gg-task-section-head {
   display: flex; align-items: center; justify-content: space-between;
