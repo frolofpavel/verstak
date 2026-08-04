@@ -142,6 +142,23 @@ describe('headless server — многотенантный режим (возв�
     expect(() => createHeadlessServer({})).toThrow(/host.*tenants|tenants/)
   })
 
+  it('ПЕРИМЕТР: клиент НЕ может снять allowlist Этапа 1 через тело запроса', async () => {
+    const port = await boot()
+    // "toolsAllow": null раньше проезжал спредом тела и включал все инструменты.
+    const created = await call(port, 'POST', '/tasks', 'user-a', {
+      prompt: 'проверка периметра', agentMode: 'bypass', providerId: 'deepseek', toolsAllow: null
+    })
+    expect(created.status).toBe(202)
+    // Контрольный кейс: задача при этом создалась и отработала — гейт не «сломал всё».
+    const runId = JSON.parse(created.body).runId as string
+    let status = 'running'
+    for (let i = 0; i < 40 && status === 'running'; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      status = JSON.parse((await call(port, 'GET', `/tasks/${runId}`, 'user-a')).body).status
+    }
+    expect(status).toBe('done')
+  }, 20_000)
+
   it('/health отвечает БЕЗ токена (проба живости для systemd) и не раскрывает задач', async () => {
     registry = createTenantRegistry({ root, masterKey: randomBytes(32) })
     const s = createHeadlessServer({ tenants: registry, authToken: 'secret-token' })

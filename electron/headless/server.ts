@@ -148,10 +148,28 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     if (req.method === 'POST' && parts.length === 1 && parts[0] === 'tasks') {
       const body = await readJsonBody(req)
       const channel: RunChannel = { sendId: 0, tenant: tenantKey, subscribers: new Set(), buffer: [], seq: 0, done: false }
-      const task = await host.startTask({
-        ...(body as unknown as StartTaskOptions),
+      // Поля берём ЯВНО, а не спредом тела. Слепой спред позволял клиенту прислать
+      // "toolsAllow": null и снять allowlist Этапа 1 — то есть включить себе shell.
+      // Набор инструментов задаёт хост, а не тот, кто ставит задачу.
+      const inferenceRaw = body.inference as Record<string, unknown> | undefined
+      const startOpts: StartTaskOptions = {
+        prompt: String(body.prompt ?? ''),
+        providerId: body.providerId as StartTaskOptions['providerId'],
+        model: body.model === undefined ? undefined : String(body.model),
+        agentMode: body.agentMode as StartTaskOptions['agentMode'],
+        workspace: body.workspace === undefined ? undefined : String(body.workspace),
+        turnsBudget: body.turnsBudget === undefined ? undefined : Number(body.turnsBudget),
+        costCapUsd: body.costCapUsd === undefined ? undefined : Number(body.costCapUsd),
         sender: channelSender(channel)
-      })
+      }
+      if (inferenceRaw && inferenceRaw.baseUrl && inferenceRaw.apiKey) {
+        startOpts.inference = {
+          baseUrl: String(inferenceRaw.baseUrl),
+          apiKey: String(inferenceRaw.apiKey),
+          models: Array.isArray(inferenceRaw.models) ? inferenceRaw.models.map(String) : undefined
+        }
+      }
+      const task = await host.startTask(startOpts)
       channel.sendId = task.sendId
       channels.set(task.runId, channel)
       stops.set(task.runId, task.stop)

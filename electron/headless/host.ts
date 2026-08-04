@@ -59,6 +59,23 @@ export interface HeadlessHostOptions {
   providerFactory?: (providerId: ProviderId, model: string, signal: AbortSignal, workspace: string) => ChatProvider | null
 }
 
+/**
+ * Маршрут инференса, заданный НА ЗАДАЧУ (облачный Verstak: шлюз выдаёт короткоживущий
+ * токен прогона и хочет, чтобы расход считал он сам).
+ *
+ * Живёт ровно столько, сколько задача: в хранилище секретов тенанта не попадает, в
+ * agent_runs и таймлайн не пишется. Именно поэтому он здесь, а не в setSecret —
+ * записанный в sqlite токен пережил бы прогон, ради которого выдан.
+ */
+export interface TaskInferenceRoute {
+  /** OpenAI-совместимый базовый URL (например внутренний вход шлюза). */
+  baseUrl: string
+  /** Токен прогона. Никогда не логируется и не сохраняется. */
+  apiKey: string
+  /** Список моделей для провайдера; по умолчанию — одна модель задачи. */
+  models?: string[]
+}
+
 export interface StartTaskOptions {
   /**
    * Workspace задачи — абсолютный путь внутри одного из workspaceRoots. Не задан →
@@ -80,6 +97,9 @@ export interface StartTaskOptions {
   /** DI-шов внутрипроцессного вызова: готовый провайдер вместо createProvider.
    *  Через HTTP недостижим (функция не сериализуется) — для сервера есть providerFactory. */
   providerOverride?: ChatProvider
+  /** Маршрут инференса на эту задачу. Задан → прогон идёт через него, секреты
+   *  тенанта не читаются и не пишутся. Не задан → прежнее поведение. */
+  inference?: TaskInferenceRoute
 }
 
 export interface StartedTask {
@@ -166,7 +186,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     }
     const descriptor = PROVIDERS[task.providerId]
     if (!descriptor) throw new Error(`неизвестный провайдер: ${task.providerId}`)
-    const hasInjectedProvider = Boolean(task.providerOverride) || Boolean(opts.providerFactory)
+    const hasInjectedProvider = Boolean(task.providerOverride) || Boolean(opts.providerFactory) || Boolean(task.inference)
     if (!hasInjectedProvider && descriptor.transport !== 'API') {
       // Этап 1: только API-транспорт (CLI-провайдеры требуют интерактивного OAuth на машине).
       throw new Error(`headless-хост Этапа 1 поддерживает только API-провайдеры (${task.providerId}: ${descriptor.transport})`)
@@ -181,6 +201,18 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     let provider = task.providerOverride
       ?? opts.providerFactory?.(task.providerId, model, ctrl.signal, workspace)
       ?? undefined
+    if (!provider && task.inference) {
+      // Per-task маршрут: OpenAI-совместимый эндпоинт с токеном прогона. Секреты
+      // тенанта здесь не читаются и не пишутся — токен нигде не оседает.
+      provider = createProvider('custom-openai', {
+        apiKey: task.inference.apiKey,
+        model,
+        cwd: workspace,
+        signal: ctrl.signal,
+        customBaseUrl: task.inference.baseUrl,
+        customModels: task.inference.models ?? [model]
+      })
+    }
     if (!provider) {
       const apiKey = descriptor.secretKey ? getSecret(descriptor.secretKey) : null
       const runtimeOptions = buildProviderRuntimeOptions({
