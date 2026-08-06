@@ -24,6 +24,15 @@ export interface UserLayer {
   path: string | null
   /** Raw markdown content; empty string if nothing loaded. */
   content: string
+  /**
+   * Проектные файлы правил, которые СУЩЕСТВУЮТ (readCappedFile !== null), но НЕ
+   * были взяты: first-match-wins берёт только первый по PROJECT_RULE_CANDIDATES.
+   * Пустой массив, когда конфликта нет (файл один или его нет) — контроль тишины.
+   * Нужен, чтобы прогон предупредил: человек мог писать правила в файл, который
+   * продукт молча игнорирует. Опционально ради обратной совместимости с местами,
+   * что конструируют UserLayer-литералы вручную (loadUserLayer заполняет всегда).
+   */
+  ignored?: string[]
 }
 
 export interface RuleSourceStatus {
@@ -68,23 +77,56 @@ export async function loadUserLayer(
 
   let projPath: string | null = null
   let projContent = ''
+  // Проектные файлы правил, которые есть в проекте, но проиграли first-match-wins.
+  const ignored: string[] = []
   if (projectRoot) {
     for (const rel of PROJECT_RULE_CANDIDATES) {
       const c = await readCappedFile(join(projectRoot, rel))
-      if (c !== null) { projPath = rel; projContent = c; break }
+      if (c === null) continue
+      // НЕ прерываем цикл на первом (как раньше `break`): досматриваем остальных,
+      // чтобы собрать существующие-но-проигнорированные. Приоритет НЕ меняется —
+      // активным остаётся первый найденный.
+      if (projPath === null) { projPath = rel; projContent = c }
+      else ignored.push(rel)
     }
   }
 
-  if (!globalContent && projPath === null) return { path: null, content: '' }
+  if (!globalContent && projPath === null) return { path: null, content: '', ignored }
   // Только проектный слой → отдаём как есть (обратная совместимость).
-  if (!globalContent) return { path: projPath, content: projContent }
+  if (!globalContent) return { path: projPath, content: projContent, ignored }
   // Только глобальный / оба → склейка с маркером, глобальный первым.
   const paths = ['~/.verstak/RULES.md']
   const parts = [`# Глобальные правила (~/.verstak/RULES.md)\n\n${globalContent}`]
   if (projPath !== null) { paths.push(projPath); parts.push(projContent) }
   let content = parts.join('\n\n---\n\n')
   if (content.length > MAX_BYTES) content = content.slice(0, MAX_BYTES)
-  return { path: paths.join(' + '), content }
+  return { path: paths.join(' + '), content, ignored }
+}
+
+/**
+ * Предупреждение о конфликте файлов правил проекта. ПОВЕДЕНИЕ (что предупреждаем и
+ * когда) закреплено здесь. ФОРМУЛИРОВКА утверждена Павлом 07.08 (задача B) — НЕ
+ * «улучшать» при правках: два коротких факта, без капса/эмодзи, одно мягкое
+ * действие в конце, ни слова о самом продукте. Разделитель « · », потому что
+ * compactProgressText (runner-progress.ts) схлопывает переносы строк в пробелы —
+ * многострочный detail в ленте всё равно стал бы одной строкой. Возвращает null,
+ * когда предупреждать не о чем (0 или 1 файл правил) — контрольный случай тишины.
+ *
+ * @param activePath активный источник правил (может включать глобальный слой:
+ *        например `~/.verstak/RULES.md + AGENTS.md`) — то, что РЕАЛЬНО читается.
+ * @param ignored существующие-но-проигнорированные проектные файлы (UserLayer.ignored).
+ */
+export function buildRuleConflictWarning(
+  activePath: string | null,
+  ignored: string[] | undefined
+): { title: string; detail: string } | null {
+  if (!ignored || ignored.length === 0) return null
+  const active = activePath ?? '(нет активного файла)'
+  return {
+    title: 'Правила читаются из одного файла',
+    detail: `Применяю: ${active} · Не читаются: ${ignored.join(', ')} · `
+      + `Если правила писались в один из них — перенеси их в активный файл.`
+  }
 }
 
 const DEFAULT_RULES = `# Verstak Rules

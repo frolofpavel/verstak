@@ -120,6 +120,11 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
     : Promise.resolve('')
 
   let userLayer = await userLayerPromise
+  // Список проигнорированных файлов правил (first-match-wins) фиксируем СРАЗУ:
+  // реконструкции userLayer ниже пересобирают объект как { path, content } и роняют
+  // это поле. Пере-навешиваем его на возвращаемый слой, чтобы composeSystemPrompt
+  // положил его в meta и прогон смог предупредить пользователя.
+  const projectIgnored = userLayer.ignored ?? []
 
   // Project Settings — пользователь может задать промпт через UI шестерёнки
   // в Project Rail. Он сохраняется в settings ключом `system_prompt_${path}`.
@@ -216,5 +221,5 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
     contextPack = contextPack ? `${contextPack}\n\n${fileRulesBlock}` : fileRulesBlock
   }
 
-  return { userLayer, contextPack }
+  return { userLayer: { ...userLayer, ignored: projectIgnored }, contextPack }
 }

@@ -17,6 +17,7 @@ import type { AgentMode } from '../../ai/mode-policy'
 import type { ProviderId, ProviderDescriptor } from '../../ai/registry'
 import { prepareSystemContext } from '../../ai/compose-system'
 import { systemForProvider } from '../../ai/compose-prompt'
+import { buildRuleConflictWarning } from '../../ai/user-layer'
 import { REVIEWER_SYSTEM_PROMPT } from '../../ai/review-prompt'
 import { canReplayCheckpoint } from '../../ai/resume-checkpoint'
 
@@ -34,6 +35,13 @@ export interface AssembledSystem {
   composedSystem: string | null
   /** Использованный ContextPack Мозга — для бейджа и метрики экономии. */
   brain: BrainContext | null
+  /**
+   * Предупреждение «в проекте несколько файлов правил, читается один» — готовый
+   * заголовок+детали для agent-progress, либо null когда конфликта нет (тишина).
+   * Заполняется только на API-пути (там Verstak сам собирает user-layer). Для CLI
+   * правила читает внешний агент своим механизмом — предупреждать нам не о чем.
+   */
+  ruleConflictWarning: { title: string; detail: string } | null
 }
 
 export interface SystemAssemblyDeps {
@@ -85,13 +93,14 @@ export async function assembleSendSystem(input: {
     // null (Debug-снапшот системы для возобновления не делаем — это продолжение).
     // 1.9.8 #4: только если провайдер совпал — иначе tool_use-история одного
     // провайдера не ляжет в формат другого (свежий старт по messages безопаснее).
-    return { messagesWithSystem: input.resumedMessages, composedSystem: null, brain: null }
+    return { messagesWithSystem: input.resumedMessages, composedSystem: null, brain: null, ruleConflictWarning: null }
   }
   if (input.useReviewerPrompt) {
     return {
       messagesWithSystem: [{ role: 'system', content: REVIEWER_SYSTEM_PROMPT }, ...messages],
       composedSystem: null,
       brain: null,
+      ruleConflictWarning: null,
     }
   }
   if (input.descriptor.transport === 'API') {
@@ -133,6 +142,14 @@ export async function assembleSendSystem(input: {
     // поведение под Простой/Турбо. Простой-подсказка нейтральна к сегодняшнему
     // поведению (один прямой путь), Турбо — поощряет всю машинерию.
     const composedSystem = composed.system + '\n\n' + input.intensitySystemHint
+    // «Первый файл правил выигрывает — молча» (задача B): если в проекте лежит больше
+    // одного файла правил, читается только первый. Собираем предупреждение из meta —
+    // прогон покажет его в ленте, поимённо: что взято и что проигнорировано. meta
+    // может отсутствовать (мок в тестах) — тогда конфликта нет, предупреждения нет.
+    const ruleConflictWarning = buildRuleConflictWarning(
+      composed.meta?.userLayerPath ?? null,
+      composed.meta?.userLayerIgnored
+    )
     // Prompt caching: 'claude' получает маркер (сам режет и кэширует стабильный
     // префикс), остальные провайдеры — снятый маркер (авто-кэш по стабильному
     // префиксу OpenAI/DeepSeek/Gemini implicit). Порядок stable→volatile уже задан
@@ -141,6 +158,7 @@ export async function assembleSendSystem(input: {
       messagesWithSystem: [{ role: 'system', content: systemForProvider(composedSystem, input.providerId) }, ...messages],
       composedSystem,
       brain,
+      ruleConflictWarning,
     }
   }
   if (input.skillOverridePrompt) {
@@ -154,7 +172,8 @@ export async function assembleSendSystem(input: {
       messagesWithSystem: [{ role: 'system', content: input.skillLayerPrompt ?? input.skillOverridePrompt }, ...messages],
       composedSystem: null,
       brain: null,
+      ruleConflictWarning: null,
     }
   }
-  return { messagesWithSystem: messages, composedSystem: null, brain: null }
+  return { messagesWithSystem: messages, composedSystem: null, brain: null, ruleConflictWarning: null }
 }

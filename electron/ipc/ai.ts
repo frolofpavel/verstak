@@ -728,6 +728,20 @@ export function registerAiIpc(deps: AiDeps): void {
     composedSystem = assembled.composedSystem
     brain = assembled.brain
 
+    // «Первый файл правил выигрывает — молча» (задача B): в проекте несколько файлов
+    // правил, читается только первый по PROJECT_RULE_CANDIDATES. Раньше об этом никто
+    // не сообщал — человек мог писать правила в игнорируемый файл. Теперь предупреждаем
+    // поимённо в ленте прогона. null → конфликта нет (тишина, контрольный случай).
+    if (assembled.ruleConflictWarning) {
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'rules-conflict',
+        phase: 'context',
+        title: assembled.ruleConflictWarning.title,
+        detail: assembled.ruleConflictWarning.detail,
+        status: 'done'
+      })
+    }
+
     // Project Brain (Итер.4 + Phase 3): бейдж «использован прогретый контекст» +
     // метрика экономии — сколько токенов контекста мозг дал готовыми (агент не
     // пере-сканировал проект). Честный показатель ценности прогрева.

@@ -289,7 +289,11 @@ const GATE_MAX_WORKERS = 4
 // input, не ноль» (cachedTokenRate в shared, единое на renderer+main) +6 пинов
 // (3 unit + 3 estimateCost с контролем known/unknown); синхронизация состава таблиц
 // цен renderer↔main (+3 записи в cost-guard) + анти-дрейф-пин +3 → 4788.
-const EXPECTED_TOTAL_TESTS = 4788
+// 07.08, задача B (первый файл правил выигрывает — МОЛЧА): loadUserLayer теперь
+// сообщает проигнорированные проектные файлы правил (поле ignored), прогон предупреждает
+// поимённо. +11 пинов (5 loadUserLayer.ignored + 4 buildRuleConflictWarning + 2 проброса
+// assembleSendSystem.ruleConflictWarning) → 4799.
+const EXPECTED_TOTAL_TESTS = 4799
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

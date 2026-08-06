@@ -95,6 +95,30 @@ describe('assembleSendSystem — приоритет веток системно�
     expect(r.messagesWithSystem.slice(1)).toEqual(messages)
   })
 
+  // ЗАДАЧА B (штаб): «первый файл правил выигрывает — МОЛЧА». Проброс из
+  // meta.userLayerIgnored (loadUserLayer) через composeSystemPrompt в assembled →
+  // прогон эмитит предупреждение. Здесь фиксируем сам проброс до ruleConflictWarning.
+  it('API-путь: два файла правил в проекте → ruleConflictWarning с обоими именами', async () => {
+    prepareSystemContext.mockResolvedValueOnce({
+      system: 'BASE_SYSTEM',
+      meta: { userLayerPath: 'AGENTS.md', userLayerIgnored: ['CLAUDE.md'] },
+    } as never)
+    const r = await assembleSendSystem(baseInput)
+    expect(r.ruleConflictWarning).not.toBeNull()
+    const text = `${r.ruleConflictWarning!.title} ${r.ruleConflictWarning!.detail}`
+    expect(text).toContain('AGENTS.md')
+    expect(text).toContain('CLAUDE.md')
+  })
+
+  it('API-путь: один файл правил → ruleConflictWarning null (ТИШИНА)', async () => {
+    prepareSystemContext.mockResolvedValueOnce({
+      system: 'BASE_SYSTEM',
+      meta: { userLayerPath: 'AGENTS.md', userLayerIgnored: [] },
+    } as never)
+    const r = await assembleSendSystem(baseInput)
+    expect(r.ruleConflictWarning).toBeNull()
+  })
+
   it('use_project_brain=false — Мозг не запрашивается', async () => {
     const getBrainContext = vi.fn(() => ({ content: 'PACK', packType: 'task' }))
     const r = await assembleSendSystem({

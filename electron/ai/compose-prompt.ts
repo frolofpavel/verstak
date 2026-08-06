@@ -46,6 +46,10 @@ export interface ComposedPrompt {
     userLayerPath: string | null
     userLayerBytes: number
     contextPackBytes: number
+    /** Проектные файлы правил, что существуют, но проигнорированы first-match-wins
+     *  (см. UserLayer.ignored). Пустой массив — конфликта нет. Прогон использует это,
+     *  чтобы предупредить пользователя (buildRuleConflictWarning). */
+    userLayerIgnored: string[]
   }
 }
 
@@ -102,7 +106,8 @@ export function composeSystemPrompt(userLayer: UserLayer, contextPack = '', skil
       systemLayerVersion: SYSTEM_LAYER_VERSION,
       userLayerPath: userLayer.path,
       userLayerBytes: trimmedUser.length,
-      contextPackBytes: trimmedPack.length
+      contextPackBytes: trimmedPack.length,
+      userLayerIgnored: userLayer.ignored ?? []
     }
   }
 }
