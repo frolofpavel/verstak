@@ -21,7 +21,7 @@
 
 import { Fragment, type Dispatch, type SetStateAction } from 'react'
 import { useProject } from '../../store/projectStore'
-import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry, MaterialsNote } from '../../store/session-snapshot'
+import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry, MaterialsNote, SpawnedSessionCard } from '../../store/session-snapshot'
 import { Markdown } from '../Markdown'
 import { AgentProgressPanel } from '../AgentProgressPanel'
 import { MessageActions, AttachmentPreview } from './message-parts'
@@ -72,6 +72,10 @@ export interface ChatStreamMessagesProps {
   /** VSK-PRODUCT-A1 3b: код-сводки чтения материалов (эфемерные строки). */
   materialsNotes: MaterialsNote[]
   onOpenPlan: () => void
+  /** Задача 10: карточки-следы вынесенных в отдельные сессии задач. */
+  spawnCards: SpawnedSessionCard[]
+  /** Клик по карточке-следу → переключиться в дочернюю сессию. */
+  onOpenSpawnedSession: (childChatId: number) => void
   subagentRuns: SubagentRunCard[]
   agentProgress: AgentProgressEntry[]
   agentProgressDurationMs: number | null
@@ -95,6 +99,7 @@ export interface ChatStreamMessagesProps {
 export function ChatStreamMessages(props: ChatStreamMessagesProps) {
   const {
     messages, isStreaming, provider, t, activeChatId, helpMode, activity, preflights, planCards, materialsNotes, onOpenPlan,
+    spawnCards, onOpenSpawnedSession,
     subagentRuns, agentProgress, agentProgressDurationMs, agentProgressFinishedAt,
     handleAgentProgressToggle, resumableRuns, lastAssistantInfo, lastAssistantAnimationKey,
     animatedAssistantText, streamStartedAt, tickNow, crossVerify, cvExpanded, setCvExpanded,
@@ -111,6 +116,7 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
           const showActivity = isLast && m.role === 'assistant' && activity.length > 0
           const showPreflights = isLast && m.role === 'assistant' && preflights.length > 0
           const showPlanCards = isLast && m.role === 'assistant' && planCards.length > 0
+          const showSpawnCards = isLast && m.role === 'assistant' && spawnCards.length > 0
           const showMaterialsNotes = isLast && m.role === 'assistant' && materialsNotes.length > 0
           const showSubagents = isLast && m.role === 'assistant' && subagentRuns.length > 0
           const changedFiles = isLast && m.role === 'assistant' && !isStreaming
@@ -145,6 +151,7 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
             && !showPreflights
             && !showSubagents
             && !showMaterialsNotes
+            && !showSpawnCards
           if (isEmptyInterruptedAssistant) {
             if (resumableRuns.length > 0) return null
             return (
@@ -228,6 +235,35 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                   </button>
                 </div>
               ))}
+              {/* Задача 10 (оркестратор): карточка-СЛЕД вынесенной в отдельную
+                  видимую сессию задачи. Клик открывает дочерний чат. Статус —
+                  видимый след возврата: «выполняется» → «готово»/«ошибка», а на
+                  смерти прогона mid-stream «прогон оборвался» (наблюдаемое, не
+                  выдуманная причина; не застревает в «выполняется»). */}
+              {showSpawnCards && spawnCards.map(card => {
+                const statusLabel = card.status === 'running' ? 'выполняется'
+                  : card.status === 'done' ? 'готово'
+                  : card.status === 'error' ? 'ошибка'
+                  : 'прогон оборвался'
+                return (
+                  <div key={`spawn-${card.childChatId}`} className={`gg-spawn-card is-${card.status}`}>
+                    <div className="gg-spawn-card-head">
+                      <span className="gg-spawn-card-title">⑂ {card.title}</span>
+                      <span className={`gg-spawn-card-status is-${card.status}`}>{statusLabel}</span>
+                    </div>
+                    <div className="gg-spawn-card-meta">
+                      Задача ушла в отдельную сессию — этот чат остаётся местом мышления.
+                    </div>
+                    <button
+                      className="gg-btn gg-btn-ghost gg-spawn-card-open"
+                      type="button"
+                      onClick={() => onOpenSpawnedSession(card.childChatId)}
+                    >
+                      Открыть сессию
+                    </button>
+                  </div>
+                )
+              })}
               {/* VSK-PRODUCT-A1 3b: код-сводка чтения материалов. Строка от НАШЕГО
                   кода (не модели): что прочитано / не удалось / не открывал. Видна
                   лишь когда есть что сказать — тихий успех сюда не попадает. */}

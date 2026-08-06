@@ -22145,6 +22145,43 @@ html[data-theme="light"] .gg-connectors-page {
   margin-top: 6px;
 }
 
+/* Задача 10 (оркестратор): карточка-след вынесенной в отдельную сессию задачи.
+   Опирается на те же переменные темы, что и gg-plan-card — новых компонентов
+   интерфейса не вводится, композицию/вид утверждает Павел отдельно. */
+.gg-spawn-card {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-secondary);
+}
+.gg-spawn-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gg-spawn-card-title {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+.gg-spawn-card-status {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-spawn-card-status.is-error,
+.gg-spawn-card-status.is-terminated {
+  color: var(--danger, #d9534f);
+}
+.gg-spawn-card-meta {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.gg-spawn-card-open {
+  margin-top: 6px;
+}
+
 /* VSK-PRODUCT-A1 3b: код-сводка чтения материалов — тихая строка в потоке. */
 .gg-materials-note {
   display: flex;

@@ -267,6 +267,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const projectSessionUsage = activeBundle?.sessionUsage ?? EMPTY_SESSION_USAGE
   const preflights = activeBundle?.preflights ?? []
   const planCards = activeBundle?.planCards ?? []
+  const spawnCards = activeBundle?.spawnCards ?? []
   const materialsNotes = activeBundle?.materialsNotes ?? []
   const subagentRuns = activeBundle?.subagentRuns ?? []
   const isHelpChat = helpMode
@@ -1133,6 +1134,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       //  - 'chat' → в chats[chatId] (хранилище одно, 4.4); если активный, в
       //             основное состояние ниже по логике
       const owner = store.lookupSendOwner(id)
+      // Оркестратор (задача 10): статус карточки-следа ребёнка на терминале его
+      // прогона. PEEK — для done/error НЕ возвращаемся: событие идёт дальше в
+      // обычную маршрутизацию дочернего чата (персист в chats[child]). Здесь только
+      // отражаем исход на карточке в РОДИТЕЛЕ. owner.chatId — это дочерний чат;
+      // settleSpawnCard ищет карточку с таким childChatId. Смерть mid-stream (ни
+      // done, ни error) ловит run-finalized своей веткой ниже — карточка не
+      // застревает в «выполняется». no-op, если owner.chatId не является ребёнком.
+      if ((event.type === 'done' || event.type === 'error') && owner?.kind === 'chat') {
+        store.settleSpawnCard({ childChatId: owner.chatId }, event.type === 'done' ? 'done' : 'error')
+      }
       if (owner?.kind === 'chat' && owner.isHelp) {
         store.applyEventToHelp(event as { type: string; [k: string]: unknown })
         if (event.type === 'done' || event.type === 'error') {
@@ -1179,6 +1190,25 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         }
         return
       }
+      // Оркестратор (задача 10): агент решил вынести задачу в отдельную ВИДИМУЮ
+      // сессию. Создаём дочерний чат (kind='main' + parentChatId), сеем seed, кладём
+      // карточку-след в РОДИТЕЛЬСКИЙ чат. Родитель НЕ блокируется — spawn_task_session
+      // уже вернул {spawned:true}; это НЕ delegate_task (результат ребёнка в контекст
+      // родителя не инъектится, видимый след = карточка). Владелец события —
+      // родительский прогон, поэтому parentChatId берём из owner (фолбэк — активный
+      // чат). Ранняя ветка с return, как plan-approval/materials-read: подписку не
+      // трогаем. За выключенным orchestrator_default это событие не эмитится вовсе.
+      if (event.type === 'spawn-task-session') {
+        const parentChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
+        if (parentChatId != null) {
+          void store.spawnChildSession({
+            parentChatId,
+            title: String((event as { title?: unknown }).title ?? 'Задача'),
+            seed: String((event as { seed?: unknown }).seed ?? ''),
+          })
+        }
+        return
+      }
       // ЗАДАЧА 1 (a)+(в): прогон финализирован в БД (статус записан ДО этого сигнала —
       // порядок закреплён пином в runner-api). Перечитываем resumableRuns проекта,
       // иначе прогон, умерший В СЕССИИ, лежит в БД восстановимым, но список на экране
@@ -1187,6 +1217,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // поэтому projectPath берём из самого события. loadResumableRuns сам сверяет,
       // что проект ещё активен (иначе список чужого проекта не трогаем).
       if (event.type === 'run-finalized') {
+        // Оркестратор (задача 10, НЕСУЩЕЕ): run-finalized эмитится ПОСЛЕ finish() на
+        // КАЖДОЙ финализации дочернего прогона (envelope id = его sendId). Если
+        // карточка-след ещё «выполняется» — значит done/error до нас НЕ дошли (смерть
+        // mid-stream). settleSpawnCard переводит только из 'running', поэтому на
+        // здоровом прогоне (done уже перевёл в 'done') это no-op, а на оборвавшемся —
+        // ставит «прогон оборвался»: карточка не застревает и причину не выдумывает.
+        // Тот же класс дефекта, что чинили в 611dd83/609bc5a.
+        store.settleSpawnCard({ sendId: id }, 'terminated')
         const finalizedProject = typeof (event as { projectPath?: unknown }).projectPath === 'string'
           ? (event as { projectPath: string }).projectPath
           : store.path
@@ -3108,6 +3146,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           activity={activity}
           preflights={preflights}
           planCards={planCards}
+          spawnCards={spawnCards}
+          onOpenSpawnedSession={(childChatId) => void useProject.getState().switchChatSession(childChatId)}
           materialsNotes={materialsNotes}
           onOpenPlan={() => setActiveView('plan')}
           subagentRuns={subagentRuns}

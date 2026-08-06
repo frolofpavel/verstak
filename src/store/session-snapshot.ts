@@ -123,6 +123,26 @@ export interface SubagentRunCard {
   toolCount?: number
 }
 
+/** Задача 10 (оркестратор): карточка-СЛЕД в РОДИТЕЛЬСКОМ чате о задаче, вынесенной
+ *  в отдельную ВИДИМУЮ дочернюю сессию. Клик по карточке ведёт в дочерний чат
+ *  (switchChatSession). Возврат результата = обновление ИМЕННО этой карточки
+ *  (видимый след), а НЕ инъекция ответа ребёнка в контекст родителя — то был бы
+ *  delegate_task (блокирующий суб-агент), Павел просил обратного: родитель остаётся
+ *  местом мышления и НЕ блокируется. Статус ловит и СМЕРТЬ ребёнка: если прогон
+ *  оборвётся mid-stream (ни done, ни error), run-finalized переведёт карточку в
+ *  'terminated' — она говорит наблюдаемое «прогон оборвался», а не застревает в
+ *  «выполняется». Эфемерная (в БД не пишется), но переживает новые отправки
+ *  родителя — иначе видимый след пропал бы при первом же follow-up. */
+export interface SpawnedSessionCard {
+  /** chat_sessions.id дочерней сессии — цель клика и ключ поиска карточки по done/error. */
+  childChatId: number
+  title: string
+  status: 'running' | 'done' | 'error' | 'terminated'
+  /** sendId дочернего прогона — по нему run-finalized находит эту карточку (envelope
+   *  run-finalized несёт sendId, но не chatId). */
+  sendId?: number
+}
+
 export interface SessionSnapshot {
   /** Chat session this snapshot belongs to. Needed when a project is restored
    *  after a background answer finished while another project was open. */
@@ -164,6 +184,11 @@ export interface SessionSnapshot {
   subagentRuns: SubagentRunCard[]
   /** VSK-PRODUCT-A1 3b: код-сводки чтения материалов этого чата (эфемерные). */
   materialsNotes: MaterialsNote[]
+  /** Задача 10: карточки-следы дочерних сессий, порождённых spawn_task_session ИЗ
+   *  этого чата. В отличие от эфемерных preflights/planCards НЕ чистятся на новом
+   *  send — иначе видимый след ребёнка пропал бы, а его done/terminated некуда было
+   *  бы приземлить. Не персистятся (теряются на рестарте, как subagentRuns). */
+  spawnCards: SpawnedSessionCard[]
   /** True when bg session got new content since user last viewed it. */
   hasUnread: boolean
 }
@@ -220,6 +245,7 @@ export function freshSnapshot(): SessionSnapshot {
     preflights: [],
     subagentRuns: [],
     materialsNotes: [],
+    spawnCards: [],
     hasUnread: false
   }
 }
