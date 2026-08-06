@@ -2,7 +2,23 @@
 // провайдеров (каветат: придумывать поля запрещено). Ядро — билляемый input с ЯВНОЙ семантикой
 // кэша: exclusive (Claude) НЕ вычитает cached, inclusive (OpenAI/Gemini/Codex-Responses) вычитает.
 import { describe, it, expect } from 'vitest'
-import { billableInputTokens, normalizedUsage, type InputAccounting } from '../../shared/contracts/usage'
+import { billableInputTokens, cachedTokenRate, normalizedUsage, type InputAccounting } from '../../shared/contracts/usage'
+
+// ЗАДАЧА A (штаб, 06.08): единое правило ставки за кэш-токен, общее для renderer
+// (pricing.ts) и main (cost-guard.ts). Неизвестна цена кэша → полная цена input,
+// НЕ ноль (занижение опаснее — контроллер порогов сработал бы позже, чем должен).
+describe('cachedTokenRate — неизвестна цена кэша → полная цена input (задача A)', () => {
+  it('цена кэша известна → возвращается она', () => {
+    expect(cachedTokenRate(0.3, 3.0)).toBe(0.3)
+  })
+  it('цена кэша НЕизвестна (undefined/null) → полная цена input, НЕ ноль', () => {
+    expect(cachedTokenRate(undefined, 0.28)).toBe(0.28)
+    expect(cachedTokenRate(null, 3.0)).toBe(3.0)
+  })
+  it('легитимно бесплатный кэш (0 из документации) уважается, НЕ подменяется полной ценой', () => {
+    expect(cachedTokenRate(0, 3.0)).toBe(0)   // проверка != null, не truthiness
+  })
+})
 
 describe('billableInputTokens — дефект B (двойное вычитание кэша у Claude)', () => {
   it('exclusive (Claude): cached НЕ вычитается — input уже без кэша', () => {

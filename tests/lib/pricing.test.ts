@@ -38,6 +38,30 @@ describe('estimateCost', () => {
     const c = estimateCost('claude', 'claude-haiku-4-5', 100, 50, 0)
     expect(c.usd).toBe('<$0.01')
   })
+
+  // ЗАДАЧА A (штаб, 06.08): у всех OpenAI-совместимых моделей нет поля cached, и
+  // счётчик считал кэш по НУЛЮ → занижение (кэш вычтен из input при inclusive, а
+  // cachedCost=0). Правило: неизвестна цена кэша → кэш по ПОЛНОЙ цене input.
+  // Занижение опаснее завышения: контроллер порогов ($2/$5) сработал бы ПОЗЖЕ.
+  it('DeepSeek (нет цены кэша): кэш по ПОЛНОЙ цене input, НЕ по нулю', () => {
+    // input 0.28; 1M input, 500k из них cached, inclusive:
+    // billable 500k×0.28=$0.14 + кэш 500k по полной 0.28=$0.14 = $0.28 (до фикса $0.14).
+    const c = estimateCost('deepseek', 'deepseek-v4-flash', 1_000_000, 0, 500_000)
+    expect(c.cents).toBe(28)
+  })
+
+  it('КОНТРОЛЬ: у Claude цена кэша ЕСТЬ (0.3) — кэш считается ИНАЧЕ (дешевле input)', () => {
+    // Те же 1M/500k: input $1.5 + кэш 500k×0.3=$0.15 = $1.65. Кэш дешевле своего input —
+    // в отличие от DeepSeek. Без контроля пин выше зелен и если бы правило затирало
+    // известную цену кэша полной ценой input.
+    const c = estimateCost('claude', 'claude-sonnet-4-5', 1_000_000, 0, 500_000)
+    expect(c.cents).toBe(165)
+  })
+
+  it('поле кэша не пришло (cached=0) — не падаем, кэш-стоимости нет', () => {
+    const c = estimateCost('deepseek', 'deepseek-v4-flash', 1_000_000, 0, 0)
+    expect(c.cents).toBe(28)  // 1M input × 0.28 = $0.28
+  })
 })
 
 describe('costSeverity', () => {

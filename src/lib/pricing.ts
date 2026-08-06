@@ -9,7 +9,7 @@
  */
 
 import type { ProviderId } from '../hooks/useProvider'
-import { billableInputTokens, type InputAccounting } from '../../shared/contracts/usage'
+import { billableInputTokens, cachedTokenRate, type InputAccounting } from '../../shared/contracts/usage'
 
 interface ModelPrice {
   input: number   // $ per 1M input tokens
@@ -18,7 +18,9 @@ interface ModelPrice {
   cacheWrite?: number // $ per 1M 5-minute cache creation tokens
 }
 
-const PRICES: Record<string, ModelPrice> = {
+// ЗАДАЧА A: экспортируется для анти-дрейф-пина с main-копией (electron/ai/cost-guard.ts).
+// Таблицы дублируются; пока не переехали в shared/, пин держит состав и цены синхронными.
+export const PRICES: Record<string, ModelPrice> = {
   // Anthropic — anthropic.com/pricing
   'claude-sonnet-4-6':  { input: 3.0,  output: 15.0,  cached: 0.3, cacheWrite: 3.75 },
   'claude-opus-4-5':    { input: 15.0, output: 75.0,  cached: 1.5, cacheWrite: 18.75 },
@@ -128,7 +130,7 @@ export function estimateCost(
   if (!price) return { usd: '—', cents: 0 }
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
-  const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
+  const cachedCost = (cachedInputTokens / 1_000_000) * cachedTokenRate(price.cached, price.input)
   const cacheWriteCost = price.cacheWrite ? (cacheWriteTokens / 1_000_000) * price.cacheWrite : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
   const total = inputCost + cachedCost + cacheWriteCost + outputCost
@@ -177,7 +179,7 @@ export function costBreakdown(
   }
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
-  const cachedCost = price.cached ? (cachedInputTokens / 1_000_000) * price.cached : 0
+  const cachedCost = (cachedInputTokens / 1_000_000) * cachedTokenRate(price.cached, price.input)
   const cacheWriteCost = price.cacheWrite ? (cacheWriteTokens / 1_000_000) * price.cacheWrite : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
   const total = inputCost + cachedCost + cacheWriteCost + outputCost

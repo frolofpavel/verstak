@@ -10,7 +10,7 @@
  */
 
 import type { ProviderId } from './registry'
-import { billableInputTokens, type InputAccounting } from '../../shared/contracts/usage'
+import { billableInputTokens, cachedTokenRate, type InputAccounting } from '../../shared/contracts/usage'
 
 export interface ModelPrice {
   input: number
@@ -62,6 +62,13 @@ export const PRICES: Record<string, ModelPrice> = {
   'moonshot-v1-128k':      { input: 2.00, output: 5.00 },
   'moonshot-v1-32k':       { input: 1.00, output: 3.00 },
   'moonshot-v1-8k':        { input: 0.20, output: 2.00 },
+  // ЗАДАЧА A (штаб): состав таблицы разошёлся с рендером — этих трёх тут не было, и
+  // на подписочных coding-планах (маржинальная цена токена $0) при ВКЛЮЧЁННОМ лимите
+  // модель падала в FALLBACK_PRICE ($3/$15): экран $0, а страж копил чужие деньги.
+  // Синхронизировано с src/lib/pricing.ts; анти-дрейф-пин держит состав в тестах.
+  'kimi-for-coding':       { input: 0, output: 0 },
+  'glm-5.2':               { input: 0, output: 0 },
+  'glm-5-turbo':           { input: 0, output: 0 },
   // Qwen (Alibaba DashScope) — alibabacloud.com/help/model-studio.
   'qwen3-max':             { input: 1.60, output: 6.40 },
   'qwen3-coder-plus':      { input: 1.00, output: 5.00 },
@@ -182,7 +189,8 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
         price = FALLBACK_PRICE
       }
       const inputCost = ((billable ?? 0) / 1_000_000) * price.input
-      const cachedCost = price.cached ? ((cached ?? 0) / 1_000_000) * price.cached : 0
+      // ЗАДАЧА A: неизвестна цена кэша → полная цена input (не ноль). См. cachedTokenRate.
+      const cachedCost = ((cached ?? 0) / 1_000_000) * cachedTokenRate(price.cached, price.input)
       const cacheWriteCost = price.cacheWrite ? ((cacheWrite ?? 0) / 1_000_000) * price.cacheWrite : 0
       const outputCost = ((output ?? 0) / 1_000_000) * price.output
       const total = inputCost + cachedCost + cacheWriteCost + outputCost
