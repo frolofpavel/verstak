@@ -450,6 +450,10 @@ export type ChatEvent =
     | { type: 'plan-replanned'; planId: number; revision: number; reason: string; preservedSteps: number }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
   | { type: 'subagent-run'; callId: string; jobId?: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number; swarm?: string }
+  /** Задача 10 (оркестратор): агент вынес задачу в отдельную ВИДИМУЮ сессию. Renderer
+   *  создаёт дочерний чат, сеет seed, кладёт карточку-след в родителя. Зеркало
+   *  electron/ai/types.ts (§5 анти-дрейф). За выключенным orchestrator_default не эмитится. */
+  | { type: 'spawn-task-session'; callId: string; title: string; seed: string }
   | { type: 'agent-job-finished'; jobId: string; parentCallId: string | null; status: AgentJobStatus; summary: string }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx' | 'verification'; filename: string; path: string; sizeBytes: number }
   /** VSK-PRODUCT-A1 3b: код-сводка чтения материалов. Зеркало electron/ai/types.ts (§5 анти-дрейф). */

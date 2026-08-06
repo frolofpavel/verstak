@@ -289,7 +289,10 @@ const GATE_MAX_WORKERS = 4
 // input, не ноль» (cachedTokenRate в shared, единое на renderer+main) +6 пинов
 // (3 unit + 3 estimateCost с контролем known/unknown); синхронизация состава таблиц
 // цен renderer↔main (+3 записи в cost-guard) + анти-дрейф-пин +3 → 4788.
-const EXPECTED_TOTAL_TESTS = 4788
+// 07.08, задача 10 (ФРОНТ оркестратора): spawnChildSession + карточка-след +
+// settleSpawnCard (видимая дочерняя сессия, возврат = статус карточки, смерть
+// mid-stream по run-finalized) → +8 store-пинов + 6 компонентных пинов = 4802.
+const EXPECTED_TOTAL_TESTS = 4802
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

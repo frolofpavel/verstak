@@ -58,6 +58,9 @@ function distinctiveBundle(tag: string): SessionSnapshot {
     preflights: [{ callId: `pf-${tag}`, summary: `s-${tag}`, affectedZones: [], risk: 'low', riskReason: '', verifyAfter: [], outOfScope: [] }],
     subagentRuns: [{ callId: `sr-${tag}`, label: `l-${tag}`, task: 't', status: 'running' }],
     materialsNotes: [{ source: 'folder', line: `materials-${tag}` }],
+    // Задача 10: карточка-след дочерней сессии — тоже состояние чата, обязана
+    // переживать roundtrip перехода между чатами вместе с остальным bundle.
+    spawnCards: [{ childChatId: 42, title: `spawn-${tag}`, status: 'running' }],
     hasUnread: false,
   }
 }

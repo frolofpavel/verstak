@@ -21,7 +21,8 @@ import {
   type SessionSnapshot,
   type PreflightCard,
   type SubagentRunCard,
-  type MaterialsNote
+  type MaterialsNote,
+  type SpawnedSessionCard
 } from './session-snapshot'
 import { applySnapshotEvent } from './apply-snapshot-event'
 import { applyBundleUpdate, type BundleUpdater } from './chat-bundle-update'
@@ -194,6 +195,21 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   pushMaterialsNote: (chatId: number, note: MaterialsNote) => void
   /** Upsert sub-agent run card по callId (running → done/error). */
   upsertSubagentRun: (card: SubagentRunCard) => void
+  /** Задача 10 (оркестратор): вынести задачу в ОТДЕЛЬНУЮ ВИДИМУЮ дочернюю сессию
+   *  (kind='main' + parentChatId), посеять seed, зарегистрировать owner прогона и
+   *  положить карточку-след в РОДИТЕЛЬСКИЙ чат. Шаблон — startReview. Возвращает id
+   *  дочернего чата или null (нет проекта / не создалась сессия). НЕ блокирует
+   *  родителя: это НЕ delegate_task. */
+  spawnChildSession: (opts: { parentChatId: number; title: string; seed: string }) => Promise<number | null>
+  /** Положить/обновить карточку-след в bundle КОНКРЕТНОГО (родительского) чата.
+   *  Upsert по childChatId. */
+  pushSpawnCard: (chatId: number, card: SpawnedSessionCard) => void
+  /** Перевести карточку-след в терминальный статус. Ищет карточку по childChatId
+   *  (done/error дочернего прогона) ИЛИ по sendId (run-finalized несёт sendId, не
+   *  chatId) во ВСЕХ чатах. Переход только из 'running' — первый терминал побеждает:
+   *  run-finalized после done не переклеит 'done' в 'terminated', а на смерти
+   *  mid-stream (done/error не пришли) карточка не застрянет в «выполняется». */
+  settleSpawnCard: (match: { childChatId?: number; sendId?: number }, status: 'done' | 'error' | 'terminated') => void
   /** Record that the AI just touched a file (read / write / list). Upgrades
    *  the marker if a higher-priority kind is observed. */
   markFileTouched: (path: string, kind: TouchKind) => void
@@ -741,6 +757,85 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     next[idx] = { ...next[idx], ...card }
     return { subagentRuns: next }
   }),
+  pushSpawnCard: (chatId, card) => get().updateChatBundle(chatId, b => {
+    const list = b.spawnCards ?? []
+    const idx = list.findIndex(c => c.childChatId === card.childChatId)
+    if (idx === -1) return { spawnCards: [...list, card] }
+    const next = list.slice()
+    next[idx] = { ...next[idx], ...card }
+    return { spawnCards: next }
+  }),
+  settleSpawnCard: (match, status) => set(s => {
+    // Ищем карточку во ВСЕХ чатах: она живёт в bundle РОДИТЕЛЯ, а сигнал приходит
+    // по дочернему прогону. done/error несут owner.chatId ⇒ ищем по childChatId;
+    // run-finalized несёт только sendId ⇒ ищем по sendId. Переход строго из
+    // 'running' — первый терминал побеждает (см. комментарий типа действия).
+    let changed = false
+    const nextChats: typeof s.chats = {}
+    for (const [id, snap] of Object.entries(s.chats)) {
+      const list = snap.spawnCards ?? []
+      const idx = list.findIndex(c =>
+        (match.childChatId != null && c.childChatId === match.childChatId) ||
+        (match.sendId != null && c.sendId === match.sendId)
+      )
+      if (idx === -1 || list[idx].status !== 'running') { nextChats[Number(id)] = snap; continue }
+      const nextList = list.slice()
+      nextList[idx] = { ...nextList[idx], status }
+      nextChats[Number(id)] = { ...snap, spawnCards: nextList }
+      changed = true
+    }
+    return changed ? { chats: nextChats } : {}
+  }),
+  spawnChildSession: async ({ parentChatId, title, seed }) => {
+    const s = get()
+    if (!s.path) return null
+    const path = s.path
+    // Провайдер/модель наследуем от родителя (текущего активного выбора) — чтобы
+    // дочерний чат показывал понятный тег и резолвился так же. Сам прогон шлём с
+    // пустыми overrides: main резолвит провайдера/модель из настроек/сессии.
+    const parentSession = s.chatSessions.find(c => c.id === parentChatId)
+    let child
+    try {
+      child = await window.api.chatSessions.create(path, {
+        title: title || 'Задача',
+        providerId: parentSession?.providerId ?? null,
+        model: parentSession?.model ?? null,
+        kind: 'main',
+        parentChatId,
+      })
+    } catch (err) {
+      console.error('[store] spawnChildSession create failed:', err)
+      return null
+    }
+    // Карточка-след СРАЗУ — в статусе «выполняется», в bundle РОДИТЕЛЯ.
+    get().pushSpawnCard(parentChatId, { childChatId: child.id, title: title || 'Задача', status: 'running' })
+    // Дочерний чат появляется в Sidebar (kind='main' с ⑂) — обновляем список.
+    void get().refreshChatSessions()
+    try {
+      const sendId = await window.api.ai.sendWithOverrides(
+        [{ role: 'user', content: seed }],
+        path,
+        {},
+        String(child.id)
+      )
+      // sendId<=0 — провайдер не инициализировался. Карточка честно говорит «ошибка»,
+      // а не висит «выполняется» до бесконечности (тот же класс, что и review sendId<=0).
+      if (!sendId || sendId <= 0) {
+        get().settleSpawnCard({ childChatId: child.id }, 'error')
+        return child.id
+      }
+      // Стрим ребёнка идёт в chats[child.id] по СУЩЕСТВУЮЩЕМУ фоновому роутингу
+      // ai.onEvent (owner = дочерний чат). sendId кладём в карточку — по нему
+      // run-finalized ребёнка её и находит.
+      get().registerSendOwner(sendId, { kind: 'chat', chatId: child.id, projectPath: path })
+      get().pushSpawnCard(parentChatId, { childChatId: child.id, title: title || 'Задача', status: 'running', sendId })
+      return child.id
+    } catch (err) {
+      console.error('[store] spawnChildSession sendWithOverrides failed:', err)
+      get().settleSpawnCard({ childChatId: child.id }, 'error')
+      return child.id
+    }
+  },
   markFileTouched: (path, kind) => set(s => {
     if (!path) return {}
     const existing = s.touchedFiles[path]
