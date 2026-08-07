@@ -301,7 +301,11 @@ const GATE_MAX_WORKERS = 4
 // 07.08, починка release-inputs.test.ts (walk-up вместо резолва от cwd, чтобы тест не
 // краснел в linked worktree): +3 пина (walk-up находит вход в границе + 2 контрольных:
 // нет нигде → красный, только в постороннем предке вне репо → красный) → 4816.
-const EXPECTED_TOTAL_TESTS = 4816
+// 07.08, честный статус safe-rebuild (не верим коду возврата npm; проверяем ФАКТ
+// загрузки свежим процессом → rebuilt/locked/failed, gate трактует locked как среду):
+// +5 пинов classifyRebuildOutcome + 3 пина decideTestGate (locked+ABI→не блок,
+// locked+не-ABI→блок, rebuilt+ABI→блок) → 4824.
+const EXPECTED_TOTAL_TESTS = 4824
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

@@ -23,19 +23,33 @@ function hasNonAbiFailures(output) {
 
 /**
  * Решение тест-гейта.
- * @param {{abiStatus:'ok'|'rebuilt'|'failed'|'error', vitestExit:number, vitestOutput:string}} p
+ *
+ * abiStatus честный (см. scripts/safe-rebuild.cjs, задача 2 07.08 — статус берётся из
+ * ПРОВЕРКИ факта, а не из кода возврата npm):
+ *   'ok'      — better-sqlite3 уже под нужным ABI;
+ *   'rebuilt' — пересобран и ПРОВЕРЕНО загружается → ABI-падений быть не должно;
+ *   'locked'  — .node залочен запущенным Electron/`npm run dev`, пересборка физически
+ *               не прошла → sqlite-падения = среда, не регрессия;
+ *   'failed'  — пересборка не прошла по иной (не-лок) причине среды;
+ *   'error'   — модуль не грузится не из-за ABI.
+ * @param {{abiStatus:'ok'|'rebuilt'|'locked'|'failed'|'error', vitestExit:number, vitestOutput:string}} p
  * @returns {{block:boolean, reason:string}}
  */
 function decideTestGate({ abiStatus, vitestExit, vitestOutput }) {
   if (vitestExit === 0) return { block: false, reason: 'все тесты зелёные' }
-  if (abiStatus === 'failed') {
-    // ABI-лок (открыт npm run dev) — sqlite-падения = шум. Блокируем только реальные.
+  // Среда: sqlite не удалось сделать загружаемым НЕ по вине кода — .node залочен
+  // ('locked') или пересборка сорвалась ('failed'). ABI-падения тут = шум; блокируем
+  // ТОЛЬКО реальные (не-ABI) падения под этим шумом.
+  if (abiStatus === 'locked' || abiStatus === 'failed') {
     if (hasNonAbiFailures(vitestOutput)) {
       return { block: true, reason: 'есть НЕ-ABI падения тестов под ABI-шумом — реальная регрессия' }
     }
-    return { block: false, reason: 'падения только ABI (открыт npm run dev) — пропускаю; sqlite-покрытие деградировано, прогони `npm run test` при закрытом приложении' }
+    const reason = abiStatus === 'locked'
+      ? 'падения только ABI: .node залочен (открыт `npm run dev`/Electron) — пропускаю; закрой приложение и прогони `npm run test` для полного sqlite-покрытия'
+      : 'падения только ABI: пересборка better-sqlite3 не прошла (среда) — пропускаю; почини окружение и прогони заново'
+    return { block: false, reason }
   }
-  // ABI в норме (ok/rebuilt) → любое падение реально.
+  // ABI в норме ('ok') или пересборка ПРОВЕРЕННО прошла ('rebuilt') → любое падение реально.
   return { block: true, reason: 'падения тестов (ABI в норме → регрессия)' }
 }
 
