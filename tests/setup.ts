@@ -1,4 +1,17 @@
 import { afterEach, vi } from 'vitest'
+import { mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { configureRuntimeLogDir } from '../electron/runtime-log'
+
+// Тесты НЕ смеют писать в БОЕВОЙ журнал приложения. Без этого runtime-log без
+// конфигурации падает на %APPDATA%/Verstak/logs — тот самый errors.jsonl, что читает
+// живое приложение и охотник за прод-багами. Любой logRuntimeError в тесте сыпал туда
+// ложные ошибки, маскируя настоящие (09.08: 336 фальшивых `searchMemories` увели штаб
+// на несуществующий дефект). Перенаправляем ТОЛЬКО журнал во временный каталог —
+// process.env.APPDATA не трогаем (его читают CLI-detect и headless-фолбэк для реальных
+// путей). Каталог свой на процесс-воркер; ОС подметёт temp сама.
+configureRuntimeLogDir(join(mkdtempSync(join(tmpdir(), 'vst-test-logs-')), 'logs'))
 
 // Ревизия ambient-лимитов (28.07). У `waitFor` из @testing-library бюджет по
 // умолчанию — 1000 мс, и он нигде не задан явно: число выбрано библиотекой, а не

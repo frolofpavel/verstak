@@ -19,8 +19,10 @@ type LogData = Record<string, unknown>
 
 let configuredBaseDir: string | null = null
 
-/** Явная конфигурация каталога логов (headless-хост). Побеждает electron-путь. */
-export function configureRuntimeLogDir(dir: string): void {
+/** Явная конфигурация каталога логов (headless-хост, тест-сетап). Побеждает electron-путь.
+ *  null — СНЯТЬ конфигурацию (вернуться к electron/APPDATA-фолбэку): нужно тестам, которые
+ *  проверяют сам фолбэк, когда глобальный тест-сетап уже перенаправил лог во временный каталог. */
+export function configureRuntimeLogDir(dir: string | null): void {
   configuredBaseDir = dir
 }
 
