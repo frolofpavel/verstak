@@ -50,6 +50,7 @@ type Overrides = {
   outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }
   pipelineRuns?: unknown
   materials?: unknown
+  isChildSession?: boolean
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -69,7 +70,7 @@ function args(dir: string, o: Overrides): unknown[] {
     skillRegistry: undefined, getSecretForDelegate: () => null, costGuard: o.costGuard,
     providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
     mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
-    parentChatId: null, subSessions: undefined, sessionTodos: undefined,
+    parentChatId: null, isChildSession: o.isChildSession, subSessions: undefined, sessionTodos: undefined,
     agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: null,
     processRegistry: o.processRegistry,
     outcome: o.outcome,
@@ -1129,4 +1130,35 @@ describe('EF-R2 Б2: account lineage при fallback (API-loop)', () => {
     }) as Parameters<typeof runApiConversation>))
     expect(materialsEvent(sender)).toBeNull()
   }, 15000)
+})
+
+describe('agent-loop — гард глубины spawn_task_session (задача C)', () => {
+  // Провайдер, захватывающий набор toolDefs (2-й аргумент provider.send).
+  function capturingProvider(): { provider: ChatProvider; toolNames: () => string[] } {
+    let captured: string[] = []
+    const provider: ChatProvider = {
+      id: 'cap', name: 'cap', models: ['cap'],
+      async *send(_messages, toolDefs?: unknown): AsyncGenerator<ChatEvent> {
+        captured = Array.isArray(toolDefs) ? (toolDefs as Array<{ name: string }>).map(t => t.name) : []
+        yield { type: 'done' } as ChatEvent
+      },
+    }
+    return { provider, toolNames: () => captured }
+  }
+
+  it('корневая сессия (isChildSession=false) → spawn_task_session предлагается модели', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vsk-spawn-root-'))
+    const cap = capturingProvider()
+    await runApiConversation(...(args(dir, { provider: cap.provider, isChildSession: false }) as Parameters<typeof runApiConversation>))
+    expect(cap.toolNames()).toContain('spawn_task_session')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('дочерняя сессия (isChildSession=true) → spawn_task_session НЕ предлагается (гард глубины)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vsk-spawn-child-'))
+    const cap = capturingProvider()
+    await runApiConversation(...(args(dir, { provider: cap.provider, isChildSession: true }) as Parameters<typeof runApiConversation>))
+    expect(cap.toolNames()).not.toContain('spawn_task_session')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

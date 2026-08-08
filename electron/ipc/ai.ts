@@ -75,6 +75,10 @@ export interface AiDeps {
   setSecret?: (key: string, value: string) => void
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
+  /** parent_chat_id чата из chat_sessions (или null). Гард глубины спавна (задача C):
+   *  дочерняя сессия (parent задан) не получает spawn_task_session. Опционально —
+   *  в тестах/делегатах не передаётся (тогда undefined → трактуем как корень). */
+  getChatParentChatId?: (chatId: number) => number | null
   /** 1.9.3 мультиаккаунт: аккаунт подписки провайдера. Резолвит секрет из SafeStorage по
    *  cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит last_used_at.
    *  null = нет заведённых аккаунтов (падаем на legacy-секрет).
@@ -1151,6 +1155,10 @@ export function registerAiIpc(deps: AiDeps): void {
         fallbackOpts,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
+        // Гард глубины спавна (задача C): дочерняя (вынесенная) сессия — та, у чьего чата
+        // задан parent_chat_id. Постоянное свойство чата, поэтому берём из chat_sessions,
+        // а не из runner-поля parentChatId (оно = текущий chatId у любого прогона).
+        isChildSession: chatId ? deps.getChatParentChatId?.(Number(chatId)) != null : false,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
         toolsAllow: outcomeToolsAllow ?? overrides?.toolsAllow ?? null,

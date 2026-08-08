@@ -331,7 +331,11 @@ const GATE_MAX_WORKERS = 4
 // сессии) — offersSpawnTaskSession. Без гарда дерево видимых чатов росло без предела;
 // держал случайно лишь малый бюджет ребёнка. +4 пина (родитель→есть; ребёнок→нет;
 // флаг выкл→нет у обоих), мутация краснеет → 4850.
-const EXPECTED_TOTAL_TESTS = 4850
+// 08.08, ПОЧИНКА сигнала гарда: 1635d48 использовал runner-поле parentChatId (= текущий
+// chatId у ЛЮБОГО прогона) → снял бы spawn у всех чатов. Верный сигнал — isChildSession
+// (chat_sessions.parent_chat_id, считает main из getChatParentChatId). +2 пина проводки в
+// agent-loop (корень→есть; ребёнок→нет), мутация возврата к parentChatId краснеет → 4852.
+const EXPECTED_TOTAL_TESTS = 4852
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

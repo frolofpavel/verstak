@@ -684,6 +684,9 @@ app.whenReady().then(() => {
     setSecret: (key, value) => settings.setSecret(key, value),
     getProviderId,
     getProviderModel,
+    // Гард глубины спавна (задача C): дочерняя сессия (parent_chat_id задан) не получает
+    // spawn_task_session. Постоянное свойство чата — берём из chat_sessions.
+    getChatParentChatId: (chatId) => chatSessions.get(chatId)?.parentChatId ?? null,
     // 1.9.3 мультиаккаунт → 2.1.3-CD: единый резолвер (readiness pin/one-shot внутри,
     // см. electron/ai/resolve-subscription-account.ts). Auto-путь не изменён.
     resolveSubscriptionAccount: createResolveSubscriptionAccount(db, {

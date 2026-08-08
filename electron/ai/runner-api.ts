@@ -194,6 +194,10 @@ export interface AgentRunContext {
   appendAuditFn?: (action: string, detail: string) => void
   trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
   parentChatId?: number | null
+  /** Этот прогон идёт в ДОЧЕРНЕЙ (вынесенной спавном) сессии — у её чата задан
+   *  parent_chat_id. Гард глубины: такой сессии НЕ даём spawn_task_session (внучек нет).
+   *  Считает main из chat_sessions; НЕ путать с parentChatId (= текущий chatId прогона). */
+  isChildSession?: boolean
   subSessions?: AiDeps['subSessions']
   sessionTodos?: AiDeps['sessionTodos']
   agentRuns?: AgentRuns
@@ -241,7 +245,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+    parentChatId, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
@@ -758,12 +762,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // tests/lib/runtime-flags.test.ts. Дефолт ON — решение Павла; килл-свитч
     // (осознанное 'false') в RuntimeFlagsTab. Триггер — решение МОДЕЛИ по ходу.
     const orchestratorDefaultOn = getSecretForDelegate?.('orchestrator_default') !== 'false'
-    // ГАРД ГЛУБИНЫ (задача C, 08.08): spawn_task_session даётся ТОЛЬКО корню. parentChatId
-    // задан ⇒ это уже вынесенная (дочерняя) сессия — глубина ровно один уровень, внучек
-    // она не заводит. Без гарда дерево ВИДИМЫХ чатов растёт без ограничителя (у спавна, в
-    // отличие от delegate_task, лимита глубины не было — держал случайно лишь малый бюджет
-    // ребёнка; поднимать бюджет без этого гарда нельзя).
-    if (!offersSpawnTaskSession(orchestratorDefaultOn, parentChatId != null)) {
+    // ГАРД ГЛУБИНЫ (задача C, 08.08): spawn_task_session даётся ТОЛЬКО корню. isChildSession —
+    // это ПОСТОЯННОЕ свойство чата (у чата в chat_sessions задан parent_chat_id), а НЕ
+    // runner-поле parentChatId (оно = текущий chatId у ЛЮБОГО прогона, для скоупа тудушек).
+    // Свойство чата, а не флаг отдельной отправки — иначе follow-up в дочернем чате снова
+    // получил бы инструмент. Глубина ровно один уровень, внучек вынесенная задача не заводит.
+    if (!offersSpawnTaskSession(orchestratorDefaultOn, isChildSession === true)) {
       allToolDefs = allToolDefs.filter(t => t.name !== 'spawn_task_session')
     }
     // 2.0.8-F cache-диагностика: набор инструментов входит в кэшируемый префикс, поэтому его
