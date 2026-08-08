@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 // Распил 1.9.8: selectAllowedToolDefs вынесен в runner-util.
-import { selectAllowedToolDefs } from '../../electron/ai/runner-util'
+import { selectAllowedToolDefs, resolveToolsAllowSet } from '../../electron/ai/runner-util'
 
 /**
  * Аудит M4: tools_allow скилла должен реально ограничивать инструменты модели —
@@ -77,5 +77,48 @@ describe('selectAllowedToolDefs (M4 — enforce skill tools_allow)', () => {
     expect(names).not.toContain('run_command')
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+// Общий предикат tools_allow — ОДИН источник для фильтра списка И для гейта диспетчера
+// (аудит 09.08). Две копии этой логики разъехались бы: инструмент, который фильтр не
+// показал, гейт бы пропустил. Здесь пиним сам предикат.
+describe('resolveToolsAllowSet — общий предикат (фильтр + гейт диспетчера)', () => {
+  const baseNames = BASE.map(d => d.name)
+  const mcpNames = MCP.map(d => d.name)
+
+  it('нет tools_allow → allowed=null (ограничения нет), fail-open=false', () => {
+    expect(resolveToolsAllowSet(null, baseNames, mcpNames)).toMatchObject({ allowed: null, unmatchedFailOpen: false })
+    expect(resolveToolsAllowSet([], baseNames, mcpNames)).toMatchObject({ allowed: null, unmatchedFailOpen: false })
+  })
+
+  it('read-only набор → allowed содержит read_file, НЕ содержит write_file/run_command', () => {
+    const { allowed, unmatchedFailOpen } = resolveToolsAllowSet(['read_file', 'search_project'], baseNames, mcpNames)
+    expect(unmatchedFailOpen).toBe(false)
+    expect(allowed?.has('read_file')).toBe(true)
+    expect(allowed?.has('write_file')).toBe(false)
+    expect(allowed?.has('run_command')).toBe(false)
+  })
+
+  it('все имена — опечатки → allowed=null И unmatchedFailOpen=true (это и есть СЛЕД для журнала)', () => {
+    const { allowed, unmatchedFailOpen } = resolveToolsAllowSet(['raed_file', 'нет_такого'], baseNames, mcpNames)
+    expect(allowed).toBeNull()
+    expect(unmatchedFailOpen).toBe(true)   // без этого флага runner-api не оставит след
+  })
+
+  it('частичное совпадение → строго ограничивает, fail-open=false (не тихое снятие)', () => {
+    const { allowed, unmatchedFailOpen } = resolveToolsAllowSet(['read_file', 'опечатка'], baseNames, mcpNames)
+    expect(unmatchedFailOpen).toBe(false)
+    expect(allowed?.has('read_file')).toBe(true)
+    expect(allowed?.has('write_file')).toBe(false)
+  })
+
+  it('псевдо-имя shell → run_command в наборе; files → read-набор', () => {
+    const shell = resolveToolsAllowSet(['shell'], baseNames, mcpNames)
+    expect(shell.allowed?.has('run_command')).toBe(true)
+    expect(shell.pseudoNames).toContain('shell')
+    const files = resolveToolsAllowSet(['files'], baseNames, mcpNames)
+    expect(files.allowed?.has('read_file')).toBe(true)
+    expect(files.allowed?.has('write_file')).toBe(false)
   })
 })

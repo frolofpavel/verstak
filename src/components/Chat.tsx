@@ -1201,10 +1201,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       if (event.type === 'spawn-task-session') {
         const parentChatId = owner?.kind === 'chat' ? owner.chatId : store.activeChatId
         if (parentChatId != null) {
+          // toolsAllow родителя наследуется ребёнком — не шире родителя. Прокидываем
+          // ТОЛЬКО когда он есть (родитель под скиллом): без ограничения ключ не добавляем
+          // (ребёнок полный, как раньше) — иначе сломался бы точный пин диспетчера.
+          const parentToolsAllow = (event as { toolsAllow?: unknown }).toolsAllow
           void store.spawnChildSession({
             parentChatId,
             title: String((event as { title?: unknown }).title ?? 'Задача'),
             seed: String((event as { seed?: unknown }).seed ?? ''),
+            ...(Array.isArray(parentToolsAllow) && parentToolsAllow.length
+              ? { toolsAllow: parentToolsAllow.map(String) }
+              : {}),
           })
         }
         return

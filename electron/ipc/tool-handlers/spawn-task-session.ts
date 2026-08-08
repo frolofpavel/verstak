@@ -34,7 +34,10 @@ export const spawnTaskSessionHandler: ToolHandler = {
     // увидит карточку-след). Событие эфемерное, в БД не пишется.
     ctx.sender.send('ai:event', {
       id: ctx.sendId,
-      event: { type: 'spawn-task-session', callId: call.id, title, seed },
+      // toolsAllow РОДИТЕЛЬСКОГО прогона едет к ребёнку: дочерняя сессия не может быть
+      // шире родителя (тот же принцип, что наследование режима — восьмой обход). Renderer
+      // форвардит его в overrides дочернего sendWithOverrides. null = у родителя скилла нет.
+      event: { type: 'spawn-task-session', callId: call.id, title, seed, toolsAllow: ctx.toolsAllow ?? null },
     })
     try {
       ctx.recordJournal(ctx.projectPath, 'tool', `Оркестратор: «${title}» → отдельная сессия`, null)
