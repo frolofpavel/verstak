@@ -179,7 +179,12 @@ export function costBreakdown(
   }
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
   const inputCost = (billableInput / 1_000_000) * price.input
-  const cachedCost = (cachedInputTokens / 1_000_000) * cachedTokenRate(price.cached, price.input)
+  // Ставка кэша ОДНА и та же для суммы и для строки разбивки. Раньше сумма считалась
+  // через cachedTokenRate (правило «неизвестна цена → по input»), а строка показывалась
+  // только при price.cached — на DeepSeek/Kimi кэш попадал в «Итого», но не в видимые
+  // строки, и итог не сходился с тем, что человек видит. Половина собственного фикса.
+  const cachedRate = cachedTokenRate(price.cached, price.input)
+  const cachedCost = (cachedInputTokens / 1_000_000) * cachedRate
   const cacheWriteCost = price.cacheWrite ? (cacheWriteTokens / 1_000_000) * price.cacheWrite : 0
   const outputCost = (outputTokens / 1_000_000) * price.output
   const total = inputCost + cachedCost + cacheWriteCost + outputCost
@@ -188,8 +193,9 @@ export function costBreakdown(
     `Цена: $${price.input}/M input, $${price.output}/M output${price.cached ? `, $${price.cached}/M cache read` : ''}${price.cacheWrite ? `, $${price.cacheWrite}/M cache write` : ''}`,
     '',
     `↑ input: ${billableInput.toLocaleString()} × $${price.input}/M = $${inputCost.toFixed(4)}`,
-    ...(cachedInputTokens > 0 && price.cached
-      ? [`⟲ cached: ${cachedInputTokens.toLocaleString()} × $${price.cached}/M = $${cachedCost.toFixed(4)}`]
+    ...(cachedInputTokens > 0
+      ? [`⟲ cached: ${cachedInputTokens.toLocaleString()} × $${cachedRate}/M = $${cachedCost.toFixed(4)}`
+         + (price.cached == null ? ' (цена кэша неизвестна — считаем по input)' : '')]
       : []),
     ...(cacheWriteTokens > 0 && price.cacheWrite
       ? [`⇧ cache write: ${cacheWriteTokens.toLocaleString()} × $${price.cacheWrite}/M = $${cacheWriteCost.toFixed(4)}`]

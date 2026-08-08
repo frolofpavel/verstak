@@ -109,4 +109,33 @@ describe('costBreakdown', () => {
     const withCached = costBreakdown('claude', 'claude-sonnet-4-5', 1000, 500, 200)
     expect(withCached).toMatch(/cached:/)
   })
+
+  // Половина собственного фикса cachedTokenRate (08.08, шипнуто в 2.4.4): сумма
+  // считала кэш по правилу «неизвестна цена → по input», а СТРОКА разбивки
+  // показывалась только при price.cached. На дешёвых моделях (нет price.cached)
+  // кэш попадал в «Итого» и не попадал в видимые строки — человек видел итог
+  // больше суммы того, что показано, без объяснения.
+  it('У модели БЕЗ цены кэша строка cached всё равно показана и названа фолбэком', () => {
+    const b = costBreakdown('deepseek', 'deepseek-v4-flash', 1_000_000, 0, 500_000)
+    expect(b).toMatch(/cached:/)
+    expect(b).toMatch(/цена кэша неизвестна/)
+  })
+
+  // ГЛАВНЫЙ инвариант, а не текст: видимые строки обязаны сходиться с «Итого».
+  it('Сумма видимых строк равна Итого (модель без цены кэша)', () => {
+    const b = costBreakdown('deepseek', 'deepseek-v4-flash', 1_000_000, 0, 500_000)
+    const shown = [...b.matchAll(/=\s\$([0-9.]+)/g)].map(m => Number(m[1]))
+    const total = Number(/Итого: \$([0-9.]+)/.exec(b)?.[1])
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown.reduce((a, n) => a + n, 0)).toBeCloseTo(total, 4)
+  })
+
+  // КОНТРОЛЬНЫЙ: у модели С известной ценой кэша ставка своя, а не input'овая —
+  // иначе фикс выродился бы в «всегда считать кэш по input».
+  it('У модели С ценой кэша ставка своя, фолбэк не подставляется', () => {
+    const b = costBreakdown('claude', 'claude-sonnet-4-5', 1_000_000, 0, 500_000)
+    expect(b).toMatch(/cached:/)
+    expect(b).not.toMatch(/цена кэша неизвестна/)
+    expect(b).toMatch(/\$0\.3\/M/)
+  })
 })
