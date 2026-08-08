@@ -55,6 +55,11 @@ const makeDeps = (snapshot: { summary: string; throughMessageId: number } | null
   recentWrites: () => [],
   getAgentMode: () => 'ask' as const,
   getContextSnapshot: () => snapshot,
+  // Прод ВСЕГДА прокидывает searchMemories (main.ts / headless host.ts). Без него
+  // buildSendMemoryContext ловил TypeError и писал ai.memories.search.fail в РЕАЛЬНЫЙ
+  // errors.jsonl (тесты пишут в прод-лог) — 336 ложных записей маскировали живые
+  // ошибки. Стаб приводит фикстуру к продовой форме. Возврат [] = «память пуста».
+  searchMemories: () => [],
 })
 
 /**
