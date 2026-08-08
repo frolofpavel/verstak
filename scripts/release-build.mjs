@@ -16,9 +16,17 @@ import { execSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const { classifyBetterSqlite3Abi } = require('./native-abi.cjs')
 
 const ROOT = process.cwd()
 const sh = (cmd, cwd = ROOT) => execSync(cmd, { cwd, encoding: 'utf8' }).trim()
+
+// Путь better_sqlite3.node внутри произвольного дерева node_modules.
+const betterSqlite3Node = base =>
+  join(base, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
 
 const head = sh('git rev-parse HEAD')
 const short = head.slice(0, 8)
@@ -33,6 +41,19 @@ const originMain = sh('git rev-parse origin/main')
 if (head !== originMain) {
   console.error(`✗ HEAD (${short}) ≠ origin/main (${originMain.slice(0, 8)}). Сначала запушь код — собирать неопубликованный коммит нельзя.`)
   process.exit(1)
+}
+
+// ПРЕДУПРЕЖДЕНИЕ (не стоп): состояние ABI в рабочем дереве. Тесты (safe-rebuild /
+// tests/global-setup ensureNodeAbi) переводят better_sqlite3.node под Node ABI; но
+// `dist:win` в чистой копии сам гонит electron-rebuild ПЕРЕД упаковкой, поэтому Node ABI
+// источника до артефакта НЕ доживает. Замер штаба (09.08): и в сломанной 2.4.5, и в
+// рабочей 2.4.6 обе копии .node (app.asar.unpacked + native-fix) — под Electron ABI.
+// Значит fail-closed ЗДЕСЬ давал бы ложный отказ после каждого прогона тестов. Настоящий
+// fail-closed — на ВЫХОДЕ (post-build ниже) и в afterPack (гард источника native-fix).
+const rootAbi = classifyBetterSqlite3Abi(betterSqlite3Node(ROOT))
+if (rootAbi !== 'electron') {
+  console.warn(`⚠ better_sqlite3.node в рабочем node_modules под «${rootAbi}» ABI (не Electron) —`)
+  console.warn('  норм: dist:win пересоберёт копию под Electron; ABI артефакта проверю после сборки.')
 }
 
 const wt = join(tmpdir(), `verstak-release-${short}`)
@@ -85,6 +106,26 @@ try {
     console.error('✗ сборка упала:\n' + out.slice(-3000))
     process.exit(1)
   }
+
+  // FAIL-CLOSED НА ВЫХОДЕ: сверяем ABI в СОБРАННОМ артефакте. Если по любой причине
+  // (пропущенный/упавший electron-rebuild, кэш пребилда, /MIR) в win-unpacked оказался
+  // Node ABI — отклоняем сборку, а не публикуем её. Это ЛАТЕНТНЫЙ риск: замер штаба
+  // показал, что в реально сломанной 2.4.5 артефакт был Electron ABI (значит настоящая
+  // причина 2.4.5 иная и НЕИЗВЕСТНА) — но защита от Node ABI на выходе всё равно нужна.
+  // Проба в дочернем процессе (native-abi.cjs) — не лочит файл, worktree корректно удалится.
+  const unpacked = join(wt, 'release', 'win-unpacked', 'resources')
+  const builtChecks = [
+    ['app.asar.unpacked', betterSqlite3Node(join(unpacked, 'app.asar.unpacked'))],
+    ['native-fix', join(unpacked, 'native-fix', 'better_sqlite3.node')],
+  ]
+  for (const [label, p] of builtChecks) {
+    const abi = classifyBetterSqlite3Abi(p)
+    if (abi !== 'electron') {
+      console.error(`✗ собранный better_sqlite3.node (${label}) под «${abi}» ABI, а не Electron — установленное приложение не откроет БД (инцидент 2.4.5). Сборка отклонена.`)
+      process.exit(1)
+    }
+  }
+  console.log('   ✓ ABI better_sqlite3.node в сборке — Electron (app.asar.unpacked + native-fix)')
 
   console.log('[4/4] переношу артефакты + пишу паспорт сборки')
   const outDir = join(ROOT, 'release')

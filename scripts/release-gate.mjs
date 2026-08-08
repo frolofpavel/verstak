@@ -362,7 +362,12 @@ const GATE_MAX_WORKERS = 4
 // кэш показан при неизвестной цене) дала +3 к общей базе 4860 (см. tests/lib/pricing.test.ts).
 // Разрешение конфликта эталона СУММОЙ приростов обеих линий: 4860 + 3 (PRICES) + 18
 // (седьмой 11 + create_proof_video 3 + восьмой 4) = 4881.
-const EXPECTED_TOTAL_TESTS = 4881
+// 09.08, класс «native ABI в релизе» закрыт (защита латентных рисков; причина 2.4.5
+// осталась НЕИЗВЕСТНОЙ — замер штаба опроверг ходовую версию): +5 пинов
+// classifyBetterSqlite3Abi (tests/scripts/native-abi.test.ts) + 3 пина source-гарда
+// самопочинки (tests/electron/native-modules.test.ts, два краснели до фикса) + 4 пина
+// afterPack-гарда native-fix (tests/scripts/native-fix-stage.test.ts, мутация краснит 2) = 4893.
+const EXPECTED_TOTAL_TESTS = 4893
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
