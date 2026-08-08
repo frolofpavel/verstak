@@ -78,7 +78,7 @@ export interface ProviderCapabilities {
   /**
    * Tick-таймлайн НАШЕГО agent-loop'а (шаги, tool-решения, прогресс хода).
    * НЕ путать с проекцией tool-событий CLI: у claude-cli/codex-cli она есть с 1.9.5
-   * (см. src/lib/runtime-capability.ts → CLI_WITH_TIMELINE) — но это информационное
+   * (см. shared/contracts/cli-capability.ts → CLI_WITH_TIMELINE) — но это информационное
    * зеркало чужого цикла, а не наш таймлайн. Здесь именно наш.
    */
   liveTimeline: boolean

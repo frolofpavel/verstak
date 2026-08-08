@@ -9,6 +9,8 @@
 // ВНУТРИ бинаря и не под контролем Verstak. Считаем capability из
 // provider+transport, а не из одного transport, и не приукрашиваем.
 
+import { CLI_WITH_TIMELINE } from '../../shared/contracts/cli-capability'
+
 export type RuntimeTransport = 'API' | 'CLI' | 'Tunnel'
 
 export type RuntimeTier = 'full' | 'observed' | 'limited'
@@ -38,10 +40,9 @@ export interface RuntimeCapability {
   tier: RuntimeTier
 }
 
-// CLI-провайдеры, где проекция tool-таймлайна РЕАЛЬНО реализована и проверена
-// тестами (срез 1 — claude-cli, срез 2 — codex-cli). Набор намеренно узкий:
-// не добавлять сюда провайдер, пока проекция не подтверждена на потоке.
-export const CLI_WITH_TIMELINE: ReadonlySet<string> = new Set(['claude-cli', 'codex-cli'])
+// CLI_WITH_TIMELINE переехал в shared/contracts/cli-capability.ts (одна правда на
+// оба слоя). Ре-экспорт — чтобы существующие импортёры renderer'а не ломались.
+export { CLI_WITH_TIMELINE }
 
 // CLI, где режимы передаются в сам внешний агент нативными флагами или близким к ним механизмом.
 // Это всё равно не такой же контроль, как у API-пути, но пользователь должен видеть разницу
@@ -105,19 +106,8 @@ export function runtimeCapability(providerId: string, transport: RuntimeTranspor
 }
 
 // ─── Защита секретов (1.9.6 #2): честный ярлык по CLI ────────────────────────
-// Зеркало electron/ai/cli-security-capabilities.ts secretProtectionLevel
-// (renderer и main не делят модуль). Держать синхронно — тест
-// cli-security-capabilities.test.ts сверяет уровни по каждому провайдеру.
-export type SecretProtectionLevel = 'full' | 'partial' | 'none'
-
-const CLI_SECRET_LEVEL: Record<string, SecretProtectionLevel> = {
-  'claude-cli': 'partial', // путь-чтение закрыто, Bash-обход открыт, не подтверждён живьём
-  'codex-cli': 'none',     // sandbox только записи, чтение .env разрешено
-  'grok-cli': 'none',
-  'gemini-cli': 'none',
-}
-
-export function secretProtectionLevel(providerId: string): SecretProtectionLevel {
-  return CLI_SECRET_LEVEL[providerId] ?? 'none'
-}
+// Источник правды — shared/contracts/cli-capability.ts (одна матрица на оба слоя;
+// раньше здесь жила ручная копия уровня под анти-дрейф-тестом). Ре-экспорт
+// сохраняет импортёров renderer'а (RunDiagnostics, AgentRunInspector).
+export { secretProtectionLevel, type SecretProtectionLevel } from '../../shared/contracts/cli-capability'
 
