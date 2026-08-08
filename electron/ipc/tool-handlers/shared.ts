@@ -95,6 +95,16 @@ export interface ToolContext {
   scopedKey: (sendId: SendId, callId: string) => string
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode
+  /** Сырой tools_allow активного скилла этого прогона (для наследования дочерней
+   *  сессией: spawn_task_session прокидывает его в overrides ребёнка). null = нет скилла. */
+  toolsAllow?: string[] | null
+  /** Разрешённый набор ИМЁН инструментов (resolveToolsAllowSet). Гейт диспетчера
+   *  (dispatchToolTurn) блокирует вызов вне набора — enforcement на ИСПОЛНЕНИИ, а не
+   *  только фильтром предлагаемого списка. null = ограничения нет (нет скилла / fail-open). */
+  allowedToolNames?: Set<string> | null
+  /** Дочерняя ли это сессия (у чата задан parent_chat_id). Нужно гейту, чтобы отказ
+   *  ОБЪЯСНИЛ, что ограничение унаследовано от родителя, а не немо «инструмент недоступен». */
+  isChildSession?: boolean
   /** NL-cron: unattended-прогон → connector_query разрешён ТОЛЬКО для read-only op'ов
    *  (op-level политика). Пишущие/выполняющие коннекторы (ssh/telegram send/вебхуки)
    *  блокируются без надзора. См. connector-readonly.ts. */

@@ -51,6 +51,7 @@ type Overrides = {
   pipelineRuns?: unknown
   materials?: unknown
   isChildSession?: boolean
+  toolsAllow?: string[] | null
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -71,7 +72,7 @@ function args(dir: string, o: Overrides): unknown[] {
     providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
     mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
     parentChatId: null, isChildSession: o.isChildSession, subSessions: undefined, sessionTodos: undefined,
-    agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: null,
+    agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: o.toolsAllow ?? null,
     processRegistry: o.processRegistry,
     outcome: o.outcome,
     pipelineRuns: o.pipelineRuns,
@@ -150,6 +151,21 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     await runApiConversation(...(args(dir, { provider: p, providerId: 'gemini-api', model: 'gemini-3-flash', costGuard: createCostGuard(100), agentRuns: runs, runId: 'r1' }) as Parameters<typeof runApiConversation>))
     expect(runs.finish).toHaveBeenCalledTimes(1)
     expect(runs.finish).toHaveBeenCalledWith('r1', 'done', expect.anything())
+  })
+
+  // Аудит 09.08 (штаб): fail-open tools_allow ОБЯЗАН оставить след — иначе опечатка в
+  // скилле тихо снимает защиту, и «read-only скилл» молча становится полным.
+  it('fail-open tools_allow (все имена — опечатки) → видимая строка в журнале прогона', async () => {
+    const runs = mockRuns()
+    const journal = vi.fn()
+    const p = provider('p1', () => [{ type: 'text', text: 'ok' }, { type: 'done' }])
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'gemini-api', model: 'gemini-3-flash',
+      costGuard: createCostGuard(100), agentRuns: runs, runId: 'rfo',
+      toolsAllow: ['нет_такого_инструмента', 'raed_file'], recordJournal: journal,
+    }) as Parameters<typeof runApiConversation>))
+    const noteCall = journal.mock.calls.find(c => c[1] === 'note' && /tools_allow.*не разобран|не разобран.*ограничени/i.test(String(c[2])))
+    expect(noteCall).toBeTruthy()
   })
 
   // ─────────────────────────────────────────────────────────────────────────────

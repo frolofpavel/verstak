@@ -13,6 +13,7 @@
  * несёт секретов — только id провайдера, модель, transport и git-sha.
  */
 import { execFileSync } from 'child_process'
+import { CLI_WITH_TIMELINE } from '../../shared/contracts/cli-capability'
 
 // Унаследованные GIT_*-переменные (напр. под pre-commit хуком) переопределяют
 // `-C <dir>` → git адресует ЧУЖОЙ репозиторий. Снимаем их (как в git-worktree.ts).
@@ -42,9 +43,10 @@ function git(cwd: string, args: string[]): string | null {
 
 export type RuntimeTransport = 'API' | 'CLI' | 'Tunnel'
 
-// Зеркало src/lib/runtime-capability.ts CLI_WITH_TIMELINE (renderer и main не
-// делят модуль — контекст-изоляция). Держать синхронно; тест сверяет набор.
-export const CLI_WITH_TIMELINE: ReadonlySet<string> = new Set(['claude-cli', 'codex-cli'])
+// CLI_WITH_TIMELINE переехал в shared/contracts/cli-capability.ts — одна правда на
+// оба слоя (импорт — вверху файла). Ре-экспорт сохраняет существующих импортёров
+// main (в т.ч. control-envelope.test.ts).
+export { CLI_WITH_TIMELINE }
 
 export interface ControlCheckpoint {
   /** Проект под git. */

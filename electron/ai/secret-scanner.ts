@@ -132,7 +132,9 @@ const PATTERNS: SecretPattern[] = [
   // (api_key=<uuid>), GigaChat/OAuth (client_secret), Bearer-токены. Только при
   // явном auth-ключевом слове рядом — иначе UUID/хеши из легитимных ответов не
   // редактируем (см. спец-обработку в scanText: гасится лишь сам value).
-  { name: 'auth-keyword-value', re: /\b(authorization|x-secret|x-api-key|api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key)\b\s*[:=]\s*["']?(?:bearer\s+|token\s+)?([A-Za-z0-9._\-+/]{16,})/gi }
+  // `basic\s+` рядом с bearer/token: Authorization: Basic <base64> — статичные креды
+  // (base64 = user:password). Без него Basic-заголовок утекал сырым (аудит 09.08).
+  { name: 'auth-keyword-value', re: /\b(authorization|x-secret|x-api-key|api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key)\b\s*[:=]\s*["']?(?:bearer\s+|token\s+|basic\s+)?([A-Za-z0-9._\-+/]{16,})/gi }
 ]
 
 export interface ScanResult {

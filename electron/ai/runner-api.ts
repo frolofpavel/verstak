@@ -32,7 +32,7 @@ import { type ToolContext, type TaggedSender as HandlerTaggedSender } from '../i
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
-import { selectAllowedToolDefs, retriableErrorEvent } from './runner-util'
+import { selectAllowedToolDefs, resolveToolsAllowSet, retriableErrorEvent } from './runner-util'
 import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
 import { captureToolObservation, isAutoCaptureEnabled } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
@@ -288,6 +288,24 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // project). Грузим один раз на прогон (deny бьёт даже bypass; правила не ослабляют
   // plan). Пусто, если файлов нет — no-op, обратная совместимость.
   const permissionRules = loadPermissionRules(projectPath)
+  // tools_allow enforcement — СТАБИЛЬНЫЙ allow-набор считаем ОДИН раз на прогон (не
+  // per-turn) тем же предикатом, что фильтрует предлагаемый список (resolveToolsAllowSet):
+  // список инструментов — меню, а не граница; гейт диспетчера (dispatchToolTurn) блокирует
+  // вызов вне набора. Универсум = base TOOL_DEFS + mcp (стабильны в пределах прогона).
+  const mcpNamesForAllow = mcpClientRef ? mcpClientRef.getAllTools().map(t => t.name) : []
+  const toolsAllowResolution = resolveToolsAllowSet(toolsAllow, TOOL_DEFS.map(d => d.name), mcpNamesForAllow)
+  const allowedToolNames = toolsAllowResolution.allowed
+  // Fail-open ОСТАВЛЯЕТ СЛЕД (штаб): сломанный tools_allow → ограничение НЕ применяется,
+  // но это обязано быть ВИДНО в журнале прогона — иначе опечатка тихо снимает защиту, и
+  // «read-only скилл» молча станет полным. Тот же принцип, что «фолбэк без следа».
+  if (toolsAllowResolution.unmatchedFailOpen) {
+    recordJournal(
+      projectPath,
+      'note',
+      'tools_allow скилла не разобран — ограничение инструментов НЕ применено',
+      `ни одно имя из tools_allow=[${(toolsAllow ?? []).join(', ')}] не совпало с инструментом (проверь имена в скилле)`
+    )
+  }
   // H (ось 3): new_task — агент пакует дистиллят, контекст очищается до него на след. turn
   // (как компакция, но по запросу агента и с его резюме). Холдер уровня прогона.
   let pendingNewTask: string | null = null
@@ -1167,6 +1185,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
+      // tools_allow: сырой список — для наследования дочерней сессией (spawn_task_session);
+      // allowedToolNames — набор для гейта диспетчера (enforcement на исполнении);
+      // isChildSession — чтобы отказ гейта объяснил наследование от родителя.
+      toolsAllow: toolsAllow ?? null, allowedToolNames, isChildSession: isChildSession === true,
       // Этап 1а headless: read-only политика коннекторов + серверный каталог «downloads».
       readOnlyConnectors: readOnlyConnectorsCtx, artifactsDownloadsDir: artifactsDownloadsDirCtx,
       defaultDocxSaveTo,

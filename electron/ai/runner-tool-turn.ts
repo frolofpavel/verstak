@@ -111,9 +111,23 @@ async function runPostHooks(
 }
 
 /**
- * Один turn исполнения инструментов: PreToolUse → dispatch по режиму → PostToolUse.
- * Порядок и параллельность — часть контракта runner'а, поэтому они живут в одной
- * тестируемой функции, а не размазаны по главному agent loop.
+ * Отказ гейта tools_allow — ОБЪЯСНЯЮЩИЙ, а не немой «инструмент недоступен». У дочерней
+ * сессии называет причину прямо: набор унаследован от родителя. Без объяснения человек
+ * упрётся в глухой отказ и не поймёт почему — ровно тот класс немых отказов, что мы чиним.
+ */
+export function toolsAllowBlockReason(toolName: string, isChildSession: boolean | undefined): string {
+  return isChildSession
+    ? `Инструмент "${toolName}" недоступен: набор инструментов УНАСЛЕДОВАН от родительской сессии ` +
+      `(её скилл ограничил доступ). Вынесенная задача не может быть шире родителя — родитель тоже ` +
+      `не мог им пользоваться. Если инструмент действительно нужен, сними ограничение осознанно.`
+    : `Инструмент "${toolName}" недоступен: активный скилл ограничил набор инструментов (tools_allow), ` +
+      `и этот инструмент вне разрешённого набора.`
+}
+
+/**
+ * Один turn исполнения инструментов: PreToolUse → гейт tools_allow → dispatch по режиму →
+ * PostToolUse. Порядок и параллельность — часть контракта runner'а, поэтому они живут в
+ * одной тестируемой функции, а не размазаны по главному agent loop.
  */
 export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<ToolResult[]> {
   const {
@@ -124,12 +138,26 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
     resolveHandler = lookupHandler,
     invokeHooks = runHooks,
   } = opts
-  const preBlocked = hooks
+  const blocked = hooks
     ? await collectPreBlocks(toolCalls, context, hooks, invokeHooks, addContext)
     : new Map<number, string>()
-  const results = await executeHandlers(toolCalls, context, preBlocked, resolveHandler)
+  // Гейт tools_allow на ИСПОЛНЕНИИ (штаб, аудит 09.08): список предлагаемых инструментов —
+  // это МЕНЮ для модели, а не граница. Вызов инструмента вне разрешённого набора — будь то
+  // галлюцинация, инъекция в читаемый контент, или дочерняя сессия под унаследованным
+  // ограничением — блокируется ЗДЕСЬ, с объясняющим отказом. allowedToolNames=null (нет
+  // скилла / fail-open) → ограничения нет → no-op для подавляющего большинства сессий.
+  const allowed = context.allowedToolNames
+  if (allowed) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      if (blocked.has(i)) continue
+      if (!allowed.has(toolCalls[i].name)) {
+        blocked.set(i, toolsAllowBlockReason(toolCalls[i].name, context.isChildSession))
+      }
+    }
+  }
+  const results = await executeHandlers(toolCalls, context, blocked, resolveHandler)
   if (hooks) {
-    await runPostHooks(toolCalls, results, context, hooks, preBlocked, invokeHooks, addContext)
+    await runPostHooks(toolCalls, results, context, hooks, blocked, invokeHooks, addContext)
   }
   return results
 }

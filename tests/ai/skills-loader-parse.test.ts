@@ -50,22 +50,46 @@ describe('изоляция загрузчика от домашних дерев
     expect(skills.map(s => s.id).sort()).toEqual(BUILT_IN_SKILLS.map(s => s.id).sort())
   })
 
-  // ЕДИНСТВЕННЫЙ тест файла, который ходит по РЕАЛЬНЫМ домашним деревьям — в этом
-  // его смысл: он доказывает поведение ПО УМОЛЧАНИЮ, и изоляцией его вылечить
-  // нельзя, иначе он перестанет проверять то, ради чего написан.
-  //
-  // Поэтому здесь ЯВНЫЙ бюджет, а не удаление работы (29.07, блокировал релиз
-  // 2.2.21). Измерено: файл целиком идёт 2.3 с соло, а под полным параллельным
-  // прогоном этот кейс упирался в глобальные 20 000 — на машине с адаптерами
-  // чужих CLI обход даёт 272 скилла и 778 файлов, и под конкуренцией воркеров за
-  // диск секунды превращаются в десятки. Бюджет заведомо БОЛЬШЕ глобального
-  // (третий аргумент `it()` для того и существует) и с запасом ×39 к измеренному.
-  const REAL_ROOTS_SCAN_TIMEOUT_MS = 90_000
+  // ИЗОЛЯЦИЯ (аудит 09.08, класс «тест зависит от живой машины»). Раньше здесь один
+  // кейс звал loadAllSkills({ roots: SKILL_ROOTS_IN_PRIORITY_ORDER }) — то есть скан
+  // РЕАЛЬНЫХ ~/.claude, ~/.codex, ~/.grok, ~/.verstak. На машине Павла это 272 скилла,
+  // на чистой — ноль; а под параллельными линиями, которые ПИШУТ в эти же деревья,
+  // файл исчезал посреди скана → ENOENT, и тест падал то у одного, то у другого.
+  // Невоспроизводим по построению. Контракт («несуществующие/присутствующие корни
+  // сканируются без ENOENT-краха») тот же, но проверяется на КОНТРОЛИРУЕМЫХ корнях.
+  // Сам список стандартных корней пиннут отдельно (describe «приоритет источников»),
+  // здесь он не нужен. Фикстура сменена (реальные деревья → temp), утверждение — то же.
+  it('корни сканируются без ENOENT-краха: несуществующий пропускается, присутствующий читается', async () => {
+    const present = mkdtempSync(join(tmpdir(), 'gg-present-'))
+    const missing = mkdtempSync(join(tmpdir(), 'gg-missing-'))
+    rmSync(missing, { recursive: true, force: true }) // гарантированно НЕсуществующий путь
+    writeFileSync(join(present, 'есть.md'), '---\nid: есть-скилл\n---\nтело\n', 'utf8')
+    try {
+      const { skills, stats } = await loadAllSkills({ roots: [present, missing] })
+      expect(stats.failed.filter(f => f.includes('ENOENT')), 'несуществующий корень дал ENOENT вместо тихого пропуска').toEqual([])
+      expect(skills.some(s => s.id === 'есть-скилл'), 'присутствующий корень не прочитан').toBe(true)
+    } finally {
+      rmSync(present, { recursive: true, force: true })
+    }
+  })
 
-  it('без roots поведение прежнее: стандартные корни в работе', async () => {
-    const { stats } = await loadAllSkills({ roots: SKILL_ROOTS_IN_PRIORITY_ORDER })
-    expect(stats.failed.filter(f => f.includes('ENOENT'))).toEqual([])
-  }, REAL_ROOTS_SCAN_TIMEOUT_MS)
+  // КОНТРОЛЬ (штаб): загрузчик видит РОВНО заданные корни. Посторонний скилл, лежащий
+  // рядом в другом (домашне-подобном) дереве, но НЕ переданный в roots, в результат НЕ
+  // попадает. Зеркало к roots:[] — доказывает, что изоляция не дырявит В ОБЕ стороны.
+  it('посторонний скилл вне roots в результат НЕ попадает', async () => {
+    const included = mkdtempSync(join(tmpdir(), 'gg-included-'))
+    const foreign = mkdtempSync(join(tmpdir(), 'gg-foreign-'))
+    writeFileSync(join(included, 'свой.md'), '---\nid: включённый-скилл\n---\nтело\n', 'utf8')
+    writeFileSync(join(foreign, 'чужой.md'), '---\nid: посторонний-скилл\n---\nтело\n', 'utf8')
+    try {
+      const { skills } = await loadAllSkills({ roots: [included] }) // foreign НЕ передан
+      expect(skills.some(s => s.id === 'включённый-скилл')).toBe(true)
+      expect(skills.some(s => s.id === 'посторонний-скилл'), 'корень вне roots подмешался в результат').toBe(false)
+    } finally {
+      rmSync(included, { recursive: true, force: true })
+      rmSync(foreign, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('скиллы папками: оба формата в одном корне', () => {

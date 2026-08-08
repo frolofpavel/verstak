@@ -67,6 +67,20 @@ describe('оркестратор: диспетчер spawn-task-session (хру�
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
 
+  // Девятый обход (аудит 09.08): toolsAllow РОДИТЕЛЯ в событии → форвардится в
+  // spawnChildSession (ребёнок не шире родителя). Без toolsAllow ключ НЕ добавляется
+  // (пин выше это стережёт) — здесь зеркальный случай, где он ЕСТЬ.
+  it('spawn-task-session с toolsAllow родителя → форвардится в spawnChildSession', () => {
+    mountChat()
+    const spy = vi.fn(async () => 42)
+    useProject.setState({ spawnChildSession: spy as never }, false)
+    act(() => { useProject.getState().registerSendOwner(300, { kind: 'chat', chatId: 7, projectPath: '/p' }) })
+    act(() => {
+      mock.aiEvents.emit({ id: 300, event: { type: 'spawn-task-session', callId: 'c1', title: 'X', seed: 's', toolsAllow: ['read_file', 'search_project'] } })
+    })
+    expect(spy).toHaveBeenCalledWith({ parentChatId: 7, title: 'X', seed: 's', toolsAllow: ['read_file', 'search_project'] })
+  })
+
   it('done дочернего прогона → карточка-след «готово»', () => {
     mountChat()
     // Карточка-след в родителе (7), child = 42, его прогон = sendId 500.

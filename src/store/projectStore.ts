@@ -201,7 +201,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
    *  положить карточку-след в РОДИТЕЛЬСКИЙ чат. Шаблон — startReview. Возвращает id
    *  дочернего чата или null (нет проекта / не создалась сессия). НЕ блокирует
    *  родителя: это НЕ delegate_task. */
-  spawnChildSession: (opts: { parentChatId: number; title: string; seed: string }) => Promise<number | null>
+  spawnChildSession: (opts: { parentChatId: number; title: string; seed: string; toolsAllow?: string[] | null }) => Promise<number | null>
   /** Положить/обновить карточку-след в bundle КОНКРЕТНОГО (родительского) чата.
    *  Upsert по childChatId. */
   pushSpawnCard: (chatId: number, card: SpawnedSessionCard) => void
@@ -787,7 +787,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
     return changed ? { chats: nextChats } : {}
   }),
-  spawnChildSession: async ({ parentChatId, title, seed }) => {
+  spawnChildSession: async ({ parentChatId, title, seed, toolsAllow }) => {
     const s = get()
     if (!s.path) return null
     const path = s.path
@@ -818,10 +818,13 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       // иначе ребёнок исполнялся бы под глобальным режимом (напр. bypass), снимая plan/ask
       // родителя: privilege escalation через спавн. Спавн в plan вообще заблокирован гейтом.
       const parentMode = await readAgentMode(parentChatId, false)
+      // toolsAllow родителя наследуется ребёнком (аудит 09.08, девятый обход): дочерняя
+      // сессия не может быть шире родителя ни по режиму, ни по набору инструментов. Пусто/
+      // null → без ограничения (у родителя скилла нет) — тогда overrides его не несут.
       const sendId = await window.api.ai.sendWithOverrides(
         [{ role: 'user', content: seed }],
         path,
-        { agentMode: parentMode },
+        { agentMode: parentMode, ...(toolsAllow && toolsAllow.length ? { toolsAllow } : {}) },
         String(child.id)
       )
       // sendId<=0 — провайдер не инициализировался. Карточка честно говорит «ошибка»,

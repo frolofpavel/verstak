@@ -75,6 +75,22 @@ describe('spawnChildSession — видимая дочерняя сессия + �
     expect(useProject.getState().chats[42]?.spawnCards ?? []).toHaveLength(0)
   })
 
+  // Девятый обход (аудит 09.08): дочерняя сессия не шире родителя и по НАБОРУ ИНСТРУМЕНТОВ.
+  it('КЕЙС 1: родитель ОГРАНИЧЕН (toolsAllow) → overrides ребёнка НЕСУТ то же ограничение', async () => {
+    seedParent(5, [])
+    const allow = ['read_file', 'search_project']
+    await useProject.getState().spawnChildSession({ parentChatId: 5, title: 'X', seed: 's', toolsAllow: allow })
+    expect(sendSpy.mock.calls.at(-1)?.[2]).toMatchObject({ agentMode: 'ask', toolsAllow: allow })
+  })
+
+  it('КЕЙС 2: родитель БЕЗ ограничений (toolsAllow null/пусто) → overrides ребёнка НЕ несут toolsAllow (ничего лишнего не отняли)', async () => {
+    seedParent(5, [])
+    await useProject.getState().spawnChildSession({ parentChatId: 5, title: 'X', seed: 's', toolsAllow: null })
+    const ov = sendSpy.mock.calls.at(-1)?.[2] as Record<string, unknown>
+    expect(ov).toMatchObject({ agentMode: 'ask' })
+    expect('toolsAllow' in ov).toBe(false)
+  })
+
   it('ВОСЬМОЙ ОБХОД: дочерняя сессия наследует режим РОДИТЕЛЬСКОГО чата, не глобальный', async () => {
     // Родитель (чат 5) в accept-edits; глобальный режим — bypass. Ребёнок обязан взять
     // режим РОДИТЕЛЯ (accept-edits), а НЕ глобальный bypass — иначе escalation через спавн.
