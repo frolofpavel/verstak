@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, rm, readFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
-import { generateHtml, generateDocx, artifactsDir, resolveDocxDir } from '../../electron/ai/artifacts'
+import { join, dirname, resolve } from 'path'
+import { generateHtml, generateDocx, artifactsDir, resolveDocxDir, commonReadDir } from '../../electron/ai/artifacts'
 import { sep } from 'path'
 
 let projectPath: string
@@ -123,6 +123,23 @@ describe('generateDocx save_to (назначение перечнем)', () => {
     const r = await generateDocx(projectPath, { filename: 'rep', sections: sec, save_to: 'alongside' }, { materialsDir: sub })
     expect(r.path).toBe(join(sub, 'rep.docx'))
     expect(r.path).not.toContain('.verstak')
+  })
+
+  // ЗАДАЧА A вариант (i): alongside из ФАКТА — общий каталог реально прочитанных файлов,
+  // зажатый в корень проекта. Наблюдение, не толкование намерения (штаб).
+  it('commonReadDir: все файлы в одной подпапке → эта подпапка', () => {
+    const subx = join(projectPath, 'cherrydom', 'briefs')
+    expect(commonReadDir([join(subx, 'a.md'), join(subx, 'b.md')], projectPath)).toBe(resolve(subx))
+  })
+  it('commonReadDir: две разные подпапки → общий предок внутри проекта', () => {
+    expect(commonReadDir([join(projectPath, 'x', 'a.md'), join(projectPath, 'y', 'b.md')], projectPath)).toBe(resolve(projectPath))
+  })
+  it('commonReadDir: ничего не читали → undefined (вызывающий → корень проекта)', () => {
+    expect(commonReadDir([], projectPath)).toBeUndefined()
+  })
+  it('commonReadDir: предок ВНЕ корня проекта → ЗАЖАТ в корень (жёсткий гард)', () => {
+    const outside = join(dirname(projectPath), 'other-project-xyz')
+    expect(commonReadDir([join(outside, 'secret.md')], projectPath)).toBe(resolve(projectPath))
   })
 
   it('downloads → переданная папка Загрузок', async () => {

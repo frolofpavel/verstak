@@ -9,7 +9,7 @@
  */
 
 import { mkdir, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, dirname, resolve, sep } from 'path'
 import { Document, Paragraph, HeadingLevel, TextRun, Packer, Table, TableRow, TableCell, WidthType } from 'docx'
 import { renderVerificationHtml, type VerificationArtifact } from './verification'
 import { defaultDownloadsDir, isWithinKnownRoots } from './path-policy'
@@ -57,6 +57,38 @@ export function resolveDocxDir(
     case undefined:
     default: return artifactsDir(ctx.projectPath)
   }
+}
+
+/** Общий каталог-предок двух абсолютных путей (по сегментам). Нет общего — ''. */
+function longestCommonDir(a: string, b: string): string {
+  const as = a.split(sep)
+  const bs = b.split(sep)
+  const out: string[] = []
+  for (let i = 0; i < Math.min(as.length, bs.length); i++) {
+    if (as[i] === bs[i]) out.push(as[i])
+    else break
+  }
+  return out.join(sep)
+}
+
+/**
+ * Каталог для alongside, ВЫВЕДЕННЫЙ ИЗ ФАКТА: общий каталог-предок файлов, реально
+ * прочитанных в этом прогоне. Это наблюдение, а не толкование намерения — «рядом с
+ * материалами» = рядом с тем, что модель действительно читала. ЖЁСТКИЙ ГАРД: результат
+ * НИКОГДА не выходит за корень проекта (предок выше/вне корня → зажимаем в корень), иначе
+ * из данных, которыми управляет модель, получилась бы запись за пределы проекта. Пусто,
+ * если ничего не читали — вызывающий тогда падает на корень проекта (прежнее поведение).
+ */
+export function commonReadDir(readPaths: string[], projectRoot: string): string | undefined {
+  const root = resolve(projectRoot)
+  const dirs = readPaths
+    .filter(p => typeof p === 'string' && p.length > 0)
+    .map(p => dirname(resolve(root, p)))
+  if (dirs.length === 0) return undefined
+  let common = dirs[0]
+  for (const d of dirs.slice(1)) common = longestCommonDir(common, d)
+  // Гард: только внутри корня проекта. Выше/вне (в т.ч. пустой общий предок) → корень.
+  return common && isWithinKnownRoots(common, [root]) ? common : root
 }
 
 export function sanitizeFilename(name: string): string {

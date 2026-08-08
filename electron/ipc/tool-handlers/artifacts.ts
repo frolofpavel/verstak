@@ -82,9 +82,12 @@ export const generateDocxHandler: ToolHandler = {
       // источника материалов (папка→alongside, вложения→downloads), заполняющий
       // пустоту, а не спорящий с моделью. Итог — «туда, где человек найдёт».
       const saveTo = call.args.save_to != null ? String(call.args.save_to) : ctx.defaultDocxSaveTo
-      // ЗАДАЧА A: alongside → папка материалов (ctx.materialsDir), когда известна.
+      // ЗАДАЧА A: alongside → папка материалов. Приоритет: папка из композера
+      // (ctx.materialsDir), иначе общий каталог реально прочитанных файлов (вариант i,
+      // зажат в корень). Оба известны — материалы из папки, поэтому composer выигрывает.
+      const materialsDir = ctx.materialsDir ?? ctx.getReadCommonDir?.()
       const res = await generateDocx(ctx.projectPath, { filename, title, sections, save_to: saveTo },
-        { downloadsDir: ctx.artifactsDownloadsDir, materialsDir: ctx.materialsDir })
+        { downloadsDir: ctx.artifactsDownloadsDir, materialsDir })
       try { ctx.recordJournal(ctx.projectPath, 'tool', `📄 Артефакт DOCX: ${res.filename}`, `${res.sizeBytes} bytes → ${res.path}`) } catch { /* */ }
       // ЗАДАЧА 2 (§3.1 видимый след): дефолт мог СМЕНИТЬ место записи (рядом/в
       // Загрузки), поэтому строка активности называет ПОЛНЫЙ ПУТЬ, а не только имя —

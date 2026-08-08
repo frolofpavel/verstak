@@ -8,6 +8,7 @@
 import type { AiDeps } from '../ipc/ai'
 import { globalProcessRegistry, type ProcessCompletion, type ProcessRegistry } from './process-registry'
 import { createFileTools, createToolsForProject, TOOL_DEFS } from './tools'
+import { commonReadDir } from './artifacts'
 import type { ProviderId } from './registry'
 import type { McpClient } from '../mcp/client'
 import type { RecipeSpec } from './skills/types'
@@ -243,6 +244,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // Исходы read-вызовов набора «папка» за прогон (для 'attachments' не используются —
   // там исход из конвейера). Несопоставленный успех уйдёт в «вне набора», не в тревогу.
   const materialReadOutcomes: ReadOutcome[] = []
+  // ЗАДАЧА A вариант (i): пути файлов, реально прочитанных за прогон (ЛЮБОЙ источник, не
+  // только папка-материалы). Из них generate_docx alongside выводит каталог назначения
+  // «рядом с материалами» — по факту прочитанного, а не по толкованию текста задачи.
+  const readPaths: string[] = []
   const startedAt = Date.now()
   logRuntime('ai.runner.loop_start', {
     sendId,
@@ -1150,6 +1155,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // ЗАДАЧА A: alongside кладёт РЯДОМ С МАТЕРИАЛАМИ. База папки материалов известна
       // только когда источник — папка (композер); для вложений её нет (пусто → корень).
       materialsDir: materialsCtx?.source === 'folder' ? materialsCtx.base : undefined,
+      // ЗАДАЧА A вариант (i): когда папка материалов не задана — alongside берёт общий
+      // каталог реально прочитанных файлов (зажатый в корень). Функция, а не значение:
+      // readPaths копятся ПО ХОДУ прогона, а generate_docx зовётся позже.
+      getReadCommonDir: () => commonReadDir(readPaths, projectPath),
       // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
       resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.
@@ -1236,6 +1245,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       if (materialsCtx?.source === 'folder' && MATERIAL_READ_TOOLS.has(call.name)) {
         const p = typeof call.args.path === 'string' ? call.args.path : ''
         if (p) materialReadOutcomes.push({ path: p, ok: !result.error, reason: result.error })
+      }
+      // ЗАДАЧА A (i): копим пути УСПЕШНО прочитанных файлов (любой источник) — из них
+      // alongside выводит каталог «рядом с материалами». Только удачные чтения: неудачное
+      // «читал» не считается прочитанным материалом.
+      if (MATERIAL_READ_TOOLS.has(call.name) && !result.error) {
+        const p = typeof call.args.path === 'string' ? call.args.path : ''
+        if (p) readPaths.push(p)
       }
       // Auto-capture memory observation — fire-and-forget, не блокирует цикл
       captureToolObservation(

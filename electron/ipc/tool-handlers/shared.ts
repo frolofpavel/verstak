@@ -112,6 +112,11 @@ export interface ToolContext {
    *  проекта (прежнее поведение, когда папки материалов нет). Уже прогнана через
    *  isWithinKnownRoots на входе, поэтому доверенный корень назначения. */
   materialsDir?: string
+  /** ЗАДАЧА A (i): общий каталог реально прочитанных за прогон файлов (зажатый в корень),
+   *  когда папка материалов НЕ задана. alongside берёт его как «рядом с материалами» по
+   *  ФАКТУ прочитанного. Функция — readPaths копятся по ходу прогона. undefined → ничего
+   *  не читали → корень проекта. */
+  getReadCommonDir?: () => string | undefined
   /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
    *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
   autoApprove?: import('../../ai/mode-policy').AutoApprove
