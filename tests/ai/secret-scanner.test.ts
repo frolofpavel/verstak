@@ -103,6 +103,24 @@ describe('scanText', () => {
     expect(redacted).toContain('[REDACTED:basic-auth]')
     expect(hits).toContain('http-basic-auth')
   })
+
+  // SEC (аудит 09.08): Authorization: Basic <base64> — статичные креды (base64
+  // декодируется в user:password). Сканер ловил Bearer, но НЕ Basic — заголовок из
+  // curl -v / конфига / OData/GigaChat утекал в контекст модели, логи и UI сырым.
+  it('redacts Authorization: Basic <base64> (не только Bearer)', () => {
+    const b64 = 'dXNlcjpzdXBlcnNlY3JldHBhc3N3b3Jk'
+    const { redacted } = scanText(`Authorization: Basic ${b64}`)
+    expect(redacted).not.toContain(b64)
+    expect(redacted).toContain('[REDACTED:auth-value]')
+    // Заголовок/схема остаются читаемыми — гасится только значение.
+    expect(redacted).toContain('Basic')
+  })
+  it('redacts Proxy-Authorization: Basic <base64>', () => {
+    const b64 = 'QWxhZGRpbjpvcGVuc2VzYW1lc2VjcmV0'
+    const { redacted } = scanText(`Proxy-Authorization: Basic ${b64}`)
+    expect(redacted).not.toContain(b64)
+    expect(redacted).toContain('[REDACTED:auth-value]')
+  })
   it('passes ordinary code through', () => {
     const code = 'function add(a, b) { return a + b }'
     const { redacted, hits } = scanText(code)

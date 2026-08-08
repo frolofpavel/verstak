@@ -112,6 +112,25 @@ const DESTRUCTIVE_FIND_RE = /(?:^|\s)-(?:delete|exec|execdir|ok|okdir|fprintf?|f
 // секретов вне проекта (ре-ревью HIGH). Срабатывает на токене после пробела/начала.
 const OUT_OF_PROJECT_PATH_RE = /(?:^|\s)(?:[/~]|\.\.[/\\]|[A-Za-z]:[/\\])/
 
+/**
+ * Вне-проектный путь в ОДНОМ токене (кавычки уже сняты вызывающим). Токен-версия
+ * OUT_OF_PROJECT_PATH_RE: та применяется к сырой строке, и якорь (?:^|\s) видит
+ * кавычку/бэкслеш вместо пути — `type "C:\…"` / `cat "\Windows\…"` / UNC `\\srv\…`
+ * проезжали мимо (аудит 09.08). Здесь якоря нет — токен уже вычленен.
+ *  - POSIX-absolute `/…`, home `~…`
+ *  - Windows backslash-absolute `\Windows\…` и UNC `\\server\share`
+ *  - parent-traversal `../` `..\` и голый `..`
+ *  - drive-путь `C:\` `C:/` и голый drive-relative `C:foo`
+ */
+export function isOutOfProjectPathToken(token: string): boolean {
+  const t = token.replace(/^["']+/, '').replace(/["']+$/, '')
+  if (!t) return false
+  if (t.startsWith('/') || t.startsWith('~') || t.startsWith('\\')) return true
+  if (t === '..' || /^\.\.[/\\]/.test(t)) return true
+  if (/^[A-Za-z]:/.test(t)) return true
+  return false
+}
+
 /** Безопасна ли команда для инъекции !`cmd` (read-only allowlist + общий денилист)? */
 export function isInjectionCommandAllowed(command: string): boolean {
   const trimmed = normalize(command)
@@ -120,13 +139,17 @@ export function isInjectionCommandAllowed(command: string): boolean {
   if (/[;&|`<>\n]|\$\(|\bsudo\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(trimmed)) return false
   // Деструктивный find и пути вне проекта — закрыты до allowlist-матча.
   if (/^find\b/i.test(trimmed) && DESTRUCTIVE_FIND_RE.test(trimmed)) return false
+  // Быстрый гейт по сырой строке (голые пути без кавычек).
   if (OUT_OF_PROJECT_PATH_RE.test(trimmed)) return false
-  // Аргумент-путь к секрету в пределах проекта (ре-ревью HIGH: `cat .env` / `cat creds.json`
-  // обходили OUT_OF_PROJECT_PATH_RE как относительный путь без /~/..). Гейт isForbiddenPath
-  // как у write_file — .env/.ssh/*.key/id_ed25519 нельзя читать даже read-командой в инъекции.
-  for (const tok of trimmed.split(/\s+/).slice(1)) {
-    if (tok.startsWith('-')) continue
-    if (isForbiddenPath(tok.replace(/^["']|["']$/g, ''))) return false
+  // Пер-токенно, со снятыми кавычками: закрывает вне-проектное чтение, которое regex
+  // на сырой строке пропускал из-за кавычек/бэкслеша (`type "C:\…"`, `cat "\Windows\…"`,
+  // UNC `\\srv\…`), И секрет-пути в пределах проекта (`cat .env`/`creds.json`) — гейт
+  // isForbiddenPath как у write_file. Кавычки не спасают ни там, ни там.
+  for (const rawTok of trimmed.split(/\s+/).slice(1)) {
+    if (rawTok.startsWith('-')) continue
+    if (isOutOfProjectPathToken(rawTok)) return false
+    const tok = rawTok.replace(/^["']+|["']+$/g, '')
+    if (isForbiddenPath(tok)) return false
   }
   if (!classifyCommand(trimmed).allowed) return false
   return INJECTION_ALLOW_PATTERNS.some(p => p.test(trimmed))

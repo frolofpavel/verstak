@@ -49,6 +49,27 @@ describe('isInjectionCommandAllowed — read-only allowlist для !`cmd` инъ
     expect(isInjectionCommandAllowed('cat ./src/x.ts')).toBe(true)
   })
 
+  // SEC (аудит 09.08): OUT_OF_PROJECT_PATH_RE применялся к СЫРОЙ строке, а якорь
+  // (?:^|\s) видел кавычку/бэкслеш вместо пути. Два обхода вне-проектного чтения:
+  //   1) backslash-absolute (\Windows\…) и UNC (\\server\share) — не покрыты классом [/~].
+  //   2) кавычки вокруг любого абсолютного пути (даже drive C:\) сдвигали путь за якорь.
+  // Читающий !`type "…"` из недоверенного {project}/.verstak/commands/*.md инжектил
+  // содержимое чужого файла в контекст модели.
+  it('блокирует backslash-absolute и UNC пути (Windows drive-relative / сеть)', () => {
+    expect(isInjectionCommandAllowed('type \\Windows\\win.ini')).toBe(false)
+    expect(isInjectionCommandAllowed('type \\\\server\\share\\secret.txt')).toBe(false)
+    expect(isInjectionCommandAllowed('cat \\Users\\Pavel\\Documents\\notes.txt')).toBe(false)
+  })
+
+  it('кавычки вокруг абсолютного пути не обходят гейт вне-проекта', () => {
+    expect(isInjectionCommandAllowed('type "C:\\Users\\Pavel\\Documents\\notes.txt"')).toBe(false)
+    expect(isInjectionCommandAllowed("cat '/etc/passwd'")).toBe(false)
+    expect(isInjectionCommandAllowed('type "\\Windows\\win.ini"')).toBe(false)
+    // Контроль: кавычки вокруг ЛЕГИТИМНОГО относительного пути НЕ ломают allowlist.
+    expect(isInjectionCommandAllowed('cat "README.md"')).toBe(true)
+    expect(isInjectionCommandAllowed('cat "./src/x.ts"')).toBe(true)
+  })
+
   // Ре-ревью HIGH: относительный путь к секрету (.env/.ssh/*.key) в пределах проекта
   // обходил OUT_OF_PROJECT_PATH_RE — теперь гейтится isForbiddenPath как write_file.
   it('блокирует чтение секрета внутри проекта (.env/.ssh/*.key/id_ed25519)', () => {
