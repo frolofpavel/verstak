@@ -141,6 +141,17 @@ describe('generateDocx save_to (назначение перечнем)', () => {
     const outside = join(dirname(projectPath), 'other-project-xyz')
     expect(commonReadDir([join(outside, 'secret.md')], projectPath)).toBe(resolve(projectPath))
   })
+  // БЕЗОПАСНОСТЬ (аудит 08.08): кламп нельзя обойти через `..` в прочитанном пути —
+  // resolve нормализует `..`, а isWithinKnownRoots (realpath) ловит выход за корень.
+  it('commonReadDir: `..` в read-пути за корень → ЗАЖАТ в корень (обход клампа закрыт)', () => {
+    const escaping = join(projectPath, 'sub', '..', '..', '..', 'Windows', 'System32', 'evil.dll')
+    expect(commonReadDir([escaping], projectPath)).toBe(resolve(projectPath))
+  })
+  it('commonReadDir: смесь легального и `..`-беглеца → общий предок зажат в корень', () => {
+    const ok = join(projectPath, 'briefs', 'a.md')
+    const escape = join(projectPath, '..', '..', 'etc', 'passwd')
+    expect(commonReadDir([ok, escape], projectPath)).toBe(resolve(projectPath))
+  })
 
   it('downloads → переданная папка Загрузок', async () => {
     const dl = await mkdtemp(join(tmpdir(), 'gg-dl-'))
