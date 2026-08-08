@@ -343,7 +343,7 @@ const GATE_MAX_WORKERS = 4
 // 08.08, аудит безопасности (свою свежую правку — злее): кламп commonReadDir не
 // обходится через `..` в read-пути (resolve нормализует + isWithinKnownRoots realpath
 // ловит). +2 пина (одиночный `..`-беглец; смесь легального и беглеца → зажат) → 4860.
-const EXPECTED_TOTAL_TESTS = 4860
+const EXPECTED_TOTAL_TESTS = 4863
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
