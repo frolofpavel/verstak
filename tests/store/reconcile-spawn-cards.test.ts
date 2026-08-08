@@ -12,10 +12,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const listRunsSpy = vi.fn(async (_p: string, _o?: unknown) => [] as Array<{ chatId: number | null; status: string }>)
+const journalSpy = vi.fn(async (_p: string, _k: string, _t: string, _d?: string | null) => ({}))
 
 const windowStub = {
   api: {
     agentRuns: { list: listRunsSpy },
+    journal: { append: journalSpy },
     chatSessions: { list: vi.fn(async () => []), listReviews: vi.fn(async () => []) },
     settings: { setKey: vi.fn(async () => {}), getKey: vi.fn(async () => null) },
   },
@@ -37,6 +39,7 @@ beforeEach(() => {
   vi.stubGlobal('window', windowStub)
   listRunsSpy.mockClear()
   listRunsSpy.mockResolvedValue([])
+  journalSpy.mockClear()
   useProject.setState({ path: '/proj', activeChatId: null, chats: {} }, false)
 })
 
@@ -101,5 +104,26 @@ describe('reconcileSpawnCards — страховка от недоставки �
     listRunsSpy.mockRejectedValue(new Error('db down'))
     await useProject.getState().reconcileSpawnCards(5)
     expect(useProject.getState().chats[5].spawnCards[0].status).toBe('running')
+  })
+})
+
+// СЛЕД (правило «у фолбэка обязан быть видимый след»): реконсиляция, реально осадившая
+// карточку, ОБЯЗАНА оставить запись в журнале — иначе системная поломка доставки событий
+// станет неотличима от нормы (тихое доосаживание при каждом входе). При 0 — молчит.
+describe('reconcileSpawnCards — видимый след при фактической осадке', () => {
+  it('осадила карточку → пишет запись в журнал прогона (факт недоставки)', async () => {
+    seedParent(5, [{ childChatId: 42, title: 'Аудит', status: 'running', sendId: 500 }])
+    listRunsSpy.mockResolvedValue([{ chatId: 42, status: 'done' }])
+    await useProject.getState().reconcileSpawnCards(5)
+    expect(journalSpy).toHaveBeenCalledTimes(1)
+    expect(journalSpy.mock.calls[0][0]).toBe('/proj')
+    expect(String(journalSpy.mock.calls[0][2])).toContain('сверк')
+  })
+
+  it('НИЧЕГО не осадила (прогон идёт) → журнал МОЛЧИТ (не засоряем на каждом входе)', async () => {
+    seedParent(5, [{ childChatId: 42, title: 'Аудит', status: 'running', sendId: 500 }])
+    listRunsSpy.mockResolvedValue([{ chatId: 42, status: 'running' }])
+    await useProject.getState().reconcileSpawnCards(5)
+    expect(journalSpy).not.toHaveBeenCalled()
   })
 })

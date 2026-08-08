@@ -838,10 +838,22 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       const mapped = terminalCardStatus(r.status)
       if (mapped && !terminalByChat.has(r.chatId)) terminalByChat.set(r.chatId, mapped)
     }
+    let settled = 0
     for (const card of running) {
       if (activeChat.has(card.childChatId)) continue
       const st = terminalByChat.get(card.childChatId)
-      if (st) get().settleSpawnCard({ childChatId: card.childChatId }, st)
+      if (st) { get().settleSpawnCard({ childChatId: card.childChatId }, st); settled++ }
+    }
+    // СЛЕД (правило «у фолбэка обязан быть видимый след», требование штаба): реконсиляция
+    // не смеет быть глушителем. Осадила хоть одну карточку — пишем в журнал ФАКТ, что
+    // терминал НЕ ДОШЁЛ событием и подобран сверкой с БД. Иначе системная поломка
+    // доставки событий стала бы неотличима от нормы. При 0 — МОЛЧИМ (иначе засорим
+    // журнал на каждом переключении чата).
+    if (settled > 0) {
+      void window.api.journal.append(
+        path, 'note', 'Карточка-след осаждена сверкой с БД',
+        `${settled} карточк(и) переведены в терминал при входе в чат — сигнал финализации дочернего прогона не дошёл до renderer (страховка reconcileSpawnCards). Если повторяется — доставка ai.onEvent сломана.`,
+      ).catch(() => { /* журнал не критичен для осадки */ })
     }
   },
   spawnChildSession: async ({ parentChatId, title, seed }) => {
