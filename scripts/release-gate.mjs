@@ -189,6 +189,30 @@ if (haveSetup) {
   }
 }
 
+// ─── 3.6 Install smoke: приложение ЖИВЁТ, а не просто распаковано ─────────────
+// Шаг [3.5] считает пакеты в asar, но не запускает приложение — и гейт дважды был
+// зелёным на нежизнеспособной сборке (31.07 недоупакованный asar; 08.08 серое окно
+// 2.4.5, render_process_gone), ловил человек постфактум. Теперь запускаем собранное
+// приложение в ИЗОЛЯЦИИ (свой userData) и проверяем, доходит ли оно до маркера
+// готовности. Источник — release/win-unpacked (release-build.mjs его сохраняет).
+// Харнесс доказан на изготовленном мёртвом артефакте (scripts/smoke-install.mjs).
+console.log('\n[3.6] Install smoke (приложение живёт)')
+const smokeUnpacked = join(ROOT, 'release', 'win-unpacked')
+if (existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
+  const r = spawnSync(
+    'node',
+    [join(ROOT, 'scripts', 'smoke-install.mjs'), '--source', smokeUnpacked, '--break', 'none', '--expect', 'PASS', '--timeout', '45000'],
+    { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+  )
+  const out = (r.stdout || '') + (r.stderr || '')
+  // Гейт ОБЯЗАН называть, ЧТО не завелось (маркер/фатал/ранний выход), а не «smoke failed».
+  const m = out.match(/→\s*(PASS|FAIL|INCONCLUSIVE)\s*\(([^)]*)\)/)
+  const reason = m ? `${m[1]}: ${m[2]}` : (out.trim().split('\n').filter(Boolean).pop() || `exit ${r.status}`)
+  check('установленное приложение ЖИВЁТ (smoke: старт до маркера готовности)', r.status === 0, reason)
+} else {
+  notes.push('[3.6] install smoke пропущен: release/win-unpacked отсутствует (release-build.mjs должен его сохранять)')
+}
+
 // ─── 4. Объективные проверки кода ────────────────────────────────────────────
 console.log('\n[4] Проверки кода (типы / тесты)')
 const run = (label, cmd, args) => {

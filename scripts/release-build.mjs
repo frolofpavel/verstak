@@ -13,7 +13,7 @@
 //
 // Запуск: node scripts/release-build.mjs
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, copyFileSync, cpSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -144,6 +144,19 @@ try {
     }
     copyFileSync(join(wtRelease, f), join(outDir, f))
     console.log(`   ✓ ${f}`)
+  }
+
+  // win-unpacked — ЗАПУСКАЕМОЕ дерево приложения для install smoke-теста гейта. Из worktree
+  // оно удаляется вместе с ним (cleanup), поэтому сохраняем копию в release/. Гейт [3.6]
+  // запускает Verstak.exe отсюда и проверяет, что приложение ЖИВЁТ, а не просто распаковано.
+  const wtUnpacked = join(wtRelease, 'win-unpacked')
+  const outUnpacked = join(outDir, 'win-unpacked')
+  if (existsSync(join(wtUnpacked, 'Verstak.exe'))) {
+    rmSync(outUnpacked, { recursive: true, force: true })
+    cpSync(wtUnpacked, outUnpacked, { recursive: true })
+    console.log('   ✓ win-unpacked (для smoke-теста гейта)')
+  } else {
+    console.warn('   ⚠ win-unpacked не найден в сборке — гейт пропустит install smoke')
   }
 
   // Паспорт: чем именно является этот .exe. Гейт сверяет его с HEAD.
