@@ -366,8 +366,14 @@ const GATE_MAX_WORKERS = 4
 // осталась НЕИЗВЕСТНОЙ — замер штаба опроверг ходовую версию): +5 пинов
 // classifyBetterSqlite3Abi (tests/scripts/native-abi.test.ts) + 3 пина source-гарда
 // самопочинки (tests/electron/native-modules.test.ts, два краснели до фикса) + 4 пина
-// afterPack-гарда native-fix (tests/scripts/native-fix-stage.test.ts, мутация краснит 2) = 4893.
-const EXPECTED_TOTAL_TESTS = 4893
+// afterPack-гарда native-fix (tests/scripts/native-fix-stage.test.ts, мутация краснит 2)
+// + 8 пинов install smoke-вердикта (tests/scripts/smoke-verdict.test.ts, три красных-на-
+// мёртвом-старте) = 4901 для ЭТОЙ ветки (база 9db7b39 = 4881, +20). ИЗМЕРЕНО, не сумма.
+// ПРИ СЛИЯНИИ В MAIN: main уже ушёл вперёд (9a2f19f = 4888, замер штаба). Сливаться
+// ПОСЛЕДНИМ и брать эталон ИЗМЕРЕНИЕМ на слитом дереве (ожидание 4888+20=4908, но провайдер-
+// model-drift генерит тесты динамически — сумма врёт, бери ФАКТ; мои файлы под drift-скан
+// не попадают, но подтвердить сбором).
+const EXPECTED_TOTAL_TESTS = 4901
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

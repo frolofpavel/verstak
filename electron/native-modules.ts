@@ -1,6 +1,7 @@
 import { app, dialog } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
+import { logRuntime } from './runtime-log'
 
 export type NativeProbeResult = 'ok' | 'missing' | 'abi_mismatch' | 'unknown'
 
@@ -94,6 +95,15 @@ export function ensureBetterSqlite3Healthy(): void {
   }
 
   if (probe !== 'ok' && repairBetterSqlite3FromBundle()) return
+
+  // VERSTAK_SMOKE: install smoke-тест не может кликнуть модалку — она бы повесила гейт.
+  // Пишем фатальный маркер в errors.jsonl (его читает smoke-install.mjs) и выходим 1
+  // сразу, без модального showErrorBox. Обычный пользовательский путь не тронут.
+  if (process.env.VERSTAK_SMOKE) {
+    logRuntime('db.open.fail', { probe, target, reason: 'better_sqlite3 native module unavailable' }, 'error')
+    app.exit(1)
+    return
+  }
 
   const hint =
     probe === 'abi_mismatch'

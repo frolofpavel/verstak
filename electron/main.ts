@@ -187,7 +187,13 @@ function createWindow(settings: Settings): BrowserWindow {
     console.error('[did-fail-load]', code, desc, url)
   })
   win.webContents.on('dom-ready', () => logRuntime('window.dom_ready'))
-  win.webContents.on('did-finish-load', () => logRuntime('window.did_finish_load'))
+  win.webContents.on('did-finish-load', () => {
+    logRuntime('window.did_finish_load')
+    // Позитивный маркер готовности для install smoke-теста: окно ДОГРУЗИЛОСЬ, а БД к
+    // этому моменту уже открыта (openDb идёт в whenReady ДО createWindow). За VERSTAK_SMOKE,
+    // чтобы обычные прод-логи не менялись. Читает scripts/smoke-install.mjs.
+    if (process.env.VERSTAK_SMOKE) logRuntime('startup.ok', { window: true, db: true })
+  })
   win.once('ready-to-show', () => logRuntime('window.ready_to_show'))
   win.on('show', () => logRuntime('window.show', { bounds: win.getBounds(), isVisible: win.isVisible() }))
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
