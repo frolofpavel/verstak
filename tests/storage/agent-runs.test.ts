@@ -126,6 +126,22 @@ describe('agent-runs (migration 16)', () => {
     db.close()
   })
 
+  it('finish бампает updated_at до момента финализации (честная свежесть)', async () => {
+    // Дефект 08.08: finish не трогал updated_at → у прогона без tick'ов (0 ходов)
+    // он оставался == started_at, хотя прогон завершился позже. updated_at читается
+    // как запасной признак свежести (AgentRunsPanel: lastEventAt ?? updatedAt ?? startedAt).
+    const db = openDb(join(dir, 'test.db'))
+    const runs = createAgentRuns(db)
+    runs.create({ runId: 'r1', projectPath: '/p', title: 'A' })
+    const created = runs.get('r1')!
+    await new Promise(r => setTimeout(r, 5)) // гарантируем зазор: created.updatedAt < finish-время
+    runs.finish('r1', 'done', {})
+    const row = runs.get('r1')!
+    expect(row.updatedAt).toBe(row.endedAt)                        // updated_at == момент финиша
+    expect(row.updatedAt!).toBeGreaterThan(created.updatedAt!)     // сдвинулся с create-времени
+    db.close()
+  })
+
   it('finish с error пишет текст ошибки и status=failed', () => {
     const db = openDb(join(dir, 'test.db'))
     const runs = createAgentRuns(db)

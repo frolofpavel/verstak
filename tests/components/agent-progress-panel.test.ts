@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { shouldShowLiveState } from '../../src/components/AgentProgressPanel'
+import { shouldShowLiveState, currentEntry } from '../../src/components/AgentProgressPanel'
+import type { AgentProgressEntry } from '../../src/lib/agent-progress'
 
 // Дефект 08.08 (найден Павлом): карточка «Ход работы» показывала ОДНОВРЕМЕННО «идёт»
 // и «завершено HH:MM:SS» — человек читал это как «прогон завис» и перезапускал живую
@@ -29,5 +30,19 @@ describe('shouldShowLiveState — живой бейдж не переживае�
   })
   it('завершён + blocked → ПОКАЗАНО (терминальная проблема)', () => {
     expect(shouldShowLiveState('blocked', false)).toBe(true)
+  })
+})
+
+// Вторая половина дефекта 08.08: currentEntry давал «Сейчас» с заголовком в настоящем
+// времени у уже завершённого прогона (устаревший running-шаг как «текущий»).
+describe('currentEntry — текущий шаг у завершённого прогона', () => {
+  const running: AgentProgressEntry = { id: 'final', phase: 'final', title: 'Пишу видимый ответ', status: 'running', timestamp: 10 }
+  const done: AgentProgressEntry = { id: 'done', phase: 'final', title: 'Ответ готов', status: 'done', timestamp: 20 }
+
+  it('прогон завершён → текущим становится ТЕРМИНАЛЬНЫЙ шаг, не устаревший running', () => {
+    expect(currentEntry([running, done], false)?.id).toBe('done')
+  })
+  it('прогон идёт → текущим остаётся ЖИВОЙ running-шаг (живая индикация)', () => {
+    expect(currentEntry([running, done], true)?.id).toBe('final')
   })
 })

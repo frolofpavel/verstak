@@ -427,8 +427,15 @@ export function createAgentRuns(db: Database): AgentRuns {
         `INSERT INTO agent_run_events (run_id, kind, label, detail, ref, status, created_at)
          VALUES (?, 'status', 'terminal', ?, NULL, ?, ?)`
       ).run(runId, `terminal:${status}`, status, Date.now())
-      const sets: string[] = ['status = ?', 'ended_at = ?']
-      const vals: unknown[] = [status, Date.now()]
+      // updated_at бампаем и на финализации: он читается как запасной признак
+      // свежести (AgentRunsPanel: lastEventAt ?? updatedAt ?? startedAt). Раньше
+      // finish его не трогал — у прогона без tick'ов (0 ходов) updated_at оставался
+      // == started_at, хотя прогон завершился позже. Реконсиляция живости судит по
+      // ended_at/status, не по updated_at, поэтому на неё это не влияло; правка —
+      // ради честной свежести. Один момент времени на ended_at и updated_at.
+      const finishedAt = Date.now()
+      const sets: string[] = ['status = ?', 'ended_at = ?', 'updated_at = ?']
+      const vals: unknown[] = [status, finishedAt, finishedAt]
       if (opts?.costCents !== undefined) { sets.push('cost_cents = ?'); vals.push(opts.costCents) }
       if (opts?.toolCount !== undefined) { sets.push('tool_count = ?'); vals.push(opts.toolCount) }
       if (opts?.filesCount !== undefined) { sets.push('files_count = ?'); vals.push(opts.filesCount) }

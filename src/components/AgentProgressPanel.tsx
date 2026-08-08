@@ -19,12 +19,21 @@ const STATUS_LABEL: Record<AgentProgressStatus, string> = {
   blocked: 'остановлено'
 }
 
-function currentEntry(entries: AgentProgressEntry[]): AgentProgressEntry | null {
+/**
+ * Текущий шаг для шапки/«Сейчас». Пока прогон ИДЁТ — это последняя живая
+ * (running/pending) запись. Когда прогон КОНЧИЛСЯ (isStreaming=false), живой записи
+ * быть не должно: активное состояние устарело (см. shouldShowLiveState), а «текущим»
+ * должен стать ТЕРМИНАЛЬНЫЙ шаг (done/error/final) — иначе шапка показывает заголовок
+ * в настоящем времени у уже завершённого прогона (дефект 08.08, вторая половина).
+ */
+export function currentEntry(entries: AgentProgressEntry[], isStreaming: boolean): AgentProgressEntry | null {
   const visible = entries.filter(e => e.id !== 'task-focus')
-  const active = visible
-    .filter(e => e.status === 'running' || e.status === 'pending')
-    .sort((a, b) => b.timestamp - a.timestamp)[0]
-  if (active) return active
+  if (isStreaming) {
+    const active = visible
+      .filter(e => e.status === 'running' || e.status === 'pending')
+      .sort((a, b) => b.timestamp - a.timestamp)[0]
+    if (active) return active
+  }
   const terminal = visible
     .filter(e => e.id === 'done' || e.id === 'error' || e.phase === 'final')
     .sort((a, b) => b.timestamp - a.timestamp)[0]
@@ -92,7 +101,7 @@ export function AgentProgressPanel({
   onToggleOpen
 }: AgentProgressPanelProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  const current = useMemo(() => currentEntry(entries), [entries])
+  const current = useMemo(() => currentEntry(entries, isStreaming), [entries, isStreaming])
   const recent = useMemo(() => recentEntries(entries, current?.id), [entries, current?.id])
 
   useEffect(() => {
@@ -141,7 +150,7 @@ export function AgentProgressPanel({
         {current && (
           <div className={`gg-agent-progress-now is-${current.status}`}>
             <div className="gg-agent-progress-now-head">
-              <span className="gg-agent-progress-now-label">Сейчас</span>
+              <span className="gg-agent-progress-now-label">{isStreaming ? 'Сейчас' : 'Итог'}</span>
               {showCurrentState && (
                 <span className={`gg-agent-progress-now-state is-${current.status}`}>{STATUS_LABEL[current.status]}</span>
               )}

@@ -317,7 +317,10 @@ const GATE_MAX_WORKERS = 4
 // 08.08, задача B (run_command не называл оболочку → модель гадала, PowerShell на
 // cmd.exe): RUN_COMMAND_SHELL_HINT в описании инструмента (cmd.exe на Windows с
 // предупреждением про командлеты, /bin/sh на POSIX). +2 пина → 4836.
-const EXPECTED_TOTAL_TESTS = 4836
+// 08.08, хвосты дефекта панели: currentEntry не даёт живой «Сейчас»-заголовок у
+// завершённого прогона (+2 пина); finish бампает updated_at до момента финализации —
+// честная свежесть (fallback в AgentRunsPanel), +1 пин с зазором времени → 4839.
+const EXPECTED_TOTAL_TESTS = 4839
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
