@@ -305,7 +305,12 @@ const GATE_MAX_WORKERS = 4
 // загрузки свежим процессом → rebuilt/locked/failed, gate трактует locked как среду):
 // +5 пинов classifyRebuildOutcome + 3 пина decideTestGate (locked+ABI→не блок,
 // locked+не-ABI→блок, rebuilt+ABI→блок) → 4824.
-const EXPECTED_TOTAL_TESTS = 4824
+// 08.08, дефект «идёт»+«завершено» разом (AgentProgressPanel, найден Павлом):
+// shouldShowLiveState — живой бейдж не переживает конец прогона (isStreaming
+// авторитетен; стрим-флаг согласуется без переписи agentProgress). +6 пинов
+// (2 контрольных штаба: завершён+running→скрыт, идёт+running→показан; + done/pending/
+// error/blocked) → 4830.
+const EXPECTED_TOTAL_TESTS = 4830
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

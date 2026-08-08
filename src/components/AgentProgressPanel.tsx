@@ -50,6 +50,23 @@ function entryTitle(entry: AgentProgressEntry, isStreaming: boolean): string {
   return entry.title
 }
 
+/**
+ * Показывать ли ЖИВОЙ бейдж состояния («идёт»/«ожидаю») у текущего шага.
+ *
+ * Дефект 08.08: карточка показывала «идёт» И «завершено» разом. isStreaming — это
+ * авторитетный сигнал «прогон окончен»; он выставляется в false и путями согласования
+ * стрим-флага (reconcileStreamFlag, phantom-flag в projectStore, вход/выход из чата),
+ * которые НЕ переписывают agentProgress, — поэтому последняя запись законно остаётся в
+ * 'running'/'pending'. Значит после конца прогона живое состояние устарело: скрываем
+ * running/pending (стаяли) и done (дублирует «завершено» в таймере), но ПОКАЗЫВАЕМ
+ * терминальные проблемы error/blocked — их пользователь должен видеть и после конца.
+ * Пока прогон реально идёт — показываем состояние как есть (живая индикация).
+ */
+export function shouldShowLiveState(status: AgentProgressStatus, isStreaming: boolean): boolean {
+  if (isStreaming) return true
+  return status === 'error' || status === 'blocked'
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000))
   const minutes = Math.floor(totalSeconds / 60)
@@ -93,7 +110,7 @@ export function AgentProgressPanel({
     ? elapsedMs ?? null
     : durationMs ?? null
   const currentTitle = current ? entryTitle(current, isStreaming) : null
-  const showCurrentState = current ? !(current.status === 'done' && !isStreaming) : false
+  const showCurrentState = current ? shouldShowLiveState(current.status, isStreaming) : false
   const timeMeta = isStreaming
     ? effectiveDurationMs != null ? formatDuration(effectiveDurationMs) : null
     : effectiveDurationMs != null
