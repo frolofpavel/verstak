@@ -41,6 +41,16 @@ export const webFetchHandler: ToolHandler = {
     if (!url) {
       return { id: call.id, name: call.name, result: '', error: 'web_fetch: нужен параметр url' }
     }
+    // Секрет в ИСХОДЯЩЕМ URL (его выбирает МОДЕЛЬ — вектор эксфильтрации после
+    // prompt-injection): запрос уже уйдёт с ним, а safeUrl затем вырежет его из
+    // header/Timeline/лога. Без видимого следа редакция ПРЯЧЕТ сам факт утечки —
+    // аудит выглядит чистым (тот же анти-паттерн, что «фолбэк без следа»). Это НЕ
+    // блок (ужесточение allow-списка — решение Павла), а именно видимость.
+    const outboundLeak = safeUrl(url) !== url
+    const leakHost = (() => { try { return new URL(url).host } catch { return 'внешний хост' } })()
+    const leakNote = outboundLeak
+      ? `⚠ В исходящем URL к ${leakHost} было значение, ПОХОЖЕЕ НА СЕКРЕТ — оно вырезано из лога, но запрос уже отправлен с ним. Возможная утечка секрета в query.\n\n`
+      : ''
     // Per-domain web-политика: ограничивает, какие домены агенту можно фетчить
     // (~/.verstak/web-policy.json + project). Проверяется на каждом хопе редиректа.
     const policy = loadWebPolicy(ctx.projectPath)
@@ -61,13 +71,14 @@ export const webFetchHandler: ToolHandler = {
       const safeBody = scanText(text).redacted
       const cleanUrl = safeUrl(res.finalUrl)
       const header = `URL: ${cleanUrl}\nСтатус: ${res.status}${res.contentType ? ` · ${res.contentType.split(';')[0]}` : ''}${clipped ? ' · (обрезано)' : ''}\n\n`
-      emitActivity(ctx, call, 'ok', 'web_fetch', `${cleanUrl} · ${res.status} · ${safeBody.length} симв.`)
-      return { id: call.id, name: call.name, result: UNTRUSTED_HEADER + header + safeBody }
+      emitActivity(ctx, call, 'ok', 'web_fetch', `${outboundLeak ? '⚠ секрет в исходящем URL · ' : ''}${cleanUrl} · ${res.status} · ${safeBody.length} симв.`)
+      return { id: call.id, name: call.name, result: leakNote + UNTRUSTED_HEADER + header + safeBody }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const safeMsg = scanText(redactUrlSecrets(msg)).redacted
-      emitActivity(ctx, call, 'error', 'web_fetch', safeMsg)
-      return { id: call.id, name: call.name, result: '', error: `web_fetch не удался: ${safeMsg}` }
+      emitActivity(ctx, call, 'error', 'web_fetch', `${outboundLeak ? '⚠ секрет в исходящем URL · ' : ''}${safeMsg}`)
+      // Запрос уже ушёл с секретом до ошибки — след об этом сохраняем и на ошибочном пути.
+      return { id: call.id, name: call.name, result: '', error: leakNote + `web_fetch не удался: ${safeMsg}` }
     }
   }
 }
