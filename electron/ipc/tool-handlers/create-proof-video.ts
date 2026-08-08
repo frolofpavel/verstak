@@ -6,10 +6,15 @@ import type { ToolHandler } from './shared'
 import { emitActivity } from './shared'
 import { peekProofFrames, takeProofFrames } from '../../ai/proof-frames'
 import { encodeFramesToMp4 } from '../../ai/frames-to-mp4'
+import { artifactModeBlock } from './artifacts'
 
 export const createProofVideoHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
+    // Гейт режима (седьмой обход, семейство артефактов): create_proof_video ПИШЕТ MP4 на
+    // диск (ffmpeg), значит в plan-режиме запрещён — как generate_docx/html/render_chart.
+    const blocked = artifactModeBlock(call, ctx)
+    if (blocked) return blocked
     // peek, НЕ take: при сбое ffmpeg кадры остаются для ретрая (ревью 26.06).
     const frames = peekProofFrames(Number(ctx.sendId))
     if (frames.length === 0) {

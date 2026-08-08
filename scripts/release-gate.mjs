@@ -350,7 +350,10 @@ const GATE_MAX_WORKERS = 4
 // ложный Policy Center), + гейт resolveDecision в трёх хендлерах. +5 пинов mode-policy
 // (3 артефакта + симметрия с browser_click + blockReason) + 6 пинов энфорсмента в
 // хендлере (plan→блок, auto→проходит), мутация краснит оба слоя → 4871.
-const EXPECTED_TOTAL_TESTS = 4871
+// 08.08, семейство артефактов ЗАКРЫТО целиком: + create_proof_video (пишет MP4 через
+// ffmpeg, тоже проходил мимо гейта). +1 пин mode-policy + 2 пина хендлера (plan→блок;
+// auto→гейт пройден, ошибка про кадры, не про режим) → 4874.
+const EXPECTED_TOTAL_TESTS = 4874
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

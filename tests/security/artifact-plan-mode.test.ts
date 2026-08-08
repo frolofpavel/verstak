@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { generateDocxHandler, generateHtmlHandler, renderChartHandler } from '../../electron/ipc/tool-handlers/artifacts'
+import { createProofVideoHandler } from '../../electron/ipc/tool-handlers/create-proof-video'
 import type { ToolContext } from '../../electron/ipc/tool-handlers/shared'
 import type { AgentMode } from '../../electron/ai/mode-policy'
 
@@ -47,4 +48,18 @@ describe('артефакты: гейт режима в ХЕНДЛЕРЕ (сед�
       expect(res.error).toBeFalsy()
     })
   }
+
+  // create_proof_video — то же семейство (пишет MP4), но в auto без кадров падает на
+  // «нет кадров», а не пишет. Поэтому проверяем: plan → блок гейта (про планирование);
+  // auto → гейт ПРОЙДЕН (ошибка НЕ про планирование, а про кадры/сборку).
+  const pv = { id: 'v1', name: 'create_proof_video', args: {} }
+  it('create_proof_video в plan → БЛОКИРОВАН гейтом (про планирование)', async () => {
+    const res = await createProofVideoHandler.handle(pv as never, ctx('plan'))
+    expect(res.error).toBeTruthy()
+    expect(String(res.error)).toContain('планирования')
+  })
+  it('create_proof_video в auto → гейт пройден (ошибка не про планирование)', async () => {
+    const res = await createProofVideoHandler.handle(pv as never, ctx('auto'))
+    expect(String(res.error ?? '')).not.toContain('планирования')
+  })
 })

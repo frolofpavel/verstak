@@ -61,7 +61,7 @@ describe('mode-policy decide()', () => {
 // («ничего не менять»). Правка alongside в тот же день увеличила радиус: файл ложится
 // в реальные документы человека, не в .verstak. Артефакт = запись файла = класс write_file.
 describe('mode-policy decide() — артефакты пишут файл на диск', () => {
-  const ARTIFACTS = ['generate_docx', 'generate_html', 'render_chart']
+  const ARTIFACTS = ['generate_docx', 'generate_html', 'render_chart', 'create_proof_video']
   // Гейтятся как браузерная мутация: block в plan (запись запрещена), иначе auto-accept.
   // Confirm в ask («файл есть файл») — отдельная задача (нет модалки), вынесена штабу.
   for (const t of ARTIFACTS) {

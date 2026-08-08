@@ -12,7 +12,7 @@ import type { ToolCall } from '../../ai/types'
  * confirm им не возвращается (нет модалки), поэтому проверяем только 'block'. Возвращает
  * error-результат для блокировки, либо null — тогда хендлер выполняется.
  */
-function artifactModeBlock(call: ToolCall, ctx: Parameters<ToolHandler['handle']>[1]): { id: string; name: string; result: ''; error: string } | null {
+export function artifactModeBlock(call: ToolCall, ctx: Parameters<ToolHandler['handle']>[1]): { id: string; name: string; result: ''; error: string } | null {
   const { decision, reason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
   if (decision === 'block') {
     return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }

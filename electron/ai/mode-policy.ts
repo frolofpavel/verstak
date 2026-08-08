@@ -74,7 +74,7 @@ export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'brow
  * ask («файл есть файл») — отдельная задача с pending-flow, вынесена штабу/Павлу.
  * Список, а не литерал: новый артефактный инструмент попадает под режим сразу.
  */
-export const ARTIFACT_TOOLS: readonly string[] = ['generate_docx', 'generate_html', 'render_chart']
+export const ARTIFACT_TOOLS: readonly string[] = ['generate_docx', 'generate_html', 'render_chart', 'create_proof_video']
 
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
@@ -130,7 +130,7 @@ export function blockReason(toolName: string, mode: AgentMode): string {
              `Пользователь сам переключит режим когда захочет выполнить запрос к коннектору.`
     }
     if (ARTIFACT_TOOLS.includes(toolName)) {
-      return `Активен режим "Режим планирования" — создание файла-артефакта (документ, HTML или диаграмма) ` +
+      return `Активен режим "Режим планирования" — создание файла-артефакта (документ, HTML, диаграмма или видео) ` +
              `запрещено: это ЗАПИСЬ на диск, а планирование ничего не меняет. ` +
              `Сначала опиши содержимое артефакта в ответе/плане; пользователь переключит режим, когда захочет создать файл.`
     }
