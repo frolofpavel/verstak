@@ -22,6 +22,7 @@
 import { Fragment, type Dispatch, type SetStateAction } from 'react'
 import { useProject } from '../../store/projectStore'
 import type { PlanCreatedCard, PreflightCard, SubagentRunCard, ActivityEntry, MaterialsNote, SpawnedSessionCard } from '../../store/session-snapshot'
+import { spawnCardStatusLabel } from '../../store/session-snapshot'
 import { Markdown } from '../Markdown'
 import { AgentProgressPanel } from '../AgentProgressPanel'
 import { MessageActions, AttachmentPreview } from './message-parts'
@@ -241,10 +242,9 @@ export function ChatStreamMessages(props: ChatStreamMessagesProps) {
                   смерти прогона mid-stream «прогон оборвался» (наблюдаемое, не
                   выдуманная причина; не застревает в «выполняется»). */}
               {showSpawnCards && spawnCards.map(card => {
-                const statusLabel = card.status === 'running' ? 'выполняется'
-                  : card.status === 'done' ? 'готово'
-                  : card.status === 'error' ? 'ошибка'
-                  : 'прогон оборвался'
+                // C(б): карточка говорит НАБЛЮДАЕМОЕ (прогон завершён), не намёк на успех —
+                // выполнена ли задача, она не знает. Подпись — из общей чистой функции.
+                const statusLabel = spawnCardStatusLabel(card.status)
                 return (
                   <div key={`spawn-${card.childChatId}`} className={`gg-spawn-card is-${card.status}`}>
                     <div className="gg-spawn-card-head">

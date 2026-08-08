@@ -143,6 +143,21 @@ export interface SpawnedSessionCard {
   sendId?: number
 }
 
+/**
+ * Подпись статуса карточки-следа. Карточка знает НАБЛЮДАЕМОЕ (прогон завершён/оборвался),
+ * а НЕ выполнена ли задача — критерия успеха у неё нет, и намекать на успех нельзя
+ * (задача 08.08, C(б)): ребёнок мог закончить 'done', но артефакта не сделать. Поэтому
+ * done → «прогон завершён» (нейтрально; рядом кнопка «Открыть сессию»), а не «готово».
+ */
+export function spawnCardStatusLabel(status: SpawnedSessionCard['status']): string {
+  switch (status) {
+    case 'running': return 'выполняется'
+    case 'done': return 'прогон завершён'
+    case 'error': return 'ошибка'
+    case 'terminated': return 'прогон оборвался'
+  }
+}
+
 export interface SessionSnapshot {
   /** Chat session this snapshot belongs to. Needed when a project is restored
    *  after a background answer finished while another project was open. */
