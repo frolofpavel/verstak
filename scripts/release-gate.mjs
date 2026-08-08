@@ -386,7 +386,13 @@ const GATE_MAX_WORKERS = 4
 // policy-файл, и новый shared/contracts/cli-capability.ts попал под детектор, изменив
 // счёт без единого написанного it(). ⇒ правило: при слиянии эталон = ИЗМЕРЕННЫЙ полный
 // сбор на слитом дереве, сумма — лишь ожидание для сверки (разошлось → взять факт).
-const EXPECTED_TOTAL_TESTS = 4888
+// 09.08, СЛИЯНИЕ линии безопасности (блок 2, девятый обход) поверх main 4888: наследование
+// toolsAllow дочерней сессией + гейт tools_allow на исполнении (dispatchToolTurn) +
+// общий предикат resolveToolsAllowSet + fail-open trace. +16 написанных it() (7 dispatch-gate,
+// 5 предикат, 2 spawn-child, 1 fail-open, 1 spawn-card forward). ИЗМЕРЕНО на слитом дереве:
+// полный сбор = 4904 / 0 падений (сумма 4888+16 совпала — новых policy-файлов под
+// provider-model-drift не добавлено, все 16 статичны).
+const EXPECTED_TOTAL_TESTS = 4904
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
