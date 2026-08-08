@@ -6,10 +6,19 @@
 import type { ToolHandler } from './shared'
 import { buildTaskSessionSeed } from '../../ai/orchestrator/seed'
 import { SPAWN_TASK_TURNS } from '../../ai/runner-shared'
+import { resolveDecision } from '../../ai/permission-rules'
+import { blockReason } from '../../ai/mode-policy'
 
 export const spawnTaskSessionHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
+    // ГЕЙТ РЕЖИМА (восьмой обход, 08.08): спавн ПОРОЖДАЕТ ИСПОЛНЕНИЕ, поэтому в plan
+    // блокируется (родитель в «ничего не менять» не заводит исполняющую дочернюю сессию).
+    // ctx.agentMode здесь = режим РОДИТЕЛЬСКОГО прогона (того, что зовёт spawn).
+    const { decision, reason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+    if (decision === 'block') {
+      return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }
+    }
     const title = String(call.args.title ?? '').trim()
     const task = String(call.args.task ?? '').trim()
     if (!title || !task) {

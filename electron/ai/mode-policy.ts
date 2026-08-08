@@ -87,15 +87,22 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
   // (там «только чтение»), в остальных режимах порог сегодня НЕ ужесточается —
   // его выберет человек по фактическим цифрам, когда они наберутся.
   const isBrowserMutation = MUTATING_BROWSER_TOOLS.includes(toolName)
+  // ВОСЬМОЙ ОБХОД (08.08): spawn_task_session ПОРОЖДАЕТ ИСПОЛНЕНИЕ (дочерняя сессия пишет
+  // файлы/запускает команды), но не входил ни в одну категорию → auto-accept во всех
+  // режимах, включая plan. По эффекту ближе к isCommand, НО confirm ему не даём: модалки
+  // подтверждения спавна нет, а classify-как-isCommand дал бы ложный Policy Center (как у
+  // артефактов). Поэтому plan→block, иначе auto; а мягкость дочерней сессии закрывает
+  // отдельно наследование режима родителя (spawnChildSession), не эта ветка.
+  const isSpawn = toolName === 'spawn_task_session'
 
   // reads + операции с СОБСТВЕННОЙ памятью агента (memory_save/memory_invalidate/
   // core_memory_*) всегда проходят: plan-режим гейтит изменения ПРОЕКТА (файлы/команды),
   // а не курирование агентом своей памяти (дёшево, обратимо, не трогает рабочее дерево).
-  if (!isEdit && !isCommand && !isBrowserMutation && !isArtifact) return 'auto-accept'
-  // Браузерная мутация и артефакт (запись файла на диск): строгость только там, где
-  // режим означает «ничего не менять» (plan → block), иначе auto-accept. Confirm в ask
-  // для артефактов сознательно НЕ здесь — нет модалки подтверждения (см. ARTIFACT_TOOLS).
-  if (isBrowserMutation || isArtifact) return mode === 'plan' ? 'block' : 'auto-accept'
+  if (!isEdit && !isCommand && !isBrowserMutation && !isArtifact && !isSpawn) return 'auto-accept'
+  // Браузерная мутация, артефакт (запись файла) и спавн (порождает исполнение): строгость
+  // только там, где режим означает «ничего не менять» (plan → block), иначе auto-accept.
+  // Confirm сознательно НЕ здесь — модалок подтверждения для них нет (см. ARTIFACT_TOOLS/isSpawn).
+  if (isBrowserMutation || isArtifact || isSpawn) return mode === 'plan' ? 'block' : 'auto-accept'
 
   let decision: ToolDecision
   switch (mode) {
@@ -133,6 +140,11 @@ export function blockReason(toolName: string, mode: AgentMode): string {
       return `Активен режим "Режим планирования" — создание файла-артефакта (документ, HTML, диаграмма или видео) ` +
              `запрещено: это ЗАПИСЬ на диск, а планирование ничего не меняет. ` +
              `Сначала опиши содержимое артефакта в ответе/плане; пользователь переключит режим, когда захочет создать файл.`
+    }
+    if (toolName === 'spawn_task_session') {
+      return `Активен режим "Режим планирования" — вынос задачи в отдельную сессию запрещён: ` +
+             `дочерняя сессия начнёт ВЫПОЛНЯТЬ действия (файлы, команды), а планирование ничего не меняет. ` +
+             `Составь план здесь (create_plan); пользователь переключит режим, когда захочет запустить задачу.`
     }
     return `Активен режим "Режим планирования" — изменение файлов и выполнение команд запрещены. ` +
            `Сосредоточься на чтении кода (read_file, get_project_map, search_project) и составлении плана через create_plan. ` +

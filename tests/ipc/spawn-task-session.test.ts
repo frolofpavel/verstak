@@ -28,6 +28,15 @@ describe('spawnTaskSessionHandler (задача 10)', () => {
     expect(journal).toHaveBeenCalled()
   })
 
+  it('plan → спавн ЗАБЛОКИРОВАН гейтом, сессия не заводится (восьмой обход)', async () => {
+    const send = vi.fn(); const journal = vi.fn()
+    const planCtx = { sendId: 7, projectPath: '/proj', sender: { send }, recordJournal: journal, agentMode: 'plan' } as unknown as ToolContext
+    const res = await spawnTaskSessionHandler.handle(call({ title: 'Отчёт', task: 'собери' }), planCtx)
+    expect(res.error).toBeTruthy()
+    expect(String(res.error)).toContain('планирования')
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('пустой title/task → ошибка, событие не эмитится', async () => {
     const send = vi.fn(); const journal = vi.fn()
     const res = await spawnTaskSessionHandler.handle(call({ title: '', task: 'x' }), ctx(send, journal))

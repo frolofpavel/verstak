@@ -48,6 +48,7 @@ function seedParent(parentId: number, cards: SpawnedSessionCard[], activeId = pa
 beforeEach(() => {
   vi.stubGlobal('window', windowStub)
   nextSendId = 500
+  windowStub.api.settings.getKey = vi.fn(async () => null) // сброс режима: по умолчанию пусто → 'ask'
   createSpy.mockClear(); listSpy.mockClear(); sendSpy.mockClear()
   useProject.setState({ path: '/proj', activeChatId: null, chatSessions: [], chats: {}, sendOwners: {} }, false)
 })
@@ -62,8 +63,9 @@ describe('spawnChildSession — видимая дочерняя сессия + �
     expect(createSpy).toHaveBeenCalledWith('/proj', expect.objectContaining({
       kind: 'main', parentChatId: 5, title: 'Аудит', providerId: 'claude', model: 'opus',
     }))
-    // Seed уходит в СВОЙ дочерний чат (chatId=42), overrides пустые.
-    expect(sendSpy).toHaveBeenCalledWith([{ role: 'user', content: 'сделай аудит' }], '/proj', {}, '42')
+    // Seed уходит в СВОЙ дочерний чат (chatId=42); overrides несут УНАСЛЕДОВАННЫЙ режим
+    // родителя (восьмой обход): при пустых настройках мока readAgentMode → 'ask'.
+    expect(sendSpy).toHaveBeenCalledWith([{ role: 'user', content: 'сделай аудит' }], '/proj', { agentMode: 'ask' }, '42')
     // Owner прогона привязан к ДОЧЕРНЕМУ чату — стрим пойдёт в chats[42].
     expect(useProject.getState().sendOwners[500]).toMatchObject({ kind: 'chat', chatId: 42, projectPath: '/proj' })
     // Карточка-след — в bundle РОДИТЕЛЯ (5), не ребёнка, со статусом «выполняется» и sendId.
@@ -71,6 +73,16 @@ describe('spawnChildSession — видимая дочерняя сессия + �
     expect(card).toMatchObject({ childChatId: 42, title: 'Аудит', status: 'running', sendId: 500 })
     // В дочернем чате карточки-следа быть не должно (след живёт у родителя).
     expect(useProject.getState().chats[42]?.spawnCards ?? []).toHaveLength(0)
+  })
+
+  it('ВОСЬМОЙ ОБХОД: дочерняя сессия наследует режим РОДИТЕЛЬСКОГО чата, не глобальный', async () => {
+    // Родитель (чат 5) в accept-edits; глобальный режим — bypass. Ребёнок обязан взять
+    // режим РОДИТЕЛЯ (accept-edits), а НЕ глобальный bypass — иначе escalation через спавн.
+    windowStub.api.settings.getKey = vi.fn(async (k: string) =>
+      k === 'agent_mode_chat_5' ? 'accept-edits' : (k === 'agent_mode' ? 'bypass' : null)) as never
+    seedParent(5, [])
+    await useProject.getState().spawnChildSession({ parentChatId: 5, title: 'X', seed: 's' })
+    expect(sendSpy.mock.calls.at(-1)?.[2]).toMatchObject({ agentMode: 'accept-edits' })
   })
 
   it('провайдер недоступен (sendId<=0) → карточка честно «ошибка», не висит «выполняется»', async () => {

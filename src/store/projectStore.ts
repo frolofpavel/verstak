@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { FileNode, ChatMessage, ProjectMeta, ChatSession, DevTask, ResumableRun } from '../types/api'
 import { sortProjectsByName } from '../lib/project-sort'
 import { isModelValidForProvider } from '../hooks/useProvider'
+import { readAgentMode } from '../hooks/useAgentMode'
 import type { PromptRouteOverride } from '../../shared/contracts/provider'
 import type { InputAccounting } from '../../shared/contracts/usage'
 import { isGenericChatTitle, titleFromFirstMessage } from '../lib/chat-session-title'
@@ -812,10 +813,15 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // Дочерний чат появляется в Sidebar (kind='main' с ⑂) — обновляем список.
     void get().refreshChatSessions()
     try {
+      // Восьмой обход (08.08): дочерняя сессия НЕ может быть мягче родителя. Наследуем
+      // режим РОДИТЕЛЬСКОГО чата (readAgentMode берёт ключ чата, не глобальный agent_mode) —
+      // иначе ребёнок исполнялся бы под глобальным режимом (напр. bypass), снимая plan/ask
+      // родителя: privilege escalation через спавн. Спавн в plan вообще заблокирован гейтом.
+      const parentMode = await readAgentMode(parentChatId, false)
       const sendId = await window.api.ai.sendWithOverrides(
         [{ role: 'user', content: seed }],
         path,
-        {},
+        { agentMode: parentMode },
         String(child.id)
       )
       // sendId<=0 — провайдер не инициализировался. Карточка честно говорит «ошибка»,

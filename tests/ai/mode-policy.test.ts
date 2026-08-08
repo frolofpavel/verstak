@@ -81,6 +81,19 @@ describe('mode-policy decide() — артефакты пишут файл на �
   })
 })
 
+// ВОСЬМОЙ ОБХОД (08.08): spawn_task_session порождает исполнение (дочерняя сессия пишет
+// файлы/команды), но не входил ни в одну категорию → auto-accept во всех режимах, включая
+// plan. Гейтим как мутацию (block в plan, иначе auto); мягкость ребёнка закрывает
+// наследование режима родителя (spawnChildSession), не эта ветка.
+describe('mode-policy decide() — spawn_task_session порождает исполнение', () => {
+  it('spawn_task_session: plan→block; ask/accept-edits/auto→auto-accept', () => {
+    expect(decide('spawn_task_session', 'plan')).toBe('block')
+    expect(decide('spawn_task_session', 'ask')).toBe('auto-accept')
+    expect(decide('spawn_task_session', 'accept-edits')).toBe('auto-accept')
+    expect(decide('spawn_task_session', 'auto')).toBe('auto-accept')
+  })
+})
+
 describe('mode-policy blockReason()', () => {
   it('plan + connector_query → упоминает внешние системы', () => {
     const msg = blockReason('connector_query', 'plan')
@@ -94,6 +107,11 @@ describe('mode-policy blockReason()', () => {
     const msg = blockReason('generate_docx', 'plan')
     expect(msg).toContain('планирования')
     expect(msg.toLowerCase()).toMatch(/файл|артефакт|документ|диаграмм/)
+  })
+  it('plan + spawn_task_session → объясняет, что дочерняя сессия исполняет', () => {
+    const msg = blockReason('spawn_task_session', 'plan')
+    expect(msg).toContain('планирования')
+    expect(msg.toLowerCase()).toMatch(/сесси|исполн|задач/)
   })
 })
 
