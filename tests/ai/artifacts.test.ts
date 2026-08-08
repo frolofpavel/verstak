@@ -104,6 +104,27 @@ describe('generateDocx save_to (назначение перечнем)', () => {
     expect(r.path).not.toContain('.verstak')
   })
 
+  // ЗАДАЧА A (08.08): «рядом с материалами» значит рядом с тем, что человек назвал.
+  // Раньше alongside всегда клал в корень проекта — при материалах в подпапке файл
+  // терялся (Павел: отчёт по clients\cherrydom\briefs лёг в корень clients, модель
+  // трижды не смогла переложить). Теперь alongside → папка материалов, когда известна.
+  it('resolveDocxDir alongside + папка материалов (подпапка) → в подпапку материалов', () => {
+    const sub = join(projectPath, 'cherrydom', 'briefs')
+    expect(resolveDocxDir('alongside', { projectPath, downloadsDir: '/dl', materialsDir: sub })).toBe(sub)
+  })
+  it('resolveDocxDir alongside БЕЗ папки материалов → корень проекта (прежнее поведение, не сломать)', () => {
+    expect(resolveDocxDir('alongside', { projectPath, downloadsDir: '/dl' })).toBe(projectPath)
+  })
+  it('resolveDocxDir downloads НЕ затирается папкой материалов (явный выбор побеждает дефолт)', () => {
+    expect(resolveDocxDir('downloads', { projectPath, downloadsDir: '/dl', materialsDir: join(projectPath, 'sub') })).toBe('/dl')
+  })
+  it('generateDocx alongside + materialsDir → файл реально ложится в папку материалов', async () => {
+    const sub = await mkdtemp(join(projectPath, 'mat-'))
+    const r = await generateDocx(projectPath, { filename: 'rep', sections: sec, save_to: 'alongside' }, { materialsDir: sub })
+    expect(r.path).toBe(join(sub, 'rep.docx'))
+    expect(r.path).not.toContain('.verstak')
+  })
+
   it('downloads → переданная папка Загрузок', async () => {
     const dl = await mkdtemp(join(tmpdir(), 'gg-dl-'))
     try {

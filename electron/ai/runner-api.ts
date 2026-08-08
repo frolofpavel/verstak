@@ -1147,6 +1147,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Этап 1а headless: read-only политика коннекторов + серверный каталог «downloads».
       readOnlyConnectors: readOnlyConnectorsCtx, artifactsDownloadsDir: artifactsDownloadsDirCtx,
       defaultDocxSaveTo,
+      // ЗАДАЧА A: alongside кладёт РЯДОМ С МАТЕРИАЛАМИ. База папки материалов известна
+      // только когда источник — папка (композер); для вложений её нет (пусто → корень).
+      materialsDir: materialsCtx?.source === 'folder' ? materialsCtx.base : undefined,
       // EF-R1 Б2: единый resolver аккаунта для delegate_task (sub-agent не обходит pre-flight).
       resolveSubscriptionAccount,
       // H (ось 3): new_task — агент запрашивает очистку контекста до дистиллята.

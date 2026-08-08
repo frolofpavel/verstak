@@ -310,7 +310,11 @@ const GATE_MAX_WORKERS = 4
 // авторитетен; стрим-флаг согласуется без переписи agentProgress). +6 пинов
 // (2 контрольных штаба: завершён+running→скрыт, идёт+running→показан; + done/pending/
 // error/blocked) → 4830.
-const EXPECTED_TOTAL_TESTS = 4830
+// 08.08, задача A (alongside кладёт РЯДОМ С МАТЕРИАЛАМИ, не в корень проекта):
+// resolveDocxDir + generateDocx резолвят alongside в папку материалов (materialsCtx.base
+// из композера), когда известна; иначе корень проекта. +4 пина (подпапка→туда, без
+// папки→корень, downloads не затирается, generateDocx реально пишет в папку) → 4834.
+const EXPECTED_TOTAL_TESTS = 4834
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

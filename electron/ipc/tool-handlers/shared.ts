@@ -107,6 +107,11 @@ export interface ToolContext {
    *  указала save_to (её молчание, не решение). Явный save_to модели перекрывает.
    *  undefined → прежний дефолт 'project' (.verstak/artifacts). */
   defaultDocxSaveTo?: import('../../ai/artifacts').DocxSaveTo
+  /** ЗАДАЧА A: папка материалов (когда источник — папка из композера). save_to='alongside'
+   *  кладёт файл СЮДА («рядом с материалами»), а не в корень проекта. undefined → корень
+   *  проекта (прежнее поведение, когда папки материалов нет). Уже прогнана через
+   *  isWithinKnownRoots на входе, поэтому доверенный корень назначения. */
+  materialsDir?: string
   /** ось 3 I: per-tool auto-approve — пользовательские категорийные тумблеры (edits/
    *  commands) поверх mode-policy.decide(). Повышают confirm→auto-accept. См. mode-policy. */
   autoApprove?: import('../../ai/mode-policy').AutoApprove

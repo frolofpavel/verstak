@@ -37,19 +37,22 @@ export function artifactsDir(projectPath: string): string {
  * закрывали в unrevert). Модель выбирает одно из трёх; конкретный каталог считает
  * НАШ код, поэтому неизвестное значение схлопывается в 'project' — никогда в путь.
  *   · project (по умолчанию) — .verstak/artifacts/{дата}/ внутри проекта;
- *   · alongside — корень открытой папки: рядом с материалами, которые ЧЕЛОВЕК
- *     открыл, а не то, что назвала модель;
+ *   · alongside — РЯДОМ С МАТЕРИАЛАМИ, которые назвал человек: папка материалов
+ *     (ctx.materialsDir — задана папкой в композере), когда известна; иначе корень
+ *     проекта. «Рядом» значит рядом с тем, что человек назвал, а не в корне вслепую;
  *   · downloads — папка Загрузок.
  */
 export type DocxSaveTo = 'project' | 'alongside' | 'downloads'
 
 export function resolveDocxDir(
   saveTo: DocxSaveTo | string | undefined,
-  ctx: { projectPath: string; downloadsDir?: string }
+  ctx: { projectPath: string; downloadsDir?: string; materialsDir?: string }
 ): string {
   switch (saveTo) {
     case 'downloads': return ctx.downloadsDir ?? defaultDownloadsDir()
-    case 'alongside': return ctx.projectPath
+    // «рядом с материалами» = папка материалов, когда известна; иначе — корень
+    // проекта (прежнее поведение, когда папки материалов нет).
+    case 'alongside': return ctx.materialsDir ?? ctx.projectPath
     case 'project':
     case undefined:
     default: return artifactsDir(ctx.projectPath)
@@ -151,10 +154,11 @@ function buildTable(t: TableInput): Table {
 export async function generateDocx(
   projectPath: string,
   args: { filename: string; title?: string; sections: SectionInput[]; save_to?: DocxSaveTo | string },
-  opts?: { downloadsDir?: string }
+  opts?: { downloadsDir?: string; materialsDir?: string }
 ): Promise<ArtifactResult> {
   const downloadsDir = opts?.downloadsDir ?? defaultDownloadsDir()
-  const dir = resolveDocxDir(args.save_to, { projectPath, downloadsDir })
+  const materialsDir = opts?.materialsDir
+  const dir = resolveDocxDir(args.save_to, { projectPath, downloadsDir, materialsDir })
   const filename = `${sanitizeFilename(args.filename)}.docx`
   const path = join(dir, filename)
   // Проверка путей стоит и на этом пути (назначение открывает запись за пределы
@@ -162,8 +166,11 @@ export async function generateDocx(
   // лежать в проекте ИЛИ в Downloads. Файл из каталога не выйдет — sanitizeFilename
   // убирает разделители (проверять здесь полный путь нельзя: имя, санитайзенное из
   // «../../x», начинается с точек и наивная строковая проверка сочла бы его выходом).
-  if (!isWithinKnownRoots(dir, [projectPath, downloadsDir])) {
-    throw new Error(`Каталог DOCX вне разрешённых папок (проект / Загрузки): ${dir}`)
+  // materialsDir разрешён как назначение alongside: он уже прогнан через
+  // isWithinKnownRoots на входе (ai.ts, композер), т.е. это доверенный корень.
+  const allowedRoots = materialsDir ? [projectPath, downloadsDir, materialsDir] : [projectPath, downloadsDir]
+  if (!isWithinKnownRoots(dir, allowedRoots)) {
+    throw new Error(`Каталог DOCX вне разрешённых папок (проект / материалы / Загрузки): ${dir}`)
   }
   if (isForbiddenPath(path) || isForbiddenPath(filename)) {
     throw new Error(`Запись артефакта запрещена политикой безопасности: ${path}`)
