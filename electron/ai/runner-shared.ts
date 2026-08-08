@@ -57,6 +57,21 @@ export const MAX_ACCOUNT_SWITCHES = 4
 // Лимиты ходов agent-loop — общие для dispatch (ipc/ai.ts) и runner-api.
 export const DEFAULT_AGENT_TURNS = 8
 export const MAX_BUDGET_TURNS = 40  // hard ceiling even with continues — prevents infinite-budget abuse
+// Бюджет ходов ВЫНЕСЕННОЙ (спавн) сессии (задача C(а), 08.08). Не дефолт обычного хода:
+// самостоятельная задача «прочитать материалы + сделать артефакт» на 8 ходах упиралась
+// (наблюдённый отказ — 8 ходов, 11 вызовов, DOCX не дошёл). 24 даёт втрое больше запаса
+// и оставляет потолок 40 для явных случаев. Своя константа делает число видимым и правимым.
+export const SPAWN_TASK_TURNS = 24
+
+/**
+ * Итоговый бюджет ходов прогона. Явный budget (из композера) побеждает; при его
+ * отсутствии дочерняя (спавн) сессия получает SPAWN_TASK_TURNS, обычная — DEFAULT.
+ * Пол DEFAULT и потолок MAX сохраняются как раньше. Пуре ради тестируемости.
+ */
+export function resolveTurnsBudget(budget: number | undefined, isChildSession: boolean): number {
+  const fallback = isChildSession ? SPAWN_TASK_TURNS : DEFAULT_AGENT_TURNS
+  return Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? fallback))
+}
 
 // ─── Реестр pending-подтверждений (общий: ipc-хендлеры ai.ts ↔ runner-api) ───
 // Keyed by `${sendId}::${callId}` — параллельные ai:send не резолвят чужие

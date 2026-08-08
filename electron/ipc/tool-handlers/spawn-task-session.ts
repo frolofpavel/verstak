@@ -5,6 +5,7 @@
 // runner-api) — за выключенным флагом сюда управление не доходит.
 import type { ToolHandler } from './shared'
 import { buildTaskSessionSeed } from '../../ai/orchestrator/seed'
+import { SPAWN_TASK_TURNS } from '../../ai/runner-shared'
 
 export const spawnTaskSessionHandler: ToolHandler = {
   mode: 'sequential',
@@ -14,7 +15,9 @@ export const spawnTaskSessionHandler: ToolHandler = {
     if (!title || !task) {
       return { id: call.id, name: call.name, result: '', error: 'spawn_task_session: title и task обязательны' }
     }
-    const seed = buildTaskSessionSeed({ title, task })
+    // Бюджет-факт в seed = ТОТ ЖЕ SPAWN_TASK_TURNS, что main даст дочернему прогону
+    // (resolveTurnsBudget при isChildSession) — единый источник, «24 хода» не разъедется с фактом.
+    const seed = buildTaskSessionSeed({ title, task, turnsBudget: SPAWN_TASK_TURNS })
     if (!seed) {
       return { id: call.id, name: call.name, result: '', error: 'spawn_task_session: пустая задача' }
     }

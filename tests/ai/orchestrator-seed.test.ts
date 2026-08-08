@@ -25,4 +25,16 @@ describe('buildTaskSessionSeed — seed дочерней сессии', () => {
   it('пустая задача → пустой seed (вызывающий не порождает сессию)', () => {
     expect(buildTaskSessionSeed({ title: 'X', task: '   ' })).toBe('')
   })
+
+  // Задача C(а): бюджет сообщается ребёнку ФАКТОМ (не просьбой).
+  it('turnsBudget → факт «У тебя N ходов» в seed', () => {
+    const s = buildTaskSessionSeed({ title: 'X', task: 'собери отчёт', turnsBudget: 24 })
+    expect(s).toContain('У тебя 24 ходов')
+    expect(s).toContain('собери отчёт')
+  })
+  it('без turnsBudget блока «Рамки» нет (обратная совместимость)', () => {
+    const s = buildTaskSessionSeed({ title: 'X', task: 'сделай' })
+    expect(s).not.toContain('Рамки этой сессии')
+    expect(s).toBe('сделай')
+  })
 })

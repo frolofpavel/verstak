@@ -12,13 +12,24 @@ export interface TaskSeedInput {
   task: string
   /** Релевантный контекст проекта (из тёплого Brain), опционально. */
   projectContext?: string | null
+  /** Бюджет ходов дочерней сессии — сообщается ФАКТОМ (задача C(а)). Опционально. */
+  turnsBudget?: number
 }
 
-/** Seed дочерней сессии: задача + (опц.) контекст проекта. Пустая задача → пустой seed. */
+/** Seed дочерней сессии: задача + (опц.) бюджет-факт + (опц.) контекст проекта. Пустая
+ *  задача → пустой seed. */
 export function buildTaskSessionSeed(input: TaskSeedInput): string {
   const task = (input.task ?? '').trim()
   if (!task) return ''
+  const parts = [task]
+  // БЮДЖЕТ — ФАКТОМ, а не просьбой (задача C(а)): факт «у тебя N ходов» нельзя «не
+  // выполнить» — он меняет то, что модель ВИДИТ, и работает. Второе предложение — ПРОСЬБА,
+  // и она НЕ несущая: гарантию, что внучек не будет и бюджета хватит, дают гард глубины
+  // и SPAWN_TASK_TURNS, а не эта строка (директива-просьба инертна — проверено на автопланах).
+  if (typeof input.turnsBudget === 'number' && input.turnsBudget > 0) {
+    parts.push(`--- Рамки этой сессии ---\nУ тебя ${input.turnsBudget} ходов. Это самостоятельная задача с собственным чатом. Если её результат — файл или артефакт, сделай его раньше подробного разбора.`)
+  }
   const ctx = (input.projectContext ?? '').trim()
-  if (!ctx) return task
-  return `${task}\n\n--- Контекст проекта ---\n${ctx}`
+  if (ctx) parts.push(`--- Контекст проекта ---\n${ctx}`)
+  return parts.join('\n\n')
 }

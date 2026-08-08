@@ -23,7 +23,7 @@ import type { ChatMessage, ChatProvider } from '../ai/types'
 import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
-import { DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+import { resolveTurnsBudget, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 // Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
 import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
 import { selectSendProvider, selectSendModel, decideSmartRouting } from './ai-send/route-selection'
@@ -1090,7 +1090,11 @@ export function registerAiIpc(deps: AiDeps): void {
       const tools = createToolsForProject(runRoot, ctrl.signal, {
         allowedWriteRoots: parseAllowedWriteRoots(deps.getSecret(ALLOWED_WRITE_ROOTS_KEY))
       })
-      const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
+      // Дочерняя (спавн) сессия — постоянное свойство чата (parent_chat_id). Считаем ОДИН
+      // раз: и для бюджета (спавн получает больший SPAWN_TASK_TURNS, задача C(а)), и для
+      // гарда глубины (context.isChildSession ниже). НЕ из runner-поля parentChatId.
+      const isChildSession = chatId ? deps.getChatParentChatId?.(Number(chatId)) != null : false
+      const turnsBudget = resolveTurnsBudget(budget, isChildSession)
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {
             try {
@@ -1155,10 +1159,9 @@ export function registerAiIpc(deps: AiDeps): void {
         fallbackOpts,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
-        // Гард глубины спавна (задача C): дочерняя (вынесенная) сессия — та, у чьего чата
-        // задан parent_chat_id. Постоянное свойство чата, поэтому берём из chat_sessions,
-        // а не из runner-поля parentChatId (оно = текущий chatId у любого прогона).
-        isChildSession: chatId ? deps.getChatParentChatId?.(Number(chatId)) != null : false,
+        // Гард глубины спавна (задача C): дочерняя сессия — та, у чьего чата задан
+        // parent_chat_id (посчитано выше вместе с бюджетом, единый источник).
+        isChildSession,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
         toolsAllow: outcomeToolsAllow ?? overrides?.toolsAllow ?? null,

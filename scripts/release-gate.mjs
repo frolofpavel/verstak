@@ -335,7 +335,12 @@ const GATE_MAX_WORKERS = 4
 // chatId у ЛЮБОГО прогона) → снял бы spawn у всех чатов. Верный сигнал — isChildSession
 // (chat_sessions.parent_chat_id, считает main из getChatParentChatId). +2 пина проводки в
 // agent-loop (корень→есть; ребёнок→нет), мутация возврата к parentChatId краснеет → 4852.
-const EXPECTED_TOTAL_TESTS = 4852
+// 08.08, C(а) бюджет+seed: спавн-сессия получает SPAWN_TASK_TURNS=24 (resolveTurnsBudget
+// при isChildSession), seed сообщает бюджет ФАКТОМ. +4 пина resolveTurnsBudget (обычная→
+// DEFAULT; дочерняя→SPAWN>DEFAULT; явный побеждает; потолок MAX) + 2 пина seed (факт;
+// без бюджета блока нет), мутация fallback краснеет. ЭФФЕКТ (артефакт дошёл) — живая
+// проверка вечером. → 4858.
+const EXPECTED_TOTAL_TESTS = 4858
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

@@ -20,7 +20,10 @@ describe('spawnTaskSessionHandler (задача 10)', () => {
     expect(send).toHaveBeenCalledTimes(1)
     const [channel, payload] = send.mock.calls[0]
     expect(channel).toBe('ai:event')
-    expect(payload.event).toMatchObject({ type: 'spawn-task-session', callId: 'c1', title: 'Отчёт Директа', seed: 'собери отчёт' })
+    expect(payload.event).toMatchObject({ type: 'spawn-task-session', callId: 'c1', title: 'Отчёт Директа' })
+    // C(а): seed = задача + факт бюджета (24 хода). Проверяем оба, без хрупкого точного равенства.
+    expect(payload.event.seed).toContain('собери отчёт')
+    expect(payload.event.seed).toContain('24 ходов')
     expect(res).toMatchObject({ id: 'c1', name: 'spawn_task_session', result: { spawned: true, title: 'Отчёт Директа' } })
     expect(journal).toHaveBeenCalled()
   })
