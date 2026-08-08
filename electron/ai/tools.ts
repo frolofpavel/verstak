@@ -74,6 +74,14 @@ export function buildRemoteSearchCommand(
   return `if command -v rg >/dev/null 2>&1; then rg ${rgFlags.join(' ')} ${rgGlobs} -- ${shq(query)} .; else grep ${grepFlags} ${grepExcludes} -- ${shq(grepPattern)} . 2>/dev/null; fi | head -100`
 }
 
+// Оболочка, в которой РЕАЛЬНО исполняется run_command (см. runCommand ниже:
+// spawn(process.env.ComSpec || 'cmd.exe', …) на Windows, /bin/sh на POSIX). Модель
+// обязана знать это ИЗ ОПИСАНИЯ, иначе гадает синтаксис — реальный случай 08.08: три
+// попытки PowerShell `Move-Item` подряд на cmd.exe провалились «синтаксической ошибкой».
+export const RUN_COMMAND_SHELL_HINT = process.platform === 'win32'
+  ? 'Оболочка — cmd.exe (Windows), НЕ PowerShell: используй cmd-синтаксис (move, copy, del, dir, type, set), а не командлеты (Move-Item, Get-ChildItem, Remove-Item). Нужен PowerShell — вызови его явно: powershell -Command "…".'
+  : 'Оболочка — /bin/sh (POSIX-синтаксис).'
+
 export const TOOL_DEFS: ToolDefinition[] = [
   {
     name: 'read_file',
@@ -131,10 +139,10 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'run_command',
-    description: 'Запустить shell-команду в корне проекта. Команда требует подтверждения пользователя. Возвращает stdout/stderr/exitCode.',
+    description: `Запустить shell-команду в корне проекта. ${RUN_COMMAND_SHELL_HINT} Команда требует подтверждения пользователя. Возвращает stdout/stderr/exitCode.`,
     parameters: {
       type: 'object',
-      properties: { command: { type: 'string', description: 'Команда для shell. Без побочных эффектов вне проекта.' } },
+      properties: { command: { type: 'string', description: `Команда для shell. Без побочных эффектов вне проекта. ${RUN_COMMAND_SHELL_HINT}` } },
       required: ['command']
     }
   },

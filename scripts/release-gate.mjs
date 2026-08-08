@@ -314,7 +314,10 @@ const GATE_MAX_WORKERS = 4
 // resolveDocxDir + generateDocx резолвят alongside в папку материалов (materialsCtx.base
 // из композера), когда известна; иначе корень проекта. +4 пина (подпапка→туда, без
 // папки→корень, downloads не затирается, generateDocx реально пишет в папку) → 4834.
-const EXPECTED_TOTAL_TESTS = 4834
+// 08.08, задача B (run_command не называл оболочку → модель гадала, PowerShell на
+// cmd.exe): RUN_COMMAND_SHELL_HINT в описании инструмента (cmd.exe на Windows с
+// предупреждением про командлеты, /bin/sh на POSIX). +2 пина → 4836.
+const EXPECTED_TOTAL_TESTS = 4836
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
