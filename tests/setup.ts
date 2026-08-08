@@ -38,4 +38,12 @@ if (typeof document !== 'undefined') {
 // каждом тест-файле.
 afterEach(() => {
   vi.unstubAllGlobals()
+  // Тест не должен оставлять СЛЕДОВ соседям. unstubAllGlobals снимает stubGlobal, но НЕ
+  // vi.spyOn: мок реального http/https/singleton'а без restore жил до конца процесса и
+  // ломал следующий файл (нативная линия: autoupdate-download-resume падал под нагрузкой,
+  // когда сосед оставлял мок реального http). restoreAllMocks снимает все spy → ни один
+  // тест не портит глобальное состояние для соседей. Безопасно: ни один тест не держит
+  // spy в beforeAll между it (проверено grep'ом — 0 таких файлов). Класс — брат d89d46b
+  // (тесты не пишут в боевой журнал): и то, и другое — «тест не оставляет следов».
+  vi.restoreAllMocks()
 })
