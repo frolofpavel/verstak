@@ -1,11 +1,31 @@
 // Artifact-хендлеры: render_chart / generate_html / generate_docx.
 // Вынесено из tool-handlers.ts (распил монолита) — поведение без изменений.
 import type { ToolHandler } from './shared'
+import { resolveDecision } from '../../ai/permission-rules'
+import { blockReason } from '../../ai/mode-policy'
+import type { ToolCall } from '../../ai/types'
+
+/**
+ * Гейт режима для артефактов (седьмой обход, 08.08). Артефакты ПИШУТ ФАЙЛ на диск, но
+ * хендлеры не звали resolveDecision → проходили во ВСЕХ режимах, включая plan. Теперь
+ * блокируем в plan (mode-policy классифицирует их как мутацию: block в plan, иначе auto).
+ * confirm им не возвращается (нет модалки), поэтому проверяем только 'block'. Возвращает
+ * error-результат для блокировки, либо null — тогда хендлер выполняется.
+ */
+function artifactModeBlock(call: ToolCall, ctx: Parameters<ToolHandler['handle']>[1]): { id: string; name: string; result: ''; error: string } | null {
+  const { decision, reason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+  if (decision === 'block') {
+    return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }
+  }
+  return null
+}
 
 export const renderChartHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
+      const blocked = artifactModeBlock(call, ctx)
+      if (blocked) return blocked
       const { renderChartSvg } = await import('../../ai/charts')
       const { artifactsDir } = await import('../../ai/artifacts')
       const { mkdir, writeFile } = await import('fs/promises')
@@ -45,6 +65,8 @@ export const generateHtmlHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
+      const blocked = artifactModeBlock(call, ctx)
+      if (blocked) return blocked
       const { generateHtml } = await import('../../ai/artifacts')
       const filename = String(call.args.filename ?? 'untitled')
       const title = call.args.title ? String(call.args.title) : undefined
@@ -73,6 +95,8 @@ export const generateDocxHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     try {
+      const blocked = artifactModeBlock(call, ctx)
+      if (blocked) return blocked
       const { generateDocx } = await import('../../ai/artifacts')
       const filename = String(call.args.filename ?? 'untitled')
       const title = call.args.title ? String(call.args.title) : undefined

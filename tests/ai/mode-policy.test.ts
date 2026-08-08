@@ -56,6 +56,31 @@ describe('mode-policy decide()', () => {
   })
 })
 
+// СЕДЬМОЙ ОБХОД ГЕЙТА (08.08): generate_docx/html/render_chart ПИШУТ ФАЙЛ на диск, но
+// не входили ни в edit/command/browser → auto-accept во ВСЕХ режимах, включая plan
+// («ничего не менять»). Правка alongside в тот же день увеличила радиус: файл ложится
+// в реальные документы человека, не в .verstak. Артефакт = запись файла = класс write_file.
+describe('mode-policy decide() — артефакты пишут файл на диск', () => {
+  const ARTIFACTS = ['generate_docx', 'generate_html', 'render_chart']
+  // Гейтятся как браузерная мутация: block в plan (запись запрещена), иначе auto-accept.
+  // Confirm в ask («файл есть файл») — отдельная задача (нет модалки), вынесена штабу.
+  for (const t of ARTIFACTS) {
+    it(`${t}: plan→block; ask/accept-edits/auto→auto-accept`, () => {
+      expect(decide(t, 'plan')).toBe('block')
+      expect(decide(t, 'ask')).toBe('auto-accept')
+      expect(decide(t, 'accept-edits')).toBe('auto-accept')
+      expect(decide(t, 'auto')).toBe('auto-accept')
+    })
+  }
+  // Артефакт = тот же класс, что браузерная мутация (block в plan, иначе auto) —
+  // симметрию проверяем с browser_click, чтобы обе категории не разъехались.
+  it('артефакт и browser_click ведут себя ОДИНАКОВО во всех режимах', () => {
+    for (const mode of ['ask', 'accept-edits', 'plan', 'auto', 'bypass'] as AgentMode[]) {
+      expect(decide('generate_docx', mode)).toBe(decide('browser_click', mode))
+    }
+  })
+})
+
 describe('mode-policy blockReason()', () => {
   it('plan + connector_query → упоминает внешние системы', () => {
     const msg = blockReason('connector_query', 'plan')
@@ -64,6 +89,11 @@ describe('mode-policy blockReason()', () => {
   })
   it('plan + write_file → объясняет режим планирования', () => {
     expect(blockReason('write_file', 'plan')).toContain('планирования')
+  })
+  it('plan + артефакт → по-русски объясняет, что файл не создан', () => {
+    const msg = blockReason('generate_docx', 'plan')
+    expect(msg).toContain('планирования')
+    expect(msg.toLowerCase()).toMatch(/файл|артефакт|документ|диаграмм/)
   })
 })
 

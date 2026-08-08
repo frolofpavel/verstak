@@ -343,7 +343,14 @@ const GATE_MAX_WORKERS = 4
 // 08.08, аудит безопасности (свою свежую правку — злее): кламп commonReadDir не
 // обходится через `..` в read-пути (resolve нормализует + isWithinKnownRoots realpath
 // ловит). +2 пина (одиночный `..`-беглец; смесь легального и беглеца → зажат) → 4860.
-const EXPECTED_TOTAL_TESTS = 4860
+// 08.08, СЕДЬМОЙ ОБХОД ГЕЙТА (штаб нашёл): артефакты (generate_docx/html/render_chart)
+// писали файл на диск в ЛЮБОМ режиме, включая plan — не были ни в одной категории
+// mode-policy, и хендлеры не звали resolveDecision. Закрыто: гейтятся как браузерная
+// мутация (block в plan, иначе auto — не isEdit, т.к. модалки confirm нет и она дала бы
+// ложный Policy Center), + гейт resolveDecision в трёх хендлерах. +5 пинов mode-policy
+// (3 артефакта + симметрия с browser_click + blockReason) + 6 пинов энфорсмента в
+// хендлере (plan→блок, auto→проходит), мутация краснит оба слоя → 4871.
+const EXPECTED_TOTAL_TESTS = 4871
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

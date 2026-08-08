@@ -63,8 +63,22 @@ export interface AutoApprove {
 // «категория — СПИСОК» в tests/security/browser-plan-mode.test.ts).
 export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'browser_click_by_number', 'browser_type_by_number']
 
+/**
+ * Инструменты, СОЗДАЮЩИЕ ФАЙЛ на диске (артефакты): все три реально пишут в проект
+ * (render_chart → .svg, generate_html → .html, generate_docx → .docx). Седьмой обход
+ * гейта (08.08): их не было ни в одной категории → auto-accept во ВСЕХ режимах, включая
+ * plan, где запись запрещена. Гейтим как браузерную мутацию (block в plan, иначе
+ * auto-accept), а НЕ как isEdit: полноценный isEdit требует confirm в ask, а модалки
+ * подтверждения для артефактов нет — classify-как-isEdit без неё дал бы ЛОЖНЫЙ Policy
+ * Center (матрица decide() показывала бы confirm, а хендлер писал бы молча). Confirm в
+ * ask («файл есть файл») — отдельная задача с pending-flow, вынесена штабу/Павлу.
+ * Список, а не литерал: новый артефактный инструмент попадает под режим сразу.
+ */
+export const ARTIFACT_TOOLS: readonly string[] = ['generate_docx', 'generate_html', 'render_chart']
+
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
+  const isArtifact = ARTIFACT_TOOLS.includes(toolName)
   // execute_code (PTC) исполняет произвольный JS — vm НЕ граница безопасности, поэтому
   // trust = run_command: confirm в ask, block в plan. Без эскалации привилегий.
   const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
@@ -77,9 +91,11 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
   // reads + операции с СОБСТВЕННОЙ памятью агента (memory_save/memory_invalidate/
   // core_memory_*) всегда проходят: plan-режим гейтит изменения ПРОЕКТА (файлы/команды),
   // а не курирование агентом своей памяти (дёшево, обратимо, не трогает рабочее дерево).
-  if (!isEdit && !isCommand && !isBrowserMutation) return 'auto-accept'
-  // Браузерная мутация: строгость только там, где режим означает «ничего не менять».
-  if (isBrowserMutation) return mode === 'plan' ? 'block' : 'auto-accept'
+  if (!isEdit && !isCommand && !isBrowserMutation && !isArtifact) return 'auto-accept'
+  // Браузерная мутация и артефакт (запись файла на диск): строгость только там, где
+  // режим означает «ничего не менять» (plan → block), иначе auto-accept. Confirm в ask
+  // для артефактов сознательно НЕ здесь — нет модалки подтверждения (см. ARTIFACT_TOOLS).
+  if (isBrowserMutation || isArtifact) return mode === 'plan' ? 'block' : 'auto-accept'
 
   let decision: ToolDecision
   switch (mode) {
@@ -112,6 +128,11 @@ export function blockReason(toolName: string, mode: AgentMode): string {
              `так как они могут менять состояние внешних систем. ` +
              `Сосредоточься на чтении кода (read_file, get_project_map, search_project) и составлении плана через create_plan. ` +
              `Пользователь сам переключит режим когда захочет выполнить запрос к коннектору.`
+    }
+    if (ARTIFACT_TOOLS.includes(toolName)) {
+      return `Активен режим "Режим планирования" — создание файла-артефакта (документ, HTML или диаграмма) ` +
+             `запрещено: это ЗАПИСЬ на диск, а планирование ничего не меняет. ` +
+             `Сначала опиши содержимое артефакта в ответе/плане; пользователь переключит режим, когда захочет создать файл.`
     }
     return `Активен режим "Режим планирования" — изменение файлов и выполнение команд запрещены. ` +
            `Сосредоточься на чтении кода (read_file, get_project_map, search_project) и составлении плана через create_plan. ` +
