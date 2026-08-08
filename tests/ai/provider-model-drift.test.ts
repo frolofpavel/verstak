@@ -370,7 +370,7 @@ describe('per-provider политики ссылаются только на с�
     { file: 'electron/ai/tool-mode.ts', decl: 'COAXABLE_PROVIDERS' },
     { file: 'src/lib/vision-support.ts', decl: 'NO_VISION' },
     { file: 'electron/ai/tier-router.ts', decl: 'TIER_PROVIDERS' },
-    { file: 'src/lib/runtime-capability.ts', decl: 'CLI_WITH_TIMELINE' },
+    { file: 'shared/contracts/cli-capability.ts', decl: 'CLI_WITH_TIMELINE' },
     { file: 'src/lib/runtime-capability.ts', decl: 'CLI_WITH_NATIVE_MODE_CONTROL' },
   ]
 
