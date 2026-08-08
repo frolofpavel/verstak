@@ -189,6 +189,30 @@ if (haveSetup) {
   }
 }
 
+// ─── 3.6 Install smoke: приложение ЖИВЁТ, а не просто распаковано ─────────────
+// Шаг [3.5] считает пакеты в asar, но не запускает приложение — и гейт дважды был
+// зелёным на нежизнеспособной сборке (31.07 недоупакованный asar; 08.08 серое окно
+// 2.4.5, render_process_gone), ловил человек постфактум. Теперь запускаем собранное
+// приложение в ИЗОЛЯЦИИ (свой userData) и проверяем, доходит ли оно до маркера
+// готовности. Источник — release/win-unpacked (release-build.mjs его сохраняет).
+// Харнесс доказан на изготовленном мёртвом артефакте (scripts/smoke-install.mjs).
+console.log('\n[3.6] Install smoke (приложение живёт)')
+const smokeUnpacked = join(ROOT, 'release', 'win-unpacked')
+if (existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
+  const r = spawnSync(
+    'node',
+    [join(ROOT, 'scripts', 'smoke-install.mjs'), '--source', smokeUnpacked, '--break', 'none', '--expect', 'PASS', '--timeout', '45000'],
+    { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+  )
+  const out = (r.stdout || '') + (r.stderr || '')
+  // Гейт ОБЯЗАН называть, ЧТО не завелось (маркер/фатал/ранний выход), а не «smoke failed».
+  const m = out.match(/→\s*(PASS|FAIL|INCONCLUSIVE)\s*\(([^)]*)\)/)
+  const reason = m ? `${m[1]}: ${m[2]}` : (out.trim().split('\n').filter(Boolean).pop() || `exit ${r.status}`)
+  check('установленное приложение ЖИВЁТ (smoke: старт до маркера готовности)', r.status === 0, reason)
+} else {
+  notes.push('[3.6] install smoke пропущен: release/win-unpacked отсутствует (release-build.mjs должен его сохранять)')
+}
+
 // ─── 4. Объективные проверки кода ────────────────────────────────────────────
 console.log('\n[4] Проверки кода (типы / тесты)')
 const run = (label, cmd, args) => {
@@ -404,7 +428,19 @@ const GATE_MAX_WORKERS = 4
 // значения pricing-shared.test.ts (+8). Значения цен НЕ тронуты (verbatim, состав 55).
 // Характеризация расчёта на обоих слоях (pricing.test + cost-guard.test, 68 пинов) зелена
 // БЕЗ правок → поведение не изменилось, это рефактор. ИЗМЕРЕНО: 4912 / 0 (сумма 4907−3+8).
-const EXPECTED_TOTAL_TESTS = 4912
+// 09.08, линия native-ABI+smoke: три fail-closed точки класса «native ABI в релизе»
+// (обеззараженная самопочинка / гард afterPack / ABI на выходе сборки) + install smoke-тест
+// (доказан на ИЗГОТОВЛЕННОМ мёртвом артефакте: целая→PASS, без .node→FAIL, без preload→FAIL
+// через render-краш). +20 статичных пинов: native-abi 5, repair 3, afterPack 4, smoke-verdict 8.
+// Линия измерила 4927 поверх main 4907 — но пока она мерила, в main лёг блок 4 (4912).
+// 09.08, ФИНАЛЬНОЕ СЛИЯНИЕ ночи (штаб): линия безопасности (4912) + линия native-ABI+smoke (+20).
+// Разошедшиеся эталоны двух линий НЕ складывались вслепую и не брались по большему —
+// пересчитаны ИЗМЕРЕНИЕМ на фактически слитом дереве, ровно по правилу §3.1.
+// ИЗМЕРЕНО: 4933 / 0 падений / 1624 файла (json, --maxWorkers=4, дерево = этот merge).
+// ОЖИДАНИЕ БЫЛО 4932 (4912 + 20) И РАЗОШЛОСЬ НА +1 — записано намеренно, потому что это
+// третий подряд случай, когда арифметика приростов не сходится с фактом, и лучшая
+// иллюстрация, зачем правило «мерить, а не складывать» вообще появилось. Берём ФАКТ.
+const EXPECTED_TOTAL_TESTS = 4933
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

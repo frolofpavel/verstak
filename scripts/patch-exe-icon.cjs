@@ -8,6 +8,7 @@
 const path = require('path')
 const fs = require('fs')
 const rcedit = require('rcedit')
+const { classifyBetterSqlite3Abi } = require('./native-abi.cjs')
 
 const WIN_VERSION_STRINGS = {
   FileDescription: 'VERSTAK',
@@ -31,7 +32,7 @@ async function patchExeIcon(exePath, icoPath) {
 }
 
 /** @param {import('app-builder-lib').AfterPackContext} context */
-module.exports = async function afterPack(context) {
+async function afterPack(context) {
   if (context.electronPlatformName !== 'win32') return
   const name = context.packager.appInfo.productFilename
   if (context.packager.config.appId === 'ru.verstak.installer') {
@@ -46,26 +47,53 @@ module.exports = async function afterPack(context) {
   stageNativeFix(context.appOutDir)
 }
 
-function stageNativeFix(appOutDir) {
-  const src = path.join(
-    appOutDir,
-    'resources',
-    'app.asar.unpacked',
-    'node_modules',
-    'better-sqlite3',
-    'build',
-    'Release',
-    'better_sqlite3.node',
-  )
-  if (!fs.existsSync(src)) {
+/**
+ * Кладёт резервную копию better_sqlite3.node в native-fix/ ДЛЯ самопочинки на старте.
+ * ГАРД (закрытие класса на корню): «резервная» копия — это копия того же упакованного
+ * модуля, поэтому если он вдруг под Node ABI, в native-fix ушёл бы БИТЫЙ бэкап, а
+ * самопочинка потом «чинила» бы им рабочую копию. Проверяем годность ИСТОЧНИКА (ABI под
+ * Electron) ДО копирования; негоден → сборку валим (не сеем битый бэкап). Классификатор —
+ * out-of-process (native-abi.cjs), не лочит .node при упаковке остальных target'ов.
+ * deps инъектируются только для тестов.
+ */
+function stageNativeFix(appOutDir, deps = {}) {
+  const exists = deps.exists || fs.existsSync
+  const classify = deps.classify || classifyBetterSqlite3Abi
+  const mkdir = deps.mkdir || (d => fs.mkdirSync(d, { recursive: true }))
+  const copy = deps.copy || fs.copyFileSync
+  const src =
+    deps.src ||
+    path.join(
+      appOutDir,
+      'resources',
+      'app.asar.unpacked',
+      'node_modules',
+      'better-sqlite3',
+      'build',
+      'Release',
+      'better_sqlite3.node',
+    )
+  const destDir = deps.destDir || path.join(appOutDir, 'resources', 'native-fix')
+  if (!exists(src)) {
     console.warn('[afterPack] skip native-fix: better_sqlite3.node not found')
     return
   }
-  const destDir = path.join(appOutDir, 'resources', 'native-fix')
-  fs.mkdirSync(destDir, { recursive: true })
-  fs.copyFileSync(src, path.join(destDir, 'better_sqlite3.node'))
+  const abi = classify(src)
+  if (abi !== 'electron') {
+    throw new Error(
+      `[afterPack] better_sqlite3.node в app.asar.unpacked под «${abi}» ABI, а не Electron — ` +
+        'native-fix стал бы копией битого модуля, а самопочинка «чинила» бы им рабочую копию. Сборка отклонена.',
+    )
+  }
+  mkdir(destDir)
+  copy(src, path.join(destDir, 'better_sqlite3.node'))
   console.log('OK: native-fix →', destDir)
 }
+
+module.exports = afterPack
+module.exports.afterPack = afterPack
+module.exports.stageNativeFix = stageNativeFix
+module.exports.patchExeIcon = patchExeIcon
 
 if (require.main === module) {
   const exe = process.argv[2] || path.join(__dirname, '..', 'release', 'win-unpacked', 'Verstak.exe')

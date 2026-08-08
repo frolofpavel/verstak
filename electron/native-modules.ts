@@ -1,6 +1,7 @@
 import { app, dialog } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
+import { logRuntime } from './runtime-log'
 
 export type NativeProbeResult = 'ok' | 'missing' | 'abi_mismatch' | 'unknown'
 
@@ -34,13 +35,34 @@ export function probeBetterSqlite3Node(nodePath: string): NativeProbeResult {
   }
 }
 
-export function repairBetterSqlite3FromBundle(): boolean {
-  const target = betterSqlite3NodePath()
-  const source = betterSqlite3FixSourcePath()
-  if (!existsSync(source)) return false
-  mkdirSync(dirname(target), { recursive: true })
-  copyFileSync(source, target)
-  return probeBetterSqlite3Node(target) === 'ok'
+/** Инъекция зависимостей — только для тестов; в проде все берутся из модуля/fs. */
+export interface RepairDeps {
+  target?: string
+  source?: string
+  exists?: (p: string) => boolean
+  probe?: (p: string) => NativeProbeResult
+  ensureDir?: (target: string) => void
+  copy?: (from: string, to: string) => void
+}
+
+export function repairBetterSqlite3FromBundle(deps: RepairDeps = {}): boolean {
+  const target = deps.target ?? betterSqlite3NodePath()
+  const source = deps.source ?? betterSqlite3FixSourcePath()
+  const exists = deps.exists ?? existsSync
+  const probe = deps.probe ?? probeBetterSqlite3Node
+  const ensureDir = deps.ensureDir ?? ((t: string) => mkdirSync(dirname(t), { recursive: true }))
+  const copy = deps.copy ?? copyFileSync
+
+  if (!exists(source)) return false
+  // Пробуем ИСТОЧНИК ДО перезаписи. Негодный native-fix (напр. Node ABI под Electron)
+  // НЕ должен затирать рабочую копию: иначе самопочинка уничтожает рабочий модуль
+  // (build уже удалён в ensureBetterSqlite3Healthy) и чинит сломанное таким же
+  // сломанным. Латентный риск класса 2.4.5 (сам инцидент имел иную, неизвестную
+  // причину). Не тот ABI → target не трогаем, false.
+  if (probe(source) !== 'ok') return false
+  ensureDir(target)
+  copy(source, target)
+  return probe(target) === 'ok'
 }
 
 /**
@@ -73,6 +95,15 @@ export function ensureBetterSqlite3Healthy(): void {
   }
 
   if (probe !== 'ok' && repairBetterSqlite3FromBundle()) return
+
+  // VERSTAK_SMOKE: install smoke-тест не может кликнуть модалку — она бы повесила гейт.
+  // Пишем фатальный маркер в errors.jsonl (его читает smoke-install.mjs) и выходим 1
+  // сразу, без модального showErrorBox. Обычный пользовательский путь не тронут.
+  if (process.env.VERSTAK_SMOKE) {
+    logRuntime('db.open.fail', { probe, target, reason: 'better_sqlite3 native module unavailable' }, 'error')
+    app.exit(1)
+    return
+  }
 
   const hint =
     probe === 'abi_mismatch'
