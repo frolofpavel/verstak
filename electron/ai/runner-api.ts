@@ -78,6 +78,15 @@ export interface MaterialsRunContext {
 
 /** Инструменты чтения, чьи исходы попадают в набор материалов папки. */
 const MATERIAL_READ_TOOLS = new Set(['read_file', 'read_document', 'read_spreadsheet', 'read_pdf'])
+
+/**
+ * Давать ли модели spawn_task_session. Только КОРНЮ (не дочерней сессии) и только при
+ * включённом оркестраторе. Гард глубины (задача C, 08.08): вынесенная задача не заводит
+ * внучек — иначе дерево видимых чатов, которых человек не создавал, растёт без предела.
+ */
+export function offersSpawnTaskSession(orchestratorDefaultOn: boolean, isChildSession: boolean): boolean {
+  return orchestratorDefaultOn && !isChildSession
+}
 // 1.9.7 #7: троттлинг crash-resume чекпойнтов (только API-путь).
 const checkpointThrottle = new Map<string, CheckpointThrottleState>()
 
@@ -749,7 +758,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // tests/lib/runtime-flags.test.ts. Дефолт ON — решение Павла; килл-свитч
     // (осознанное 'false') в RuntimeFlagsTab. Триггер — решение МОДЕЛИ по ходу.
     const orchestratorDefaultOn = getSecretForDelegate?.('orchestrator_default') !== 'false'
-    if (!orchestratorDefaultOn) {
+    // ГАРД ГЛУБИНЫ (задача C, 08.08): spawn_task_session даётся ТОЛЬКО корню. parentChatId
+    // задан ⇒ это уже вынесенная (дочерняя) сессия — глубина ровно один уровень, внучек
+    // она не заводит. Без гарда дерево ВИДИМЫХ чатов растёт без ограничителя (у спавна, в
+    // отличие от delegate_task, лимита глубины не было — держал случайно лишь малый бюджет
+    // ребёнка; поднимать бюджет без этого гарда нельзя).
+    if (!offersSpawnTaskSession(orchestratorDefaultOn, parentChatId != null)) {
       allToolDefs = allToolDefs.filter(t => t.name !== 'spawn_task_session')
     }
     // 2.0.8-F cache-диагностика: набор инструментов входит в кэшируемый префикс, поэтому его
