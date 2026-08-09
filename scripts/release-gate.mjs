@@ -12,7 +12,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import asar from '@electron/asar'
+
+const require = createRequire(import.meta.url)
+const { comparePayloadTrees, describeCompareResult } = require('./payload-compare.cjs')
 
 const ROOT = process.cwd()
 const failures = []
@@ -189,29 +193,82 @@ if (haveSetup) {
   }
 }
 
+// ─── 3.55 Пейлоад установщика == win-unpacked (что РЕАЛЬНО ставится) ──────────
+// Гейт до 09.08 проверял ЭТАЛОН (win-unpacked), а установщик кладёт пользователю
+// содержимое app-payload.7z — и сборщик пейлоада (build-setup.cjs) три версии подряд
+// (2.4.5–2.4.7) фильтровал locales\: рендер у установивших падал access violation в
+// вечное серое окно, гейт при этом был зелёным — он смотрел не на то дерево.
+// Теперь пейлоад извлекается из САМОГО Setup.exe и сверяется с win-unpacked пофайлово
+// (имена + размеры; недостающий, обрезанный или лишний файл роняет). Контрольный кейс
+// «пейлоад без locales → красный» — tests/scripts/payload-compare.test.ts.
+// Именно СВЕРКА, а не smoke, ловит этот класс: живой прогон 09.08 показал, что без
+// locales на чистом userData приложение доходит до startup.ok без краша — access
+// violation установленных 2.4.5–2.4.7 зависел от состояния реального профиля.
+console.log('\n[3.55] Пейлоад установщика == win-unpacked (пофайлово)')
+const smokeUnpacked = join(ROOT, 'release', 'win-unpacked')
+const payloadTmp = join(tmpdir(), `verstak-gate-payload-${version}`)
+let payloadTreeDir = null
+if (haveSetup && existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
+  try {
+    rmSync(payloadTmp, { recursive: true, force: true })
+    mkdirSync(payloadTmp, { recursive: true })
+    const sevenZip = join(ROOT, 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe')
+    // Паттерн с ПРЯМЫМИ слэшами — как в [3.5]: обратный слэш не матчит записи NSIS-архива.
+    spawnSync(sevenZip, ['e', setup, `-o${payloadTmp}`, 'resources/app-payload.7z', '-y'], { encoding: 'utf8' })
+    const payloadArchive = join(payloadTmp, 'app-payload.7z')
+    if (check('app-payload.7z извлечён из Setup.exe', existsSync(payloadArchive))) {
+      const treeDir = join(payloadTmp, 'tree')
+      const x = spawnSync(sevenZip, ['x', payloadArchive, `-o${treeDir}`, '-y', '-bso0', '-bsp0'], { encoding: 'utf8' })
+      if (check('пейлоад распакован полностью', x.status === 0, x.status === 0 ? '' : (x.stderr || '').trim().slice(0, 120))) {
+        // smoke [3.6] дальше гоняется на ЭТОМ дереве даже при расхождении сверки:
+        // красный от сверки уже есть, а smoke даст вторую улику — как именно умирает.
+        payloadTreeDir = treeDir
+        const cmp = comparePayloadTrees(smokeUnpacked, treeDir)
+        check('пейлоад == win-unpacked пофайлово (имена + размеры)', cmp.ok, describeCompareResult(cmp))
+      }
+    }
+  } catch (e) {
+    check('пейлоад сверен с win-unpacked', false, String(e).slice(0, 120))
+  }
+} else if (!haveSetup) {
+  notes.push('[3.55] сверка пейлоада пропущена: Setup.exe не собран')
+} else {
+  notes.push('[3.55] сверка пейлоада пропущена: release/win-unpacked отсутствует (release-build.mjs должен его сохранять)')
+}
+
 // ─── 3.6 Install smoke: приложение ЖИВЁТ, а не просто распаковано ─────────────
 // Шаг [3.5] считает пакеты в asar, но не запускает приложение — и гейт дважды был
 // зелёным на нежизнеспособной сборке (31.07 недоупакованный asar; 08.08 серое окно
 // 2.4.5, render_process_gone), ловил человек постфактум. Теперь запускаем собранное
 // приложение в ИЗОЛЯЦИИ (свой userData) и проверяем, доходит ли оно до маркера
-// готовности. Источник — release/win-unpacked (release-build.mjs его сохраняет).
-// Харнесс доказан на изготовленном мёртвом артефакте (scripts/smoke-install.mjs).
+// готовности. Источник — дерево пейлоада из Setup.exe ([3.55]), т.е. РОВНО то, что
+// получает пользователь; fallback — release/win-unpacked, если Setup не собран.
+// settle 8000: render_process_gone установленной 2.4.5–2.4.7 приходил ~0.5 с ПОСЛЕ
+// позитивного маркера (did_finish_load) — окно наблюдения после позитива обязано
+// накрывать этот класс с запасом. Харнесс доказан на изготовленном мёртвом артефакте
+// (scripts/smoke-install.mjs, --break db|renderer --expect FAIL; класс locales smoke
+// не ловит — см. [3.55]).
 console.log('\n[3.6] Install smoke (приложение живёт)')
-const smokeUnpacked = join(ROOT, 'release', 'win-unpacked')
-if (existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
+const smokeSource = payloadTreeDir ?? smokeUnpacked
+if (existsSync(join(smokeSource, 'Verstak.exe'))) {
   const r = spawnSync(
     'node',
-    [join(ROOT, 'scripts', 'smoke-install.mjs'), '--source', smokeUnpacked, '--break', 'none', '--expect', 'PASS', '--timeout', '45000'],
+    [join(ROOT, 'scripts', 'smoke-install.mjs'), '--source', smokeSource, '--break', 'none', '--expect', 'PASS', '--timeout', '45000', '--settle', '8000'],
     { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
   )
   const out = (r.stdout || '') + (r.stderr || '')
   // Гейт ОБЯЗАН называть, ЧТО не завелось (маркер/фатал/ранний выход), а не «smoke failed».
   const m = out.match(/→\s*(PASS|FAIL|INCONCLUSIVE)\s*\(([^)]*)\)/)
   const reason = m ? `${m[1]}: ${m[2]}` : (out.trim().split('\n').filter(Boolean).pop() || `exit ${r.status}`)
-  check('установленное приложение ЖИВЁТ (smoke: старт до маркера готовности)', r.status === 0, reason)
+  check(
+    `установленное приложение ЖИВЁТ (smoke на ${payloadTreeDir ? 'пейлоаде из Setup.exe' : 'win-unpacked'})`,
+    r.status === 0,
+    reason,
+  )
 } else {
-  notes.push('[3.6] install smoke пропущен: release/win-unpacked отсутствует (release-build.mjs должен его сохранять)')
+  notes.push('[3.6] install smoke пропущен: нет дерева с Verstak.exe (ни пейлоада, ни win-unpacked)')
 }
+try { rmSync(payloadTmp, { recursive: true, force: true }) } catch { /* ignore */ }
 
 // ─── 4. Объективные проверки кода ────────────────────────────────────────────
 console.log('\n[4] Проверки кода (типы / тесты)')
@@ -446,7 +503,12 @@ const GATE_MAX_WORKERS = 4
 // дефект searchMemories — 336 «прод-записей» оказались все до одной тестовыми).
 // ФИНАЛ НОЧИ, ИЗМЕРЕНО на полном слитом дереве: 4948 / 0 падений / 1631 файл
 // (json, --maxWorkers=4). Это число — о том дереве, которое реально лежит в main.
-const EXPECTED_TOTAL_TESTS = 4948
+// 09.08, установщик терял locales (серые окна 2.4.5–2.4.7): пины на пейлоад-сборщик
+// (build-setup-payload 4) + пофайловую сверку пейлоада с win-unpacked (payload-compare 4,
+// контрольный «без locales → красный») + watchdog смерти рендера (render-watchdog 5).
+// ИЗМЕРЕНО на дереве поверх main 4702c5d: 4961 / 0 падений / 570 файлов
+// (json, --maxWorkers=2 — машина под параллельной работой; сумма 4948+13 совпала).
+const EXPECTED_TOTAL_TESTS = 4961
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

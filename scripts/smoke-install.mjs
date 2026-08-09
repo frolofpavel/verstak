@@ -9,7 +9,7 @@
 // Установку Павла НЕ трогает: работает на копии, свой userData, teardown в конце.
 //
 // Запуск:
-//   node scripts/smoke-install.mjs --source <dir с Verstak.exe> [--break none|db|renderer]
+//   node scripts/smoke-install.mjs --source <dir с Verstak.exe> [--break none|db|renderer|locales]
 //                                  [--expect PASS|FAIL] [--timeout 30000] [--keep]
 import { spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -28,7 +28,7 @@ const hasFlag = name => process.argv.includes(`--${name}`)
 
 const DEFAULT_SOURCE = join(process.env.LOCALAPPDATA || '', 'Programs', 'Verstak')
 const source = arg('source', DEFAULT_SOURCE)
-const breakKind = arg('break', 'none') // none | db | renderer
+const breakKind = arg('break', 'none') // none | db | renderer | locales
 const expect = (arg('expect', '') || '').toUpperCase() // PASS | FAIL | ''
 const timeoutMs = Number.parseInt(arg('timeout', '30000'), 10)
 const settleMs = Number.parseInt(arg('settle', '3500'), 10) // после позитива ждём фатал
@@ -98,15 +98,23 @@ function breakRenderer() {
   // Сносим preload (распакован через asarUnpack) — окно не может инициализировать рендерер,
   // Electron эмитит preload-error/render-process-gone. Это класс краха установленной 2.4.5.
   const preload = join(appDir, 'resources', 'app.asar.unpacked', 'out', 'preload')
-  if (existsSync(preload)) {
-    rmSync(preload, { recursive: true, force: true })
-    console.log('[smoke] поломка renderer: снесён out/preload')
-  } else {
-    // Фолбэк: снести локали (mismatch locale → нативный краш рендерера, комментарий deploy-local).
-    const locales = join(appDir, 'locales')
-    rmSync(locales, { recursive: true, force: true })
-    console.log('[smoke] поломка renderer: снесён locales/')
+  if (!existsSync(preload)) {
+    // Прежний фолбэк «снести locales» ОПРОВЕРГНУТ живым прогоном 09.08: без locales на
+    // ЧИСТОМ userData приложение доходит до startup.ok без краша (PASS) — фолбэк давал
+    // ложно-краснеющую поломку, которая не краснеет. Не изображаем поломку, которой нет.
+    die('нет out/preload в источнике — поломку renderer внести нельзя')
   }
+  rmSync(preload, { recursive: true, force: true })
+  console.log('[smoke] поломка renderer: снесён out/preload')
+}
+function breakLocales() {
+  // Класс потери 2.4.5–2.4.7: сборщик пейлоада терял locales\. ВНИМАНИЕ: на чистом
+  // userData краш НЕ воспроизводится (проверено 09.08 — startup.ok, PASS за 10 с);
+  // access violation у установленных версий зависел от состояния реального профиля.
+  // Поэтому гейт ловит этот класс ПОФАЙЛОВОЙ СВЕРКОЙ ([3.55] release-gate), а этот
+  // режим оставлен для живой диагностики на реальном профиле, не как контрольный FAIL.
+  rmSync(join(appDir, 'locales'), { recursive: true, force: true })
+  console.log('[smoke] поломка locales: снесён locales/')
 }
 
 // --- Чтение логов приложения ---
@@ -140,6 +148,7 @@ async function main() {
 
   if (breakKind === 'db') breakDb()
   else if (breakKind === 'renderer') breakRenderer()
+  else if (breakKind === 'locales') breakLocales()
   else if (breakKind !== 'none') die(`неизвестный --break: ${breakKind}`)
 
   const exe = join(appDir, 'Verstak.exe')

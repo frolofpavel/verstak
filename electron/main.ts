@@ -137,6 +137,7 @@ import {
   readMainWindowState,
   trackMainWindowState
 } from './window-state'
+import { createRenderWatchdog } from './render-watchdog'
 import type { Settings } from './storage/settings'
 
 let mainWindowRef: BrowserWindow | null = null
@@ -174,9 +175,26 @@ function createWindow(settings: Settings): BrowserWindow {
   // Диагностика/наблюдаемость рендерера: причина падения, его консоль, сбой preload,
   // ошибка загрузки. Логируется в main-процесс (видно в ELECTRON_ENABLE_LOGGING).
   // Полезно и в проде: молчаливый краш рендерера в упаковке иначе не отследить.
+  // Watchdog: смерть рендера не оставляет труп-окно (класс серых окон 2.4.5–2.4.7,
+  // access violation без locales). Сначала ЛОГ СМЕРТИ — след дефекта остаётся всегда,
+  // перезагрузка его не прячет; потом решение: reload с лимитом попыток, дальше
+  // честная ошибка человеку вместо молчаливого цикла крашей.
+  const renderWatchdog = createRenderWatchdog()
   win.webContents.on('render-process-gone', (_e, details) => {
     logRuntime('window.render_process_gone', { reason: details.reason, exitCode: details.exitCode }, 'error')
     console.error('[render-process-gone]', JSON.stringify(details))
+    const decision = renderWatchdog.decide(details.reason)
+    if (decision === 'reload') {
+      logRuntime('window.render_watchdog.reload', { reason: details.reason }, 'warn')
+      win.webContents.reload()
+    } else if (decision === 'give-up') {
+      logRuntime('window.render_watchdog.give_up', { reason: details.reason }, 'error')
+      dialog.showErrorBox(
+        'Verstak: окно не запускается',
+        `Внутреннее окно приложения падает при каждом запуске (${details.reason}, код ${details.exitCode}).\n` +
+          'Переустановите Verstak свежим установщиком. Логи: папка logs в данных приложения.',
+      )
+    }
   })
   win.webContents.on('preload-error', (_e, preloadPath, err) => {
     logRuntimeError('window.preload_error', err, { preloadPath })
@@ -344,6 +362,13 @@ app.on('second-instance', () => {
   logRuntime('app.second_instance')
   const win = BrowserWindow.getAllWindows()[0]
   if (!win) return
+  // Мёртвый рендер не показываем как живой (2.4.5–2.4.7: каждый клик по ярлыку
+  // фокусировал серый труп зомби-экземпляра). Клик человека — осознанная попытка
+  // открыть приложение, поэтому reload даже если watchdog уже исчерпал лимит.
+  if (win.webContents.isCrashed()) {
+    logRuntime('app.second_instance.dead_renderer_reload', {}, 'warn')
+    win.webContents.reload()
+  }
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()

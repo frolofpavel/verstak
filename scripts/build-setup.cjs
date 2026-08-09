@@ -41,7 +41,12 @@ function die(msg) {
   process.exit(1)
 }
 
-const PAYLOAD_SKIP = new Set(['app-payload', 'locales'])
+// В пейлоад идёт ВСЁ дерево win-unpacked, кроме вложенного app-payload прошлой сборки.
+// 'locales' здесь стоял с 777a304 («быстрее старт установщика») и стоил трёх версий
+// с серым окном: без locale-pak рендер Chromium падает access violation (0xC0000005)
+// через ~0.5 с после did_finish_load. Ничего из win-unpacked больше не фильтровать —
+// потерю ловят tests/scripts/build-setup-payload.test.ts и сверка в release-gate.
+const PAYLOAD_SKIP = new Set(['app-payload'])
 
 function readAsarFile(archivePath, filePath) {
   const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
@@ -194,6 +199,7 @@ function writeLatestYml(version, setupPath) {
   fs.writeFileSync(path.join(ROOT, 'release', 'latest.yml'), body)
 }
 
+function main() {
 if (!fs.existsSync(path.join(UNPACKED, 'Verstak.exe'))) {
   die('Нет release/win-unpacked — сначала соберите приложение (electron-builder --win --x64).')
 }
@@ -255,3 +261,10 @@ if (!fs.existsSync(built)) die(`Не найден ${built}`)
 fs.copyFileSync(built, dest)
 writeLatestYml(pkg.version, dest)
 console.log(`[build-setup] OK → release/${setupName}`)
+}
+
+if (require.main === module) main()
+
+// Экспорт для тестов: copyDirFiltered формирует пейлоад установщика, и потеря
+// каталога здесь = битая установка у пользователя (locales, 2.4.5–2.4.7).
+module.exports = { PAYLOAD_SKIP, copyDirFiltered, computePayloadManifest }
