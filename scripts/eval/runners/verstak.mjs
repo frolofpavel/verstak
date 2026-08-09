@@ -2,15 +2,16 @@ import { spawnSync } from 'node:child_process'
 import { request as httpsRequest } from 'node:https'
 import { cleanGitEnvironment, redactSecrets } from '../contracts.mjs'
 
-export function runVerstakCli({ root, repoRoot, cliPath, fixture, model, maxTurns }) {
-  return spawnSync(
+export function runVerstakCli({ root, repoRoot, cliPath, fixture, model, maxTurns, provider }) {
+  const started = Date.now()
+  const result = spawnSync(
     process.execPath,
     [
       cliPath,
       'recipe',
       'run',
       '--provider',
-      'verstak-gateway',
+      provider ?? 'verstak-gateway',
       '--model',
       model,
       '--recipe',
@@ -32,6 +33,9 @@ export function runVerstakCli({ root, repoRoot, cliPath, fixture, model, maxTurn
       env: cleanGitEnvironment(),
     },
   )
+  // spawnSync не меряет время сам; без этого поля колонка median time у verstak
+  // в Arena-отчёте была вечным unknown.
+  return { ...result, durationMs: Date.now() - started }
 }
 
 export async function resolveModel(spec, args, apiKey) {

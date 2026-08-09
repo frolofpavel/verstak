@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildArenaSummary, writeArenaReports } from './arena-report.mjs'
+import { analyzeSelfCheck } from './self-check.mjs'
 import { getVerstakCommit, hasSecretLikeText, splitList } from './contracts.mjs'
 import { changedFiles, materializeFixture, runVerify, snapshot } from './fixtures/helpers.mjs'
 import { selectFixtures } from './fixtures/index.mjs'
@@ -41,6 +42,7 @@ export async function runArena(argv, env = process.env) {
   const reproduceCommand = [
     'npm run eval:arena --',
     `--runners ${args.runners.join(',')}`,
+    `--provider ${args.provider}`,
     `--models ${args.models.join(',')}`,
     `--suite ${args.suite}`,
     `--repeat ${args.repeat}`,
@@ -53,6 +55,7 @@ export async function runArena(argv, env = process.env) {
       suite: args.suite,
       repeat: args.repeat,
       models: args.models,
+      provider: args.provider,
       runners: args.runners,
       dryRun: args.dryRun,
       probes,
@@ -89,6 +92,7 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
             task: fixture.task,
             fixture,
             maxTurns: fixture.maxTurns,
+            provider: args.provider,
             env,
           })
         : { status: 1, stdout: '', stderr: comparabilityReason, error: null, durationMs: 0 }
@@ -98,6 +102,12 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
       /model.{0,40}(not found|unknown|unavailable|unsupported|invalid)|unknown model|invalid model/i.test(raw)
     const comparable = comparableBeforeRun && !modelUnavailable
     if (modelUnavailable) comparabilityReason = `model "${model}" is unavailable in ${runner.label}`
+    // Трейс агента (метрики §5 V2: шаги · вызовы · ошибки · была ли проверка).
+    // Отдаёт его только verstak-cli (--trace-json в stdout-JSON); у конкурентов
+    // и в dry-run парс не удаётся, и метрики честно уходят в null/no-trace.
+    let agentTrace = null
+    try { agentTrace = JSON.parse(execution.stdout || '')?.trace ?? null } catch { /* нет JSON-вывода */ }
+    const selfCheck = analyzeSelfCheck(agentTrace)
     const verifyRuns = !args.dryRun && comparable ? runVerify(workspace, fixture.verify) : []
     const after = existsSync(workspace) ? snapshot(workspace) : new Map()
     const changed = changedFiles(before, after)
@@ -129,6 +139,11 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
       durationMs: execution.durationMs,
       estimatedCost: null,
       interventions: countInterventions(raw),
+      agentTurns: agentTrace?.turnsUsed ?? null,
+      agentToolCalls: agentTrace?.toolCallsCount ?? agentTrace?.toolCalls?.length ?? null,
+      agentErrors: agentTrace ? Boolean(agentTrace.runtimeError || agentTrace.modelError) : null,
+      selfCheck: selfCheck.status,
+      selfCheckEvidence: selfCheck.evidence,
       comparable,
       comparabilityReason,
       traceSecretLeak,
@@ -155,6 +170,9 @@ function parseArenaArgs(argv) {
     runners: ['verstak', 'codex', 'opencode'],
     models: [],
     tasks: null,
+    // Провайдер verstak-раннера. Ключ берётся ИЗ ОКРУЖЕНИЯ по имени провайдера
+    // (PROVIDER_ENV_KEYS) — в код и отчёты значения ключей не попадают.
+    provider: 'verstak-gateway',
     suite: 'core',
     repeat: 3,
     runDate: null,
@@ -170,6 +188,7 @@ function parseArenaArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--runners') args.runners = splitList(valueAt(i++, arg))
+    else if (arg === '--provider') args.provider = valueAt(i++, arg)
     else if (arg === '--models') args.models = splitList(valueAt(i++, arg))
     else if (arg === '--tasks') args.tasks = splitList(valueAt(i++, arg))
     else if (arg === '--suite') args.suite = valueAt(i++, arg)
@@ -199,13 +218,30 @@ function dryProbe(runner) {
   return { available: true, version: `${runner.id}-dry-run`, error: null }
 }
 
+// Env-ключ на провайдера — зеркало ENV_KEYS из scripts/verstak-cli.mjs для
+// провайдеров, которыми реально гоняют Arena. Значение ключа никогда не читается
+// дальше Boolean(): в отчёт попадает только имя недостающей переменной.
+const PROVIDER_ENV_KEYS = Object.freeze({
+  'verstak-gateway': 'VERSTAK_GATEWAY_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+})
+
 function runnerProbe(runner, args, env) {
   if (args.dryRun) return dryProbe(runner)
   if (runner.id === 'verstak') {
+    const envKey = PROVIDER_ENV_KEYS[args.provider]
+    if (!envKey) {
+      return {
+        available: false,
+        version: `verstak-${getVerstakCommit(ROOT).slice(0, 12)}`,
+        error: `Arena does not know the env key for provider "${args.provider}"`,
+      }
+    }
     return {
-      available: Boolean(env.VERSTAK_GATEWAY_API_KEY),
+      available: Boolean(env[envKey]),
       version: `verstak-${getVerstakCommit(ROOT).slice(0, 12)}`,
-      error: env.VERSTAK_GATEWAY_API_KEY ? null : 'VERSTAK_GATEWAY_API_KEY is missing',
+      error: env[envKey] ? null : `${envKey} is missing`,
     }
   }
   return probeVersion(runner, env)

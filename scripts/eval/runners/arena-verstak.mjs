@@ -9,7 +9,7 @@ export const verstakArenaRunner = assertRunnerAdapter({
   versionArgs: ['--version'],
   automation: 'non-interactive',
   permissionProfile: 'isolated-workspace-write',
-  buildInvocation({ repoRoot, workspace, model, fixture, maxTurns }) {
+  buildInvocation({ repoRoot, workspace, model, fixture, maxTurns, provider }) {
     return {
       root: workspace,
       repoRoot,
@@ -17,12 +17,13 @@ export const verstakArenaRunner = assertRunnerAdapter({
       fixture,
       model,
       maxTurns,
+      provider,
     }
   },
 })
 
-export function runVerstakArena({ repoRoot, workspace, model, fixture, maxTurns }) {
+export function runVerstakArena({ repoRoot, workspace, model, fixture, maxTurns, provider }) {
   return runVerstakCli(
-    verstakArenaRunner.buildInvocation({ repoRoot, workspace, model, fixture, maxTurns }),
+    verstakArenaRunner.buildInvocation({ repoRoot, workspace, model, fixture, maxTurns, provider }),
   )
 }

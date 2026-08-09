@@ -59,10 +59,13 @@ describe('modular model eval harness', () => {
         runDate: '2026-07-17T00:00:00.000Z',
       })
       expect(parsed.meta.verstakCommit).toMatch(/^[a-f0-9]{40}$/)
-      expect(parsed.meta.fixtureManifest).toHaveLength(30)
-      expect(parsed.rows).toHaveLength(180)
-      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { id: string }) => fixture.id)).size).toBe(30)
-      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).size).toBe(30)
+      // 09.08: +4 фикстуры классов задач из ТЗ V2 §5 (diagnose-root-cause,
+      // small-function, linked-files-edit, self-inflicted-regression) — контракт
+      // состава сознательно расширен постановкой штаба, baseline снимается с ними.
+      expect(parsed.meta.fixtureManifest).toHaveLength(34)
+      expect(parsed.rows).toHaveLength(204)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { id: string }) => fixture.id)).size).toBe(34)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).size).toBe(34)
       expect(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).toEqual([
         'small-edit',
         'bugfix',
@@ -94,6 +97,10 @@ describe('modular model eval harness', () => {
         'rate-limit-account-rotation-simulation',
         'proof-completeness',
         'unrelated-change-resistance',
+        'diagnose-root-cause',
+        'small-function',
+        'linked-files-edit',
+        'self-inflicted-regression',
       ])
       expect(readFileSync(join(dir, 'report.md'), 'utf8')).toContain('| fixture | category | recipe |')
 

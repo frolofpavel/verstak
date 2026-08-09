@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { assertNoSecretLikeText, redactSecrets } from './contracts.mjs'
+import { describeSelfCheck } from './self-check.mjs'
 
 export function buildArenaSummary(rows, repeat) {
   const groups = new Map()
@@ -18,6 +19,8 @@ export function buildArenaSummary(rows, repeat) {
       durations: [],
       costs: [],
       interventions: 0,
+      selfCheckedRuns: 0,
+      selfCheckEligibleRuns: 0,
     }
     group.runs++
     if (row.comparable) {
@@ -27,6 +30,12 @@ export function buildArenaSummary(rows, repeat) {
       if (Number.isFinite(row.durationMs)) group.durations.push(row.durationMs)
       if (Number.isFinite(row.estimatedCost)) group.costs.push(row.estimatedCost)
       group.interventions += row.interventions
+      // Метрика «проверил ли себя» считается только там, где записи БЫЛИ:
+      // no-writes/no-trace не разбавляют rate ни в плюс, ни в минус.
+      if (row.selfCheck === 'checked' || row.selfCheck === 'unchecked') {
+        group.selfCheckEligibleRuns++
+        if (row.selfCheck === 'checked') group.selfCheckedRuns++
+      }
     }
     groups.set(key, group)
   }
@@ -41,6 +50,9 @@ export function buildArenaSummary(rows, repeat) {
     medianDurationMs: median(group.durations),
     medianEstimatedCost: median(group.costs),
     interventions: group.interventions,
+    selfCheckedRuns: group.selfCheckedRuns,
+    selfCheckEligibleRuns: group.selfCheckEligibleRuns,
+    selfCheckRate: group.selfCheckEligibleRuns ? group.selfCheckedRuns / group.selfCheckEligibleRuns : null,
     comparable: group.comparableRuns === group.runs && group.runs > 0,
     productionRecommendationEligible:
       repeat >= 3
@@ -61,7 +73,7 @@ export function writeArenaReports({ markdownPath, jsonPath, payload }) {
   writeFileSync(jsonPath, json, 'utf8')
 }
 
-function renderArenaMarkdown(payload) {
+export function renderArenaMarkdown(payload) {
   const lines = [
     '# Verstak Model Gym Arena',
     '',
@@ -75,12 +87,12 @@ function renderArenaMarkdown(payload) {
     '',
     '## Сводка',
     '',
-    '| runner | version | model | runs | pass rate | median time | median cost | interventions | comparable | production eligible |',
-    '|---|---|---|---:|---:|---:|---:|---:|---|---|',
+    '| runner | version | model | runs | pass rate | self-check rate | median time | median cost | interventions | comparable | production eligible |',
+    '|---|---|---|---:|---:|---:|---:|---:|---:|---|---|',
   ]
   for (const item of payload.summary) {
     lines.push(
-      `| ${esc(item.runnerLabel)} | ${esc(item.runnerVersion)} | ${esc(item.model)} | ${item.runs} | ${item.passRate === null ? 'unknown' : `${(item.passRate * 100).toFixed(1)}%`} | ${nullable(item.medianDurationMs)} | ${nullable(item.medianEstimatedCost)} | ${item.interventions} | ${item.comparable ? 'yes' : 'no'} | ${item.productionRecommendationEligible ? 'yes' : 'no'} |`,
+      `| ${esc(item.runnerLabel)} | ${esc(item.runnerVersion)} | ${esc(item.model)} | ${item.runs} | ${item.passRate === null ? 'unknown' : `${(item.passRate * 100).toFixed(1)}%`} | ${item.selfCheckRate === null || item.selfCheckRate === undefined ? 'unknown' : `${(item.selfCheckRate * 100).toFixed(1)}% (${item.selfCheckedRuns}/${item.selfCheckEligibleRuns})`} | ${nullable(item.medianDurationMs)} | ${nullable(item.medianEstimatedCost)} | ${item.interventions} | ${item.comparable ? 'yes' : 'no'} | ${item.productionRecommendationEligible ? 'yes' : 'no'} |`,
     )
   }
   lines.push(
@@ -96,12 +108,12 @@ function renderArenaMarkdown(payload) {
     '',
     '## Запуски',
     '',
-    '| runner | model | fixture | repeat | result | verify | time ms | cost | interventions | comparable | reason |',
-    '|---|---|---|---|---|---|---:|---:|---:|---|---|',
+    '| runner | model | fixture | repeat | result | verify | time ms | cost | interventions | turns | calls | errors | self-check | comparable | reason |',
+    '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|',
   )
   for (const row of payload.rows) {
     lines.push(
-      `| ${esc(row.runnerId)} | ${esc(row.model)} | ${esc(row.fixtureId)} | ${row.repeat} | ${esc(row.result)} | ${row.verifyPass ? 'pass' : 'fail'} | ${row.durationMs} | ${nullable(row.estimatedCost)} | ${row.interventions} | ${row.comparable ? 'yes' : 'no'} | ${esc(row.comparabilityReason || row.failureMode)} |`,
+      `| ${esc(row.runnerId)} | ${esc(row.model)} | ${esc(row.fixtureId)} | ${row.repeat} | ${esc(row.result)} | ${row.verifyPass ? 'pass' : 'fail'} | ${row.durationMs} | ${nullable(row.estimatedCost)} | ${row.interventions} | ${nullable(row.agentTurns)} | ${nullable(row.agentToolCalls)} | ${row.agentErrors === null || row.agentErrors === undefined ? 'unknown' : row.agentErrors ? 'yes' : 'no'} | ${describeSelfCheck({ status: row.selfCheck })} | ${row.comparable ? 'yes' : 'no'} | ${esc(row.comparabilityReason || row.failureMode)} |`,
     )
   }
   lines.push('')

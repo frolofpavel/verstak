@@ -1,10 +1,13 @@
 import { validateFixture } from '../contracts.mjs'
 import { CORE_FIXTURES } from './core.mjs'
 import { EXPANDED_FIXTURES } from './expanded.mjs'
+import { TASK_CLASS_FIXTURES } from './task-classes.mjs'
 
 const SUITES = new Map([
   ['v0', CORE_FIXTURES],
-  ['core', Object.freeze([...CORE_FIXTURES, ...EXPANDED_FIXTURES])],
+  // task-classes закрывают пять классов задач из ТЗ V2 §5 — baseline снимается
+  // уже с ними, поэтому они входят в core, а не в отдельный suite.
+  ['core', Object.freeze([...CORE_FIXTURES, ...EXPANDED_FIXTURES, ...TASK_CLASS_FIXTURES])],
 ])
 
 export function selectFixtures(suiteName, requestedTasks) {
