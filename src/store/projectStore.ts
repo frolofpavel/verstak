@@ -211,6 +211,15 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
    *  run-finalized после done не переклеит 'done' в 'terminated', а на смерти
    *  mid-stream (done/error не пришли) карточка не застрянет в «выполняется». */
   settleSpawnCard: (match: { childChatId?: number; sendId?: number }, status: 'done' | 'error' | 'terminated') => void
+  /** СТРАХОВКА от НЕДОСТАВКИ терминального события (не механизм осадки — им остаётся
+   *  settleSpawnCard по событиям ai.onEvent). Осадка карточки держится на доставке
+   *  done/error/run-finalized в renderer; если подписка их пропустила (полный
+   *  размонтаж Chat при смене проекта и т.п.), карточка вечно висит «выполняется».
+   *  Реконсиляция при входе в родительский чат сверяет ПРАВДУ БД (agentRuns) и
+   *  осаживает карточки, чей дочерний прогон терминален. Осаживает ТОЛЬКО когда в
+   *  дочернем чате НЕТ активного прогона — иначе живая индикация «выполняется» не
+   *  гасится (контроль). Событийный путь остаётся первичным; это второй рубеж. */
+  reconcileSpawnCards: (parentChatId: number) => Promise<void>
   /** Record that the AI just touched a file (read / write / list). Upgrades
    *  the marker if a higher-priority kind is observed. */
   markFileTouched: (path: string, kind: TouchKind) => void
@@ -349,6 +358,21 @@ function hasInflightChatSend(
 
 function chatLaneKey(chatId: number, isHelp: boolean): string {
   return `${isHelp ? 'help' : 'chat'}:${chatId}`
+}
+
+// Классификация статуса прогона для reconcileSpawnCards (страховка от недоставки
+// терминала). Держим отдельными чистыми хелперами: и тестируемо, и функция
+// реконсиляции остаётся простой. Активные (может продолжиться) — карточку НЕ трогаем.
+const ACTIVE_RUN_STATUSES = new Set<string>(['running', 'queued', 'waiting_review', 'suspended'])
+function isActiveRunStatus(status: string): boolean {
+  return ACTIVE_RUN_STATUSES.has(status)
+}
+/** Терминальный статус прогона → статус карточки-следа. null — не терминальный. */
+function terminalCardStatus(status: string): 'done' | 'error' | 'terminated' | null {
+  if (status === 'done') return 'done'
+  if (status === 'failed') return 'error'
+  if (status === 'stopped' || status === 'timed_out' || status === 'interrupted') return 'terminated'
+  return null
 }
 
 function hasInflightProjectSend(
@@ -787,6 +811,53 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
     return changed ? { chats: nextChats } : {}
   }),
+  reconcileSpawnCards: async (parentChatId) => {
+    // СТРАХОВКА от недоставки терминального события (см. декларацию). Осадка
+    // по-прежнему держится на ai.onEvent (settleSpawnCard); здесь — второй рубеж
+    // на случай, когда подписка пропустила done/error/run-finalized (полный
+    // размонтаж Chat при смене проекта). Сверяем правду БД и осаживаем зависшие.
+    const s = get()
+    const path = s.path
+    if (path == null) return
+    const running = (s.chats[parentChatId]?.spawnCards ?? []).filter(c => c.status === 'running')
+    if (running.length === 0) return
+    let runs: import('../types/api').AgentRun[]
+    try {
+      runs = await window.api.agentRuns.list(path, { limit: 200 })
+    } catch {
+      return // БД недоступна — молча выходим, событийный путь остаётся
+    }
+    // КОНТРОЛЬ: дочерний чат с ЛЮБЫМ активным прогоном — «выполняется» всё ещё правда,
+    // не осаживаем (иначе реконсиляция гасила бы живую индикацию). terminalByChat —
+    // последний терминальный статус на чат (список recent-first, первый и берём).
+    const activeChat = new Set<number>()
+    const terminalByChat = new Map<number, 'done' | 'error' | 'terminated'>()
+    for (const r of runs) {
+      if (r.chatId == null) continue
+      if (isActiveRunStatus(r.status)) { activeChat.add(r.chatId); continue }
+      const mapped = terminalCardStatus(r.status)
+      if (mapped && !terminalByChat.has(r.chatId)) terminalByChat.set(r.chatId, mapped)
+    }
+    let settled = 0
+    for (const card of running) {
+      if (activeChat.has(card.childChatId)) continue
+      const st = terminalByChat.get(card.childChatId)
+      if (st) { get().settleSpawnCard({ childChatId: card.childChatId }, st); settled++ }
+    }
+    // СЛЕД (правило «у фолбэка обязан быть видимый след», требование штаба): реконсиляция
+    // не смеет быть глушителем. Осадила хоть одну карточку — пишем в журнал ФАКТ, что
+    // терминал НЕ ДОШЁЛ событием и подобран сверкой с БД. Иначе системная поломка
+    // доставки событий стала бы неотличима от нормы. При 0 — МОЛЧИМ (иначе засорим
+    // журнал на каждом переключении чата).
+    if (settled > 0) {
+      void window.api.journal.append(
+        path, 'note', 'Карточка-след осаждена сверкой с БД',
+        `${settled} карточк(и) переведены в терминал при входе в чат — сигнал финализации дочернего прогона не дошёл до renderer (страховка reconcileSpawnCards). Если повторяется — доставка ai.onEvent сломана.`,
+      ).catch(() => { /* журнал не критичен для осадки */ })
+    }
+  },
+  // toolsAllow в подписи — НЕ терять при слиянии: дочерняя сессия наследует ограничение
+  // по инструментам от родителя (девятый обход, линия безопасности 09.08).
   spawnChildSession: async ({ parentChatId, title, seed, toolsAllow }) => {
     const s = get()
     if (!s.path) return null
@@ -967,6 +1038,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       })()
     }
     void get().refreshReviewsFor(id)
+    // Страховка от недоставки терминала: вход в родительский чат сверяет зависшие
+    // карточки-следы с правдой БД (см. reconcileSpawnCards). Fire-and-forget —
+    // не блокирует переключение; no-op, если бегущих карточек нет.
+    void get().reconcileSpawnCards(id)
   },
   registerSendOwner: (sendId, owner) => set(s => {
     if (owner.kind !== 'chat') {

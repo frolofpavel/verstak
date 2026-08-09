@@ -204,7 +204,12 @@ export function UpdatesSettings() {
     void window.api.updater.getState()
       .then(s => applyPhase(
         s.phase,
-        s.remoteVersion ?? s.version,
+        // Честно: показываем то, что РЕАЛЬНО установится (s.version — resolved-цель
+        // из toUiSnapshot: `s.version || s.remoteVersion`), а НЕ последний релиз
+        // (s.remoteVersion). Они расходятся, когда на последней версии нет пригодного
+        // установщика и резолвер откатывается на более раннюю устанавливаемую: тогда
+        // качается X, а заголовок врал «скачиваем Y». Совпадает с onState-путём ниже.
+        s.version,
         s.percent,
         s.error,
         s.pendingRelease,

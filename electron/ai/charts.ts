@@ -137,6 +137,14 @@ function renderPie(input: ChartInput, w: number, h: number): string {
     const startAngle = (cumulative / total) * 2 * Math.PI - Math.PI / 2
     cumulative += v
     const endAngle = (cumulative / total) * 2 * Math.PI - Math.PI / 2
+    // Срез в 100% (единственный ненулевой канал) — это полный круг. Одним arc'ом полный
+    // круг вырождается: начальная точка дуги совпадает с конечной, и SVG такую дугу НЕ
+    // рисует → пирог показывался пустым. Рисуем настоящий <circle>. (bug 09.08)
+    if (v >= total) {
+      const pct = Math.round((v / total) * 100)
+      return `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${PALETTE[i % PALETTE.length]}" stroke="#fff" stroke-width="2"/>
+      <text x="${cx.toFixed(1)}" y="${(cy - radius - 8).toFixed(1)}" text-anchor="middle" font-size="11" fill="#1a1d22">${escapeXml(input.labels[i].slice(0, 18))} (${pct}%)</text>`
+    }
     const x1 = cx + radius * Math.cos(startAngle)
     const y1 = cy + radius * Math.sin(startAngle)
     const x2 = cx + radius * Math.cos(endAngle)

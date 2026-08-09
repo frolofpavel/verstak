@@ -33,12 +33,13 @@ describe('runtime-log в headless Node — без electron', () => {
 
   it('без явной конфигурации фолбэк не трогает electron и указывает внутрь APPDATA/cwd', async () => {
     const mod = await import('../electron/runtime-log')
+    // ЯВНАЯ правка фикстуры (09.08): tests/setup.ts теперь глобально перенаправляет журнал
+    // во временный каталог (тесты не пишут в боевой errors.jsonl). Это ЗАТЕНЯЕТ фолбэк,
+    // который проверяет данный кейс, поэтому снимаем конфигурацию перед проверкой самого
+    // фолбэка — иначе тест мерил бы temp-каталог сетапа, а не поведение без конфигурации.
+    mod.configureRuntimeLogDir(null)
     const dir = mod.runtimeLogsDir()
     const expectedRoot = process.env.APPDATA || process.cwd()
-    // configureRuntimeLogDir из первого кейса может уже стоять — сбрасывать нечем по
-    // дизайну (одна конфигурация на процесс), поэтому допускаем оба корня.
-    expect(
-      dir.startsWith(expectedRoot) || dir.startsWith(join(tmpdir(), 'vsk-rtlog-'))
-    ).toBe(true)
+    expect(dir.startsWith(expectedRoot)).toBe(true)
   })
 })

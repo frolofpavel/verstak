@@ -50,6 +50,10 @@ const baseDeps = {
   recentWrites: () => [],
   getAgentMode: () => 'ask' as const,
   getContextSnapshot: () => null,
+  // Прод ВСЕГДА прокидывает searchMemories (main.ts / headless host.ts). Без него
+  // buildSendMemoryContext ловил TypeError и писал ai.memories.search.fail в РЕАЛЬНЫЙ
+  // errors.jsonl (тесты пишут в прод-лог). Стаб приводит фикстуру к продовой форме.
+  searchMemories: () => [],
 }
 
 function eventWithDone(): { event: unknown; done: Promise<void> } {

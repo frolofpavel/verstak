@@ -90,4 +90,32 @@ describe('renderChartSvg', () => {
     expect(svg).not.toMatch(/-\d+%/)
     expect(svg).toContain('не могут быть отрицательными')
   })
+
+  // Полный круг одним arc'ом вырождается: у среза в 100% начальная точка дуги = конечной,
+  // а SVG такую дугу НЕ рисует → пирог показывался пустым (bug 09.08). Видимый срез — это
+  // либо <circle>, либо <path>, у которого точка L не совпадает с концом дуги A.
+  const hasVisiblePieSlice = (svg: string): boolean => {
+    if (/<circle\b/.test(svg)) return true
+    // Любой slice-path с НЕвырожденной дугой (L-точка ≠ конец дуги A).
+    const paths = [...svg.matchAll(/M [\d.-]+ [\d.-]+ L ([\d.-]+) ([\d.-]+) A [\d.-]+ [\d.-]+ 0 \d 1 ([\d.-]+) ([\d.-]+) Z/g)]
+    return paths.some(m => m[1] !== m[3] || m[2] !== m[4])
+  }
+
+  it('pie chart с одним 100% срезом рисует видимый круг, а не пустоту', () => {
+    const svg = renderChartSvg({ kind: 'pie', labels: ['Только Директ'], values: [100] })
+    expect(svg).toContain('(100%)')
+    expect(hasVisiblePieSlice(svg)).toBe(true)
+  })
+
+  it('pie chart где один канал = весь трафик ([50,0,0]) рисует видимый срез', () => {
+    const svg = renderChartSvg({ kind: 'pie', labels: ['Директ', 'SEO', 'Авито'], values: [50, 0, 0] })
+    expect(hasVisiblePieSlice(svg)).toBe(true)
+  })
+
+  it('pie chart с несколькими срезами не регрессировал (все видимы, проценты на месте)', () => {
+    const svg = renderChartSvg({ kind: 'pie', labels: ['a', 'b'], values: [70, 30] })
+    expect(hasVisiblePieSlice(svg)).toBe(true)
+    expect(svg).toContain('70%')
+    expect(svg).toContain('30%')
+  })
 })
