@@ -21,6 +21,9 @@ import { createReadStream } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import https from 'node:https'
 import http from 'node:http'
+import {
+  decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote,
+} from './agent-completion-gate.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -1511,6 +1514,11 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   let baseline = []
   let reviewGatePassed = !recipe?.reviewer?.required
   let reviewGateNudges = 0
+  // V2-3: счётчики за весь прогон — «написал и ни разу не проверил» видно только
+  // на масштабе прогона, а не отдельного хода.
+  let runAcceptedWrites = 0
+  let runVerifications = 0
+  let completionGateNudges = 0
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     trace.turnsUsed = turn + 1
@@ -1568,6 +1576,28 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         err.trace = trace
         throw err
       }
+      // V2-3 completion gate (то же правило, что на десктопном пути; общий модуль
+      // agent-completion-gate.mjs, расхождение стережёт анти-дрейф-пин): были
+      // приняты записи и ни одной проверки → не выпускаем финал, возвращаем ход.
+      // Bounded: после лимита прогон закрывается ЧЕСТНОЙ пометкой, а не «готово».
+      const completionDecision = decideCompletionGate({
+        acceptedWrites: runAcceptedWrites,
+        verifications: runVerifications,
+        nudges: completionGateNudges,
+      })
+      if (completionDecision === 'retry') {
+        completionGateNudges++
+        trace.completionGateNudges = completionGateNudges
+        trace.toolCalls.push({ turn, name: 'completion-gate-nudge', args: {} })
+        trace.toolCallsCount = trace.toolCalls.length
+        messages.push({ role: 'user', content: buildCompletionGateNudge(recipe?.verify?.commands ?? []) })
+        continue
+      }
+      if (completionDecision === 'finish-unverified') {
+        trace.completionGateNudges = completionGateNudges
+        trace.finishedUnverified = true
+        if (!jsonMode) process.stderr.write(`\n${unverifiedWorkNote(runAcceptedWrites)}\n`)
+      }
       break
     }
 
@@ -1597,6 +1627,12 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         trace.runtimeError = true
         result = `Ошибка: ${e.message}`
       }
+      // V2-3: учитываем ПРИНЯТУЮ запись и факт проверки. Запись считается принятой,
+      // только если инструмент не вернул ошибку — иначе отказ гейта («проверь») мог бы
+      // требоваться за работу, которой не произошло.
+      const toolFailed = typeof result === 'string' && result.startsWith('Ошибка:')
+      if (!toolFailed && isMutatingToolName(call.name)) runAcceptedWrites++
+      if (!toolFailed && isVerificationToolCall(call)) runVerifications++
       if (call.name === 'review_before_commit' && typeof result === 'string' && result.includes(REVIEW_GATE_PASS_MARKER)) {
         reviewGatePassed = true
         trace.reviewGate = 'pass'
