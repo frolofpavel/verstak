@@ -82,8 +82,10 @@ export const TASK_CLASS_FIXTURES = Object.freeze([
     category: 'linked-files-edit',
     recipe: 'bugfix',
     maxTurns: 10,
+    // linked.test.mjs в unrelatedFiles: живой baseline поймал повтор, где агент
+    // переписал сам тест — контракт «правь код, не оракул» обязан быть границей.
     expectedFiles: ['price.mjs', 'receipt.mjs'],
-    unrelatedFiles: ['unrelated.mjs'],
+    unrelatedFiles: ['unrelated.mjs', 'linked.test.mjs'],
     verify: ['npm run test:fast'],
     requiresReview: false,
     task: 'Расширь контракт: formatPrice(cents, currency) в price.mjs должен возвращать строку вида "12.34 RUB", и все места вызова обязаны передавать валюту. Обнови потребителя receipt.mjs согласованно. unrelated.mjs не трогать. Прогони npm run test:fast.',

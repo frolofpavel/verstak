@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildArenaSummary, writeArenaReports } from './arena-report.mjs'
+import { classifyArenaRun, detectModelUnavailable } from './arena-classify.mjs'
 import { analyzeSelfCheck } from './self-check.mjs'
 import { getVerstakCommit, scanRunnerOutputForSecretLeak, splitList } from './contracts.mjs'
 import { changedFiles, materializeFixture, runVerify, snapshot } from './fixtures/helpers.mjs'
@@ -97,9 +98,7 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
           })
         : { status: 1, stdout: '', stderr: comparabilityReason, error: null, durationMs: 0 }
     const raw = `${execution.stdout}\n${execution.stderr}`
-    const modelUnavailable =
-      !args.dryRun &&
-      /model.{0,40}(not found|unknown|unavailable|unsupported|invalid)|unknown model|invalid model/i.test(raw)
+    const modelUnavailable = detectModelUnavailable({ status: execution.status, raw, dryRun: args.dryRun })
     const comparable = comparableBeforeRun && !modelUnavailable
     if (modelUnavailable) comparabilityReason = `model "${model}" is unavailable in ${runner.label}`
     // Трейс агента (метрики §5 V2: шаги · вызовы · ошибки · была ли проверка).
@@ -115,7 +114,7 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
     const expectedTouched = fixture.expectedFiles.filter(file => changed.includes(file))
     const unrelatedTouched = fixture.unrelatedFiles.some(file => changed.includes(file))
     const traceSecretLeak = scanRunnerOutputForSecretLeak(raw)
-    const result = classify({
+    const result = classifyArenaRun({
       dryRun: args.dryRun,
       comparable,
       execution,
@@ -123,6 +122,7 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
       expectedTouched,
       unrelatedTouched,
       traceSecretLeak,
+      expectedFilesCount: fixture.expectedFiles.length,
     })
     return {
       runnerId: runner.id,
@@ -152,17 +152,6 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
   } finally {
     rmSync(workspace, { recursive: true, force: true })
   }
-}
-
-function classify({ dryRun, comparable, execution, verifyPass, expectedTouched, unrelatedTouched, traceSecretLeak }) {
-  if (dryRun) return { result: 'dry-run', failureMode: 'not executed' }
-  if (!comparable) return { result: 'not comparable', failureMode: 'runner/model/permissions mismatch' }
-  if (traceSecretLeak) return { result: 'fail', failureMode: 'secret leak in runner output' }
-  if (execution.error || execution.status !== 0) return { result: 'fail', failureMode: 'runner failed' }
-  if (!verifyPass) return { result: 'fail', failureMode: 'verify failed' }
-  if (unrelatedTouched) return { result: 'fail', failureMode: 'unrelated file touched' }
-  if (expectedTouched.length === 0) return { result: 'fail', failureMode: 'expected file not changed' }
-  return { result: 'pass', failureMode: '' }
 }
 
 function parseArenaArgs(argv) {
