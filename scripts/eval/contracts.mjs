@@ -173,6 +173,15 @@ export function assertNoSecretLikeText(value, label) {
   if (hasSecretLikeText(value)) throw new Error(`${label} contains a secret-like value`)
 }
 
+// Скан вывода раннера Arena. Живой baseline 09.08: имя workspace-каталога несёт
+// fixture.id, и 'task-refinement' порождает подстроку 'sk-task-refinement-…{16,}' —
+// детектор резал прогоны за их СОБСТВЕННЫЙ путь. Имя каталога — известный не-секрет:
+// вырезается до скана (по самому имени, чтобы не зависеть от формы слэшей в JSON);
+// настоящие ключи в остальном выводе остаются видимыми.
+export function scanRunnerOutputForSecretLeak(raw) {
+  return hasSecretLikeText(String(raw ?? '').replace(/model-gym-arena-[A-Za-z0-9._-]+/g, '[WORKSPACE-DIR]'))
+}
+
 export function safeBaseUrl(value, explicitSecrets = []) {
   try {
     const url = new URL(value)

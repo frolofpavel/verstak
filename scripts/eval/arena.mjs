@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildArenaSummary, writeArenaReports } from './arena-report.mjs'
 import { analyzeSelfCheck } from './self-check.mjs'
-import { getVerstakCommit, hasSecretLikeText, splitList } from './contracts.mjs'
+import { getVerstakCommit, scanRunnerOutputForSecretLeak, splitList } from './contracts.mjs'
 import { changedFiles, materializeFixture, runVerify, snapshot } from './fixtures/helpers.mjs'
 import { selectFixtures } from './fixtures/index.mjs'
 import { codexRunner, runCodex } from './runners/codex.mjs'
@@ -114,7 +114,7 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
     const verifyPass = verifyRuns.length > 0 && verifyRuns.every(result => result.exitCode === 0)
     const expectedTouched = fixture.expectedFiles.filter(file => changed.includes(file))
     const unrelatedTouched = fixture.unrelatedFiles.some(file => changed.includes(file))
-    const traceSecretLeak = hasSecretLikeText(raw)
+    const traceSecretLeak = scanRunnerOutputForSecretLeak(raw)
     const result = classify({
       dryRun: args.dryRun,
       comparable,
