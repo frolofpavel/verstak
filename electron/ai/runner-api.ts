@@ -19,6 +19,11 @@ import {
 } from './review-gate'
 import { MAX_STEPS_REPORT } from './model-presets'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from './compact-history'
+import { shouldReinjectFocus } from './focus-chain-policy'
+import {
+  decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote,
+} from './completion-gate'
+import { detectVerifyScriptsForHint } from './session-journal'
 import { estimateTokens } from './context-limits'
 import { withInitialRetry } from './with-retry'
 import { classifyProviderError } from './provider-error'
@@ -94,7 +99,9 @@ const checkpointThrottle = new Map<string, CheckpointThrottleState>()
  * Full agentic loop with file tools + diff confirmation + command sandbox.
  * Only providers that support function calling go through here.
  */
-const FOCUS_REINJECT_EVERY = 8  // ось 3 C: каждые N ходов реинъект незакрытого todo-листа (анти-дрейф)
+// V2-1: правило реинжекта Focus Chain живёт в ai/focus-chain-policy.ts.
+// Прежняя константа здесь равнялась DEFAULT_AGENT_TURNS (8) и сравнивалась по
+// модулю с номером хода — при бюджете 8 (turn ∈ 0..7) не срабатывала НИ РАЗУ.
 
 // Вынесены из ipc/ai.ts вместе с runApiConversation (только его потребители, срез 4c).
 function formatProcessCompletionNote(completion: ProcessCompletion): string {
@@ -697,6 +704,54 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     return decision
   }
 
+  // V2-1: состояние реинжекта Focus Chain. Считаем ходы ОТ ПРОШЛОГО реинжекта и
+  // помним, была ли между ними компакция (она выбрасывает именно то состояние,
+  // ради которого Focus Chain существует).
+  let lastFocusReinjectTurn = 0
+  let compactedSinceFocusReinject = false
+
+  // V2-3 completion gate: счётчики за ВЕСЬ прогон (не за ход) — «написал и ни разу
+  // не проверил» проявляется именно на масштабе прогона. Команды для nudge берём
+  // из рецепта, если он есть, иначе из package.json проекта (тот же источник, что
+  // у подсказки после записи) — гейт обязан не только требовать, но и подсказывать чем.
+  const runVerifyScriptHints: string[] = []
+  let runAcceptedWrites = 0
+  let runVerifications = 0
+  let completionGateNudges = 0
+
+  /**
+   * V2-3: перед финалом требуем доказательство, если были записи и не было проверок.
+   * Возвращает 'allow' | 'retry'; исчерпание попыток даёт allow, но помечает прогон
+   * как непроверенный — человек это видит, работа за проверенную не выдаётся.
+   */
+  const enforceCompletionGateBeforeFinal = (): 'allow' | 'retry' => {
+    const decision = decideCompletionGate({
+      acceptedWrites: runAcceptedWrites,
+      verifications: runVerifications,
+      nudges: completionGateNudges,
+    })
+    if (decision === 'retry') {
+      completionGateNudges++
+      currentMessages.push({ role: 'user', content: buildCompletionGateNudge(runVerifyScriptHints) })
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'tool-blocked', callId: `completion-gate-${completionGateNudges}`, name: 'run_command',
+          reason: 'Файлы изменены, но результат не проверен — запусти тесты/тайпчек/сборку.' },
+      })
+      return 'retry'
+    }
+    if (decision === 'finish-unverified') {
+      // Видимость для человека — само событие: карточка прогона покажет, что
+      // работа сдана непроверенной. Отдельного флага не заводим, чтобы в коде не
+      // появилось поле, которое пишется и никем не читается.
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'info', message: unverifiedWorkNote(filesTouched.size) },
+      })
+    }
+    return 'allow'
+  }
+
   try {
 
   turnLoop: for (let turn = 0; turn < turnsBudget; turn++) {
@@ -721,12 +776,21 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender.send('ai:event', { id: sendId, event: { type: 'info', message: '🧹 Контекст очищен по new_task — продолжаю с дистиллята' } })
       pendingNewTask = null
     }
-    // Focus Chain (ось 3 C): по cadence реинъектим незакрытый todo-лист как system-
-    // напоминание — длинная сессия дрейфует, чеклист уезжает из внимания (§5.4). Лёгко:
-    // только если есть НЕзавершённые пункты; компакция и так несёт якорь отдельно.
-    if (turn > 0 && turn % FOCUS_REINJECT_EVERY === 0 && sessionTodos && projectPath) {
+    // Focus Chain (ось 3 C + V2-1): реинжектим незакрытый todo-лист как system-
+    // напоминание — длинная сессия дрейфует, чеклист уезжает из внимания (§5.4).
+    // Решение — shouldReinjectFocus: по признаку (незакрытые пункты + ходы С ПРОШЛОГО
+    // реинжекта) и сразу после компакции, а не по модулю совпавшей константы.
+    if (sessionTodos && projectPath) {
       const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
-      if (focus) {
+      const reinject = shouldReinjectFocus({
+        turn,
+        lastReinjectTurn: lastFocusReinjectTurn,
+        hasOpenItems: Boolean(focus),
+        compactedSinceReinject: compactedSinceFocusReinject,
+      })
+      if (focus && reinject) {
+        lastFocusReinjectTurn = turn
+        compactedSinceFocusReinject = false
         // Дедуп: убираем прошлый Focus-Chain блок, чтобы не копить дубли в истории (ревью).
         for (let i = currentMessages.length - 1; i >= 0; i--) {
           const c = currentMessages[i]
@@ -993,6 +1057,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
               const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
               currentMessages.length = 0
               currentMessages.push(...compacted)
+              compactedSinceFocusReinject = true // V2-1: после компакции вернуть Focus Chain
               sender.send('ai:event', { id: sendId, event: { type: 'info', text: '🔄 Контекст переполнен — сжат, повторяю' } })
               assistantText = ''
               continue turnLoop
@@ -1050,6 +1115,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
+      // V2-3 (главная правка): на ОБЫЧНОМ пути финал не выпускается, если были записи
+      // и ни одной проверки. Bounded — после лимита попыток прогон закрывается с
+      // видимой пометкой «не проверено», а не выдаётся за готовое.
+      if (enforceCompletionGateBeforeFinal() === 'retry') { assistantText = ''; continue }
       exitReason = 'completed'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
@@ -1320,6 +1389,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // to verify (run tests / typecheck / lint). The context-pack already
     // showed verify_scripts; we re-surface as an inline reminder so the model
     // pays attention this turn specifically.
+    // V2-3: копим за прогон принятые записи и факты проверки. Проверкой считается
+    // вызов модели (isVerificationToolCall) — авто-диагностика продукта не годится:
+    // гейт спрашивает, проверил ли себя АГЕНТ.
+    runAcceptedWrites += toolOutcome.acceptedWrites
+    runVerifications += toolCalls.filter(isVerificationToolCall).length
+    if (runVerifyScriptHints.length === 0 && toolOutcome.acceptedWrites > 0) {
+      const hints = recipeVerifyCommands.length > 0
+        ? recipeVerifyCommands
+        : await detectVerifyScriptsForHint(projectPath).catch(() => [])
+      runVerifyScriptHints.push(...hints)
+    }
     const verifyHint = await buildTurnVerificationHint({
       acceptedWrites: toolOutcome.acceptedWrites,
       tsWrites: toolOutcome.tsWrites,
@@ -1441,6 +1521,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           const afterChars = compacted.reduce((sum, m) => sum + (m.content ?? '').length, 0)
           currentMessages.length = 0
           currentMessages.push(...compacted)
+          compactedSinceFocusReinject = true // V2-1: после компакции вернуть Focus Chain
           sender.send('ai:event', {
             id: sendId,
             event: {
