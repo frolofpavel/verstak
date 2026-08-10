@@ -23,3 +23,9 @@ export declare function decideCompletionGate(input: {
 export declare function buildCompletionGateNudge(verifyCommands: string[]): string
 
 export declare function unverifiedWorkNote(fileCount: number): string
+
+/** V3: одна строка об ИТОГЕ проверок. null — проверок не было, строки нет. */
+export declare function verifiedWorkNote(
+  checks: Array<{ label: string; ok: boolean }>,
+  fileCount?: number,
+): string | null

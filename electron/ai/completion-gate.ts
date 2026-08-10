@@ -30,5 +30,6 @@ export {
   decideCompletionGate,
   buildCompletionGateNudge,
   unverifiedWorkNote,
+  verifiedWorkNote,
 } from '../../scripts/agent-completion-gate.mjs'
 export type { CompletionGateDecision } from '../../scripts/agent-completion-gate.mjs'

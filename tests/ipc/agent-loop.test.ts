@@ -1178,3 +1178,111 @@ describe('agent-loop — гард глубины spawn_task_session (задач�
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// V3 (волна 2.6.0): итог проверок одной строкой — ИНТЕГРАЦИОННЫЙ пин.
+//
+// Чистая функция verifiedWorkNote проверена отдельно (verification-autopilot.test.ts).
+// Здесь проверяется то, чего та проверить не может: что рантайм её ВООБЩЕ ЗОВЁТ и
+// зовёт на настоящем следе прогона. Без этого пина фича была бы «зелёной функцией,
+// которую никто не вызывает» — ровно класс, описанный в §3.1.
+describe('agent-loop — V3: строка об итоге проверок', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vsk-v3-verify-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  const infoTexts = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls
+      .map((c: unknown[]) => (c[1] as { event?: { type?: string; message?: string } })?.event)
+      .filter((e): e is { type: string; message: string } => e?.type === 'info' && typeof e?.message === 'string')
+      .map(e => e.message)
+
+  // Команда выбрана ДЕТЕРМИНИРОВАННОЙ намеренно: `npm test` во временном каталоге
+  // без package.json падает, и первая версия пина ловила строку «не прошло» вместо
+  // «Проверено» — то есть мерила исход чужой команды, а не то, ради чего написана.
+  // Здесь проверяется ИНТЕГРАЦИЯ (рантайм собирает след и зовёт verifiedWorkNote);
+  // качество признака «что считается проверкой» проверяется отдельно.
+  const PASSING_CHECK = 'echo test'
+
+  it('запись + пройденная проверка → одна строка «Проверено» с именем проверки', async () => {
+    const sender = makeSender()
+    // Ход 1: правка файла и проверка. Ход 2: финал без инструментов.
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'tool-call', call: { id: 'v1', name: 'run_command', args: { command: PASSING_CHECK } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const note = infoTexts(sender).find(t => t.includes('Проверено'))
+    expect(note, 'рантайм не отправил строку об итоге проверок').toBeTruthy()
+    expect(note).toContain(PASSING_CHECK)
+  })
+
+  it('КОНТРОЛЬ: запись без единой проверки → строки «Проверено» НЕТ', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(infoTexts(sender).some(t => t.includes('Проверено')), 'плашка появилась без единой проверки — она врёт').toBe(false)
+  })
+})
+
+// V3 (11.08): completion gate обязан работать на ОБОИХ путях завершения.
+//
+// НАЙДЕНО ЗАМЕРОМ. Гейт V2-3 («были записи и ни одной проверки → не выпускать
+// финал») стоял только на втором выходе цикла. Основной путь — провайдер шлёт
+// `done` внутри стрима — проходил мимо него, то есть на живых прогонах правило
+// не работало вовсе, а нота «сделано, не проверено» не появлялась там, где была
+// нужнее всего. Пины стерегли чистую decideCompletionGate; вызывается ли она в
+// этом месте, не проверял никто.
+describe('agent-loop — V3: completion gate на основном пути завершения', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vsk-v3-gate-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  const events = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls.map((c: unknown[]) => (c[1] as { event?: Record<string, unknown> })?.event)
+
+  it('запись без проверки + финал через done в стриме → рантайм ТРЕБУЕТ доказательство', async () => {
+    const sender = makeSender()
+    // Ровно продовая форма: правка, затем провайдер закрывает стрим событием done
+    // без единого вызова инструмента. До фикса прогон закрывался молча.
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'гейт не сработал на основном пути — правило V2-3 декоративно').toBeGreaterThan(0)
+  })
+
+  it('исчерпав попытки, прогон закрывается ЧЕСТНОЙ пометкой «не проверено»', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'всё готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const infos = events(sender)
+      .filter((e): e is Record<string, unknown> => e?.type === 'info' && typeof e?.message === 'string')
+      .map(e => String(e.message))
+    expect(infos.some(t => t.includes('не проверен')), 'работа сдана как проверенная, хотя проверок не было').toBe(true)
+  })
+})

@@ -52,3 +52,37 @@ export function buildCompletionGateNudge(verifyCommands) {
 export function unverifiedWorkNote(fileCount) {
   return `⚠️ Файлов изменено: ${fileCount}, но результат не проверен — тесты, тайпчек или сборка за этот прогон не запускались. Проверьте перед тем, как полагаться на изменения.`
 }
+
+/**
+ * V3 (волна 2.6.0): ИТОГ ПРОВЕРОК ОДНОЙ СТРОКОЙ — положительная половина пары.
+ *
+ * До неё человек видел только отрицательную ноту («сделано, не проверено»), а
+ * успешный случай не сообщал ничего: тишина одинаково означала и «проверок не
+ * было», и «проверки прошли». Отсюда правило §3.1 наоборот — у сработавшего
+ * ХОРОШЕГО пути тоже должен быть след, иначе доверять нечему.
+ *
+ * Строка собирается из ФАКТА прогона (что реально исполнилось и с каким кодом
+ * возврата), а не из слов модели: «я всё проверил» доказательством не является.
+ * Нет ни одной проверки → строки нет вовсе (её место занимает нота выше).
+ */
+export function verifiedWorkNote(checks, fileCount) {
+  const list = (checks ?? []).filter(c => c && c.label)
+  if (list.length === 0) return null
+  const failed = list.filter(c => !c.ok)
+  const names = list.map(c => `${c.ok ? '✓' : '✗'} ${c.label}`).join(', ')
+  const head = failed.length === 0
+    ? `✅ Проверено: ${plural(list.length, 'пройдена', 'пройдены', 'пройдено')} ${list.length} ${plural(list.length, 'проверка', 'проверки', 'проверок')}`
+    : `⚠️ Проверок: ${list.length}, из них не прошло ${failed.length}`
+  const files = typeof fileCount === 'number' && fileCount > 0
+    ? `; файлов изменено: ${fileCount}`
+    : ''
+  return `${head}${files}. ${names}`
+}
+
+function plural(n, one, few, many) {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
+  return many
+}

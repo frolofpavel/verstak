@@ -26,7 +26,7 @@ import {
   MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
 } from './progress'
 import {
-  decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote,
+  decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote, verifiedWorkNote,
 } from './completion-gate'
 import { detectVerifyScriptsForHint } from './session-journal'
 import { estimateTokens } from './context-limits'
@@ -766,6 +766,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let runAcceptedWrites = 0
   let runVerifications = 0
   let completionGateNudges = 0
+  // V3: след проверок прогона — ЧТО реально исполнилось и с каким исходом.
+  // Собирается из фактических вызовов и их результатов; слова модели («я всё
+  // проверил») сюда не попадают и попасть не могут — из них и строится плашка.
+  const verificationTrail: Array<{ label: string; ok: boolean }> = []
 
   /**
    * V2-3: перед финалом требуем доказательство, если были записи и не было проверок.
@@ -796,7 +800,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         id: sendId,
         event: { type: 'info', message: unverifiedWorkNote(filesTouched.size) },
       })
+      return 'allow'
     }
+    // V3: положительная половина пары. Тем же каналом, что и нота «не проверено»
+    // — человек читает итог одной строкой в ленте, нового UI не заводим (§6).
+    // Условие строгое: строка появляется, только если проверки РЕАЛЬНО были;
+    // иначе её нет вовсе, и «тихо» по-прежнему значит «нечем хвастаться».
+    const note = verifiedWorkNote(verificationTrail, filesTouched.size)
+    if (note) sender.send('ai:event', { id: sendId, event: { type: 'info', message: note } })
     return 'allow'
   }
 
@@ -1133,6 +1144,20 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             sender.send('ai:event', { id: sendId, event: { type: 'error', message: REVIEW_GATE_STOP_MESSAGE } })
             sender.send('ai:event', { id: sendId, event: { type: 'done' } })
             return
+          }
+          // V3 (11.08), НАЙДЕНО ЗАМЕРОМ, А НЕ ЧТЕНИЕМ: completion gate стоял ТОЛЬКО
+          // на втором пути завершения (ниже по циклу), а этот — основной, им
+          // заканчивается почти каждый прогон: провайдер шлёт `done` внутри стрима.
+          // Значит правило V2-3 «были записи и ни одной проверки → не выпускать
+          // финал» на живом пути НЕ РАБОТАЛО, и нота «сделано, не проверено» не
+          // появлялась там, где была нужнее всего. Пины стерегли чистую функцию
+          // decideCompletionGate, а вызывается ли она — не проверял никто (§3.1:
+          // зелёная функция, которую никто не зовёт). Гейт обязан стоять на ОБОИХ
+          // выходах, иначе он декоративен.
+          if (enforceCompletionGateBeforeFinal() === 'retry') {
+            emitStepLine(turn, [], 'требую доказательство: файлы изменены, проверок нет')
+            assistantText = ''
+            continue turnLoop
           }
           exitReason = 'completed'
           // Д2 + остаток Д1: финал несёт ИСХОД. Это основной путь завершения
@@ -1547,6 +1572,21 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // гейт спрашивает, проверил ли себя АГЕНТ.
     runAcceptedWrites += toolOutcome.acceptedWrites
     runVerifications += toolCalls.filter(isVerificationToolCall).length
+    // V3: тот же признак проверки, что у гейта (общий isVerificationToolCall —
+    // второго определения «что считается проверкой» в продукте быть не должно),
+    // но здесь запоминается ещё и ИСХОД. Успех читается из кода возврата, если он
+    // есть; у инструментов без кода — по отсутствию ошибки.
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]
+      if (!isVerificationToolCall(call)) continue
+      const res = toolResults[i]
+      const exitCode = (res?.result as { exitCode?: unknown } | null | undefined)?.exitCode
+      const ok = !res?.error && (typeof exitCode === 'number' ? exitCode === 0 : true)
+      const label = typeof call.args?.command === 'string' && call.args.command.trim()
+        ? call.args.command.trim()
+        : call.name
+      verificationTrail.push({ label, ok })
+    }
     if (runVerifyScriptHints.length === 0 && toolOutcome.acceptedWrites > 0) {
       const hints = recipeVerifyCommands.length > 0
         ? recipeVerifyCommands
