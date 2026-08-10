@@ -20,6 +20,10 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const { classifyBetterSqlite3Abi } = require('./native-abi.cjs')
+// Список промежуточных стадий сборки — ОДИН на весь релизный конвейер: сборщик
+// установщика их создаёт и убирает, а здесь мы сносим их в упавшей сборке, до
+// того как git попробует удалить дерево (см. cleanup).
+const { INTERMEDIATE } = require('./build-setup.cjs')
 
 const ROOT = process.cwd()
 const sh = (cmd, cwd = ROOT) => execSync(cmd, { cwd, encoding: 'utf8' }).trim()
@@ -60,15 +64,54 @@ const wt = join(tmpdir(), `verstak-release-${short}`)
 const nm = join(wt, 'node_modules')
 
 function cleanup() {
-  // node_modules теперь РЕАЛЬНАЯ КОПИЯ (не junction) — удаляем весь worktree
-  // целиком одной командой; отдельного снятия junction больше нет.
-  try { sh(`git worktree remove --force "${wt}"`) } catch { /* ignore */ }
+  // ИДЕМПОТЕНТНОСТЬ — не гигиена, а условие правдивости следа ниже. cleanup()
+  // зовётся ДВАЖДЫ на успешном пути: из finally и из process.on('exit'). Второй
+  // вызов всегда падает `fatal: … is not a working tree`, и след, повешенный на
+  // код возврата, кричал бы «не убралось» на КАЖДОЙ здоровой сборке. Сигнал,
+  // который врёт на норме, люди перестают читать — и §3.1 отключается ровно там,
+  // где он нужен.
+  //
+  // Признак «убирать нечего» — САМ КАТАЛОГ, а не флаг «мы уже вызывались»:
+  // cleanup() зовётся ещё и ДО сборки (снять остаток прошлого прогона), и флаг
+  // погасил бы финальную уборку целиком. Вопрос «каталог на диске есть?» верен
+  // во всех трёх точках вызова.
+  if (!existsSync(wt)) return
+
+  // Сначала снимаем ПРИЧИНУ отказа, а не боремся с последствиями. Уборка падала
+  // на «Filename too long»: самый длинный путь внутри release/app-payload-staging
+  // даёт 263 символа под временным префиксом при MAX_PATH 260. Node сносит их
+  // спокойно, git — нет, поэтому убираем стадии сами и только потом отдаём
+  // дерево git'у. Список берём ОДИН, из сборщика установщика, — иначе он
+  // разъедется с тем, что реально создаётся.
+  for (const name of INTERMEDIATE) {
+    try { rmSync(join(wt, 'release', name), { recursive: true, force: true }) } catch { /* уже нет — хорошо */ }
+  }
+
+  try {
+    sh(`git worktree remove --force "${wt}"`)
+  } catch { /* судим по диску ниже, а не по коду возврата */ }
+
+  // СЛЕД ПО ФАКТУ. Код возврата здесь обманчив дважды: git может вернуть ошибку,
+  // сняв при этом регистрацию (тогда каталог с гигабайтами остаётся, но из
+  // `git worktree list` пропадает — мусор становится невидимым), а может
+  // «упасть» просто потому, что убирать уже нечего. Единственный честный
+  // вопрос — остался ли каталог на диске.
+  if (existsSync(wt)) {
+    console.warn(`\n⚠ временную копию убрать не удалось: ${wt}`)
+    console.warn('  она весит гигабайты и из `git worktree list` могла уже пропасть.')
+    console.warn('  удалите каталог вручную, затем выполните `git worktree prune`.')
+  }
 }
 
 process.on('exit', cleanup)
 
 try {
   if (existsSync(wt)) cleanup()
+  // Запись-призрак того же коммита блокирует пересборку: `git worktree add`
+  // отвечает «missing but already registered worktree», даже когда каталога нет
+  // и следа. Ровно это сейчас висит от 2.4.7 (verstak-release-4702c5da). prune
+  // снимает ТОЛЬКО записи без каталога — чужие рабочие деревья не затрагивает.
+  try { sh('git worktree prune') } catch { /* не критично: add ниже скажет прямо */ }
   console.log(`[1/4] чистая копия коммита → ${wt}`)
   sh(`git worktree add --detach -q "${wt}" ${head}`)
 

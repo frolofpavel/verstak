@@ -17,6 +17,7 @@ import asar from '@electron/asar'
 
 const require = createRequire(import.meta.url)
 const { comparePayloadTrees, describeCompareResult } = require('./payload-compare.cjs')
+const { buildReleaseBody } = require('./changelog-notes.cjs')
 
 const ROOT = process.cwd()
 const failures = []
@@ -95,8 +96,27 @@ if (check('узнали последний опубликованный рели
 }
 
 // CHANGELOG обязан описывать эту версию — иначе люди получат обновление без объяснения.
-const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8')
-check('CHANGELOG описывает эту версию', changelog.includes(`## ${version}`), `## ${version}`)
+// Проверяем ТЕМ ЖЕ извлекателем, которым публикация берёт тело GitHub Release
+// (scripts/changelog-notes.cjs): раньше здесь стоял `includes('## X')`, и секция
+// с заголовком, но без текста, гейт проходила — а на странице релиза выходила
+// пустота. Одна проверка и один источник: что гейт признал нотами, то и уедет
+// на страницу, буква в букву.
+const releaseNotes = buildReleaseBody(join(ROOT, 'CHANGELOG.md'), version)
+check('CHANGELOG описывает эту версию (непустая секция)', !!releaseNotes,
+  releaseNotes ? `## ${version}, ${releaseNotes.length} символов` : `нет непустой секции «## ${version}» — страница релиза выйдет пустой`)
+
+// ВСТРОЕННЫЙ каталог «Что нового» — ТРЕТИЙ источник того же текста, и он отставал
+// молча ровно так же, как ноты GitHub: и docs/RELEASE-v*.md, и ENTRIES в
+// scripts/sync-verstak-changelog.cjs оборвались на 2.4.2. Следствие было хуже
+// пустой страницы: для 2.4.3…2.4.9 описания не осталось НИГДЕ, доступном
+// пользователю, — модалка «Что нового» мержит тело с GitHub (там была заглушка)
+// со встроенным каталогом (там записи нет) и показывала «описание недоступно».
+// Проверка держит третий источник в строю: забыли обновить — релиз не выйдет.
+{
+  const embedded = readFileSync(join(ROOT, 'electron', 'official-changelog.ts'), 'utf8')
+  check('встроенный каталог «Что нового» знает эту версию', embedded.includes(`version: '${version}'`),
+    `version: '${version}' в electron/official-changelog.ts (обнови ENTRIES в scripts/sync-verstak-changelog.cjs и прогони node scripts/generate-official-changelog.cjs)`)
+}
 
 // package-lock обязан идти синком с package.json: реальный инцидент — lock остался на 2.0.8
 // при package.json 2.0.11 (npm version бампит оба, но ручной bump package.json — нет).
@@ -531,7 +551,7 @@ const GATE_MAX_WORKERS = 4
 // scripts/agent-completion-gate.mjs (CLI зовёт напрямую, десктоп ре-экспортирует
 // через .d.mts — allowJs не включали); +2 пина (референсная идентичность модулей
 // и факт вызова гейта в CLI-цикле). ИЗМЕРЕНО: 5009 / 0.
-const EXPECTED_TOTAL_TESTS = 5122
+const EXPECTED_TOTAL_TESTS = 5134
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

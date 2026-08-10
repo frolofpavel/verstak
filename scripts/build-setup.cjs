@@ -199,6 +199,60 @@ function writeLatestYml(version, setupPath) {
   fs.writeFileSync(path.join(ROOT, 'release', 'latest.yml'), body)
 }
 
+// ПРОМЕЖУТОЧНЫЕ СТАДИИ — то, что существует только ради сборки Setup.exe и после
+// него никому не нужно. Каждая перед созданием чистится (rmSync выше), но ПОСЛЕ
+// сборки лежала до следующего релиза: ~2.1 ГБ в release/ и глубокие пути внутри
+// staging, на которых ловили «Filename too long» при удалении временной копии.
+//
+// СПИСОК, А НЕ ЛИТЕРАЛЫ В ОДНОЙ СТРОКЕ: следующая стадия сборки попадёт под
+// уборку, как только её имя появится здесь, а не когда автор правки о ней
+// вспомнит. И, что важнее, состав списка виден пину — иначе однажды в него
+// добавят win-unpacked и молча сломают гейт.
+const INTERMEDIATE = [
+  'app-payload-staging',    // копия win-unpacked под упаковку в 7z
+  'installer-app-staging',  // дерево приложения самого установщика
+  'installer-build',        // выход electron-builder; Setup уже скопирован в release/
+  'app-payload.7z',         // встроен в Setup; гейт извлекает его ИЗ Setup.exe, не отсюда
+]
+
+// НЕ УБИРАЕМ, и это не забывчивость:
+//  · win-unpacked — вход гейта (шаг 3.55 сверяет с ним пейлоад пофайлово,
+//    шаг 3.6 запускает оттуда Verstak.exe для install smoke);
+//  · app-payload-manifest.json — крошечный, служит следом состава пейлоада;
+//  · Setup/Portable/latest.yml/BUILD_PROVENANCE.json — сами артефакты релиза.
+// Уборка чинит и ВТОРУЮ поломку, не только занятый диск. Временную копию дерева
+// (release-build.mjs) не удавалось снести `git worktree remove` с ошибкой
+// «Filename too long»: самый длинный путь внутри app-payload-staging — 205
+// символов относительной части, и под временным префиксом %TEMP%\verstak-release-<sha>
+// он даёт 263 при MAX_PATH 260. Тот же файл в win-unpacked укладывается в 256 и
+// проходит. То есть границу пробивало ИМЕННО имя staging-каталога; убрав его до
+// выхода из сборки, мы убираем и причину незакрываемой временной копии.
+//
+// VERSTAK_KEEP_BUILD_STAGING=1 — отладочный выход для того, кто чинит сам
+// установщик: dev-поток (`npm run dev:installer`) читает фолбэком манифест из
+// release/app-payload-staging/payload-manifest.json.
+function cleanupIntermediates() {
+  if (process.env.VERSTAK_KEEP_BUILD_STAGING === '1') {
+    console.log('[build-setup] VERSTAK_KEEP_BUILD_STAGING=1 — промежуточные стадии оставлены')
+    return
+  }
+  const freed = []
+  for (const name of INTERMEDIATE) {
+    const target = path.join(ROOT, 'release', name)
+    if (!fs.existsSync(target)) continue
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+      freed.push(name)
+    } catch (err) {
+      // След обязателен: молчаливая неудача уборки — ровно то, из-за чего
+      // гигабайты копились незамеченными (CLAUDE.md §3.1).
+      console.warn(`[build-setup] ⚠ не удалось убрать release/${name}: ${err.message}`)
+      console.warn('[build-setup]   удалите вручную — иначе следующая сборка начнётся с занятого диска')
+    }
+  }
+  if (freed.length > 0) console.log(`[build-setup] убраны промежуточные стадии: ${freed.join(', ')}`)
+}
+
 function main() {
 if (!fs.existsSync(path.join(UNPACKED, 'Verstak.exe'))) {
   die('Нет release/win-unpacked — сначала соберите приложение (electron-builder --win --x64).')
@@ -260,6 +314,7 @@ const dest = path.join(ROOT, 'release', setupName)
 if (!fs.existsSync(built)) die(`Не найден ${built}`)
 fs.copyFileSync(built, dest)
 writeLatestYml(pkg.version, dest)
+cleanupIntermediates()
 console.log(`[build-setup] OK → release/${setupName}`)
 }
 
@@ -267,4 +322,4 @@ if (require.main === module) main()
 
 // Экспорт для тестов: copyDirFiltered формирует пейлоад установщика, и потеря
 // каталога здесь = битая установка у пользователя (locales, 2.4.5–2.4.7).
-module.exports = { PAYLOAD_SKIP, copyDirFiltered, computePayloadManifest }
+module.exports = { PAYLOAD_SKIP, copyDirFiltered, computePayloadManifest, INTERMEDIATE, cleanupIntermediates }

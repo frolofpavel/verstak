@@ -8,9 +8,13 @@
 // Токен берётся из Git Credential Manager и НИКОГДА не печатается.
 // Запуск: node scripts/release-publish.mjs
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const { buildReleaseBody } = require('./changelog-notes.cjs')
 
 const ROOT = process.cwd()
 const REPO = 'frolofpavel/verstak'
@@ -46,8 +50,25 @@ const json = (s) => { try { return JSON.parse(s) } catch { return {} } }
 let rel = json(curl([`${API}/releases/tags/${tag}`]).out)
 let releaseId = rel.id
 if (!releaseId) {
-  const notesPath = join(ROOT, 'docs', `RELEASE-${tag}.md`)
-  const body = existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : `Verstak ${version}`
+  // Ноты берём из CHANGELOG.md — ОДНОГО источника, который к тому же уже
+  // проверяет гейт («CHANGELOG описывает эту версию»). До 2.5.0 источников было
+  // два: люди писали CHANGELOG, а публикация читала docs/RELEASE-v{version}.md
+  // и, не найдя файла, выкладывала заглушку «Verstak {version}». Файлы
+  // RELEASE-v* перестали делать после v2.4.2 — страницы релизов 2.4.3…2.4.9
+  // вышли пустыми, и никто не заметил СЕМЬ раз подряд именно потому, что
+  // заглушка молчала (§3.1: фолбэк без следа прячет дефект, который компенсирует).
+  //
+  // Fail-closed вместо заглушки: нет нот — нет публикации. Артефакты к этому
+  // моменту ещё не залиты, latest.yml тем более, поэтому остановка здесь
+  // безопасна и обратима — в отличие от выложенной пустой страницы, которую
+  // пользователи уже увидят.
+  const body = buildReleaseBody(join(ROOT, 'CHANGELOG.md'), version)
+  if (!body) {
+    console.error(`✗ в CHANGELOG.md нет непустой секции «## ${version}» — публиковать нечего.`)
+    console.error('  Страница релиза без нот бесполезна людям. Опиши версию в CHANGELOG и запусти публикацию заново.')
+    console.error('  Ничего не выложено: артефакты не заливались, автообновление не тронуто.')
+    process.exit(1)
+  }
   const payload = JSON.stringify({ tag_name: tag, name: `Verstak ${version}`, body, draft: false, prerelease: false })
   // Тело релиза (переносы строк, эмодзи, кириллица) НЕЛЬЗЯ передавать аргументом
   // командной строки: Windows-argv его калечит → GitHub отвечает «Problems parsing JSON».
@@ -61,6 +82,25 @@ if (!releaseId) {
   console.log(`\n[создан релиз ${tag}, id=${releaseId}]`)
 } else {
   console.log(`\n[релиз ${tag} уже есть, id=${releaseId} — дозаливаю недостающее]`)
+  // Самовосстановление: релиз мог быть создан прошлой (заглушечной) версией
+  // публикации или руками по тегу — тогда на странице стоит «Verstak X» или
+  // пустота. Дозаполняем ИЗ CHANGELOG, но только такой случай: непустое тело,
+  // написанное человеком, не трогаем — перетереть чужой текст хуже, чем
+  // оставить его как есть.
+  const current = typeof rel.body === 'string' ? rel.body.trim() : ''
+  const isStub = current === '' || current === `Verstak ${version}`
+  if (isStub) {
+    const body = buildReleaseBody(join(ROOT, 'CHANGELOG.md'), version)
+    if (body) {
+      const tmpPatch = join(tmpdir(), `verstak-release-patch-${version}.json`)
+      writeFileSync(tmpPatch, JSON.stringify({ body }), 'utf8')
+      const patched = json(curl(['-X', 'PATCH', `${API}/releases/${releaseId}`, '-H', 'Content-Type: application/json', '--data-binary', `@${tmpPatch}`]).out)
+      try { unlinkSync(tmpPatch) } catch { /* best-effort */ }
+      console.log(patched.id ? '  ✓ страница релиза была пустой — заполнил из CHANGELOG' : '  ⚠ не удалось заполнить пустую страницу релиза')
+    } else {
+      console.log('  ⚠ страница релиза пуста, и в CHANGELOG нет секции этой версии — заполнить нечем')
+    }
+  }
 }
 
 const assets = () => json(curl([`${API}/releases/${releaseId}/assets?per_page=100`]).out)
