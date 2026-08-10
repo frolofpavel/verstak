@@ -17,7 +17,7 @@
 // Chat.tsx: так тело JSX переезжает дословно, без единой правки разметки.
 // Компонент презентационный: своего состояния нет, решения остаются в Chat.tsx.
 
-import type { Dispatch, RefObject, SetStateAction } from 'react'
+import { useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { estimateCost, costSeverity, costBreakdown } from '../../lib/pricing'
 import { ModelPicker } from '../ModelPicker'
 import { ModePicker, type AgentMode } from '../ModePicker'
@@ -108,6 +108,18 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
     skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled, activePipeline,
     setPipelineWizardMode, setPipelineWizardOpen, setOutcomeRunsOpen,
   } = props
+  // V1 (волна 2.6.0): телеметрия прогона свёрнута под одну иконку.
+  //
+  // ПОЧЕМУ УЗЛЫ ОСТАЮТСЯ В DOM, А НЕ РАЗМОНТИРУЮТСЯ. Скрытие здесь — задача CSS
+  // (класс `is-closed`), и это не обход, а условие безопасности правки: 46
+  // характеризационных пинов чата ищут эти узлы селектором, и размонтирование
+  // сделало бы «зелёный прогон» результатом исчезновения элемента, а не
+  // сохранности поведения. Состояние раскрытия читается пином по классу и
+  // aria-expanded — видимость держит стиль, наличие держит разметка.
+  //
+  // Ничего не удалено и не переименовано: те же самые узлы, те же значения, тот
+  // же единственный источник данных — они лишь переехали внутрь раскрытия.
+  const [telemetryOpen, setTelemetryOpen] = useState(false)
   return (
     <div className="gg-composer-hint">
       {isStreaming && input.trim() ? (
@@ -158,6 +170,17 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
               </>
             )
           })()}
+          <button
+            type="button"
+            className={`gg-telemetry-btn ${telemetryOpen ? 'is-open' : ''}`}
+            onClick={() => setTelemetryOpen(v => !v)}
+            aria-expanded={telemetryOpen}
+            aria-label="Показатели прогона"
+            title="Показатели прогона: токены, стоимость, инструменты, автопрокрутка"
+          >
+            <span aria-hidden>📊</span>
+          </button>
+          <div className={`gg-telemetry-drawer ${telemetryOpen ? 'is-open' : 'is-closed'}`}>
           {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
             // 2.0.8-E хвост: передаём семантику провайдера — иначе у Claude (exclusive)
             // из input повторно вычитался кэш и ценник занижал реальную стоимость (дефект B).
@@ -197,6 +220,19 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
               {sessionStats.filesCount > 0 && (<><span className="gg-usage-sep">·</span><span>📄{sessionStats.filesCount}</span></>)}
             </span>
           )}
+          <button
+            type="button"
+            className={`gg-auto-scroll-btn ${autoScrollEnabled ? 'is-on' : 'is-off'}`}
+            onClick={toggleAutoScroll}
+            title={autoScrollEnabled ? t.chat.autoScrollOn : t.chat.autoScrollOff}
+            aria-pressed={autoScrollEnabled}
+          >
+            {autoScrollEnabled ? t.chat.autoScrollLabelOn : t.chat.autoScrollLabelOff}
+          </button>
+          </div>
+          {/* Откат правки — ДЕЙСТВИЕ, а не телеметрия: остаётся на виду. Спрятать
+              его за раскрытие значило бы отнять у человека кнопку отмены, а
+              постановка V1 про показатели, а не про доступ к действиям. */}
           {undoCount > 0 && !chatIsolated && (
             <button
               type="button"
@@ -208,15 +244,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
               <span className="gg-undo-count">{undoCount}</span>
             </button>
           )}
-          <button
-            type="button"
-            className={`gg-auto-scroll-btn ${autoScrollEnabled ? 'is-on' : 'is-off'}`}
-            onClick={toggleAutoScroll}
-            title={autoScrollEnabled ? t.chat.autoScrollOn : t.chat.autoScrollOff}
-            aria-pressed={autoScrollEnabled}
-          >
-            {autoScrollEnabled ? t.chat.autoScrollLabelOn : t.chat.autoScrollLabelOff}
-          </button>
           <DevTaskBadge />
         </div>
         <div className="gg-composer-meta-cluster gg-composer-meta-cluster--end">

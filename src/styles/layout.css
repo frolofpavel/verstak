@@ -22229,3 +22229,35 @@ html[data-theme="light"] .gg-connectors-page {
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }
+
+/* ─── V1 (волна 2.6.0): телеметрия подвала под одну иконку ────────────────────
+   Секция-маркер по §9. Ничего не удалено и не перекрашено: те же узлы, те же
+   значения, тот же источник — они лишь скрыты до раскрытия. Новых цветов и
+   шрифтов нет, всё на существующих переменных темы; кнопка повторяет геометрию
+   соседней .gg-auto-scroll-btn, чтобы ряд не поехал. */
+.gg-telemetry-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.gg-telemetry-btn:hover { color: var(--text-primary); }
+.gg-telemetry-btn.is-open { border-color: var(--border-strong, var(--border-subtle)); color: var(--text-primary); }
+
+/* Раскрытие. Узлы остаются в разметке всегда (характеризационные пины чата
+   ищут их селектором); видимостью управляет ровно этот класс. */
+.gg-telemetry-drawer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.gg-telemetry-drawer.is-closed { display: none; }
