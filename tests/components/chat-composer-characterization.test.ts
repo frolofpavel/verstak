@@ -275,15 +275,24 @@ describe('композер — нижняя строка', () => {
     expect(document.querySelector('.gg-usage-pill')).toBeNull()
   })
 
-  // Турбо = auto/bypass. На старте режим 'ask', значит кнопка обязана
-  // сообщать выключенное состояние и через класс, и через aria.
-  it('турбо-кнопка отражает режим в aria-pressed', () => {
+  // Турбо = auto/bypass. ПРЕДПОСЫЛКА ПИНА ИЗМЕНЕНА 11.08 (V5): раньше здесь
+  // стояло «на старте режим ask, значит кнопка выключена». Дефолт стал `auto`
+  // решением Павла, и утверждение про 'false' стерегло бы отменённый контракт.
+  // Проверяемое свойство осталось тем же и стало ПАРОЙ: кнопка отражает
+  // РЕЖИМ — при дефолте включена, при явно выбранном ask выключена. Так пин
+  // переживёт и будущую смену дефолта, а не сломается вместе с ней.
+  // ЗЕРКАЛО этого кейса («явно выбранный ask → кнопка выключена») живёт НЕ здесь,
+  // а в tests/lib/agent-mode-default.test.ts, и это не лень: чтение настроек
+  // асинхронно, а под jsdom любое асинхронное ожидание в смонтированном Chat
+  // вешает прогон без вывода (§3.1, проверено на этом же кейсе). Здесь —
+  // синхронное начальное состояние, там — полная пара по значениям настройки.
+  it('турбо-кнопка при дефолтном режиме (auto) сообщает включённое состояние', () => {
     mountChat()
     const turbo = document.querySelector('.gg-chat-turbo-btn') as HTMLButtonElement
     expect(turbo).toBeTruthy()
-    expect(turbo.getAttribute('aria-pressed')).toBe('false')
-    expect(turbo.className).toContain('is-simple')
-    expect(turbo.getAttribute('aria-label')).toBe('Включить турбо-режим')
+    expect(turbo.getAttribute('aria-pressed')).toBe('true')
+    expect(turbo.className).toContain('is-turbo')
+    expect(turbo.getAttribute('aria-label')).toBe('Выключить турбо-режим')
   })
 
   it('подсказки стрима нет, пока черновик пуст и прогон не идёт', () => {

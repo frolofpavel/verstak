@@ -103,6 +103,7 @@ import { registerContextCompactionIpc } from './ipc/context-compaction'
 import { pickSummaryProviderGated } from './ai/pick-summary-provider'
 import { activeSnapshot as activeContextSnapshot } from './storage/chat-context-snapshots'
 import { AGENT_MODES } from './ai/mode-policy'
+import { resolveAgentMode } from '../shared/contracts/agent-mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
 import { registerSkillsIpc } from './ipc/skills'
 import { createUserProfiles } from './storage/user-profiles'
@@ -503,11 +504,10 @@ app.whenReady().then(() => {
     return 'gemini-api'
   }
   const getProviderModel = (id: ProviderId): string | null => settings.getSecret(`model_${id}`)
-  const getAgentMode = () => {
-    const v = settings.getSecret('agent_mode')
-    if (v && AGENT_MODES.some(m => m.id === v)) return v as typeof AGENT_MODES[number]['id']
-    return 'ask' as const
-  }
+  // V5: дефолт берётся из shared-контракта — main строку не сравнивает сам, иначе
+  // renderer и main могли бы разъехаться в показаниях (урок plan_approval_gate).
+  // Нет значения = человек режим не выбирал → дефолт продукта; есть = его выбор.
+  const getAgentMode = () => resolveAgentMode(settings.getSecret('agent_mode')) as typeof AGENT_MODES[number]['id']
 
   const chats = createChats(db)
   const chatSessions = createChatSessions(db)

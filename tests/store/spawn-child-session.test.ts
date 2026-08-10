@@ -9,6 +9,7 @@
 //  · НЕСУЩЕЕ: смерть mid-stream (run-finalized, ни done ни error) переводит карточку
 //    в «оборвался» и НЕ застревает в «выполняется»; первый терминал побеждает.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { DEFAULT_AGENT_MODE } from '../../shared/contracts/agent-mode-policy'
 
 const createSpy = vi.fn(async (_path: string, opts: { title?: string; providerId?: string | null; model?: string | null; kind?: string; parentChatId?: number | null }) => ({
   id: 42,
@@ -64,8 +65,10 @@ describe('spawnChildSession — видимая дочерняя сессия + �
       kind: 'main', parentChatId: 5, title: 'Аудит', providerId: 'claude', model: 'opus',
     }))
     // Seed уходит в СВОЙ дочерний чат (chatId=42); overrides несут УНАСЛЕДОВАННЫЙ режим
-    // родителя (восьмой обход): при пустых настройках мока readAgentMode → 'ask'.
-    expect(sendSpy).toHaveBeenCalledWith([{ role: 'user', content: 'сделай аудит' }], '/proj', { agentMode: 'ask' }, '42')
+    // родителя (восьмой обход): при пустых настройках мока readAgentMode отдаёт ДЕФОЛТ
+    // продукта. Сравниваем с константой, а не с литералом: 11.08 (V5) дефолт стал
+    // `auto`, и литерал 'ask' стерёг бы отменённый контракт вместо наследования режима.
+    expect(sendSpy).toHaveBeenCalledWith([{ role: 'user', content: 'сделай аудит' }], '/proj', { agentMode: DEFAULT_AGENT_MODE }, '42')
     // Owner прогона привязан к ДОЧЕРНЕМУ чату — стрим пойдёт в chats[42].
     expect(useProject.getState().sendOwners[500]).toMatchObject({ kind: 'chat', chatId: 42, projectPath: '/proj' })
     // Карточка-след — в bundle РОДИТЕЛЯ (5), не ребёнка, со статусом «выполняется» и sendId.
@@ -80,14 +83,14 @@ describe('spawnChildSession — видимая дочерняя сессия + �
     seedParent(5, [])
     const allow = ['read_file', 'search_project']
     await useProject.getState().spawnChildSession({ parentChatId: 5, title: 'X', seed: 's', toolsAllow: allow })
-    expect(sendSpy.mock.calls.at(-1)?.[2]).toMatchObject({ agentMode: 'ask', toolsAllow: allow })
+    expect(sendSpy.mock.calls.at(-1)?.[2]).toMatchObject({ agentMode: DEFAULT_AGENT_MODE, toolsAllow: allow })
   })
 
   it('КЕЙС 2: родитель БЕЗ ограничений (toolsAllow null/пусто) → overrides ребёнка НЕ несут toolsAllow (ничего лишнего не отняли)', async () => {
     seedParent(5, [])
     await useProject.getState().spawnChildSession({ parentChatId: 5, title: 'X', seed: 's', toolsAllow: null })
     const ov = sendSpy.mock.calls.at(-1)?.[2] as Record<string, unknown>
-    expect(ov).toMatchObject({ agentMode: 'ask' })
+    expect(ov).toMatchObject({ agentMode: DEFAULT_AGENT_MODE })
     expect('toolsAllow' in ov).toBe(false)
   })
 

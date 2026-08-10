@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AgentMode } from '../components/ModePicker'
 import { HELP_AGENT_MODE } from '../lib/help-scope'
+import { DEFAULT_AGENT_MODE, resolveAgentMode } from '../../shared/contracts/agent-mode-policy'
 
-const KNOWN: AgentMode[] = ['ask', 'accept-edits', 'plan', 'auto', 'bypass']
-export function parseAgentMode(v: string | null | undefined): AgentMode {
-  return (v && (KNOWN as string[]).includes(v)) ? (v as AgentMode) : 'ask'
+// V5: дефолт режима живёт в shared/contracts — одна точка на main и renderer.
+// Дублировать строку 'auto' здесь нельзя: расхождение показало бы человеку один
+// режим, пока main работает в другом (урок plan_approval_gate, A3 §2.1).
+export function parseAgentMode(v: string | null | undefined, fallback: AgentMode = DEFAULT_AGENT_MODE): AgentMode {
+  return resolveAgentMode(v, fallback)
 }
 
 const POLL_MS = 2000
@@ -16,8 +19,10 @@ export function agentModeSettingsKey(chatId: number | null | undefined, helpMode
 
 export async function readAgentMode(chatId: number | null | undefined, helpMode = false): Promise<AgentMode> {
   if (helpMode) {
+    // У справочного чата СВОЙ дефолт — он не участвует в продуктовом V5-дефолте.
+    // Fallback передаётся явно: иначе мусорное значение уводило бы справку в auto.
     const v = await window.api.settings.getKey(agentModeSettingsKey(chatId, true))
-    return parseAgentMode(v ?? HELP_AGENT_MODE)
+    return parseAgentMode(v, HELP_AGENT_MODE as AgentMode)
   }
   const chatKey = agentModeSettingsKey(chatId, false)
   const v = await window.api.settings.getKey(chatKey)
@@ -30,7 +35,9 @@ export async function writeAgentMode(chatId: number | null | undefined, helpMode
 }
 
 export function useAgentMode(chatId?: number | null, helpMode = false): { mode: AgentMode; setMode: (m: AgentMode) => Promise<void> } {
-  const [mode, setLocal] = useState<AgentMode>('ask')
+  // Начальное значение до первого чтения настроек: продуктовый дефолт, иначе на
+  // старте мелькал бы `ask`, которого у нового пользователя уже нет.
+  const [mode, setLocal] = useState<AgentMode>(helpMode ? (HELP_AGENT_MODE as AgentMode) : DEFAULT_AGENT_MODE)
   const key = useMemo(() => agentModeSettingsKey(chatId, helpMode), [chatId, helpMode])
 
   const refresh = useCallback(async () => {
