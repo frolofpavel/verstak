@@ -1,4 +1,9 @@
 import { sanitizeStaleModelText } from '../../shared/contracts/provider'
+import { RUN_OUTCOME_TITLE, RUN_OUTCOME_DETAIL, type RunOutcome } from '../../shared/contracts/run-outcome'
+
+function isRunOutcome(value: unknown): value is RunOutcome {
+  return value === 'completed' || value === 'partial' || value === 'no-work'
+}
 
 export type AgentProgressPhase =
   | 'understand'
@@ -393,12 +398,18 @@ export function reduceAgentProgress(
   }
 
   if (event.type === 'done') {
+    // Д2: исход прогона приходит из main вместе с 'done' — там есть и полный
+    // текст ответа, и число вызовов. Ярлык обязан повторять исход, а не факт
+    // «завершилось без ошибки»: карточка «Задача выполнена» над разделом «Что НЕ
+    // доделано» — это неправда, которую человек читает первой. Событие без
+    // outcome (старые пути: abort, ошибка, side-chat) ведёт себя как раньше.
+    const outcome = isRunOutcome(event.outcome) ? event.outcome : null
     const next = finishRunning(progress, 'done')
     return upsertAgentProgress(next, {
       id: 'done',
       phase: 'final',
-      title: 'Ответ готов',
-      detail: 'Работа завершена, результат записан в чат.',
+      title: outcome && outcome !== 'completed' ? RUN_OUTCOME_TITLE[outcome] : 'Ответ готов',
+      detail: outcome ? RUN_OUTCOME_DETAIL[outcome] : 'Работа завершена, результат записан в чат.',
       status: 'done',
       timestamp: ts
     })

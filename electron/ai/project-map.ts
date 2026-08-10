@@ -349,9 +349,17 @@ export async function getDependencyMap(root: string, refresh = false): Promise<D
     const cached = depCache.get(root)
     if (cached) return cached
   }
-  const map = await buildDependencyMap(root)
-  depCache.set(root, map)
-  return map
+  // Та же дедупликация, что у карты проекта (Д1): обход тот же и стоит столько же.
+  const inFlight = buildingDeps.get(root)
+  if (inFlight) return inFlight
+  const build = buildDependencyMap(root)
+    .then(map => {
+      depCache.set(root, map)
+      return map
+    })
+    .finally(() => { buildingDeps.delete(root) })
+  buildingDeps.set(root, build)
+  return build
 }
 
 export function invalidateDependencyMap(root: string): void {
@@ -400,6 +408,15 @@ export function markFileDirty(root: string, filePath: string): void {
   dirtyFiles.get(root)!.add(filePath)
 }
 
+// Д1 (приёмка 10.08): параллельные сборки одного проекта делят одну работу.
+// Раньше дедупликация была только у фонового прогрева (warmProjectMaps), а сам
+// getProjectMap её не имел — и три одновременные отправки в один проект
+// запускали три полных рекурсивных обхода. На проекте из 45k файлов
+// (C:\Users\Pavel\Downloads в тех прогонах) это давало минуты тишины и старт
+// всех трёх прогонов одной секундой, когда обходы наконец заканчивались.
+const buildingMap = new Map<string, Promise<ProjectMap>>()
+const buildingDeps = new Map<string, Promise<DependencyMap>>()
+
 export async function getProjectMap(root: string, refresh = false): Promise<ProjectMap> {
   const cached = cache.get(root)
   if (!refresh && cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -427,11 +444,19 @@ export async function getProjectMap(root: string, refresh = false): Promise<Proj
     }
   }
 
-  // Full rebuild
+  // Full rebuild. Идёт ОДИН на root: пришедшие пока он идёт получают тот же
+  // промис, а не собственный обход файловой системы (Д1).
+  const inFlight = buildingMap.get(root)
+  if (inFlight) return inFlight
   dirtyFiles.delete(root)
-  const map = await buildProjectMap(root)
-  cache.set(root, { map, timestamp: Date.now() })
-  return map
+  const build = buildProjectMap(root)
+    .then(map => {
+      cache.set(root, { map, timestamp: Date.now() })
+      return map
+    })
+    .finally(() => { buildingMap.delete(root) })
+  buildingMap.set(root, build)
+  return build
 }
 
 export function invalidateProjectMap(root: string): void {

@@ -73,6 +73,7 @@ export interface ToolDefinition {
 
 export type { NormalizedUsage, InputAccounting } from '../../shared/contracts/usage'
 import type { InputAccounting } from '../../shared/contracts/usage'
+import type { RunOutcome } from '../../shared/contracts/run-outcome'
 
 /**
  * Событие usage. 2.0.8-E: совместимый СУПЕРСЕТ — адаптеры кладут полный NormalizedUsage (через
@@ -150,7 +151,10 @@ export type ChatEvent =
    *  reason — код RouteReason. resetAt — epoch ms восстановления лимита; null = неизвестно
    *  (UI обязан показать «нет данных», НЕ выдуманное время/«безлимит»). */
   | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
-  | { type: 'done' }
+  /** Д2 (приёмка 10.08): исход прогона едет вместе с финалом — ярлык карточки обязан
+   *  повторять исход, а не факт «завершилось без ошибки». Поле НЕобязательное: пути
+   *  abort/error/side-chat шлют 'done' как раньше и ведут себя как раньше. */
+  | { type: 'done'; outcome?: RunOutcome }
   | { type: 'error'; message: string }
   // ЗАДАЧА 1 (a)+(в): терминальный сигнал прогона, эмитится ПОСЛЕ agentRuns.finish()
   // (статус уже записан в БД). Чистый сигнал без флага восстановимости — рендер по

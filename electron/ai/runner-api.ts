@@ -54,6 +54,7 @@ import {
   createObservationState, hasNoArgs, shouldBlockArgless, recordObservation,
   changesObservation, noteContextChange,
 } from './loop-detect'
+import { detectRunOutcome } from '../../shared/contracts/run-outcome'
 import {
   isAgentRunTimeoutAbort,
 } from './run-lifecycle'
@@ -1107,7 +1108,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             return
           }
           exitReason = 'completed'
-          sender.send('ai:event', { id: sendId, event })
+          // Д2 + остаток Д1: финал несёт ИСХОД. Это основной путь завершения
+          // (провайдер закрыл стрим без вызовов), второй — ниже по циклу; оба
+          // считают исход одинаково, потому что правило одно на всех.
+          sender.send('ai:event', {
+            id: sendId,
+            event: { ...event, outcome: detectRunOutcome({ toolCallCount, assistantText: assistantText || lastAssistantText }) },
+          })
           // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done,
           // чтобы не блокировать UI. Результат придёт отдельным событием.
           if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
@@ -1210,7 +1217,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       }
       emitStepLine(turn, [], runAcceptedWrites > 0 && runVerifications === 0 ? 'закрываю: сделано, НЕ проверено' : 'готово')
       exitReason = 'completed'
-      sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+      // Д2 + остаток Д1: ярлык карточки обязан повторять ИСХОД. Считаем его здесь,
+      // потому что только тут известны обе части — полный текст ответа (агент сам
+      // мог назвать работу неполной) и число сделанных вызовов (нулевая работа не
+      // может закрыться как «выполнена», какой бы ни была причина отказа).
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'done', outcome: detectRunOutcome({ toolCallCount, assistantText: lastAssistantText || assistantText }) },
+      })
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
       if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
       return

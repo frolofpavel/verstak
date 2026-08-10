@@ -467,7 +467,9 @@ export type ChatEvent =
   | { type: 'cross-verify'; result: string; provider: string; ok: boolean }
   /** 2.0.8-D: автоматическая смена маршрута прогона. Зеркало electron/ai/types.ts (§5 анти-дрейф). */
   | { type: 'route-changed'; action: 'rotate-account' | 'model-fallback' | 'refresh-auth'; reason: string; attempt: number; requested: { providerId: string; model: string }; actual: { providerId: string; model: string }; resetAt: number | null; accounts: { fromLabel: string | null; toLabel: string | null } | null }
-  | { type: 'done' }
+  /** Д2: исход прогона рядом с финалом. Зеркало electron/ai/types.ts (§5 анти-дрейф).
+   *  Необязательное — пути abort/error/side-chat шлют 'done' без него, как раньше. */
+  | { type: 'done'; outcome?: 'completed' | 'partial' | 'no-work' }
   | { type: 'error'; message: string }
   // ЗАДАЧА 1 (a)+(в): терминальный сигнал прогона (статус уже записан в БД). Зеркало
   // electron/ai/types.ts (§5 анти-дрейф). Рендер по нему перечитывает resumableRuns.

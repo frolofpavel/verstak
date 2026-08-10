@@ -67,6 +67,38 @@ export interface ContextPackInput {
   /** Project Brain (Итер.4): готовый ContextPack (short/medium/long) прогретого
    *  проекта. Инжектится вместо повторной сборки всего контекста. */
   brainContext?: string | null
+  /** Д1: бюджет ожидания карт. Параметр — ради тестируемости; в проде MAP_BUDGET_MS. */
+  mapBudgetMs?: number
+}
+
+/**
+ * Д1 (приёмка 10.08): сколько ждём карту проекта и граф зависимостей.
+ *
+ * Разбор runtime.jsonl показал зависание ДО старта прогона: между «подобрал
+ * память» и «отправил модели» проходило 7–15 минут, вызовов инструментов не
+ * шло. Проект тех прогонов — каталог из 45k файлов, и сборка контекста ждала
+ * полный рекурсивный обход, сколько бы он ни занял.
+ *
+ * Карта — УСКОРЕНИЕ («окупается на одном сэкономленном read_file»), а не
+ * условие работы. Ускорение, ради которого человек ждёт четверть часа, перестаёт
+ * быть ускорением: по истечении бюджета собираем пакет без карты, а сам обход
+ * продолжается и наполняет кэш к следующей отправке.
+ */
+export const MAP_BUDGET_MS = 8000
+
+/**
+ * Дождаться работы, но не дольше бюджета; просрочка и падение дают `fallback`.
+ * Сама работа не отменяется — она дойдёт до кэша и пригодится следующему разу.
+ */
+export async function withBudget<T>(work: Promise<T>, budgetMs: number, fallback: T): Promise<T> {
+  if (budgetMs <= 0) return fallback
+  return new Promise<T>(resolve => {
+    const timer = setTimeout(() => resolve(fallback), budgetMs)
+    work.then(
+      value => { clearTimeout(timer); resolve(value) },
+      () => { clearTimeout(timer); resolve(fallback) },
+    )
+  })
 }
 
 /**
@@ -170,26 +202,42 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   //    text re-parsing here). Cache is auto-invalidated on write_file.
   let mapBlock = ''
   let projectMap: ProjectMap | null = null
-  try {
-    projectMap = await getProjectMap(projectPath, false)
+  // Д1: ждём карту с бюджетом. Просрочка — не ошибка и не тишина: ниже она
+  // называется прямо, иначе выпавшая карта неотличима от проекта без карты и
+  // модель «почему-то» перестаёт видеть структуру.
+  const budgetMs = input.mapBudgetMs ?? MAP_BUDGET_MS
+  const mapDeadline = await withBudget(
+    getProjectMap(projectPath, false).catch(() => null),
+    budgetMs,
+    null,
+  )
+  if (mapDeadline) {
+    projectMap = mapDeadline
     // Бюджет поднят 1500 → 2500: компактная карта остаётся «список путей»,
     // но архитектурная нагрузка (символы хабов) живёт в отдельной dep-секции
     // ниже со своим узким бюджетом, а не раздувает этот список.
     mapBlock = projectMapToText(projectMap, { mode: 'compact', maxChars: 2500 })
-  } catch {
-    /* map build failed — skip silently */
+  } else {
+    parts.push(`project_map: карта проекта не успела построиться за ${Math.round(budgetMs / 1000)} с (очень много файлов) — она догружается в фоне. Пока пользуйся find_files, list_directory и search_project вместо неё, и не считай отсутствие карты признаком пустого проекта.`)
   }
 
   // 4b. Dependency hubs + key symbols — архитектурные опоры проекта. Граф
   //     кэшируется (getDependencyMap дёшев после warm на открытии), поэтому
   //     инжект почти бесплатен по времени. Бюджет узкий: символы только для
   //     хабов. Это идёт в каждый запрос — держим компактным.
+  // Д1: тот же бюджет — обход у графа зависимостей такой же полный и стоит столько же.
   let depBlock = ''
-  try {
-    const dep = input.dependencyMap ?? await getDependencyMap(projectPath, false)
-    depBlock = buildDependencySection(dep, projectMap)
-  } catch {
-    /* dependency map build failed — skip silently */
+  const dep = input.dependencyMap ?? await withBudget(
+    getDependencyMap(projectPath, false).catch(() => null),
+    budgetMs,
+    null,
+  )
+  if (dep) {
+    try {
+      depBlock = buildDependencySection(dep, projectMap)
+    } catch {
+      /* dependency section build failed — skip silently */
+    }
   }
 
   // 5. Core Memory (Hermes-style) — всегда в system prompt, загружается при каждом turn'е.

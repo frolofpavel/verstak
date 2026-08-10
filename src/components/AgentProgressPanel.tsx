@@ -34,9 +34,14 @@ export function currentEntry(entries: AgentProgressEntry[], isStreaming: boolean
       .sort((a, b) => b.timestamp - a.timestamp)[0]
     if (active) return active
   }
+  // Д2: при РАВНЫХ метках (финальный текст и 'done' попадают в один тик) побеждает
+  // служебная запись финала — именно она несёт исход прогона. Без этого уточнения
+  // шапка показывала «Пишу видимый ответ» вместо честного ярлыка, и заголовок
+  // зависел бы от того, успел ли тик смениться.
+  const rank = (e: AgentProgressEntry): number => (e.id === 'done' || e.id === 'error' ? 1 : 0)
   const terminal = visible
     .filter(e => e.id === 'done' || e.id === 'error' || e.phase === 'final')
-    .sort((a, b) => b.timestamp - a.timestamp)[0]
+    .sort((a, b) => (b.timestamp - a.timestamp) || (rank(b) - rank(a)))[0]
   if (terminal) return terminal
   return [...visible].sort((a, b) => b.timestamp - a.timestamp)[0] ?? null
 }
@@ -54,8 +59,20 @@ function historyStatus(entry: AgentProgressEntry, currentId?: string): AgentProg
   return entry.status
 }
 
-function entryTitle(entry: AgentProgressEntry, isStreaming: boolean): string {
-  if (!isStreaming && entry.status === 'done') return 'Задача выполнена'
+/**
+ * Заголовок записи в шапке карточки.
+ *
+ * Д2 (приёмка 10.08): «Задача выполнена» ставилось на ЛЮБУЮ завершённую запись,
+ * поэтому карточка обещала выполнение над отчётом с разделом «Что НЕ доделано».
+ * Теперь обобщение применяется только к служебной записи финала ('done') и
+ * только когда она сама не несёт честного заголовка исхода — а честный
+ * («Сделано частично», «Работа не выполнялась») пишет reduceAgentProgress по
+ * outcome из main. Все прочие записи показывают свой заголовок как есть.
+ */
+export function entryTitle(entry: AgentProgressEntry, isStreaming: boolean): string {
+  if (!isStreaming && entry.status === 'done' && entry.id === 'done' && entry.title === 'Ответ готов') {
+    return 'Задача выполнена'
+  }
   return entry.title
 }
 
