@@ -42,7 +42,7 @@ import { type ToolContext, type TaggedSender as HandlerTaggedSender } from '../i
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, resolveToolsAllowSet, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, decideAutoContinue, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
+import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, decideAutoContinue, buildGoalCheckNote, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
 import { captureToolObservation, isAutoCaptureEnabled } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
@@ -770,6 +770,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // встал. Потолок MAX_BUDGET_TURNS и явный бюджет человека остаются границами.
   let effectiveTurnsBudget = turnsBudget
   let autoContinues = 0
+  // Д7: продление бюджета — единственная точка, где рантайм САМ тратит деньги
+  // человека, и до 10.08 оно не знало признака «цель закрыта»: прогон, уже
+  // выдавший финальный ответ, молча ехал до потолка. Первый ход каждого
+  // продления несёт ноту-гейт (buildGoalCheckNote); решение модели читается
+  // структурно — финал без инструментов завершает прогон, вызовы означают
+  // осознанное продолжение, о котором сообщается в ленту.
+  let pendingGoalCheck = false
 
   // V2-5: одна строка на шаг в едином формате «шаг · цель · действие · результат ·
   // решение · прогресс». Новой шины нет — строка едет существующим
@@ -846,6 +853,41 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
     const toolCalls: ToolCall[] = []
     let assistantText = ''
+    // Аудит M4: tools_allow скилла применяется ЗДЕСЬ — модель видит только
+    // разрешённые инструменты (read-only скилл физически не получит write_file/
+    // run_command). Фильтруем и стандартные, и MCP (см. selectAllowedToolDefs).
+    // v3 Шаг D: max-steps hard-stop (вдохновлено OpenCode). На ПОСЛЕДНЕМ turn'е
+    // (сюда доходят только зацикленные прогоны — нормальные финишируют раньше)
+    // убираем тулзы и инжектим инструкцию отчёта: модель обязана отчитаться
+    // структурой «сделано/не доделано/дальше», а не молча упереться в лимит.
+    // V2-2: решение о продлении принимается ДО того, как ход объявлен последним.
+    // Иначе порядок был бы вреден: на последнем ходу у модели отбираются
+    // инструменты и требуется отчёт «сделано/не доделано», и продление после
+    // этого дарило бы прогону ход, потраченный на преждевременное подведение
+    // итогов. Продлеваем раньше — последнего хода просто не наступает.
+    // Блок стоит ДО снятия компакт-копии messagesForProvider: нота гейта Д7
+    // обязана уехать провайдеру ЭТИМ же ходом, а не следующим.
+    if (turn === effectiveTurnsBudget - 1) {
+      const auto = decideAutoContinue({
+        budget: effectiveTurnsBudget,
+        allowed: autoContinueTurns === true,
+        staleTurns: progressState.staleTurns,
+        extensions: autoContinues,
+      })
+      if (auto.extend) {
+        autoContinues++
+        effectiveTurnsBudget = auto.nextBudget
+        // Д7: продление больше не молчаливое. Первый ход продления несёт гейт
+        // «цель закрыта?» — если модель ответит финалом без инструментов, прогон
+        // завершится обычным путём toolCalls.length === 0 ниже.
+        pendingGoalCheck = true
+        currentMessages.push({ role: 'user', content: buildGoalCheckNote() })
+        sender.send('ai:event', {
+          id: sendId,
+          event: { type: 'info', message: `⏸ Бюджет ходов исчерпан — спрашиваю агента, закрыта ли цель. Если ответ уже выдан, прогон остановится; продолжение будет видимым, кнопка Стоп работает (бюджет ${effectiveTurnsBudget}, потолок ${MAX_BUDGET_TURNS}).` },
+        })
+      }
+    }
     // Context sliding window: старые tool results заменяем краткими маркерами,
     // чтобы input_tokens не росли квадратично с длиной сессии. См.
     // ai/compact-history.ts. Сам currentMessages не модифицируется — компактим
@@ -862,34 +904,6 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       description: t.description,
       parameters: t.inputSchema
     })) : []
-    // Аудит M4: tools_allow скилла применяется ЗДЕСЬ — модель видит только
-    // разрешённые инструменты (read-only скилл физически не получит write_file/
-    // run_command). Фильтруем и стандартные, и MCP (см. selectAllowedToolDefs).
-    // v3 Шаг D: max-steps hard-stop (вдохновлено OpenCode). На ПОСЛЕДНЕМ turn'е
-    // (сюда доходят только зацикленные прогоны — нормальные финишируют раньше)
-    // убираем тулзы и инжектим инструкцию отчёта: модель обязана отчитаться
-    // структурой «сделано/не доделано/дальше», а не молча упереться в лимит.
-    // V2-2: решение о продлении принимается ДО того, как ход объявлен последним.
-    // Иначе порядок был бы вреден: на последнем ходу у модели отбираются
-    // инструменты и требуется отчёт «сделано/не доделано», и продление после
-    // этого дарило бы прогону ход, потраченный на преждевременное подведение
-    // итогов. Продлеваем раньше — последнего хода просто не наступает.
-    if (turn === effectiveTurnsBudget - 1) {
-      const auto = decideAutoContinue({
-        budget: effectiveTurnsBudget,
-        allowed: autoContinueTurns === true,
-        staleTurns: progressState.staleTurns,
-        extensions: autoContinues,
-      })
-      if (auto.extend) {
-        autoContinues++
-        effectiveTurnsBudget = auto.nextBudget
-        sender.send('ai:event', {
-          id: sendId,
-          event: { type: 'info', message: `⏩ Работа продолжается: есть продвижение, бюджет ходов расширен до ${effectiveTurnsBudget} (потолок ${MAX_BUDGET_TURNS}).` },
-        })
-      }
-    }
     const isLastTurn = effectiveTurnsBudget > 1 && turn === effectiveTurnsBudget - 1
     let allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
     // PTC (T1.4) пока opt-in: execute_code предлагается модели только при
@@ -1193,6 +1207,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
       if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
       return
+    }
+
+    // Д7: модель ответила на гейт «цель закрыта?» вызовами инструментов —
+    // продолжение осознанное, и человек обязан это видеть, а не догадываться
+    // по растущим счётчикам.
+    if (pendingGoalCheck) {
+      pendingGoalCheck = false
+      sender.send('ai:event', {
+        id: sendId,
+        event: { type: 'info', message: `⏩ Агент продолжает: по его решению цель ещё не закрыта (бюджет ${effectiveTurnsBudget}, потолок ${MAX_BUDGET_TURNS}). Если результат вас уже устраивает — нажмите Стоп.` },
+      })
     }
 
     // Этап 2, приоритет 3: native tool-call пришёл с битым JSON в arguments (typed
