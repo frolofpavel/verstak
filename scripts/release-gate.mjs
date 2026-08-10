@@ -531,7 +531,7 @@ const GATE_MAX_WORKERS = 4
 // scripts/agent-completion-gate.mjs (CLI зовёт напрямую, десктоп ре-экспортирует
 // через .d.mts — allowJs не включали); +2 пина (референсная идентичность модулей
 // и факт вызова гейта в CLI-цикле). ИЗМЕРЕНО: 5009 / 0.
-const EXPECTED_TOTAL_TESTS = 5030
+const EXPECTED_TOTAL_TESTS = 5045
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

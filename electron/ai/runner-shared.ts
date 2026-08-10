@@ -55,22 +55,85 @@ export const MAX_FALLBACK_ATTEMPTS = 2
 export const MAX_ACCOUNT_SWITCHES = 4
 
 // Лимиты ходов agent-loop — общие для dispatch (ipc/ai.ts) и runner-api.
-export const DEFAULT_AGENT_TURNS = 8
+//
+// V2-2 (agent-runtime-v2.md §4): дефолт обычного прогона был 8 и опровергнут
+// СОБСТВЕННЫМ замером продукта — тем самым, что ниже обосновывает SPAWN_TASK_TURNS:
+// задача «прочитать материалы + сделать артефакт» упёрлась на 8 ходах (11 вызовов,
+// артефакт не дошёл). Вывод тогда применили ТОЛЬКО к спавн-сессиям, а обычный чат,
+// где человек работает каждый день, остался на опровергнутом числе. Замер Arena
+// 09–10.08 подтвердил границу с другой стороны: оба слабых класса (правка связанных
+// файлов, регрессия от собственной правки) укладываются в 8–10 ходов, то есть на
+// дефолте 8 половина таких задач упиралась в стену на середине.
+export const DEFAULT_AGENT_TURNS = 16
+// Пол ЯВНОГО бюджета — отдельная константа, и это не косметика. Пока пол и дефолт
+// были одним числом, поднятие дефолта молча переписывало бы бюджет, назначенный
+// человеком: композер просит 10 — получает 16. Явное решение человека не трогаем,
+// поднимаем только то, что он не назначал.
+export const MIN_AGENT_TURNS = 8
 export const MAX_BUDGET_TURNS = 40  // hard ceiling even with continues — prevents infinite-budget abuse
-// Бюджет ходов ВЫНЕСЕННОЙ (спавн) сессии (задача C(а), 08.08). Не дефолт обычного хода:
-// самостоятельная задача «прочитать материалы + сделать артефакт» на 8 ходах упиралась
-// (наблюдённый отказ — 8 ходов, 11 вызовов, DOCX не дошёл). 24 даёт втрое больше запаса
-// и оставляет потолок 40 для явных случаев. Своя константа делает число видимым и правимым.
+// Бюджет ходов ВЫНЕСЕННОЙ (спавн) сессии (задача C(а), 08.08). Больше обычного:
+// самостоятельная задача идёт без человека рядом и остановиться ей дороже.
 export const SPAWN_TASK_TURNS = 24
 
 /**
  * Итоговый бюджет ходов прогона. Явный budget (из композера) побеждает; при его
  * отсутствии дочерняя (спавн) сессия получает SPAWN_TASK_TURNS, обычная — DEFAULT.
- * Пол DEFAULT и потолок MAX сохраняются как раньше. Пуре ради тестируемости.
+ * Пол MIN и потолок MAX. Пуре ради тестируемости.
  */
 export function resolveTurnsBudget(budget: number | undefined, isChildSession: boolean): number {
   const fallback = isChildSession ? SPAWN_TASK_TURNS : DEFAULT_AGENT_TURNS
-  return Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? fallback))
+  return Math.min(MAX_BUDGET_TURNS, Math.max(MIN_AGENT_TURNS, budget ?? fallback))
+}
+
+// ── V2-2: автопродолжение бюджета, пока есть прогресс ───────────────────────
+//
+// Поднятого дефолта мало: длинная работа упиралась бы в стену просто позже.
+// Постановка: продолжение АВТОМАТИЧЕСКОЕ, пока есть прогресс; ручное «+10 ходов» —
+// только когда прогресса нет. Признак прогресса берём у V2-4 (ai/progress.ts) —
+// один сигнал на обе правки, иначе они разъехались бы и продление однажды
+// продлило бы застой.
+/** На сколько ходов продлеваем за раз. */
+export const AUTO_CONTINUE_STEP = 8
+/** Сколько раз подряд можно продлить без человека (bounded поверх потолка MAX). */
+export const MAX_AUTO_CONTINUES = 3
+
+export type AutoContinueReason = 'progress' | 'not-allowed' | 'no-progress' | 'bounded' | 'ceiling'
+
+export interface AutoContinueInput {
+  /** Текущий бюджет прогона. */
+  budget: number
+  /**
+   * Разрешено ли ЭТОМУ прогону растить бюджет самому. Разрешение — ЯВНОЕ, и это
+   * не осторожность ради осторожности: `runApiConversation` зовут не только из
+   * чата, но и из пайплайнов, делегирования и спавн-сессий, где бюджет — часть
+   * условия задачи. Эластичный бюджет по умолчанию менял бы поведение всем им
+   * разом. Даёт разрешение тот, кто знает, что бюджет никто не назначал:
+   * дефолтный ход человека в чате и облачная задача без явного лимита.
+   */
+  allowed: boolean
+  /** Ходов подряд без нового факта на момент проверки (V2-4). */
+  staleTurns: number
+  /** Сколько раз этот прогон уже продлевали автоматически. */
+  extensions: number
+}
+
+/**
+ * Продлевать ли бюджет вместо остановки. Порядок проверок — от «чужого решения»
+ * к «нашему»: без явного разрешения вызывающего не растим бюджет ни при каком
+ * прогрессе.
+ *
+ * Условие прогресса намеренно СТРОГОЕ — ровно «последний ход дал новый факт»
+ * (staleTurns === 0), а не «прогон в целом ещё не встал». Продление тратит деньги
+ * человека; если работа уже замедлилась, решение остаётся за ним — кнопка
+ * «+10 ходов» никуда не делась. Ошибаться дешевле в эту сторону.
+ */
+export function decideAutoContinue(input: AutoContinueInput): { extend: boolean; nextBudget: number; reason: AutoContinueReason } {
+  const stay = (reason: AutoContinueReason) => ({ extend: false, nextBudget: input.budget, reason })
+  if (!input.allowed) return stay('not-allowed')
+  if (input.staleTurns > 0) return stay('no-progress')
+  if (input.extensions >= MAX_AUTO_CONTINUES) return stay('bounded')
+  if (input.budget >= MAX_BUDGET_TURNS) return stay('ceiling')
+  return { extend: true, nextBudget: Math.min(MAX_BUDGET_TURNS, input.budget + AUTO_CONTINUE_STEP), reason: 'progress' }
 }
 
 // ─── Реестр pending-подтверждений (общий: ipc-хендлеры ai.ts ↔ runner-api) ───

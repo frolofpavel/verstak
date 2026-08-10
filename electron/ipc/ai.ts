@@ -1095,6 +1095,11 @@ export function registerAiIpc(deps: AiDeps): void {
       // гарда глубины (context.isChildSession ниже). НЕ из runner-поля parentChatId.
       const isChildSession = chatId ? deps.getChatParentChatId?.(Number(chatId)) != null : false
       const turnsBudget = resolveTurnsBudget(budget, isChildSession)
+      // V2-2: бюджет никто не назначал — прогону разрешено растить его самому,
+      // пока есть продвижение. Различить это может только здесь: в runner доезжает
+      // уже разрешённое число, и «16 по умолчанию» от «16 по просьбе» неотличимы.
+      // Явную просьбу человека не переигрываем — это его потолок, а не наш.
+      const autoContinueTurns = budget === undefined
       const auditFn = deps.appendAudit
         ? (action: string, detail: string) => {
             try {
@@ -1152,7 +1157,7 @@ export function registerAiIpc(deps: AiDeps): void {
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
-        connectors: deps.connectors, agentMode, turnsBudget,
+        connectors: deps.connectors, agentMode, turnsBudget, autoContinueTurns,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
         resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
         providerId, model,

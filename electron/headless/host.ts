@@ -19,6 +19,7 @@ import { createCostGuard } from '../ai/cost-guard'
 import { prepareSystemContext } from '../ai/compose-system'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { runApiConversation } from '../ai/runner-api'
+import { resolveTurnsBudget } from '../ai/runner-shared'
 import { configureRuntimeLogDir, logRuntime } from '../runtime-log'
 import { createSkillRegistry } from '../ai/skills/registry'
 import type { SkillRegistry } from '../ai/skills/types'
@@ -474,7 +475,12 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         }
       },
       agentMode,
-      turnsBudget: task.turnsBudget ?? 8,
+      // V2-2: было захардкожено 8 — то самое опровергнутое собственным замером
+      // число, мимо resolveTurnsBudget. Облачная задача идёт БЕЗ человека рядом,
+      // и упереться в стену ей дороже всего. Теперь общий resolver: явный бюджет
+      // запроса побеждает, иначе дефолт продукта.
+      turnsBudget: resolveTurnsBudget(task.turnsBudget, false),
+      autoContinueTurns: task.turnsBudget === undefined,
       // Этап 1: unattended — коннекторы read-only, артефакты «downloads» падают в workspace.
       readOnlyConnectors: true,
       artifactsDownloadsDir: workspace,

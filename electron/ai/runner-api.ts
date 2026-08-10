@@ -41,7 +41,7 @@ import { type ToolContext, type TaggedSender as HandlerTaggedSender } from '../i
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
 import { registerConversationSupplements, unregisterConversationSupplements, formatConversationSupplement } from './runner-supplements'
 import { selectAllowedToolDefs, resolveToolsAllowSet, retriableErrorEvent } from './runner-util'
-import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
+import { type FallbackOpts, DEFAULT_AGENT_TURNS, MAX_BUDGET_TURNS, decideAutoContinue, pendingWrites, pendingCommands, pendingPlans, scopedKey } from './runner-shared'
 import { captureToolObservation, isAutoCaptureEnabled } from './memory-hooks'
 import type { ToolEvent } from './procedural-memory'
 import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from './cross-verify'
@@ -192,6 +192,11 @@ export interface AgentRunContext {
   }
   agentMode: AgentMode
   turnsBudget?: number
+  /** V2-2: разрешить прогону растить бюджет самому, пока есть продвижение.
+   *  Разрешение ЯВНОЕ (по умолчанию выключено): этот runner зовут не только из
+   *  чата, но и из пайплайнов, делегирования и спавн-сессий, где бюджет — часть
+   *  условия задачи. Включает тот, кто знает, что бюджет никто не назначал. */
+  autoContinueTurns?: boolean
   skillRegistry?: AiDeps['skillRegistry']
   getSecretForDelegate?: AiDeps['getSecret']
   /** EF-R1 Б2: единый resolver аккаунта для delegate_task внутри агентного цикла. */
@@ -252,7 +257,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
     recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
-    turnsBudget = DEFAULT_AGENT_TURNS, skillRegistry, getSecretForDelegate, costGuard,
+    turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
     parentChatId, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
@@ -759,9 +764,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     return 'allow'
   }
 
+  // V2-2: бюджет прогона — величина ЖИВАЯ. Пока прогон продолжает узнавать новое,
+  // он продлевается сам (decideAutoContinue); упирается в стену только тот, кто
+  // встал. Потолок MAX_BUDGET_TURNS и явный бюджет человека остаются границами.
+  let effectiveTurnsBudget = turnsBudget
+  let autoContinues = 0
+
   try {
 
-  turnLoop: for (let turn = 0; turn < turnsBudget; turn++) {
+  turnLoop: for (let turn = 0; turn < effectiveTurnsBudget; turn++) {
     drainSupplements()
     drainProcessCompletionsForRun()
     if (signal.aborted) {
@@ -833,7 +844,28 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // (сюда доходят только зацикленные прогоны — нормальные финишируют раньше)
     // убираем тулзы и инжектим инструкцию отчёта: модель обязана отчитаться
     // структурой «сделано/не доделано/дальше», а не молча упереться в лимит.
-    const isLastTurn = turnsBudget > 1 && turn === turnsBudget - 1
+    // V2-2: решение о продлении принимается ДО того, как ход объявлен последним.
+    // Иначе порядок был бы вреден: на последнем ходу у модели отбираются
+    // инструменты и требуется отчёт «сделано/не доделано», и продление после
+    // этого дарило бы прогону ход, потраченный на преждевременное подведение
+    // итогов. Продлеваем раньше — последнего хода просто не наступает.
+    if (turn === effectiveTurnsBudget - 1) {
+      const auto = decideAutoContinue({
+        budget: effectiveTurnsBudget,
+        allowed: autoContinueTurns === true,
+        staleTurns: progressState.staleTurns,
+        extensions: autoContinues,
+      })
+      if (auto.extend) {
+        autoContinues++
+        effectiveTurnsBudget = auto.nextBudget
+        sender.send('ai:event', {
+          id: sendId,
+          event: { type: 'info', message: `⏩ Работа продолжается: есть продвижение, бюджет ходов расширен до ${effectiveTurnsBudget} (потолок ${MAX_BUDGET_TURNS}).` },
+        })
+      }
+    }
+    const isLastTurn = effectiveTurnsBudget > 1 && turn === effectiveTurnsBudget - 1
     let allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
     // PTC (T1.4) пока opt-in: execute_code предлагается модели только при
     // ptc_enabled='true' (по умолчанию выкл — фича ждёт live-проверки петли).
@@ -1636,15 +1668,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     exitReason = 'error'
     sender.send('ai:event', { id: sendId, event: { type: 'error', message: REVIEW_GATE_STOP_MESSAGE } })
   }
-  const canContinue = turnsBudget < MAX_BUDGET_TURNS
+  // V2-2: сюда прогон доходит, только если продлевать было НЕЧЕГО — последний ход
+  // не дал нового факта, либо бюджет назначил человек, либо уперлись в потолок.
+  // Ручное «+N ходов» осталось ровно для этого случая; считаем от РЕАЛЬНОГО
+  // бюджета (с учётом автопродлений), иначе кнопка предлагала бы уже потраченное.
+  const canContinue = effectiveTurnsBudget < MAX_BUDGET_TURNS
   sender.send('ai:event', {
     id: sendId,
     event: {
       type: 'turns-exhausted',
-      used: turnsBudget,
+      used: effectiveTurnsBudget,
       maxBudget: MAX_BUDGET_TURNS,
       canContinue,
-      suggestedAdd: Math.min(10, MAX_BUDGET_TURNS - turnsBudget)
+      suggestedAdd: Math.min(10, MAX_BUDGET_TURNS - effectiveTurnsBudget)
     }
   })
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
@@ -1666,7 +1702,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       projectPath,
       providerId: providerId ?? null,
       model: model ?? null,
-      turnCount: turnsBudget
+      turnCount: effectiveTurnsBudget
     })
     // Smart fallback для API-агентного пути: если withInitialRetry исчерпал попытки
     // (throw наружу) и ошибка всё ещё retriable — переключаемся на следующего провайдера.
