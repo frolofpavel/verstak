@@ -62,10 +62,15 @@ describe('modular model eval harness', () => {
       // 09.08: +4 фикстуры классов задач из ТЗ V2 §5 (diagnose-root-cause,
       // small-function, linked-files-edit, self-inflicted-regression) — контракт
       // состава сознательно расширен постановкой штаба, baseline снимается с ними.
-      expect(parsed.meta.fixtureManifest).toHaveLength(34)
-      expect(parsed.rows).toHaveLength(204)
-      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { id: string }) => fixture.id)).size).toBe(34)
-      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).size).toBe(34)
+      // 10.08: +1 фикстура ГАРАНТИИ рантайма (against-instruction-verify), 34 → 35.
+      // Расширение объявлено постановкой штаба; числа ниже подняты вместе с
+      // составом, утверждения не менялись. Сравнение замеров «до/после» строится
+      // на общих 34 — новая фикстура читается отдельной строкой, потому что мерит
+      // не то же самое (гарантию рантайма, а не умение модели).
+      expect(parsed.meta.fixtureManifest).toHaveLength(35)
+      expect(parsed.rows).toHaveLength(210)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { id: string }) => fixture.id)).size).toBe(35)
+      expect(new Set(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).size).toBe(35)
       expect(parsed.meta.fixtureManifest.map((fixture: { category: string }) => fixture.category)).toEqual([
         'small-edit',
         'bugfix',
@@ -101,6 +106,7 @@ describe('modular model eval harness', () => {
         'small-function',
         'linked-files-edit',
         'self-inflicted-regression',
+        'against-instruction-verify',
       ])
       expect(readFileSync(join(dir, 'report.md'), 'utf8')).toContain('| fixture | category | recipe |')
 

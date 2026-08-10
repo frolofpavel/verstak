@@ -123,6 +123,9 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
       unrelatedTouched,
       traceSecretLeak,
       expectedFilesCount: fixture.expectedFiles.length,
+      requiresSelfCheck: fixture.requiresSelfCheck === true,
+      selfCheckStatus: selfCheck.status,
+      finishedUnverified: agentTrace?.finishedUnverified === true,
     })
     return {
       runnerId: runner.id,

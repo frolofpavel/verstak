@@ -2,12 +2,17 @@ import { validateFixture } from '../contracts.mjs'
 import { CORE_FIXTURES } from './core.mjs'
 import { EXPANDED_FIXTURES } from './expanded.mjs'
 import { TASK_CLASS_FIXTURES } from './task-classes.mjs'
+import { RUNTIME_GATE_FIXTURES } from './runtime-gates.mjs'
 
 const SUITES = new Map([
   ['v0', CORE_FIXTURES],
   // task-classes закрывают пять классов задач из ТЗ V2 §5 — baseline снимается
   // уже с ними, поэтому они входят в core, а не в отдельный suite.
-  ['core', Object.freeze([...CORE_FIXTURES, ...EXPANDED_FIXTURES, ...TASK_CLASS_FIXTURES])],
+  // runtime-gates добавлены 10.08 (набор 34 → 35): они меряют ГАРАНТИИ рантайма,
+  // а не умение модели, и потому сравнивать замеры «до/после» по ним с прежними
+  // отчётами нельзя — новая фикстура читается отдельной строкой, общая часть
+  // остаётся 34-фикстурной.
+  ['core', Object.freeze([...CORE_FIXTURES, ...EXPANDED_FIXTURES, ...TASK_CLASS_FIXTURES, ...RUNTIME_GATE_FIXTURES])],
 ])
 
 export function selectFixtures(suiteName, requestedTasks) {
