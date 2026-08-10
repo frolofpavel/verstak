@@ -64,36 +64,70 @@ export function vskSnapshot(gen: string): PageSnapshot {
     return false
   }
 
-  function roleOf(el: Element): string {
-    const explicit = el.getAttribute('role')
-    if (explicit) return explicit
-    const tag = el.tagName.toLowerCase()
-    if (tag === 'a') return 'link'
-    if (tag === 'button' || tag === 'summary') return 'button'
-    if (tag === 'select') return 'combobox'
-    if (tag === 'textarea') return 'textbox'
-    if (tag === 'input') {
-      const t = (el.getAttribute('type') || 'text').toLowerCase()
-      if (t === 'checkbox') return 'checkbox'
-      if (t === 'radio') return 'radio'
-      if (t === 'submit' || t === 'button') return 'button'
-      return 'textbox'
-    }
-    if (el.getAttribute('contenteditable') === 'true') return 'textbox'
-    return 'button'
-  }
-
+  // Д5: подпись элемента. Порядок прежний, но добавлены два источника, которыми
+  // реально подписывают ИКОНКИ: aria-labelledby (текст лежит в другом узле) и
+  // <svg><title> (единственная подпись у svg-кнопки). Без них кнопка-лупа имела
+  // пустое имя, то есть в снимке была и адресоваться ею было нечем.
   function nameOf(el: Element): string {
     const h = el as HTMLElement
+    let labelled = ''
+    const by = el.getAttribute('aria-labelledby')
+    if (by) {
+      const parts: string[] = []
+      for (const id of by.split(/\s+/)) {
+        const node = id ? el.ownerDocument.getElementById(id) : null
+        if (node) parts.push((node as HTMLElement).innerText || node.textContent || '')
+      }
+      labelled = parts.join(' ')
+    }
+    const svgTitle = el.querySelector ? el.querySelector('svg title') : null
     const raw = (el.getAttribute('aria-label')
+      || labelled
       || (el as HTMLInputElement).value
       || h.innerText
       || el.textContent
       || el.getAttribute('placeholder')
       || el.getAttribute('title')
       || el.getAttribute('alt')
+      || (svgTitle ? svgTitle.textContent : '')
       || '').replace(/\s+/g, ' ').trim()
     return raw.length > CLAMP ? raw.slice(0, CLAMP) + '…' : raw
+  }
+
+  // Д5: отправляет ли этот элемент форму. Отдельная роль нужна ровно тем
+  // элементам, у которых НЕТ подписи: опознать их можно только по назначению.
+  // Кнопка с текстом остаётся обычной кнопкой — иначе адресация по тексту, ради
+  // которой find и существует, поехала бы у всех форм разом.
+  function submitsForm(el: Element): boolean {
+    const tag = el.tagName.toLowerCase()
+    const type = (el.getAttribute('type') || '').toLowerCase()
+    if (tag === 'input') return type === 'submit' || type === 'image'
+    if (tag !== 'button') return false
+    if (type && type !== 'submit') return false
+    // Кнопка без type внутри формы по стандарту HTML тоже submit.
+    return Boolean((el as HTMLButtonElement).form || (el.closest ? el.closest('form') : null))
+  }
+
+  function roleOf(el: Element): string {
+    const explicit = el.getAttribute('role')
+    if (explicit) return explicit
+    const tag = el.tagName.toLowerCase()
+    if (tag === 'a') return 'link'
+    if (tag === 'button' || tag === 'summary') {
+      return (tag === 'button' && !nameOf(el) && submitsForm(el)) ? 'submit' : 'button'
+    }
+    if (tag === 'select') return 'combobox'
+    if (tag === 'textarea') return 'textbox'
+    if (tag === 'input') {
+      const t = (el.getAttribute('type') || 'text').toLowerCase()
+      if (t === 'checkbox') return 'checkbox'
+      if (t === 'radio') return 'radio'
+      if (t === 'submit' || t === 'image') return nameOf(el) ? 'button' : 'submit'
+      if (t === 'button') return 'button'
+      return 'textbox'
+    }
+    if (el.getAttribute('contenteditable') === 'true') return 'textbox'
+    return 'button'
   }
 
   const root = document.documentElement
@@ -105,7 +139,12 @@ export function vskSnapshot(gen: string): PageSnapshot {
     if (isHidden(el)) continue
     n++
     el.setAttribute('data-vsk-el', gen + ':' + n)
-    elements.push({ n, tag: el.tagName.toLowerCase(), role: roleOf(el), name: nameOf(el) })
+    const role = roleOf(el)
+    // Д5: у элемента без подписи имя в снимке было ПУСТЫМ — элемент есть, а
+    // сказать о нём модели нечего. Подпись синтетическая и честная: она называет
+    // назначение, а не выдумывает текст, которого на странице нет.
+    const name = nameOf(el) || (role === 'submit' ? '(кнопка отправки формы)' : '')
+    elements.push({ n, tag: el.tagName.toLowerCase(), role, name })
   }
   return { gen, count: n, elements }
 }
@@ -282,6 +321,14 @@ export function vskFind(snap: PageSnapshot, query: string, limit: number): FindR
   // vskFind.toString() (BrowserView), поэтому обязан быть самодостаточным —
   // модульные хелперы туда не попадут (как roleOf/nameOf живут внутри vskSnapshot).
   // Вес совпадения: качество имени доминирует, навигации/действию — бонус над полем.
+  // Д5: у кнопки без подписи совпадать нечему — её ищут по НАЗНАЧЕНИЮ, теми
+  // словами, которыми модель думает о задаче («отправить», «поиск», «найти»).
+  // Список корней, а не полных слов: русская морфология иначе не сойдётся
+  // («отправить» ≠ «отправки»). Инлайнится внутрь функции — vskFind уезжает в
+  // страницу через .toString() и обязан быть самодостаточным.
+  const roleSynonyms = (role: string): string[] => (
+    role === 'submit' ? ['submit', 'отправ', 'поиск', 'искать', 'найти', 'search', 'go', 'лупа', 'кнопка'] : []
+  )
   const matchScore = (e: SnapshotElement, needle: string): number => {
     const name = (e.name || '').toLowerCase()
     const role = (e.role || '').toLowerCase()
@@ -290,9 +337,10 @@ export function vskFind(snap: PageSnapshot, query: string, limit: number): FindR
     if (name === needle) s = 100
     else if (name.startsWith(needle)) s = 70
     else if (name.includes(needle)) s = 50
+    else if (roleSynonyms(role).some(w => w.includes(needle) || needle.includes(w))) s = 45
     else if (role.includes(needle) || tag.includes(needle)) s = 20
     // Роли действия/перехода (клик) выше полей ввода при равном совпадении.
-    if (role === 'link' || role === 'button' || role === 'tab' || role === 'menuitem') s += 5
+    if (role === 'link' || role === 'button' || role === 'submit' || role === 'tab' || role === 'menuitem') s += 5
     return s
   }
   const q = String(query || '').trim().toLowerCase()
@@ -304,7 +352,8 @@ export function vskFind(snap: PageSnapshot, query: string, limit: number): FindR
   const hits = snap.elements.filter(e =>
     (e.name || '').toLowerCase().includes(q) ||
     (e.role || '').toLowerCase().includes(q) ||
-    (e.tag || '').toLowerCase().includes(q))
+    (e.tag || '').toLowerCase().includes(q) ||
+    roleSynonyms((e.role || '').toLowerCase()).some(w => w.includes(q) || q.includes(w)))
   // Ранжирование: качество совпадения ИМЕНИ доминирует (точное > префикс > вхождение >
   // только роль/тег), плюс небольшой бонус навигационным/действующим ролям. Так пункт
   // навигации (ссылка/кнопка) встаёт ВЫШЕ поля-фильтра при равном совпадении по запросу —
