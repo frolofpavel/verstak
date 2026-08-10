@@ -23,6 +23,7 @@ export interface ProgressState {
 
 export type StagnationReason = 'repeat-call' | 'reread-loop' | 'no-new-facts'
 
+export declare function observationDigest(value: unknown): string
 export declare function factKey(call: ProgressCall): string
 export declare function callKey(call: ProgressCall): string
 export declare function createProgressState(): ProgressState

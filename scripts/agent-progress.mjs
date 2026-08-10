@@ -65,6 +65,17 @@ function digest(value) {
   return hash.toString(36)
 }
 
+/**
+ * Дайджест ОДНОГО наблюдения — что инструмент увидел, с нормализацией волатильного.
+ * Экспортируется ради Д4 (electron/ai/loop-detect.ts): подпись безаргументного
+ * вызова строится из наблюдения, и нормализация обязана быть той же самой —
+ * иначе страница с часами выглядела бы вечно новой для одного механизма и
+ * повторяющейся для другого.
+ */
+export function observationDigest(value) {
+  return digest(value)
+}
+
 /** Ключ факта одного вызова: что спросили → что ответили. */
 export function factKey(call) {
   const name = String(call?.name ?? 'unknown')

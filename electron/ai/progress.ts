@@ -20,6 +20,7 @@
 export {
   STAGNATION_TURNS,
   MAX_STRATEGY_NUDGES,
+  observationDigest,
   factKey,
   callKey,
   createProgressState,

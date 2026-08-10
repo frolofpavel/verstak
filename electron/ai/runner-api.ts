@@ -51,6 +51,10 @@ import { classifyRouteReason } from './route-policy'
 import { resolveToolMode, isCoaxableProvider, JSON_TOOL_INSTRUCTION, IGNORED_TOOLS_NUDGE, claimsCompletedAction } from './tool-mode'
 import { type ExitReason, callSignature } from './session-journal'
 import {
+  createObservationState, hasNoArgs, shouldBlockArgless, recordObservation,
+  changesObservation, noteContextChange,
+} from './loop-detect'
+import {
   isAgentRunTimeoutAbort,
 } from './run-lifecycle'
 import { decideCheckpointSave, type CheckpointThrottleState } from './checkpoint-throttle'
@@ -467,6 +471,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // (the threshold the UI tells the user). Tracking via Map avoids the
   // sliding-window eviction problem of the previous flat-array approach.
   const signatureCounts = new Map<string, number>()
+  // Д4: наблюдения безаргументных инструментов — их подпись строится не из
+  // аргументов (которых нет), а из того, что вызов увидел. См. loop-detect.ts.
+  const observationState = createObservationState()
   const LOOP_THRESHOLD = 3
   // Сколько раз скармливаем supervisor-ноту «смени подход» прежде чем жёстко
   // остановиться. 1 = один шанс на восстановление, потом hard-stop (bounded).
@@ -1262,8 +1269,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
 
     // Loop detection — increment counter per signature; block when any tool
     // call has been issued LOOP_THRESHOLD (3) times across the whole loop.
+    //
+    // Д4 (приёмка 10.08): у БЕЗАРГУМЕНТНОГО вызова подпись «имя + аргументы»
+    // вырождается в константу, поэтому третий browser_snapshot за прогон
+    // блокировался всегда — даже после навигации. Такие вызовы различаются тем,
+    // что они НАБЛЮДАЮТ (loop-detect.ts): три одинаковых наблюдения подряд
+    // ловятся как прежде, изменившаяся страница и любое действие агента счёт
+    // обнуляют. Вызовы с аргументами идут прежним путём без изменений.
     const loopHits: ToolCall[] = []
     for (const c of toolCalls) {
+      if (hasNoArgs(c.args)) {
+        if (shouldBlockArgless(observationState, c.name, LOOP_THRESHOLD)) loopHits.push(c)
+        continue
+      }
       const sig = callSignature(c)
       const next = (signatureCounts.get(sig) ?? 0) + 1
       signatureCounts.set(sig, next)
@@ -1523,6 +1541,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // не приносящие нового знания при формально разных вызовах. Механизмы не
     // дублируются, они смотрят на разное — на ВЫЗОВ и на ЗНАНИЕ. На CLI-пути
     // первого нет вовсе, там V2-4 закрывает оба случая.
+    // Д4: наблюдения безаргументных вызовов этого хода. Порядок важен: сперва
+    // действия обнуляют счёт (мир изменился по воле агента), потом пишутся сами
+    // наблюдения — иначе снимок, снятый в одном ходу с навигацией, был бы стёрт
+    // собственной же навигацией и правило не сработало бы никогда.
+    if (toolCalls.some(c => changesObservation(c.name))) noteContextChange(observationState)
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]
+      if (!hasNoArgs(call.args)) continue
+      recordObservation(observationState, call.name, {
+        result: toolResults[i]?.result,
+        error: toolResults[i]?.error,
+      })
+    }
     lastTurnProgress = recordTurn(progressState, toolCalls.map((call, i) => ({
       name: call.name,
       args: call.args,
