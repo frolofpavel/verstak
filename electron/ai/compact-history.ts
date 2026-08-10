@@ -372,6 +372,17 @@ export function formatFocusChain(todos: ReadonlyArray<{ title: string; status: s
   return '[Focus Chain — незакрытые пункты задачи (держи в фокусе, не дрейфуй):\n' + lines.join('\n') + more + ']'
 }
 
+/**
+ * Первый незакрытый пункт Focus Chain — «цель» в строке шага (V2-5). Отдельная
+ * функция, потому что formatFocusChain отдаёт весь блок с рамкой и переводами
+ * строк: в однострочный лог он не годится, а резать его регуляркой на стороне
+ * потребителя значило бы завести второй, молча расходящийся разбор.
+ */
+export function firstOpenFocusItem(todos: ReadonlyArray<{ title: string; status: string }>): string | null {
+  const active = todos.filter(t => t.status !== 'done')
+  return active.length > 0 ? active[0].title : null
+}
+
 /** Статистика сжатия — для журнала / отладки. */
 export function diffSize(before: ChatMessage[], after: ChatMessage[]): { savedChars: number; pct: number } {
   const charsOf = (msgs: ChatMessage[]): number =>

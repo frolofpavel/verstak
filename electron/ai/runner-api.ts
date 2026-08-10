@@ -18,7 +18,8 @@ import {
   MAX_REVIEW_GATE_NUDGES, type VerifyRun,
 } from './review-gate'
 import { MAX_STEPS_REPORT } from './model-presets'
-import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from './compact-history'
+import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, firstOpenFocusItem, buildNewTaskContext } from './compact-history'
+import { formatStepLine } from './step-log'
 import { shouldReinjectFocus } from './focus-chain-policy'
 import {
   MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
@@ -35,7 +36,7 @@ import { SessionAgentCounter } from './delegation-limits'
 import type { AgentMode } from './mode-policy'
 import { loadPermissionRules } from './permission-rules'
 import { hooksEnabled, hooksProjectEnabled, loadHooks, runHooks, type CompiledHooks } from './hooks'
-import type { ChatMessage, ToolCall, ChatProvider, Attachment } from './types'
+import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from './types'
 import { type ToolContext, type TaggedSender as HandlerTaggedSender } from '../ipc/tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { compactProgressText, modelProgressLabel, emitAgentProgress, createModelWaitHeartbeat } from './runner-progress'
@@ -770,6 +771,30 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let effectiveTurnsBudget = turnsBudget
   let autoContinues = 0
 
+  // V2-5: одна строка на шаг в едином формате «шаг · цель · действие · результат ·
+  // решение · прогресс». Новой шины нет — строка едет существующим
+  // agent_run_events (kind='step'). Именно два последних поля отличают её от
+  // прежних событий: без «решения рантайма» и «прогресса» лог остаётся
+  // перечислением вызовов и не отвечает на вопрос, где агент буксует.
+  let lastTurnProgress: { progressed: boolean; newFacts: number } = { progressed: false, newFacts: 0 }
+  const emitStepLine = (turn: number, calls: ToolCall[], decision: string, results?: ToolResult[]): void => {
+    if (!agentRuns || !runId) return
+    const goal = (sessionTodos && projectPath)
+      ? firstOpenFocusItem(sessionTodos.list(projectPath, parentChatId ?? null))
+      : null
+    const line = formatStepLine({
+      step: turn + 1,
+      budget: effectiveTurnsBudget,
+      goal: goal ?? (typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : null),
+      calls: calls.map((call, i) => ({ name: call.name, args: call.args, error: results?.[i]?.error })),
+      decision,
+      progressed: lastTurnProgress.progressed,
+      newFacts: lastTurnProgress.newFacts,
+      staleTurns: progressState.staleTurns,
+    })
+    try { agentRuns.appendEvent(runId, 'step', { detail: line }) } catch { /* журнал шага не критичен */ }
+  }
+
   try {
 
   turnLoop: for (let turn = 0; turn < effectiveTurnsBudget; turn++) {
@@ -1157,7 +1182,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // V2-3 (главная правка): на ОБЫЧНОМ пути финал не выпускается, если были записи
       // и ни одной проверки. Bounded — после лимита попыток прогон закрывается с
       // видимой пометкой «не проверено», а не выдаётся за готовое.
-      if (enforceCompletionGateBeforeFinal() === 'retry') { assistantText = ''; continue }
+      if (enforceCompletionGateBeforeFinal() === 'retry') {
+        emitStepLine(turn, [], 'требую доказательство: файлы изменены, проверок нет')
+        assistantText = ''
+        continue
+      }
+      emitStepLine(turn, [], runAcceptedWrites > 0 && runVerifications === 0 ? 'закрываю: сделано, НЕ проверено' : 'готово')
       exitReason = 'completed'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
@@ -1460,16 +1490,26 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // вовсе — бюджет доедался молча. Признак один: ход не породил ни одного факта,
     // которого в прогоне ещё не было. Bounded: одна подсказка сменить подход, и
     // если не помогло — честная остановка с описанием блокера, а не тихий max-turns.
-    recordTurn(progressState, toolCalls.map((call, i) => ({
+    //
+    // Граница с детектором зацикливания выше (LOOP_THRESHOLD, signatureCounts):
+    // тот ловит ТОЧНЫЙ повтор вызова — три одинаковые подписи — и делает это
+    // РАНЬШЕ, поэтому до сюда такой прогон на десктопе не доходит вовсе. V2-4
+    // добирает то, чего подпись не видит: чтение по кругу разных файлов и ходы,
+    // не приносящие нового знания при формально разных вызовах. Механизмы не
+    // дублируются, они смотрят на разное — на ВЫЗОВ и на ЗНАНИЕ. На CLI-пути
+    // первого нет вовсе, там V2-4 закрывает оба случая.
+    lastTurnProgress = recordTurn(progressState, toolCalls.map((call, i) => ({
       name: call.name,
       args: call.args,
       result: toolResults[i]?.result,
       error: toolResults[i]?.error,
     })))
     const stagnation = detectStagnation(progressState)
+    let turnDecision = 'продолжаю'
     if (stagnation.stagnant) {
       if (progressState.strategyNudges < MAX_STRATEGY_NUDGES) {
         progressState.strategyNudges++
+        turnDecision = `прошу сменить подход (${stagnation.reason})`
         currentMessages.push({ role: 'user', content: buildStrategyChangeHint(stagnation.reason, stagnation.staleTurns) })
         sender.send('ai:event', {
           id: sendId,
@@ -1477,12 +1517,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             reason: 'Прогресса нет несколько ходов подряд — прошу сменить подход.' },
         })
       } else {
+        emitStepLine(turn, toolCalls, `останавливаю: застой (${stagnation.reason})`, toolResults)
         sender.send('ai:event', { id: sendId, event: { type: 'info', message: stagnationStopNote(stagnation.reason, stagnation.staleTurns) } })
         exitReason = 'loop-detected'
         sender.send('ai:event', { id: sendId, event: { type: 'done' } })
         return
       }
     }
+    // V2-5: одна строка на шаг в едином формате. Едет существующим каналом
+    // agent_run_events (kind='step') — новой шины постановка не разрешает, да и
+    // не нужно: не хватало не канала, а СОПОСТАВИМОЙ строки с решением рантайма.
+    emitStepLine(turn, toolCalls, turnDecision, toolResults)
 
     // Crash-resume (P1): живой прогресс прогона на КАЖДОМ завершённом turn.
     // turn_index = номер этого хода (1-based), last_tool_name = имя последнего

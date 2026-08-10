@@ -259,6 +259,7 @@ describe('verstak-cli detect stagnation (V2-4)', () => {
 
   it('КОНТРОЛЬ: агент, узнающий новое каждый ход, не обрывается', async () => {
     if (!canBind) return
+    progressReqCount = 0 // счётчик мока общий на файл — сценарий обязан начинаться с нуля
     const out = await runCliAsync([
       '-p', 'ollama', '-m', 'llama3.2', '--json', '--trace-json', '--mode', 'auto',
       '--max-turns', '12', '--project', projectDir, 'makes-progress: читай по одному новому файлу'
@@ -270,5 +271,27 @@ describe('verstak-cli detect stagnation (V2-4)', () => {
     // Прогон дошёл до собственного финала: пять чтений и текстовый ответ.
     expect(parsed.trace.finalStatus).toBe('success')
     expect(parsed.trace.toolCalls.filter((c: any) => c.name === 'read_file')).toHaveLength(5)
+  }, CLI_RUN_TEST_TIMEOUT_MS)
+
+  // V2-5: та же строка шага, что на десктопном пути (общий agent-step-log.mjs).
+  // Она едет существующим трейсом — новой шины постановка не разрешает.
+  it('трейс несёт строку на КАЖДЫЙ шаг в едином формате', async () => {
+    if (!canBind) return
+    progressReqCount = 0 // счётчик мока общий на файл — сценарий обязан начинаться с нуля
+    const out = await runCliAsync([
+      '-p', 'ollama', '-m', 'llama3.2', '--json', '--trace-json', '--mode', 'auto',
+      '--max-turns', '12', '--project', projectDir, 'makes-progress: читай по одному новому файлу'
+    ], 60000)
+
+    const parsed = JSON.parse(out.stdout)
+    // Шагов столько же, сколько прожитых ходов: строка на каждый, включая финальный
+    // ход без инструментов — иначе именно решение о завершении и пропало бы.
+    expect(parsed.trace.steps).toHaveLength(parsed.trace.turnsUsed)
+    for (const line of parsed.trace.steps) {
+      expect(line.split(' · ')).toHaveLength(6)
+      expect(line).not.toContain('\n')
+    }
+    expect(parsed.trace.steps[0]).toContain('прогресс: да')
+    expect(parsed.trace.steps.at(-1)).toContain('решение: готово')
   }, CLI_RUN_TEST_TIMEOUT_MS)
 })

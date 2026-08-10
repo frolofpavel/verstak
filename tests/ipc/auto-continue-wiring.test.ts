@@ -40,9 +40,21 @@ const readCall = (id: string, path: string): ChatEvent[] => [
   { type: 'done' } as ChatEvent,
 ]
 
-function runCtx(dir: string, provider: ChatProvider, autoContinueTurns: boolean) {
+/** Мок durable-журнала прогона: V2-5 кладёт строку шага именно сюда (kind='step'). */
+function mockRuns() {
+  const events: Array<{ kind: string; detail?: string | null }> = []
+  return {
+    events,
+    steps: () => events.filter(e => e.kind === 'step').map(e => String(e.detail ?? '')),
+    finish: vi.fn(), tick: vi.fn(), saveCheckpoint: vi.fn(), clearCheckpoint: vi.fn(),
+    appendEvent: (_runId: string, kind: string, opts?: { detail?: string | null }) => { events.push({ kind, detail: opts?.detail }) },
+  }
+}
+
+function runCtx(dir: string, provider: ChatProvider, autoContinueTurns: boolean, agentRuns?: ReturnType<typeof mockRuns>, budget = START_BUDGET) {
   const signal = new AbortController().signal
   return {
+    agentRuns, runId: agentRuns ? 'run-1' : undefined,
     sender: { send: vi.fn(), exec: vi.fn(async () => undefined) },
     sendId: 1, provider, tools: createFileTools(dir, signal), projectPath: dir,
     initialMessages: [{ role: 'user' as const, content: 'иди по шагам' }], signal,
@@ -50,7 +62,7 @@ function runCtx(dir: string, provider: ChatProvider, autoContinueTurns: boolean)
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
     searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
     connectors: { list: () => [], query: async () => ({}) },
-    agentMode: 'bypass', turnsBudget: START_BUDGET, autoContinueTurns,
+    agentMode: 'bypass', turnsBudget: budget, autoContinueTurns,
     getSecretForDelegate: () => null, parentChatId: null,
   }
 }
@@ -95,4 +107,40 @@ describe('V2-2 автопродолжение бюджета в agent-loop', () 
   it('дефолт обычного прогона реально поднят — стена наступает позже восьмого хода', () => {
     expect(DEFAULT_AGENT_TURNS).toBeGreaterThan(8)
   })
+})
+
+// V2-5: строка шага в durable-журнале прогона. Канал существующий
+// (agent_run_events), новой шины нет — проверяем, что строка туда реально
+// доезжает и что в ней есть решение рантайма и прогресс.
+describe('V2-5 строка шага в agent_run_events', () => {
+  it('на каждый ход — одна строка kind="step" в едином формате', async () => {
+    const runs = mockRuns()
+    const provider = countingProvider(turn => readCall(`c${turn}`, `f${turn}.txt`))
+    await runApiConversation(runCtx(dir, provider, false, runs) as never)
+
+    const steps = runs.steps()
+    expect(steps).toHaveLength(START_BUDGET)
+    for (const line of steps) expect(line.split(' · ')).toHaveLength(6)
+    expect(steps[0]).toContain('шаг 1/5')
+    expect(steps[0]).toContain('действие: read_file(f1.txt)')
+    expect(steps[0]).toContain('прогресс: да')
+  }, 60_000)
+
+  it('строка называет РЕШЕНИЕ рантайма, а не только вызовы', async () => {
+    // Вставший прогон вида «чтение по кругу»: пять файлов по очереди. Именно этот
+    // вид застоя добавляет V2-4 — ТОЧНЫЙ повтор вызова на десктопе перехватывает
+    // более ранний детектор зацикливания (LOOP_THRESHOLD, три одинаковые подписи),
+    // и до V2-4 такой прогон просто не доходит. Разные подписи его обходят: каждая
+    // повторяется дважды за девять ходов, порога не достигает — а нового знания
+    // прогон не получает вовсе. В журнале обязаны быть видны обе развилки V2-4.
+    const runs = mockRuns()
+    const cycle = ['f1.txt', 'f2.txt', 'f3.txt', 'f4.txt', 'f5.txt']
+    const provider = countingProvider(turn => readCall(`c${turn}`, cycle[(turn - 1) % cycle.length]))
+    await runApiConversation(runCtx(dir, provider, false, runs, 12) as never)
+
+    const steps = runs.steps()
+    expect(steps.some(l => l.includes('решение: прошу сменить подход'))).toBe(true)
+    expect(steps.at(-1)).toContain('решение: останавливаю: застой')
+    expect(steps.at(-1)).toContain('прогресс: нет')
+  }, 60_000)
 })

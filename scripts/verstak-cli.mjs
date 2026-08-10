@@ -27,6 +27,7 @@ import {
 import {
   MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
 } from './agent-progress.mjs'
+import { formatStepLine } from './agent-step-log.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -1526,6 +1527,30 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   // agent-progress.mjs). Здесь он особенно нужен: у CLI-цикла нет вообще никакой
   // защиты от вставшего агента — он молча доедал --max-turns.
   const progressState = createProgressState()
+  // V2-5: строки шагов прогона. Отдельного канала не заводим — они часть трейса,
+  // который CLI уже отдаёт по --trace-json.
+  trace.steps = []
+  const recordStep = (turn, calls, results, decision, turnProgress) => {
+    trace.steps.push(formatStepLine({
+      step: turn + 1,
+      budget: MAX_TURNS,
+      goal: prompt,
+      calls: (calls ?? []).map((call, i) => ({
+        name: call.name,
+        args: call.args,
+        // В CLI нет поля error у результата: провал инструмента приходит строкой
+        // «Ошибка: …». Приводим к общему виду здесь, чтобы формат строки совпадал
+        // с десктопным, а не «почти совпадал».
+        error: typeof results?.[i]?.result === 'string' && results[i].result.startsWith('Ошибка:')
+          ? results[i].result
+          : undefined,
+      })),
+      decision,
+      progressed: turnProgress?.progressed ?? false,
+      newFacts: turnProgress?.newFacts ?? 0,
+      staleTurns: progressState.staleTurns,
+    }))
+  }
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     trace.turnsUsed = turn + 1
@@ -1598,6 +1623,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         trace.toolCalls.push({ turn, name: 'completion-gate-nudge', args: {} })
         trace.toolCallsCount = trace.toolCalls.length
         messages.push({ role: 'user', content: buildCompletionGateNudge(recipe?.verify?.commands ?? []) })
+        recordStep(turn, [], [], 'требую доказательство: файлы изменены, проверок нет', { progressed: false, newFacts: 0 })
         continue
       }
       if (completionDecision === 'finish-unverified') {
@@ -1605,6 +1631,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         trace.finishedUnverified = true
         if (!jsonMode) process.stderr.write(`\n${unverifiedWorkNote(runAcceptedWrites)}\n`)
       }
+      recordStep(turn, [], [], completionDecision === 'finish-unverified' ? 'закрываю: сделано, НЕ проверено' : 'готово', { progressed: false, newFacts: 0 })
       break
     }
 
@@ -1663,26 +1690,35 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
     // прогона, как и там, определяют verify-команды, а не эта ветка. Отдельного
     // статуса не заводим, чтобы не менять контракт трейса ради пометки, которая
     // и так есть полем stagnationStopped.
-    recordTurn(progressState, toolCalls.map((call, i) => ({
+    const turnProgress = recordTurn(progressState, toolCalls.map((call, i) => ({
       name: call.name,
       args: call.args,
       result: toolResults[i]?.result,
     })))
     const stagnation = detectStagnation(progressState)
+    let turnDecision = 'продолжаю'
+    let stopAfterStep = false
     if (stagnation.stagnant) {
       trace.stagnation = { reason: stagnation.reason, staleTurns: stagnation.staleTurns }
       if (progressState.strategyNudges < MAX_STRATEGY_NUDGES) {
         progressState.strategyNudges++
+        turnDecision = `прошу сменить подход (${stagnation.reason})`
         trace.stagnationNudges = progressState.strategyNudges
         trace.toolCalls.push({ turn, name: 'stagnation-nudge', args: {} })
         trace.toolCallsCount = trace.toolCalls.length
         messages.push({ role: 'user', content: buildStrategyChangeHint(stagnation.reason, stagnation.staleTurns) })
       } else {
+        turnDecision = `останавливаю: застой (${stagnation.reason})`
         trace.stagnationStopped = true
+        stopAfterStep = true
         if (!jsonMode) process.stderr.write(`\n${stagnationStopNote(stagnation.reason, stagnation.staleTurns)}\n`)
-        break
       }
     }
+    // V2-5: строка шага в ТОМ ЖЕ формате, что на десктопе (общий agent-step-log.mjs).
+    // Едет существующим трейсом; ради неё Arena и сможет сравнить версии рантайма
+    // между собой — по одному формату, а не по двум разным журналам.
+    recordStep(turn, toolCalls, toolResults, turnDecision, turnProgress)
+    if (stopAfterStep) break
   }
 
   if (recipe?.reviewer?.required && !reviewGatePassed) {
