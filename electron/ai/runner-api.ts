@@ -21,6 +21,9 @@ import { MAX_STEPS_REPORT } from './model-presets'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, buildNewTaskContext } from './compact-history'
 import { shouldReinjectFocus } from './focus-chain-policy'
 import {
+  MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
+} from './progress'
+import {
   decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote,
 } from './completion-gate'
 import { detectVerifyScriptsForHint } from './session-journal'
@@ -715,6 +718,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // из рецепта, если он есть, иначе из package.json проекта (тот же источник, что
   // у подсказки после записи) — гейт обязан не только требовать, но и подсказывать чем.
   const runVerifyScriptHints: string[] = []
+  // V2-4: копилка фактов прогона — из неё выводится и «есть прогресс» (условие
+  // автопродолжения бюджета V2-2), и «прогон встал». Один сигнал на обе правки:
+  // разные сигналы разъехались бы, и автопродолжение однажды продлило бы застой.
+  const progressState = createProgressState()
   let runAcceptedWrites = 0
   let runVerifications = 0
   let completionGateNudges = 0
@@ -1415,6 +1422,35 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       pendingAttachments.length = 0
     }
     currentMessages.push(nextUserMsg)
+
+    // V2-4: встал ли прогон. Лестница восстановления выше лечит отказ ПРОВАЙДЕРА;
+    // отказ ЗАДАЧИ (агент крутится и не узнаёт нового) рантайм-механизма не имел
+    // вовсе — бюджет доедался молча. Признак один: ход не породил ни одного факта,
+    // которого в прогоне ещё не было. Bounded: одна подсказка сменить подход, и
+    // если не помогло — честная остановка с описанием блокера, а не тихий max-turns.
+    recordTurn(progressState, toolCalls.map((call, i) => ({
+      name: call.name,
+      args: call.args,
+      result: toolResults[i]?.result,
+      error: toolResults[i]?.error,
+    })))
+    const stagnation = detectStagnation(progressState)
+    if (stagnation.stagnant) {
+      if (progressState.strategyNudges < MAX_STRATEGY_NUDGES) {
+        progressState.strategyNudges++
+        currentMessages.push({ role: 'user', content: buildStrategyChangeHint(stagnation.reason, stagnation.staleTurns) })
+        sender.send('ai:event', {
+          id: sendId,
+          event: { type: 'tool-blocked', callId: `stagnation-${progressState.strategyNudges}`, name: toolCalls[0]?.name ?? 'run_command',
+            reason: 'Прогресса нет несколько ходов подряд — прошу сменить подход.' },
+        })
+      } else {
+        sender.send('ai:event', { id: sendId, event: { type: 'info', message: stagnationStopNote(stagnation.reason, stagnation.staleTurns) } })
+        exitReason = 'loop-detected'
+        sender.send('ai:event', { id: sendId, event: { type: 'done' } })
+        return
+      }
+    }
 
     // Crash-resume (P1): живой прогресс прогона на КАЖДОМ завершённом turn.
     // turn_index = номер этого хода (1-based), last_tool_name = имя последнего

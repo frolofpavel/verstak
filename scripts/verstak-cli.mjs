@@ -24,6 +24,9 @@ import http from 'node:http'
 import {
   decideCompletionGate, isVerificationToolCall, buildCompletionGateNudge, unverifiedWorkNote,
 } from './agent-completion-gate.mjs'
+import {
+  MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
+} from './agent-progress.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -1519,6 +1522,10 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   let runAcceptedWrites = 0
   let runVerifications = 0
   let completionGateNudges = 0
+  // V2-4: тот же детект застоя, что на десктопном пути (общий модуль
+  // agent-progress.mjs). Здесь он особенно нужен: у CLI-цикла нет вообще никакой
+  // защиты от вставшего агента — он молча доедал --max-turns.
+  const progressState = createProgressState()
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     trace.turnsUsed = turn + 1
@@ -1644,6 +1651,38 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
 
     // Добавляем результаты как user-сообщение
     messages.push({ role: 'user', content: '', toolResults })
+
+    // V2-4: прогон встал? Признак один — ход не породил ни одного факта, которого
+    // в прогоне ещё не было (повтор вызова, перечитывание тех же файлов, ходы без
+    // нового знания — три вида одного события). Bounded: одна подсказка сменить
+    // подход, дальше — честная остановка с описанием блокера вместо тихого
+    // проедания бюджета до max-turns.
+    //
+    // ВНИМАНИЕ на finalStatus: остановка по застою НЕ означает «сделано». Она
+    // выходит из цикла ровно тем же путём, что исчерпание max-turns, и итог
+    // прогона, как и там, определяют verify-команды, а не эта ветка. Отдельного
+    // статуса не заводим, чтобы не менять контракт трейса ради пометки, которая
+    // и так есть полем stagnationStopped.
+    recordTurn(progressState, toolCalls.map((call, i) => ({
+      name: call.name,
+      args: call.args,
+      result: toolResults[i]?.result,
+    })))
+    const stagnation = detectStagnation(progressState)
+    if (stagnation.stagnant) {
+      trace.stagnation = { reason: stagnation.reason, staleTurns: stagnation.staleTurns }
+      if (progressState.strategyNudges < MAX_STRATEGY_NUDGES) {
+        progressState.strategyNudges++
+        trace.stagnationNudges = progressState.strategyNudges
+        trace.toolCalls.push({ turn, name: 'stagnation-nudge', args: {} })
+        trace.toolCallsCount = trace.toolCalls.length
+        messages.push({ role: 'user', content: buildStrategyChangeHint(stagnation.reason, stagnation.staleTurns) })
+      } else {
+        trace.stagnationStopped = true
+        if (!jsonMode) process.stderr.write(`\n${stagnationStopNote(stagnation.reason, stagnation.staleTurns)}\n`)
+        break
+      }
+    }
   }
 
   if (recipe?.reviewer?.required && !reviewGatePassed) {

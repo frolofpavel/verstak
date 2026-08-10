@@ -20,6 +20,8 @@ let reqCount = 0
 let recipePassReqCount = 0
 let recipeFailReqCount = 0
 let recipeDangerReqCount = 0
+let stagnationReqCount = 0
+let progressReqCount = 0
 
 function sse(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`
@@ -56,6 +58,8 @@ function runCliAsync(args: string[], timeoutMs: number): Promise<{ status: numbe
 beforeAll(async () => {
   projectDir = mkdtempSync(join(tmpdir(), 'verstak-cli-test-'))
   writeFileSync(join(projectDir, 'sample.txt'), 'hello', 'utf8')
+  // Файлы для контрольного сценария V2-4 «агент продвигается»: каждый ход читает новый.
+  for (let i = 1; i <= 5; i++) writeFileSync(join(projectDir, `step-${i}.txt`), `шаг ${i}`, 'utf8')
   writeFileSync(join(projectDir, 'package.json'), JSON.stringify({
     type: 'module',
     scripts: {
@@ -110,6 +114,26 @@ beforeAll(async () => {
         recipeFailReqCount++
         res.write(sse({ choices: [{ delta: { content: recipeFailReqCount === 1 ? 'готово без gate' : 'всё равно готово без gate' } }] }))
         res.write(sse({ choices: [{ delta: {}, finish_reason: 'stop' }] }))
+      } else if (allText.includes('stagnation-loop')) {
+        // V2-4: модель, которая встала. Возвращаем ОДИН И ТОТ ЖЕ вызов бесконечно —
+        // ровно то поведение, на котором CLI-цикл раньше молча доедал --max-turns.
+        stagnationReqCount++
+        res.write(sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_stag_${stagnationReqCount}`, function: { name: 'read_file', arguments: '' } }] } }] }))
+        res.write(sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'read_file', arguments: '{"path":"sample.txt"}' } }] } }] }))
+        res.write(sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }))
+      } else if (allText.includes('makes-progress')) {
+        // КОНТРОЛЬ к V2-4: агент, который каждый ход читает НОВЫЙ файл. Застоем
+        // объявляться не должен — иначе детектор обрывал бы живую работу.
+        progressReqCount++
+        const path = progressReqCount <= 5 ? `step-${progressReqCount}.txt` : ''
+        if (path) {
+          res.write(sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_prog_${progressReqCount}`, function: { name: 'read_file', arguments: '' } }] } }] }))
+          res.write(sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'read_file', arguments: JSON.stringify({ path }) } }] } }] }))
+          res.write(sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }))
+        } else {
+          res.write(sse({ choices: [{ delta: { content: 'прочитал все шаги' } }] }))
+          res.write(sse({ choices: [{ delta: {}, finish_reason: 'stop' }] }))
+        }
       } else {
         reqCount++
         // Имя приходит ДВАЖДЫ (полное) — воспроизводит поведение DeepSeek.
@@ -209,5 +233,42 @@ describe('verstak-cli headless recipe enforcement', () => {
     expect(parsed.trace.reviewGate).toBe('fail')
     expect(parsed.trace.failureReason).toContain('allowlist')
     expect(existsSync(badFile)).toBe(true)
+  }, CLI_RUN_TEST_TIMEOUT_MS)
+})
+
+// V2-4 (agent-runtime-v2.md §4) — детект застоя на CLI-пути. Именно этот цикл
+// исполняет Arena, и защиты от вставшего агента у него не было вообще: модель,
+// повторяющая один вызов, молча доедала весь --max-turns. Сетка проверяет обе
+// стороны — что застой ловится И что работающий агент не обрывается.
+describe('verstak-cli detect stagnation (V2-4)', () => {
+  it('останавливает вставший прогон РАНЬШЕ max-turns и называет причину', async () => {
+    if (!canBind) return
+    const out = await runCliAsync([
+      '-p', 'ollama', '-m', 'llama3.2', '--json', '--trace-json', '--mode', 'auto',
+      '--max-turns', '12', '--project', projectDir, 'stagnation-loop: повторяй один и тот же вызов'
+    ], 60000)
+
+    const parsed = JSON.parse(out.stdout)
+    // Главное утверждение: бюджет НЕ проеден до конца.
+    expect(parsed.trace.turnsUsed).toBeLessThan(12)
+    expect(parsed.trace.stagnationStopped).toBe(true)
+    expect(parsed.trace.stagnation.reason).toBe('repeat-call')
+    // Перед остановкой был ровно один шанс сменить подход (bounded).
+    expect(parsed.trace.toolCalls.filter((c: any) => c.name === 'stagnation-nudge')).toHaveLength(1)
+  }, CLI_RUN_TEST_TIMEOUT_MS)
+
+  it('КОНТРОЛЬ: агент, узнающий новое каждый ход, не обрывается', async () => {
+    if (!canBind) return
+    const out = await runCliAsync([
+      '-p', 'ollama', '-m', 'llama3.2', '--json', '--trace-json', '--mode', 'auto',
+      '--max-turns', '12', '--project', projectDir, 'makes-progress: читай по одному новому файлу'
+    ], 60000)
+
+    const parsed = JSON.parse(out.stdout)
+    expect(parsed.trace.stagnationStopped).toBeUndefined()
+    expect(parsed.trace.toolCalls.some((c: any) => c.name === 'stagnation-nudge')).toBe(false)
+    // Прогон дошёл до собственного финала: пять чтений и текстовый ответ.
+    expect(parsed.trace.finalStatus).toBe('success')
+    expect(parsed.trace.toolCalls.filter((c: any) => c.name === 'read_file')).toHaveLength(5)
   }, CLI_RUN_TEST_TIMEOUT_MS)
 })
