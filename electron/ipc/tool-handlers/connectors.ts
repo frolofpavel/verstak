@@ -82,7 +82,7 @@ export const connectorQueryHandler: ToolHandler = {
         accepted = true
       } else {
         // 'confirm' — переиспользуем pending-command поток (та же модалка подтверждения)
-        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary } })
+        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary, toolName: call.name } })
         accepted = await awaitCommandConfirm(ctx, call.id)
       }
       if (!accepted) {

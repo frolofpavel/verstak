@@ -50,7 +50,7 @@ export const mcpToolHandler: ToolHandler = {
     }
     if (decision === 'confirm') {
       // 'confirm' — переиспользуем pending-command поток (та же модалка подтверждения)
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary } })
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary, toolName: call.name } })
       const accepted = await awaitCommandConfirm(ctx, call.id)
       if (!accepted) {
         ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })

@@ -105,6 +105,13 @@ export function registerSettingsIpc(settings: Settings): void {
     rememberApproval(rule)  // идемпотентно; правило возвращаем для UI-фидбека
     return rule
   })
+  // Гейт видимости чекбокса «больше не спрашивать»: показываем его только когда
+  // derivePrefixRule реально сформирует правило — иначе чекбокс обещал запись в
+  // permissions.json и молча ничего не делал (дефект A1, 10.08).
+  ipcMain.handle('permissions:can-remember', async (_e, toolName: string, argText: string): Promise<boolean> => {
+    const { derivePrefixRule } = await import('../ai/permission-rules')
+    return derivePrefixRule(toolName, argText) !== null
+  })
 
   ipcMain.handle('cli:detect', () => detectInstalledClis())
   ipcMain.handle('local-models:scan', () => scanLocalModelServers())

@@ -87,7 +87,7 @@ export async function authorizeProcessCommand(call: Parameters<ToolHandler['hand
     return null
   }
 
-  ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command, sendId: ctx.sendId } })
+  ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command, toolName: call.name, sendId: ctx.sendId } })
   const accepted = await awaitCommandConfirm(ctx, call.id)
   if (!accepted) {
     ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command, status: 'rejected' } })

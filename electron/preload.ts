@@ -142,6 +142,7 @@ contextBridge.exposeInMainWorld('api', {
     setKey: (key: string, value: string) => ipcRenderer.invoke('settings:set-key', key, value),
     outputStyles: (projectPath: string | null) => ipcRenderer.invoke('output-styles:list', projectPath),
     rememberApproval: (toolName: string, argText: string) => ipcRenderer.invoke('permissions:remember', toolName, argText),
+    canRememberRule: (toolName: string, argText: string) => ipcRenderer.invoke('permissions:can-remember', toolName, argText),
     onUiScaleChanged: (cb: (percent: number) => void) => {
       const handler = (_e: unknown, percent: number) => cb(percent)
       ipcRenderer.on('ui-scale:changed', handler)

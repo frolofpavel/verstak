@@ -965,7 +965,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         after: String(event.after ?? '')
       }] }
     } else if (t === 'pending-command' && typeof event.callId === 'string') {
-      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), toolName: typeof event.toolName === 'string' ? event.toolName : undefined, sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
     }
     return { sessions: { ...s.sessions, [projectPath]: next } }
   }),
@@ -1091,7 +1091,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
         after: String(event.after ?? '')
       }] }
     } else if (t === 'pending-command' && typeof event.callId === 'string') {
-      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
+      next = { ...next, pendingCommand: { callId: event.callId, command: String(event.command ?? ''), toolName: typeof event.toolName === 'string' ? event.toolName : undefined, sendId: typeof event.sendId === 'number' ? event.sendId : undefined } }
     }
     // Персист завершённого assistant-сообщения в БД (переживёт reload).
     // persistedByChat: активный чат уже персистит сам (Chat.tsx) — не дублируем.

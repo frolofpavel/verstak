@@ -20,6 +20,10 @@ export interface PendingWrite {
 export interface PendingCommand {
   callId: string
   command: string
+  /** Имя инструмента, приславшего подтверждение (run_command/connector_query/...).
+   *  Нужен модалке, чтобы показывать «больше не спрашивать» только там, где
+   *  правило реально сформируется. Отсутствует у старых событий → чекбокс скрыт. */
+  toolName?: string
   /** sendId for strict resolve lookup. */
   sendId?: number
 }

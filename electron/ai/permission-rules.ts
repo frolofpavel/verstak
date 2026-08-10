@@ -273,11 +273,11 @@ export function derivePrefixRule(toolName: string, argText: string): string | nu
     if (SAFE_COMMANDS.has(base)) return `Bash(${words[0]}:*)`
     return null // неизвестная/опасная команда — не запоминаем
   }
-  if (toolName === 'connector_query') {
-    const id = argText.trim()
-    return id ? `connector_query(${id})` : null
-  }
-  return null  // V1: запоминаем только команды/коннекторы (файловые правки — по режиму)
+  // Правило формируется ТОЛЬКО для команд (run_command/run_until_green) — это и есть
+  // граница «больше не спрашивать». Ветвь connector_query снята решением штаба 10.08:
+  // она была недостижима из UI (модалка хардкодила 'run_command'), а авто-правило на
+  // коннектор — молчаливое согласие на будущие отправки/платежи (SEC-CMD-04/05).
+  return null
 }
 
 /** Дописать allow-правило в user-scope permissions (~/.verstak/permissions.json).

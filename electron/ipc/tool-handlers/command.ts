@@ -154,7 +154,7 @@ export const runCommandHandler: ToolHandler = {
       // sendId в payload события: фоновый чат сохранит его в снапшот pendingCommand,
       // и резолв из Inbox пойдёт по строгому ключу ${sendId}::${callId}, а не по
       // collision-prone endsWith-фолбэку (ревью 24.06).
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command, sendId: ctx.sendId } })
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command, toolName: call.name, sendId: ctx.sendId } })
       accepted = await awaitCommandConfirm(ctx, call.id)
     }
     if (!accepted) {

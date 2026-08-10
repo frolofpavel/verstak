@@ -177,8 +177,21 @@ describe('permission-rules — derivePrefixRule (persistent approvals)', () => {
     expect(derivePrefixRule('run_command', 'git')).toBeNull()
     expect(derivePrefixRule('run_command', 'git -c core.pager=evil status')).toBeNull()
   })
-  it('connector_query → правило по id', () => {
-    expect(derivePrefixRule('connector_query', 'ozon-seller')).toBe('connector_query(ozon-seller)')
+  // Пин «connector_query → правило по id» СНЯТ 10.08 решением штаба: он стерёг
+  // отменённый контракт. Ветвь была недостижима из UI (модалка хардкодила
+  // 'run_command'), а авто-правило на коннектор — молчаливое согласие на будущие
+  // отправки/платежи (SEC-CMD-04/05). Зеркальный пин ниже закрепляет обратное.
+  it('connector_query НЕ формирует правило (граница: только команды, SEC-CMD-04/05)', () => {
+    expect(derivePrefixRule('connector_query', 'ozon-seller')).toBeNull()
+    expect(derivePrefixRule('connector_query', 'yookassa')).toBeNull()
+  })
+  it('фактическая граница записи: run_command и run_until_green, больше никто', () => {
+    expect(derivePrefixRule('run_until_green', 'npm test')).toBe('Bash(npm test:*)')
+    expect(derivePrefixRule('spawn_process', 'npm test')).toBeNull()
+    expect(derivePrefixRule('execute_code', 'console.log(1)')).toBeNull()
+    expect(derivePrefixRule('edit_spreadsheet', 'report.xlsx')).toBeNull()
+    expect(derivePrefixRule('mcp_github_create_issue', '{}')).toBeNull()
+    expect(derivePrefixRule('browser_navigate', 'https://x')).toBeNull()
   })
   it('пустое / файловые тулзы → null (запоминаем только команды)', () => {
     expect(derivePrefixRule('run_command', '')).toBeNull()

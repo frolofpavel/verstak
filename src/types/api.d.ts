@@ -438,7 +438,7 @@ export type ChatEvent =
   | { type: 'thought'; text: string }
   | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
-  | { type: 'pending-command'; callId: string; command: string }
+  | { type: 'pending-command'; callId: string; command: string; toolName?: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
   | { type: 'turns-exhausted'; used: number; maxBudget: number; canContinue: boolean; suggestedAdd: number }
@@ -597,6 +597,9 @@ declare global {
         setKey: (key: string, value: string) => Promise<void>
         outputStyles: (projectPath: string | null) => Promise<Array<{ id: string; name: string; description: string; scope: string }>>
         rememberApproval: (toolName: string, argText: string) => Promise<string | null>
+        /** true, если derivePrefixRule сформирует правило для этой пары — гейт видимости
+         *  чекбокса «больше не спрашивать» (иначе он обещает и не делает). */
+        canRememberRule: (toolName: string, argText: string) => Promise<boolean>
         onUiScaleChanged?: (cb: (percent: number) => void) => () => void
       }
       providers: {

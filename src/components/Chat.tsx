@@ -1420,7 +1420,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         }
       }
       else if (event.type === 'pending-command') {
-        store.setPendingCommand({ callId: event.callId, command: event.command, sendId: id })
+        store.setPendingCommand({ callId: event.callId, command: event.command, toolName: event.toolName, sendId: id })
         store.pushActivity({
           id: event.callId,
           kind: 'command',

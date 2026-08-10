@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 
@@ -6,13 +6,34 @@ export function CommandConfirm() {
   const pendingCommand = useActiveChatField('pendingCommand') ?? null
   const setPendingCommand = useProject(s => s.setPendingCommand)
   const [remember, setRemember] = useState(false)
+  // Чекбокс «больше не спрашивать» показываем ТОЛЬКО когда правило реально
+  // сформируется (derivePrefixRule ≠ null). К модалке ходят шесть инструментов
+  // (run_command / spawn_process / connector_query / execute_code / файлы / MCP /
+  // браузер) — для всех, кроме безопасных команд, чекбокс раньше обещал запись в
+  // ~/.verstak/permissions.json и молча не делал её. Скрыт по умолчанию: событие
+  // без toolName (старый снапшот) правила не даст.
+  const [canRemember, setCanRemember] = useState(false)
+  const callId = pendingCommand?.callId ?? null
+  const toolName = pendingCommand?.toolName ?? null
+  const commandText = pendingCommand?.command ?? ''
+  useEffect(() => {
+    setCanRemember(false)
+    setRemember(false)
+    if (callId === null || toolName === null) return
+    let alive = true
+    window.api.settings.canRememberRule(toolName, commandText)
+      .then(ok => { if (alive) setCanRemember(ok) })
+      .catch(() => { /* остаёмся скрытыми — хуже показать и соврать */ })
+    return () => { alive = false }
+  }, [callId, toolName, commandText])
   if (!pendingCommand) return null
   const ref = pendingCommand
 
   async function accept() {
     // «Запомнить» — до резолва, чтобы правило легло в permissions.json ещё до
-    // следующего вызова. Тихо игнорируем null (файловые тулзы правило не дают).
-    if (remember) {
+    // следующего вызова. Запись правил остаётся только у команд: чекбокс виден
+    // лишь когда derivePrefixRule('run_command', …) формирует правило.
+    if (remember && canRemember) {
       try { await window.api.settings.rememberApproval('run_command', ref.command) } catch { /* не блокируем выполнение */ }
     }
     await window.api.ai.resolveCommand(ref.callId, true, ref.sendId)
@@ -42,10 +63,12 @@ export function CommandConfirm() {
             <span className="gg-cmd-prompt">$</span>
             <code className="gg-cmd-text">{pendingCommand.command}</code>
           </div>
-          <label className="gg-remember-approval" title="Похожие команды с этим префиксом будут выполняться автоматически в следующих сессиях (правило в ~/.verstak/permissions.json)">
-            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
-            <span>Больше не спрашивать про такие команды</span>
-          </label>
+          {canRemember && (
+            <label className="gg-remember-approval" title="Похожие команды с этим префиксом будут выполняться автоматически в следующих сессиях (правило в ~/.verstak/permissions.json)">
+              <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+              <span>Больше не спрашивать про такие команды</span>
+            </label>
+          )}
         </div>
 
         <div className="gg-modal-footer">

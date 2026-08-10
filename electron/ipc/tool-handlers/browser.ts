@@ -135,7 +135,7 @@ export const browserHandler: ToolHandler = {
     if (decision === 'confirm') {
       const target = String(call.args.url ?? call.args.selector ?? '')
       const summary = call.name === 'browser_navigate' ? `Переход в браузере: ${target}` : `Клик в браузере: ${target}`
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary, sendId: ctx.sendId } })
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: summary, toolName: call.name, sendId: ctx.sendId } })
       const accepted = await awaitCommandConfirm(ctx, call.id)
       if (!accepted) {
         ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' } })

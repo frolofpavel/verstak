@@ -107,7 +107,7 @@ export type ChatEvent =
   | { type: 'agent-progress'; id?: string; phase: 'understand' | 'context' | 'model' | 'reasoning' | 'tool' | 'command' | 'write' | 'verify' | 'final'; title: string; detail?: string; status?: 'pending' | 'running' | 'done' | 'error' | 'blocked' }
   | { type: 'tool-call'; call: ToolCall }
   | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
-  | { type: 'pending-command'; callId: string; command: string }
+  | { type: 'pending-command'; callId: string; command: string; toolName?: string }
   | { type: 'command-result'; callId: string; command: string; status: 'ok' | 'error' | 'rejected'; exitCode?: number; stdout?: string; stderr?: string; error?: string }
   | { type: 'tool-blocked'; callId: string; name: string; command?: string; reason: string }
     | { type: 'plan-created'; planId: number; title: string; stepCount: number; quality?: { score: number; status: 'pass' | 'revise' | 'block'; warnings: string[] } }

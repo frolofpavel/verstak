@@ -25,7 +25,7 @@ export const executeCodeHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: reason }
     }
     if (decision !== 'auto-accept') {
-      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: `execute_code:\n${code}` } })
+      ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-command', callId: call.id, command: `execute_code:\n${code}`, toolName: call.name } })
       const accepted = await awaitCommandConfirm(ctx, call.id)
       if (!accepted) {
         ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command: 'execute_code', status: 'rejected' } })
