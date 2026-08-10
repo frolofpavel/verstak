@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildArenaSummary, writeArenaReports } from './arena-report.mjs'
+import { buildArenaSummary, costRegressions, writeArenaReports } from './arena-report.mjs'
 import { classifyArenaRun, detectModelUnavailable } from './arena-classify.mjs'
 import { analyzeSelfCheck } from './self-check.mjs'
 import { getVerstakCommit, scanRunnerOutputForSecretLeak, splitList } from './contracts.mjs'
@@ -12,6 +12,7 @@ import { changedFiles, materializeFixture, runVerify, snapshot } from './fixture
 import { selectFixtures } from './fixtures/index.mjs'
 import { codexRunner, runCodex } from './runners/codex.mjs'
 import { opencodeRunner, runOpenCode } from './runners/opencode.mjs'
+import { extractUsage } from './runners/verstak.mjs'
 import { probeVersion } from './runners/process.mjs'
 import { runVerstakArena, verstakArenaRunner } from './runners/arena-verstak.mjs'
 
@@ -48,6 +49,13 @@ export async function runArena(argv, env = process.env) {
     `--suite ${args.suite}`,
     `--repeat ${args.repeat}`,
   ].join(' ')
+  // D1: базовый замер для оси цены — прошлый arena-*.json. Рост цены при том же
+  // успехе публикуется отдельной секцией отчёта как регрессия.
+  let baselineRows = null
+  if (args.baseline) {
+    const { readFileSync } = await import('node:fs')
+    baselineRows = JSON.parse(readFileSync(args.baseline, 'utf8'))?.rows ?? []
+  }
   const payload = {
     meta: {
       arenaVersion: 'model-gym-arena-v1',
@@ -64,6 +72,7 @@ export async function runArena(argv, env = process.env) {
     },
     rows,
     summary: buildArenaSummary(rows, args.repeat),
+    ...(baselineRows ? { costRegressions: costRegressions(rows, baselineRows) } : {}),
   }
   writeArenaReports({ markdownPath: args.out, jsonPath: args.jsonOut, payload })
   return { ok: rows.every(row => !row.traceSecretLeak), report: args.out, json: args.jsonOut, rows: rows.length }
@@ -105,7 +114,11 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
     // Отдаёт его только verstak-cli (--trace-json в stdout-JSON); у конкурентов
     // и в dry-run парс не удаётся, и метрики честно уходят в null/no-trace.
     let agentTrace = null
-    try { agentTrace = JSON.parse(execution.stdout || '')?.trace ?? null } catch { /* нет JSON-вывода */ }
+    let parsedStdout = null
+    try { parsedStdout = JSON.parse(execution.stdout || ''); agentTrace = parsedStdout?.trace ?? null } catch { /* нет JSON-вывода */ }
+    // D1 (10.08): вторая ось вердикта — ЦЕНА. Токены/стоимость из того же
+    // stdout-JSON, что и трейс; нет данных → честный null, не ноль.
+    const usage = extractUsage(parsedStdout)
     const selfCheck = analyzeSelfCheck(agentTrace)
     const verifyRuns = !args.dryRun && comparable ? runVerify(workspace, fixture.verify) : []
     const after = existsSync(workspace) ? snapshot(workspace) : new Map()
@@ -140,7 +153,10 @@ async function runOne({ runner, probe, fixture, repeat, args, env }) {
       changedFiles: changed,
       unrelatedFilesTouched: unrelatedTouched,
       durationMs: execution.durationMs,
-      estimatedCost: null,
+      estimatedCost: usage.estimatedCost,
+      tokensInput: usage.tokens.input,
+      tokensOutput: usage.tokens.output,
+      tokensTotal: usage.tokens.total,
       interventions: countInterventions(raw),
       agentTurns: agentTrace?.turnsUsed ?? null,
       agentToolCalls: agentTrace?.toolCallsCount ?? agentTrace?.toolCalls?.length ?? null,
@@ -168,6 +184,7 @@ function parseArenaArgs(argv) {
     suite: 'core',
     repeat: 3,
     runDate: null,
+    baseline: null,
     dryRun: false,
     out: join(ROOT, '.verstak-data', 'model-gym', 'arena-latest.md'),
     jsonOut: join(ROOT, '.verstak-data', 'model-gym', 'arena-latest.json'),
@@ -188,6 +205,7 @@ function parseArenaArgs(argv) {
     else if (arg === '--run-date') args.runDate = new Date(valueAt(i++, arg)).toISOString()
     else if (arg === '--out') args.out = resolve(valueAt(i++, arg))
     else if (arg === '--json-out') args.jsonOut = resolve(valueAt(i++, arg))
+    else if (arg === '--baseline') args.baseline = resolve(valueAt(i++, arg))
     else if (arg === '--dry-run') args.dryRun = true
     else throw new Error(`Unknown Arena argument: ${arg}`)
   }

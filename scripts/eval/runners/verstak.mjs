@@ -2,29 +2,37 @@ import { spawnSync } from 'node:child_process'
 import { request as httpsRequest } from 'node:https'
 import { cleanGitEnvironment, redactSecrets } from '../contracts.mjs'
 
+/** Аргументы CLI-прогона — чистая функция (пин на форму вызова). */
+export function buildVerstakCliArgs({ cliPath, fixture, model, maxTurns, provider, root }) {
+  return [
+    cliPath,
+    'recipe',
+    'run',
+    '--provider',
+    provider ?? 'verstak-gateway',
+    '--model',
+    model,
+    '--recipe',
+    fixture.recipe,
+    '--workspace',
+    root,
+    '--task',
+    fixture.task,
+    '--json',
+    '--trace-json',
+    // D1 (10.08): класс фикстур с автопродолжением живёт БЕЗ прибитого лимита —
+    // maxTurns == null означает «бюджетом правит рантайм (resolveTurnsBudget +
+    // автопродолжение)», как у настоящего пользователя. Перевод конкретных
+    // фикстур в этот класс — ОТДЕЛЬНОЕ движение при новом замере, не здесь.
+    ...(maxTurns == null ? [] : ['--max-turns', String(maxTurns)]),
+  ]
+}
+
 export function runVerstakCli({ root, repoRoot, cliPath, fixture, model, maxTurns, provider }) {
   const started = Date.now()
   const result = spawnSync(
     process.execPath,
-    [
-      cliPath,
-      'recipe',
-      'run',
-      '--provider',
-      provider ?? 'verstak-gateway',
-      '--model',
-      model,
-      '--recipe',
-      fixture.recipe,
-      '--workspace',
-      root,
-      '--task',
-      fixture.task,
-      '--json',
-      '--trace-json',
-      '--max-turns',
-      String(maxTurns),
-    ],
+    buildVerstakCliArgs({ cliPath, fixture, model, maxTurns, provider, root }),
     {
       cwd: repoRoot,
       encoding: 'utf8',

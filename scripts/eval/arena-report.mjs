@@ -62,6 +62,68 @@ export function buildArenaSummary(rows, repeat) {
   }))
 }
 
+// D1 (10.08): рост цены при ТОМ ЖЕ успехе = регрессия. Порог явный, не магический:
+// медианы цен дрожат между прогонами, 10% отсекают шум одиночного повтора.
+export const COST_REGRESSION_THRESHOLD = 0.10
+
+/**
+ * Сравнить цену успеха с базовым замером по ключу (runnerId, fixtureId).
+ * Метрика цены выбирается по доступности: стоимость → токены → вызовы; сравнение
+ * идёт ТОЛЬКО в одной и той же метрике с обеих сторон. Успех обязан совпадать —
+ * подорожавший, но более успешный прогон регрессией цены не считается (это
+ * другой размен, его читают отдельной строкой отчёта).
+ */
+export function costRegressions(rows, baselineRows) {
+  const metricOf = group => {
+    if (group.costs.length) return { name: 'estimatedCost', value: median(group.costs) }
+    if (group.tokens.length) return { name: 'tokensTotal', value: median(group.tokens) }
+    if (group.calls.length) return { name: 'toolCalls', value: median(group.calls) }
+    return null
+  }
+  const groupBy = list => {
+    const map = new Map()
+    for (const row of list ?? []) {
+      if (!row.comparable) continue
+      const key = `${row.runnerId}:${row.fixtureId}`
+      const g = map.get(key) ?? { runnerId: row.runnerId, fixtureId: row.fixtureId, runs: 0, passes: 0, costs: [], tokens: [], calls: [] }
+      g.runs++
+      if (row.result === 'pass') g.passes++
+      if (Number.isFinite(row.estimatedCost)) g.costs.push(row.estimatedCost)
+      if (Number.isFinite(row.tokensTotal)) g.tokens.push(row.tokensTotal)
+      if (Number.isFinite(row.agentToolCalls)) g.calls.push(row.agentToolCalls)
+      map.set(key, g)
+    }
+    return map
+  }
+  const current = groupBy(rows)
+  const baseline = groupBy(baselineRows)
+  const regressions = []
+  for (const [key, cur] of current) {
+    const base = baseline.get(key)
+    if (!base || !cur.runs || !base.runs) continue
+    const curPass = cur.passes / cur.runs
+    const basePass = base.passes / base.runs
+    if (curPass !== basePass) continue // успех изменился — это не ось цены
+    const curMetric = metricOf(cur)
+    const baseMetric = metricOf(base)
+    if (!curMetric || !baseMetric || curMetric.name !== baseMetric.name) continue
+    if (baseMetric.value === 0) continue
+    const growth = (curMetric.value - baseMetric.value) / baseMetric.value
+    if (growth > COST_REGRESSION_THRESHOLD) {
+      regressions.push({
+        runnerId: cur.runnerId,
+        fixtureId: cur.fixtureId,
+        metric: curMetric.name,
+        baseline: baseMetric.value,
+        current: curMetric.value,
+        growth,
+        passRate: curPass,
+      })
+    }
+  }
+  return regressions
+}
+
 export function writeArenaReports({ markdownPath, jsonPath, payload }) {
   mkdirSync(dirname(markdownPath), { recursive: true })
   mkdirSync(dirname(jsonPath), { recursive: true })
@@ -108,13 +170,28 @@ export function renderArenaMarkdown(payload) {
     '',
     '## Запуски',
     '',
-    '| runner | model | fixture | repeat | result | verify | time ms | cost | interventions | turns | calls | errors | self-check | comparable | reason |',
-    '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|',
+    '| runner | model | fixture | repeat | result | verify | time ms | cost | tokens | interventions | turns | calls | errors | self-check | comparable | reason |',
+    '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|',
   )
   for (const row of payload.rows) {
     lines.push(
-      `| ${esc(row.runnerId)} | ${esc(row.model)} | ${esc(row.fixtureId)} | ${row.repeat} | ${esc(row.result)} | ${row.verifyPass ? 'pass' : 'fail'} | ${row.durationMs} | ${nullable(row.estimatedCost)} | ${row.interventions} | ${nullable(row.agentTurns)} | ${nullable(row.agentToolCalls)} | ${row.agentErrors === null || row.agentErrors === undefined ? 'unknown' : row.agentErrors ? 'yes' : 'no'} | ${describeSelfCheck({ status: row.selfCheck })} | ${row.comparable ? 'yes' : 'no'} | ${esc(row.comparabilityReason || row.failureMode)} |`,
+      `| ${esc(row.runnerId)} | ${esc(row.model)} | ${esc(row.fixtureId)} | ${row.repeat} | ${esc(row.result)} | ${row.verifyPass ? 'pass' : 'fail'} | ${row.durationMs} | ${nullable(row.estimatedCost)} | ${nullable(row.tokensTotal)} | ${row.interventions} | ${nullable(row.agentTurns)} | ${nullable(row.agentToolCalls)} | ${row.agentErrors === null || row.agentErrors === undefined ? 'unknown' : row.agentErrors ? 'yes' : 'no'} | ${describeSelfCheck({ status: row.selfCheck })} | ${row.comparable ? 'yes' : 'no'} | ${esc(row.comparabilityReason || row.failureMode)} |`,
     )
+  }
+  // D1: ось цены против базового замера — рост при том же успехе называется регрессией.
+  if (Array.isArray(payload.costRegressions)) {
+    lines.push('', '## Регрессии цены (тот же успех, дороже)', '')
+    if (payload.costRegressions.length === 0) {
+      lines.push('Нет: ни одна пара (runner, fixture) не подорожала больше порога при том же успехе.')
+    } else {
+      lines.push(
+        '| runner | fixture | metric | baseline | current | growth | pass rate |',
+        '|---|---|---|---:|---:|---:|---:|',
+      )
+      for (const r of payload.costRegressions) {
+        lines.push(`| ${esc(r.runnerId)} | ${esc(r.fixtureId)} | ${esc(r.metric)} | ${r.baseline} | ${r.current} | ${(r.growth * 100).toFixed(1)}% | ${(r.passRate * 100).toFixed(1)}% |`)
+      }
+    }
   }
   lines.push('')
   return lines.join('\n')
