@@ -30,6 +30,7 @@ export type RuntimeFlagKey =
   | 'use_project_brain'
   | 'plan_approval_gate'
   | 'orchestrator_default'
+  | 'mutation_check_enabled'
 
 export interface RuntimeFlagDef {
   key: RuntimeFlagKey
@@ -114,6 +115,16 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     // стережёт tests/lib/runtime-flags.test.ts.
     defaultOn: true,
     readAt: 'electron/ai/runner-api.ts',
+  },
+  {
+    key: 'mutation_check_enabled',
+    // C2 (P6). Подпись по правилу Павла: говорит, что человек ПОЛУЧАЕТ.
+    title: 'Проверка, что тест не декоративный',
+    what: 'Когда агент говорит «починил и написал тест», он может доказать это мутацией фикса: тест прогоняется в изолированной копии без фикса и обязан покраснеть. Зелёный — тест ничего не стережёт, вердикт отклоняется.',
+    whenOff: 'Доказательство мутацией недоступно: «написал тест» принимается без проверки, что тест вообще ловит дефект. Экономит время второго прогона.',
+    // Выключатель обязателен по постановке: второй прогон тестов стоит времени.
+    defaultOn: true,
+    readAt: 'electron/ipc/tool-handlers/mutation-check.ts',
   },
 ] as const
 

@@ -19,7 +19,8 @@
 
 export const COMPLETION_GATE_MAX_NUDGES = 2
 
-const VERIFICATION_TOOLS = new Set(['check_diagnostics', 'attest_verification', 'review_before_commit'])
+// C2 (P6): mutation_check — проверка «тест не декоративный» тоже проверка.
+const VERIFICATION_TOOLS = new Set(['check_diagnostics', 'attest_verification', 'review_before_commit', 'mutation_check'])
 const VERIFICATION_COMMAND_RE = /\b(test|tests|test:\S+|type|typecheck|tsc|build|lint|vitest|jest|pytest|mypy|cargo\s+test|go\s+test)\b/i
 
 export function isVerificationToolCall(call) {

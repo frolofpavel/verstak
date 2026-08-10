@@ -53,12 +53,12 @@ beforeEach(() => { store = {}; stubApi() })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('вкладка «Поведение агента» — состав', () => {
-  // Число обновлено с пяти до шести осознанно (29.07): состав вкладки — предмет
-  // сегодняшнего изменения, а не охраняемый контракт. Утверждение осталось той же
-  // силы: лишняя строка по-прежнему даёт красный.
-  it('рисует все семь флагов, каждый с подписью и тумблером', async () => {
+  // Число обновляется осознанно (29.07: 5→6; 11.08: 7→8 — mutation_check_enabled,
+  // C2/P6): состав вкладки — предмет изменения, а не охраняемый контракт.
+  // Утверждение осталось той же силы: лишняя строка по-прежнему даёт красный.
+  it('рисует все восемь флагов, каждый с подписью и тумблером', async () => {
     await mountTab()
-    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(7)
+    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(8)
     for (const f of RUNTIME_FLAGS) {
       const r = row(f.key)
       expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain(f.title)

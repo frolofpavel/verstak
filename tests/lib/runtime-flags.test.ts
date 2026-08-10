@@ -25,11 +25,12 @@ import { PLAN_APPROVAL_GATE_DEFAULT_ON } from '../../shared/contracts/runtime-fl
 const ROOT = process.cwd()
 
 describe('RUNTIME_FLAGS — состав', () => {
-  // СОСТАВ ИЗМЕНЁН ОСОЗНАННО (29.07), и это объявляется прямо здесь: пятёрка была
-  // не контрактом, а перечнем того, что успели вывести 27.07. Шестым добавлен
-  // `plan_approval_gate` — настройка существовала, но её единственный тумблер был
-  // спрятан в свёрнутом блоке чужой вкладки, и живая приёмка встала на этом.
-  it('в таблице ровно семь флагов, без дублей', () => {
+  // СОСТАВ ИЗМЕНЁН ОСОЗНАННО (29.07, затем 11.08), и это объявляется прямо здесь:
+  // пятёрка была не контрактом, а перечнем того, что успели вывести 27.07. Шестым
+  // добавлен `plan_approval_gate` (тумблер был спрятан, живая приёмка встала).
+  // Восьмым — `mutation_check_enabled` (C2/P6): выключатель обязателен по
+  // постановке — второй прогон тестов стоит времени.
+  it('в таблице ровно восемь флагов, без дублей', () => {
     const keys = RUNTIME_FLAGS.map(f => f.key)
     expect(keys).toEqual([
       'memory_lifecycle',
@@ -39,6 +40,7 @@ describe('RUNTIME_FLAGS — состав', () => {
       'auto_capture_memory',
       'plan_approval_gate',
       'orchestrator_default',
+      'mutation_check_enabled',
     ])
     expect(new Set(keys).size).toBe(keys.length)
   })
@@ -77,6 +79,9 @@ describe('RUNTIME_FLAGS — дефолты', () => {
     // и проверен харнесом. Полярность opt-out (stored !== 'false'), килл-свитч в
     // RuntimeFlagsTab. Мутация в false без флипа чтения в runner-api = красный анти-дрейф.
     orchestrator_default: true,
+    // C2 (P6): включён по умолчанию, осознанное выключение (stored === 'false')
+    // уважается — цена проверки объявлена в whenOff.
+    mutation_check_enabled: true,
   }
 
   for (const [key, defaultOn] of Object.entries(EXPECTED) as Array<[RuntimeFlagKey, boolean]>) {
