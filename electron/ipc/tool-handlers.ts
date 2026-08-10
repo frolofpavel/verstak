@@ -57,6 +57,7 @@ import { checklistAddHandler, checklistCompleteHandler, checklistListHandler } f
 import { spawnTaskSessionHandler } from './tool-handlers/spawn-task-session'
 import { scheduleHandler } from './tool-handlers/schedule'
 import { mutationCheckHandler } from './tool-handlers/mutation-check'
+import { draftProjectRulesHandler } from './tool-handlers/project-rules'
 
 // Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
 // write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
@@ -101,6 +102,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'schedule': scheduleHandler,
   // C2 (P6) — мутация фикса в изолированном worktree: тест обязан покраснеть без фикса
   'mutation_check': mutationCheckHandler,
+  // P2 — черновик правил проекта; запись идёт существующим confirm-write путём
+  'draft_project_rules': draftProjectRulesHandler,
   // TodoGate (Фаза 3) — оркестрационный todo-лист сессии
   'todo_create': todoCreateHandler,
   'todo_update': todoUpdateHandler,
