@@ -35,6 +35,11 @@ export interface PageSnapshot {
   gen: string
   count: number
   elements: SnapshotElement[]
+  /** B1: рекурсия по shadow DOM/iframe упёрлась в бюджет (глубина/узлы/элементы) —
+   *  часть страницы НЕ вошла в снимок. След обязателен: молчаливый потолок
+   *  неотличим от «покрыли всё» (§3.1, урок про фолбэки). Отсутствует на страницах,
+   *  где бюджеты не тронуты, — снимок обычной страницы байт-в-байт прежний. */
+  truncatedByBudget?: boolean
 }
 
 /**
@@ -130,23 +135,61 @@ export function vskSnapshot(gen: string): PageSnapshot {
     return 'button'
   }
 
+  // B1 (10.08): снимок заходит в shadow DOM и same-origin iframe — иначе Битрикс24
+  // и Я.Директ (веб-компоненты, фреймы) для инструментов пустые. Рекурсия жёстко
+  // ограничена: снимок дорог ровно там, где shadow/iframe обильны, а потолок без
+  // следа неотличим от «покрыли всё» — поэтому при ЛЮБОМ срезе ставится
+  // truncatedByBudget. Cross-origin iframe недоступен по построению (contentDocument
+  // бросает/null) — пропускается честно, без падения. Числа — границы безопасности,
+  // не тюнинг: глубина вложенности реальных страниц ≤3, элементов и узлов — с
+  // запасом над замером B2 (M.Video-каталог: 1091 интерактивный элемент).
+  const MAX_DEPTH = 6
+  const MAX_ELEMENTS = 2000
+  const MAX_SCAN = 20000
   const root = document.documentElement
   root.setAttribute('data-vsk-gen', gen)
-  const all = Array.from(document.querySelectorAll(INTERACTIVE))
   const elements: SnapshotElement[] = []
   let n = 0
-  for (const el of all) {
-    if (isHidden(el)) continue
-    n++
-    el.setAttribute('data-vsk-el', gen + ':' + n)
-    const role = roleOf(el)
-    // Д5: у элемента без подписи имя в снимке было ПУСТЫМ — элемент есть, а
-    // сказать о нём модели нечего. Подпись синтетическая и честная: она называет
-    // назначение, а не выдумывает текст, которого на странице нет.
-    const name = nameOf(el) || (role === 'submit' ? '(кнопка отправки формы)' : '')
-    elements.push({ n, tag: el.tagName.toLowerCase(), role, name })
+  let scanned = 0
+  let budgetHit = false
+  const visit = (scope: Document | ShadowRoot, depth: number): void => {
+    for (const el of Array.from(scope.querySelectorAll(INTERACTIVE))) {
+      if (n >= MAX_ELEMENTS) { budgetHit = true; break }
+      if (isHidden(el)) continue
+      n++
+      el.setAttribute('data-vsk-el', gen + ':' + n)
+      const role = roleOf(el)
+      // Д5: у элемента без подписи имя в снимке было ПУСТЫМ — элемент есть, а
+      // сказать о нём модели нечего. Подпись синтетическая и честная: она называет
+      // назначение, а не выдумывает текст, которого на странице нет.
+      const name = nameOf(el) || (role === 'submit' ? '(кнопка отправки формы)' : '')
+      elements.push({ n, tag: el.tagName.toLowerCase(), role, name })
+    }
+    // Вход в под-деревья: shadow-хосты и фреймы этого scope, в порядке DOM.
+    for (const host of Array.from(scope.querySelectorAll('*'))) {
+      scanned++
+      if (scanned > MAX_SCAN) { budgetHit = true; return }
+      const sr = (host as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot
+      if (sr) {
+        if (depth >= MAX_DEPTH) budgetHit = true
+        else visit(sr, depth + 1)
+      }
+      const tag = host.tagName ? host.tagName.toLowerCase() : ''
+      if (tag === 'iframe' || tag === 'frame') {
+        try {
+          const doc = (host as HTMLIFrameElement).contentDocument
+          if (doc) {
+            if (depth >= MAX_DEPTH) budgetHit = true
+            else visit(doc, depth + 1)
+          }
+        } catch { /* cross-origin — недоступен, честно пропускаем */ }
+      }
+    }
   }
-  return { gen, count: n, elements }
+  visit(document, 0)
+  const snap: PageSnapshot = { gen, count: n, elements }
+  if (budgetHit) snap.truncatedByBudget = true
+  return snap
 }
 
 /** Результат разрешения номера в элемент текущего снимка. */
@@ -164,7 +207,39 @@ export function vskResolveNumbered(n: number): NumberedResolve {
   if (!gen) {
     return { ok: false, error: 'Нет активного снимка страницы (после навигации номера сброшены) — сделай browser_snapshot заново.' }
   }
-  const el = document.querySelector('[data-vsk-el="' + gen + ':' + n + '"]')
+  // B1: номер мог быть выдан элементу внутри shadow DOM / iframe — ищем той же
+  // ограниченной рекурсией, что и снимок (те же потолки, иначе снимок находит,
+  // а клик «не находит», и фича декоративна).
+  const SEL = '[data-vsk-el="' + gen + ':' + n + '"]'
+  const MAX_DEPTH = 6
+  const MAX_SCAN = 20000
+  let scanned = 0
+  const search = (scope: Document | ShadowRoot, depth: number): Element | null => {
+    const hit = scope.querySelector(SEL)
+    if (hit) return hit
+    if (depth >= MAX_DEPTH) return null
+    for (const host of Array.from(scope.querySelectorAll('*'))) {
+      scanned++
+      if (scanned > MAX_SCAN) return null
+      const sr = (host as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot
+      if (sr) {
+        const r = search(sr, depth + 1)
+        if (r) return r
+      }
+      const tag = host.tagName ? host.tagName.toLowerCase() : ''
+      if (tag === 'iframe' || tag === 'frame') {
+        try {
+          const doc = (host as HTMLIFrameElement).contentDocument
+          if (doc) {
+            const r = search(doc, depth + 1)
+            if (r) return r
+          }
+        } catch { /* cross-origin — недоступен */ }
+      }
+    }
+    return null
+  }
+  const el = search(document, 0)
   if (!el) {
     return { ok: false, error: 'Элемент №' + n + ' не найден в текущем снимке (страница изменилась или номер устарел) — сделай browser_snapshot заново.' }
   }
@@ -289,11 +364,15 @@ export interface CappedSnapshot {
   shown: number        // сколько вернули (≤ topN)
   truncated: boolean   // count > topN → есть непоказанные, ищи через browser_find
   elements: SnapshotElement[]
+  /** B1: след бюджета рекурсии shadow/iframe — прокидывается из PageSnapshot. */
+  truncatedByBudget?: boolean
 }
 export function vskCapSnapshot(snap: PageSnapshot, topN: number): CappedSnapshot {
   const n = Math.max(1, topN | 0)
   const elements = snap.elements.slice(0, n)
-  return { gen: snap.gen, count: snap.count, shown: elements.length, truncated: snap.count > n, elements }
+  const out: CappedSnapshot = { gen: snap.gen, count: snap.count, shown: elements.length, truncated: snap.count > n, elements }
+  if (snap.truncatedByBudget) out.truncatedByBudget = true
+  return out
 }
 
 /** Результат browser_find: подходящие элементы с их НОМЕРАМИ из снимка (годны для
