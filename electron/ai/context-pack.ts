@@ -17,7 +17,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
-import { getProjectMap, projectMapToText, getDependencyMap, computeDependencyHubs } from './project-map'
+import { projectMapToText, computeDependencyHubs, getProjectMapIfReady, getDependencyMapIfReady } from './project-map'
 import type { DependencyMap, ProjectMap } from './project-map'
 import { detectCrossProjectPaths } from './grounding'
 import { buildProfileBlock, loadProjectProfile, type ProjectProfile } from './project-profile'
@@ -67,7 +67,11 @@ export interface ContextPackInput {
   /** Project Brain (Итер.4): готовый ContextPack (short/medium/long) прогретого
    *  проекта. Инжектится вместо повторной сборки всего контекста. */
   brainContext?: string | null
-  /** Д1: бюджет ожидания карт. Параметр — ради тестируемости; в проде MAP_BUDGET_MS. */
+  /**
+   * Д1: бюджет ожидания карт. С V2 (ось A) сборка контекста карт НЕ ЖДЁТ вовсе —
+   * поле сохранено ради совместимости вызовов и больше ни на что не влияет.
+   * Снимаем его отдельным движением вместе с чисткой вызывающих.
+   */
   mapBudgetMs?: number
 }
 
@@ -210,23 +214,28 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   //    text re-parsing here). Cache is auto-invalidated on write_file.
   let mapBlock = ''
   let projectMap: ProjectMap | null = null
-  // Д1: ждём карту с бюджетом. Просрочка — не ошибка и не тишина: ниже она
-  // называется прямо, иначе выпавшая карта неотличима от проекта без карты и
-  // модель «почему-то» перестаёт видеть структуру.
-  const budgetMs = input.mapBudgetMs ?? MAP_BUDGET_MS
-  const mapDeadline = await withBudget(
-    getProjectMap(projectPath, false).catch(() => null),
-    budgetMs,
-    null,
-  )
-  if (mapDeadline) {
-    projectMap = mapDeadline
+  // V2 ось A: карту БЕРЁМ ГОТОВОЙ или не берём вовсе — ожидания здесь больше нет.
+  //
+  // Прежде тут стоял `withBudget(getProjectMap(...), 8 c)`, и это был честный
+  // компромисс своего времени (Д1: до бюджета отправка висела до 15 минут). Но
+  // замер V2 показал, что компромисс платит и НИЧЕГО не покупает: на каталоге в
+  // 44 964 файла «Привет» стоил 8.5 с, по истечении которых пакет всё равно
+  // собирался без карты. Ожидание ради пустоты — худший из возможных разменов.
+  //
+  // Теперь: есть в кэше — вставили бесплатно; нет — не ждём ни миллисекунды,
+  // сборка идёт в фоне, а модель берёт карту инструментом `get_project_map`.
+  // Это ленивость, а не угадывание намерения (§3.1).
+  projectMap = getProjectMapIfReady(projectPath)
+  if (projectMap) {
     // Бюджет поднят 1500 → 2500: компактная карта остаётся «список путей»,
     // но архитектурная нагрузка (символы хабов) живёт в отдельной dep-секции
     // ниже со своим узким бюджетом, а не раздувает этот список.
     mapBlock = projectMapToText(projectMap, { mode: 'compact', maxChars: 2500 })
   } else {
-    parts.push(`project_map: карта проекта не успела построиться за ${Math.round(budgetMs / 1000)} с (очень много файлов) — она догружается в фоне. Пока пользуйся find_files, list_directory и search_project вместо неё, и не считай отсутствие карты признаком пустого проекта.`)
+    // След обязателен и здесь: молча отсутствующая карта неотличима от пустого
+    // проекта. Текст называет ЗАМЕНУ, а не только факт — иначе модель не знает,
+    // что делать дальше.
+    parts.push('project_map: карта проекта в этом запросе не приложена — она собирается в фоне, чтобы не задерживать ответ. Нужна структура проекта — вызови get_project_map (это дешевле нескольких read_file); также доступны find_files, list_directory и search_project. Отсутствие карты здесь НЕ означает, что проект пуст.')
   }
 
   // 4b. Dependency hubs + key symbols — архитектурные опоры проекта. Граф
@@ -242,11 +251,7 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   // опоры архитектуры, не зная почему (§3.1 — у сработавшего запасного пути
   // обязана быть видимая пометка).
   let depBlock = ''
-  const dep = input.dependencyMap ?? await withBudget(
-    getDependencyMap(projectPath, false).catch(() => null),
-    budgetMs,
-    null,
-  )
+  const dep = input.dependencyMap ?? getDependencyMapIfReady(projectPath)
   if (dep) {
     try {
       depBlock = buildDependencySection(dep, projectMap)
@@ -254,7 +259,7 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
       /* dependency section build failed — skip silently */
     }
   } else {
-    parts.push(`dependency_hubs: граф зависимостей не успел построиться за ${Math.round(budgetMs / 1000)} с (очень много файлов кода) — он догружается в фоне. Ключевые модули проекта в этом запросе не перечислены; опирайся на search_project и read_file, а не считай, что связей между файлами нет.`)
+    parts.push('dependency_hubs: граф зависимостей в этом запросе не приложен — он собирается в фоне, чтобы не задерживать ответ. Ключевые модули проекта здесь не перечислены; опирайся на search_project и read_file, а не считай, что связей между файлами нет.')
   }
 
   // 5. Core Memory (Hermes-style) — всегда в system prompt, загружается при каждом turn'е.

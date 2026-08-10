@@ -20,6 +20,7 @@ import {
 import { MAX_STEPS_REPORT } from './model-presets'
 import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, createCompactedHistory, microcompactIfNeeded, formatFocusChain, firstOpenFocusItem, buildNewTaskContext } from './compact-history'
 import { formatStepLine } from './step-log'
+import { createTextCoalescer } from './stream-coalescer'
 import { shouldReinjectFocus } from './focus-chain-policy'
 import {
   MAX_STRATEGY_NUDGES, buildStrategyChangeHint, createProgressState, detectStagnation, recordTurn, stagnationStopNote,
@@ -262,7 +263,7 @@ export interface AgentRunContext {
 
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
-    sender, sendId, provider, tools, projectPath, initialMessages, signal,
+    sender: rawSender, sendId, provider, tools, projectPath, initialMessages, signal,
     recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
@@ -272,6 +273,30 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
+  // V2 ось B (волна 2.6.0): текстовые дельты склеиваются окном ~30 мс. Обёртка
+  // стоит на САМОМ sender, а не расставлена по веткам цикла, и это главное в
+  // решении: порядок событий тогда гарантирован КОНСТРУКЦИЕЙ, а не дисциплиной
+  // вызовов. Любое не-текстовое событие (tool-call, usage, error, done) сначала
+  // сбрасывает накопленный текст и только потом уходит само — иначе ответ модели
+  // приезжал бы после инструмента, и лента врала бы о ходе работы.
+  //
+  // Первый чанк после паузы уходит НЕМЕДЛЕННО (leading edge в createTextCoalescer):
+  // «время до первого символа» — главная метрика волны, платить за плавность
+  // задержкой первого символа было бы разменом не в ту сторону.
+  const textStream = createTextCoalescer(text => {
+    rawSender.send('ai:event', { id: sendId, event: { type: 'text', text } })
+  })
+  const sender: HandlerTaggedSender = {
+    send: (channel, payload) => {
+      if (channel === 'ai:event' && payload.id === sendId) {
+        const ev = payload.event as { type?: string; text?: string } | undefined
+        if (ev?.type === 'text' && typeof ev.text === 'string') { textStream.push(ev.text); return }
+        textStream.flush()
+      }
+      rawSender.send(channel, payload)
+    },
+    exec: (code: string) => rawSender.exec(code),
+  }
   // VSK-PRODUCT-A1 3b: захватываем ДО петли — внутри неё `ctx` затеняется ToolContext.
   const materialsCtx = ctx.materials ?? null
   // Этап 1а headless: те же поля, тот же захват до петли (затенение ctx).

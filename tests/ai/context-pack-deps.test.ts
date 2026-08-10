@@ -10,6 +10,14 @@ import { invalidateProjectMap, invalidateDependencyMap, warmProjectMaps } from '
  *   - в блок инжектятся dependency_hubs (самые импортируемые файлы);
  *   - для хабов добавляются ключевые символы (hub_symbols).
  * Граф зависимостей строится из реальных файлов во временной папке.
+ *
+ * ФИКСТУРА ПРАВЛЕНА 11.08 (V2 ось A), утверждения НЕ тронуты — объявляю по §3.1.
+ * Раньше эти кейсы полагались на то, что buildContextPack сам построит карту и
+ * граф синхронно. С переводом контекста push→pull сборка контекста больше ничего
+ * не ждёт: карта попадает в пакет, только если кэш прогрет. Поэтому фикстура
+ * теперь греет карты явно (warmProjectMaps) — ровно то, что в проде делает
+ * открытие проекта. Проверяемое свойство прежнее: прогретый граф даёт хабы и
+ * символы, проект без связей их не даёт.
  */
 describe('context-pack dependency enrichment', () => {
   let dir: string
@@ -31,6 +39,7 @@ export class Engine {}
     writeFileSync(join(dir, 'src', 'b.ts'), `import { helper } from './utils'\nexport const b = helper()`)
     writeFileSync(join(dir, 'src', 'c.ts'), `import { Engine } from './utils'\nexport const c = new Engine()`)
 
+    await warmProjectMaps(dir)
     const pack = await buildContextPack({ projectPath: dir })
 
     // Хаб-секция присутствует и указывает на utils.ts с числом импортов.
@@ -44,6 +53,7 @@ export class Engine {}
   it('не падает на проекте без межфайловых связей', async () => {
     mkdirSync(join(dir, 'src'), { recursive: true })
     writeFileSync(join(dir, 'src', 'lonely.ts'), 'export const x = 1')
+    await warmProjectMaps(dir)
     const pack = await buildContextPack({ projectPath: dir })
     // Карта есть, но dependency_hubs отсутствуют (нет importedBy) — секция не добавляется.
     expect(pack).toContain('project_map')
