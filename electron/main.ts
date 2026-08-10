@@ -90,6 +90,8 @@ import { createPlans } from './storage/plans'
 import { createUserWorkflows } from './storage/user-workflows'
 import { createPlanOutcomes } from './storage/plan-outcomes'
 import { registerPlansIpc } from './ipc/plans'
+import { createResultTrials } from './storage/result-trials'
+import { registerResultTrialsIpc } from './ipc/result-trials'
 import { registerWorkflowsIpc } from './ipc/workflows'
 import { createFeedback } from './storage/feedback'
 import { registerFeedbackIpc } from './ipc/feedback'
@@ -955,6 +957,9 @@ app.whenReady().then(() => {
     isMemoryLifecycleEnabled: () => getSecret('memory_lifecycle') !== 'false',
   })
   registerPlansIpc(plans, agentRuns)
+  // P1: состязание исполнителей — одна постановка у нескольких провайдеров,
+  // таблица факта, принятие одного результата без потери остальных.
+  registerResultTrialsIpc(createResultTrials(db))
   // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Прогон — ТОТ ЖЕ
   // headless-цикл, что у scheduled (ТЗ §2: второй agent loop запрещён); отличия
   // объявлены явно — режим планирования (изменения блокирует mode-policy),

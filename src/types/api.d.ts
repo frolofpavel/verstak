@@ -832,6 +832,26 @@ declare global {
         snapshots: (chatId: number) => Promise<ContextSnapshotDTO[]>
         compact: (chatId: number) => Promise<CompactResultDTO>
       }
+      /** P1: состязание исполнителей — одна постановка у нескольких провайдеров. */
+      resultTrials: {
+        /** Возможно ли состязание в этом проекте (нужен git — по копии дерева на исполнителя). */
+        available: (projectPath: string) => Promise<{ available: boolean; reason: string | null }>
+        start: (input: {
+          projectPath: string
+          prompt: string
+          parentChatId?: number | null
+          competitors: Array<{ providerId: string; model?: string | null }>
+        }) => Promise<{ trial: ResultTrialDTO; attempts: TrialAttemptDTO[] }>
+        list: (projectPath: string, limit?: number) => Promise<ResultTrialDTO[]>
+        /** Таблица «что получилось · ходов · минут · рублей» — из фактов прогонов. */
+        summary: (trialId: number) => Promise<TrialAttemptSummaryDTO[]>
+        bindRun: (attemptId: number, opts: { chatId?: number | null; runId?: string | null; status?: 'running' }) => Promise<void>
+        finishAttempt: (attemptId: number, opts: { status: 'done' | 'failed'; outcome?: string | null; error?: string | null }) => Promise<void>
+        /** Дифф работы попытки — доступен и у отклонённой (работа не теряется). */
+        diff: (trialId: number, attemptId: number) => Promise<string>
+        accept: (trialId: number, attemptId: number) => Promise<TrialAttemptSummaryDTO[]>
+        dispose: (trialId: number) => Promise<boolean>
+      }
       plans: {
         list: (projectPath: string) => Promise<Plan[]>
         get: (id: number) => Promise<Plan | null>
@@ -1737,6 +1757,45 @@ export interface TierRecommendation {
 
 /** Policy Center — снимок политики разрешений агента (см. electron/ipc/settings.ts). */
 export type AgentModeId = 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'
+
+/** P1: состязание исполнителей. Одна постановка, несколько попыток, один принятый. */
+export interface ResultTrialDTO {
+  id: number
+  projectPath: string
+  parentChatId: number | null
+  prompt: string
+  status: 'running' | 'accepted' | 'cancelled'
+  acceptedAttemptId: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TrialAttemptDTO {
+  id: number
+  trialId: number
+  providerId: string
+  model: string | null
+  /** Изолированный каталог исполнителя (свой у каждого). */
+  workspace: string
+  chatId: number | null
+  runId: string | null
+  status: 'pending' | 'running' | 'done' | 'failed' | 'accepted' | 'archived'
+  outcome: string | null
+  error: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** Строка таблицы результата. null значит «неизвестно» и так и показывается —
+ *  оценки вместо факта здесь не бывает (постановка P1: деньги только настоящие). */
+export interface TrialAttemptSummaryDTO extends TrialAttemptDTO {
+  turns: number | null
+  toolCount: number | null
+  filesCount: number | null
+  costCents: number | null
+  durationMs: number | null
+  runStatus: string | null
+}
 export type PolicyDecision = 'confirm' | 'auto-accept' | 'block'
 export type PolicyCategory = 'read' | 'edit' | 'command' | 'connector'
 export interface PolicyMatrixRow {

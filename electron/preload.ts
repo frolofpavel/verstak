@@ -373,6 +373,21 @@ contextBridge.exposeInMainWorld('api', {
     snapshots: (chatId: number) => ipcRenderer.invoke('context:snapshots', chatId),
     compact: (chatId: number) => ipcRenderer.invoke('context:compact', chatId)
   },
+  // P1: состязание исполнителей (одна постановка → несколько провайдеров).
+  resultTrials: {
+    available: (projectPath: string) => ipcRenderer.invoke('result-trials:available', projectPath),
+    start: (input: { projectPath: string; prompt: string; parentChatId?: number | null; competitors: Array<{ providerId: string; model?: string | null }> }) =>
+      ipcRenderer.invoke('result-trials:start', input),
+    list: (projectPath: string, limit?: number) => ipcRenderer.invoke('result-trials:list', projectPath, limit),
+    summary: (trialId: number) => ipcRenderer.invoke('result-trials:summary', trialId),
+    bindRun: (attemptId: number, opts: { chatId?: number | null; runId?: string | null; status?: 'running' }) =>
+      ipcRenderer.invoke('result-trials:bind-run', attemptId, opts),
+    finishAttempt: (attemptId: number, opts: { status: 'done' | 'failed'; outcome?: string | null; error?: string | null }) =>
+      ipcRenderer.invoke('result-trials:finish-attempt', attemptId, opts),
+    diff: (trialId: number, attemptId: number) => ipcRenderer.invoke('result-trials:diff', trialId, attemptId),
+    accept: (trialId: number, attemptId: number) => ipcRenderer.invoke('result-trials:accept', trialId, attemptId),
+    dispose: (trialId: number) => ipcRenderer.invoke('result-trials:dispose', trialId),
+  },
   plans: {
     list: (projectPath: string) => ipcRenderer.invoke('plans:list', projectPath),
     get: (id: number) => ipcRenderer.invoke('plans:get', id),

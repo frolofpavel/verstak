@@ -1496,6 +1496,42 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(enabled, next_run_at)')
     }
+  },
+  {
+    version: 64,
+    description: 'P1 (цена принятого результата): result_trials + result_trial_attempts — одна постановка у нескольких исполнителей. Только append. Факты прогона (деньги/ходы/время) НЕ дублируются: attempt хранит run_id, а цифры читаются из agent_runs, иначе таблица однажды разойдётся с расходом.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS result_trials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          parent_chat_id INTEGER,
+          prompt TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running',
+          accepted_attempt_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS result_trial_attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          trial_id INTEGER NOT NULL,
+          provider_id TEXT NOT NULL,
+          model TEXT,
+          workspace TEXT NOT NULL,
+          chat_id INTEGER,
+          run_id TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          outcome TEXT,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trial_attempts_trial ON result_trial_attempts(trial_id)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_result_trials_project ON result_trials(project_path)')
+    }
   }
 ]
 
