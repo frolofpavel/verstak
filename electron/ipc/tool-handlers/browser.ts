@@ -36,6 +36,11 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     } else if (call.name === 'browser_type_by_number') {
       // Ввод по номеру (заполнение форм). Устаревший номер / не поле → честная ошибка.
       action = `return await api.typeByNumber(Number(a.n), String(a.text ?? ''));`
+    } else if (call.name === 'browser_press_key') {
+      // Д3: отправка формы. Цель — поле с фокусом либо номер из снимка; проверка
+      // допустимости клавиши живёт в vskPressKey (одна реализация на схему,
+      // исполнитель и гейт), поэтому здесь только передача аргументов.
+      action = `return await api.pressKey(String(a.key ?? ''), a.n != null ? Number(a.n) : undefined);`
     } else if (call.name === 'browser_wait_for') {
       // Ожидание элемента с честным таймаутом (не слепая пауза).
       action = `return await api.waitFor(String(a.query ?? ''), a.timeout_ms != null ? Number(a.timeout_ms) : undefined);`
@@ -154,6 +159,7 @@ export const browserHandler: ToolHandler = {
                     : call.name === 'browser_find' ? `Браузер: поиск «${String(call.args.query ?? '')}»`
                     : call.name === 'browser_click_by_number' ? `Браузер: клик по элементу №${String(call.args.n ?? '')}`
                     : call.name === 'browser_type_by_number' ? `Браузер: ввод в элемент №${String(call.args.n ?? '')}`
+                    : call.name === 'browser_press_key' ? `Браузер: нажата клавиша ${String(call.args.key ?? '')}`
                     : call.name === 'browser_wait_for' ? `Браузер: ожидание «${String(call.args.query ?? '')}»`
                     : call.name === 'browser_console_errors' ? `Браузер: чтение консоли`
                     : call.name === 'browser_network' ? `Браузер: чтение сети`

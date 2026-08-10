@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 // VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
 // §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
-import { vskSnapshot, vskResolveNumbered, vskFill, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, type PageSnapshot, type CappedSnapshot, type FindResult } from '../../shared/browser-snapshot'
+import { vskSnapshot, vskResolveNumbered, vskFill, vskPressKey, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, type PageSnapshot, type CappedSnapshot, type FindResult } from '../../shared/browser-snapshot'
 
 /**
  * In-app browser. Uses Electron's <webview> tag (enabled via webviewTag: true
@@ -54,6 +54,8 @@ declare global {
       clickByNumber: (n: number) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
       /** Ввод текста по номеру поля из последнего снимка (заполнение форм). */
       typeByNumber: (n: number, text: string) => Promise<{ ok: true; url: string | null } | { ok: false; error: string }>
+      /** Д3: нажать Enter/Tab/Escape в поле с фокусом (или по номеру) — отправка формы. */
+      pressKey: (key: string, n?: number) => Promise<{ ok: true; submitted: boolean; url: string | null } | { ok: false; error: string }>
       /** Ждать элемент (селектор/текст) с честным таймаутом. */
       waitFor: (query: string, timeoutMs?: number) => Promise<{ ok: true } | { ok: false; error: string }>
       /** VSK-BROWSER-B2: сырой буфер консоли (редакция/фильтр в main). */
@@ -291,6 +293,32 @@ export function BrowserView() {
         })()`
         try {
           const r = await wv.executeJavaScript(code) as { ok: true; url: string | null } | { ok: false; error: string }
+          return r && typeof r === 'object' ? r : { ok: false, error: 'нет ответа' }
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
+      },
+      async pressKey(key, n) {
+        const wv = webviewRef.current
+        if (!wv) return { ok: false, error: 'Browser view не активен' }
+        // Д3: цель нажатия — поле с текущим ФОКУСОМ (обычный случай: только что
+        // ввели текст через typeByNumber), либо конкретный номер из снимка. Тот же
+        // резолвер, что у клика/ввода (§3.1) — второго пути адресации не заводим.
+        const target = n != null
+          ? `(() => { const r = resolve(${JSON.stringify(n)}); return r.ok ? r.el : r; })()`
+          : `(document.activeElement && document.activeElement !== document.body ? document.activeElement : null)`
+        const code = `(() => {
+          const resolve = ${vskResolveNumbered.toString()};
+          const press = ${vskPressKey.toString()};
+          const t = ${target};
+          if (!t) return { ok: false, error: 'Нет поля в фокусе: сначала введи текст (browser_type_by_number) или укажи номер поля.' };
+          if (t.ok === false) return t;
+          const r = press(t, ${JSON.stringify(key)});
+          if (!r.ok) return r;
+          return { ok: true, submitted: r.submitted, url: location.href };
+        })()`
+        try {
+          const r = await wv.executeJavaScript(code) as { ok: true; submitted: boolean; url: string | null } | { ok: false; error: string }
           return r && typeof r === 'object' ? r : { ok: false, error: 'нет ответа' }
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -160,6 +160,56 @@ export function vskFill(el: Element, text: string): FillResult {
   return { ok: false, error: 'Элемент не текстовое поле (input/textarea/contenteditable) — ввод невозможен. Проверь номер снимком.' }
 }
 
+// Д3 (приёмка 10.08): отправка формы. Список ЗАКРЫТЫЙ и это граница, а не
+// осторожность: постановка прямо запрещает эмуляцию произвольной клавиатуры
+// («не сорок мелких browser-команд»). Enter отправляет, Tab уводит фокус на
+// следующее поле, Escape закрывает подсказку/оверлей — ровно то, чего не хватало,
+// чтобы дойти до выдачи через UI-форму.
+export const VSK_PRESS_KEYS = ['Enter', 'Tab', 'Escape'] as const
+export type VskPressKey = typeof VSK_PRESS_KEYS[number]
+
+/** Результат нажатия клавиши. */
+export type PressKeyResult = { ok: true; submitted: boolean } | { ok: false; error: string }
+
+/**
+ * Нажать разрешённую клавишу по элементу: keydown → (для Enter) отправка формы →
+ * keyup. Отправка идёт ТОЛЬКО если страница не отменила keydown — иначе это была
+ * бы подделка нажатия, а не нажатие: обработчик страницы остаётся главным.
+ *
+ * Исполняется в странице над элементом от vskResolveNumbered (как vskFill).
+ * Самодостаточна (DOM + KeyboardEvent глобальны) — инжектится .toString(),
+ * поэтому список клавиш и коды здесь ЛИТЕРАЛЫ, а экспортируемая константа выше —
+ * их зеркало для кода на стороне Node (схема инструмента, тесты).
+ */
+export function vskPressKey(el: Element, key: string): PressKeyResult {
+  const ALLOWED: Record<string, number> = { Enter: 13, Tab: 9, Escape: 27 }
+  const code = ALLOWED[key]
+  if (!code) {
+    return { ok: false, error: 'Клавиша не поддерживается. Доступны только Enter, Tab и Escape — инструмент существует для отправки формы и перехода по полям, а не для произвольной клавиатуры.' }
+  }
+  const h = el as HTMLElement
+  if (typeof h.focus === 'function') h.focus()
+  const init = { key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true }
+  const down = new KeyboardEvent('keydown', init)
+  const notPrevented = el.dispatchEvent(down)
+  let submitted = false
+  if (key === 'Enter' && notPrevented) {
+    // Реальный браузер отправляет форму по Enter из текстового поля. jsdom этого
+    // не делает сам, поэтому воспроизводим тот же исход явно — иначе инструмент
+    // «нажал», а форма стоит на месте, ровно как в дефекте.
+    const form = (el as HTMLInputElement).form
+      || (typeof el.closest === 'function' ? el.closest('form') : null)
+    if (form) {
+      const f = form as HTMLFormElement
+      if (typeof f.requestSubmit === 'function') f.requestSubmit()
+      else f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      submitted = true
+    }
+  }
+  el.dispatchEvent(new KeyboardEvent('keyup', init))
+  return { ok: true, submitted }
+}
+
 /**
  * Есть ли на странице цель ожидания: CSS-селектор ИЛИ видимый текст. Чистая проверка
  * ОДНОГО момента — опрос во времени делает вызывающий (BrowserView), с честным

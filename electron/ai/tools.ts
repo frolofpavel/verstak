@@ -13,6 +13,10 @@ import { treeKill } from './child-kill'
 import { isDangerousCommand } from '../connectors/ssh'
 import { shq } from '../projects/ssh-fs'
 import { parseSshProjectPath, makeSshExec, createSshBackend, type SshBackend } from '../projects/ssh-backend'
+// Д3: перечень клавиш живёт рядом с их реализацией (shared/browser-snapshot) —
+// схема инструмента берёт ЕГО, а не свою копию, иначе схема и исполнитель
+// разошлись бы молча (§3.1: фикстура, не совпадающая с продовой формой).
+import { VSK_PRESS_KEYS } from '../../shared/browser-snapshot'
 
 const execFileAsync = promisify(execFile)
 
@@ -426,6 +430,18 @@ export const TOOL_DEFS: ToolDefinition[] = [
         text: { type: 'string', description: 'Текст для ввода.' }
       },
       required: ['n', 'text']
+    }
+  },
+  {
+    name: 'browser_press_key',
+    description: 'Нажать клавишу для ОТПРАВКИ ФОРМЫ и перехода по полям: Enter отправляет форму (когда у поиска нет кнопки с подписью или кнопка — иконка), Tab уводит фокус на следующее поле, Escape закрывает подсказку/оверлей. По умолчанию нажатие идёт в поле с текущим фокусом; передай n, чтобы нажать в конкретном поле из ПОСЛЕДНЕГО browser_snapshot. Другие клавиши НЕ поддерживаются — это не эмуляция клавиатуры.',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', enum: [...VSK_PRESS_KEYS], description: 'Клавиша: Enter (отправить форму), Tab (следующее поле), Escape (закрыть подсказку).' },
+        n: { type: 'number', description: 'Необязательно: номер поля из последнего browser_snapshot. Без него нажатие идёт в поле с текущим фокусом.' }
+      },
+      required: ['key']
     }
   },
   {

@@ -61,7 +61,10 @@ export interface AutoApprove {
 // browser_click, поэтому в ТУ ЖЕ категорию (иначе новый путь проехал бы мимо
 // SEC-CMD-06 ровно как когда-то проезжал сам клик — расширяемость сторожит пин
 // «категория — СПИСОК» в tests/security/browser-plan-mode.test.ts).
-export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'browser_click_by_number', 'browser_type_by_number']
+// Д3 (приёмка 10.08): browser_press_key — Enter отправляет форму залогиненной
+// страницы, то есть меняет чужую систему ровно как клик. В категорию — сразу,
+// а не «когда автор правки вспомнит»: ради этого она и заведена списком.
+export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'browser_click_by_number', 'browser_type_by_number', 'browser_press_key']
 
 /**
  * Инструменты, СОЗДАЮЩИЕ ФАЙЛ на диске (артефакты): все три реально пишут в проект

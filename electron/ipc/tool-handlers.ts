@@ -80,6 +80,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'browser_find': browserHandler,              // VSK-BROWSER-B2 (основной путь адресации)
   'browser_click_by_number': browserHandler,   // VSK-BROWSER-B1 этап 1
   'browser_type_by_number': browserHandler,    // VSK-BROWSER-B1 этап 1 (A)
+  'browser_press_key': browserHandler,         // Д3 (приёмка 10.08): отправка формы
   'browser_wait_for': browserHandler,          // VSK-BROWSER-B1 этап 1 (A)
   'browser_console_errors': browserHandler,    // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
   'browser_network': browserHandler,           // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
