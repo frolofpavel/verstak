@@ -96,6 +96,33 @@ describe('Д2: карточка прогона повторяет исход, а
     }
   })
 
+  it('финал — САМАЯ ПОЗДНЯЯ запись ленты, иначе шапка покажет живой шаг вместо итога', () => {
+    // Пин на первопричину, а не на её симптом. Пока finishRunning брал своё
+    // время, между ним и меткой записи 'done' могла смениться миллисекунда —
+    // закрытые шаги оказывались НОВЕЕ финала, и заголовок карточки зависел от
+    // того, успел ли тик смениться. Тест выше ловил это через раз и выглядел
+    // недетерминированным; недетерминированным было поведение (§3.1).
+    let progress = buildInitialAgentProgress('найди на хабре ai агентов')
+    progress = reduceAgentProgress(progress, { type: 'text', text: 'отвечаю' })
+    progress = reduceAgentProgress(progress, { type: 'done', outcome: 'partial' })
+
+    const done = progress.find(e => e.id === 'done')!
+    for (const entry of progress) {
+      expect(entry.timestamp, `шаг «${entry.title}» новее финала — шапка покажет его`).toBeLessThanOrEqual(done.timestamp)
+    }
+  })
+
+  it('ЗАЩИТА В ГЛУБИНУ: даже если живой шаг оказался новее, шапка берёт финал', () => {
+    // Зеркальный случай, собранный руками: лента, в которой 'final' новее 'done'.
+    // Продукт такой больше не порождает, но currentEntry обязан быть устойчив —
+    // иначе один недосмотр во времени снова вернёт «Пишу видимый ответ» в шапку.
+    const skewed = [
+      { id: 'final', phase: 'final' as const, title: 'Пишу видимый ответ', status: 'done' as const, timestamp: 99 },
+      { id: 'done', phase: 'final' as const, title: RUN_OUTCOME_TITLE.partial, status: 'done' as const, timestamp: 99 },
+    ]
+    expect(currentEntry(skewed, false)?.id).toBe('done')
+  })
+
   it('КОНТРОЛЬ: пока прогон ИДЁТ, шапка показывает живой шаг, а не ярлык исхода', () => {
     // Финала ещё не было — исход неизвестен, и обещать его нечем. Иначе правка
     // выродилась бы в «всегда показывать итог», в том числе посреди работы.

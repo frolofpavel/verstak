@@ -92,8 +92,16 @@ function trimProgress(entries: AgentProgressEntry[]): AgentProgressEntry[] {
   return focus ? [focus, ...tail] : tail
 }
 
-function finishRunning(progress: AgentProgressEntry[], status: AgentProgressStatus): AgentProgressEntry[] {
-  const ts = now()
+/**
+ * Закрыть живые шаги одним и тем же моментом времени, что и сама терминальная
+ * запись. Метка ПЕРЕДАЁТСЯ, а не берётся здесь заново, и это не косметика:
+ * пока `finishRunning` звал `now()` сам, между ним и меткой записи 'done' могла
+ * смениться миллисекунда — тогда закрытые шаги оказывались НОВЕЕ финала, и шапка
+ * карточки показывала «Пишу видимый ответ» вместо итога прогона. Дефект
+ * проявлялся через раз и выглядел недетерминированным тестом; недетерминированным
+ * было поведение продукта (§3.1).
+ */
+function finishRunning(progress: AgentProgressEntry[], status: AgentProgressStatus, ts: number): AgentProgressEntry[] {
   return progress.map(item => (
     item.status === 'running' || item.status === 'pending'
       ? { ...item, status, timestamp: ts }
@@ -404,7 +412,7 @@ export function reduceAgentProgress(
     // доделано» — это неправда, которую человек читает первой. Событие без
     // outcome (старые пути: abort, ошибка, side-chat) ведёт себя как раньше.
     const outcome = isRunOutcome(event.outcome) ? event.outcome : null
-    const next = finishRunning(progress, 'done')
+    const next = finishRunning(progress, 'done', ts)
     return upsertAgentProgress(next, {
       id: 'done',
       phase: 'final',
@@ -416,7 +424,7 @@ export function reduceAgentProgress(
   }
 
   if (event.type === 'error') {
-    const next = finishRunning(progress, 'error')
+    const next = finishRunning(progress, 'error', ts)
     return upsertAgentProgress(next, {
       id: 'error',
       phase: 'final',
