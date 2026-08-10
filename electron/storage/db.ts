@@ -1468,6 +1468,34 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!cols.includes('run_id')) db.exec('ALTER TABLE decision_record ADD COLUMN run_id TEXT')
       db.exec('CREATE INDEX IF NOT EXISTS idx_decision_run ON decision_record(run_id)')
     }
+  },
+  {
+    version: 63,
+    description: 'C1 (P5, пакет 2.5.0): scheduled_jobs — задачи по расписанию headless-сервиса. max_runs обязателен: расписание не имеет права быть вечным фоновым расходом; runs_done/next_run_at в БД — расписание переживает перезапуск сервиса.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          workspace TEXT,
+          provider_id TEXT,
+          model TEXT,
+          schedule_kind TEXT NOT NULL,
+          interval_minutes INTEGER,
+          daily_time TEXT,
+          next_run_at INTEGER NOT NULL,
+          max_runs INTEGER NOT NULL,
+          runs_done INTEGER NOT NULL DEFAULT 0,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_run_id TEXT,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(enabled, next_run_at)')
+    }
   }
 ]
 

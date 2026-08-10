@@ -35,7 +35,9 @@ export const STAGE1_TOOLS_ALLOW: string[] = [
   'core_memory_update', 'core_memory_append', 'core_memory_replace', 'core_memory_remove',
   'checklist_add', 'checklist_complete', 'checklist_list',
   'todo_create', 'todo_update', 'todo_list',
-  'conversation_search'
+  'conversation_search',
+  // C1 (P5): расписание — фасад scheduledJobs есть только у headless-хоста
+  'schedule'
 ]
 
 /** Коннекторы, выключенные на общем сервере Этапа 1 (ssh = удалённый shell). */

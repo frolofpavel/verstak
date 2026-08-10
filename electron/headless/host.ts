@@ -21,6 +21,8 @@ import { isWithinKnownRoots } from '../ai/path-policy'
 import { runApiConversation } from '../ai/runner-api'
 import { resolveTurnsBudget } from '../ai/runner-shared'
 import { configureRuntimeLogDir, logRuntime } from '../runtime-log'
+import { createScheduledJobs, type ScheduledJobs } from '../storage/scheduled-jobs'
+import { startScheduler, type Scheduler } from './scheduler'
 import { createSkillRegistry } from '../ai/skills/registry'
 import type { SkillRegistry } from '../ai/skills/types'
 import type { ChatProvider, ChatMessage } from '../ai/types'
@@ -60,6 +62,11 @@ export interface HeadlessHostOptions {
    * и подмена провайдера снаружи процесса была бы дырой.
    */
   providerFactory?: (providerId: ProviderId, model: string, signal: AbortSignal, workspace: string) => ChatProvider | null
+  /**
+   * C1 (P5): период опроса расписания в мс; null — выключить scheduler (тесты,
+   * потребители с собственным циклом). По умолчанию 30 секунд.
+   */
+  schedulerPollMs?: number | null
 }
 
 /**
@@ -206,6 +213,10 @@ export interface HeadlessHost {
   getRunThreadId: (runId: string) => number | null
   /** Workspace прогона — по нему выдаются файлы задачи. null, если прогона нет. */
   getRunWorkspace: (runId: string) => string | null
+  /** C1 (P5): хранилище задач по расписанию (список/выключение — для ручек сервиса). */
+  scheduledJobs: ScheduledJobs
+  /** Один проход расписания вручную (тесты, отладка). Возвращает число запущенных. */
+  schedulerTick: () => Promise<number>
   /**
    * Закрыть хост, НЕ оборвав живые прогоны. Ждёт их завершения до `timeoutMs`, затем
    * прерывает и даёт финализации дописать статус. Асинхронный не для красоты: синхронное
@@ -272,6 +283,10 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   }
 
   agentRuns.reconcileStale()
+
+  // C1 (P5): расписание. Правда в sqlite — рестарт сервиса подхватывает просроченное
+  // одним запуском (recordRun пересчитывает от момента старта, не навёрстывает).
+  const scheduledJobs = createScheduledJobs(db)
 
   let nextSendId = 1
 
@@ -498,6 +513,20 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       model,
       agentRuns,
       runId,
+      // C1 (P5): создание задач по расписанию из прогона. Дефолты — из ЭТОГО прогона:
+      // модель не обязана знать провайдера и workspace, чтобы поставить «ту же ревизию
+      // на 9 утра». Прямой ScheduledJobs наружу не отдаём — только create с дефолтами.
+      scheduledJobs: {
+        create: (job: { name: string; prompt: string; schedule: import('../storage/scheduled-jobs').ScheduleSpec; maxRuns: number; providerId?: string | null; model?: string | null; workspace?: string | null }) => {
+          const created = scheduledJobs.create({
+            ...job,
+            providerId: job.providerId ?? providerId,
+            model: job.model ?? model,
+            workspace: job.workspace ?? workspace
+          })
+          return { id: created.id, nextRunAt: created.nextRunAt, maxRuns: created.maxRuns }
+        }
+      },
       // undefined → дефолт Этапа 1; явный null = «все инструменты» задаётся сознательно.
       toolsAllow: task.toolsAllow === undefined ? STAGE1_TOOLS_ALLOW : task.toolsAllow
       // Каст через unknown: опциональные фасады (subSessions, verifications, pipelineRuns…)
@@ -521,6 +550,25 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       stop: () => ctrl.abort()
     }
   }
+
+  // C1 (P5): исполнитель расписания. Прогон ЖЁСТКО в 'auto' (unattended; план-гейт
+  // в auto не применяется по построению — закреплено пином scheduler.test.ts).
+  // pollMs=null — потребитель выключил цикл (тесты дёргают schedulerTick сами).
+  const schedulerStart: Parameters<typeof startScheduler>[0]['startTask'] = async (t) => {
+    const started = await startTask({
+      prompt: t.prompt,
+      workspace: t.workspace,
+      providerId: t.providerId as ProviderId | undefined,
+      model: t.model,
+      agentMode: t.agentMode
+    })
+    return { runId: started.runId, completion: started.completion }
+  }
+  const scheduler: Scheduler = startScheduler({
+    jobs: scheduledJobs,
+    startTask: schedulerStart,
+    pollMs: opts.schedulerPollMs === undefined ? 30_000 : opts.schedulerPollMs
+  })
 
   return {
     startTask,
@@ -611,7 +659,10 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         .get(runId) as { workspace: string } | undefined
       return row?.workspace ?? null
     },
+    scheduledJobs,
+    schedulerTick: () => scheduler.tick(),
     close: async (closeOpts) => {
+      scheduler.stop()  // новые запуски по расписанию во время закрытия не стартуют
       const waitMs = closeOpts?.timeoutMs ?? CLOSE_WAIT_MS
       if (active.size > 0) {
         logRuntime('headless.host.close.waiting', { active: active.size, waitMs })

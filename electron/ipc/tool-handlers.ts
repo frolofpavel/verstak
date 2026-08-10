@@ -55,6 +55,7 @@ import { renderChartHandler, generateHtmlHandler, generateDocxHandler } from './
 import { replanPlanHandler, reportStepOutcomeHandler, submitTaskContractHandler } from './tool-handlers/outcome'
 import { checklistAddHandler, checklistCompleteHandler, checklistListHandler } from './tool-handlers/checklist'
 import { spawnTaskSessionHandler } from './tool-handlers/spawn-task-session'
+import { scheduleHandler } from './tool-handlers/schedule'
 
 // Инвариант (контракт-страж tests/contracts/tool-contract.test.ts, 2.0.7-G): каждый
 // write/sequential TOOL_DEF обязан иметь ЯВНЫЙ handler здесь, а не проваливаться в generic
@@ -95,6 +96,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'checklist_add': checklistAddHandler,
   'checklist_complete': checklistCompleteHandler,
   'checklist_list': checklistListHandler,
+  // C1 (P5) — задача по расписанию (исполняет headless-scheduler; на десктопе фасада нет)
+  'schedule': scheduleHandler,
   // TodoGate (Фаза 3) — оркестрационный todo-лист сессии
   'todo_create': todoCreateHandler,
   'todo_update': todoUpdateHandler,

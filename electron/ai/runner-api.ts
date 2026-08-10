@@ -185,6 +185,8 @@ export interface AgentRunContext {
   planOutcomes?: ToolContext['planOutcomes']
   agentJobs?: ToolContext['agentJobs']
   agentJobScheduler?: ToolContext['agentJobScheduler']
+  /** C1 (P5): фасад расписания — только headless-хост. */
+  scheduledJobs?: ToolContext['scheduledJobs']
   recordJournal: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void
   readJournal: (projectPath: string, limit: number) => Array<{ kind: string; title: string; detail: string | null; createdAt: number }>
   saveMemory: AiDeps['saveMemory']
@@ -261,7 +263,7 @@ export interface AgentRunContext {
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender, sendId, provider, tools, projectPath, initialMessages, signal,
-    recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
+    recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
     searchMemories, searchConversations, connectors, agentMode,
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
@@ -1371,7 +1373,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       : undefined
     const ctx: ToolContext = {
       sender, sendId, signal, projectPath, tools,
-        recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
+        recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,
       // §10 хвост: отпустить чекпойнт прогона, с которого сняли план (доработка
       // переносит якорь на текущий прогон — прежний иначе осиротел бы).

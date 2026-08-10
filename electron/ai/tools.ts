@@ -860,6 +860,23 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'schedule',
+    description: 'C1 (P5): создать задачу по расписанию — её исполнит headless-сервис Verstak, даже когда окно закрыто («каждый день в 9:00 прогоняй ревизию», «через 30 минут проверь сборку»). ОБЯЗАТЕЛЕН явный лимит итераций max_runs: задача без лимита не создаётся — расписание не имеет права быть вечным фоновым расходом. Виды: once (run_at_ms), interval (every_minutes, не чаще 5 минут), daily (time «HH:MM»). Прогоны идут unattended в режиме auto; результаты — в списке задач сервиса.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Короткое имя задачи — его увидит человек в списке.' },
+        prompt: { type: 'string', description: 'Постановка, которую агент выполнит по расписанию.' },
+        kind: { type: 'string', enum: ['once', 'interval', 'daily'], description: 'Тип расписания.' },
+        run_at_ms: { type: 'number', description: 'kind=once: момент запуска (unix ms).' },
+        every_minutes: { type: 'number', description: 'kind=interval: период в минутах, минимум 5.' },
+        time: { type: 'string', description: 'kind=daily: время «HH:MM» (локальное время сервиса).' },
+        max_runs: { type: 'number', description: 'ОБЯЗАТЕЛЬНО: лимит итераций (1..100). Лимит исчерпан → задача выключается сама.' }
+      },
+      required: ['name', 'prompt', 'kind', 'max_runs']
+    }
+  },
+  {
     name: 'todo_create',
     description: 'TodoGate: создать оркестрационный todo-лист разом (batch). Главный агент декомпозирует цель в список пунктов — суб-агенты потом берут (todo_update status=in_progress), закрывают (done) или блокируют (blocked). Лист виден пользователю в панели Агенты как живой прогресс. Используй в начале сложной многошаговой задачи перед делегированием.',
     parameters: {

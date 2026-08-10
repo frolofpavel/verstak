@@ -81,6 +81,18 @@ function makeFakeHost() {
     } : null),
     getRunThreadId: (runId) => (runId === 'run-fake-1' ? 7 : null),
     getRunWorkspace: (runId) => (runId === 'run-fake-1' ? '/w' : null),
+    // C1: правка фикстуры при неизменных утверждениях — фейк добирает новые поля
+    // контракта HeadlessHost (расписание в этих тестах не участвует).
+    scheduledJobs: {
+      create: () => { throw new Error('fake host: расписание не участвует') },
+      get: () => null,
+      list: () => [],
+      due: () => [],
+      recordRun: () => undefined,
+      setEnabled: () => undefined,
+      remove: () => undefined
+    },
+    schedulerTick: async () => 0,
     close: async () => undefined
   }
   return {

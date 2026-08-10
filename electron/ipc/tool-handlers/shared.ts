@@ -17,6 +17,7 @@ import type { CreatePlanMeta, NewStep, Plan, Plans } from '../../storage/plans'
 import type { PlanOutcomes } from '../../storage/plan-outcomes'
 import type { AgentJobs } from '../../storage/agent-jobs'
 import type { AgentJobScheduler } from '../../ai/agent-job-scheduler'
+import type { ScheduleSpec } from '../../storage/scheduled-jobs'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -52,6 +53,21 @@ export interface ToolContext {
   /** Durable execution truth for delegate/parallel/orchestrate/swarm. */
   agentJobs?: AgentJobs
   agentJobScheduler?: AgentJobScheduler
+  /** C1 (P5): создание задач по расписанию. Фасад даёт ТОЛЬКО headless-хост —
+   *  расписание исполняет сервис; на десктопе фасада нет, и инструмент schedule
+   *  честно отвечает, что расписание живёт в headless-сервисе (не пишет строку,
+   *  которую никто никогда не исполнит). */
+  scheduledJobs?: {
+    create: (job: {
+      name: string
+      prompt: string
+      schedule: ScheduleSpec
+      maxRuns: number
+      providerId?: string | null
+      model?: string | null
+      workspace?: string | null
+    }) => { id: number; nextRunAt: number; maxRuns: number }
+  }
   /** Parent durable job for nested delegation. */
   parentJobId?: string | null
   /** Server-owned Outcome context: pipelineId никогда не берётся из args модели. */
