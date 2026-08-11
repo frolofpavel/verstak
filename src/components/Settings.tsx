@@ -404,7 +404,7 @@ function connectorMeta(id: string) {
   }
 }
 
-import type { McpServerEntry, McpTool, PopularMcpServer } from '../types/api'
+import type { McpCatalogEntry, McpServerEntry, McpTool, PopularMcpServer } from '../types/api'
 
 // ── MCP Hardening — review-before-trust helpers ──────────────────────────────
 
@@ -603,6 +603,12 @@ function McpTab() {
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({})
   const [showAdd, setShowAdd] = useState(false)
   const [popular, setPopular] = useState<PopularMcpServer[]>([])
+  // P8: каталог готовых серверов — подключение в один шаг.
+  const [catalog, setCatalog] = useState<McpCatalogEntry[]>([])
+  const [openCatalogId, setOpenCatalogId] = useState<string | null>(null)
+  const [catalogKeys, setCatalogKeys] = useState<Record<string, string>>({})
+  const [catalogBusy, setCatalogBusy] = useState<string | null>(null)
+  const [catalogError, setCatalogError] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [newForm, setNewForm] = useState({ name: '', command: '', args: '', env: '' })
@@ -622,13 +628,15 @@ function McpTab() {
 
   async function loadAll() {
     try {
-      const [svrs, tools, pop] = await Promise.all([
+      const [svrs, tools, pop, cat] = await Promise.all([
         window.api.mcp.listServers(),
         window.api.mcp.tools(),
-        window.api.mcp.popular()
+        window.api.mcp.popular(),
+        window.api.mcp.catalog()
       ])
       setServers(svrs)
       setPopular(pop)
+      setCatalog(cat)
       const ids = new Set<string>()
       const counts: Record<string, number> = {}
       for (const t of tools as McpTool[]) {
@@ -717,6 +725,63 @@ function McpTab() {
     }
   }
 
+  // P8: один шаг из каталога — добавить сервер с заполненными параметрами,
+  // сразу подключить и показать паспорт (или честный отказ прямо в карточке).
+  async function handleCatalogConnect(entry: McpCatalogEntry) {
+    const missing = entry.env.filter(f => f.required && !(catalogKeys[`${entry.id}:${f.key}`] ?? '').trim())
+    if (missing.length > 0) {
+      setCatalogError(prev => ({ ...prev, [entry.id]: `Заполни: ${missing.map(f => f.label).join(', ')}` }))
+      return
+    }
+    setCatalogBusy(entry.id)
+    setCatalogError(prev => { const e = { ...prev }; delete e[entry.id]; return e })
+    let added: McpServerEntry | null = null
+    try {
+      const envObj: Record<string, string> = {}
+      for (const f of entry.env) {
+        const v = (catalogKeys[`${entry.id}:${f.key}`] ?? '').trim()
+        if (v) envObj[f.key] = v
+      }
+      added = await window.api.mcp.addServer({
+        name: entry.name,
+        command: entry.command,
+        args: JSON.stringify(entry.args),
+        env: JSON.stringify(envObj),
+        enabled: true,
+        catalogId: entry.id
+      })
+      setServers(prev => [...prev, added!])
+      const tools = await window.api.mcp.connect(added.id) as McpTool[]
+      const agg = classifyServer(tools)
+      setManifests(prev => ({
+        ...prev,
+        [added!.id]: {
+          tools: tools.map(t => ({ ...t, scope: classifyTool(t).scope })),
+          risk: agg.risk,
+          scopes: agg.scopes,
+          toolCount: agg.toolCount,
+          env: entry.env.map(f => ({ key: f.key, empty: !envObj[f.key] }))
+        }
+      }))
+      setConnectedIds(prev => new Set([...prev, added!.id]))
+      setToolCounts(prev => ({ ...prev, [added!.id]: tools.length }))
+      setOpenCatalogId(null)
+      // Ключи из формы каталога больше не нужны в памяти renderer'а
+      setCatalogKeys(prev => {
+        const next = { ...prev }
+        for (const k of Object.keys(next)) if (k.startsWith(`${entry.id}:`)) delete next[k]
+        return next
+      })
+    } catch (e) {
+      const msg = mcpErrorText(e)
+      setCatalogError(prev => ({ ...prev, [entry.id]: msg }))
+      // Сервер уже добавлен в список — показываем отказ и там, где он живёт дальше.
+      if (added) setPreviewError(prev => ({ ...prev, [added!.id]: msg }))
+    } finally {
+      setCatalogBusy(null)
+    }
+  }
+
   async function handleToggle(id: string, enabled: boolean) {
     await window.api.mcp.toggleServer(id, enabled)
     setServers(prev => prev.map(s => s.id === id ? { ...s, enabled } : s))
@@ -802,6 +867,83 @@ function McpTab() {
           </div>
         </div>
       </section>
+
+      {/* P8: каталог готовых серверов — подключение в один шаг */}
+      {catalog.length > 0 && (
+        <section className="gg-external-tools-panel">
+          <div className="gg-external-tools-panel-head">
+            <div>
+              <div className="gg-settings-section-title">Каталог готовых серверов</div>
+              <p>Параметры уже заполнены — остаётся вставить ключ. Серверы пишут их авторы, не Verstak: после подключения появится паспорт, а опасные действия по-прежнему идут через подтверждение</p>
+            </div>
+          </div>
+          {(['russian', 'world'] as const).map(group => (
+            <div key={group} className="gg-mcp-catalog-group">
+              <div className="gg-mcp-catalog-group-title">{group === 'russian' ? 'Российские сервисы' : 'Мировые'}</div>
+              <div className="gg-mcp-catalog-grid">
+                {catalog.filter(c => c.group === group).map(c => {
+                  const addedEntry = servers.find(s => s.catalogId === c.id)
+                  const open = openCatalogId === c.id
+                  const err = catalogError[c.id]
+                  return (
+                    <article key={c.id} className={`gg-mcp-catalog-card ${open ? 'is-open' : ''}`}>
+                      <div className="gg-mcp-catalog-card-head">
+                        <h4>{c.name}</h4>
+                        <span className={`gg-mcp-catalog-badge ${c.noKey ? 'is-nokey' : 'is-key'}`}>
+                          {c.noKey ? 'Без ключа' : 'Нужен ключ'}
+                        </span>
+                      </div>
+                      <p>{c.description}</p>
+                      <div className="gg-mcp-catalog-meta">
+                        <span>Автор: {c.vendor}</span>
+                        <span>{c.runtime === 'uvx' ? 'Нужен Python (uv)' : 'Нужен Node.js'}</span>
+                      </div>
+                      {open && c.env.length > 0 && (
+                        <div className="gg-mcp-catalog-keys">
+                          {c.env.map(f => (
+                            <label key={f.key}>
+                              <span>{f.label}{f.required ? '' : ' — необязательно'}</span>
+                              <input
+                                className="gg-input"
+                                type={f.secret ? 'password' : 'text'}
+                                value={catalogKeys[`${c.id}:${f.key}`] ?? ''}
+                                onChange={e => setCatalogKeys(prev => ({ ...prev, [`${c.id}:${f.key}`]: e.target.value }))}
+                                placeholder={f.hint ?? ''}
+                                spellCheck={false}
+                                autoComplete="off"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      {err && (
+                        <div className="gg-external-tools-alert is-error">
+                          <span>Не подключился</span>
+                          <p>{err}</p>
+                        </div>
+                      )}
+                      <div className="gg-mcp-catalog-actions">
+                        {addedEntry ? (
+                          <span className="gg-mcp-catalog-added">Добавлено — смотри «Подключения»</span>
+                        ) : (open || c.env.length === 0) ? (
+                          <button className="gg-btn gg-btn-primary" disabled={catalogBusy === c.id} onClick={() => void handleCatalogConnect(c)}>
+                            {catalogBusy === c.id ? 'Подключаю…' : 'Добавить и проверить'}
+                          </button>
+                        ) : (
+                          <button className="gg-btn gg-btn-primary" onClick={() => setOpenCatalogId(c.id)}>Подключить</button>
+                        )}
+                        {open && (
+                          <button className="gg-btn gg-btn-ghost" onClick={() => setOpenCatalogId(null)}>Свернуть</button>
+                        )}
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {error && (
         <div className="gg-external-tools-alert is-error">
