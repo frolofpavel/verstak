@@ -14,18 +14,13 @@ import { PROVIDERS } from './registry'
 import { CLI_FREE, ZERO_COST_PROVIDERS } from './cost-guard'
 import { PRICES, normalizeModelId } from '../../shared/contracts/pricing'
 import { isKnownProviderId } from '../../shared/contracts/provider'
+import { TRIAL_ESTIMATE_TOKENS, type TrialTokenAssumption } from '../../shared/contracts/trials'
 
-export interface TrialTokenAssumption {
-  inputTokens: number
-  outputTokens: number
-}
-
-/**
- * Объём «типичной агентной задачи» для дефолтной оценки. Ориентир — живой разбор
- * трёх агентов 08.08 (задачи по $3–9 на моделях среднего/верхнего ценника).
- * Это ДОПУЩЕНИЕ для сравнения исполнителей между собой, не обещание чека.
- */
-export const TRIAL_ESTIMATE_TOKENS: TrialTokenAssumption = { inputTokens: 400_000, outputTokens: 30_000 }
+// Допущение объёма переехало в shared (шаг 3): панель показывает его рядом с
+// центами и обязана читать ТУ ЖЕ константу, что кормит расчёт. Реэкспорт — чтобы
+// существующие импорты из этого модуля не менялись.
+export { TRIAL_ESTIMATE_TOKENS }
+export type { TrialTokenAssumption }
 
 export type TrialEstimateBasis = 'price' | 'subscription' | 'zero-cost' | 'unknown'
 

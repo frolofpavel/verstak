@@ -22261,3 +22261,84 @@ html[data-theme="light"] .gg-connectors-page {
   flex-wrap: wrap;
 }
 .gg-telemetry-drawer.is-closed { display: none; }
+
+/* ─── P1 (волна 2.6.0): состязание исполнителей в «Истории работы» ────────────
+   Секция-маркер по §9. Таблица попыток + лаунчер живут внутри существующей
+   панели прогонов — нового экрана нет. Никаких новых цветов и шрифтов: всё на
+   существующих переменных темы; кнопки — те же .gg-btn, статус-акценты — те же
+   --success/--error, что у карточек прогонов рядом. */
+.gg-trials { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+
+.gg-trial-card,
+.gg-trial-launcher {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+}
+.gg-trial-head { display: flex; align-items: center; gap: 8px; }
+.gg-trial-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-trial-status { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+.gg-trial-status.is-accepted { color: var(--success); }
+
+.gg-trial-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: var(--text-sm); }
+.gg-trial-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 2px 8px 4px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.gg-trial-table td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.gg-trial-row.is-accepted td { color: var(--success); }
+.gg-trial-row.is-archived td, .gg-trial-row.is-failed td { color: var(--text-tertiary); }
+.gg-trial-attempt-status.is-failed { color: var(--error); }
+.gg-trial-attempt-status.is-accepted { color: var(--success); }
+.gg-trial-outcome { max-width: 260px; overflow-wrap: anywhere; }
+.gg-trial-money { white-space: nowrap; }
+.gg-trial-actions { display: flex; gap: 6px; white-space: nowrap; }
+
+.gg-trial-diff-row td { padding: 0 0 8px; }
+.gg-trial-diff {
+  max-height: 300px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken, var(--bg-base));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Лаунчер: постановка как есть + строки исполнителей с оценкой до запуска. */
+.gg-trial-prompt {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--bg-sunken, var(--bg-base));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.gg-trial-picks { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.gg-trial-pick { display: flex; align-items: center; gap: 8px; }
+.gg-trial-pick .gg-input { min-width: 0; }
+.gg-trial-estimate { font-size: var(--text-sm); color: var(--text-secondary); white-space: nowrap; }
+.gg-trial-assumption { margin-top: 6px; font-size: 11px; color: var(--text-tertiary); }
+.gg-trial-warn { margin-top: 6px; font-size: var(--text-sm); color: var(--warning, #facc15); }
+.gg-trial-launch-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+.gg-run-action-trial:hover { border-color: var(--accent); color: var(--accent); }

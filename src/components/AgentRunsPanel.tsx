@@ -7,6 +7,7 @@ import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
 import { summarizeAgentRunPipeline } from '../lib/agent-run-pipeline'
 import { EmptyState } from './EmptyState'
 import { RunDiagnostics } from './RunDiagnostics'
+import { ResultTrialsSection, type TrialLaunchSource } from './ResultTrialsSection'
 
 function fmtDuration(start: number, end: number | null): string {
   const ms = (end ?? Date.now()) - start
@@ -382,7 +383,7 @@ function RunDetail({ runId, providerLabel }: { runId: string; providerLabel: (id
   )
 }
 
-function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onResume }: {
+function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onResume, onTrial }: {
   run: AgentRun
   jobCount: number
   providerLabel: (id: string | null) => string
@@ -390,6 +391,7 @@ function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onR
   onToggle: () => void
   onStop: (runId: string) => void
   onResume: (runId: string, status: string) => void
+  onTrial: (run: AgentRun) => void
 }) {
   const t = useT()
   // Слияние задачи 1: раскрытый прогон = две вкладки. «Обзор» — операционка (что делал:
@@ -452,6 +454,15 @@ function RunCard({ run, jobCount, providerLabel, expanded, onToggle, onStop, onR
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onResume(run.runId, run.status) } }}
             >{run.status === 'suspended' ? '↻ Продолжить' : t.agentRuns.resend}</span>
           )}
+          {/* P1: состязание — та же постановка у 2–3 исполнителей, каждый в своём workspace. */}
+          <span
+            className="gg-run-action gg-run-action-trial"
+            role="button"
+            tabIndex={0}
+            title="Состязание: прогнать эту постановку у 2–3 исполнителей и принять один результат"
+            onClick={(e) => { e.stopPropagation(); onTrial(run) }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onTrial(run) } }}
+          >⚔</span>
           <span className="gg-run-card-caret">{expanded ? '▾' : '▸'}</span>
         </span>
       </button>
@@ -501,6 +512,8 @@ export function AgentRunsPanel() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [providerMeta, setProviderMeta] = useState<Record<string, string>>({})
   const [visibleLimit, setVisibleLimit] = useState(20)
+  // P1: задача-источник открытого лаунчера состязания (null — лаунчер закрыт).
+  const [trialSource, setTrialSource] = useState<TrialLaunchSource | null>(null)
 
   useEffect(() => {
     void window.api.providers.list().then((list: ProviderDescriptorDTO[]) => {
@@ -624,6 +637,13 @@ export function AgentRunsPanel() {
       </div>
 
       <div className="gg-panel-body">
+        {/* P1: состязания исполнителей живут в этой же панели — нового экрана нет
+            сознательно (сравнение — побочный продукт обычной работы). */}
+        <ResultTrialsSection
+          projectPath={path}
+          launchSource={trialSource}
+          onDismissSource={() => setTrialSource(null)}
+        />
         {filtered.length === 0 ? (
           <EmptyState
             icon="🗂️"
@@ -643,6 +663,7 @@ export function AgentRunsPanel() {
                 onToggle={() => setExpanded(prev => prev === r.runId ? null : r.runId)}
                 onStop={handleStop}
                 onResume={(id, status) => void handleResume(id, status)}
+                onTrial={(source) => setTrialSource({ runId: source.runId, chatId: source.chatId, title: source.title })}
               />
             ))}
             {runs.length >= visibleLimit && (

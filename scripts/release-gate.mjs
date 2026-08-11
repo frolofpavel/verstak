@@ -560,7 +560,9 @@ const GATE_MAX_WORKERS = 4
 // 11.08 P1 шаги 1–2 (startTrialRuns + оценка до запуска) → 5309 (измерено,
 // --maxWorkers=4; 5294 passed + 15 skipped; +20 новых + 2 динамических у
 // bridge-стража result-trials — по тесту на добавленный канал).
-const EXPECTED_TOTAL_TESTS = 5309
+// 11.08 P1 шаг 3 (панель состязания в «Истории работы») → 5335 (измерено,
+// --maxWorkers=4; 5320 passed + 15 skipped; +20 хелперы trial-view + 6 панель).
+const EXPECTED_TOTAL_TESTS = 5335
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
