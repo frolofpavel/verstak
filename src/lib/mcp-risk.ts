@@ -49,6 +49,16 @@ export function classifyTool(tool: { name: string; description?: string; annotat
 }
 
 /**
+ * P8 шаг 2 «видно, что сервер дал»: требует ли инструмент подтверждения.
+ * 'auto' — выполняется сразу (read), 'confirm' — в режимах ask/accept-edits
+ * встанет пауза подтверждения. Согласовано с mcpDecision (electron/ai/mcp-policy.ts);
+ * пара закреплена анти-дрейф-тестом tests/lib/mcp-confirm-visibility.test.ts.
+ */
+export function confirmRequirement(scope: McpScope): 'auto' | 'confirm' {
+  return scope === 'read' ? 'auto' : 'confirm'
+}
+
+/**
  * Агрегирует классификацию сервера по списку его инструментов.
  * Риск сервера = максимальный риск среди инструментов; считаем tools по scope.
  */

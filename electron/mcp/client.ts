@@ -5,8 +5,10 @@
  * Каждый сервер — отдельный дочерний процесс.
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
+import { scanText } from '../ai/secret-scanner'
+import { treeKill } from '../ai/child-kill'
 
 export interface McpTool {
   name: string
@@ -45,10 +47,25 @@ interface McpConnection {
   requestId: number
   pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>
   buffer: string
+  /** P8 шаг 3: хвост stderr — единственный источник причины, когда сервер умирает на старте. */
+  stderrTail: string[]
+}
+
+const STDERR_TAIL_LINES = 12
+const STDERR_TAIL_CHARS = 1500
+
+/** Хвост stderr для строки причины: последние строки, секреты отредактированы. */
+function stderrTailText(conn: McpConnection): string {
+  const joined = conn.stderrTail.join('\n').trim()
+  if (!joined) return ''
+  return scanText(joined.slice(-STDERR_TAIL_CHARS)).redacted
 }
 
 const TOOL_CALL_TIMEOUT_MS = 30_000
-const INIT_TIMEOUT_MS = 15_000
+// P8: холодный первый запуск npx/uvx КАЧАЕТ пакет сервера — на 15s «один шаг»
+// из каталога падал бы таймаутом на любой свежей машине. Подключение — редкое
+// явное действие с «Подключаю…» в UI, длинное ожидание здесь честнее отказа.
+const INIT_TIMEOUT_MS = 90_000
 
 /**
  * Allowlist переменных окружения, которые прокидываем в дочерний MCP-процесс.
@@ -76,6 +93,36 @@ function buildMcpEnv(configEnv?: Record<string, string>): Record<string, string>
   return { ...env, ...(configEnv ?? {}) }
 }
 
+/**
+ * P8: на Windows голое имя команды ('npx', 'uvx') spawn'ом без shell не
+ * запускается — npm-шимы это .cmd, а spawn ищет только .exe. Резолвим реальный
+ * путь через where (паттерн cli-detect.ts) и включаем shell для .cmd/.bat/.ps1
+ * (как claude-cli.ts). Без резолва каталог серверов на Windows мёртв целиком.
+ */
+export function resolveSpawnTarget(command: string): { file: string; useShell: boolean } {
+  const isShim = (p: string) => /\.(cmd|bat|ps1)$/i.test(p)
+  // shell:true склеивает команду строкой — путь с пробелом («C:\Program Files\
+  // nodejs\npx.cmd») без кавычек cmd.exe режет по пробелу. Поймано живой
+  // приёмкой P8: «"C:\Program" не является внутренней или внешней командой».
+  const shellSafe = (p: string) => /\s/.test(p) ? `"${p}"` : p
+  if (process.platform !== 'win32') return { file: command, useShell: false }
+  if (/[\\/]/.test(command) || /\.[a-z0-9]{2,4}$/i.test(command)) {
+    const useShell = isShim(command)
+    return { file: useShell ? shellSafe(command) : command, useShell }
+  }
+  try {
+    const out = spawnSync('where', [command], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    const lines = (out.stdout ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    // where отдаёт все варианты (npx, npx.cmd, npx.ps1) — берём запускаемое:
+    // сперва .exe (не нужен shell), затем .cmd/.bat.
+    const exe = lines.find(l => /\.exe$/i.test(l))
+    if (exe) return { file: exe, useShell: false }
+    const shim = lines.find(isShim)
+    if (shim) return { file: shellSafe(shim), useShell: true }
+  } catch { /* нет where / не нашлось — пусть spawn честно скажет ENOENT */ }
+  return { file: command, useShell: false }
+}
+
 export class McpClient extends EventEmitter {
   private connections: Map<string, McpConnection> = new Map()
 
@@ -89,10 +136,15 @@ export class McpClient extends EventEmitter {
       await this.disconnect(config.id)
     }
 
-    const child = spawn(config.command, config.args, {
+    const target = resolveSpawnTarget(config.command)
+    const child = spawn(target.file, config.args, {
       env: buildMcpEnv(config.env),
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      // .cmd-шимы (npx и прочие npm-обёртки) запускаются только через shell.
+      // Аргументы каталога простые (без пробелов/метасимволов), ручные — на
+      // совести добавившего; cmd.exe получает их через join как в claude-cli.
+      shell: target.useShell
     })
 
     const conn: McpConnection = {
@@ -101,7 +153,8 @@ export class McpClient extends EventEmitter {
       tools: [],
       requestId: 0,
       pending: new Map(),
-      buffer: ''
+      buffer: '',
+      stderrTail: []
     }
 
     // Парсим построчный JSON-RPC из stdout
@@ -132,19 +185,38 @@ export class McpClient extends EventEmitter {
       }
     })
 
-    // stderr — только для дебага
+    // stderr — дебаг + хвост для честной причины отказа (сервер, умерший на
+    // старте, объясняется только здесь: «ключ не подошёл» живёт в его stderr).
     child.stderr!.on('data', (chunk: Buffer) => {
-      console.debug(`[mcp:${config.id}] stderr:`, chunk.toString('utf8').trim())
+      const text = chunk.toString('utf8')
+      console.debug(`[mcp:${config.id}] stderr:`, text.trim())
+      for (const line of text.split('\n')) {
+        const t = line.trim()
+        if (t) conn.stderrTail.push(t)
+      }
+      if (conn.stderrTail.length > STDERR_TAIL_LINES) {
+        conn.stderrTail.splice(0, conn.stderrTail.length - STDERR_TAIL_LINES)
+      }
     })
 
     child.on('error', (err) => {
       console.error(`[mcp:${config.id}] process error:`, err.message)
-      this._handleDisconnect(config.id, err.message)
+      // ENOENT — самый частый честный отказ: нет рантайма (npx → Node.js, uvx → uv).
+      const friendly = (err as NodeJS.ErrnoException).code === 'ENOENT'
+        ? `Не удалось запустить "${config.command}" — команда не найдена. ` +
+          (config.command === 'npx' ? 'Нужен установленный Node.js.'
+            : config.command === 'uvx' ? 'Нужен Python с установленным uv.'
+            : 'Проверь, что программа установлена и видна в PATH.')
+        : `Не удалось запустить "${config.command}": ${err.message}`
+      this._handleDisconnect(config.id, friendly)
     })
 
-    child.on('exit', (code, signal) => {
-      const reason = signal ? `signal ${signal}` : `exit ${code}`
-      console.warn(`[mcp:${config.id}] process exited: ${reason}`)
+    // 'close', не 'exit': к close потоки дочитаны, и хвост stderr уже собран.
+    child.on('close', (code, signal) => {
+      const codeStr = signal ? `сигнал ${signal}` : `код ${code}`
+      console.warn(`[mcp:${config.id}] process exited: ${codeStr}`)
+      const tail = stderrTailText(conn)
+      const reason = `сервер завершился (${codeStr})${tail ? `. Вывод сервера:\n${tail}` : ''}`
       this._handleDisconnect(config.id, reason)
     })
 
@@ -224,9 +296,10 @@ export class McpClient extends EventEmitter {
     }
     conn.pending.clear()
 
-    // Убиваем процесс
+    // Убиваем всё дерево: при shell:true kill() снимает только cmd.exe-обёртку,
+    // а сам сервер (node.exe под npx) осиротел бы и продолжал жить.
     try {
-      conn.process.kill()
+      treeKill(conn.process)
     } catch { /* уже мёртв */ }
 
     this.emit('disconnected', serverId)
@@ -269,7 +342,11 @@ export class McpClient extends EventEmitter {
     conn.pending.clear()
 
     this.emit('disconnected', serverId, reason)
-    this.emit('error', serverId, new Error(`Server ${serverId} disconnected: ${reason}`))
+    // 'error' у EventEmitter особый: без слушателя emit КИДАЕТ и роняет main-процесс.
+    // Подписчиков сегодня нет (P8, проверено grep'ом) — эмитим только если появятся.
+    if (this.listenerCount('error') > 0) {
+      this.emit('error', serverId, new Error(`Server ${serverId} disconnected: ${reason}`))
+    }
   }
 
   private _send(conn: McpConnection, msg: JsonRpcRequest): void {

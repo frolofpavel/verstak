@@ -18,6 +18,8 @@ export interface McpServerEntry {
   /** JSON-строка: Record<string,string> — переменные окружения для процесса */
   env: string
   enabled: boolean
+  /** P8: слаг записи каталога, из которой сервер добавлен (для «Добавлено» в UI). */
+  catalogId?: string
 }
 
 const SETTINGS_KEY = 'mcp_servers'

@@ -1112,6 +1112,7 @@ declare global {
         tools(): Promise<McpTool[]>
         connectedServers(): Promise<Array<{ id: string; name: string; command: string; args: string[]; env?: Record<string, string> }>>
         popular(): Promise<PopularMcpServer[]>
+        catalog(): Promise<McpCatalogEntry[]>
         saveAll(servers: McpServerEntry[]): Promise<void>
       }
     }
@@ -1194,6 +1195,8 @@ export interface McpServerEntry {
   /** JSON-строка: Record<string,string> */
   env: string
   enabled: boolean
+  /** P8: слаг записи каталога, из которой сервер добавлен (для «Добавлено» в UI). */
+  catalogId?: string
 }
 
 /** MCP Tool — инструмент, предоставляемый внешним MCP-сервером. */
@@ -1835,6 +1838,30 @@ export interface PopularMcpServer {
   args: string[]
   envHint?: string
   description: string
+}
+
+/** P8: поле ключа/настройки записи каталога MCP (дескриптор, без значения). */
+export interface McpCatalogEnvField {
+  key: string
+  label: string
+  required: boolean
+  secret: boolean
+  hint?: string
+}
+
+/** P8: запись каталога готовых MCP-серверов — подключение в один шаг. */
+export interface McpCatalogEntry {
+  id: string
+  name: string
+  vendor: string
+  description: string
+  group: 'russian' | 'world'
+  runtime: 'npx' | 'uvx'
+  command: string
+  args: string[]
+  env: McpCatalogEnvField[]
+  noKey: boolean
+  docsUrl?: string
 }
 
 export {}

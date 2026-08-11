@@ -16,6 +16,7 @@ import {
   POPULAR_MCP_SERVERS,
   type McpServerEntry
 } from '../mcp/registry'
+import { MCP_CATALOG } from '../mcp/catalog'
 
 export function registerMcpIpc(settings: Settings): void {
 
@@ -85,6 +86,11 @@ export function registerMcpIpc(settings: Settings): void {
 
   ipcMain.handle('mcp:popular', () => {
     return POPULAR_MCP_SERVERS
+  })
+
+  // P8: каталог готовых серверов — статические данные, секретов не содержит.
+  ipcMain.handle('mcp:catalog', () => {
+    return MCP_CATALOG
   })
 
   ipcMain.handle('mcp:save-all', (_e, servers: McpServerEntry[]) => {

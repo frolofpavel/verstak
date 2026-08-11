@@ -113,6 +113,20 @@ electron/                  ← main process (Node.js)
                                 (telegram send_document, yandex-disk upload_file):
                                 ctx.allowedReadRoots + вечный запрет секрето-файлов
 
+electron/mcp/              ← MCP-серверы: чужие инструменты в агентный цикл (P8 12.08)
+├── client.ts              ← stdio JSON-RPC клиент. Win32: голое 'npx'/'uvx' резолвится
+│                             через where + shell-квотирование пути с пробелом (живая
+│                             приёмка: без этого каталог мёртв). Честный отказ: stderr-хвост
+│                             + код выхода в причине (через secret-scanner). Env-allowlist,
+│                             дерево процессов убивается treeKill
+├── registry.ts            ← конфиги серверов (mcp_servers → settings secret → safeStorage);
+│                             env с ключами шифруется целиком, в промпт не попадает
+└── catalog.ts             ← каталог готовых серверов: 10 российских + 5 мировых, каждая
+                              запись проверена по живому npm/PyPI/README (12.08). Данные,
+                              не инфраструктура; гейт mcp-policy.ts каталожных не ослабляет.
+                              MCP доходит ТОЛЬКО до API-пути (runner-api.mcpClientRef);
+                              CLI-провайдеры живут своим набором — см. пометку в UI
+
 electron/headless/         ← ВТОРОЙ потребитель ядра: Node-сервис без Electron (Этап 1а
 │                             облачного Verstak; карта — docs/headless-core-recon-2026-08-04.md)
 ├── bin.ts                 ← ТОЧКА ВХОДА сервиса: env → конфиг → listen. Сборка —

@@ -701,6 +701,7 @@ contextBridge.exposeInMainWorld('api', {
     tools: () => ipcRenderer.invoke('mcp:tools'),
     connectedServers: () => ipcRenderer.invoke('mcp:connected-servers'),
     popular: () => ipcRenderer.invoke('mcp:popular'),
+    catalog: () => ipcRenderer.invoke('mcp:catalog'),
     saveAll: (servers: unknown) => ipcRenderer.invoke('mcp:save-all', servers)
   }
 })
