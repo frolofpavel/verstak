@@ -49,7 +49,7 @@ import {
   IconKonturFocus, IconMpstats, IconOzonPerformance, IconJira, IconTrello
 } from './ConnectorIcons'
 import { useT } from '../i18n'
-import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
+import { classifyTool, classifyServer, confirmRequirement, type McpScope, type McpRisk } from '../lib/mcp-risk'
 import { modeModelsKey, parseModeModels, serializeModeModels } from '../lib/mode-model'
 import type { AgentMode } from './ModePicker'
 
@@ -841,6 +841,8 @@ function McpTab() {
         <div className="gg-external-tools-intro-rule">
           <div className="gg-external-tools-rule-title">Главное правило</div>
           <p>Если задачу закрывает вкладка Коннекторы или встроенные возможности модели, внешний инструмент подключать не нужно</p>
+          {/* P8 разведка 12.08: MCP доходит только до API-пути — честно говорим об этом здесь */}
+          <p className="gg-external-tools-cli-note">Внешние инструменты видят API-провайдеры. CLI-провайдеры (Claude Code, Codex CLI, Gemini CLI) работают своим набором инструментов и эти серверы не подхватывают</p>
         </div>
       </section>
 
@@ -1049,6 +1051,13 @@ function McpTab() {
                         <div>
                           <div className="gg-external-tools-passport-title">Паспорт проверки</div>
                           <p>{mcpActionCountLabel(manifest.toolCount)} · {scopeSummary(manifest.scopes) || 'доступ не определён'}</p>
+                          {/* P8 шаг 2: сколько действий пройдёт сразу, сколько встанет на подтверждение */}
+                          <p className="gg-external-tools-confirm-summary">
+                            {(() => {
+                              const auto = manifest.tools.filter(t => confirmRequirement(t.scope) === 'auto').length
+                              return `Выполняются сразу: ${auto} · с подтверждением: ${manifest.toolCount - auto}`
+                            })()}
+                          </p>
                         </div>
                         <span className={`gg-external-tools-access is-${manifest.risk}`}>
                           {manifest.risk === 'high' ? 'Высокий доступ' : manifest.risk === 'medium' ? 'Средний доступ' : 'Безопасный доступ'}
@@ -1084,7 +1093,13 @@ function McpTab() {
                               <div key={t.name} className="gg-external-tools-action-row">
                                 <span className={`gg-external-tools-action-scope is-${t.scope}`}>{mcpScopeHuman(t.scope)}</span>
                                 <div>
-                                  <div className="gg-external-tools-action-name">{t.name}</div>
+                                  <div className="gg-external-tools-action-name">
+                                    {t.name}
+                                    {/* P8 шаг 2: судьба вызова видна до первого запуска */}
+                                    <span className={`gg-external-tools-action-confirm is-${confirmRequirement(t.scope)}`}>
+                                      {confirmRequirement(t.scope) === 'confirm' ? 'с подтверждением' : 'сразу'}
+                                    </span>
+                                  </div>
                                   {t.description && <p>{t.description}</p>}
                                 </div>
                               </div>

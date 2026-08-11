@@ -16668,6 +16668,39 @@ html[data-theme="light"] .gg-updates-page {
   font-size: var(--text-xs);
 }
 
+/* ── P8 шаг 2: видимость подтверждений в паспорте MCP-сервера ──────────────── */
+.gg-external-tools-confirm-summary {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.gg-external-tools-action-confirm {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.gg-external-tools-action-confirm.is-auto {
+  background: color-mix(in srgb, var(--ok, #2da44e) 14%, transparent);
+  color: var(--ok, #2da44e);
+}
+
+.gg-external-tools-action-confirm.is-confirm {
+  background: color-mix(in srgb, var(--warn, #bf8700) 14%, transparent);
+  color: var(--warn, #bf8700);
+}
+
+.gg-external-tools-cli-note {
+  margin-top: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 /* ── P8: каталог готовых MCP-серверов (подключение в один шаг) ─────────────── */
 .gg-mcp-catalog-group {
   margin-top: 14px;
