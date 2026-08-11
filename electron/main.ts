@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, safeStorage, session, dialog, protocol, net, Menu, ipcMain, shell } from 'electron'
 import { pathToFileURL } from 'url'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -6,6 +6,7 @@ import { mkdirSync } from 'fs'
 import { logRuntime, logRuntimeError, runtimeLogsDir } from './runtime-log'
 import { registerRuntimeLogIpc } from './runtime-log-ipc'
 import { decidePopupNavigation } from './ai/popup-policy'
+import { decideMainWindowNavigation, decideMainWindowPopup } from './main-window-navigation'
 import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish } from './browser/network-capture'
 import { loadPermissionRules } from './ai/permission-rules'
 
@@ -408,6 +409,37 @@ app.whenReady().then(() => {
     // target=_blank → новое окно → любой URL» проходила молча.
     // Правила читаем на КАЖДОМ попапе, а не кешируем: файл человек правит между
     // событиями, и устаревший снимок означал бы «запрет написан, но не действует».
+    // Б1 (живая приёмка 11.08): главное окно ДВАЖДЫ уводилось top-level
+    // навигацией на passport.yandex.ru — renderer выгружался молча, стор
+    // терялся, второй раз кончилось before_quit. У окна не было ни
+    // will-navigate-гарда, ни setWindowOpenHandler: клик по <a href>,
+    // target=_top и drag&drop ссылки в окно проходили без проверки.
+    // Правило: окно типа 'window' грузит ТОЛЬКО собственный index; попап
+    // никогда не создаёт child-окно (http(s) — в системный браузер, видимо).
+    // Навигацию ВНУТРИ webview этот гард не судит — у неё свой контур ниже.
+    if (contents.getType() === 'window') {
+      const navOpts = {
+        devServerUrl: process.env.ELECTRON_RENDERER_URL ?? null,
+        indexFileUrl: pathToFileURL(join(HERE, '../renderer/index.html')).href,
+      }
+      contents.on('will-navigate', (ev, url) => {
+        const verdict = decideMainWindowNavigation(url, navOpts)
+        if (!verdict.allow) {
+          ev.preventDefault()
+          logRuntime('window.top_navigation.blocked', { url: String(url).slice(0, 500), reason: verdict.reason }, 'warn')
+        }
+      })
+      contents.setWindowOpenHandler(({ url }) => {
+        const popup = decideMainWindowPopup(url)
+        if (popup.openExternal) {
+          logRuntime('window.popup.open_external', { url: String(url).slice(0, 500) })
+          void shell.openExternal(url)
+        } else {
+          logRuntime('window.popup.blocked', { url: String(url).slice(0, 500), reason: popup.reason }, 'warn')
+        }
+        return { action: 'deny' }
+      })
+    }
     if (contents.getType() === 'webview') {
       contents.setWindowOpenHandler(({ url }) => {
         const verdict = decidePopupNavigation(url, loadPermissionRules(null))

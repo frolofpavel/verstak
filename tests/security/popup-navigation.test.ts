@@ -82,7 +82,13 @@ describe('SEC-CMD-08 · main.ts реально зовёт эту проверк�
   })
 
   it('в обработчике не осталось безусловной загрузки по одной лишь схеме', () => {
-    const handler = main.slice(main.indexOf('setWindowOpenHandler'), main.indexOf('setWindowOpenHandler') + 600)
+    // Локатор (Б1, 11.08): якорь — ветка webview, а не первое вхождение
+    // setWindowOpenHandler: у главного окна появился СВОЙ обработчик попапов
+    // (main-window-navigation), он стоит раньше по файлу и loadURL не зовёт
+    // по построению. Утверждения пина не менялись.
+    const webviewBranch = main.indexOf("getType() === 'webview'")
+    const start = main.indexOf('setWindowOpenHandler', webviewBranch)
+    const handler = main.slice(start, start + 600)
     expect(handler, 'обработчик не найден — пин потерял предмет').toContain('loadURL')
     expect(
       /if\s*\(\s*\/\^https\?:\\\/\\\/\/i\.test\(url\)\s*\)\s*\{\s*void contents\.loadURL\(url\)\s*\}/.test(handler),
