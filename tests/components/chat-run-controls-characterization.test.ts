@@ -83,19 +83,46 @@ describe('панели прогона — состав и место', () => {
     expect(document.querySelector('.gg-timeline')).toBeNull()
   })
 
-  it('появилась активность — таймлайн встаёт под потоком', () => {
+  // В1 (решение Павла 11.08): лента активности над строкой ввода ДУБЛИРОВАЛА
+  // карточку «Ход работы» — остаётся только карточка. Прежний пин этого блока
+  // («появилась активность — таймлайн встаёт под потоком») стерёг именно
+  // отменённый контракт и снят тем же коммитом, что скрыл ленту (§3.1).
+  it('В1: активность больше НЕ рендерит ленту над строкой ввода', () => {
     mountChat()
     seedActive(useProject, {
       activity: [{ id: 'a1', kind: 'read', label: 'Читаю', detail: 'src/a.ts', status: 'ok', timestamp: 1 }],
     })
     act(() => { useProject.setState({}, false) })
+    expect(document.querySelector('.gg-timeline')).toBeNull()
+    // Данные не потеряны: активность по-прежнему лежит в store — её читает
+    // «Ход работы», скрыт только дублирующий рендер.
+    const bundle = useProject.getState().chats[7]
+    expect(bundle?.activity).toHaveLength(1)
+  })
+
+  it('В1-контроль: пилюли ревью и артефактов НЕ дубли — остаются в подвале', () => {
+    mountChat()
+    act(() => {
+      useProject.setState({
+        reviews: {
+          5: {
+            reviewChatId: 5, parentChatId: 7, providerId: 'claude',
+            status: 'done', noteCount: 2, createdAt: 1,
+          } as never,
+        },
+        artifacts: [{ kind: 'html', path: 'C:/proj/a.html', filename: 'a.html', sizeBytes: 2048 } as never],
+      }, false)
+    })
     const timeline = document.querySelector('.gg-timeline')
-    expect(timeline).toBeTruthy()
-    expect(timeline?.getAttribute('role')).toBe('log')
-    // Именно ПОД потоком, а не над ним: порядок узлов — часть контракта разметки.
-    const stream = document.querySelector('.gg-chat-stream-area') as HTMLElement
-    expect(stream.compareDocumentPosition(timeline as Node) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy()
+    expect(timeline, 'подвал с ревью/артефактами исчез вместе с лентой — потеря доступа').toBeTruthy()
+    expect(document.querySelector('.gg-review-pill')).toBeTruthy()
+    expect(document.querySelector('.gg-artifact-pill')).toBeTruthy()
+    // А чипов активности в нём нет и с активностью в store:
+    seedActive(useProject, {
+      activity: [{ id: 'a1', kind: 'read', label: 'Читаю', detail: 'src/a.ts', status: 'ok', timestamp: 1 }],
+    })
+    act(() => { useProject.setState({}, false) })
+    expect(document.querySelector('.gg-timeline-pill.is-read')).toBeNull()
   })
 
   it('баннера pipeline нет, пока pipeline не запущен', () => {

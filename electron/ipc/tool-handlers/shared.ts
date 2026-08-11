@@ -361,8 +361,62 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
   if (name === 'browser_read_page') {
     return { label: 'browser_read_page', detail: args.selector ? String(args.selector) : '(вся страница)' }
   }
+  // В2 (живая проверка 11.08): подпись обязана быть НЕПУСТОЙ у каждого
+  // браузерного инструмента — пустой detail рендерился в чип-кружок без текста,
+  // а отсутствующая ветка не оставляла следа вовсе (см. историю browser_click
+  // ниже). Формулировки зеркалят журнальный тернарник в browser.ts; результат —
+  // только обогащение, непустота держится на одних аргументах (сетка
+  // tests/ipc/browser-activity-labels.test.ts перебирает группу по TOOL_DEFS).
   if (name === 'browser_screenshot') {
-    return { label: 'browser_screenshot', detail: '' }
+    const url = (result && typeof result === 'object' && 'url' in result)
+      ? String((result as { url?: unknown }).url ?? '')
+      : ''
+    return { label: 'browser_screenshot', detail: url ? `скриншот · ${url}` : 'скриншот страницы' }
+  }
+  if (name === 'browser_snapshot') {
+    const r = (result && typeof result === 'object') ? result as { count?: unknown } : undefined
+    const count = typeof r?.count === 'number' ? r.count : null
+    return { label: 'browser_snapshot', detail: count != null ? `снимок страницы · ${count} элементов` : 'снимок страницы' }
+  }
+  if (name === 'browser_find') {
+    const q = String(args.query ?? '')
+    const r = (result && typeof result === 'object') ? result as { items?: unknown } : undefined
+    const hits = Array.isArray(r?.items) ? r!.items!.length : null
+    return { label: 'browser_find', detail: hits != null ? `поиск «${q}» · ${hits} совпадений` : `поиск «${q}»` }
+  }
+  if (name === 'browser_click_by_number') {
+    // Как у browser_click: адрес страницы из результата — «куда», не только «сколько».
+    const url = (result && typeof result === 'object' && 'url' in result)
+      ? String((result as { url?: unknown }).url ?? '')
+      : ''
+    const target = `элемент №${String(args.n ?? '?')}`
+    return { label: 'browser_click_by_number', detail: url ? `${target} · ${url}` : target }
+  }
+  if (name === 'browser_type_by_number') {
+    // Сам вводимый текст в подпись НЕ идёт — в поле может быть что угодно
+    // (журнал в browser.ts так же пишет только номер поля).
+    return { label: 'browser_type_by_number', detail: `ввод в поле №${String(args.n ?? '?')}` }
+  }
+  if (name === 'browser_press_key') {
+    const key = String(args.key ?? '?')
+    const purpose = key === 'Enter' ? 'Enter — отправка формы'
+      : key === 'Tab' ? 'Tab — следующее поле'
+        : key === 'Escape' ? 'Escape — закрыть оверлей'
+          : key
+    return { label: 'browser_press_key', detail: args.n != null ? `${purpose} · поле №${String(args.n)}` : purpose }
+  }
+  if (name === 'browser_wait_for') {
+    return { label: 'browser_wait_for', detail: `ожидание «${String(args.query ?? '')}»` }
+  }
+  if (name === 'browser_console_errors') {
+    const r = (result && typeof result === 'object') ? result as { count?: unknown } : undefined
+    const count = typeof r?.count === 'number' ? r.count : null
+    return { label: 'browser_console_errors', detail: count != null ? `консоль · ${count} сообщений` : 'чтение консоли' }
+  }
+  if (name === 'browser_network') {
+    const r = (result && typeof result === 'object') ? result as { count?: unknown } : undefined
+    const count = typeof r?.count === 'number' ? r.count : null
+    return { label: 'browser_network', detail: count != null ? `сеть · ${count} запросов` : 'чтение сети' }
   }
   // Клик — единственное браузерное действие, меняющее чужую систему, и до 30.07
   // он был единственным без ветки здесь: сводка возвращала null, значит

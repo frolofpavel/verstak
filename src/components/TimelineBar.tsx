@@ -4,42 +4,20 @@ import { ReviewPills } from './ReviewPills'
 import { ArtifactsPanel } from './ArtifactsPanel'
 
 /**
- * Horizontal pulse lane shown between the chat stream and the composer.
+ * Подвал чата между потоком и композером.
  *
- * Gemini Ultra audit (2026-05-21, idea A): users describe the agent as a
- * "black box" — they can't tell what it's doing right now without scrolling
- * through long messages. This lane gives a constant visual heartbeat: every
- * tool the agent ran in this turn appears here as a short pill.
+ * История: с 2026-05-21 (Gemini Ultra audit, idea A) здесь жила лента-«пульс» —
+ * чип на каждый tool-вызов текущего хода. В1 (решение Павла 11.08): после
+ * появления браузерных событий лента стала дублем карточки «Ход работы»
+ * (AgentProgressPanel читает те же события) — рендер чипов активности снят,
+ * остаётся только карточка. Данные не тронуты: `activity` по-прежнему пишется
+ * в store тем же путём, компонент лишь не рисует её вторым слоем.
  *
- * Source of truth is `useProject().activity` — same array the inline activity
- * list reads. We display only the most-recent N pills to keep the lane tidy.
+ * НЕ дубли — и потому остаются здесь: pills ревью (вход в Explicit Review) и
+ * pills артефактов (вход в preview) — другого входа у них нет.
  */
 
-const ICONS: Record<string, string> = {
-  read: '📖',
-  list: '📂',
-  write: '✏',
-  command: '⚡',
-  blocked: '🚫',
-  // 2.1.3-CD: переключение маршрута (ротация аккаунта / model-fallback).
-  route: '⇄'
-}
-
-const MAX_VISIBLE = 14
-
-function shortenPath(detail: string | undefined): string {
-  if (!detail) return ''
-  // Tool details look like "src/components/Chat.tsx · 123 символов" — strip
-  // the suffix; otherwise just trim long content.
-  const path = detail.split(' · ')[0] ?? detail
-  // Keep last two segments so the user knows where without going wide
-  const segs = path.split(/[\\/]/)
-  if (segs.length > 2) return '…/' + segs.slice(-2).join('/')
-  return path.length > 36 ? path.slice(0, 33) + '…' : path
-}
-
 export function TimelineBar() {
-  const activity = useActiveChatField('activity') ?? []
   const isStreaming = useActiveChatField('isStreaming') ?? false
   const reviews = useProject(s => s.reviews)
   const artifactsCount = useProject(s => s.artifacts.length)
@@ -50,33 +28,12 @@ export function TimelineBar() {
     ? 0
     : Object.values(reviews).filter(r => r.parentChatId === activeChatId).length
 
-  // Скрываем лейн только если ВСЁ пусто.
-  if (activity.length === 0 && reviewCount === 0 && artifactsCount === 0) return null
-
-  // Most recent at the right, like a tape moving forward.
-  const visible = activity.slice(-MAX_VISIBLE)
-  const hiddenCount = activity.length - visible.length
+  // В1: активность лейн больше не показывает — рендерим его только ради
+  // ревью/артефактов.
+  if (reviewCount === 0 && artifactsCount === 0) return null
 
   return (
-    <div className={`gg-timeline ${isStreaming ? 'is-streaming' : ''}`} role="log" aria-label="Активность агента">
-      {hiddenCount > 0 && (
-        <span className="gg-timeline-overflow" title={`Ещё ${hiddenCount} событий раньше`}>+{hiddenCount}</span>
-      )}
-      {visible.map(a => {
-        const icon = ICONS[a.kind] ?? '·'
-        const detail = shortenPath(a.detail)
-        const tooltip = `${a.label}${a.detail ? '\n' + a.detail : ''}\nстатус: ${a.status}`
-        return (
-          <span
-            key={a.id}
-            className={`gg-timeline-pill is-${a.kind} is-${a.status}`}
-            title={tooltip}
-          >
-            <span className="gg-timeline-pill-icon">{icon}</span>
-            {detail && <span className="gg-timeline-pill-detail">{detail}</span>}
-          </span>
-        )
-      })}
+    <div className={`gg-timeline ${isStreaming ? 'is-streaming' : ''}`} role="log" aria-label="Ревью и артефакты">
       <ReviewPills />
       <ArtifactsPanel />
     </div>
