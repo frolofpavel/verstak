@@ -468,6 +468,13 @@ export interface AiSendInternal {
   /** Изолированный корень прогона (workspace попытки состязания). Побеждает
    *  worktree-сессию чата — попытка работает строго в своём каталоге. */
   isolatedRoot?: string
+  /** Б2 (живая приёмка 11.08): у прогона НЕТ поверхности подтверждений — скрытый
+   *  чат попытки, показать карточку некому, ожидание висело бы вечно. Хендлеры
+   *  через awaitCommandConfirm немедленно ОТКАЗЫВАЮТ (пауза ответственного
+   *  действия не ослабляется — только reject) и зовут этот хук со сводкой
+   *  действия; контур состязания делает из неё честный failed попытки. Из
+   *  renderer'а недостижим — IPC-регистрация internal не форвардит. */
+  onConfirmAutoRejected?: (info: { toolName: string; subject: string }) => void
 }
 
 /** Программный запуск обычного ai:send из main (P1: прогон попытки состязания).
@@ -1191,6 +1198,13 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
         searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
         connectors: deps.connectors, agentMode, turnsBudget, autoContinueTurns,
+        // Б2: авто-отказ подтверждений прогона без поверхности (main-only internal).
+        autoRejectConfirms: internal?.onConfirmAutoRejected
+          ? (info => {
+              logRuntime('ai.confirm.auto_reject', { sendId, toolName: info.toolName, subject: info.subject.slice(0, 300) }, 'warn')
+              internal.onConfirmAutoRejected!({ toolName: info.toolName, subject: info.subject })
+            })
+          : undefined,
         skillRegistry: deps.skillRegistry, getSecretForDelegate: deps.getSecret, costGuard,
         resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
         providerId, model,

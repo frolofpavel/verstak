@@ -992,7 +992,7 @@ app.whenReady().then(() => {
   registerPlansIpc(plans, agentRuns)
   // P1: состязание исполнителей — одна постановка у нескольких провайдеров,
   // таблица факта, принятие одного результата без потери остальных.
-  registerResultTrialsIpc(createResultTrials(db), { chatSessions, invokeAiSend })
+  registerResultTrialsIpc(createResultTrials(db), { chatSessions, invokeAiSend, abortSend })
   // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Прогон — ТОТ ЖЕ
   // headless-цикл, что у scheduled (ТЗ §2: второй agent loop запрещён); отличия
   // объявлены явно — режим планирования (изменения блокирует mode-policy),

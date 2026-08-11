@@ -109,6 +109,13 @@ export interface ToolContext {
   /** #3 plan-gate: ожидающие одобрения планы (create_plan в plan-режиме). */
   pendingPlans?: Map<string, { sendId: SendId; resolve: (d: { decision: 'approve' | 'revise' | 'reject'; feedback?: string }) => void }>
   scopedKey: (sendId: SendId, callId: string) => string
+  /** Б2 (живая приёмка 11.08): у прогона НЕТ поверхности подтверждений (скрытый
+   *  чат попытки состязания — kind=subagent, окна нет). Когда задан —
+   *  awaitCommandConfirm НЕ регистрирует pending (показать карточку некому,
+   *  ожидание висело бы вечно), а немедленно возвращает ОТКАЗ и зовёт хук со
+   *  сводкой действия. Только reject, никогда accept: пауза ответственного
+   *  действия не ослабляется. Задаётся ТОЛЬКО main-вызовами (AiSendInternal). */
+  autoRejectConfirms?: (info: { callId: string; toolName: string; subject: string }) => void
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode
   /** Сырой tools_allow активного скилла этого прогона (для наследования дочерней
@@ -299,7 +306,20 @@ export function emitActivity(ctx: ToolContext, call: ToolCall, status: 'ok' | 'e
  * не освобождали ожидание → весь ai:send висел до ручного Stop. Тот же паттерн,
  * что в diffConfirmWrite для write_file.
  */
-export function awaitCommandConfirm(ctx: ToolContext, callId: string): Promise<boolean> {
+export function awaitCommandConfirm(
+  ctx: ToolContext,
+  callId: string,
+  /** Сводка действия для честного отказа без поверхности: имя инструмента +
+   *  предмет (команда / путь / URL). Используется ТОЛЬКО веткой autoRejectConfirms. */
+  info?: { toolName: string; subject: string },
+): Promise<boolean> {
+  // Б2: скрытому чату карточку подтверждения показать некому — ожидание висело
+  // бы вечно (живой факт 11.08: попытка состязания с `del`). Немедленный ОТКАЗ
+  // (не согласие!) + след, из которого вызывающий контур соберёт честный failed.
+  if (ctx.autoRejectConfirms) {
+    ctx.autoRejectConfirms({ callId, toolName: info?.toolName ?? '', subject: info?.subject ?? '' })
+    return Promise.resolve(false)
+  }
   return new Promise<boolean>(resolve => {
     let settled = false
     const key = ctx.scopedKey(ctx.sendId, callId)

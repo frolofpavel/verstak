@@ -200,6 +200,10 @@ export interface AgentRunContext {
     query: (id: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>
   }
   agentMode: AgentMode
+  /** Б2 (живая приёмка 11.08): прогон без поверхности подтверждений (скрытый чат
+   *  попытки состязания). Доезжает до ToolContext: awaitCommandConfirm вместо
+   *  вечного ожидания немедленно отказывает и зовёт этот хук. Только main-вызовы. */
+  autoRejectConfirms?: ToolContext['autoRejectConfirms']
   turnsBudget?: number
   /** V2-2: разрешить прогону растить бюджет самому, пока есть продвижение.
    *  Разрешение ЯВНОЕ (по умолчанию выключено): этот runner зовут не только из
@@ -265,7 +269,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender: rawSender, sendId, provider, tools, projectPath, initialMessages, signal,
     recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, invalidateMemory,
-    searchMemories, searchConversations, connectors, agentMode,
+    searchMemories, searchConversations, connectors, agentMode, autoRejectConfirms,
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
@@ -1431,6 +1435,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         runChecks: () => Array.from(executedChecks, ([command, exitCode]) => ({ command, exitCode })),
       invalidateMemory,
       pendingAttachments, pendingWrites, pendingCommands, pendingPlans, scopedKey,
+      // Б2: скрытому прогону (попытка состязания) подтверждение показать некому —
+      // авто-отказ вместо вечного ожидания; хук доносит причину до таблицы попыток.
+      autoRejectConfirms,
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       // tools_allow: сырой список — для наследования дочерней сессией (spawn_task_session);
       // allowedToolNames — набор для гейта диспетчера (enforcement на исполнении);

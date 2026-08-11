@@ -77,7 +77,7 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
   it('каждая попытка: свой чат, свой workspace, её провайдер/модель, режим auto', async () => {
     const trial = makeTrial()
     const { invoke, calls } = recordingInvoker()
-    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
 
     // Контрольный кейс «действие происходит»: ровно по вызову на попытку.
     expect(invoke).toHaveBeenCalledTimes(2)
@@ -90,9 +90,11 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
     expect(calls[0].overrides).toMatchObject({ providerId: 'deepseek', model: 'deepseek-chat', agentMode: 'auto' })
     expect(calls[1].overrides).toMatchObject({ providerId: 'openai', model: 'gpt-5', agentMode: 'auto' })
 
-    // Изоляция: свой workspace каждому.
-    expect(calls[0].internal).toEqual({ isolatedRoot: '/w/a' })
-    expect(calls[1].internal).toEqual({ isolatedRoot: '/w/b' })
+    // Изоляция: свой workspace каждому. (Фикстура-локатор обновлена Б2 11.08:
+    // internal дополнился main-only хуком onConfirmAutoRejected — само
+    // обязательство «свой isolatedRoot каждой попытке» не менялось.)
+    expect(calls[0].internal).toMatchObject({ isolatedRoot: '/w/a' })
+    expect(calls[1].internal).toMatchObject({ isolatedRoot: '/w/b' })
 
     // Свой чат каждому — скрытый (subagent), привязанный к постановке.
     const chatIds = calls.map(c => Number(c.chatId))
@@ -107,7 +109,7 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
   it('runId привязан из факта agent_runs — summary наполняется тем же путём, что «Итого»', async () => {
     const trial = makeTrial()
     const { invoke } = recordingInvoker()
-    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
 
     const attempts = trials.attempts(trial.id)
     expect(attempts.map(a => a.runId)).toEqual(['run-1', 'run-2'])
@@ -129,7 +131,7 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
       if (first) { first = false; return 0 } // ранний стоп маршрута: run-строки нет
       return good.invoke(...args)
     })
-    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
 
     const attempts = trials.attempts(trial.id)
     expect(attempts[0].status).toBe('failed')
@@ -146,7 +148,7 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
       if (first) { first = false; throw new Error('нет ключа DeepSeek') }
       return good.invoke(...args)
     })
-    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    const res = await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
 
     const attempts = trials.attempts(trial.id)
     expect(attempts[0].status).toBe('failed')
@@ -163,7 +165,7 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
       ],
     })
     const { invoke } = recordingInvoker()
-    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
 
     const attempts = trials.attempts(trial.id)
     expect(attempts[0].status).toBe('failed')
@@ -176,8 +178,8 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
   it('повторный запуск — громкий отказ: pending-попыток больше нет', async () => {
     const trial = makeTrial()
     const { invoke } = recordingInvoker()
-    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
-    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id))
+    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
+    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id))
       .rejects.toThrow(/ожидающих/i)
     // Второго комплекта прогонов не случилось.
     expect(invoke).toHaveBeenCalledTimes(2)
@@ -186,15 +188,15 @@ describe('P1: startTrialRuns — запуск попыток обычным ai:s
   it('завершённое состязание не перезапускается', async () => {
     const trial = makeTrial()
     const { invoke } = recordingInvoker()
-    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id)
+    await startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id)
     trials.accept(trial.id, trials.attempts(trial.id)[0].id)
-    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, trial.id))
+    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, trial.id))
       .rejects.toThrow(/заверш/i)
   })
 
   it('несуществующее состязание — понятная ошибка', async () => {
     const { invoke } = recordingInvoker()
-    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke }, SENDER, 999))
+    await expect(startTrialRuns(trials, { chatSessions, invokeAiSend: invoke, abortSend: vi.fn(() => true) }, SENDER, 999))
       .rejects.toThrow(/не найдено/i)
   })
 })

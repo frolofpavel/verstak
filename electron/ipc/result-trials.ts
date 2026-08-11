@@ -32,6 +32,9 @@ export interface TrialCompetitorInput {
 export interface ResultTrialsDeps {
   chatSessions: Pick<ChatSessions, 'create'>
   invokeAiSend: AiSendInvoker
+  /** Б2: остановить прогон попытки, чьё действие требовало подтверждения человека
+   *  (поверхности подтверждений у скрытого чата нет). Тот же abortSend, что у ai:stop. */
+  abortSend: (sendId: number) => boolean
 }
 
 /**
@@ -76,6 +79,22 @@ export async function startTrialRuns(
     trials.bindRun(attempt.id, { chatId: chat.id, status: 'running' })
     const messages: ChatMessage[] = [{ role: 'user', content: trial.prompt }]
     try {
+      // Б2 (живая приёмка 11.08): danger-действие попытки требует подтверждения
+      // человека, а поверхности подтверждений у скрытого чата НЕТ — карточка
+      // улетала в sendId, неизвестный renderer'у, и попытка висела бы вечно.
+      // Авто-режим ответственное действие не покрывает И НЕ ДОЛЖЕН: пауза не
+      // ослабляется, подтверждение авто-ОТКЛОНЯЕТСЯ, попытка помечается честным
+      // failed с самой командой, прогон останавливается (деньги не горят дальше).
+      const sendIdBox = { id: 0 }
+      let confirmRejected = false
+      const onConfirmAutoRejected = (info: { toolName: string; subject: string }) => {
+        if (confirmRejected) return // первая причина — самая честная; не стопим дважды
+        confirmRejected = true
+        const subject = info.subject.trim() || info.toolName || 'действие'
+        trials.finishAttempt(attempt.id, { status: 'failed', error: `требовало подтверждения человека: ${subject.slice(0, 300)}` })
+        logRuntime('trial.attempt.confirm_auto_reject', { trialId, attemptId: attempt.id, toolName: info.toolName, subject: subject.slice(0, 300) }, 'warn')
+        if (sendIdBox.id > 0) deps.abortSend(sendIdBox.id)
+      }
       // invokeAiSend возвращается ПОСЛЕ подготовки (run-строка уже создана), сам
       // прогон продолжается в фоне — попытки стартуют одна за другой, работают
       // параллельно. sendId=0 — ранний стоп маршрута: run-строки нет.
@@ -83,8 +102,9 @@ export async function startTrialRuns(
         sender, messages, trial.projectPath, undefined,
         { providerId: attempt.providerId, model: attempt.model, agentMode: 'auto' },
         String(chat.id),
-        { isolatedRoot: attempt.workspace },
+        { isolatedRoot: attempt.workspace, onConfirmAutoRejected },
       )
+      sendIdBox.id = sendId
       if (sendId === 0) {
         trials.finishAttempt(attempt.id, { status: 'failed', error: 'прогон не стартовал: маршрут/ключ/аккаунт (причина — в событиях чата попытки)' })
         continue
