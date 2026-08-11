@@ -77,6 +77,10 @@ export interface ResultTrials {
   /** Таблица для человека: попытки + факт прогона из agent_runs. */
   summary: (trialId: number) => TrialAttemptSummary[]
   bindRun: (attemptId: number, opts: { chatId?: number | null; runId?: string | null; status?: AttemptStatus }) => void
+  /** Свежайший run_id чата попытки — из agent_runs (факт, не выдумка). ai:send
+   *  генерит runId внутри себя; после старта попытки он снимается ЭТИМ запросом
+   *  и привязывается через bindRun. null — прогон не стартовал. */
+  latestRunIdForChat: (chatId: number) => string | null
   finishAttempt: (attemptId: number, opts: { status: AttemptStatus; outcome?: string | null; error?: string | null }) => void
   /**
    * Принять одну попытку. Остальные — в архив, НЕ удаляются: их workspace и
@@ -187,6 +191,12 @@ export function createResultTrials(db: Database): ResultTrials {
         runStatus: r.runStatus ?? null,
         durationMs: r.startedAt != null && r.endedAt != null ? r.endedAt - r.startedAt : null,
       }))
+    },
+
+    latestRunIdForChat: (chatId) => {
+      const row = db.prepare('SELECT run_id as runId FROM agent_runs WHERE chat_id = ? ORDER BY rowid DESC LIMIT 1')
+        .get(chatId) as { runId: string } | undefined
+      return row?.runId ?? null
     },
 
     bindRun: (attemptId, opts) => {

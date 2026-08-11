@@ -861,7 +861,8 @@ app.whenReady().then(() => {
       return snap ? { summary: snap.summary, throughMessageId: snap.throughMessageId } : null
     }
   }
-  registerAiIpc(aiDeps)
+  // P1: invokeAiSend — запуск попыток состязания ТЕМ ЖЕ кодом, что канал ai:send.
+  const { invokeAiSend } = registerAiIpc(aiDeps)
   const mobileRelayUrl = process.env.VERSTAK_MOBILE_RELAY_URL?.trim()
   const mobileRelayToken = process.env.VERSTAK_MOBILE_RELAY_TOKEN?.trim()
   let mobileBridge: ReturnType<typeof startMobileBridge> | null = null
@@ -959,7 +960,7 @@ app.whenReady().then(() => {
   registerPlansIpc(plans, agentRuns)
   // P1: состязание исполнителей — одна постановка у нескольких провайдеров,
   // таблица факта, принятие одного результата без потери остальных.
-  registerResultTrialsIpc(createResultTrials(db))
+  registerResultTrialsIpc(createResultTrials(db), { chatSessions, invokeAiSend })
   // VSK-PLAN-GEN-A2: генерация плана из раздела «Планы». Прогон — ТОТ ЖЕ
   // headless-цикл, что у scheduled (ТЗ §2: второй agent loop запрещён); отличия
   // объявлены явно — режим планирования (изменения блокирует mode-policy),

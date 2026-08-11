@@ -842,6 +842,15 @@ declare global {
           parentChatId?: number | null
           competitors: Array<{ providerId: string; model?: string | null }>
         }) => Promise<{ trial: ResultTrialDTO; attempts: TrialAttemptDTO[] }>
+        /** P1 шаг 1: прогнать pending-попытки обычным ai:send (каждая — со своей
+         *  моделью и своим workspace). Итог — сколько стартовало + свежие попытки. */
+        startRuns: (trialId: number) => Promise<{ started: number; attempts: TrialAttemptDTO[] }>
+        /** P1 шаг 2: оценка расхода ДО запуска — по прайсу выбранных моделей.
+         *  estimateCents=null значит «цена неизвестна» и так и показывается. */
+        estimate: (
+          competitors: Array<{ providerId: string; model?: string | null }>,
+          tokens?: { inputTokens: number; outputTokens: number },
+        ) => Promise<TrialAttemptEstimateDTO[]>
         list: (projectPath: string, limit?: number) => Promise<ResultTrialDTO[]>
         /** Таблица «что получилось · ходов · минут · рублей» — из фактов прогонов. */
         summary: (trialId: number) => Promise<TrialAttemptSummaryDTO[]>
@@ -1796,6 +1805,16 @@ export interface TrialAttemptSummaryDTO extends TrialAttemptDTO {
   durationMs: number | null
   runStatus: string | null
 }
+/** P1 шаг 2: оценка расхода попытки ДО запуска. Основание цифры объявлено явно;
+ *  'unknown' = цены нет, и это показывается словом «неизвестна», не тарифом. */
+export interface TrialAttemptEstimateDTO {
+  providerId: string
+  model: string | null
+  basis: 'price' | 'subscription' | 'zero-cost' | 'unknown'
+  price: { input: number; output: number } | null
+  estimateCents: number | null
+}
+
 export type PolicyDecision = 'confirm' | 'auto-accept' | 'block'
 export type PolicyCategory = 'read' | 'edit' | 'command' | 'connector'
 export interface PolicyMatrixRow {

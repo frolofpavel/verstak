@@ -406,15 +406,15 @@ export async function runScheduledHeadless(
   }
 }
 
-export function registerAiIpc(deps: AiDeps): void {
-  /**
-   * Optional overrides for ai:send. Used by Explicit Review feature: the
-   * reviewer needs a DIFFERENT provider from the chat's main provider, must
-   * skip tool dispatch (review is read-only synthesis), and may use a custom
-   * system prompt (REVIEWER_SYSTEM_PROMPT) instead of the project's system
-   * layer. Without overrides, ai:send behaves exactly as before.
-   */
-  interface AiSendOverrides {
+/**
+ * Optional overrides for ai:send. Used by Explicit Review feature: the
+ * reviewer needs a DIFFERENT provider from the chat's main provider, must
+ * skip tool dispatch (review is read-only synthesis), and may use a custom
+ * system prompt (REVIEWER_SYSTEM_PROMPT) instead of the project's system
+ * layer. Without overrides, ai:send behaves exactly as before.
+ * (P1: вынесен на уровень модуля — тип нужен invokeAiSend; сам контракт не менялся.)
+ */
+export interface AiSendOverrides {
     providerId?: ProviderId
     model?: string | null
     /** Снимок выбранного в UI маршрута на момент нажатия Send. Не превращает его
@@ -459,7 +459,31 @@ export function registerAiIpc(deps: AiDeps): void {
     materialsFolder?: string
   }
 
-  ipcMain.handle('ai:send', async (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) => {
+/**
+ * P1 (состязание исполнителей): внутренние параметры прогона, доступные ТОЛЬКО
+ * main-вызовам (invokeAiSend). IPC-регистрация их сознательно НЕ форвардит:
+ * isolatedRoot из renderer'а был бы обходом гейта известных корней проекта.
+ */
+export interface AiSendInternal {
+  /** Изолированный корень прогона (workspace попытки состязания). Побеждает
+   *  worktree-сессию чата — попытка работает строго в своём каталоге. */
+  isolatedRoot?: string
+}
+
+/** Программный запуск обычного ai:send из main (P1: прогон попытки состязания).
+ *  Возвращается из registerAiIpc — тот же код, что обслуживает IPC-канал. */
+export type AiSendInvoker = (
+  sender: Electron.WebContents,
+  incomingMessages: ChatMessage[],
+  projectPath: string | null,
+  budget?: number,
+  overrides?: AiSendOverrides,
+  chatId?: string,
+  internal?: AiSendInternal,
+) => Promise<number>
+
+export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
+  const handleAiSend: AiSendInvoker = async (sender, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string, internal?: AiSendInternal) => {
     // Безопасность: projectPath приходит из рендерера. Без проверки агент мог бы
     // получить файловый + shell доступ к произвольной системной папке (C:\Windows,
     // C:\Users\Pavel). Гейтим так же, как files/terminal IPC (isWithinKnownRoots).
@@ -478,7 +502,11 @@ export function registerAiIpc(deps: AiDeps): void {
     // (ревью: critical data-loss — правки в worktree, а undo-стек ключевался main).
     // Security-чек выше — на исходном main-пути; worktree создан нами (tmp). НЕ реассайним
     // projectPath (это сломало бы TS-narrowing из-за захвата в замыканиях) — отдельный const.
-    const isolatedRoot = chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null
+    // P1: isolatedRoot попытки состязания (internal, только main-вызовы) побеждает
+    // worktree-сессию чата — у попытки нет своей записи в worktree_sessions сознательно:
+    // её каталогом управляет контур состязания (dispose), а не lifecycle worktree-UI.
+    const isolatedRoot = internal?.isolatedRoot
+      ?? (chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null)
     // 2.0.8-D2: числовой chatId для резолва per-chat pin аккаунта (2.0.8-B binding).
     const chatIdNum = chatId ? Number(chatId) : undefined
     // 2.1.3-CD: явный one-shot аккаунт (promptRoute.accountId) — резолвится строго:
@@ -549,7 +577,7 @@ export function registerAiIpc(deps: AiDeps): void {
         runTimeout = null
       }
     }
-    const taggedSender = tagSender(e.sender, projectPath) // route progress and chat events to this project
+    const taggedSender = tagSender(sender, projectPath) // route progress and chat events to this project
     // 2.0.8-D2 + 2.1.3-CD: ранние стопы маршрута ДО создания run/провайдера — чистый выход.
     //  · unavailable: pin/one-shot на удалённый аккаунт → стоп-с-вопросом (НЕ тихая ротация).
     //  · blocked: явно выбранный (one-shot) или закреплённый аккаунт не готов (cooling /
@@ -928,7 +956,12 @@ export function registerAiIpc(deps: AiDeps): void {
       provider = createProvider(providerId, {
         apiKey,
         model,
-        cwd: projectPath ?? process.cwd(),
+        // Изолированный прогон (worktree чата / workspace попытки состязания) — cwd
+        // провайдера следует за изолированным корнем. Для CLI-провайдера cwd — рабочий
+        // каталог его собственного агента: без этого два CLI-исполнителя состязания
+        // работали бы в ОДНОМ дереве человека и затирали друг друга («попытки не делят
+        // состояние»), а «изолированный» CLI-чат правил основное дерево.
+        cwd: isolatedRoot ?? projectPath ?? process.cwd(),
         signal: ctrl.signal,
         projectSystemPrompt: projectSystemPromptForProvider,
         skillPrompt: skillPromptForProvider,
@@ -1209,7 +1242,12 @@ export function registerAiIpc(deps: AiDeps): void {
       }).finally(cleanup)
     }
     return sendId
-  })
+  }
+
+  // IPC-регистрация форвардит РОВНО пять аргументов renderer'а: internal (isolatedRoot)
+  // из IPC недостижим — см. AiSendInternal.
+  ipcMain.handle('ai:send', (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) =>
+    handleAiSend(e.sender, incomingMessages, projectPath, budget, overrides, chatId))
 
   // Управление идущим прогоном (стоп / приостановка / append-context) и резолв
   // pending-подтверждений — самостоятельный модуль (2.1.10-F). abortSend передаётся
@@ -1217,6 +1255,9 @@ export function registerAiIpc(deps: AiDeps): void {
   registerAiResolveIpc(ipcMain, abortSend)
 
   registerAiCountTokensIpc(ipcMain, deps)
+
+  // P1: состязание исполнителей запускает попытки ТЕМ ЖЕ кодом, что IPC-канал.
+  return { invokeAiSend: handleAiSend }
 }
 
 // Type re-exports for renderer (api.d.ts)

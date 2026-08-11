@@ -378,6 +378,11 @@ contextBridge.exposeInMainWorld('api', {
     available: (projectPath: string) => ipcRenderer.invoke('result-trials:available', projectPath),
     start: (input: { projectPath: string; prompt: string; parentChatId?: number | null; competitors: Array<{ providerId: string; model?: string | null }> }) =>
       ipcRenderer.invoke('result-trials:start', input),
+    // P1 шаг 1: прогнать pending-попытки обычным ai:send (main запускает, renderer ждёт итог).
+    startRuns: (trialId: number) => ipcRenderer.invoke('result-trials:start-runs', trialId),
+    // P1 шаг 2: оценка расхода ДО запуска; неизвестная цена = null («неизвестна»).
+    estimate: (competitors: Array<{ providerId: string; model?: string | null }>, tokens?: { inputTokens: number; outputTokens: number }) =>
+      ipcRenderer.invoke('result-trials:estimate', competitors, tokens),
     list: (projectPath: string, limit?: number) => ipcRenderer.invoke('result-trials:list', projectPath, limit),
     summary: (trialId: number) => ipcRenderer.invoke('result-trials:summary', trialId),
     bindRun: (attemptId: number, opts: { chatId?: number | null; runId?: string | null; status?: 'running' }) =>
