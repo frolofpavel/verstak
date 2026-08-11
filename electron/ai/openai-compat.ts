@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { normalizedUsage } from '../../shared/contracts/usage'
 import { formatVerstakMeta, mapGatewayError } from './gateway-meta'
+import { mapProviderAuthError } from './provider-errors'
 import { parseTextToolCalls } from './tool-call-repair'
 
 export interface OpenAiCompatOptions {
@@ -268,11 +269,14 @@ export function createOpenAiCompatProvider(opts: OpenAiCompatOptions): ChatProvi
         yield { type: 'done' }
       } catch (err) {
         // Verstak Gateway — человеко-читаемые ошибки по статусу/коду (нет баланса,
-        // лимит, ключ). Для остальных провайдеров — обычное сообщение.
+        // лимит, ключ). Б3.3 (живая приёмка 11.08): остальные провайдеры получают
+        // общий перевод 401/403/402 («подписка неактивна / ключ отклонён») —
+        // kimi-coding с протухшей подпиской падал голым сообщением SDK.
+        // Непонятый статус остаётся сырым сообщением — оно честнее перевода.
         const e = err as { status?: number; code?: string; error?: { code?: string } }
         const friendly = opts.id === 'verstak-gateway'
           ? mapGatewayError(e.status, e.code ?? e.error?.code)
-          : null
+          : mapProviderAuthError(opts.name, e.status, e.code ?? e.error?.code)
         yield { type: 'error', message: friendly ?? (err instanceof Error ? err.message : String(err)) }
       }
     }

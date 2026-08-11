@@ -142,3 +142,33 @@ describe('колонки «что вышло» и «минут»', () => {
     expect(fmtTrialMinutes(24 * 60_000)).toBe('24 мин')
   })
 })
+
+// Б3.1 (живая приёмка 11.08): архивная попытка, остановленная ⏹ на середине,
+// показывала «готово · файлов: N» — ярлык не различал «дошёл до конца» и
+// «остановлен». Мелкая нечестность, но именно по ней человек решает, чью
+// работу принять.
+describe('Б3 · ярлык архива честен про остановку (runStatus stopped)', () => {
+  it('остановленная попытка — «остановлен · файлов: N», не «готово»', () => {
+    for (const status of ['done', 'accepted', 'archived'] as const) {
+      expect(attemptOutcomeLabel({ status, runStatus: 'stopped', outcome: null, error: null, filesCount: 3 }))
+        .toBe('остановлен · файлов: 3')
+    }
+    expect(attemptOutcomeLabel({ status: 'archived', runStatus: 'stopped', outcome: null, error: null, filesCount: null }))
+      .toBe('остановлен')
+    expect(attemptOutcomeLabel({ status: 'archived', runStatus: 'stopped', outcome: null, error: null, filesCount: 0 }))
+      .toBe('остановлен')
+  })
+
+  // КОНТРОЛЬ «происходит»: дошедший до конца прогон остаётся «готово».
+  it('контроль: дошедший до конца — «готово · файлов: N» как раньше', () => {
+    expect(attemptOutcomeLabel({ status: 'archived', runStatus: 'done', outcome: null, error: null, filesCount: 2 }))
+      .toBe('готово · файлов: 2')
+    expect(attemptOutcomeLabel({ status: 'done', runStatus: 'done', outcome: null, error: null, filesCount: null }))
+      .toBe('готово')
+  })
+
+  it('слова попытки (outcome/error) по-прежнему важнее выведенного ярлыка', () => {
+    expect(attemptOutcomeLabel({ status: 'archived', runStatus: 'stopped', outcome: 'починил половину', error: null, filesCount: 1 }))
+      .toBe('починил половину')
+  })
+})

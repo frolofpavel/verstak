@@ -11,6 +11,20 @@ export interface Settings {
   setSecret: (key: string, value: string) => void
 }
 
+/** Читаемый ли это текст, а не декодированные как UTF-8 зашифрованные байты:
+ *  U+FFFD (битые последовательности) и управляющие символы (кроме \t\n\r) в
+ *  легитимных значениях настроек не встречаются. */
+function looksLikeReadableText(s: string): boolean {
+  return !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(s)
+}
+
+/** Plain-base64 фолбэк: отдаёт значение ТОЛЬКО если оно читаемый текст.
+ *  Зашифрованный blob, декодированный как UTF-8, — мусор, а не значение → null. */
+function plainDecodeIfReadable(value: string): string | null {
+  const decoded = Buffer.from(value, 'base64').toString('utf-8')
+  return looksLikeReadableText(decoded) ? decoded : null
+}
+
 export function createSettings(db: Database, safe: SafeStorageLike): Settings {
   const stmtGet = db.prepare('SELECT value FROM settings WHERE key = ?')
   const stmtSet = db.prepare(
@@ -31,10 +45,15 @@ export function createSettings(db: Database, safe: SafeStorageLike): Settings {
           return safe.decryptString(buf)
         }
         // Fallback: значение хранится как plain base64
-        return Buffer.from(row.value, 'base64').toString('utf-8')
+        return plainDecodeIfReadable(row.value)
       } catch {
-        // Если ключ записан одним способом а читаем другим — попробуем plain
-        try { return Buffer.from(row.value, 'base64').toString('utf-8') } catch { return null }
+        // Если ключ записан одним способом а читаем другим — попробуем plain.
+        // Б3.2 (живая приёмка 11.08): сюда попадает и DPAPI/os_crypt-blob чужого
+        // окружения (dev на реальном профиле; prod после переустановки со сменой
+        // ключа) — его БАЙТЫ нельзя отдавать как «значение»: так
+        // last_whats_new_version стал кракозябрами в заголовке модалки
+        // «Пропущенные обновления». Нечитаемое в этом окружении = null.
+        try { return plainDecodeIfReadable(row.value) } catch { return null }
       }
     },
     setSecret(key, value) {

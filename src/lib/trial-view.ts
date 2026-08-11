@@ -113,6 +113,12 @@ export function attemptOutcomeLabel(
     case 'done':
     case 'accepted':
     case 'archived':
+      // Б3.1 (живая приёмка 11.08): остановленный ⏹ на середине прогон — не
+      // «готово». Ярлык обязан различать «дошёл до конца» и «остановлен»:
+      // по нему человек решает, чью работу принять.
+      if (row.runStatus === 'stopped') {
+        return row.filesCount != null && row.filesCount > 0 ? `остановлен · файлов: ${row.filesCount}` : 'остановлен'
+      }
       return row.filesCount != null && row.filesCount > 0 ? `готово · файлов: ${row.filesCount}` : 'готово'
     default: return row.status
   }
