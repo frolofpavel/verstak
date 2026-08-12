@@ -263,12 +263,17 @@ export function BrowserView() {
         if (!wv) return { ok: false, error: 'Browser view не активен' }
         // Инжектим ТОТ ЖЕ vskResolveNumbered (пин §3.1); клик над найденным el —
         // здесь же, в странице, т.к. DOM-ссылку наружу не отдать.
+        // P3 (13.08): у не-HTML элемента метода .click() НЕТ — живой замер на Хабре
+        // дал «target.click is not a function» на <svg>. Такой элемент попадает в
+        // снимок, когда ему проставлена роль (<svg role="button">), и клик по нему
+        // падал в рантайме вместо действия. Запасной путь — настоящее событие мыши.
         const code = `(() => {
           const resolve = ${vskResolveNumbered.toString()};
           const r = resolve(${JSON.stringify(n)});
           if (!r.ok) return r;
           try { r.el.scrollIntoView({ block: 'center' }); } catch (e) {}
-          r.el.click();
+          if (typeof r.el.click === 'function') r.el.click();
+          else r.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
           return { ok: true, url: location.href };
         })()`
         try {
