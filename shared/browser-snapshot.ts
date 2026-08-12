@@ -143,9 +143,64 @@ export function vskSnapshot(gen: string): PageSnapshot {
   // бросает/null) — пропускается честно, без падения. Числа — границы безопасности,
   // не тюнинг: глубина вложенности реальных страниц ≤3, элементов и узлов — с
   // запасом над замером B2 (M.Video-каталог: 1091 интерактивный элемент).
+  // P3 (13.08): КЛИКАБЕЛЬНОЕ БЕЗ СЕМАНТИКИ. Живая приёмка Хабра уперлась в то, что
+  // страница просит «Нажмите на иконку поиска», а иконки в снимке нет: она —
+  // `span.tm-svg-icon__wrapper > svg`, и НИ ОДНО звено её цепочки не подходит под
+  // INTERACTIVE (не ссылка, не кнопка, роли нет, обработчик повешен Vue через
+  // addEventListener — значит и `[onclick]` мимо). Замерено на живой странице:
+  // синтетический click по этой обёртке даёт 539 → 17102 символа и настоящие
+  // заголовки. То есть дверь была одна, и она не была видна.
+  //
+  // Признак берём тот же, по которому клик опознаёт ЧЕЛОВЕК, — курсор-указатель.
+  // Это не эвристика «на всякий случай»: страница сама объявляет им кликабельность.
+  //
+  // ГРАНИЦЫ СНЯТЫ ЗАМЕРОМ, А НЕ НА ГЛАЗ. Первая редакция брала ЛЮБОЙ pointer-элемент
+  // и на ленте Хабра дала 310 лишних номеров при +70 мс на снимок (Википедия +92 мс,
+  // каталог М.Видео +130 мс) — снимок распухал, настоящие контролы выдавливались из
+  // top-N. Сужение до ИКОНОЧНОГО контрола (маленькая обёртка вокруг img/svg — ровно
+  // тот класс, на котором споткнулась приёмка) дало 21 цель и +7 мс на той же ленте,
+  // Википедия +38 мс, М.Видео +23 мс. Дешёвые проверки идут ДО getComputedStyle,
+  // поэтому вместе с шумом упала и цена.
+  //
+  // Остальные ограничения — против распухания (cursor НАСЛЕДУЕТСЯ, без них одна
+  // иконка дала бы номер каждому своему предку):
+  //   · только ВНЕШНИЙ элемент pointer-поддерева (у родителя курсор другой);
+  //   · внутри нет настоящего контрола — тогда адресуемым остаётся он, а не обёртка;
+  //   · без подписи не берём: безымянный номер модели нечем назвать в find.
   const MAX_DEPTH = 6
   const MAX_ELEMENTS = 2000
   const MAX_SCAN = 20000
+  const MAX_POINTER = 300
+  const XHTML = 'http://www.w3.org/1999/xhtml'
+  const SKIP_TAGS = ['html', 'body', 'head', 'script', 'style', 'noscript']
+  let pointerCount = 0
+
+  function cursorOf(el: Element): string {
+    try {
+      const view = el.ownerDocument.defaultView || globalThis
+      const cs = view.getComputedStyle ? view.getComputedStyle(el as HTMLElement) : null
+      return cs ? cs.cursor : ''
+    } catch { return '' }
+  }
+
+  /** Кликабелен по курсору, но не имеет семантики — иначе бы уже попал в INTERACTIVE. */
+  function isPointerTarget(el: Element): boolean {
+    if (el.namespaceURI !== XHTML) return false            // svg/path/use — внутренности иконки
+    const tag = el.tagName ? el.tagName.toLowerCase() : ''
+    if (SKIP_TAGS.indexOf(tag) !== -1) return false
+    if (el.matches(INTERACTIVE)) return false              // уже пронумерован как контрол
+    // Иконочная обёртка: одна-две вложенности вокруг картинки. Проверки дешёвые и
+    // стоят ПЕРЕД getComputedStyle — он и есть дорогая часть обхода (замер выше).
+    const kids = el.children ? el.children.length : 0
+    if (kids === 0 || kids > 2) return false
+    if (!el.querySelector('img,svg')) return false
+    if (cursorOf(el) !== 'pointer') return false
+    const parent = el.parentElement
+    if (parent && cursorOf(parent) === 'pointer') return false  // не внешний в поддереве
+    if (el.querySelector(INTERACTIVE)) return false        // внутри есть настоящий контрол
+    return !isHidden(el)
+  }
+
   const root = document.documentElement
   root.setAttribute('data-vsk-gen', gen)
   const elements: SnapshotElement[] = []
@@ -169,6 +224,20 @@ export function vskSnapshot(gen: string): PageSnapshot {
     for (const host of Array.from(scope.querySelectorAll('*'))) {
       scanned++
       if (scanned > MAX_SCAN) { budgetHit = true; return }
+      // Второй класс адресуемого — кликабельное без семантики (см. выше). Идёт в тот
+      // же обход, отдельного прохода по документу нет: цена снимка не удваивается.
+      if (n < MAX_ELEMENTS && isPointerTarget(host)) {
+        const pname = nameOf(host)
+        if (pname) {
+          if (pointerCount >= MAX_POINTER) budgetHit = true
+          else {
+            pointerCount++
+            n++
+            host.setAttribute('data-vsk-el', gen + ':' + n)
+            elements.push({ n, tag: host.tagName.toLowerCase(), role: 'button', name: pname })
+          }
+        }
+      }
       const sr = (host as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot
       if (sr) {
         if (depth >= MAX_DEPTH) budgetHit = true
