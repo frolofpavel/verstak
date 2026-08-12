@@ -7,7 +7,8 @@ import { logRuntime, logRuntimeError, runtimeLogsDir } from './runtime-log'
 import { registerRuntimeLogIpc } from './runtime-log-ipc'
 import { decidePopupNavigation } from './ai/popup-policy'
 import { decideMainWindowNavigation, decideMainWindowPopup } from './main-window-navigation'
-import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish } from './browser/network-capture'
+import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish, isTrackedWebview } from './browser/network-capture'
+import { shouldStampAppCsp } from './browser/csp-scope'
 import { loadPermissionRules } from './ai/permission-rules'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
@@ -281,8 +282,10 @@ function installCSP(): void {
     "base-uri 'self'"
   ].join('; ')
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const rt = details.resourceType
-    if (rt === 'mainFrame' || rt === 'subFrame' || rt === 'stylesheet' || rt === 'script') {
+    // Политика приложения — СВОЕМУ окну, а не чужим сайтам во встроенном браузере:
+    // сессия у них одна, и до 12.08 строгий script-src 'self' доставался каждой
+    // открытой странице, из-за чего её фреймворк не стартовал вовсе (csp-scope.ts).
+    if (shouldStampAppCsp(details.resourceType, details.webContentsId, isTrackedWebview)) {
       const headers = { ...details.responseHeaders, 'Content-Security-Policy': [csp] }
       callback({ responseHeaders: headers })
       return
@@ -393,6 +396,14 @@ app.whenReady().then(() => {
       delete webPreferences.preload
       webPreferences.nodeIntegration = false
       webPreferences.contextIsolation = true
+      // P3 кусок 2 (замер 12.08): встроенным браузером агент работает, когда человек
+      // смотрит в чат, а окно бывает перекрыто или свёрнуто. Chromium в этом случае
+      // ЗАМОРАЖИВАЕТ фоновую страницу: таймеры не срабатывают вовсе (проверено —
+      // промис от setTimeout не разрешается), кадров нет, IntersectionObserver молчит.
+      // Для обычной вкладки это экономия, для страницы, которой прямо сейчас управляет
+      // агент, — отказ: SPA не догружает и не рисует выдачу. Троттлинг снимается ТОЛЬКО
+      // у вкладок браузера; главное окно и его политика не затронуты.
+      webPreferences.backgroundThrottling = false
       // Ре-ревью LOW (defense-in-depth): не дать скомпрометированному рендереру/скиллу
       // ослабить webview через <webview webpreferences="webSecurity=no">.
       webPreferences.webSecurity = true

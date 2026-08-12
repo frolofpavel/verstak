@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+  Renderer живого смоука P3. Держит один <webview>, к слоту прикладывается ПРОДОВЫЙ
+  стиль (shared/browser-slot-style.ts), затем измеряются условия страницы и
+  проигрывается продовый путь ввода и отправки формы (vskFill + vskPressKey).
+-->
+<body style="margin:0;background:#222">
+<div id="slot" style="width:100%;height:100vh"></div>
+<script>
+// Замер условий внутри страницы: вьюпорт, кадры, наблюдатель пересечений.
+const PROBE_ENV = `(async () => {
+  let raf = 0
+  const t0 = performance.now()
+  const tick = () => { raf++; if (performance.now() - t0 < 1000) requestAnimationFrame(tick) }
+  requestAnimationFrame(tick)
+  let ioFired = 0
+  const p = document.createElement('div')
+  p.style.cssText = 'width:10px;height:10px;position:absolute;top:0;left:0'
+  document.body.appendChild(p)
+  const io = new IntersectionObserver(() => { ioFired++ })
+  io.observe(p)
+  await new Promise(r => setTimeout(r, 1100))
+  io.disconnect(); p.remove()
+  return { innerW: innerWidth, innerH: innerHeight, rafPerSec: raf, ioFired }
+})()`
+
+// Ввод и отправка — ТОТ ЖЕ путь, что у инструментов (vskFill + vskPressKey).
+const ACT = `(() => {
+  const el = document.getElementById('q')
+  el.focus()
+  el.value = 'агент'
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+  el.dispatchEvent(new Event('change', { bubbles: true }))
+  const init = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
+  if (el.dispatchEvent(new KeyboardEvent('keydown', init))) {
+    const f = el.form || el.closest('form')
+    if (f) { f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }
+  }
+  el.dispatchEvent(new KeyboardEvent('keyup', init))
+  return true
+})()`
+
+const READ = `(() => {
+  const li = document.querySelectorAll('#results .result')
+  return { results: li.length, first: li.length ? li[0].textContent : null }
+})()`
+
+window.__run = async ({ url, css }) => {
+  const slot = document.getElementById('slot')
+  slot.style.cssText = css
+  const wv = document.createElement('webview')
+  wv.setAttribute('src', 'about:blank')
+  wv.style.width = '100%'
+  wv.style.height = '100%'
+  slot.appendChild(wv)
+
+  await new Promise(r => wv.addEventListener('dom-ready', r, { once: true }))
+  await wv.loadURL(url)
+  await new Promise(r => setTimeout(r, 1200))
+
+  const env = await wv.executeJavaScript(PROBE_ENV)
+  await wv.executeJavaScript(ACT)
+
+  // Ожидание с честным бюджетом — как browser_wait_for, без слепых пауз.
+  let res = { results: 0, first: null }
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 800))
+    res = await wv.executeJavaScript(READ)
+    if (res.results > 0) break
+  }
+  console.log('SMOKE ' + JSON.stringify(Object.assign({}, env, res)))
+}
+</script>
+</body>

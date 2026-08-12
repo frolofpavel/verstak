@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react'
 import { BrowserView } from './BrowserView'
+import { browserSlotStyle } from '../../shared/browser-slot-style'
 
 /**
  * Браузер СМОНТИРОВАН ВСЕГДА — независимо от того, открыта ли вкладка «Браузер».
@@ -21,10 +23,17 @@ import { BrowserView } from './BrowserView'
  * что `.gg-panel` браузера раскладывается ровно как раньше (когда рендерился прямо во
  * вкладке). Безопасность не меняется: SEC-CMD-гейты живут в `browserHandler`
  * (electron), до `window.verstakBrowser` — этот компонент их не касается.
+ *
+ * ЧЕМ прячется вне своей вкладки — решает `shared/browser-slot-style.ts`, и это НЕ
+ * стилистическая мелочь: `display:none` убирал у страницы лейаут-бокс, из-за чего
+ * внутри неё вьюпорт был 0×0, кадры не приходили, а IntersectionObserver не срабатывал
+ * никогда — SPA-выдача не отрисовывалась вовсе (замер 12.08, P3 кусок 2). Стиль вынесен
+ * в shared, потому что его проверяют ДВА разных теста — jsdom-пин и живой смоук на
+ * настоящем Electron; копия стиля в смоуке была бы зелёной при сломанном продукте.
  */
 export function PersistentBrowser({ active }: { active: boolean }) {
   return (
-    <div className="gg-browser-slot" style={{ display: active ? 'contents' : 'none' }}>
+    <div className="gg-browser-slot" style={browserSlotStyle(active) as CSSProperties}>
       <BrowserView />
     </div>
   )

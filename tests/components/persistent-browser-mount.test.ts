@@ -31,13 +31,36 @@ describe('PersistentBrowser — браузер смонтирован без о�
     expect(typeof api()!.snapshot).toBe('function')
   })
 
-  it('скрыт, когда вкладка не выбрана (display:none), и раскрыт на своей вкладке (display:contents)', async () => {
+  // ДЕФЕКТ P3 кусок 2 (Павел, 10.08 и замер 12.08): вне своей вкладки слот прятался
+  // через display:none. Для человека это «браузер скрыт», а для СТРАНИЦЫ — окно
+  // нулевого размера: замер на живом Electron дал вьюпорт 0×0, rAF 0/с и молчащий
+  // IntersectionObserver, то есть SPA-выдача не отрисовывалась вовсе, а инструменты
+  // честно показывали пустоту. Числа и контрольные случаи — `npm run smoke:browser-spa`.
+  //
+  // ЧТО ИЗМЕНИЛОСЬ В ЭТОМ ПИНЕ (объявляется прямо, §3.1): прежнее утверждение
+  // `display === 'none'` стерегло МЕХАНИЗМ, который замером признан дефектным.
+  // Пользовательский контракт не отменён и проверяется здесь по-прежнему — человек
+  // не видит браузер вне его вкладки и не может по нему попасть мышью; добавлено
+  // требование, которого не хватало: слот обязан сохранять лейаут-бокс.
+  it('вне своей вкладки: невидим человеку и не ловит мышь, но НЕ display:none — иначе у страницы нулевой вьюпорт', async () => {
+    render(createElement(PersistentBrowser, { active: false }))
+    const slot = () => document.querySelector('.gg-browser-slot') as HTMLElement | null
+    await waitFor(() => expect(slot()).toBeTruthy())
+    const st = slot()!.style
+    expect(st.display).not.toBe('none')     // ГЛАВНОЕ: лейаут-бокс сохранён, вьюпорт настоящий
+    expect(st.opacity).toBe('0')            // человек не видит браузер вне его вкладки
+    expect(st.pointerEvents).toBe('none')   // и не может попасть по нему мышью
+    expect(st.position).toBe('fixed')       // вне потока — лейаут активной вкладки не трогает
+    expect(st.zIndex).toBe('-1')            // под интерфейсом, а не поверх него
+  })
+
+  it('на своей вкладке раскрыт как раньше (display:contents) — тот же webview, не второй браузер', async () => {
     const { rerender } = render(createElement(PersistentBrowser, { active: false }))
     const slot = () => document.querySelector('.gg-browser-slot') as HTMLElement | null
     await waitFor(() => expect(slot()).toBeTruthy())
-    expect(slot()!.style.display).toBe('none')          // человек не видит браузер вне его вкладки
     rerender(createElement(PersistentBrowser, { active: true }))
-    expect(slot()!.style.display).toBe('contents')      // открыл вкладку — виден, тот же webview
+    expect(slot()!.style.display).toBe('contents')
+    expect(slot()!.style.opacity).toBe('')   // видим полностью, без остаточной прозрачности
   })
 
   it('размонтирование снимает API (чистый контракт жизненного цикла)', async () => {

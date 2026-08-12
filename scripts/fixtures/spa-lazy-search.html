@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Фикстура: SPA с ленивой выдачей</title>
+<!--
+  ФИКСТУРА для scripts/smoke-browser-spa.mjs (P3 кусок 2).
+
+  Воспроизводит КЛАСС дефекта, а не сайт: выдача появляется только если у страницы
+  есть настоящий вьюпорт и она получает кадры. Ровно на этом ломался встроенный
+  браузер, пока слот прятался через display:none (вьюпорт 0x0, rAF 0/с,
+  IntersectionObserver молчит) — см. shared/browser-slot-style.ts.
+
+  Ничего не грузится из сети: данные локальные, поведение детерминировано.
+  Отправка формы — клиентская (preventDefault), как у настоящего SPA: полной
+  перезагрузки нет, меняется только адрес через history.pushState.
+-->
+<style>
+  body { font: 14px system-ui; margin: 0; padding: 16px }
+  #sentinel { height: 1px }
+  .spacer { height: 60vh }
+  li { padding: 4px 0 }
+</style>
+<body>
+  <form id="f" action="/search" method="GET">
+    <input id="q" name="q" placeholder="Поиск">
+    <button type="submit">Найти</button>
+  </form>
+
+  <div id="out">Введите запрос, чтобы увидеть результаты</div>
+  <div class="spacer"></div>
+  <div id="sentinel"></div>
+
+<script>
+const DATA = [
+  'Как мы строили агента на своём рантайме',
+  'Агенты и инструменты: кто кого вызывает',
+  'Разбор: чем отличается план от намерения',
+  'Почему агенту нужен настоящий вьюпорт',
+  'Ленивая выдача и наблюдатель пересечений',
+]
+
+let pending = null
+
+document.getElementById('f').addEventListener('submit', (e) => {
+  // Клиентская отправка: SPA не перезагружает документ, только меняет адрес.
+  e.preventDefault()
+  const q = document.getElementById('q').value.trim()
+  history.pushState(null, '', '/search?q=' + encodeURIComponent(q))
+  document.getElementById('out').textContent = 'Загрузка…'
+  pending = DATA.filter(t => !q || t.toLowerCase().includes(q.toLowerCase()))
+  arm()
+})
+
+// КЛАСС ДЕФЕКТА №1: подгрузка по видимости. Наблюдатель не срабатывает никогда,
+// если у окна нулевой размер, — выдача не появится ни через какое ожидание.
+function arm() {
+  const io = new IntersectionObserver((entries) => {
+    if (!entries.some(en => en.isIntersecting) || !pending) return
+    io.disconnect()
+    // КЛАСС ДЕФЕКТА №2: отрисовка ждёт кадра. Без кадров список не строится.
+    requestAnimationFrame(() => {
+      const ul = document.createElement('ul')
+      ul.id = 'results'
+      for (const t of pending) {
+        const li = document.createElement('li')
+        li.className = 'result'
+        li.textContent = t
+        ul.appendChild(li)
+      }
+      const out = document.getElementById('out')
+      out.textContent = ''
+      out.appendChild(ul)
+      pending = null
+    })
+  }, { root: null, rootMargin: '2000px' })
+  io.observe(document.getElementById('sentinel'))
+}
+</script>
+</body>
+</html>
