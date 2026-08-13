@@ -15,7 +15,7 @@
 
 import type { ProviderId } from './registry'
 import { billableInputTokens, cachedTokenRate, type InputAccounting } from '../../shared/contracts/usage'
-import { PRICES, normalizeModelId, type ModelPrice } from '../../shared/contracts/pricing'
+import { PRICES, normalizeModelId, OWN_ENDPOINT_PROVIDERS, type ModelPrice } from '../../shared/contracts/pricing'
 
 export { PRICES, normalizeModelId }
 export type { ModelPrice }
@@ -31,7 +31,11 @@ export const CLI_FREE: Set<ProviderId> = new Set(['gemini-cli', 'claude-cli', 'g
 // Провайдеры, где стоимость заведомо $0 (локальный inference / собственный
 // endpoint без известного тарифа). Их неизвестные модели НЕ попадают под
 // fail-safe — они осознанно бесплатные, а не «непосчитанные».
-export const ZERO_COST_PROVIDERS: Set<ProviderId> = new Set(['ollama', 'custom-openai'])
+//
+// C8 (13.08): состав переехал в shared/contracts/pricing.ts — экран считал этих
+// провайдеров по публичной таблице цен, потому что набор жил только здесь. Имя
+// оставлено прежним: его читают proof-pack, trial-estimate и agent-run-usage.
+export const ZERO_COST_PROVIDERS: ReadonlySet<ProviderId> = OWN_ENDPOINT_PROVIDERS as ReadonlySet<ProviderId>
 
 export interface CostGuard {
   /** Накопить usage и проверить cap. Возвращает true если превышено → abort.

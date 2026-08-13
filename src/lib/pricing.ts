@@ -10,7 +10,7 @@
 
 import type { ProviderId } from '../hooks/useProvider'
 import { billableInputTokens, cachedTokenRate, type InputAccounting } from '../../shared/contracts/usage'
-import { PRICES, normalizeModelId, type ModelPrice } from '../../shared/contracts/pricing'
+import { PRICES, normalizeModelId, OWN_ENDPOINT_PROVIDERS, type ModelPrice } from '../../shared/contracts/pricing'
 
 export { PRICES }
 export type { ModelPrice }
@@ -36,6 +36,13 @@ export function estimateCost(
   cacheWriteTokens = 0,
 ): CostEstimate {
   if (CLI_FREE.has(providerId)) return { usd: null, cents: 0 }
+  // C8: свой endpoint (локальный inference / чужой OpenAI-совместимый прокси) —
+  // публичная таблица цен к нему НЕ применяется. Без этой проверки достаточно
+  // назвать модель прокси знакомым именем («gpt-4o»), чтобы человеку показались
+  // доллары по тарифу OpenAI за его собственный сервер, — при том что страж
+  // лимита и журнал расхода считают те же токены бесплатными. Ответ здесь тот же,
+  // что уже даёт main ($0 при известной цене), чтобы не завести третий.
+  if (OWN_ENDPOINT_PROVIDERS.has(providerId)) return { usd: '$0.00', cents: 0 }
   const price = PRICES[normalizeModelId(providerId, model)]
   if (!price) return { usd: '—', cents: 0 }
   const billableInput = billableInputTokens({ inputTokens, cacheReadTokens: cachedInputTokens, inputAccounting }) ?? 0
@@ -82,6 +89,14 @@ export function costBreakdown(
 ): string {
   if (CLI_FREE.has(providerId)) {
     return `Провайдер: ${providerId} (CLI, подписка — стоимость = $0)\nТокены input: ${inputTokens}\nТокены output: ${outputTokens}`
+  }
+  // C8: причина названа прямо. Прочерк или голый $0 человек прочитал бы как сбой
+  // счётчика; здесь сказано, что тариф своего endpoint'а продукту неизвестен и
+  // публичные цены к нему не применяются.
+  if (OWN_ENDPOINT_PROVIDERS.has(providerId)) {
+    return `Провайдер: ${providerId} — свой endpoint, тариф неизвестен продукту.\n`
+      + `Публичная таблица цен к нему не применяется, расход считается как $0.\n`
+      + `Токены input: ${inputTokens}\nТокены output: ${outputTokens}`
   }
   const price = PRICES[normalizeModelId(providerId, model)]
   if (!price) {
