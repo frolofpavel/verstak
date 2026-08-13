@@ -145,6 +145,21 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
     // добавлен / изменён / удалён / без изменений. Сырое `before`/`after` живёт
     // только внутри main и только для двух дел: записи на диск и записи в стек
     // отката.
+    // C9 (родня Б2): у прогона может НЕ БЫТЬ поверхности подтверждений — скрытый
+    // чат попытки состязания идёт без окна. Карточку показать некому, и ожидание
+    // висело бы до ручного Stop. Путь КОМАНД закрыли 11.08 (awaitCommandConfirm),
+    // путь ЗАПИСИ остался со своим ожиданием и про флаг не знал.
+    //
+    // Класс числился недостижимым (скрытые попытки идут в auto, а там запись
+    // авто-принималась) — и перестал им быть в этом же пакете: C1 заставил
+    // правила проекта спрашивать и в auto.
+    //
+    // Только ОТКАЗ, никогда согласие: пауза ответственного действия здесь не
+    // ослабляется, а получает честный исход вместо зависания.
+    if (ctx.autoRejectConfirms) {
+      ctx.autoRejectConfirms({ callId: call.id, toolName: call.name, subject: path })
+      return { id: call.id, name: call.name, result: `User rejected write to ${path}`, error: 'User rejected' }
+    }
     const shown = maskSecretsForDiff(before, after)
     ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'pending-write', callId: call.id, path, before: shown.before, after: shown.after } })
     const key = ctx.scopedKey(ctx.sendId, call.id)
