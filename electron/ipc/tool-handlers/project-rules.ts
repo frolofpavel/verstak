@@ -42,6 +42,15 @@ export const draftProjectRulesHandler: ToolHandler = {
     if (result.error) return { ...result, id: call.id, name: call.name }
     // Итог называет и путь, и то, чего в черновике НЕТ — иначе человек решит,
     // что отсутствие команды тестов означает «Verstak не нашёл», а не «их нет».
+    //
+    // C2 (13.08): и НАЙДЕННОЕ тоже, явным перечнем. Раньше итог говорил о
+    // командах только в форме «не найдено», а когда не отсутствовало ничего —
+    // молчал о них вовсе. Сам черновик уходит в файл, в tool_result его нет, то
+    // есть у модели про команды не было НИ ОДНОГО факта — и на месте пробела она
+    // досочиняла: живой прогон 12.08 дал «не найдено: build, lint, typecheck»
+    // ровно там, где нашлись все четыре. Пробел в результате инструмента модель
+    // закрывает догадкой; заполнить его дешевле, чем спорить с пересказом.
+    const found = Object.entries(draft.facts.commands).filter(([, v]) => v !== null)
     const missing = Object.entries(draft.facts.commands)
       .filter(([, v]) => v === null)
       .map(([k]) => k)
@@ -54,7 +63,12 @@ export const draftProjectRulesHandler: ToolHandler = {
           ? `Существующий ${draft.facts.existingRulesPath} НЕ тронут — перенесите нужное вручную.`
           : '',
         draft.facts.sources.length ? `Источники фактов: ${draft.facts.sources.join(', ')}.` : 'Источников фактов в корне не нашлось.',
-        missing.length ? `Не найдено в проекте (в черновике так и записано): ${missing.join(', ')}.` : '',
+        found.length
+          ? `Найдено в проекте и записано в черновик: ${found.map(([k, v]) => `${k} — ${v}`).join(', ')}.`
+          : 'Команд в проекте не нашлось ни одной.',
+        missing.length
+          ? `Не найдено в проекте (в черновике так и записано): ${missing.join(', ')}.`
+          : 'Не найденных команд нет — нашлись все четыре.',
       ].filter(Boolean).join(' '),
     }
   },
