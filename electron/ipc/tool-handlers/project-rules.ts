@@ -1,12 +1,17 @@
 // P2 (волна 2.6.0): draft_project_rules — Verstak собирает черновик правил проекта.
 //
-// ЗАПИСЬ ИДЁТ СУЩЕСТВУЮЩИМ ПУТЁМ. Handler не пишет файл сам, а делегирует
-// writeFileHandler: тот же diff перед глазами человека, то же подтверждение, те
-// же гарды (write scope, path-policy, запрет на секрето-файлы). Своего окна и
-// своей записи здесь нет намеренно — второй путь записи означал бы второй набор
-// гардов, который однажды отстанет от первого.
+// ЗАПИСЬ ИДЁТ СУЩЕСТВУЮЩИМ ПУТЁМ. Handler не пишет файл сам, а делегирует общей
+// записи: тот же diff перед глазами человека, то же подтверждение, те же гарды
+// (write scope, path-policy, запрет на секрето-файлы). Своего окна и своей записи
+// здесь нет намеренно — второй путь записи означал бы второй набор гардов,
+// который однажды отстанет от первого.
+//
+// C1 (13.08): отличие ровно одно и оно точечное — diff показывается и в auto.
+// Правила проекта меняют ПОВЕДЕНИЕ агента, а не строку кода; auto с 2.6.0
+// достаётся новым пользователям по умолчанию, и молчаливая запись правил
+// означала бы, что человек узнал о них уже по последствиям.
 import type { ToolHandler } from './shared'
-import { writeFileHandler } from './file-ops'
+import { writeFileConfirmingEvenInAuto } from './file-ops'
 import { draftProjectRules } from '../../ai/project-rules-draft'
 
 export const draftProjectRulesHandler: ToolHandler = {
@@ -30,7 +35,7 @@ export const draftProjectRulesHandler: ToolHandler = {
       ? `\n\n> Файл ${draft.facts.existingRulesPath} оставлен нетронутым: это отдельный черновик-предложение.\n`
       : ''
 
-    const result = await writeFileHandler.handle(
+    const result = await writeFileConfirmingEvenInAuto(
       { ...call, name: 'write_file', args: { path: targetPath, content: draft.content + notice } },
       ctx,
     )

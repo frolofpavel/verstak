@@ -83,9 +83,15 @@ describe('Карта (project-map) — открывается и обрабат�
       files: { revealInExplorer: vi.fn(async () => {}) },
     })
     render(createElement(ProjectMapPanel))
-    await waitFor(() => expect(document.querySelector('.gg-panel-title')?.textContent).toBe('Карта проекта'))
+    // Ждём ИМЕННО разобранную карту, а не заголовок: заголовок панель рисует уже в
+    // состоянии «Строю карту проекта…», то есть ДО того, как projectMap.get()
+    // разрешился. Под нагрузкой (хук коммита, дефолтный параллелизм) ожидание
+    // заканчивалось на загрузке, и следом падало утверждение про статистику —
+    // ложное красное о продукте, который вёл себя правильно. Утверждения те же,
+    // исправлена точка синхронизации.
+    await waitFor(() => expect(document.body.textContent).toContain('1 файлов'))
+    expect(document.querySelector('.gg-panel-title')?.textContent).toBe('Карта проекта')
     // Карта разобрана: статистика и группа верхней папки на экране.
-    expect(document.body.textContent).toContain('1 файлов')
     expect(document.body.textContent).toContain('src')
   })
 })

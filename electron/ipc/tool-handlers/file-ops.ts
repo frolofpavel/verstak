@@ -51,7 +51,18 @@ export const unknownToolHandler: ToolHandler = {
 // File ops: write_file, apply_patch, propose_edits
 // ============================================================================
 
-async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string, permissionName?: string): Promise<ToolResult> {
+/**
+ * opts.alwaysConfirm — ТОЧЕЧНОЕ исключение для записи, которая меняет не код, а
+ * ПОВЕДЕНИЕ агента (сегодня один вход: draft_project_rules). Оно умеет ровно
+ * одно: понизить `auto-accept` до `confirm`. Ни `block` не ослабляет, ни правила
+ * permissions не обходит — путь для обычных правок остаётся тем же.
+ *
+ * `bypass` не трогаем сознательно, тем же доводом, что и в resolveDecision:
+ * этот режим по определению «никаких диалогов», человек выбирает его осознанно.
+ * Чинить надо `auto` — он с 2.6.0 достаётся новым пользователям по умолчанию,
+ * то есть НЕ выбран, а получен.
+ */
+async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, before: string, after: string, permissionName?: string, opts?: { alwaysConfirm?: boolean }): Promise<ToolResult> {
   // Durable Agent Job scope — серверный инвариант поверх режима и permission rules.
   // Даже bypass/auto-accept не может записать за пределы job.writeScope.
   if (ctx.parentJobId && ctx.agentJobs) {
@@ -103,7 +114,8 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
     return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(decisionName, ctx.agentMode) }
   }
   let accepted: boolean
-  if (decision === 'auto-accept') {
+  const forceConfirm = opts?.alwaysConfirm === true && ctx.agentMode !== 'bypass'
+  if (decision === 'auto-accept' && !forceConfirm) {
     // Skip user prompt — still surface the diff via tool-activity for visibility
     ctx.sender.send('ai:event', {
       id: ctx.sendId,
@@ -207,6 +219,24 @@ export const writeFileHandler: ToolHandler = {
     const after = String(call.args.content ?? '')
     return diffConfirmWrite(call, ctx, path, before, after)
   }
+}
+
+/**
+ * Запись файла ТЕМ ЖЕ путём, но с обязательным показом diff в auto (C1, 13.08).
+ *
+ * Единственный потребитель — draft_project_rules. Правила проекта это мета-файл о
+ * поведении агента: приняв их молча, человек узнаёт о новых правилах уже по факту
+ * их действия. Живая приёмка 12.08 показала, что заголовочное «черновик показан
+ * до записи» держалось только в ask, а auto с 2.6.0 — дефолт новых пользователей.
+ *
+ * Отдельного пути записи здесь нет намеренно: те же гарды, тот же diff, тот же
+ * откат — отличается ровно одно решение (см. diffConfirmWrite, opts.alwaysConfirm).
+ */
+export async function writeFileConfirmingEvenInAuto(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const path = String(call.args.path)
+  const before = await readBeforeContent(ctx, path)
+  const after = String(call.args.content ?? '')
+  return diffConfirmWrite(call, ctx, path, before, after, undefined, { alwaysConfirm: true })
 }
 
 export const applyPatchHandler: ToolHandler = {
