@@ -28,6 +28,12 @@ export const draftProjectRulesHandler: ToolHandler = {
     // Прямая правка существующего возможна только явным overwrite:true от
     // модели — то есть осознанным решением, видимым в вызове.
     const overwrite = call.args.overwrite === true
+    // C3 (13.08): вторая ветка НЕ мёртвая, хотя приёмка 12.08 записала её мёртвой.
+    // ensureUserLayer скаффолдит правила на ОТКРЫТИИ проекта, вызовом `void …
+    // .catch(() => {})` — его никто не ждёт, он не повторяется перед вызовом
+    // инструмента и может не пройти по правам. Состояние «правил нет» на живом
+    // проекте достижимо; ветка — запасной путь, а не остаток. Пины:
+    // tests/ipc/project-rules-target.test.ts.
     const targetPath = draft.isProposalToExisting && !overwrite
       ? '.verstak/RULES.draft.md'
       : draft.targetPath
