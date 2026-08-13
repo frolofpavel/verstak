@@ -24,6 +24,9 @@ const { classifyBetterSqlite3Abi } = require('./native-abi.cjs')
 // установщика их создаёт и убирает, а здесь мы сносим их в упавшей сборке, до
 // того как git попробует удалить дерево (см. cleanup).
 const { INTERMEDIATE } = require('./build-setup.cjs')
+// Проводка уборки на сигналы обрыва — отдельным модулем, чтобы она проверялась
+// пином на поддельном процессе, а не грепом по тексту этого скрипта (C7).
+const { installAbortCleanup } = require('./abort-cleanup.cjs')
 
 const ROOT = process.cwd()
 const sh = (cmd, cwd = ROOT) => execSync(cmd, { cwd, encoding: 'utf8' }).trim()
@@ -104,6 +107,23 @@ function cleanup() {
 }
 
 process.on('exit', cleanup)
+
+// C7: обрыв сборки (Ctrl+C, kill) — «exit» здесь НЕ срабатывает: без своего
+// обработчика Node выполняет штатную реакцию на сигнал. Оставался каталог на
+// гигабайты И запись в `git worktree list`; призрак ловили дважды, один раз он
+// уронил следующую сборку («missing but already registered worktree»). Поэтому
+// на сигналах убираем каталог и ТУТ ЖЕ снимаем регистрацию: cleanup мог не
+// добить `git worktree remove`, а prune чистит записи без каталога и чужих
+// рабочих деревьев не трогает.
+installAbortCleanup({
+  process,
+  onAbort: () => {
+    console.warn('\n⚠ сборка прервана — убираю временную копию…')
+    cleanup()
+    try { sh('git worktree prune') } catch { /* запись снимется на следующем запуске */ }
+  },
+  onExit: code => process.exit(code),
+})
 
 try {
   if (existsSync(wt)) cleanup()
