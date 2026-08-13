@@ -2,8 +2,9 @@
 // Назначает каждому MCP-инструменту scope (что он умеет) и risk (насколько опасен),
 // чтобы пользователь мог отревьюить сервер ДО того как доверит ему «руки» агента.
 
-export type McpScope = 'read' | 'write' | 'command' | 'network' | 'unknown'
-export type McpRisk = 'low' | 'medium' | 'high'
+import { keywordScopeAndRisk, type McpRisk, type McpScope } from '../../shared/contracts/mcp-scope'
+
+export type { McpRisk, McpScope }
 
 export interface ToolClassification {
   scope: McpScope
@@ -16,25 +17,16 @@ export interface ServerClassification {
   toolCount: number
 }
 
-// Keyword tables ordered most-dangerous → least. Longest/most-dangerous match wins:
-// we walk the groups top-down and return on the first hit.
-const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; risk: McpRisk; keywords: readonly string[] }> = [
-  { scope: 'command', risk: 'high', keywords: ['terminal', 'command', 'process', 'spawn', 'shell', 'exec', 'bash', 'kill', 'run', 'sh'] },
-  { scope: 'network', risk: 'medium', keywords: ['download', 'upload', 'request', 'browse', 'crawl', 'fetch', 'http', 'web', 'url', 'api'] },
-  { scope: 'write', risk: 'medium', keywords: ['create', 'update', 'delete', 'remove', 'insert', 'modify', 'rename', 'write', 'edit', 'patch', 'post', 'move', 'send', 'put', 'set'] },
-  { scope: 'read', risk: 'low', keywords: ['describe', 'search', 'query', 'view', 'show', 'list', 'find', 'read', 'get'] }
-]
-
 /**
  * Классифицирует один инструмент по name + description.
- * Эвристика по lowercased тексту, выигрывает самое опасное совпадение.
+ *
+ * Таблица ключевых слов и правило совпадения живут в
+ * `shared/contracts/mcp-scope.ts` — ОДНИ на ярлык (здесь) и на боевой гейт
+ * (`electron/ai/mcp-policy.ts`). До 13.08 таблица была продублирована, и правка
+ * в одной копии молча развела бы то, что человек читает, и то, что решается.
  */
 function keywordClassify(tool: { name: string; description?: string }): ToolClassification {
-  const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase()
-  for (const rule of SCOPE_RULES) {
-    if (rule.keywords.some(kw => haystack.includes(kw))) return { scope: rule.scope, risk: rule.risk }
-  }
-  return { scope: 'unknown', risk: 'medium' }
+  return keywordScopeAndRisk(tool.name, tool.description)
 }
 
 export function classifyTool(tool: { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }): ToolClassification {

@@ -5,15 +5,17 @@
  * нельзя перечислить по имени в mode-policy.decide(). Вместо этого классифицируем
  * scope тулза по эвристике (name + description) и маппим scope + mode → решение.
  *
- * Эвристика — реплика src/lib/mcp-risk.ts (renderer-side классификатор). Electron
- * не может импортировать из src/, поэтому таблица ключевых слов продублирована здесь.
- * Если правишь ключевые слова — синхронизируй оба файла.
+ * Эвристика ОДНА на оба слоя — `shared/contracts/mcp-scope.ts`. До 13.08 таблица
+ * ключевых слов была продублирована здесь и в `src/lib/mcp-risk.ts` с припиской
+ * «правишь одну — синхронизируй вторую»; правка совпадения в одной копии молча
+ * развела бы ярлык в интерфейсе и решение боевого гейта.
  */
 
 import type { AgentMode } from './mode-policy'
 import type { ToolDecision } from './mode-policy'
+import { keywordScope, type McpScope } from '../../shared/contracts/mcp-scope'
 
-export type McpScope = 'read' | 'write' | 'command' | 'network' | 'unknown'
+export type { McpScope }
 
 /** Стандартные MCP tool annotations (из tools/list spec) — надёжнее угадайки по имени. */
 export interface McpToolAnnotations {
@@ -21,25 +23,7 @@ export interface McpToolAnnotations {
   destructiveHint?: boolean
 }
 
-// Keyword tables ordered most-dangerous → least. Longest/most-dangerous match wins:
-// проходим группы сверху вниз и возвращаем на первом совпадении.
-const SCOPE_RULES: ReadonlyArray<{ scope: McpScope; keywords: readonly string[] }> = [
-  { scope: 'command', keywords: ['terminal', 'command', 'process', 'spawn', 'shell', 'exec', 'bash', 'kill', 'run', 'sh'] },
-  { scope: 'network', keywords: ['download', 'upload', 'request', 'browse', 'crawl', 'fetch', 'http', 'web', 'url', 'api'] },
-  { scope: 'write', keywords: ['create', 'update', 'delete', 'remove', 'insert', 'modify', 'rename', 'write', 'edit', 'patch', 'post', 'move', 'send', 'put', 'set'] },
-  { scope: 'read', keywords: ['describe', 'search', 'query', 'view', 'show', 'list', 'find', 'read', 'get'] }
-]
-
 const VALID_SCOPES: ReadonlySet<string> = new Set(['read', 'write', 'command', 'network'])
-
-/** keyword-эвристика по name+description (фолбэк, выигрывает самое опасное). */
-function keywordScope(name: string, description?: string): McpScope {
-  const haystack = `${name} ${description ?? ''}`.toLowerCase()
-  for (const rule of SCOPE_RULES) {
-    if (rule.keywords.some(kw => haystack.includes(kw))) return rule.scope
-  }
-  return 'unknown'
-}
 
 /**
  * Классифицирует scope MCP-инструмента. Приоритет:
