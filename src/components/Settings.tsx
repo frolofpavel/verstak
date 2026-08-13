@@ -1136,7 +1136,7 @@ function McpTab() {
             </label>
             <label className="is-wide">
               <span>Аргументы</span>
-              <input className="gg-input" value={newForm.args} onChange={e => setNewForm(f => ({ ...f, args: e.target.value }))} placeholder='["-y", "@modelcontextprotocol/server-github"]' spellCheck={false} />
+              <input className="gg-input" value={newForm.args} onChange={e => setNewForm(f => ({ ...f, args: e.target.value }))} placeholder='["-y", "@modelcontextprotocol/server-filesystem", "."]' spellCheck={false} />
             </label>
             <label className="is-wide">
               <span>Ключи и переменные</span>

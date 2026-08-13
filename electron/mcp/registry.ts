@@ -76,7 +76,22 @@ export function updateMcpServer(settings: Settings, id: string, patch: Partial<O
   return updated
 }
 
-/** Предустановленные популярные MCP-серверы — показываем в UI как быстрый выбор. */
+/**
+ * Предустановленные популярные MCP-серверы — показываем в UI как быстрый выбор.
+ *
+ * C5 (13.08): отсюда убраны три шаблона на пакеты, снятые с поддержки —
+ * `@modelcontextprotocol/server-github`, `-postgres`, `-puppeteer`. Проверено по
+ * живому npm: у всех трёх стоит `deprecated: Package no longer supported`.
+ * Заготовка, ведущая на мёртвый пакет, хуже отсутствия заготовки: она выглядит
+ * рекомендацией продукта, а даёт человеку отказ на первом же запуске.
+ *
+ * Браузер закрыт каталогом P8 (`@playwright/mcp`) — дублировать его шаблоном
+ * незачем. У GitHub и PostgreSQL проверенной замены в каталоге сегодня НЕТ; они
+ * не заменены наспех, а сняты — кандидаты в каталог отдельным движением, где
+ * запись проверяется по живому источнику.
+ *
+ * Остаётся `server-filesystem` — он поддерживается (версия 2026.7.10 на 13.08).
+ */
 export const POPULAR_MCP_SERVERS: Array<{
   name: string
   command: string
@@ -89,24 +104,5 @@ export const POPULAR_MCP_SERVERS: Array<{
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
     description: 'Даёт агенту доступ к файлам в выбранной рабочей папке'
-  },
-  {
-    name: 'GitHub',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-github'],
-    envHint: 'GITHUB_PERSONAL_ACCESS_TOKEN',
-    description: 'Работа с репозиториями, issues и pull request через GitHub API'
-  },
-  {
-    name: 'PostgreSQL',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/mydb'],
-    description: 'Чтение данных из PostgreSQL по строке подключения'
-  },
-  {
-    name: 'Браузер',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-puppeteer'],
-    description: 'Открытие страниц, скриншоты и простые проверки в браузере'
   }
 ]
