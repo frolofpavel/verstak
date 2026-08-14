@@ -1,7 +1,7 @@
 {
   "name": "verstak",
   "version": "2.6.2",
-  "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
+  "description": "AI work assistant for Windows: describe a task in plain words, Verstak does it on your computer.",
   "main": "out/main/main.mjs",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || exit 0",

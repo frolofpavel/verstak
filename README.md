@@ -1,6 +1,8 @@
 # Verstak
 
-Open-source desktop AI coding IDE. Vendor-agnostic — 18 providers, 31 connectors, multi-agent orchestration, system-verified results, persistent memory.
+Verstak — открытый ИИ-помощник для Windows и универсальный исполнитель задач на компьютере пользователя. Он работает с файлами, документами, браузером, данными и кодом через подключённые AI-модели, сохраняя проекты, историю, память и инструменты в одной независимой рабочей среде.
+
+*AI work assistant for Windows: describe a task in plain words, Verstak does it on your computer.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -8,9 +10,13 @@ Open-source desktop AI coding IDE. Vendor-agnostic — 18 providers, 31 connecto
 
 ## What is Verstak
 
-Verstak is a desktop AI coding assistant built on Electron + TypeScript + React. It's a local-first alternative to Cursor, Claude Code, and GitHub Copilot that runs entirely on your own API keys or existing CLI subscriptions — no cloud account required beyond the providers you already use.
+You describe a task in plain words; Verstak uses a connected AI model and the tools on your computer to do the work — read the material, create or change files, work with a website or an app, prepare a document, a table, a research note, a design or code.
 
-The key idea: never be locked in. If one provider is down or expensive, switch in one click. Your project context, memory, and chat history stay local.
+Verstak is not only an editor, not only an IDE, not only a programmer's assistant, and not a chat that hands out advice. Working with code is one of its capabilities alongside documents, files, the browser, data, and other work tasks.
+
+The working environment lives on your machine and is not permanently tied to one AI company. Connect the API, subscription, or local model available to you: projects, history, memory, and tools belong to the app, so switching the model does not mean moving your whole workspace. One available connection is enough to start.
+
+Technical capabilities below prove that promise — they do not replace it.
 
 ---
 

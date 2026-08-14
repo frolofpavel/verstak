@@ -111,7 +111,7 @@ export function SetupWizard() {
         <>
           <h1 className="gg-installer-title">Добро пожаловать</h1>
           <p className="gg-installer-lead">
-            Verstak — IDE для разработки с AI-агентами
+            Подключите доступную AI-модель и напишите, что нужно сделать.
           </p>
           <ul className="gg-installer-value-list">
             {INSTALLER_VALUE_PROPS.map((item) => (
