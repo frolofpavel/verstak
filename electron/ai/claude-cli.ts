@@ -9,6 +9,8 @@ import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
 import { safeStderrTail } from './cli-stderr'
+import { buildClaudeMcpBridge } from './claude-cli-mcp'
+import type { McpServerConfig } from '../mcp/client'
 
 interface ClaudeCliOptions {
   binary?: string
@@ -26,6 +28,9 @@ interface ClaudeCliOptions {
   oauthToken?: string | null
   memories?: Array<{ type: string; content: string; tags: string[] }>
   agentMode?: AgentMode
+  /** Подключённые в Verstak MCP-серверы — те же, что видит API-путь. Пробрасываются
+   *  дочернему claude через --mcp-config (инструменты исполняет он сам). */
+  mcpServers?: McpServerConfig[]
   onPromptBuilt?: (payload: string) => void
 }
 
@@ -94,6 +99,34 @@ export function claudeSecretDenySpecifiers(): string[] {
  */
 export function claudeGuardArgs(mode: AgentMode | undefined): string[] {
   return ['--permission-mode', claudePermissionMode(mode), '--disallowedTools', ...claudeSecretDenySpecifiers()]
+}
+
+/**
+ * Полная командная строка дочернего claude. Вынесено из send() отдельной функцией,
+ * чтобы порядок блоков был проверяем пином, а не читался глазами: guard обязан
+ * оставаться ПОСЛЕДНИМ (--disallowedTools variadic), а MCP-мост — до него.
+ */
+export function buildClaudeCliArgs(opts: {
+  model?: string
+  agentMode?: AgentMode
+  /** Блок ['--mcp-config', '<json>'] из buildClaudeMcpBridge. Пусто → флага нет. */
+  mcpArgs?: string[]
+}): string[] {
+  const args = ['--print', '--output-format', 'stream-json', '--verbose']
+  if (opts.model && opts.model !== 'auto') {
+    // Open Design #2: имя модели идёт в argv дочернего CLI — если оно начинается с
+    // «-», CLI примет его за флаг. Небезопасное отклоняем, CLI берёт дефолт.
+    const safeModel = safeCliModelArg(opts.model)
+    if (safeModel) args.push('--model', safeModel)
+    else console.warn(`[claude-cli] небезопасное имя модели «${opts.model}» отклонено (могло стать флагом дочернему CLI) — использую дефолт`)
+  }
+  // Внешние инструменты Verstak (MCP). Ставим ДО guard: --mcp-config тоже variadic,
+  // но следующий за JSON токен начинается с «--» и список на нём обрывается.
+  if (opts.mcpArgs?.length) args.push(...opts.mcpArgs)
+  // Срез 5: режим прав (accept-edits/plan/bypass) + guard секретов. Должен
+  // идти ПОСЛЕДНИМ — --disallowedTools variadic, иначе он съест соседние флаги.
+  args.push(...claudeGuardArgs(opts.agentMode))
+  return args
 }
 
 function findBinary(): string {
@@ -182,17 +215,16 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
         return
       }
 
-      const args = ['--print', '--output-format', 'stream-json', '--verbose']
-      if (opts.model && opts.model !== 'auto') {
-        // Open Design #2: имя модели идёт в argv дочернего CLI — если оно начинается с
-        // «-», CLI примет его за флаг. Небезопасное отклоняем, CLI берёт дефолт.
-        const safeModel = safeCliModelArg(opts.model)
-        if (safeModel) args.push('--model', safeModel)
-        else console.warn(`[claude-cli] небезопасное имя модели «${opts.model}» отклонено (могло стать флагом дочернему CLI) — использую дефолт`)
-      }
-      // Срез 5: режим прав (accept-edits/plan/bypass) + guard секретов. Должен
-      // идти ПОСЛЕ --model — --disallowedTools variadic, ставим его последним.
-      args.push(...claudeGuardArgs(opts.agentMode))
+      // Внешние инструменты (MCP): те же серверы, что видит API-путь. Ключи идут
+      // не в argv, а в env дочернего процесса — см. шапку claude-cli-mcp.ts.
+      // useShell тот же, что у spawn ниже: через cmd.exe JSON нужно экранировать.
+      const useShell = binary.endsWith('.cmd') || binary.endsWith('.ps1')
+      const mcpBridge = buildClaudeMcpBridge(opts.mcpServers ?? [], useShell)
+      const args = buildClaudeCliArgs({
+        model: opts.model,
+        agentMode: opts.agentMode,
+        mcpArgs: mcpBridge?.args
+      })
       // OAuth token из Settings → env var дочернему процессу. Это решает
       // headless+Max ограничение Claude Code (см. fix(claude-cli): нашёл
       // решение headless+Max в DEVLOG). Сначала env из текущего процесса,
@@ -202,9 +234,11 @@ export function createClaudeCliProvider(opts: ClaudeCliOptions = {}): ChatProvid
       if (opts.oauthToken) {
         env.CLAUDE_CODE_OAUTH_TOKEN = opts.oauthToken
       }
+      // Значения ключей MCP-серверов. В argv стоят только имена этих переменных.
+      if (mcpBridge) Object.assign(env, mcpBridge.env)
       const child = spawn(binary, args, {
         cwd,
-        shell: binary.endsWith('.cmd') || binary.endsWith('.ps1'),
+        shell: useShell,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         env

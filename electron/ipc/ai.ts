@@ -350,6 +350,7 @@ export async function runScheduledHeadless(
       gigachatClientSecret: runtimeOptions.gigachatClientSecret,
       gigachatTlsVerify: runtimeOptions.gigachatTlsVerify,
       checkModel: runtimeOptions.checkModel,
+      mcpServers: deps.mcpClient?.getConnectedServers(),
     })
     const userMsg: ChatMessage = { role: 'user', content: opts.prompt }
     const composed = await prepareSystemContext({
@@ -980,6 +981,10 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
         gigachatClientSecret,
         gigachatTlsVerify,
         memories: descriptor.transport !== 'API' ? memories : undefined,  // CLI + Tunnel (2.0.4)
+        // Внешние инструменты — ТЕ ЖЕ записи, что получает API-путь через
+        // mcpClientRef (второго реестра нет). Дочерний claude поднимает свои
+        // экземпляры серверов и исполняет их инструменты сам.
+        mcpServers: deps.mcpClient?.getConnectedServers(),
         effortLevel: resolvedEffort,
         agentMode,
         checkModel,

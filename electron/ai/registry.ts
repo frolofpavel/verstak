@@ -13,6 +13,7 @@ import { createGigaChatProvider, GIGACHAT_MODELS } from './gigachat'
 import type { ChatProvider } from './types'
 import type { AgentMode } from './mode-policy'
 import type { ModelGateResult } from './model-catalog-service'
+import type { McpServerConfig } from '../mcp/client'
 import {
   capabilitiesFor,
   type ProviderId,
@@ -252,6 +253,10 @@ export interface CreateOptions {
   /** Режим агента — CLI-провайдеры (Codex) маппят его во флаги песочницы.
    *  Для API-провайдеров режим применяется в ipc/ai.ts через mode-policy.decide. */
   agentMode?: AgentMode
+  /** Подключённые MCP-серверы Verstak. API-путь получает их через mcpClientRef;
+   *  claude-cli — через --mcp-config (инструменты исполняет сам CLI). Остальные
+   *  три CLI внешнюю конфигурацию per-run не принимают — разведка 14.08. */
+  mcpServers?: McpServerConfig[]
   /** 2.0.7-E: гейт живого каталога (пока grok-cli). Блокирует запрошенную модель ДО
    *  child-процесса, если аутентифицированный свежий каталог подтверждает её отсутствие. */
   checkModel?: (model: string) => ModelGateResult
@@ -282,6 +287,7 @@ export function createProvider(id: ProviderId, opts: CreateOptions): ChatProvide
         oauthToken: opts.claudeOauthToken,
         memories: opts.memories,
         agentMode: opts.agentMode,
+        mcpServers: opts.mcpServers,
         onPromptBuilt: opts.onPromptBuilt
       })
     case 'grok': {
