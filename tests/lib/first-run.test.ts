@@ -13,19 +13,32 @@ const src = (rel: string) => readFileSync(join(__dirname, '..', '..', 'src', rel
  */
 describe('«Обновление установлено» при первой установке (§5)', () => {
   it('первая в жизни установка — модалки НЕТ', () => {
-    expect(decideWhatsNew({ current: '2.6.4', last: null, onboardingCompleted: false }))
+    expect(decideWhatsNew({ current: '2.6.4', last: null, firstSeenVersion: '2.6.4' }))
       .toBe('first-install')
   })
 
   it('контроль: обновление поверх работавшей версии модалку ПОКАЗЫВАЕТ', () => {
-    expect(decideWhatsNew({ current: '2.6.5', last: '2.6.4', onboardingCompleted: true })).toBe('show')
-    // Профиль жил до появления ключа last_whats_new_version — это тоже обновление.
-    expect(decideWhatsNew({ current: '2.6.5', last: null, onboardingCompleted: true })).toBe('show')
+    expect(decideWhatsNew({ current: '2.6.5', last: '2.6.4', firstSeenVersion: '2.6.4' })).toBe('show')
+    // Профиль родился на прошлой версии, ключа last ещё не знал — это обновление.
+    expect(decideWhatsNew({ current: '2.6.5', last: null, firstSeenVersion: '2.6.4' })).toBe('show')
+    // Профиль старше самой метки (жил до её появления) — тоже обновление.
+    expect(decideWhatsNew({ current: '2.6.5', last: null, firstSeenVersion: null })).toBe('show')
+  })
+
+  /**
+   * Живая приёмка 16.08 поймала то, чего не видел прежний пин: признаком
+   * первого запуска был «онбординг не пройден», а онбординг завершается в той
+   * же сессии РАНЬШЕ показа модалки — и она всё равно вылезала на главном
+   * экране. Метка рождения профиля от порядка событий внутри сессии не зависит.
+   */
+  it('первый запуск определяется меткой рождения профиля, а не онбордингом', () => {
+    // Онбординг только что пройден, но профиль родился на этой же версии.
+    expect(decideWhatsNew({ current: '2.6.4', last: null, firstSeenVersion: '2.6.4' })).toBe('first-install')
   })
 
   it('та же версия повторно модалку не показывает', () => {
-    expect(decideWhatsNew({ current: '2.6.4', last: '2.6.4', onboardingCompleted: true })).toBe('skip')
-    expect(decideWhatsNew({ current: '2.6.3', last: '2.6.4', onboardingCompleted: true })).toBe('skip')
+    expect(decideWhatsNew({ current: '2.6.4', last: '2.6.4', firstSeenVersion: '2.6.4' })).toBe('skip')
+    expect(decideWhatsNew({ current: '2.6.3', last: '2.6.4', firstSeenVersion: '2.6.0' })).toBe('skip')
   })
 
   it('на первой установке версия ЗАПОМИНАЕТСЯ — иначе следующее обновление покажет и её', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import { decideWhatsNew } from '../lib/whats-new-gate'
+import { FIRST_SEEN_VERSION_KEY } from '../../shared/contracts/first-run'
 import { ReleaseNotesModal, type ReleaseNote } from './ReleaseNotesModal'
 
 const LAST_WHATS_NEW_KEY = 'last_whats_new_version'
@@ -23,9 +24,9 @@ export function WhatsNewModal() {
 
         const current = await window.api.app.getVersion()
         const last = await window.api.settings.getKey(LAST_WHATS_NEW_KEY)
-        const onboardingCompleted = !!(await window.api.settings.getKey('onboarding_completed'))
+        const firstSeenVersion = await window.api.settings.getKey(FIRST_SEEN_VERSION_KEY)
 
-        const decision = decideWhatsNew({ current, last, onboardingCompleted })
+        const decision = decideWhatsNew({ current, last, firstSeenVersion })
         if (decision === 'skip') return
         if (decision === 'first-install') {
           // Первая установка: «Обновление установлено» здесь — ложь. Версию

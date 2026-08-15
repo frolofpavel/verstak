@@ -407,6 +407,10 @@ export const en = {
     connected: 'Connected',
     needAuth: 'Needs authorization',
     noConnected: 'No connected models',
+    notConnected: 'not connected',
+    envKey: 'key from environment',
+    envKeyShort: 'from environment',
+    envKeyHint: 'The key comes from an environment variable (VERSTAK_ALLOW_ENV_KEYS), not from Settings. Requests are billed to whoever owns that key.',
   },
 
   // Honest runtime-control labels (computed from provider+transport, not just transport).

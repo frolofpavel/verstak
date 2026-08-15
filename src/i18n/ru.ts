@@ -399,6 +399,10 @@ export const ru: Translations = {
     connected: 'Подключённые',
     needAuth: 'Нужна авторизация',
     noConnected: 'Нет подключённых моделей',
+    notConnected: 'не подключён',
+    envKey: 'ключ из окружения',
+    envKeyShort: 'из окружения',
+    envKeyHint: 'Ключ взят из переменной окружения (VERSTAK_ALLOW_ENV_KEYS), а не введён в Настройках. Запросы оплачивает владелец этого ключа.',
   },
 
   // Честные ярлыки контроля рантайма (считаются из provider+transport, не только transport).

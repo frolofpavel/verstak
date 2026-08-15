@@ -17,10 +17,19 @@ export function decideWhatsNew(input: {
   current: string
   /** Версия, для которой модалку уже показывали. Пусто — ни разу. */
   last: string | null
-  /** Человек прошёл онбординг — значит установка не первая. */
-  onboardingCompleted: boolean
+  /**
+   * Версия, на которой профиль РОДИЛСЯ (`first_seen_version`, ставит main на
+   * пустом хранилище). Равна текущей → это первая в жизни установка.
+   *
+   * Признак «онбординг пройден» на этом месте НЕ РАБОТАЕТ, и это проверено
+   * живьём 16.08: онбординг завершается в той же сессии, на несколько секунд
+   * раньше показа модалки, поэтому к её монтированию флаг уже стоит и первый
+   * запуск выглядит как обновление. Метка рождения профиля от порядка событий
+   * внутри сессии не зависит.
+   */
+  firstSeenVersion: string | null
 }): WhatsNewDecision {
-  const { current, last, onboardingCompleted } = input
-  if (!last) return onboardingCompleted ? 'show' : 'first-install'
+  const { current, last, firstSeenVersion } = input
+  if (!last) return firstSeenVersion === current ? 'first-install' : 'show'
   return semverGt(current, last) ? 'show' : 'skip'
 }

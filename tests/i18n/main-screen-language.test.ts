@@ -31,6 +31,9 @@ describe('главный экран и онбординг — один язык 
     { file: 'components/ProjectRail.tsx', literal: "'Активные'" },
     { file: 'components/AuthScreen.tsx', literal: "label: 'Developer'" },
     { file: 'store/projectStore.ts', literal: "title: 'Основной чат'" },
+    // Поймано ЖИВОЙ приёмкой 16.08, а не чтением кода: на английском главном
+    // экране это была единственная оставшаяся кириллица.
+    { file: 'components/ModelPicker.tsx', literal: '>не подключён</span>' },
   ]
 
   it('измеренные строки больше не зашиты литералом в свои файлы', () => {
@@ -57,6 +60,8 @@ describe('главный экран и онбординг — один язык 
       ['rail.filterArchive', ru.rail.filterArchive, en.rail.filterArchive],
       ['effort.standard', ru.effort.standard, en.effort.standard],
       ['effort.title', ru.effort.title, en.effort.title],
+      ['modelPicker.notConnected', ru.modelPicker.notConnected, en.modelPicker.notConnected],
+      ['modelPicker.envKey', ru.modelPicker.envKey, en.modelPicker.envKey],
       ['auth.roles.developer', ru.auth.roles.developer, en.auth.roles.developer],
       ['auth.roles.student', ru.auth.roles.student, en.auth.roles.student],
     ]

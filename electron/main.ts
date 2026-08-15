@@ -38,6 +38,7 @@ import { registerRemindersIpc } from './ipc/reminders'
 import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
 import { resolveSecret } from './env-secrets'
+import { FIRST_SEEN_VERSION_KEY } from '../shared/contracts/first-run'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
 import { registerSubscriptionAccountsIpc } from './ipc/subscription-accounts'
@@ -519,6 +520,17 @@ app.whenReady().then(() => {
   }
   const settings = createSettings(db, safeStorage)
   logRuntime('startup.settings.ready')
+
+  // §5 ревью 2.6.4: «Обновление установлено» при ПЕРВОЙ в жизни установке.
+  // Метку ставим здесь и только здесь — на профиле, в котором ещё НИЧЕГО не
+  // записано. Онбординг для этого не годится: он завершается в той же сессии,
+  // на несколько секунд раньше показа модалки (поймано живой приёмкой 16.08 —
+  // модалка всё равно вылезала). Профиль, переживший обновление, к этому
+  // моменту уже полон строк, метка не ставится, и «что нового» показывается.
+  if (!settings.getSecret(FIRST_SEEN_VERSION_KEY)) {
+    const rows = (db.prepare('SELECT COUNT(*) AS n FROM settings').get() as { n: number }).n
+    if (rows === 0) settings.setSecret(FIRST_SEEN_VERSION_KEY, app.getVersion())
+  }
 
   // Затухание памяти — после показа окна, не блокирует старт
   setImmediate(() => {

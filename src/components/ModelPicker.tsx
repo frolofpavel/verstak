@@ -19,9 +19,6 @@ import { shortModel } from '../lib/gateway-preset-labels'
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
-/** §2 ревью 2.6.4: откуда взят ключ, человеку видно, а не только логам. */
-const ENV_KEY_HINT =
-  'Ключ взят из переменной окружения (VERSTAK_ALLOW_ENV_KEYS), а не введён в Настройках. Запросы оплачивает владелец этого ключа.'
 
 interface PickerEntry {
   providerId: ProviderId
@@ -317,8 +314,8 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
   }, [open])
 
   let triggerTitle = t.modelPicker.changeModel
-  if (!currentAuthorized) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — провайдер не подключён`
-  else if (currentFromEnv) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — ${ENV_KEY_HINT}`
+  if (!currentAuthorized) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — ${t.modelPicker.notConnected}`
+  else if (currentFromEnv) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — ${t.modelPicker.envKeyHint}`
 
   return (
     <div className={`gg-mp-wrap ${variant === 'footer' ? 'is-footer' : ''}`} ref={wrapRef}>
@@ -336,9 +333,9 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
             <span className="gg-provider-badge-name">{provider.label}</span>
             <span className="gg-provider-badge-sep">·</span>
             <span className="gg-provider-badge-model">{shortModel(provider.model)}</span>
-            {!currentAuthorized && <span className="gg-provider-badge-warn">не подключён</span>}
+            {!currentAuthorized && <span className="gg-provider-badge-warn">{t.modelPicker.notConnected}</span>}
             {currentAuthorized && currentFromEnv && (
-              <span className="gg-provider-badge-env" title={ENV_KEY_HINT}>ключ из окружения</span>
+              <span className="gg-provider-badge-env" title={t.modelPicker.envKeyHint}>{t.modelPicker.envKey}</span>
             )}
           </span>
         ) : (
@@ -458,6 +455,7 @@ function PickerRow({
   locked?: boolean
   onSelect: () => void
 }) {
+  const t = useT()
   const isCli = isCliProvider(entry.providerId)
   const control = modeControlInfo(entry.providerId, entry.transport)
   const badge = control.level === 'verstak' ? null : {
@@ -492,7 +490,7 @@ function PickerRow({
             <span className="gg-mp-row-model">{shortModel(entry.model)}</span>
             <span className={`gg-mp-badge gg-mp-badge-transport ${entry.transport === 'CLI' ? 'is-cli' : entry.transport === 'Tunnel' ? 'is-tunnel' : 'is-api'}`}>{entry.transport}</span>
             {entry.fromEnv && (
-              <span className="gg-mp-badge gg-mp-badge-env" title={ENV_KEY_HINT}>из окружения</span>
+              <span className="gg-mp-badge gg-mp-badge-env" title={t.modelPicker.envKeyHint}>{t.modelPicker.envKeyShort}</span>
             )}
           </span>
         </span>
