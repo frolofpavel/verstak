@@ -12,6 +12,7 @@
 // что ничего не нашли» для анти-дрейф теста недопустимо.
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import {
   RUNTIME_FLAGS,
@@ -20,7 +21,7 @@ import {
   runtimeFlagByKey,
   type RuntimeFlagKey,
 } from '../../src/lib/runtime-flags'
-import { PLAN_APPROVAL_GATE_DEFAULT_ON } from '../../shared/contracts/runtime-flag-policy'
+import { RUNTIME_FLAG_DEFAULT_ON } from '../../shared/contracts/runtime-flag-policy'
 
 const ROOT = process.cwd()
 
@@ -118,44 +119,89 @@ describe('RUNTIME_FLAGS — дефолты', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// АНТИ-ДРЕЙФ. Renderer не может импортировать electron/, поэтому сверяемся с
-// ИСХОДНИКОМ main: ищем реальное выражение чтения каждого флага и выводим из него
-// полярность. Разъехалось — красный.
+// АНТИ-ДРЕЙФ. КОНТРАКТ СМЕНИЛСЯ 15.08 (§3.1 ревизии), и это объявляется прямо
+// здесь, а не подгоняется молча.
+//
+// Было: полярность объявлялась ТРИЖДЫ — в shared, в таблице renderer и отдельным
+// сравнением строки в каждой точке чтения main. Страж сверял две последние
+// редакции, выводя полярность из исходника main регуляркой по `!== 'false'`.
+// Именно так этот пин и должен был работать, пока дубль существовал.
+//
+// Стало: полярность объявлена ОДИН раз — RUNTIME_FLAG_DEFAULT_ON в
+// shared/contracts/runtime-flag-policy.ts; main зовёт `runtimeFlagOn(key, …)`,
+// таблица renderer берёт `defaultOn` оттуда же. Сверять две редакции больше
+// нечего — их одна. Ровно так с 30.07 жил plan_approval_gate, и его ветка в
+// прежнем страже (`viaSharedHelper`) была образцом: теперь он распространён на
+// все восемь флагов.
+//
+// Поэтому страж проверяет ДРУГОЕ, и это не ослабление, а перенос на то, что
+// теперь может сломаться:
+//   1) чтение флага НЕ ИСЧЕЗЛО из файла, где оно обещано таблицей (readAt);
+//   2) сравнение строки НЕ ЗАВЕЛОСЬ ЗАНОВО нигде в electron/ — то есть дубль
+//      не вернулся;
+//   3) контрольный кейс к пункту 2: та же регулярка обязана ЛОВИТЬ дубль на
+//      синтетическом тексте. Без него «не нашли ни одного сравнения» было бы
+//      зелёным и у сломанной регулярки (§3.1: рядом с «не произошло» стоит
+//      кейс, где происходит).
 // ─────────────────────────────────────────────────────────────────────────────
-describe('RUNTIME_FLAGS — анти-дрейф с main', () => {
-  /** Полярность, выведенная из исходника main: true = opt-out, false = opt-in. */
-  function polarityFromSource(key: RuntimeFlagKey, file: string): boolean {
-    const src = readFileSync(join(ROOT, file), 'utf8')
-    const optOut = new RegExp(`getSecret[^\\n]*['\`"]${key}['\`"]\\s*\\)?\\s*!==\\s*'false'`)
-    const optIn = new RegExp(`getSecret[^\\n]*['\`"]${key}['\`"]\\s*\\)?\\s*===\\s*'true'`)
-    // A3 §2.1: у plan_approval_gate полярности в main БОЛЬШЕ НЕТ — он читается
-    // общим хелпером из shared/, единым для main и renderer. Дублировать
-    // сравнение строки стало нечем, и это сильнее любого стража: расходиться
-    // теперь физически нечему. Здесь остаётся проверка, что чтение НЕ ИСЧЕЗЛО.
-    const viaSharedHelper = new RegExp(`isPlanApprovalGateOn\\([^\\n]*${key}`)
-    if (key === 'plan_approval_gate' && viaSharedHelper.test(src)) {
-      return PLAN_APPROVAL_GATE_DEFAULT_ON
-    }
-    // memory-hooks читает через вынесенную константу — разбираем и этот вид.
-    const optInViaConst = /getSecret\?\.\(AUTO_CAPTURE_SETTING_KEY\)\s*===\s*'true'/
-    if (optOut.test(src)) return true
-    if (optIn.test(src)) return false
-    if (key === 'auto_capture_memory' && optInViaConst.test(src)) return false
-    throw new Error(
-      `не нашёл чтение флага ${key} в ${file}. Либо флаг перестал читаться, либо ` +
-      'изменилась форма выражения — страж обязан упасть, а не промолчать.'
-    )
-  }
+/** Сравнение строки настройки с 'true'/'false' по конкретному ключу флага —
+ *  ровно та форма, которая раньше и была дублем полярности. */
+function inlineComparisonRe(key: string): RegExp {
+  return new RegExp(`['\`"]${key}['\`"]\\s*\\)?\\s*(?:!==\\s*'false'|===\\s*'true')`)
+}
 
+describe('RUNTIME_FLAGS — анти-дрейф с main', () => {
   for (const f of RUNTIME_FLAGS) {
-    it(`${f.key}: полярность в ${f.readAt} совпадает с таблицей renderer`, () => {
-      expect(polarityFromSource(f.key, f.readAt)).toBe(f.defaultOn)
+    it(`${f.key}: читается в ${f.readAt} общим хелпером, а не своим сравнением`, () => {
+      const src = readFileSync(join(ROOT, f.readAt), 'utf8')
+      // Чтение существует. Три допустимых вида: по литералу ключа, по вынесенной
+      // константе (memory-hooks) и через именной хелпер (plan_approval_gate).
+      const readsViaHelper = new RegExp(`runtimeFlagOn\\(\\s*(?:['\`"]${f.key}['\`"]|[A-Z_]+)`).test(src)
+        || new RegExp(`isPlanApprovalGateOn\\([^\\n]*${f.key}`).test(src)
+      expect(
+        readsViaHelper,
+        `не нашёл чтение флага ${f.key} в ${f.readAt}: либо флаг перестал читаться, ` +
+        'либо чтение снова делает что-то своё — страж обязан упасть, а не промолчать.'
+      ).toBe(true)
+      // И полярность в этом файле НЕ объявляется заново.
+      expect(
+        inlineComparisonRe(f.key).test(src),
+        `${f.readAt}: полярность ${f.key} снова продублирована сравнением строки`
+      ).toBe(false)
     })
   }
+
+  it('во ВСЁМ electron/ нет ни одного сравнения строки по ключу флага', () => {
+    const files = execSync('git ls-files electron', { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(f => f.endsWith('.ts'))
+    expect(files.length, 'не нашёл исходников electron/ — пин потерял предмет').toBeGreaterThan(50)
+    const offenders: string[] = []
+    for (const file of files) {
+      const src = readFileSync(join(ROOT, file), 'utf8')
+      for (const f of RUNTIME_FLAGS) if (inlineComparisonRe(f.key).test(src)) offenders.push(`${file} → ${f.key}`)
+    }
+    expect(offenders, 'дубль полярности вернулся в main').toEqual([])
+  })
+
+  it('контроль: регулярка ловит дубль, если он появится (иначе пин выше пуст)', () => {
+    expect(inlineComparisonRe('smart_routing').test("getSecret('smart_routing') !== 'false'")).toBe(true)
+    expect(inlineComparisonRe('auto_capture_memory').test("get?.('auto_capture_memory') === 'true'")).toBe(true)
+    expect(inlineComparisonRe('smart_routing').test("runtimeFlagOn('smart_routing', getSecret('smart_routing'))")).toBe(false)
+  })
 
   it('ключ автозахвата в main объявлен той же строкой', () => {
     const src = readFileSync(join(ROOT, 'electron/ai/memory-hooks.ts'), 'utf8')
     expect(src).toContain("AUTO_CAPTURE_SETTING_KEY = 'auto_capture_memory'")
+  })
+
+  it('таблица renderer берёт полярность из единственного источника, а не пишет свою', () => {
+    const src = readFileSync(join(ROOT, 'src/lib/runtime-flags.ts'), 'utf8')
+    for (const f of RUNTIME_FLAGS) {
+      expect(src, `${f.key}: defaultOn снова объявлен литералом в таблице renderer`)
+        .toContain(`defaultOn: RUNTIME_FLAG_DEFAULT_ON.${f.key},`)
+    }
+    expect(RUNTIME_FLAGS.map(f => f.defaultOn))
+      .toEqual(RUNTIME_FLAGS.map(f => RUNTIME_FLAG_DEFAULT_ON[f.key]))
   })
 })
 

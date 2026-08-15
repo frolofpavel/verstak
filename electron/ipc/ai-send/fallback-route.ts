@@ -23,6 +23,7 @@ import type { SwitchResult } from '../../storage/subscription-accounts'
 import type { CooldownReason } from '../../../shared/contracts/subscription'
 import { resolveCodexHome } from './route-selection'
 import type { ResolveSubscriptionAccountFn } from './account-preflight'
+import { runtimeFlagOn } from '../../../shared/contracts/runtime-flag-policy'
 
 /**
  * Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера. Только если
@@ -39,7 +40,7 @@ export function isSmartFallbackAllowed(input: {
   oneShotAccountId: number | null
 }): boolean {
   const routeFallbackAllowed = (!input.promptRoute || input.promptRoute.fallbackPolicy === 'allow') && input.oneShotAccountId == null
-  return input.getSecret('smart_fallback') !== 'false'
+  return runtimeFlagOn('smart_fallback', input.getSecret('smart_fallback'))
     && input.descriptor.transport === 'API'
     && !input.overrideProviderId  // не задействуем fallback в Explicit Review
     && routeFallbackAllowed       // strict prompt-route отключает fallback

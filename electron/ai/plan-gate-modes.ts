@@ -34,7 +34,11 @@ export interface PlanGateInput {
   agentMode: AgentMode
   /** ctx.outcome?.phase. Строка, а не тип из ipc/ — чтобы ai/ не зависел от ipc/. */
   outcomePhase?: string | null
-  /** Настройка `plan_approval_gate` === 'true'. Рубильник чат-контекста. */
+  /** Настройка `plan_approval_gate`, уже прочитанная общим хелпером
+   *  (`isPlanApprovalGateOn`): opt-out, выключает только явная 'false'. Прежняя
+   *  запись «=== 'true'» описывала полярность до 30.07 и пережила свою правду —
+   *  снята 15.08 тем же движением, что свело полярность в один источник (§3.1).
+   *  Рубильник чат-контекста. */
   planApprovalSetting?: boolean
   /** ctx.delegationDepth: 0 — главный агент, ≥1 — субагент. */
   delegationDepth?: number

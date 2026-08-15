@@ -6,6 +6,7 @@ import { mkdirSync } from 'fs'
 import { logRuntime, logRuntimeError, runtimeLogsDir } from './runtime-log'
 import { registerRuntimeLogIpc } from './runtime-log-ipc'
 import { decidePopupNavigation } from './ai/popup-policy'
+import { runtimeFlagOn } from '../shared/contracts/runtime-flag-policy'
 import { decideMainWindowNavigation, decideMainWindowPopup } from './main-window-navigation'
 import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish, isTrackedWebview } from './browser/network-capture'
 import { shouldStampAppCsp } from './browser/csp-scope'
@@ -999,7 +1000,7 @@ app.whenReady().then(() => {
     },
     // memory lifecycle `pre-compress` (2.1.13): память пишется строго в проект чата.
     chatProjectPath: chatId => chatSessions.get(chatId)?.projectPath ?? null,
-    isMemoryLifecycleEnabled: () => getSecret('memory_lifecycle') !== 'false',
+    isMemoryLifecycleEnabled: () => runtimeFlagOn('memory_lifecycle', getSecret('memory_lifecycle')),
   })
   registerPlansIpc(plans, agentRuns)
   // P1: состязание исполнителей — одна постановка у нескольких провайдеров,

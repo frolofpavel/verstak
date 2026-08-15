@@ -66,6 +66,7 @@ export { resolveCodexHome } from './ai-send/route-selection'
  *  тут остаётся публичный тип для runner'ов и deps). */
 export type { ResolvedSubscription } from '../ai/resolve-subscription-account'
 import type { ResolvedSubscription } from '../ai/resolve-subscription-account'
+import { runtimeFlagOn } from '../../shared/contracts/runtime-flag-policy'
 
 // Экспортирован для runner-api.ts (распил #1, срез 4c): AgentRunContext ссылается
 // на AiDeps['...']-индексы. Type-only импорт в runner-api → без рантайм-цикла.
@@ -853,7 +854,7 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
     // Smart routing: если пользователь не задал модель явно и effort=standard,
     // выбираем дешёвую/мощную модель по сложности запроса. Решение — в decideSmartRouting;
     // здесь остаются побочные эффекты (лог + info-событие), чтобы порядок событий не поехал.
-    const smartRoutingEnabled = deps.getSecret('smart_routing') !== 'false'
+    const smartRoutingEnabled = runtimeFlagOn('smart_routing', deps.getSecret('smart_routing'))
     const smartPick = decideSmartRouting({
       enabled: smartRoutingEnabled,
       overrideModel: overrides?.model,

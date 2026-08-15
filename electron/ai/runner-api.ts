@@ -70,6 +70,7 @@ import { dispatchToolTurn } from './runner-tool-turn'
 import { collectToolTurnOutcome, reviewGatePassedInTurn } from './runner-tool-outcome'
 import { buildTurnVerificationHint } from './runner-verification'
 import { summarizeMaterials, formatMaterialsLine, type ReadOutcome } from './materials-summary'
+import { runtimeFlagOn } from '../../shared/contracts/runtime-flag-policy'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -971,7 +972,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // совпадает с defaultOn:true в src/lib/runtime-flags.ts — стережёт
     // tests/lib/runtime-flags.test.ts. Дефолт ON — решение Павла; килл-свитч
     // (осознанное 'false') в RuntimeFlagsTab. Триггер — решение МОДЕЛИ по ходу.
-    const orchestratorDefaultOn = getSecretForDelegate?.('orchestrator_default') !== 'false'
+    const orchestratorDefaultOn = runtimeFlagOn('orchestrator_default', getSecretForDelegate?.('orchestrator_default'))
     // ГАРД ГЛУБИНЫ (задача C, 08.08): spawn_task_session даётся ТОЛЬКО корню. isChildSession —
     // это ПОСТОЯННОЕ свойство чата (у чата в chat_sessions задан parent_chat_id), а НЕ
     // runner-поле parentChatId (оно = текущий chatId у ЛЮБОГО прогона, для скоупа тудушек).

@@ -1,12 +1,13 @@
 // Рантайм-флаги, которые до 27.07 жили только в БД и не были видны человеку.
 //
-// Шесть переключателей поведения агента читаются в main через getSecret(key) и
-// сравнение со строкой. Полярность у них РАЗНАЯ, и это не случайность:
-//   · четыре флага — opt-out: `getSecret(k) !== 'false'`, то есть включены, пока
-//     явно не выключили;
-//   · `auto_capture_memory` — opt-in: `getSecret(k) === 'true'`, то есть выключен,
-//     пока явно не включили. Решение Павла от 26.07 (2.1.13): сырой автозахват
-//     tool-потока засорял память проекта служебными записями.
+// Переключатели поведения агента читаются в main общим хелпером
+// `runtimeFlagOn(key, getSecret(key))` (до 15.08 каждый читатель сравнивал строку
+// сам — см. §3.1 ревизии). Полярность у флагов РАЗНАЯ, и это не случайность:
+//   · большинство — opt-out: выключает только явная строка 'false', то есть они
+//     включены, пока явно не выключили;
+//   · `auto_capture_memory` — opt-in: включает только явная строка 'true', то есть
+//     выключен, пока явно не включили. Решение Павла от 26.07 (2.1.13): сырой
+//     автозахват tool-потока засорял память проекта служебными записями.
 //   · `plan_approval_gate` — opt-in по той же причине осознанности. Добавлен
 //     29.07 после живой приёмки: настройка существовала с самого начала, но
 //     единственный её переключатель был спрятан в свёрнутом блоке «Дополнительные
@@ -15,22 +16,21 @@
 //     сорвались. Теперь тумблер здесь, и он ОДИН (дубль в PolicyTab снят: два
 //     переключателя на один ключ расходятся в показаниях).
 //
-// Здесь ровно одна декларация на весь renderer: и UI, и тесты берут дефолты
-// отсюда. Соответствие этой таблицы тому, как читает main, стережёт анти-дрейф
-// тест tests/lib/runtime-flags.test.ts — он парсит исходники electron/ и падает,
-// если полярность разъехалась или чтение флага исчезло.
+// ПОЛЯРНОСТЬ ЗДЕСЬ НЕ ОБЪЯВЛЯЕТСЯ (15.08, §3.1 ревизии). Единственный её источник —
+// shared/contracts/runtime-flag-policy.ts: оттуда же её берёт и main. Здесь живёт
+// то, чего у main нет и быть не должно, — человеческие подписи и порядок показа.
+// Соответствие «флаг читается там, где обещано» стережёт анти-дрейф тест
+// tests/lib/runtime-flags.test.ts — он парсит исходники electron/ и падает, если
+// чтение флага исчезло или сравнение строки завелось заново.
 
-import { PLAN_APPROVAL_GATE_DEFAULT_ON } from '../../shared/contracts/runtime-flag-policy'
+import {
+  RUNTIME_FLAG_DEFAULT_ON,
+  isFlagOn,
+  flagValue,
+  type RuntimeFlagKey,
+} from '../../shared/contracts/runtime-flag-policy'
 
-export type RuntimeFlagKey =
-  | 'memory_lifecycle'
-  | 'auto_capture_memory'
-  | 'smart_routing'
-  | 'smart_fallback'
-  | 'use_project_brain'
-  | 'plan_approval_gate'
-  | 'orchestrator_default'
-  | 'mutation_check_enabled'
+export type { RuntimeFlagKey }
 
 export interface RuntimeFlagDef {
   key: RuntimeFlagKey
@@ -52,7 +52,7 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     title: 'Память проекта',
     what: 'Перед сжатием контекста и в конце сессии агент сохраняет решения, факты и долги — и подхватывает их в следующих разговорах.',
     whenOff: 'Каждый разговор начинается с чистого листа: принятые решения придётся напоминать вручную.',
-    defaultOn: true,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.memory_lifecycle,
     readAt: 'electron/main.ts',
   },
   {
@@ -60,7 +60,7 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     title: 'Знание о проекте в промпте',
     what: 'К запросу добавляется выжимка накопленного знания о проекте, чтобы агент не переспрашивал то, что уже выяснено.',
     whenOff: 'Агент работает только с тем, что видит в текущем разговоре.',
-    defaultOn: true,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.use_project_brain,
     readAt: 'electron/ipc/ai-send/system-assembly.ts',
   },
   {
@@ -68,7 +68,7 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     title: 'Умный выбор модели',
     what: 'Модель под задачу подбирается автоматически: рассуждение — сильной, простое действие — быстрой и дешёвой.',
     whenOff: 'Всегда работает модель, выбранная в чате вручную.',
-    defaultOn: true,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.smart_routing,
     readAt: 'electron/ipc/ai.ts',
   },
   {
@@ -76,7 +76,7 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     title: 'Автоподмена при сбое',
     what: 'Если провайдер недоступен или упёрся в лимит, прогон продолжается на запасной модели вместо ошибки.',
     whenOff: 'Прогон останавливается с ошибкой, переключать придётся руками.',
-    defaultOn: true,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.smart_fallback,
     readAt: 'electron/ipc/ai-send/fallback-route.ts',
   },
   {
@@ -84,7 +84,7 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     title: 'Сырой автозахват в память',
     what: 'В память пишется строка на каждое действие с файлом или командой — прежнее поведение до версии 2.1.13.',
     whenOff: 'В память попадают только осмысленные выжимки, а не поток служебных записей. Это состояние по умолчанию.',
-    defaultOn: false,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.auto_capture_memory,
     readAt: 'electron/ai/memory-hooks.ts',
   },
   {
@@ -96,9 +96,8 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     // A3 §2.1 (30.07): цикл планов включён ПО УМОЛЧАНИЮ. Прежде был opt-in, и это
     // была неверная продуктовая логика — человек не пойдёт включать то, о чём не
     // знает. Полярность живёт в shared/contracts/runtime-flag-policy.ts, одна на
-    // main и renderer; здесь она только повторяется для таблицы интерфейса, а
-    // согласованность стережёт tests/lib/plan-approval-default.test.ts.
-    defaultOn: PLAN_APPROVAL_GATE_DEFAULT_ON,
+    // main и renderer; согласованность стережёт tests/lib/plan-approval-default.test.ts.
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.plan_approval_gate,
     readAt: 'electron/ipc/tool-handlers/verification.ts',
   },
   {
@@ -110,10 +109,10 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     // ВКЛЮЧЁН ПО УМОЛЧАНИЮ — решение Павла («должна быть фишка»). Весь поток
     // (спавн → видимая дочерняя сессия → карточка-след → возврат по done/error/
     // run-finalized) собран и проверен харнесом до флипа. Полярность opt-out
-    // (stored !== 'false') совпадает с чтением main в runner-api; осознанное
-    // ВЫКЛЮЧЕНИЕ — кнопкой в RuntimeFlagsTab (килл-свитч) — уважается. Соответствие
-    // стережёт tests/lib/runtime-flags.test.ts.
-    defaultOn: true,
+    // (выключает только явная 'false') — общая с main, runner-api читает её тем же
+    // хелпером; осознанное ВЫКЛЮЧЕНИЕ — кнопкой в RuntimeFlagsTab (килл-свитч) —
+    // уважается. Соответствие стережёт tests/lib/runtime-flags.test.ts.
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.orchestrator_default,
     readAt: 'electron/ai/runner-api.ts',
   },
   {
@@ -123,20 +122,19 @@ export const RUNTIME_FLAGS: readonly RuntimeFlagDef[] = [
     what: 'Когда агент говорит «починил и написал тест», он может доказать это мутацией фикса: тест прогоняется в изолированной копии без фикса и обязан покраснеть. Зелёный — тест ничего не стережёт, вердикт отклоняется.',
     whenOff: 'Доказательство мутацией недоступно: «написал тест» принимается без проверки, что тест вообще ловит дефект. Экономит время второго прогона.',
     // Выключатель обязателен по постановке: второй прогон тестов стоит времени.
-    defaultOn: true,
+    defaultOn: RUNTIME_FLAG_DEFAULT_ON.mutation_check_enabled,
     readAt: 'electron/ipc/tool-handlers/mutation-check.ts',
   },
 ] as const
 
-/** Включён ли флаг при таком сохранённом значении. Повторяет чтение main дословно. */
+/** Включён ли флаг при таком сохранённом значении. Формула — общая с main
+ *  (shared/contracts/runtime-flag-policy.isFlagOn), своей копии здесь больше нет. */
 export function isRuntimeFlagOn(def: RuntimeFlagDef, stored: string | null | undefined): boolean {
-  return def.defaultOn ? stored !== 'false' : stored === 'true'
+  return isFlagOn(def.defaultOn, stored)
 }
 
 /** Что записать в настройки, чтобы флаг оказался в нужном состоянии. */
-export function runtimeFlagValue(on: boolean): string {
-  return on ? 'true' : 'false'
-}
+export const runtimeFlagValue = flagValue
 
 export function runtimeFlagByKey(key: RuntimeFlagKey): RuntimeFlagDef {
   const found = RUNTIME_FLAGS.find(f => f.key === key)

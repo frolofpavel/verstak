@@ -7,6 +7,7 @@
 
 import type { MemoryType } from '../storage/memories'
 import { scanText } from './secret-scanner'
+import { runtimeFlagOn } from '../../shared/contracts/runtime-flag-policy'
 
 // Какие tool calls захватываем в память
 const CAPTURE_TOOLS = new Set([
@@ -96,7 +97,7 @@ export const AUTO_CAPTURE_SETTING_KEY = 'auto_capture_memory'
  * возвращает прежнее поведение целиком, без правки кода.
  */
 export function isAutoCaptureEnabled(getSecret: ((key: string) => string | null) | undefined): boolean {
-  return getSecret?.(AUTO_CAPTURE_SETTING_KEY) === 'true'
+  return runtimeFlagOn(AUTO_CAPTURE_SETTING_KEY, getSecret?.(AUTO_CAPTURE_SETTING_KEY))
 }
 
 /**

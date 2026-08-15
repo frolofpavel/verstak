@@ -16,6 +16,7 @@ import type { ChatMessage } from '../../ai/types'
 import type { AgentMode } from '../../ai/mode-policy'
 import type { ProviderId, ProviderDescriptor } from '../../ai/registry'
 import { prepareSystemContext } from '../../ai/compose-system'
+import { runtimeFlagOn } from '../../../shared/contracts/runtime-flag-policy'
 import { systemForProvider } from '../../ai/compose-prompt'
 import { buildRuleConflictWarning } from '../../ai/user-layer'
 import { REVIEWER_SYSTEM_PROMPT } from '../../ai/review-prompt'
@@ -111,7 +112,7 @@ export async function assembleSendSystem(input: {
     const projectSystemPrompt = input.projectPath ? input.deps.getSecret(`system_prompt_${input.projectPath}`) : null
     // Project Brain (Итер.4): если проект прогрет и не выключено — инжектим
     // готовый ContextPack под задачу (вместо сборки всего контекста заново).
-    const brainOn = input.deps.getSecret('use_project_brain') !== 'false'
+    const brainOn = runtimeFlagOn('use_project_brain', input.deps.getSecret('use_project_brain'))
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
     const brain = (brainOn && input.projectPath && input.deps.getBrainContext)
       ? input.deps.getBrainContext(input.projectPath, lastUserMsg) : null

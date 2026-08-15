@@ -32,6 +32,54 @@ export function flagValue(on: boolean): string {
   return on ? 'true' : 'false'
 }
 
+/** Ключи рантайм-флагов (вкладка «Поведение агента»). Список живёт здесь, потому
+ *  что его читают ОБА слоя: main — чтобы прочесть флаг, renderer — чтобы его
+ *  показать. */
+export type RuntimeFlagKey =
+  | 'memory_lifecycle'
+  | 'auto_capture_memory'
+  | 'smart_routing'
+  | 'smart_fallback'
+  | 'use_project_brain'
+  | 'plan_approval_gate'
+  | 'orchestrator_default'
+  | 'mutation_check_enabled'
+
+/**
+ * ЕДИНСТВЕННОЕ место, где объявлена полярность каждого флага (15.08, §3.1
+ * ревизии). До этого дня формула жила в трёх редакциях: здесь, в таблице
+ * renderer (`src/lib/runtime-flags.ts`) и в каждой точке чтения main отдельным
+ * сравнением строки. Значения совпадали, но принцип — нет: модуль «одной правды»
+ * был заведён 30.07 ровно чтобы убить дубль, а снаружи его не звал никто, и
+ * дубль спокойно жил дальше под присмотром анти-дрейф-теста.
+ *
+ * Теперь расходиться нечему: main зовёт `runtimeFlagOn(key, stored)`, renderer
+ * берёт `defaultOn` отсюда же. Страж превратился из сверки двух редакций в
+ * проверку, что чтение флага НЕ ИСЧЕЗЛО и что сравнение строки не завелось заново
+ * (`tests/lib/runtime-flags.test.ts`).
+ *
+ * `true` — opt-out (выключает только явная 'false'), `false` — opt-in (включает
+ * только явная 'true'). Смена значения здесь меняет поведение продукта у всех,
+ * кто тумблер не трогал: дефолты под пинами в том же тесте.
+ */
+export const RUNTIME_FLAG_DEFAULT_ON: Record<RuntimeFlagKey, boolean> = {
+  memory_lifecycle: true,
+  use_project_brain: true,
+  smart_routing: true,
+  smart_fallback: true,
+  // opt-in — решение Павла от 26.07 (2.1.13): сырой автозахват засорял память.
+  auto_capture_memory: false,
+  // opt-out с 30.07 (A3 §2.1): цикл планов работает по умолчанию.
+  plan_approval_gate: true,
+  orchestrator_default: true,
+  mutation_check_enabled: true,
+}
+
+/** Включён ли флаг по ключу и сохранённому значению — вход для main. */
+export function runtimeFlagOn(key: RuntimeFlagKey, stored: string | null | undefined): boolean {
+  return isFlagOn(RUNTIME_FLAG_DEFAULT_ON[key], stored)
+}
+
 /**
  * Согласование плана перед работой (`plan_approval_gate`).
  *
@@ -40,9 +88,11 @@ export function flagValue(on: boolean): string {
  * то, о чём не знает, и не откроет раздел, про который не слышал.
  *
  * Константа существует, чтобы main не сравнивал строку сам: одно место на оба
- * слоя, и анти-дрейф стеречь больше нечего.
+ * слоя, и анти-дрейф стеречь больше нечего. С 15.08 она — псевдоним записи в
+ * RUNTIME_FLAG_DEFAULT_ON, чтобы у полярности не осталось второй редакции даже
+ * здесь.
  */
-export const PLAN_APPROVAL_GATE_DEFAULT_ON = true
+export const PLAN_APPROVAL_GATE_DEFAULT_ON = RUNTIME_FLAG_DEFAULT_ON.plan_approval_gate
 
 /** Включено ли согласование плана при таком сохранённом значении. */
 export function isPlanApprovalGateOn(stored: string | null | undefined): boolean {
