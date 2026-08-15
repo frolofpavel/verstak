@@ -9,6 +9,7 @@ import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
 import type { AgentMode } from './mode-policy'
 import { safeStderrTail } from './cli-stderr'
+import { secretPathDenyGlobs } from './secret-scanner'
 import { buildClaudeMcpBridge } from './claude-cli-mcp'
 import type { McpServerConfig } from '../mcp/client'
 
@@ -66,27 +67,21 @@ export function claudePermissionMode(mode: AgentMode | undefined): string {
   }
 }
 
-// Зеркало isForbiddenPath (secret-scanner) в gitignore-style deny-глобы Claude Code.
-// Раньше guard `.env`/`.ssh`/creds работал ТОЛЬКО на API-пути (path-policy Verstak);
-// CLI писал мимо него. Теперь, включив запись через --permission-mode, обязаны
-// закрыть file-инструменты (Read/Edit/Write) на секрет-путях и в CLI. Bash-
-// эксфильтрация (`cat .env`) флагами надёжно не режется — inherent-лимит CLI,
-// честно оговорён; сеть безопасности — Control Envelope (git-якорь, срез 4).
-const SECRET_GLOBS = [
-  '**/.env', '**/.env.*',
-  '.ssh/**', '**/.ssh/**',
-  '.aws/**', '**/.aws/**',
-  '.gnupg/**', '.azure/**', '.docker/**', '.kube/**', '.config/gcloud/**',
-  '**/*.key', '**/*.pem', '**/*.p12', '**/*.pfx', '**/*.crt', '**/*.cer', '**/*.jks', '**/*.keystore',
-  '**/creds*.json', '**/credentials*.json',
-  '**/.npmrc', '**/.netrc', '**/cookies.json',
-]
+// Guard `.env`/`.ssh`/creds работал ТОЛЬКО на API-пути (path-policy Verstak); CLI писал
+// мимо него. Включив запись через --permission-mode, обязаны закрыть file-инструменты
+// (Read/Edit/Write) на секрет-путях и в CLI.
+//
+// ВТОРОЙ РЕДАКЦИИ СПИСКА ЗДЕСЬ БОЛЬШЕ НЕТ (§3.2 ревизии 15.08). Она называла себя
+// «зеркалом isForbiddenPath» и при этом уже разошлась с ним по пяти позициям — приватный
+// ключ в корне проекта CLI читал, а API-путь закрывал. Глобы приходят из ОДНОГО источника
+// (secret-scanner.secretPathDenyGlobs), который генерирует их из тех же списков, что
+// применяет isForbiddenPath. Руками этот список не править: правится secret-scanner.
 const SECRET_DENY_TOOLS = ['Read', 'Edit', 'Write']
 
 /** Path-scoped deny-специфаеры Claude Code для секрет-путей (все file-инструменты). */
 export function claudeSecretDenySpecifiers(): string[] {
   const out: string[] = []
-  for (const g of SECRET_GLOBS) {
+  for (const g of secretPathDenyGlobs()) {
     for (const t of SECRET_DENY_TOOLS) out.push(`${t}(${g})`)
   }
   return out

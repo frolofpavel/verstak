@@ -22,7 +22,12 @@ describe('claudeSecretDenySpecifiers — guard секретов зеркалит
     expect(specs).toContain('Read(**/.env)')
     expect(specs).toContain('Edit(**/.env)')
     expect(specs).toContain('Write(**/.env)')
-    expect(specs).toContain('Read(**/.env.*)')
+    // Раньше здесь стоял литерал `Read(**/.env.*)` из рукописной второй редакции
+    // списка. Редакция отменена (§3.2 ревизии — она разошлась с isForbiddenPath),
+    // глобы теперь генерируются из единственного источника, и суффиксную форму
+    // покрывает более широкий `**/.env*` — он же ловит `.envrc`, который прежний
+    // литерал пропускал. Утверждение то же, литерал — от живого контракта.
+    expect(specs).toContain('Read(**/.env*)')
   })
 
   it('блокирует .ssh, ключи/сертификаты и creds*.json', () => {

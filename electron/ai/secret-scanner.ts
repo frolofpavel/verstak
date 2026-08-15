@@ -101,6 +101,38 @@ export function isForbiddenPath(relPath: string): boolean {
   return false
 }
 
+/**
+ * ЕДИНЫЙ ИСТОЧНИК запретов для второго потребителя — CLI-пути (§3.2 ревизии 15.08).
+ *
+ * Раньше `claude-cli.ts` держал ВТОРУЮ редакцию того же списка руками, объявляя её
+ * «зеркалом isForbiddenPath». Списки разошлись: приватный ключ в корне проекта
+ * (`ssh-keygen -f ./id_rsa`), `authorized_keys`/`known_hosts` вне `.ssh/`, файл
+ * `credentials` без расширения, `hh_cookies.json` и `.envrc` API-путь закрывал, а
+ * CLI читал штатным Read. Теперь глобы ГЕНЕРИРУЮТСЯ из тех же трёх списков и тех же
+ * двух правил, что применяет `isForbiddenPath` — расходиться стало нечему.
+ *
+ * Формат — gitignore-style глобы. Каждое имя отдаётся В ДВУХ формах: голой (только
+ * корень проекта) и с префиксом двойной звезды (любая глубина). Диалект матчера
+ * дочернего CLI нам не подконтролен, а объединение запретов безопаснее пересечения.
+ *
+ * ЧЕСТНАЯ ГРАНИЦА, а не недоделка: глобы закрывают file-инструменты чужого процесса.
+ * Bash-эксфильтрация (`cat .env`) флагами не режется в принципе — это inherent-лимит
+ * CLI-пути, сеть безопасности там другая (Control Envelope, git-якорь).
+ */
+export function secretPathDenyGlobs(): string[] {
+  const out = new Set<string>()
+  // Имя может лежать и в корне проекта, и на любой глубине.
+  const add = (glob: string) => { out.add(glob); out.add(`**/${glob}`) }
+  for (const basename of FORBIDDEN_BASENAMES) add(basename)
+  for (const dir of FORBIDDEN_DIRS) { add(dir); add(`${dir}/**`) }
+  for (const ext of FORBIDDEN_EXTENSIONS) add(`*${ext}`)
+  // Два правила isForbiddenPath, которых нет в списках-множествах:
+  add('.env*')            // basename.startsWith('.env') → .env, .envrc, .env.staging
+  add('creds*.json')      // /^(creds|credentials).*\.json$/
+  add('credentials*.json')
+  return [...out]
+}
+
 interface SecretPattern {
   name: string
   re: RegExp
