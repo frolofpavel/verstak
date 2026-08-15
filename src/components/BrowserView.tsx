@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 // VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
 // §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
 import { vskSnapshot, vskResolveNumbered, vskFill, vskPressKey, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, type PageSnapshot, type CappedSnapshot, type FindResult } from '../../shared/browser-snapshot'
+// Форма записи консоли — ОДНА на производителя и читателя (main). Собственный
+// литерал здесь и был дефектом 15.08: ключ `message` против ожидаемого `text`.
+import { consoleRecordFromWebviewEvent, type ConsoleRecord, type WebviewConsoleEvent } from '../../shared/browser-console-record'
 
 /**
  * In-app browser. Uses Electron's <webview> tag (enabled via webviewTag: true
@@ -58,8 +61,9 @@ declare global {
       pressKey: (key: string, n?: number) => Promise<{ ok: true; submitted: boolean; url: string | null } | { ok: false; error: string }>
       /** Ждать элемент (селектор/текст) с честным таймаутом. */
       waitFor: (query: string, timeoutMs?: number) => Promise<{ ok: true } | { ok: false; error: string }>
-      /** VSK-BROWSER-B2: сырой буфер консоли (редакция/фильтр в main). */
-      consoleMessages: () => Promise<Array<{ level: number; message: string; line?: number; source?: string }>>
+      /** VSK-BROWSER-B2: неотредактированный буфер консоли в КАНОНИЧЕСКОЙ форме
+       *  (`shared/browser-console-record`); редакция и фильтр — в main. */
+      consoleMessages: () => Promise<ConsoleRecord[]>
       /** VSK-BROWSER-B2: сырые записи сети из страницы (редакция в main). */
       networkRequests: () => Promise<Array<Record<string, unknown>>>
       screenshot: () => Promise<string>  // data:image/png;base64,...
@@ -108,9 +112,11 @@ const NET_RECORDER = `(() => {
 
 export function BrowserView() {
   const webviewRef = useRef<Webview | null>(null)
-  // B2: буфер консоли — событие webview 'console-message' (без CDP). Хранит сырое,
-  // редакция и фильтр «только error/warning» — в main. Чистится на новой навигации.
-  const consoleBufRef = useRef<Array<{ level: number; message: string; line?: number; source?: string }>>([])
+  // B2: буфер консоли — событие webview 'console-message' (без CDP). Текст хранится
+  // НЕОТРЕДАКТИРОВАННЫМ (secret-scanner и фильтр «только error/warning» — в main),
+  // а форма записи — каноническая из shared: перевод имён полей события в имена
+  // полей записи делает ровно одно место. Чистится на новой навигации.
+  const consoleBufRef = useRef<ConsoleRecord[]>([])
   // Адресная строка пустая на старте (виден плейсхолдер) — «about:blank» в поле
   // выглядел бы артефактом; browser-панель Claude Code тоже открывается пустой.
   const [urlInput, setUrlInput] = useState('')
@@ -145,9 +151,9 @@ export function BrowserView() {
     // B2: захват консоли + чистка на новой странице + (пере)инжект рекордера сети.
     const CONSOLE_CAP = 200
     const onConsole = (e: Event) => {
-      const ev = e as Event & { level?: number; message?: string; line?: number; sourceId?: string }
+      const ev = e as Event & WebviewConsoleEvent
       const buf = consoleBufRef.current
-      buf.push({ level: ev.level ?? 0, message: String(ev.message ?? ''), line: ev.line, source: ev.sourceId })
+      buf.push(consoleRecordFromWebviewEvent(ev))
       if (buf.length > CONSOLE_CAP) buf.splice(0, buf.length - CONSOLE_CAP)
     }
     const onNav = () => { consoleBufRef.current = [] }   // новая страница — свой лог

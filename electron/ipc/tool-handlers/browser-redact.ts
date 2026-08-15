@@ -7,6 +7,7 @@
 // ЗДЕСЬ, в main, где живёт secret-scanner (renderer его не импортирует). Пин на
 // редакцию обязателен: заголовок замаскирован, URL-токен погашен, тело не уходит.
 import { redactForDisplay, redactUrlSecrets } from '../../ai/secret-scanner'
+import { normalizeConsoleLevel, type ConsoleLevel } from '../../../shared/browser-console-record'
 
 // Заголовки, несущие секрет/сессию — маскируем ЦЕЛИКОМ (не отпечаток: даже хвост
 // bearer'а — утечка). Список — по имени, а не по значению: значение произвольно.
@@ -31,30 +32,27 @@ export function redactNetworkEntry(e: RawNetEntry): SafeNetEntry {
   }
 }
 
-export type ConsoleLevel = 'log' | 'info' | 'warning' | 'error' | 'debug'
+// Форма записи и таблица уровней — НЕ здесь: `shared/browser-console-record` держит
+// их для производителя и читателя разом. Своя копия таблицы в этом файле и была
+// дефектом 15.08 (числа трактовались зеркально, console.error выпадал из выдачи).
+export type { ConsoleLevel } from '../../../shared/browser-console-record'
 export interface RawConsoleMsg { level?: unknown; text?: unknown; line?: unknown; source?: unknown }
 export interface SafeConsoleMsg { level: ConsoleLevel; text: string; line?: number; source?: string }
 
-// webview console-message даёт числовой level: 0=log,1=warning,2=error,3=debug/verbose.
-function normalizeLevel(level: unknown): ConsoleLevel {
-  if (typeof level === 'string') {
-    const l = level.toLowerCase()
-    if (l === 'warn' || l === 'warning') return 'warning'
-    if (l === 'error') return 'error'
-    if (l === 'debug' || l === 'verbose') return 'debug'
-    if (l === 'info') return 'info'
-    return 'log'
-  }
-  if (level === 2) return 'error'
-  if (level === 1) return 'warning'
-  if (level === 3) return 'debug'
-  return 'log'
-}
+/** Запись пришла БЕЗ ключа `text` — форма неизвестна. Отличимо от пустого сообщения. */
+export const UNKNOWN_CONSOLE_SHAPE = '[текст сообщения не передан: неизвестная форма записи консоли]'
 
 /** Сообщение консоли, безопасное для модели: текст и источник прогнаны через
  *  redactForDisplay (в console.log мог утечь ключ). Чистая функция. */
 export function redactConsoleMessage(m: RawConsoleMsg): SafeConsoleMsg {
-  const out: SafeConsoleMsg = { level: normalizeLevel(m.level), text: redactForDisplay(String(m.text ?? '')) }
+  // ОТСУТСТВИЕ ключа `text` — это не пустое сообщение, а чужая форма записи, и
+  // молчать об этом нельзя: пустая строка неотличима от «страница ничего не
+  // написала», а такой отказ не краснеет нигде. Ровно так дефект 15.08 и прожил —
+  // с постройки блока B2 (01.08) модель получала `text: ''` у КАЖДОЙ записи
+  // встроенного браузера и сообщала об этом молчанием (§3.1: запасной путь обязан
+  // оставлять след).
+  const text = m.text == null ? UNKNOWN_CONSOLE_SHAPE : String(m.text)
+  const out: SafeConsoleMsg = { level: normalizeConsoleLevel(m.level), text: redactForDisplay(text) }
   if (typeof m.line === 'number') out.line = m.line
   if (m.source) out.source = redactForDisplay(String(m.source))
   return out
