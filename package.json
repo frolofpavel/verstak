@@ -24,6 +24,8 @@
     "test:fast": "vitest run",
     "type": "tsc --noEmit",
     "check:mojibake": "node scripts/check-mojibake.cjs",
+    "bench:browser-page": "node scripts/bench/browser-page-bench.mjs",
+    "bench:browser-run": "node scripts/bench/browser-run-bench.mjs",
     "release:build": "node scripts/release-build.mjs",
     "release:gate": "node scripts/release-gate.mjs",
     "release:publish": "node scripts/release-publish.mjs",
