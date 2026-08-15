@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { InstallDefaults, InstallProgress } from '../../electron/installer/types'
 import iconUrl from '../assets/icon.png'
-import { INSTALLER_VALUE_PROPS, INSTALLER_WIZARD_STEPS, MODEL_PROVIDER_COUNT } from './constants'
+import { INSTALLER_VALUE_PROPS, INSTALLER_WIZARD_STEPS } from './constants'
 import { InstallerLoader } from './InstallerLoader'
 
 type Step = 'welcome' | 'directory' | 'installing' | 'finish'
@@ -178,7 +178,7 @@ export function SetupWizard() {
         <p className="gg-installer-lead">Verstak установлен</p>
         <p className="gg-installer-text">
           Ярлык появится в меню «Пуск» и на рабочем столе.
-          Подключите провайдеры в настройках — доступно {MODEL_PROVIDER_COUNT} вариантов.
+          Подключите доступную AI-модель в настройках и напишите, что нужно сделать.
         </p>
         <label className="gg-installer-check">
           <input type="checkbox" checked={runAfter} onChange={(e) => setRunAfter(e.target.checked)} />
