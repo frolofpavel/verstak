@@ -52,6 +52,15 @@ type Overrides = {
   materials?: unknown
   isChildSession?: boolean
   toolsAllow?: string[] | null
+  /** ПРАВКА ФИКСТУРЫ (объявляю, §3.1): раньше харнес всегда слал undefined, поэтому
+   *  ветка Focus Chain в runner-api была недостижима из этой сетки в принципе.
+   *  Утверждения существующих пинов не изменились — у них поле не задано, значение
+   *  прежнее (undefined). См. describe «Focus Chain доезжает до истории». */
+  sessionTodos?: unknown
+  /** ПРАВКА ФИКСТУРЫ (объявляю, §3.1): бюджет ходов был жёстко 5, а порог реинжекта
+   *  Focus Chain — 4 хода, и на пятом ходу срабатывает max-steps hard-stop. Дефолт
+   *  прежний (5), поэтому ни одно утверждение существующих пинов не изменилось. */
+  turnsBudget?: number
 }
 
 function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefined) } }
@@ -67,11 +76,11 @@ function args(dir: string, o: Overrides): unknown[] {
     recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: o.recordJournal ?? vi.fn(), readJournal: vi.fn(() => []),
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
     searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
-    connectors: { list: () => [], query: async () => ({}) }, agentMode: o.agentMode ?? 'bypass', turnsBudget: 5,
+    connectors: { list: () => [], query: async () => ({}) }, agentMode: o.agentMode ?? 'bypass', turnsBudget: o.turnsBudget ?? 5,
     skillRegistry: undefined, getSecretForDelegate: () => null, costGuard: o.costGuard,
     providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
     mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
-    parentChatId: null, isChildSession: o.isChildSession, subSessions: undefined, sessionTodos: undefined,
+    parentChatId: null, isChildSession: o.isChildSession, subSessions: undefined, sessionTodos: o.sessionTodos,
     agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: o.toolsAllow ?? null,
     processRegistry: o.processRegistry,
     outcome: o.outcome,
@@ -1284,5 +1293,175 @@ describe('agent-loop — V3: completion gate на основном пути за
       .filter((e): e is Record<string, unknown> => e?.type === 'info' && typeof e?.message === 'string')
       .map(e => String(e.message))
     expect(infos.some(t => t.includes('не проверен')), 'работа сдана как проверенная, хотя проверок не было').toBe(true)
+  })
+
+  // Ревизия 15.08 §2.1: у гейта ДВА выхода, и 11.08 закрыли только один. Мутация
+  // ВТОРОГО (`runner-api.ts:1269`) давала 5463 зелёных — та же фича, тот же файл,
+  // соседние сто строк. Пин ниже стережёт именно второй выход, чтобы класс не остался
+  // открытым в третьем месте: оба выхода теперь под одной сеткой.
+  //
+  // ЧЕМ ВТОРОЙ ВЫХОД ОТЛИЧАЕТСЯ ОТ ПЕРВОГО. Первый — провайдер шлёт `done` внутри
+  // стрима (кейс выше). Второй — стрим КОНЧАЕТСЯ БЕЗ события `done` (генератор просто
+  // завершился); тогда цикл выходит из for-await и добирает финал после стрима. Форма
+  // фикстуры отсюда и берётся: на последнем ходу событие `done` не эмитится вовсе.
+  it('ВТОРОЙ выход (стрим кончился без done): запись без проверки → гейт требует доказательство', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }])  // ← НЕТ done: выход через пост-стримовую ветку
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'гейт не сработал на ВТОРОМ выходе — правило V2-3 там декоративно').toBeGreaterThan(0)
+  })
+
+  // КОНТРОЛЬНЫЙ кейс к обоим выходам. Пин «гейт сработал» ничего не измеряет, если
+  // не показано, что при выполненном условии гейт МОЛЧИТ: иначе он мог бы кричать
+  // всегда. Здесь запись есть и проверка есть — требования доказательства быть не должно.
+  it('КОНТРОЛЬ: запись + проверка → гейт молчит на обоих выходах', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'tool-call', call: { id: 'v1', name: 'run_command', args: { command: 'echo test' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'гейт требует доказательство при выполненном условии — он кричит всегда').toBe(0)
+  })
+})
+
+// Ревизия 15.08 §2.4 — ДЕНЬГИ ПОЛЬЗОВАТЕЛЯ. Мутация `runner-api.ts:1105`
+// (`if (check.exceeded)` никогда не истинно) давала 5463 зелёных: costGuard считал,
+// сообщение готовил, а прогон НЕ останавливался. Пины `cost-guard.test.ts` и
+// `daily-cost-guard.test.ts` стерегут подсчёт и порог как ЧИСТУЮ логику; что
+// превышение реально ОБРЫВАЕТ ход в агентном цикле, не проверял никто.
+//
+// Наблюдаемая величина выбрана так, чтобы её нельзя было подделать: не событие, а
+// РАБОТА ПОСЛЕ ЛИМИТА. Провайдер в одном стриме отдаёт usage за пределом, а СРАЗУ
+// ПОСЛЕ — вызов write_file. Лимит держит, если файла на диске не появилось.
+describe('agent-loop — лимит расхода обрывает прогон (§2.4 ревизии 15.08)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vsk-cost-cap-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  const events = (sender: ReturnType<typeof makeSender>) =>
+    sender.send.mock.calls.map((c: unknown[]) => (c[1] as { event?: Record<string, unknown> })?.event)
+
+  // Модель 'm' неизвестна таблице цен → при ВКЛЮЧЁННОМ cap считается по
+  // консервативному FALLBACK_PRICE ($15/1M output). 200k output ≈ $3 при лимите $0.01.
+  const OVER_CAP_USAGE = { type: 'usage' as const, usage: { inputTokens: 0, outputTokens: 200_000 } }
+
+  it('превышение лимита → работа ПОСЛЕ него не выполняется, человек видит причину', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', () => [
+      OVER_CAP_USAGE,
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'after-cap.txt', content: 'x' } } },
+      { type: 'done' },
+    ])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+      costGuard: createCostGuard(0.01),
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(existsSync(join(dir, 'after-cap.txt')), 'прогон продолжил работу ПОСЛЕ превышения лимита — деньги жгутся дальше').toBe(false)
+    const errs = events(sender).filter(e => e?.type === 'error').map(e => String(e?.message ?? ''))
+    expect(errs.some(m => m.includes('лимит')), 'лимит сработал молча — человек не узнал, почему прогон встал').toBe(true)
+  })
+
+  // КОНТРОЛЬ: тот же стрим, лимит с запасом — вызов ОБЯЗАН выполниться. Без него
+  // «файла нет» зелено и тогда, когда write_file не работает вовсе.
+  it('КОНТРОЛЬ: лимит не превышен → тот же вызов выполняется', async () => {
+    const sender = makeSender()
+    const p = provider('deepseek', () => [
+      OVER_CAP_USAGE,
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'after-cap.txt', content: 'x' } } },
+      { type: 'done' },
+    ])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+      costGuard: createCostGuard(1000),
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(existsSync(join(dir, 'after-cap.txt')), 'вызов не выполнился и без лимита — пин выше ничего не измеряет').toBe(true)
+  })
+})
+
+// Ревизия 15.08 §2.2: Focus Chain не реинжектится. Мутация `runner-api.ts:891`
+// (`if (focus && reinject)` не исполняется никогда) давала 5463 зелёных.
+// `focus-chain-policy.test.ts` пинит `shouldReinjectFocus` как чистую функцию —
+// доказательства, что решение ДОХОДИТ до истории сообщений, не было. Цена: механизм,
+// который «не срабатывал ни разу за всё существование» (аудит B3), починили правилом,
+// и если условие снова разъедется, ни один тест не покраснеет.
+//
+// Наблюдаемая величина — сами сообщения, которые получает провайдер: реинжект
+// существует ровно постольку, поскольку блок доезжает до модели.
+describe('agent-loop — Focus Chain доезжает до истории (§2.2 ревизии 15.08)', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vsk-focus-')) })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  /** Провайдер, записывающий историю КАЖДОГО хода — предмет проверки именно она.
+   *  Путь чтения РАЗНЫЙ на каждом ходу СОЗНАТЕЛЬНО: повтор одного и того же вызова
+   *  взводит детектор зацикливания, и прогон вставал на четвёртом ходу — то есть
+   *  раньше порога реинжекта, который сетка и проверяет. */
+  function recordingProvider(seen: ChatMessage[][]): ChatProvider {
+    return {
+      id: 'deepseek', name: 'deepseek', models: ['m'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        const n = seen.length
+        seen.push(messages.map(m => ({ ...m })))
+        yield { type: 'tool-call', call: { id: `r${n}`, name: 'read_file', args: { path: `seed-${n}.txt` } } }
+        yield { type: 'done' }
+      },
+    }
+  }
+
+  /** Сидим файлы под все ходы бюджета — читаемый файл на каждый ход. */
+  const seedFiles = () => { for (let i = 0; i < 8; i++) writeFileSync(join(dir, `seed-${i}.txt`), `seed ${i}`) }
+
+  const OPEN_TODO = [{ id: 1, title: 'закрыть пункт A', status: 'pending', assigneeCallId: null, ord: 0 }]
+
+  const hasFocusBlock = (msgs: ChatMessage[]) =>
+    msgs.some(m => m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('[Focus Chain'))
+
+  it('незакрытые пункты + порог ходов → блок Focus Chain появляется в истории провайдера', async () => {
+    seedFiles()
+    const seen: ChatMessage[][] = []
+    // FOCUS_REINJECT_EVERY = 4 → реинжект на ходу 4 (0-based), т.е. на 5-м обращении.
+    await runApiConversation(...(args(dir, {
+      provider: recordingProvider(seen), providerId: 'deepseek', model: 'm', agentMode: 'bypass', turnsBudget: 8,
+      sessionTodos: { list: () => OPEN_TODO, createBatch: () => [], update: () => {}, findByTitle: () => null },
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(seen.length, 'цикл не дошёл до порога реинжекта — пин ничего не измеряет').toBeGreaterThanOrEqual(5)
+    expect(hasFocusBlock(seen[4]), 'Focus Chain не доехал до истории — решение правила теряется по дороге').toBe(true)
+  })
+
+  it('КОНТРОЛЬ: до порога блока нет, и без незакрытых пунктов он не появляется никогда', async () => {
+    seedFiles()
+    const early: ChatMessage[][] = []
+    await runApiConversation(...(args(dir, {
+      provider: recordingProvider(early), providerId: 'deepseek', model: 'm', agentMode: 'bypass', turnsBudget: 8,
+      sessionTodos: { list: () => OPEN_TODO, createBatch: () => [], update: () => {}, findByTitle: () => null },
+    }) as Parameters<typeof runApiConversation>))
+    expect(hasFocusBlock(early[1]), 'блок реинжектится раньше порога — правило не то, что пинится').toBe(false)
+
+    const noTodos: ChatMessage[][] = []
+    await runApiConversation(...(args(dir, {
+      provider: recordingProvider(noTodos), providerId: 'deepseek', model: 'm', agentMode: 'bypass', turnsBudget: 8,
+      sessionTodos: { list: () => [], createBatch: () => [], update: () => {}, findByTitle: () => null },
+    }) as Parameters<typeof runApiConversation>))
+    expect(noTodos.some(hasFocusBlock), 'блок появился без единого незакрытого пункта').toBe(false)
   })
 })
