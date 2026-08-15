@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { dirname, join, relative } from 'path'
 import { nativeFsPromises } from './native-fs'
 
-const { cp, mkdir, readFile, readdir, rm, stat, writeFile } = nativeFsPromises
+const { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } = nativeFsPromises
 
 const STALE_UNPACKED = join('resources', 'app.asar.unpacked')
 
@@ -12,6 +12,7 @@ async function removeStaleUnpacked(installDir: string): Promise<void> {
 }
 import { homedir } from 'os'
 import type { InstallDefaults, InstallProgress, InstallResult } from './types'
+import { detectRunningInstall, probeLock, RUNNING_INSTALL_MESSAGE, type LockProbe } from './running-check'
 import { createShortcut, psQuote, runPowerShell, setUninstallRegistry } from './shell'
 import {
   defaultInstallDir,
@@ -115,10 +116,25 @@ function emit(
   })
 }
 
-async function copyPayload(
+/** Суффикс отложенной прежней версии файла. Живёт только внутри одной установки. */
+export const INSTALL_BACKUP_SUFFIX = '.verstak-bak'
+
+/**
+ * Что установка успела сделать с папкой — чтобы откат ВОССТАНОВИЛ, а не стёр.
+ * `replaced` — файлы, у которых прежняя версия отложена под .verstak-bak;
+ * `created` — файлов раньше не было, при откате их достаточно убрать.
+ */
+export type InstallLedger = { replaced: string[]; created: string[] }
+
+export function newInstallLedger(): InstallLedger {
+  return { replaced: [], created: [] }
+}
+
+export async function copyPayload(
   payloadRoot: string,
   installDir: string,
   onProgress: (p: InstallProgress) => void,
+  ledger: InstallLedger,
 ): Promise<void> {
   const files = await walkFiles(payloadRoot)
   const bytesTotal = files.reduce((sum, f) => sum + f.size, 0)
@@ -132,9 +148,26 @@ async function copyPayload(
     const file = files[i]
     const target = join(installDir, file.rel)
     await mkdir(dirname(target), { recursive: true })
+    // Прежняя версия не затирается, а ОТКЛАДЫВАЕТСЯ: переименование внутри той
+    // же папки — операция над метаданными, копирования 860 МБ не добавляет.
+    if (existsSync(target)) {
+      const backup = `${target}${INSTALL_BACKUP_SUFFIX}`
+      await rm(backup, { force: true }).catch(() => {})
+      await rename(target, backup)
+      ledger.replaced.push(file.rel)
+    } else {
+      ledger.created.push(file.rel)
+    }
     await cp(file.abs, target, { force: true })
     bytesDone += file.size
     emit(onProgress, { phase: 'copying' }, i + 1, files.length, bytesDone, bytesTotal, file.rel)
+  }
+}
+
+/** Установка удалась — отложенные копии больше не нужны. */
+export async function commitInstall(installDir: string, ledger: InstallLedger): Promise<void> {
+  for (const rel of ledger.replaced) {
+    await rm(join(installDir, `${rel}${INSTALL_BACKUP_SUFFIX}`), { force: true }).catch(() => {})
   }
 }
 
@@ -158,8 +191,19 @@ Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstal
 `
 }
 
-async function writeUninstaller(installDir: string): Promise<string> {
-  const scriptPath = join(installDir, uninstallScriptName())
+async function writeUninstaller(installDir: string, ledger: InstallLedger): Promise<string> {
+  const rel = uninstallScriptName()
+  const scriptPath = join(installDir, rel)
+  // Тем же порядком, что и payload: прежний скрипт откладывается, а не теряется —
+  // иначе откат обновления оставил бы рабочую установку без своего деинсталлятора.
+  if (existsSync(scriptPath)) {
+    const backup = `${scriptPath}${INSTALL_BACKUP_SUFFIX}`
+    await rm(backup, { force: true }).catch(() => {})
+    await rename(scriptPath, backup)
+    ledger.replaced.push(rel)
+  } else {
+    ledger.created.push(rel)
+  }
   await writeFile(scriptPath, buildUninstallScript(installDir), 'utf8')
   return scriptPath
 }
@@ -188,47 +232,69 @@ export async function dirIsOursToWipe(dir: string): Promise<boolean> {
   }
 }
 
-/** Откат установки. ownDir → убрать папку целиком; иначе удалить ТОЛЬКО
- *  записанные payload-файлы + uninstall-скрипт, не затрагивая чужие файлы. */
-export async function rollbackInstall(installDir: string, payloadRoot: string, ownDir: boolean): Promise<void> {
+/**
+ * Откат установки.
+ *
+ * ownDir → папку завёл сам установщик (не было или была пуста), терять нечего —
+ * убираем целиком. Иначе (обновление поверх рабочей версии) откат ВОССТАНАВЛИВАЕТ
+ * прежние файлы из отложенных копий и убирает только дописанное.
+ *
+ * Прежний контракт — «откат удаляет записанные payload-файлы» — ОТМЕНЁН
+ * (враждебное ревью 2.6.4 §1): payload-файлы и есть вся установка, поэтому
+ * такое удаление означало «снести рабочее приложение при сбое». Замер по живому
+ * стенду: 22 записи в каталоге → 11, `locales/` пуст, приложение не стартует
+ * вообще. Удаление рабочей установки при сбое запрещено в любом случае.
+ */
+export async function rollbackInstall(
+  installDir: string,
+  ledger: InstallLedger,
+  ownDir: boolean,
+): Promise<void> {
   if (ownDir) {
     await rm(installDir, { recursive: true, force: true })
     return
   }
-  let files: FileEntry[] = []
-  try {
-    files = await walkFiles(payloadRoot)
-  } catch {
-    return // нет payload-манифеста — безопаснее ничего не удалять
+  for (const rel of ledger.created) {
+    await rm(join(installDir, rel), { force: true }).catch(() => {})
   }
-  for (const f of files) {
-    await rm(join(installDir, f.rel), { force: true }).catch(() => {})
+  for (const rel of ledger.replaced) {
+    const target = join(installDir, rel)
+    // rename на Windows идёт через MoveFileEx(REPLACE_EXISTING) — недописанная
+    // новая версия перекрывается прежней одним движением.
+    await rename(`${target}${INSTALL_BACKUP_SUFFIX}`, target).catch(() => {})
   }
-  await rm(join(installDir, uninstallScriptName()), { force: true }).catch(() => {})
 }
 
 export async function runInstall(
   installDir: string,
   version: string,
   onProgress: (p: InstallProgress) => void,
+  deps: { probeLock?: LockProbe } = {},
 ): Promise<InstallResult> {
   const normalized = installDir.trim()
   if (!normalized) return { ok: false, error: 'Укажите папку установки.' }
+  // §1 ревью 2.6.4: отказ ДО первой записи. Установка поверх работающей копии
+  // упирается в залоченный файл на середине — и до этой проверки доламывала то,
+  // что ещё работало. Ничего не тронуто → откатывать нечего.
+  if (await detectRunningInstall(normalized, deps.probeLock ?? probeLock)) {
+    return { ok: false, error: RUNNING_INSTALL_MESSAGE }
+  }
   // B1: фиксируем ДО любых записей, можно ли при откате стирать папку целиком —
   // иначе сбой копирования в существующую непустую папку удалял бы чужие данные.
   const ownDir = await dirIsOursToWipe(normalized)
+  const ledger = newInstallLedger()
   let payloadRoot = ''
   try {
     emit(onProgress, { phase: 'preparing' }, 0, 0, 0, 0, '')
     payloadRoot = resolvePayloadRoot()
 
     await removeStaleUnpacked(normalized)
-    await copyPayload(payloadRoot, normalized, onProgress)
+    await copyPayload(payloadRoot, normalized, onProgress, ledger)
 
     emit(onProgress, { phase: 'shortcuts' }, 0, 0, 0, 0, '')
     await createShortcuts(normalized)
 
-    const uninstallPs1 = await writeUninstaller(normalized)
+    const uninstallPs1 = await writeUninstaller(normalized, ledger)
     const exe = installedExePath(normalized)
     const uninstallString = `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${uninstallPs1}"`
 
@@ -242,12 +308,13 @@ export async function runInstall(
       displayIcon: `${exe},0`,
     })
 
+    await commitInstall(normalized, ledger)
     emit(onProgress, { phase: 'done', percent: 100 }, 0, 0, 0, 0, '')
     return { ok: true, installDir: normalized }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     try {
-      await rollbackInstall(normalized, payloadRoot, ownDir)
+      await rollbackInstall(normalized, ledger, ownDir)
     } catch {
       // ignore cleanup errors
     }

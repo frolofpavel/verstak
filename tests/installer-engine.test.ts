@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { dirIsOursToWipe, rollbackInstall } from '../electron/installer/engine'
+import { dirIsOursToWipe, newInstallLedger, rollbackInstall } from '../electron/installer/engine'
 
 /**
  * B1: runInstall при ЛЮБОЙ ошибке делал rm(installDir, recursive, force) —
@@ -23,24 +23,30 @@ describe('installer rollback (B1: не теряем чужие файлы при
     expect(await dirIsOursToWipe(join(base, 'nope'))).toBe(true)
   })
 
-  it('ownDir=false: откат удаляет только payload-файлы, СОХРАНЯЯ чужие', async () => {
-    const payload = join(base, 'payload'); mkdirSync(payload)
-    writeFileSync(join(payload, 'a.txt'), 'a')
-    writeFileSync(join(payload, 'b.txt'), 'b')
+  /**
+   * Утверждение «откат УДАЛЯЕТ записанные payload-файлы» здесь стояло до 16.08 и
+   * стерегло контракт, отменённый враждебным ревью §1: payload-файлы и есть вся
+   * установка, поэтому их удаление означало «снести рабочее приложение при сбое».
+   * Что осталось верным и проверяется по-прежнему — чужие файлы откат не трогает;
+   * восстановление прежних версий стережёт tests/installer/install-guard.test.ts.
+   */
+  it('ownDir=false: откат убирает дописанное, СОХРАНЯЯ чужие файлы', async () => {
     const installDir = join(base, 'install'); mkdirSync(installDir)
     writeFileSync(join(installDir, 'sentinel.txt'), 'МОИ ДАННЫЕ') // чужой файл
-    writeFileSync(join(installDir, 'a.txt'), 'a')                 // частично скопированный payload
+    writeFileSync(join(installDir, 'a.txt'), 'a')                 // дописан установкой
 
-    await rollbackInstall(installDir, payload, false)
+    const ledger = newInstallLedger()
+    ledger.created.push('a.txt')
+    await rollbackInstall(installDir, ledger, false)
 
     expect(existsSync(join(installDir, 'sentinel.txt'))).toBe(true) // сохранён
-    expect(existsSync(join(installDir, 'a.txt'))).toBe(false)       // payload-файл убран
+    expect(existsSync(join(installDir, 'a.txt'))).toBe(false)       // дописанное убрано
   })
 
   it('ownDir=true: откат убирает папку целиком', async () => {
     const installDir = join(base, 'owned'); mkdirSync(installDir)
     writeFileSync(join(installDir, 'a.txt'), 'a')
-    await rollbackInstall(installDir, join(base, 'payload-x'), true)
+    await rollbackInstall(installDir, newInstallLedger(), true)
     expect(existsSync(installDir)).toBe(false)
   })
 })
