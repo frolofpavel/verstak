@@ -37,6 +37,7 @@ import { registerJournalIpc } from './ipc/journal'
 import { registerRemindersIpc } from './ipc/reminders'
 import { getActiveProjectPath } from './state/project-state'
 import { registerSettingsIpc } from './ipc/settings'
+import { resolveSecret } from './env-secrets'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
 import { registerSubscriptionAccountsIpc } from './ipc/subscription-accounts'
@@ -533,18 +534,12 @@ app.whenReady().then(() => {
     }
   })
 
-  const ENV_MAP: Record<string, string> = {
-    gemini_api_key: 'GEMINI_API_KEY',
-    anthropic_api_key: 'ANTHROPIC_API_KEY',
-    openai_api_key: 'OPENAI_API_KEY',
-    groq_api_key: 'GROQ_API_KEY',
-    xai_api_key: 'XAI_API_KEY',
-  }
-  const getSecret = (key: string): string | null => {
-    const stored = settings.getSecret(key)
-    if (stored) return stored
-    return process.env[ENV_MAP[key] ?? ''] ?? null
-  }
+  // §2 ревью 2.6.4: подхват ключа из окружения выключен по умолчанию — раньше он
+  // был молчаливым, и свежий профиль без единого секрета уходил в Google за
+  // деньги владельца `GEMINI_API_KEY`, рисуя при этом «не подключён».
+  // Единый источник правила — electron/env-secrets.ts, оттуда же интерфейс
+  // узнаёт ИМЕНА ключей (никогда значения).
+  const getSecret = (key: string): string | null => resolveSecret(key, settings.getSecret(key)).value
   const getProviderId = (): ProviderId => {
     const v = settings.getSecret('provider')
     if (v && v in PROVIDERS) return v as ProviderId

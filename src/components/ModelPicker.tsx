@@ -19,12 +19,18 @@ import { shortModel } from '../lib/gateway-preset-labels'
 
 type CliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 
+/** §2 ревью 2.6.4: откуда взят ключ, человеку видно, а не только логам. */
+const ENV_KEY_HINT =
+  'Ключ взят из переменной окружения (VERSTAK_ALLOW_ENV_KEYS), а не введён в Настройках. Запросы оплачивает владелец этого ключа.'
+
 interface PickerEntry {
   providerId: ProviderId
   providerLabel: string
   model: string
   transport: RuntimeTransport
   authorized: boolean
+  /** Ключ провайдера взят из переменной окружения, а не введён человеком (§2 ревью). */
+  fromEnv: boolean
   enabled: boolean
   isCurrent: boolean
   sortRank: number
@@ -64,12 +70,14 @@ function buildPickerEntries(
   currentProviderId: ProviderId,
   currentModel: string,
   storedModels: Record<string, string>,
+  envSecretKeys: Set<string> = new Set(),
 ): PickerEntry[] {
   const entries: PickerEntry[] = []
 
   for (const p of providers) {
     const pid = p.id as ProviderId
     const authorized = authorizedIds.has(pid)
+    const fromEnv = !!p.secretKey && envSecretKeys.has(p.secretKey)
     const label = p.shortLabel || p.name
     const models = p.models.length > 0 ? p.models : [storedModels[pid] || p.defaultModel || ''].filter(Boolean)
 
@@ -81,6 +89,7 @@ function buildPickerEntries(
         model,
         transport: p.transport,
         authorized: false,
+        fromEnv: false,
         enabled: false,
         isCurrent: pid === currentProviderId,
         sortRank: 0,
@@ -106,6 +115,7 @@ function buildPickerEntries(
         model: m,
         transport: p.transport,
         authorized: true,
+        fromEnv,
         enabled,
         isCurrent,
         sortRank,
@@ -133,6 +143,8 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
   const [authorizedIds, setAuthorizedIds] = useState<Set<ProviderId>>(new Set())
   const [storedModels, setStoredModels] = useState<Record<string, string>>({})
   const [currentAuthorized, setCurrentAuthorized] = useState(true)
+  const [envSecretKeys, setEnvSecretKeys] = useState<Set<string>>(new Set())
+  const [currentFromEnv, setCurrentFromEnv] = useState(false)
   // Хвост 2.0.8-D2: закрепление аккаунта за чатом. Бэкенд был готов ещё тогда, а в notes
   // 2.0.8 честно написано «кнопка появится в следующем релизе» — вот она.
   const [accounts, setAccounts] = useState<SubscriptionAccountDTO[]>([])
@@ -147,11 +159,12 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
         if (cancelled) return
         setProviders(list)
 
-        const [rawEnabled, rawCustomUrl, cliStatus, localModels, ...rest] = await Promise.all([
+        const [rawEnabled, rawCustomUrl, cliStatus, localModels, envKeyNames, ...rest] = await Promise.all([
           window.api.settings.getKey('enabled_models'),
           window.api.settings.getKey('custom_openai_baseurl'),
           window.api.cliAuth.statusAll().catch(() => null as CliStatusMap | null),
           window.api.localModels.scan().catch(() => []),
+          window.api.settings.envSecretKeys().catch(() => [] as string[]),
           ...list.map(async p => {
             const keyVal = p.secretKey ? await window.api.settings.getKey(p.secretKey) : null
             const modelVal = await window.api.settings.getKey(`model_${p.id}`)
@@ -170,6 +183,12 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
           if (p.secretKey && row.keyVal) keys[p.secretKey] = row.keyVal
           if (row.modelVal) models[p.id] = row.modelVal
         })
+        // §2 ревью 2.6.4: ключ из окружения — тоже ключ. Раньше индикатор его не
+        // видел и писал «не подключён», пока агент уже платил им. Само значение в
+        // renderer не приходит, только имя ключа — маркер достаточен для статуса.
+        const envKeys = new Set(Array.isArray(envKeyNames) ? envKeyNames as string[] : [])
+        for (const k of envKeys) if (k in keys) keys[k] = 'env'
+        setEnvSecretKeys(envKeys)
 
         if (!rawEnabled) {
           const pid = (await window.api.settings.getKey('provider')) ?? 'gemini-api'
@@ -199,10 +218,13 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
         setAuthorizedIds(authorized)
         setStoredModels(models)
         setCurrentAuthorized(authorized.has(provider.id))
+        setCurrentFromEnv(list.some(p => p.id === provider.id && !!p.secretKey && envKeys.has(p.secretKey)))
       } catch {
         if (!cancelled) {
           setEnabledModels(new Set())
           setAuthorizedIds(new Set())
+          setEnvSecretKeys(new Set())
+          setCurrentFromEnv(false)
         }
       }
     })()
@@ -217,8 +239,9 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
       provider.id,
       provider.model,
       storedModels,
+      envSecretKeys,
     ),
-    [providers, enabledModels, authorizedIds, provider.id, provider.model, storedModels],
+    [providers, enabledModels, authorizedIds, provider.id, provider.model, storedModels, envSecretKeys],
   )
 
   const readyEntries = entries.filter(e => e.authorized)
@@ -293,9 +316,9 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
     return () => window.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const triggerTitle = !currentAuthorized
-    ? `${provider.label} · ${shortModel(provider.model)} — провайдер не подключён`
-    : t.modelPicker.changeModel
+  let triggerTitle = t.modelPicker.changeModel
+  if (!currentAuthorized) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — провайдер не подключён`
+  else if (currentFromEnv) triggerTitle = `${provider.label} · ${shortModel(provider.model)} — ${ENV_KEY_HINT}`
 
   return (
     <div className={`gg-mp-wrap ${variant === 'footer' ? 'is-footer' : ''}`} ref={wrapRef}>
@@ -314,6 +337,9 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
             <span className="gg-provider-badge-sep">·</span>
             <span className="gg-provider-badge-model">{shortModel(provider.model)}</span>
             {!currentAuthorized && <span className="gg-provider-badge-warn">не подключён</span>}
+            {currentAuthorized && currentFromEnv && (
+              <span className="gg-provider-badge-env" title={ENV_KEY_HINT}>ключ из окружения</span>
+            )}
           </span>
         ) : (
           <>
@@ -465,6 +491,9 @@ function PickerRow({
           <span className="gg-mp-row-title">
             <span className="gg-mp-row-model">{shortModel(entry.model)}</span>
             <span className={`gg-mp-badge gg-mp-badge-transport ${entry.transport === 'CLI' ? 'is-cli' : entry.transport === 'Tunnel' ? 'is-tunnel' : 'is-api'}`}>{entry.transport}</span>
+            {entry.fromEnv && (
+              <span className="gg-mp-badge gg-mp-badge-env" title={ENV_KEY_HINT}>из окружения</span>
+            )}
           </span>
         </span>
         <span className="gg-mp-row-state">

@@ -594,6 +594,8 @@ declare global {
       }
       settings: {
         getKey: (key: string) => Promise<string | null>
+        /** Имена ключей провайдеров, взятых из переменных окружения (никогда значения). */
+        envSecretKeys: () => Promise<string[]>
         setKey: (key: string, value: string) => Promise<void>
         outputStyles: (projectPath: string | null) => Promise<Array<{ id: string; name: string; description: string; scope: string }>>
         rememberApproval: (toolName: string, argText: string) => Promise<string | null>

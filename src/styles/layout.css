@@ -4598,6 +4598,13 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   color: var(--warning, #facc15);
   white-space: nowrap;
 }
+/* §2 ревью 2.6.4: ключ из переменной окружения виден человеку, а не только логам. */
+.gg-provider-badge-env {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--warning, #facc15);
+  white-space: nowrap;
+}
 .gg-provider-dot {
   width: 7px; height: 7px;
   border-radius: 50%;
@@ -5895,6 +5902,12 @@ body.gg-rail-toggling .gg-msg-actions {
 }
 .gg-mp-badge-transport {
   flex-shrink: 0;
+}
+.gg-mp-badge-env {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--warning, #facc15) 90%, var(--text-tertiary));
+  border-color: color-mix(in srgb, var(--warning, #facc15) 34%, transparent);
+  background: color-mix(in srgb, var(--warning, #facc15) 9%, transparent);
 }
 .gg-mp-row-hidden-pill {
   display: inline-flex;

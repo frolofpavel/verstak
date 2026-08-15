@@ -24,6 +24,7 @@ import { runDoctor } from '../ai/doctor'
 import { recommendTier, type TierRecommendation } from '../ai/tier-router'
 import { AGENT_MODES, decide, type AgentMode, type ToolDecision } from '../ai/mode-policy'
 import { dangerousCommandLabels } from '../ai/command-policy'
+import { envSecretKeys } from '../env-secrets'
 
 /**
  * Сериализуемый дескриптор провайдера для renderer (без фабричных функций).
@@ -77,6 +78,12 @@ function buildPolicyMatrix(): PolicyMatrixDTO {
 
 export function registerSettingsIpc(settings: Settings): void {
   ipcMain.handle('settings:get-key', (_e, key: string) => settings.getSecret(key))
+
+  // §2 ревью 2.6.4: интерфейс обязан знать, что ключ пришёл из окружения, иначе
+  // индикатор врёт («не подключён» при живом оплаченном запросе). Наружу уходят
+  // ТОЛЬКО имена ключей — значения не покидают main. Пустой список, пока не
+  // выставлен VERSTAK_ALLOW_ENV_KEYS.
+  ipcMain.handle('settings:env-secret-keys', (): string[] => envSecretKeys(k => settings.getSecret(k)))
   ipcMain.handle('settings:set-key', (e, key: string, value: string) => {
     settings.setSecret(key, value)
     if (key === UI_SCALE_KEY) {

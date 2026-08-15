@@ -139,6 +139,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   settings: {
     getKey: (key: string) => ipcRenderer.invoke('settings:get-key', key),
+    /** Имена ключей, которые прямо сейчас берутся из окружения. Значений здесь нет. */
+    envSecretKeys: () => ipcRenderer.invoke('settings:env-secret-keys'),
     setKey: (key: string, value: string) => ipcRenderer.invoke('settings:set-key', key, value),
     outputStyles: (projectPath: string | null) => ipcRenderer.invoke('output-styles:list', projectPath),
     rememberApproval: (toolName: string, argText: string) => ipcRenderer.invoke('permissions:remember', toolName, argText),
