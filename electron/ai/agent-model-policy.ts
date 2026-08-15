@@ -43,6 +43,14 @@ export function canonicalAgentModel(model: string | null | undefined): string | 
   return DATA.aliases[model] ?? model
 }
 
+/** Политика конкретной модели (agentMode / роли / рецепты).
+ *
+ *  ОСТАВЛЕНА, И ЭТО ОБЪЯВЛЕНО (§1.4 ревизии, 15.08): продукт сегодня ходит в
+ *  реестр только через recommendAgentModel — эту функцию зовёт один её тест.
+ *  Не удалена потому, что она читает продуктовую политику без побочных эффектов,
+ *  а её тест содержательный: через неё проверяется СОДЕРЖИМОЕ
+ *  agent-model-policy.json (какой модели какой agentMode), и удаление функции
+ *  унесло бы вместе с собой проверку самой политики. */
 export function getAgentModelPolicy(model: string | null | undefined): AgentModelPolicy | null {
   const canonical = canonicalAgentModel(model)
   if (!canonical) return null

@@ -35,7 +35,13 @@ export interface RouteAttempt {
   accountId: number | null
 }
 
-/** Ключ попытки (инвариант 7): повтор запрещён. */
+/** Ключ попытки (инвариант 7): повтор запрещён.
+ *
+ *  ОСТАВЛЕН ОСОЗНАННО, и это объявляется (§1.4 ревизии, 15.08): в проде функцию
+ *  сегодня не зовут — учёта попыток по ключам нет вовсе, повтор гасят другие
+ *  механизмы (loop guard в runner-shared, охлаждение аккаунта). Живёт своим
+ *  тестом. Это не мусор, а ЕДИНСТВЕННОЕ место, где записан формат ключа
+ *  `providerId:model:accountId`; когда учёт появится, разъезжаться будет нечему. */
 export function attemptKey(a: RouteAttempt): string {
   return `${a.providerId}:${a.model}:${a.accountId ?? '-'}`
 }
@@ -98,34 +104,15 @@ export function cooldownReasonForLimitKind(kind: 'usage' | 'rate' | 'quota' | 'a
   return undefined
 }
 
-/** Что делать с текущим маршрутом. */
-export type RouteAction =
-  | 'stop'           // прекратить: маршрут исчерпан / политика запрещает смену / loop guard
-  | 'refresh-auth'   // обновить токен/логин на ТОМ ЖЕ аккаунте (не смена маршрута)
-  | 'rotate-account' // сменить аккаунт того же провайдера/модели (пул подписок)
-  | 'model-fallback' // сменить провайдера/модель (настроенная цепочка)
-
-export interface RouteCooldown {
-  scope: CooldownScope    // account | model | provider — глушим ТОЛЬКО нужную область (инвариант 6)
-  reason: CooldownReason
-}
-
-export interface RouteDecisionInput {
-  policy: RoutePolicy
-  /** Аккаунт закреплён за чатом (инвариант 1). Проводка подаёт false до среза D2. */
-  pinned: boolean
-  current: RouteAttempt
-  reason: RouteReason
-  /** Уже попробованные ключи providerId:model:accountId (инвариант 7, без повторов). */
-  triedKeys: readonly string[]
-  /** Готовые (не cooling) аккаунты того же провайдера/модели — кандидаты ротации, по порядку. */
-  readyAccounts: readonly RouteAttempt[]
-  /** Настроенные fallback провайдер/модель кандидаты, по порядку приоритета. */
-  modelFallbacks: readonly RouteAttempt[]
-  /** Общий потолок попыток (loop guard). Единый источник — согласован с runner-shared. */
-  maxAttempts: number
-}
-
+// СНЯТ 15.08 (§1.4 ревизии) контракт функции решения маршрута, которой не было
+// написано: RouteDecision (результат), RouteDecisionInput (вход), RouteAction и
+// RouteCooldown (его составные части). Ни одного потребителя ни в проде, ни в
+// тестах — decideRoute так и не появилась, маршрут решается в runner-api, а
+// охлаждение — cooldownReasonForLimitKind ниже. Половину контракта уже сняли
+// вместе с §1.3, и держать вторую половину было бы хуже, чем не держать ничего:
+// подробный интерфейс с описанием инвариантов читается как ЖИВОЙ и обещает
+// движок, которого нет. Понадобится — восстанавливается из git одной командой,
+// потому что писался целиком и разом.
 /** Классифицирует ошибку/статус в RouteReason (чистая логика). Расширяет classifyFallbackReason
  *  разделением quota vs rate-limit vs provider-unavailable vs model-not-found (инвариант 5).
  *  Порядок проверок важен: auth → context → model-not-found → quota → rate-limit → network →

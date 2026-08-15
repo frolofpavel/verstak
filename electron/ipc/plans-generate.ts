@@ -91,6 +91,13 @@ export function __resetPlanGenerationForTests(): void {
   activeByProject.clear()
 }
 
+/** Идёт ли сейчас генерация по этому проекту.
+ *
+ *  ОСТАВЛЕНА, И ЭТО ОБЪЯВЛЕНО (§1.4 ревизии, 15.08): сам guard (§5.3) работает
+ *  внутри — на реестре activeByProject, — а этот публичный запрос состояния зовёт
+ *  один тест. Не удалён потому, что реестр модульный и закрытый: без него
+ *  проверить «guard действительно держит один запрос на проект» можно было бы
+ *  только через побочные эффекты. */
 export function isGenerating(projectPath: string): boolean {
   return activeByProject.has(projectPath)
 }

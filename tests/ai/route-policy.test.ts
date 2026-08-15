@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   classifyRouteReason, attemptKey, resolveChatAccount, pickChatAccountId,
-  type RouteDecisionInput, type RouteAttempt, type RouteReason,
+  type RouteAttempt, type RouteReason,
 } from '../../electron/ai/route-policy'
 
 const A = (providerId: string, model: string, accountId: number | null = null): RouteAttempt =>

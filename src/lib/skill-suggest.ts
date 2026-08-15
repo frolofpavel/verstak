@@ -264,7 +264,12 @@ export function buildSkillIndex(skills: Skill[]): SkillTokenIndex[] {
   }))
 }
 
-/** Скоринг черновика против готового индекса (на keystroke токенизируем только draft). */
+/** Скоринг черновика против готового индекса (на keystroke токенизируем только draft).
+ *
+ *  ОСТАВЛЕНА, И ЭТО ОБЪЯВЛЕНО (§1.4 ревизии, 15.08): интерфейс показывает список
+ *  подсказок и потому зовёт suggestManyFromIndex / suggestScoredFromIndex, а эту
+ *  однострочную обёртку «дай ровно одну» — только её тест. Не задел незаконченной
+ *  фичи и не дубль логики: весь скоринг живёт ниже, здесь лишь limit = 1. */
 export function suggestFromIndex(
   draft: string,
   index: SkillTokenIndex[],
