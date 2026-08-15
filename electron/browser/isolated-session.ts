@@ -60,7 +60,10 @@ export interface IsolatedBrowserApi {
   pressKey(key: string, n?: number): Promise<{ ok: true; submitted: boolean; url: string | null } | Fail>
   waitFor(query: string, timeoutMs?: number): Promise<{ ok: true } | Fail>
   /** Форма записи — `{ level, text, line, source }`: ровно то, что читает
-   *  `browser-redact.redactConsoleMessage`. Иначе редактор вернул бы пустой текст. */
+   *  `browser-redact.redactConsoleMessage`. Иначе редактор вернул бы пустой текст.
+   *  Канон формы с 15.08 живёт в `shared/browser-console-record` (там же таблица
+   *  уровней): встроенный путь эту форму как раз и не соблюдал — клал ключ
+   *  `message`, и модель получала пустой текст у каждой записи. */
   consoleMessages(): Promise<Array<{ level: string; text: string; line?: number; source?: string }>>
   networkRequests(): Promise<Array<Record<string, unknown>>>
   screenshot(): Promise<string>

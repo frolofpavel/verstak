@@ -53,28 +53,37 @@ describe('redactNetworkEntry — auth-заголовки и URL-секреты �
 
 describe('redactConsoleMessage — секрет из console.log не уходит модели', () => {
   it('редактирует текст, нормализует уровень, хранит номер строки', () => {
-    const m = redactConsoleMessage({ level: 2, text: 'Auth failed with key sk-aBcdEfGh1234567890ijKLmnOP', line: 42, source: 'app.js' })
+    const m = redactConsoleMessage({ level: 3, text: 'Auth failed with key sk-aBcdEfGh1234567890ijKLmnOP', line: 42, source: 'app.js' })
     expect(m.level).toBe('error')
     expect(m.text).not.toContain('sk-aBcdEfGh1234567890ijKLmnOP')
     expect(m.line).toBe(42)
   })
 
-  it('уровни webview (0/1/2/3) → log/warning/error/debug', () => {
-    expect(redactConsoleMessage({ level: 0, text: 'x' }).level).toBe('log')
-    expect(redactConsoleMessage({ level: 1, text: 'x' }).level).toBe('warning')
-    expect(redactConsoleMessage({ level: 2, text: 'x' }).level).toBe('error')
-    expect(redactConsoleMessage({ level: 3, text: 'x' }).level).toBe('debug')
+  // ТАБЛИЦА ИСПРАВЛЕНА 15.08 по ЖИВОМУ ЗАМЕРУ, а не подогнана под правку. Прежние
+  // утверждения (0→log, 1→warning, 2→error, 3→debug) описывали producer'а, которого
+  // не существует: реальное DOM-событие console-message элемента <webview> на
+  // Electron 40 отдаёт console.debug→0, console.log/info→1, console.warn→2,
+  // console.error→3. Из-за зеркальной трактовки настоящая ошибка страницы получала
+  // уровень debug и выпадала из фильтра error+warning совсем. Полная таблица и
+  // связь producer↔читатель — tests/contracts/browser-console-record-shape.test.ts.
+  it('уровни webview (0/1/2/3) → debug/info/warning/error', () => {
+    expect(redactConsoleMessage({ level: 0, text: 'x' }).level).toBe('debug')
+    expect(redactConsoleMessage({ level: 1, text: 'x' }).level).toBe('info')
+    expect(redactConsoleMessage({ level: 2, text: 'x' }).level).toBe('warning')
+    expect(redactConsoleMessage({ level: 3, text: 'x' }).level).toBe('error')
   })
 })
 
 describe('ОГРАНИЧЕННЫЙ список (не весь лог — план §4)', () => {
   it('capConsoleErrors: только error+warning, последние N, count честный', () => {
+    // Уровни — по живому замеру webview: 1=log/info, 2=warning, 3=error (см. пояснение
+    // к таблице выше). Утверждения теста не менялись, менялись только числа фикстуры.
     const raw = [
-      { level: 0, text: 'обычный лог' },
-      { level: 1, text: 'предупреждение 1' },
-      { level: 2, text: 'ошибка 1' },
-      { level: 2, text: 'ошибка 2' },
-      { level: 2, text: 'ошибка 3' },
+      { level: 1, text: 'обычный лог' },
+      { level: 2, text: 'предупреждение 1' },
+      { level: 3, text: 'ошибка 1' },
+      { level: 3, text: 'ошибка 2' },
+      { level: 3, text: 'ошибка 3' },
     ]
     const r = capConsoleErrors(raw, 2)
     expect(r.count).toBe(4)          // всего error+warning (лог отфильтрован)
@@ -121,7 +130,7 @@ describe('редакция стоит на ПУТИ исполнения (чер
 
   it('browser_console_errors через хендлер отдаёт только error/warning, ограниченным списком', async () => {
     const ctx = ctxWith({ url: 'https://x', __raw: [
-      { level: 0, text: 'обычный лог' }, { level: 2, text: 'TypeError: x is undefined' },
+      { level: 1, text: 'обычный лог' }, { level: 3, text: 'TypeError: x is undefined' },
     ] })
     const res = await browserHandler.handle({ id: 'c1', name: 'browser_console_errors', args: {} } as ToolCall, ctx)
     const out = res.result as { count: number; messages: Array<{ level: string; text: string }> }
