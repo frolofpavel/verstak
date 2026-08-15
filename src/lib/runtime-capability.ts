@@ -108,6 +108,6 @@ export function runtimeCapability(providerId: string, transport: RuntimeTranspor
 // ─── Защита секретов (1.9.6 #2): честный ярлык по CLI ────────────────────────
 // Источник правды — shared/contracts/cli-capability.ts (одна матрица на оба слоя;
 // раньше здесь жила ручная копия уровня под анти-дрейф-тестом). Ре-экспорт
-// сохраняет импортёров renderer'а (RunDiagnostics, AgentRunInspector).
+// сохраняет импортёров renderer'а (RunDiagnostics).
 export { secretProtectionLevel, type SecretProtectionLevel } from '../../shared/contracts/cli-capability'
 
