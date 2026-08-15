@@ -281,16 +281,35 @@ describe('vskCapSnapshot — top-N выдачи, но нумерация в DOM 
   it('элементов больше N → truncated, shown=N, но элемент за пределами N ВСЁ РАВНО кликается', () => {
     document.body.innerHTML = Array.from({ length: 200 }, (_, i) => `<button>Кнопка ${i}</button>`).join('')
     const snap = vskSnapshot('g1')     // нумерует ВСЕ 200
-    const capped = vskCapSnapshot(snap, VSK_SNAPSHOT_TOP_N)   // 150
+    const capped = vskCapSnapshot(snap, VSK_SNAPSHOT_TOP_N)
     expect(snap.count).toBe(200)
     expect(capped.count).toBe(200)     // всего честно
-    expect(capped.shown).toBe(150)     // отдали top-N
+    expect(capped.shown).toBe(VSK_SNAPSHOT_TOP_N)     // отдали top-N
     expect(capped.truncated).toBe(true)
-    expect(capped.elements.length).toBe(150)
+    expect(capped.elements.length).toBe(VSK_SNAPSHOT_TOP_N)
     // Ключевое: элемент №180 не в выдаче, но в DOM пронумерован → резолвится (find/клик достанут).
     const r = vskResolveNumbered(180)
     expect(r.ok).toBe(true)
     expect((r as { ok: true; el: Element }).el.textContent).toBe('Кнопка 179')
+  })
+
+  // P3 кусок 2 (15.08): понижение порога со 150 до 50 опирается на утверждение
+  // «цель за пределами карты не потеряна — её находит find». Утверждение обязано
+  // быть проверяемым, иначе обоснование порога держится на словах: замер показал
+  // реальные цели на рангах 135 и 152 (переключатель темы и результаты MDN).
+  it('find видит цель ЗА пределами top-N — обрезается выдача снимка, не поиск', () => {
+    document.body.innerHTML = Array.from({ length: 200 }, (_, i) =>
+      `<button>${i === 179 ? 'Переключить тему' : `Кнопка ${i}`}</button>`).join('')
+    const snap = vskSnapshot('g1')
+    const capped = vskCapSnapshot(snap, VSK_SNAPSHOT_TOP_N)
+    // В карте цели нет — она за порогом.
+    expect(capped.elements.some(e => e.name === 'Переключить тему')).toBe(false)
+    // Но find её находит, и по её номеру элемент резолвится (значит клик дойдёт).
+    const r = vskFind(snap, 'переключить тему', 30)
+    expect(r.matches.length).toBe(1)
+    expect(r.matches[0].n).toBe(180)
+    expect(r.matches[0].n).toBeGreaterThan(VSK_SNAPSHOT_TOP_N)
+    expect(vskResolveNumbered(r.matches[0].n).ok).toBe(true)
   })
 
   it('элементов ≤ N → truncated=false, показаны все', () => {
