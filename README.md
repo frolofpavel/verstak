@@ -22,7 +22,7 @@ Technical capabilities below prove that promise — they do not replace it.
 
 ## Features
 
-### Providers (18)
+### Providers
 
 **API providers** (bring your own key):
 - Gemini, Claude, Grok, ChatGPT, OpenRouter, DeepSeek, Kimi (Moonshot), Qwen, Mistral, Groq, Ollama, Custom OpenAI-compatible
@@ -58,7 +58,7 @@ Memory is visible and editable in Settings → Memory.
 
 ### Agent Capabilities
 
-- **20+ tools:** read/write files, terminal, search, browser navigation, diagnostics
+- **Tools:** read/write files, terminal, search, browser navigation, diagnostics
 - **`check_diagnostics`** — runs `tsc --noEmit` as a native agent tool; agent sees and fixes type errors in the loop
 - **Multi-agent orchestration** — `delegate` / `orchestrate` / **`swarm`** (consensus): dispatch subtasks to different providers/roles in parallel, live agent graph, todo-gate
 - **Tasks dashboard** — every `ai:send` is a tracked run with live progress (turn N, current tool, counters), stop / resume, crash-resume that **never auto-replays destructive actions**
@@ -89,7 +89,7 @@ Memory is visible and editable in Settings → Memory.
 
 ---
 
-### Connectors (31)
+### Connectors
 
 Pull live data from external systems straight into the agent chat. Read-only, credentials encrypted.
 

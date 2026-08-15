@@ -19,7 +19,7 @@ export const ru: Translations = {
     enter: 'Войти →',
     profile: 'Профиль',
     features: {
-      providers: '10+ AI-провайдеров в одном окне',
+      providers: 'AI-провайдеры в одном окне',
       memory: 'Память между сессиями',
       agents: 'Параллельные агенты',
     },

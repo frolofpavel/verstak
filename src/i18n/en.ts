@@ -18,7 +18,7 @@ export const en = {
     enter: 'Enter →',
     profile: 'Profile',
     features: {
-      providers: '10+ AI providers in one window',
+      providers: 'AI providers in one window',
       memory: 'Memory across sessions',
       agents: 'Parallel agents',
     },
