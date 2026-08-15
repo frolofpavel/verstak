@@ -349,7 +349,6 @@ export function vskFill(el: Element, text: string): FillResult {
 // следующее поле, Escape закрывает подсказку/оверлей — ровно то, чего не хватало,
 // чтобы дойти до выдачи через UI-форму.
 export const VSK_PRESS_KEYS = ['Enter', 'Tab', 'Escape'] as const
-export type VskPressKey = typeof VSK_PRESS_KEYS[number]
 
 /** Результат нажатия клавиши. */
 export type PressKeyResult = { ok: true; submitted: boolean } | { ok: false; error: string }

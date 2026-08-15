@@ -26,7 +26,6 @@ interface AgentModelPolicyData {
     fastEdit: string
   }
   aliases: Record<string, string>
-  gatewayPresetRecommendations: Record<string, string>
   policies: AgentModelPolicy[]
 }
 
@@ -38,7 +37,6 @@ export const DEFAULT_AGENT_REVIEWER_MODEL = DATA.defaults.reviewer
 export const DEFAULT_AGENT_PLANNER_MODEL = DATA.defaults.planner
 export const DEFAULT_AGENT_FAST_EDIT_MODEL = DATA.defaults.fastEdit
 export const AGENT_MODEL_POLICIES: AgentModelPolicy[] = DATA.policies
-export const GATEWAY_AGENT_PRESET_RECOMMENDATIONS = DATA.gatewayPresetRecommendations
 
 export function canonicalAgentModel(model: string | null | undefined): string | null {
   if (!model) return null

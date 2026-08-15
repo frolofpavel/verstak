@@ -71,17 +71,6 @@ export type FallbackReason =
   | 'provider_compat_error'     // прочая 4xx-несовместимость запроса
   | 'unknown'
 
-export interface FallbackPlan {
-  /** Повторить на ТОЙ ЖЕ модели (транзиент). */
-  retrySameModel: boolean
-  /** Переключиться на fallback-провайдера/модель. */
-  switchModel: boolean
-  /** Перейти из native tool-calling в JSON-text режим на той же модели. */
-  switchToJsonMode: boolean
-  /** Остановить прогон и вернуть понятную ошибку пользователю. */
-  askUser: boolean
-}
-
 /** Классифицирует ошибку/ситуацию агентного цикла в FallbackReason (чистая логика). */
 export function classifyFallbackReason(error: unknown): FallbackReason {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase()

@@ -70,9 +70,6 @@ export function safeParseProfile(json: string | null | undefined): ProjectProfil
   }
 }
 
-/** Относительный путь профиля в проекте (директория-конвенция приложения). */
-export const PROFILE_REL_PATH = '.verstak/profile.json'
-
 /**
  * Загрузить профиль проекта из `.verstak/profile.json`. Никогда не бросает —
  * нет файла / битый JSON → null (context-pack просто не инжектит блок).

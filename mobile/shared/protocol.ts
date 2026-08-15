@@ -38,7 +38,6 @@ export interface MobileEnvelope<T = unknown> {
 }
 
 export type MobileCommand = MobileEnvelope & { kind: MobileCommandKind }
-export type MobileEvent = MobileEnvelope & { kind: MobileEventKind }
 
 const kinds = new Set<string>([...MOBILE_COMMAND_KINDS, ...MOBILE_EVENT_KINDS])
 

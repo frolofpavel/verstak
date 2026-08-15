@@ -39,10 +39,6 @@ export function selectFixtures(suiteName, requestedTasks) {
   return selected
 }
 
-export function listSuites() {
-  return [...SUITES.keys()]
-}
-
 function assertUniqueIds(fixtures) {
   const seen = new Set()
   for (const fixture of fixtures) {

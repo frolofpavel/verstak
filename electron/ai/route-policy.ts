@@ -126,19 +126,6 @@ export interface RouteDecisionInput {
   maxAttempts: number
 }
 
-export interface RouteDecision {
-  action: RouteAction
-  /** Следующий маршрут (для rotate/model-fallback/refresh-auth) либо null (stop). */
-  next: RouteAttempt | null
-  reason: RouteReason
-  /** Номер попытки = triedKeys.length + 1 (инвариант 8: пишется в route-changed). */
-  attemptNumber: number
-  /** Какую область охладить (null — не охлаждать: auth/network/none). */
-  cooldown: RouteCooldown | null
-  /** allow-политика меняет маршрут только с видимым предупреждением (инвариант 2). */
-  visibleWarning: boolean
-}
-
 /** Классифицирует ошибку/статус в RouteReason (чистая логика). Расширяет classifyFallbackReason
  *  разделением quota vs rate-limit vs provider-unavailable vs model-not-found (инвариант 5).
  *  Порядок проверок важен: auth → context → model-not-found → quota → rate-limit → network →

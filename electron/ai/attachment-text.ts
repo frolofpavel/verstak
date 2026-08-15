@@ -24,8 +24,6 @@ export function isOfficeAttachment(att: Attachment): boolean {
 /** Исход конвейера по ОДНОМУ office-вложению — единый источник и для инлайна текста
  *  (expandOfficeAttachments), и для код-сводки материалов (materials-context). */
 export type OfficeExtraction = { ok: true; text: string } | { ok: false; reason: string }
-/** @deprecated старое имя — оставлено как мост до полной миграции потребителей. */
-export type DocxExtraction = OfficeExtraction
 
 export async function extractDocxAttachment(att: Attachment): Promise<OfficeExtraction> {
   try {
