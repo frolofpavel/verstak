@@ -262,22 +262,11 @@ export const EXTRA_PROVIDERS: ExtraProviderSpec[] = [
   }
 ]
 
-/**
- * Русские названия пресетов Verstak Gateway для UI. В API уходит id (ключ),
- * пользователю показываем человекочитаемое (значение). Fusion — Phase 4.
- */
-export const GATEWAY_PRESET_LABELS: Record<string, string> = {
-  'kimi-k2.7-code': 'Kimi K2.7 Code - default',
-  'deepseek-chat': 'DeepSeek Chat - fallback',
-  'qwen3-coder': 'Qwen3 Coder - allowed',
-  'verstak/economy': 'Эконом',
-  'verstak/free': '🎁 Бесплатно — проба',
-  'verstak/balanced': 'Баланс',
-  'verstak/coder': 'Кодинг',
-  'verstak/long': 'Длинный контекст',
-  'verstak/fast': 'Быстро',
-  'verstak/private': 'Приватно',
-}
+// Русские метки пресетов Verstak Gateway живут ТОЛЬКО в renderer'е
+// (src/lib/gateway-preset-labels.ts): метку показывает пикер моделей, у main
+// поверхности показа нет и по IPC таблица не уходила. Здешняя копия удалена
+// 15.08 (§1.2 ревизии) — её читали одни тесты. Страж «у каждого пресета есть
+// метка» стоит на живой копии: tests/lib/gateway-preset-labels.test.ts.
 
 /**
  * Builder для extra-провайдера. Принимает providerId и runtime-конфиг

@@ -626,7 +626,10 @@ const GATE_MAX_WORKERS = 4
 // единственным его потребителем — tests/components/agent-run-inspector.test.ts (5 тестов).
 // → 5545 ИЗМЕРЕНО на дереве уборки (`npm run test:fast -- --maxWorkers=4`, 0 падений,
 // 640 файлов). Число ИЗМЕРЕНО, а не вычтено из прежнего (§3.1).
-const EXPECTED_TOTAL_TESTS = 5545
+// 15.08 УБОРКА §1.2 ревизии: удалена мёртвая main-копия GATEWAY_PRESET_LABELS вместе
+// с двумя тестами, которые были её единственными читателями. → 5543 ИЗМЕРЕНО
+// (`npm run test:fast -- --maxWorkers=4`, 0 падений, 641 файл).
+const EXPECTED_TOTAL_TESTS = 5543
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

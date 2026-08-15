@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { EXTRA_PROVIDERS, GATEWAY_PRESET_LABELS, createExtraProvider } from '../../electron/ai/extra-providers'
+import { EXTRA_PROVIDERS, createExtraProvider } from '../../electron/ai/extra-providers'
 
 describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', () => {
   const spec = EXTRA_PROVIDERS.find(p => p.id === 'verstak-gateway')
@@ -20,12 +20,9 @@ describe('Verstak Gateway провайдер (Phase 1 / Итерация 1)', ()
     expect(spec!.defaultModel).toBe('kimi-k2.7-code')
   })
 
-  it('русские названия пресетов для UI (в API уходит id)', () => {
-    expect(GATEWAY_PRESET_LABELS['verstak/economy']).toBe('Эконом')
-    expect(GATEWAY_PRESET_LABELS['verstak/coder']).toBe('Кодинг')
-    // каждый пресет имеет лейбл
-    for (const m of spec!.models) expect(GATEWAY_PRESET_LABELS[m]).toBeTruthy()
-  })
+  // Проверка русских названий пресетов переехала туда, где живёт единственная
+  // таблица меток — tests/lib/gateway-preset-labels.test.ts (main-копия удалена
+  // 15.08, §1.2 ревизии; показывает метку renderer, у main поверхности нет).
 
   it('createExtraProvider строит провайдер (OpenAI-совместимый, как DeepSeek)', () => {
     const p = createExtraProvider('verstak-gateway', { apiKey: 'vsk_live_test' })
