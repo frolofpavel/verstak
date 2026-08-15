@@ -167,6 +167,52 @@ describe('connector_query gating + Я.Диск guard', () => {
 
   // 2.0.0 security (аудит M2): вывод коннектора недоверен → обрамлён маркером
   // против prompt-injection (симметрия с web_fetch).
+  // Ревизия 15.08 §2.6: unattended-прогон снова может ПИСАТЬ через коннекторы, и ни один
+  // тест не краснеет. Мутация `connectors.ts:61` (op-политика read-only выключена) давала
+  // 5463 зелёных: `tests/ai/connector-readonly.test.ts` стережёт чистую
+  // `isReadOnlyConnectorOp`, а что гейт СТОИТ в хендлере — не проверял никто. Цена —
+  // обещание «без надзора разрешено только чтение», ради которого расписание вообще
+  // можно было включать по умолчанию.
+  //
+  // Наблюдаемая величина — ушёл ли запрос в коннектор (h.queries), а не текст ошибки.
+  it('unattended: ssh (выполнение) → запрос НЕ уходит, причина названа', async () => {
+    const h = harness(dir, 'bypass')  // bypass — чтобы отказ шёл ИМЕННО от op-политики, а не от режима
+    ;(h.ctx as { readOnlyConnectors?: boolean }).readOnlyConnectors = true
+    ;(h.ctx.connectors as { list: () => Array<{ id: string; kind: string }> }).list = () => [{ id: 'ssh', kind: 'ssh' }]
+    const res = await connectorQueryHandler.handle(call({ id: 'ssh', op: 'run_remote' }), h.ctx)
+    expect(h.queries.length).toBe(0)
+    expect(res.error).toContain('без надзора')
+  })
+
+  it('unattended: telegram send (отправка) → запрос НЕ уходит', async () => {
+    const h = harness(dir, 'bypass')
+    ;(h.ctx as { readOnlyConnectors?: boolean }).readOnlyConnectors = true
+    ;(h.ctx.connectors as { list: () => Array<{ id: string; kind: string }> }).list = () => [{ id: 'telegram', kind: 'telegram' }]
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', op: 'send_message' }), h.ctx)
+    expect(h.queries.length).toBe(0)
+    expect(res.error).toContain('без надзора')
+  })
+
+  // КОНТРОЛЬНЫЕ кейсы. Первый: читающий op того же коннектора ОБЯЗАН пройти — иначе
+  // «запрос не ушёл» измеряло бы просто сломанный хендлер. Второй: тот же пишущий op
+  // БЕЗ unattended проходит — значит отказ даёт именно op-политика, а не что-то ещё.
+  it('КОНТРОЛЬ: unattended + читающий op (telegram get_me) → запрос уходит', async () => {
+    const h = harness(dir, 'bypass')
+    ;(h.ctx as { readOnlyConnectors?: boolean }).readOnlyConnectors = true
+    ;(h.ctx.connectors as { list: () => Array<{ id: string; kind: string }> }).list = () => [{ id: 'telegram', kind: 'telegram' }]
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', op: 'get_me' }), h.ctx)
+    expect(h.queries.length).toBe(1)
+    expect(res.error).toBeFalsy()
+  })
+
+  it('КОНТРОЛЬ: тот же пишущий op БЕЗ unattended → запрос уходит', async () => {
+    const h = harness(dir, 'bypass')
+    ;(h.ctx.connectors as { list: () => Array<{ id: string; kind: string }> }).list = () => [{ id: 'telegram', kind: 'telegram' }]
+    const res = await connectorQueryHandler.handle(call({ id: 'telegram', op: 'send_message' }), h.ctx)
+    expect(h.queries.length).toBe(1)
+    expect(res.error).toBeFalsy()
+  })
+
   it('результат коннектора обрамлён маркером недоверенного контента', async () => {
     const h = harness(dir, 'auto', () => ({ rows: [{ msg: 'привет' }] }))
     const res = await connectorQueryHandler.handle(call({ id: 'http' }), h.ctx)

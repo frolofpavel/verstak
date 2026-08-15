@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, rm, readFile } from 'fs/promises'
+import { mkdtemp, rm, readFile, mkdir } from 'fs/promises'
+import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname, resolve } from 'path'
 import { generateHtml, generateDocx, artifactsDir, resolveDocxDir, commonReadDir } from '../../electron/ai/artifacts'
@@ -178,6 +179,45 @@ describe('generateDocx save_to (назначение перечнем)', () => {
     const r = await generateDocx(projectPath, { filename: '../../evil', sections: sec, save_to: 'alongside' })
     expect(r.path.startsWith(projectPath + sep)).toBe(true)
     expect(r.filename).not.toMatch(/[/\\]/)
+  })
+})
+
+// Ревизия 15.08 §2.7: артефакт может перезаписать `.env` / ключи — и НИ ОДИН тест не
+// краснел. Мутация `artifacts.ts:207` (проверка `isForbiddenPath` обесточена) давала
+// 5463 зелёных: сетка выше проверяет happy-path генерации и перечень назначений, а
+// `tests/security/secret-write-path.test.ts` стережёт путь `write_file`, не артефактов.
+// Гейт стоит ОДИН на два признака — имя файла и весь путь; сетка бьёт по обоим, потому
+// что мутация обесточивает их разом.
+describe('generateDocx — запрет секрето-путей на боевом пути артефактов (§2.7 ревизии 15.08)', () => {
+  const sec = [{ paragraphs: ['x'] }]
+
+  it('имя `.env` → запись отклонена, файла на диске нет', async () => {
+    // sanitizeFilename оставляет `.env` как есть → `.env.docx`, и это ровно тот
+    // случай, который basename-правило обязано поймать.
+    await expect(
+      generateDocx(projectPath, { filename: '.env', sections: sec, save_to: 'alongside' })
+    ).rejects.toThrow(/политикой безопасности/)
+    expect(existsSync(join(projectPath, '.env.docx'))).toBe(false)
+  })
+
+  it('каталог назначения внутри `.ssh` → запись отклонена (гейт судит весь путь, не только имя)', async () => {
+    const ssh = join(await mkdtemp(join(tmpdir(), 'gg-art-sec-')), '.ssh')
+    await mkdir(ssh, { recursive: true })
+    try {
+      await expect(
+        generateDocx(projectPath, { filename: 'report', sections: sec, save_to: 'downloads' }, { downloadsDir: ssh })
+      ).rejects.toThrow(/политикой безопасности/)
+      expect(existsSync(join(ssh, 'report.docx'))).toBe(false)
+    } finally { await rm(dirname(ssh), { recursive: true, force: true }) }
+  })
+
+  // КОНТРОЛЬ: без этого «файла нет» зелено и тогда, когда генерация не работает вовсе.
+  it('КОНТРОЛЬ: обычное имя в той же папке → файл создаётся', async () => {
+    const dl = await mkdtemp(join(tmpdir(), 'gg-art-ok-'))
+    try {
+      const r = await generateDocx(projectPath, { filename: 'report', sections: sec, save_to: 'downloads' }, { downloadsDir: dl })
+      expect(existsSync(r.path)).toBe(true)
+    } finally { await rm(dl, { recursive: true, force: true }) }
   })
 })
 
