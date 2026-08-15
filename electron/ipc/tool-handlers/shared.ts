@@ -438,6 +438,19 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
     const count = typeof r?.count === 'number' ? r.count : null
     return { label: 'browser_network', detail: count != null ? `сеть · ${count} запросов` : 'чтение сети' }
   }
+  // P3 кусок 3: закрытие чистой сессии. Ветка добавлена ПОТОМУ, что её отсутствие
+  // уронило сетку browser-activity-labels: она перебирает всю браузерную группу
+  // TOOL_DEFS и требует подписи у КАЖДОГО инструмента. Сетка сработала ровно так,
+  // как задумана, — новый инструмент без следа не проехал молча.
+  if (name === 'browser_close_session') {
+    const r = (result && typeof result === 'object') ? result as { closed?: unknown } : undefined
+    const closed = typeof r?.closed === 'boolean' ? r.closed : null
+    return {
+      label: 'browser_close_session',
+      detail: closed === null ? 'закрытие чистой сессии'
+            : closed ? 'чистая сессия закрыта' : 'чистой сессии не было',
+    }
+  }
   // Клик — единственное браузерное действие, меняющее чужую систему, и до 30.07
   // он был единственным без ветки здесь: сводка возвращала null, значит
   // emitActivity не звался и следа не оставалось ВООБЩЕ (ни Timeline, ни audit).

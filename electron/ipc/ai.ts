@@ -24,6 +24,7 @@ import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './to
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
 import { resolveTurnsBudget, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+import { closeIsolatedSession } from '../browser/isolated-session'
 // Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
 import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
 import { selectSendProvider, selectSendModel, decideSmartRouting } from './ai-send/route-selection'
@@ -661,6 +662,12 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
       suspendedSends.delete(sendId)
       // ось 3 E: чистим серверный счётчик run_until_green этого прогона (иначе Map течёт).
       clearRunUntilGreenForSend(sendId)
+      // P3 кусок 3: изолированная браузерная сессия принадлежит ЭТОМУ прогону и
+      // умирает вместе с ним — первый из четырёх путей закрытия (см. шапку
+      // electron/browser/isolated-session.ts). Место выбрано не случайно: cleanup
+      // зовётся на ЛЮБОМ выходе (успех, ошибка, прерывание), поэтому «браузер
+      // остался жить после задачи» здесь недостижимо по построению.
+      void closeIsolatedSession(sendId)
       // APP-04: чистим bounded smart-approve escalation counter этого прогона.
       clearSmartApproveForSend(sendId)
       // sendIdToChatId mapping cleared via separate ai:event done handler in

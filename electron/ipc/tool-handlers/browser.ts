@@ -1,4 +1,7 @@
 // Browser-хендлер: navigate / read_page / screenshot. Вынесено при распиле.
+// P3 кусок 3: тот же хендлер обслуживает ДВЕ среды — встроенный браузер и
+// изолированную (Playwright) сессию. Второго набора инструментов нет: различается
+// только получатель вызова, выбираемый полем `env` (см. shared/browser-env.ts).
 import type { ToolHandler, ToolContext } from './shared'
 import type { ToolCall, ToolResult } from '../../ai/types'
 import { emitActivity, summarizeToolCall, awaitCommandConfirm } from './shared'
@@ -8,6 +11,13 @@ import { blockReason } from '../../ai/mode-policy'
 import { execAwaitingBrowserApi, isBrowserNotReady } from './browser-ready'
 import { capConsoleErrors, capNetwork } from './browser-redact'
 import { readCapture } from '../../browser/network-capture'
+import {
+  resolveBrowserEnv, localhostEnvHint, BROWSER_ENV_LABEL, type BrowserEnv,
+} from '../../../shared/browser-env'
+import {
+  openIsolatedSession, getIsolatedSession, closeIsolatedSession,
+  getActiveBrowserEnv, setActiveBrowserEnv, type IsolatedBrowserApi,
+} from '../../browser/isolated-session'
 
 async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
@@ -96,9 +106,127 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
   }
 }
 
+/**
+ * ДЕЙСТВИЯ, общие для обеих сред. Список, а не память автора правки: пин сверяет его
+ * с обоими диспетчерами сразу, поэтому новый browser-инструмент, забытый в
+ * изолированной среде, краснеет, а не отдаёт молча не то (тот же приём, что
+ * MUTATING_BROWSER_TOOLS в mode-policy).
+ */
+export const BROWSER_ACTION_TOOLS: readonly string[] = [
+  'browser_navigate', 'browser_read_page', 'browser_snapshot', 'browser_find',
+  'browser_click_by_number', 'browser_type_by_number', 'browser_press_key',
+  'browser_wait_for', 'browser_console_errors', 'browser_network',
+  'browser_click', 'browser_screenshot',
+]
+
+/** Инструмент жизненного цикла среды — действием над страницей не является. */
+export const BROWSER_SESSION_TOOL = 'browser_close_session'
+
+/**
+ * Тот же набор действий, исполненный в ИЗОЛИРОВАННОЙ сессии. Читается рядом с
+ * dispatchBrowser намеренно: видно, что имена, аргументы и форма ответа совпадают.
+ *
+ * Незнакомое имя — ЧЕСТНАЯ ОШИБКА, а не «всё остальное — скриншот» (как в ветке
+ * встроенного пути): молчаливая подмена действия неотличима от выполнения.
+ */
+async function dispatchIsolated(call: ToolCall, api: IsolatedBrowserApi): Promise<ToolResult> {
+  const a = call.args ?? {}
+  const ok = (result: unknown): ToolResult => ({ id: call.id, name: call.name, result: result ?? '' })
+  try {
+    switch (call.name) {
+      case 'browser_navigate':
+        return ok(await api.navigate(String(a.url ?? '')))
+      case 'browser_read_page': {
+        const text = await api.readPage(a.selector ? String(a.selector) : undefined)
+        return ok({ url: api.getURL(), title: api.getTitle(), text })
+      }
+      case 'browser_snapshot': {
+        const snap = await api.snapshot()
+        return ok({ url: api.getURL(), title: api.getTitle(), ...snap })
+      }
+      case 'browser_find': {
+        const r = await api.find(String(a.query ?? ''), a.limit != null ? Number(a.limit) : undefined)
+        return ok({ url: api.getURL(), title: api.getTitle(), ...r })
+      }
+      case 'browser_click_by_number':
+        return ok(await api.clickByNumber(Number(a.n)))
+      case 'browser_type_by_number':
+        return ok(await api.typeByNumber(Number(a.n), String(a.text ?? '')))
+      case 'browser_press_key':
+        return ok(await api.pressKey(String(a.key ?? ''), a.n != null ? Number(a.n) : undefined))
+      case 'browser_wait_for':
+        return ok(await api.waitFor(String(a.query ?? ''), a.timeout_ms != null ? Number(a.timeout_ms) : undefined))
+      case 'browser_console_errors': {
+        // Редакция — ТА ЖЕ (secret-scanner в main), лимит по умолчанию тот же.
+        const limit = a.limit != null ? Number(a.limit) : 20
+        return ok({ url: api.getURL(), ...capConsoleErrors(await api.consoleMessages(), limit) })
+      }
+      case 'browser_network': {
+        // ВАЖНО: НЕ readCapture(). Тот захват принадлежит сессии встроенного
+        // браузера — то есть содержит трафик РУЧНЫХ действий человека. Подмешать его
+        // в чистую сессию значило бы уничтожить ровно то свойство, ради которого эта
+        // среда построена, и сделать это молча.
+        const limit = a.limit != null ? Number(a.limit) : 30
+        return ok({ url: api.getURL(), ...capNetwork(await api.networkRequests(), limit) })
+      }
+      case 'browser_click':
+        return ok(await api.click(String(a.selector ?? '')))
+      case 'browser_screenshot':
+        return ok({ url: api.getURL(), dataUrl: await api.screenshot() })
+      default:
+        return { id: call.id, name: call.name, result: '', error: `Инструмент ${call.name} не поддержан в чистой сессии.` }
+    }
+  } catch (err) {
+    return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** Обеспечить сессию для изолированного вызова: create или reuse, либо честный отказ. */
+async function ensureIsolated(call: ToolCall, ctx: ToolContext): Promise<{ ok: true; api: IsolatedBrowserApi; opened: boolean; note?: string } | { ok: false; error: string }> {
+  const existing = getIsolatedSession(ctx.sendId)
+  if (existing) return { ok: true, api: existing.api, opened: false }
+  if (call.name !== 'browser_navigate') {
+    return { ok: false, error: 'Чистая сессия ещё не открыта. Начни с browser_navigate с env="isolated" — она поднимется под эту задачу и закроется вместе с ней.' }
+  }
+  const opened = await openIsolatedSession(ctx.sendId, { signal: ctx.signal })
+  // ОТКАЗ НЕ ПОДМЕНЯЕТСЯ ВСТРОЕННЫМ БРАУЗЕРОМ (рамка волны §3 п.5). Просили чистоту —
+  // тихо отдать сессию с куками человека было бы худшим из возможных исходов.
+  if (!opened.ok) return { ok: false, error: opened.error }
+  const info = opened.session.info
+  return {
+    ok: true,
+    api: opened.session.api,
+    opened: !opened.reused,
+    note: `Чистая сессия поднята: ${info.browserLabel}${info.headless ? '' : ' (с окном)'}, свой временный профиль, кук пользователя нет.`,
+  }
+}
+
 export const browserHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
+    // ЖИЗНЕННЫЙ ЦИКЛ СРЕДЫ идёт до гейта режима сознательно: закрытие своей же
+    // временной сессии ничего в чужой системе не меняет, а запретить прибрать за
+    // собой значило бы оставлять процессы (урок C7).
+    if (call.name === BROWSER_SESSION_TOOL) {
+      const closed = await closeIsolatedSession(ctx.sendId)
+      const result = { closed, mode: 'builtin' as BrowserEnv }
+      try { ctx.recordJournal(ctx.projectPath, 'tool', closed ? 'Браузер: чистая сессия закрыта' : 'Браузер: чистой сессии не было', null) } catch { /* журнал не критичен */ }
+      // Подпись берётся у summarizeToolCall, а не пишется здесь второй раз: сетка
+      // browser-activity-labels требует её от КАЖДОГО браузерного инструмента, и две
+      // копии текста разошлись бы, оставив сетку зелёной на своей.
+      const s = summarizeToolCall(call.name, call.args, result)
+      if (s) emitActivity(ctx, call, 'ok', s.label, s.detail)
+      return { id: call.id, name: call.name, result }
+    }
+
+    // ВЫБОР СРЕДЫ — чистая функция над аргументом и состоянием прогона. Незнакомое
+    // значение останавливает вызов честной ошибкой, а не откатом в дефолт.
+    const envRes = resolveBrowserEnv((call.args ?? {}).env, getActiveBrowserEnv(ctx.sendId))
+    if (!envRes.ok) {
+      return { id: call.id, name: call.name, result: '', error: envRes.error }
+    }
+    const env: BrowserEnv = envRes.env
+
     // ГЕЙТ РЕЖИМА (SEC-CMD-06). До 30.07 этот файл не звал ни resolveDecision,
     // ни decide — клик исполнялся во всех пяти режимах, включая `plan`, где
     // запрещено даже писать файл. Клик меняет ЧУЖУЮ систему: страница
@@ -142,7 +270,28 @@ export const browserHandler: ToolHandler = {
         return { id: call.id, name: call.name, result: '', error: 'User rejected' }
       }
     }
-    const result = await dispatchBrowser(call, ctx)
+    // МАРШРУТИЗАЦИЯ СРЕД — СТРОГО ПОСЛЕ ГЕЙТА. Порядок здесь и есть гарантия: гейт
+    // судит по имени инструмента и аргументам, о среде он не знает вовсе, поэтому
+    // клик в чистой сессии физически не может обойти то, что останавливает клик во
+    // встроенной. Врезать выбор среды ВЫШЕ гейта значило бы завести второй путь
+    // исполнения мимо resolveDecision — ровно тот класс, который SEC-CMD-06/07
+    // закрывали дважды.
+    let result: ToolResult
+    let openNote: string | undefined
+    if (env === 'isolated') {
+      const ready = await ensureIsolated(call, ctx)
+      if (!ready.ok) {
+        return { id: call.id, name: call.name, result: '', error: ready.error }
+      }
+      openNote = ready.note
+      // Среда становится активной ТОЛЬКО после успешного подъёма: иначе неудачная
+      // попытка изоляции заперла бы прогон в среде, которой нет.
+      setActiveBrowserEnv(ctx.sendId, 'isolated')
+      result = await dispatchIsolated(call, ready.api)
+    } else {
+      setActiveBrowserEnv(ctx.sendId, 'builtin')
+      result = await dispatchBrowser(call, ctx)
+    }
     // Journal what AI looked at on the web
     try {
       if (!result.error) {
@@ -169,7 +318,11 @@ export const browserHandler: ToolHandler = {
         const clicked = (call.name === 'browser_click' || call.name === 'browser_click_by_number') && result.result && typeof result.result === 'object'
           ? String((result.result as { url?: unknown }).url ?? '')
           : ''
-        ctx.recordJournal(ctx.projectPath, 'tool', label, clicked || null)
+        // След среды в журнале ставится ТОЛЬКО для чистой сессии: у встроенной метка
+        // остаётся прежней (её читают существующие пины), а необычное — именно
+        // изоляция, и в журнале человека она обязана быть названа.
+        const labelled = env === 'isolated' ? `${label} [${BROWSER_ENV_LABEL.isolated}]` : label
+        ctx.recordJournal(ctx.projectPath, 'tool', labelled, clicked || null)
       }
     } catch { /* journal not critical */ }
     // Screenshot → queue as attachment for next user message
@@ -189,6 +342,25 @@ export const browserHandler: ToolHandler = {
           try { addProofFrame(Number(ctx.sendId), Buffer.from(m[2], 'base64')) } catch { /* best-effort */ }
           result.result = { url: typeof r === 'object' ? r.url : null, attached: true }
         }
+      }
+    }
+    // Поле `mode` в КАЖДОМ ответе (решение постановки P3: вводится на куске 3, когда
+    // у поля появилось содержимое). Без него смена среды была бы неразличима для
+    // модели, а рамка волны запрещает молчаливую смену.
+    //
+    // МЕСТО ВЫБРАНО НЕ ПРОИЗВОЛЬНО — ПОСЛЕ обработки скриншота. Стояло выше, и на
+    // browser_screenshot ветка вложения ЗАМЕНЯЛА весь result.result целиком, унося
+    // `mode` вместе с ним. Пин при этом был зелёным: подставной api отдавал пустой
+    // dataUrl, замена не срабатывала, и утверждение проверялось на входе, которого в
+    // проде не бывает (§3.1 — фикстура не совпала с продовой формой). Ловится
+    // контрольным кейсом с НАСТОЯЩИМ base64, а не перечитыванием.
+    if (result.result && typeof result.result === 'object') {
+      const r = result.result as Record<string, unknown>
+      r.mode = env
+      if (openNote) r.session = openNote
+      if (call.name === 'browser_navigate') {
+        const hint = localhostEnvHint(env, String(call.args.url ?? ''))
+        if (hint) r.hint = hint
       }
     }
     // Результат передаём ЯВНО: у клика адрес страницы живёт только в нём.

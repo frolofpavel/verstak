@@ -9,6 +9,7 @@ import { decidePopupNavigation } from './ai/popup-policy'
 import { decideMainWindowNavigation, decideMainWindowPopup } from './main-window-navigation'
 import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish, isTrackedWebview } from './browser/network-capture'
 import { shouldStampAppCsp } from './browser/csp-scope'
+import { closeAllIsolatedSessions } from './browser/isolated-session'
 import { loadPermissionRules } from './ai/permission-rules'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
@@ -1125,6 +1126,11 @@ app.whenReady().then(() => {
   // completion'ы, иначе они копятся всю сессию (spawn_process долгих команд).
   globalProcessRegistry.startSweeper()
   app.once('before-quit', () => globalProcessRegistry.stopSweeper())
+  // P3 кусок 3: третий из четырёх путей закрытия изолированных сессий (см. шапку
+  // electron/browser/isolated-session.ts). Выход из приложения не должен оставлять
+  // живых браузерных процессов — урок C7. Закрытие идёт с потолком ожидания внутри,
+  // поэтому висящий браузер не превращает выход в зависание.
+  app.once('before-quit', () => { void closeAllIsolatedSessions() })
   }
 
   setImmediate(registerDeferredIpc)

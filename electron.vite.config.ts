@@ -18,6 +18,13 @@ const NATIVE_DEPS = [
   'onnxruntime-node',
   // ↑ AI SDKs internally pull in form-data / node-fetch / proxy-agent which
   //   often have __dirname / require.resolve. Safer to keep as external.
+  'playwright-core',
+  // ↑ P3 кусок 3 (изолированная браузерная сессия). Поймано СБОРКОЙ, не догадкой:
+  //   `Rolldown failed to resolve import "chromium-bidi/..." from
+  //   playwright-core/lib/coreBundle.js`. Внутри лежит собранный CJS со ссылками на
+  //   опциональные модули, которых в дереве нет, — бандлер обязан их видеть, рантайм
+  //   нет. Модуль и так грузится ЛЕНИВО (`await import`) из node_modules, поэтому
+  //   внешним ему быть естественно: 13 МБ драйвера не должны ехать в бандл main.
 ]
 
 export default defineConfig({
