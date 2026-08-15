@@ -617,7 +617,7 @@ export function AgentRunsPanel() {
         {/* Слияние задачи 1: раздел «История работы» (бывшие «Прогоны» + «История работы AI»).
             Заголовок захардкожен, как соседний «Расписание» в Sidebar и бывший заголовок
             инспектора — чтобы не трогать общие i18n-файлы, которые сейчас правит другая линия. */}
-        <h2 className="gg-panel-title">История работы</h2>
+        <h2 className="gg-panel-title">{t.sidebar.workHistory}</h2>
         <div className="gg-panel-meta">
           {t.agentRuns.meta.replace('{total}', String(runs.length)).replace('{active}', String(activeCount))}
         </div>

@@ -654,7 +654,7 @@ export function Sidebar({ onOpenSettings, 'aria-hidden': ariaHidden }: SidebarPr
 
             <SidebarNavSection
               sectionId="project"
-              title="Материалы"
+              title={t.sidebar.materialsSection}
               activeView={activeView}
               viewIds={PROJECT_VIEW_IDS}
             >

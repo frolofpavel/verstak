@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getTranslations } from '../i18n'
 import type { FileNode, ChatMessage, ProjectMeta, ChatSession, DevTask, ResumableRun } from '../types/api'
 import { sortProjectsByName } from '../lib/project-sort'
 import { isModelValidForProvider } from '../hooks/useProvider'
@@ -536,7 +537,12 @@ export const useProject = create<ProjectState>((set, get, store) => ({
 
     let chatSessions = chatSessionsRaw
     if (chatSessions.length === 0) {
-      const created = await window.api.chatSessions.create(path, { title: 'Основной чат' })
+      // §5 ревью 2.6.4: заголовок первого чата — на языке интерфейса. Английский
+      // главный экран показывал «Pavel · Основной чат» рядом с «Terminal».
+      const lang = (await window.api.settings.getKey('app_language')) === 'ru' ? 'ru' : 'en'
+      const created = await window.api.chatSessions.create(path, {
+        title: getTranslations(lang).sidebar.mainChat,
+      })
       if (myToken !== setProjectToken) return
       chatSessions = [created]
     }

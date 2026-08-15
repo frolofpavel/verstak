@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
+import { useT, type Translations } from '../i18n'
 
 export type EffortLevel = 'quick' | 'standard' | 'deep'
 
-const OPTIONS: Array<{ id: EffortLevel; label: string; hint: string }> = [
-  { id: 'quick', label: 'Быстро', hint: 'Короткие ответы, дешевле' },
-  { id: 'standard', label: 'Стандарт', hint: 'Баланс скорости и глубины' },
-  { id: 'deep', label: 'Глубоко', hint: 'Расширенное мышление' },
-]
-
-function labelFor(level: EffortLevel): string {
-  return OPTIONS.find(o => o.id === level)?.label ?? 'Стандарт'
+// §5 ревью 2.6.4: подписи главного экрана — из словаря, а не литералами.
+// Английский интерфейс показывал «Стандарт» рядом с «What needs to be done?».
+function optionsFor(t: Translations): Array<{ id: EffortLevel; label: string; hint: string }> {
+  return [
+    { id: 'quick', label: t.effort.quick, hint: t.effort.quickHint },
+    { id: 'standard', label: t.effort.standard, hint: t.effort.standardHint },
+    { id: 'deep', label: t.effort.deep, hint: t.effort.deepHint },
+  ]
 }
 
 export function EffortPicker() {
+  const t = useT()
+  const OPTIONS = optionsFor(t)
+  const labelFor = (level: EffortLevel): string =>
+    OPTIONS.find(o => o.id === level)?.label ?? t.effort.standard
   const effortLevel = useProject(s => s.effortLevel)
   const setEffortLevel = useProject(s => s.setEffortLevel)
   const [open, setOpen] = useState(false)
@@ -34,7 +39,7 @@ export function EffortPicker() {
         type="button"
         className="gg-effort-trigger"
         onClick={() => setOpen(v => !v)}
-        title="Стиль ответа модели"
+        title={t.effort.title}
         aria-expanded={open}
         aria-haspopup="listbox"
       >

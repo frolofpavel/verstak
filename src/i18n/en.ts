@@ -8,6 +8,12 @@ export const en = {
     name: 'Name',
     email: 'Email (optional)',
     role: 'Role',
+    roles: {
+      developer: 'Developer',
+      designer: 'Designer',
+      manager: 'Manager',
+      student: 'Student',
+    },
     startWorking: 'Start working →',
     enter: 'Enter →',
     profile: 'Profile',
@@ -33,6 +39,12 @@ export const en = {
   // Sidebar
   rail: {
     clients: 'My projects',
+    filterAria: 'Project filter',
+    filterAll: 'All',
+    filterActive: 'Active',
+    filterPaused: 'Paused',
+    filterDone: 'Done',
+    filterArchive: 'Archive',
     createClient: 'Create project',
     openClient: 'Open project',
     createNewClient: 'Create new',
@@ -125,6 +137,9 @@ export const en = {
     controlSection: 'Control',
     projectSection: 'Project',
     toolsSection: 'Tools',
+    materialsSection: 'Materials',
+    chatTools: 'Chat tools',
+    workHistory: 'Work history',
     openFolder: 'Open folder',
     deleteChat: 'Delete this chat and all its messages?',
     renameChat: 'Rename',
@@ -483,9 +498,13 @@ export const en = {
 
   // Effort control
   effort: {
+    title: 'Response style',
     quick: 'Quick — short answers',
+    quickHint: 'Shorter answers, cheaper',
     standard: 'Standard',
+    standardHint: 'Balance of speed and depth',
     deep: 'Deep — extended thinking',
+    deepHint: 'Extended thinking',
   },
 
   // Placeholder views

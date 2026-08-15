@@ -289,7 +289,7 @@ export function AgentsPanel() {
   return (
     <div className="gg-panel">
       <div className="gg-panel-header">
-        <h2 className="gg-panel-title">Агенты</h2>
+        <h2 className="gg-panel-title">{t.sidebar.agents}</h2>
         <div className="gg-panel-meta">
           {subs.length} суб-сессий · {runningCount} активно
           {queue && ` · очередь: ${queue.inFlight} в работе / ${queue.queued} ждут`}

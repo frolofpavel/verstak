@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../i18n'
-import { semverGt } from '../lib/semver'
+import { decideWhatsNew } from '../lib/whats-new-gate'
 import { ReleaseNotesModal, type ReleaseNote } from './ReleaseNotesModal'
 
 const LAST_WHATS_NEW_KEY = 'last_whats_new_version'
@@ -23,8 +23,16 @@ export function WhatsNewModal() {
 
         const current = await window.api.app.getVersion()
         const last = await window.api.settings.getKey(LAST_WHATS_NEW_KEY)
+        const onboardingCompleted = !!(await window.api.settings.getKey('onboarding_completed'))
 
-        if (last && !semverGt(current, last)) return
+        const decision = decideWhatsNew({ current, last, onboardingCompleted })
+        if (decision === 'skip') return
+        if (decision === 'first-install') {
+          // Первая установка: «Обновление установлено» здесь — ложь. Версию
+          // запоминаем, чтобы следующее обновление показало только своё (§5).
+          await window.api.settings.setKey(LAST_WHATS_NEW_KEY, current)
+          return
+        }
 
         let fetched = await window.api.updater.getReleaseNotes({
           sinceVersion: last || current,

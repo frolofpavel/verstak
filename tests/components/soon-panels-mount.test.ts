@@ -8,6 +8,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, cleanup, waitFor } from '@testing-library/react'
+// §5 ревью 2.6.4: заголовок панели теперь берётся из словаря активного языка,
+// а не зашит по-русски. Сверяем со словарём — иначе пин снова стерёг бы
+// конкретную русскую строку в английском интерфейсе.
+import { en } from '../../src/i18n/en'
 
 const { useProject } = await import('../../src/store/projectStore')
 const { BrainPanel } = await import('../../src/components/BrainPanel')
@@ -97,7 +101,7 @@ describe('Карта (project-map) — открывается и обрабат�
 })
 
 describe('Агенты (agents) — открывается', () => {
-  it('заголовок «Агенты» рендерится с пустыми списками (панель не падает)', async () => {
+  it('заголовок панели рендерится с пустыми списками (панель не падает)', async () => {
     stubApi({
       agents: {
         list: vi.fn(async () => []),
@@ -113,6 +117,6 @@ describe('Агенты (agents) — открывается', () => {
       providers: { list: vi.fn(async () => []) },
     })
     render(createElement(AgentsPanel))
-    await waitFor(() => expect(document.querySelector('.gg-panel-title')?.textContent).toBe('Агенты'))
+    await waitFor(() => expect(document.querySelector('.gg-panel-title')?.textContent).toBe(en.sidebar.agents))
   })
 })

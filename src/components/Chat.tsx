@@ -2373,9 +2373,12 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       return { path: store.path, activeChatId: store.activeChatId }
     }
     try {
+      // §3 ревью 2.6.4: молчаливого «проект = весь домашний каталог» больше нет.
+      // Нет прошлого проекта — спрашиваем папку системным диалогом; отказ =
+      // работа не начинается, а не начинается в чужом каталоге.
       const last = await window.api.settings.getKey('last_project_path')
-      const home = await window.api.app.getHomeDir()
-      const target = (last && last.length > 0) ? last : home
+      const target = (last && last.length > 0) ? last : await window.api.projects.pick()
+      if (!target) return null
       await store.setProject(target)
     } catch {
       return null
@@ -3047,7 +3050,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
                   <circle cx="19" cy="17" r="2.5" />
                   <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
                 </svg>
-                <span>Агенты</span>
+                <span>{t.sidebar.agents}</span>
               </button>
             </div>
           )}

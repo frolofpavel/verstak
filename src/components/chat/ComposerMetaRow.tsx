@@ -252,10 +252,10 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
               type="button"
               className={`gg-chat-settings-btn ${composerSettingsOpen ? 'is-active' : ''}`}
               onClick={() => setComposerSettingsOpen(v => !v)}
-              title="Инструменты чата"
+              title={t.sidebar.chatTools}
               aria-expanded={composerSettingsOpen}
             >
-              <span>Инструменты чата</span>
+              <span>{t.sidebar.chatTools}</span>
             </button>
             {composerSettingsOpen && (
               <div className="gg-chat-settings-popover">

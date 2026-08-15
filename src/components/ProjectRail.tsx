@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEven
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useProject } from '../store/projectStore'
+import { chooseStartupProject } from '../lib/project-bootstrap'
 import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import type { ProjectGroup, ProjectMeta, ProjectStatus } from '../types/api'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -647,18 +648,13 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
       await Promise.all([refreshProjectList(), refreshGroups()])
       const state = useProject.getState()
       if (!state.path) {
-        const list = state.projectList
-        const last = await window.api.settings.getKey('last_project_path')
-        const lastInList = last && list.some(p => p.path === last) ? last : null
-        if (lastInList) {
-          await setProject(lastInList)
-        } else if (list.length > 0) {
-          await setProject(list[0].path)
-        } else {
-          const home = await window.api.app.getHomeDir()
-          const fallback = (last && last.length > 0) ? last : home
-          if (fallback) await setProject(fallback)
-        }
+        // §3 ревью 2.6.4: домашний каталог проектом больше не назначается.
+        // Нечего открыть — открываем пусто, папку выбирает человек («Открыть папку»).
+        const decision = chooseStartupProject({
+          lastPath: await window.api.settings.getKey('last_project_path'),
+          knownPaths: state.projectList.map(p => p.path),
+        })
+        if (decision.kind === 'open') await setProject(decision.path)
       }
       setBootstrapped(true)
     })()
@@ -874,14 +870,14 @@ export function ProjectRail({ onOpenProjectSettings, onOpenAppSettings, onOpenHe
               )}
             </div>
           )}
-          <div className="gg-rail-filter-tabs" aria-label="Фильтр проектов">
-            {[
-              ['default', 'Все'],
-              ['active', 'Активные'],
-              ['paused', 'Пауза'],
-              ['done', 'Завершённые'],
-              ['archive', 'Архив']
-            ].map(([value, label]) => (
+          <div className="gg-rail-filter-tabs" aria-label={t.rail.filterAria}>
+            {([
+              ['default', t.rail.filterAll],
+              ['active', t.rail.filterActive],
+              ['paused', t.rail.filterPaused],
+              ['done', t.rail.filterDone],
+              ['archive', t.rail.filterArchive]
+            ] as const).map(([value, label]) => (
               <button
                 key={value}
                 type="button"

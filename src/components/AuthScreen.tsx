@@ -25,11 +25,13 @@ interface Props {
 
 type Role = 'developer' | 'designer' | 'manager' | 'student'
 
-const ROLES: { value: Role; label: string; icon: string }[] = [
-  { value: 'developer', label: 'Developer', icon: '⚡' },
-  { value: 'designer',  label: 'Designer',  icon: '🎨' },
-  { value: 'manager',   label: 'Manager',   icon: '📋' },
-  { value: 'student',   label: 'Student',   icon: '📚' },
+// §5 ревью 2.6.4: онбординг на одном языке. Роли стояли по-английски в русском
+// интерфейсе — первый экран продукта показывал сразу два языка.
+const ROLES: { value: Role; icon: string }[] = [
+  { value: 'developer', icon: '⚡' },
+  { value: 'designer',  icon: '🎨' },
+  { value: 'manager',   icon: '📋' },
+  { value: 'student',   icon: '📚' },
 ]
 
 const ROLE_DEFAULTS: Record<Role, { provider: string; model: string }> = {
@@ -390,7 +392,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
                       onClick={() => setRole(r.value)}
                     >
                       <span className="gg-auth-role-icon">{r.icon}</span>
-                      {r.label}
+                      {t.auth.roles[r.value]}
                     </button>
                   ))}
                 </div>
