@@ -1337,6 +1337,91 @@ describe('agent-loop — V3: completion gate на основном пути за
     const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
     expect(nudges.length, 'гейт требует доказательство при выполненном условии — он кричит всегда').toBe(0)
   })
+
+  // 2.7.0 шаг 2: КРАСНАЯ ПРОВЕРКА — НЕ ДОКАЗАТЕЛЬСТВО.
+  //
+  // Разница, перенесённая из pipeline-гейта (`src/lib/pipeline-gate.ts`), который
+  // запускала снятая кнопка «До результата»: тот смотрел на ИСХОД (`pass`/`fail`),
+  // а completion-гейт — только на ФАКТ вызова. Прогон, записавший файлы, прогнавший
+  // проверку и получивший красное, закрывался как готовый: `verifications > 0`.
+  //
+  // Пин наблюдает не решение чистой функции (её стерегут пины completion-gate.test),
+  // а РАНТАЙМ: реальная команда, реальный ненулевой код возврата, живой цикл.
+  // Команда пишется файлом и зовётся `node test-fail.js` — инлайновый `node -e "…"`
+  // на cmd.exe разбирается кавычками и молча не делает ничего (§3.1).
+  it('запись + КРАСНАЯ проверка → рантайм НЕ выпускает финал (красное не доказательство)', async () => {
+    writeFileSync(join(dir, 'test-fail.js'), 'process.exit(1)\n')
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'tool-call', call: { id: 'v1', name: 'run_command', args: { command: 'node test-fail.js' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'красная проверка засчитана как доказательство — гейт смотрит на факт, а не на исход').toBeGreaterThan(0)
+  })
+
+  // КОНТРОЛЬНЫЙ кейс к предыдущему: та же фикстура, тот же файл, но команда ЗЕЛЁНАЯ.
+  // Без него пин выше не отличает «гейт увидел красное» от «гейт сломался на любом
+  // node-вызове».
+  it('КОНТРОЛЬ: запись + ЗЕЛЁНАЯ проверка тем же способом → гейт молчит', async () => {
+    writeFileSync(join(dir, 'test-ok.js'), 'process.exit(0)\n')
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'tool-call', call: { id: 'v1', name: 'run_command', args: { command: 'node test-ok.js' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender,
+    }) as Parameters<typeof runApiConversation>))
+
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'зелёная проверка не засчитана — гейт кричит всегда').toBe(0)
+  })
+
+  // Человеку итог тоже должен быть сказан честно: «не проверено» и «проверка не
+  // прошла» — разные вещи, и подменять второе первым значит соврать в пользу продукта.
+  //
+  // ПЕРВАЯ РЕДАКЦИЯ ЭТОГО ПИНА БЫЛА ЛОЖНО-ЗЕЛЁНОЙ, объявляю (§3.1). Она искала
+  // `/не прошл/i` среди info-событий — и проходила на НЕПОЧИНЕННОМ коде, потому что
+  // это же сочетание уже даёт плашка `verifiedWorkNote` («Проверок: 1, из них не
+  // прошло 1»). Пин выглядел доказательством правки, а измерял чужую фичу.
+  // Здесь утверждение разбито на две части, и первая краснеет до фикса: (а) гейт
+  // ДОШЁЛ до исчерпания попыток — то есть красное реально не засчиталось; (б) в
+  // закрывающей ноте нет лжи «проверки не запускались», хотя проверка запускалась.
+  // Часть (б) без части (а) ничего не измеряет: до фикса гейт молчит вовсе, и
+  // «лжи нет» верно пусто.
+  it('исчерпав попытки на красной проверке, финал называет ПРОВАЛ, а не «не проверялось»', async () => {
+    writeFileSync(join(dir, 'test-fail.js'), 'process.exit(1)\n')
+    const sender = makeSender()
+    const p = provider('deepseek', (turn) => turn === 1 ? [
+      { type: 'tool-call', call: { id: 'w1', name: 'write_file', args: { path: 'a.txt', content: 'x' } } },
+      { type: 'tool-call', call: { id: 'v1', name: 'run_command', args: { command: 'node test-fail.js' } } },
+      { type: 'done' },
+    ] : [{ type: 'text', text: 'всё готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p, providerId: 'deepseek', model: 'm', agentMode: 'bypass', sender, turnsBudget: 8,
+    }) as Parameters<typeof runApiConversation>))
+
+    // (а) красное не засчитано как доказательство — гейт израсходовал все попытки.
+    const nudges = events(sender).filter(e => e?.type === 'tool-blocked' && String(e?.callId ?? '').startsWith('completion-gate'))
+    expect(nudges.length, 'гейт не дошёл до исчерпания попыток — красное засчитано доказательством').toBe(2)
+
+    // (б) и закрыл прогон, не соврав «проверки не запускались».
+    const infos = events(sender)
+      .filter((e): e is Record<string, unknown> => e?.type === 'info' && typeof e?.message === 'string')
+      .map(e => String(e.message))
+    expect(infos.some(t => /не запускались/i.test(t)), 'прогон, где проверка ЗАПУСКАЛАСЬ и упала, закрыт нотой «проверки не запускались»').toBe(false)
+    expect(infos.some(t => /не прошла/i.test(t)), 'человеку не сказано, что проверка провалилась').toBe(true)
+  })
 })
 
 // Ревизия 15.08 §2.4 — ДЕНЬГИ ПОЛЬЗОВАТЕЛЯ. Мутация `runner-api.ts:1105`

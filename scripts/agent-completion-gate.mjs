@@ -12,10 +12,16 @@
 // не существует и существовать не должно — сверять нечему. Ложное обоснование
 // опаснее ложного факта: оно объясняло, почему расхождения можно не бояться.
 //
-// Правило: были принятые записи в файлы и ни одной проверки за прогон — финал не
-// выпускается, ход возвращается модели с требованием доказательства. Bounded:
-// после COMPLETION_GATE_MAX_NUDGES попыток прогон закрывается честной пометкой
-// «сделано, не проверено» вместо выдачи работы за проверенную.
+// Правило: были принятые записи в файлы и ни одной ПРОЙДЕННОЙ проверки за прогон —
+// финал не выпускается, ход возвращается модели с требованием доказательства.
+// Bounded: после COMPLETION_GATE_MAX_NUDGES попыток прогон закрывается честной
+// пометкой вместо выдачи работы за проверенную.
+//
+// ОБНОВЛЕНО 16.08 вместе с правкой (§3.1: запись снимается тем же коммитом, что
+// закрывает позицию). Здесь стояло «ни одной проверки», и это описывало редакцию,
+// где красный прогон засчитывался доказательством наравне с зелёным. Разница
+// перенесена из pipeline-гейта при снятии кнопки «До результата» — см. docblock
+// decideCompletionGate ниже.
 
 export const COMPLETION_GATE_MAX_NUDGES = 2
 
@@ -30,14 +36,52 @@ export function isVerificationToolCall(call) {
   return VERIFICATION_COMMAND_RE.test(command)
 }
 
-export function decideCompletionGate({ acceptedWrites, verifications, nudges }) {
+/**
+ * 2.7.0 шаг 2: СЧИТАЕТСЯ ИСХОД ПРОВЕРКИ, А НЕ ЕЁ ФАКТ.
+ *
+ * Решение Павла 16.08 сняло кнопку «До результата» — «делать надо так, чтобы не
+ * требовались доказательства и проверки». Кнопка запускала pipeline со своим
+ * verify-гейтом (`src/lib/pipeline-gate.ts`), и её снятие обязано было ПЕРЕНЕСТИ
+ * сюда разницу, а не оставить продукт слабее, чем он был под кнопкой.
+ *
+ * Разница была ровно одна. Pipeline-гейт различал `pass` / `fail` / `unknown`, а
+ * этот смотрел только на счётчик вызовов: `verifications > 0 → allow`. Прогон,
+ * который записал файлы, прогнал тесты, получил КРАСНОЕ и сказал «готово»,
+ * проезжал гейт целиком — проверка ведь была. Красный прогон доказательством не
+ * является; доказательством является ПРОЙДЕННАЯ проверка.
+ *
+ * Второе расхождение оставлено сознательно: pipeline на исчерпании попыток даёт
+ * `blocked` (отказ), чат даёт `finish-unverified` (честная пометка). В чате нельзя
+ * отказаться отвечать человеку — пометка «сделано, НЕ доказано» и есть чатовая
+ * форма того же честного стопа. Машина остаётся bounded в обоих случаях.
+ *
+ * `failedVerifications` необязательно: без него правило прежнее (вызывающий, не
+ * умеющий читать исход, ничего не ломает и ничего не приобретает).
+ */
+export function decideCompletionGate({ acceptedWrites, verifications, failedVerifications, nudges }) {
   if (acceptedWrites <= 0) return 'allow'
-  if (verifications > 0) return 'allow'
+  const failed = Math.max(0, Number(failedVerifications) || 0)
+  const passed = Math.max(0, (Number(verifications) || 0) - failed)
+  if (passed > 0) return 'allow'
   if (nudges >= COMPLETION_GATE_MAX_NUDGES) return 'finish-unverified'
   return 'retry'
 }
 
-export function buildCompletionGateNudge(verifyCommands) {
+/**
+ * Текст ветвится по списку УПАВШИХ проверок, потому что два отказа нельзя
+ * описывать одними словами. «Ты ни разу не проверил» — прямая ложь для прогона,
+ * который проверил и получил красное; на такой упрёк модель отвечает повторным
+ * запуском той же команды и снова упирается в ту же стену.
+ */
+export function buildCompletionGateNudge(verifyCommands, failedChecks) {
+  const failed = (failedChecks ?? []).filter(Boolean).slice(0, 4)
+  if (failed.length > 0) {
+    return [
+      `Проверка не прошла: ${failed.map(c => `\`${c}\``).join(', ')}. Красный прогон доказательством не является.`,
+      'Почини причину и прогони ту же проверку снова — до зелёного.',
+      'Если починить нечем, скажи об этом прямо и назови причину; работу готовой не объявляй.',
+    ].join('\n')
+  }
   const commands = (verifyCommands ?? []).filter(Boolean).slice(0, 4)
   const how = commands.length
     ? `Проверить можно так: ${commands.map(c => `\`${c}\``).join(', ')}.`
@@ -49,7 +93,12 @@ export function buildCompletionGateNudge(verifyCommands) {
   ].join('\n')
 }
 
-export function unverifiedWorkNote(fileCount) {
+/** Та же развилка для человека: «не запускалось» и «не прошло» — разные новости. */
+export function unverifiedWorkNote(fileCount, failedChecks) {
+  const failed = (failedChecks ?? []).filter(Boolean).slice(0, 4)
+  if (failed.length > 0) {
+    return `⚠️ Файлов изменено: ${fileCount}, проверка не прошла: ${failed.join(', ')} — работа НЕ доказана. Не полагайтесь на изменения, пока проверка не станет зелёной.`
+  }
   return `⚠️ Файлов изменено: ${fileCount}, но результат не проверен — тесты, тайпчек или сборка за этот прогон не запускались. Проверьте перед тем, как полагаться на изменения.`
 }
 

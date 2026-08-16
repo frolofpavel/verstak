@@ -17,12 +17,14 @@ export declare function isVerificationToolCall(call: {
 export declare function decideCompletionGate(input: {
   acceptedWrites: number
   verifications: number
+  /** 2.7.0: сколько из них УПАЛО. Доказательством считается пройденная проверка. */
+  failedVerifications?: number
   nudges: number
 }): CompletionGateDecision
 
-export declare function buildCompletionGateNudge(verifyCommands: string[]): string
+export declare function buildCompletionGateNudge(verifyCommands: string[], failedChecks?: string[]): string
 
-export declare function unverifiedWorkNote(fileCount: number): string
+export declare function unverifiedWorkNote(fileCount: number, failedChecks?: string[]): string
 
 /** V3: одна строка об ИТОГЕ проверок. null — проверок не было, строки нет. */
 export declare function verifiedWorkNote(

@@ -769,7 +769,6 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // разные сигналы разъехались бы, и автопродолжение однажды продлило бы застой.
   const progressState = createProgressState()
   let runAcceptedWrites = 0
-  let runVerifications = 0
   let completionGateNudges = 0
   // V3: след проверок прогона — ЧТО реально исполнилось и с каким исходом.
   // Собирается из фактических вызовов и их результатов; слова модели («я всё
@@ -781,29 +780,50 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
    * Возвращает 'allow' | 'retry'; исчерпание попыток даёт allow, но помечает прогон
    * как непроверенный — человек это видит, работа за проверенную не выдаётся.
    */
+  /**
+   * Ярлык шага для журнала. Отдельной функцией потому, что выходов у гейта ДВА
+   * (см. ниже по циклу), и разъехавшиеся формулировки уже стоили класса ошибок:
+   * 11.08 гейт стоял только на одном выходе, 15.08 мутация второго дала зелёный
+   * прогон. Одна причина — одна строка на оба места.
+   */
+  const completionGateStepLabel = (): string => {
+    const failed = verificationTrail.find(c => !c.ok)
+    return failed
+      ? `требую доказательство: проверка не прошла (${failed.label})`
+      : 'требую доказательство: файлы изменены, проверок нет'
+  }
+
   const enforceCompletionGateBeforeFinal = (): 'allow' | 'retry' => {
+    // 2.7.0: счётчики выводятся из ОДНОГО следа (`verificationTrail`), а не живут
+    // отдельной переменной рядом с ним. Прежний `runVerifications` считал ровно те
+    // же вызовы, но без исхода — второй счётчик той же величины однажды разъехался
+    // бы со следом, а именно исход теперь и решает.
+    const failedChecks = verificationTrail.filter(c => !c.ok).map(c => c.label)
     const decision = decideCompletionGate({
       acceptedWrites: runAcceptedWrites,
-      verifications: runVerifications,
+      verifications: verificationTrail.length,
+      failedVerifications: failedChecks.length,
       nudges: completionGateNudges,
     })
     if (decision === 'retry') {
       completionGateNudges++
-      currentMessages.push({ role: 'user', content: buildCompletionGateNudge(runVerifyScriptHints) })
+      currentMessages.push({ role: 'user', content: buildCompletionGateNudge(runVerifyScriptHints, failedChecks) })
       sender.send('ai:event', {
         id: sendId,
         event: { type: 'tool-blocked', callId: `completion-gate-${completionGateNudges}`, name: 'run_command',
-          reason: 'Файлы изменены, но результат не проверен — запусти тесты/тайпчек/сборку.' },
+          reason: failedChecks.length > 0
+            ? `Проверка не прошла (${failedChecks[0]}) — почини причину и прогони снова.`
+            : 'Файлы изменены, но результат не проверен — запусти тесты/тайпчек/сборку.' },
       })
       return 'retry'
     }
     if (decision === 'finish-unverified') {
       // Видимость для человека — само событие: карточка прогона покажет, что
-      // работа сдана непроверенной. Отдельного флага не заводим, чтобы в коде не
+      // работа сдана недоказанной. Отдельного флага не заводим, чтобы в коде не
       // появилось поле, которое пишется и никем не читается.
       sender.send('ai:event', {
         id: sendId,
-        event: { type: 'info', message: unverifiedWorkNote(filesTouched.size) },
+        event: { type: 'info', message: unverifiedWorkNote(filesTouched.size, failedChecks) },
       })
       return 'allow'
     }
@@ -1160,7 +1180,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           // зелёная функция, которую никто не зовёт). Гейт обязан стоять на ОБОИХ
           // выходах, иначе он декоративен.
           if (enforceCompletionGateBeforeFinal() === 'retry') {
-            emitStepLine(turn, [], 'требую доказательство: файлы изменены, проверок нет')
+            emitStepLine(turn, [], completionGateStepLabel())
             assistantText = ''
             continue turnLoop
           }
@@ -1265,14 +1285,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         return
       }
       // V2-3 (главная правка): на ОБЫЧНОМ пути финал не выпускается, если были записи
-      // и ни одной проверки. Bounded — после лимита попыток прогон закрывается с
-      // видимой пометкой «не проверено», а не выдаётся за готовое.
+      // и ни одной ПРОЙДЕННОЙ проверки. Bounded — после лимита попыток прогон
+      // закрывается с видимой пометкой, а не выдаётся за готовое.
       if (enforceCompletionGateBeforeFinal() === 'retry') {
-        emitStepLine(turn, [], 'требую доказательство: файлы изменены, проверок нет')
+        emitStepLine(turn, [], completionGateStepLabel())
         assistantText = ''
         continue
       }
-      emitStepLine(turn, [], runAcceptedWrites > 0 && runVerifications === 0 ? 'закрываю: сделано, НЕ проверено' : 'готово')
+      emitStepLine(turn, [], runAcceptedWrites > 0 && !verificationTrail.some(c => c.ok) ? 'закрываю: сделано, НЕ доказано' : 'готово')
       exitReason = 'completed'
       // Д2 + остаток Д1: ярлык карточки обязан повторять ИСХОД. Считаем его здесь,
       // потому что только тут известны обе части — полный текст ответа (агент сам
@@ -1579,11 +1599,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // вызов модели (isVerificationToolCall) — авто-диагностика продукта не годится:
     // гейт спрашивает, проверил ли себя АГЕНТ.
     runAcceptedWrites += toolOutcome.acceptedWrites
-    runVerifications += toolCalls.filter(isVerificationToolCall).length
-    // V3: тот же признак проверки, что у гейта (общий isVerificationToolCall —
-    // второго определения «что считается проверкой» в продукте быть не должно),
-    // но здесь запоминается ещё и ИСХОД. Успех читается из кода возврата, если он
-    // есть; у инструментов без кода — по отсутствию ошибки.
+    // V3: признак проверки один на продукт (`isVerificationToolCall` — второго
+    // определения «что считается проверкой» быть не должно), и здесь же
+    // запоминается ИСХОД. Успех читается из кода возврата, если он есть; у
+    // инструментов без кода — по отсутствию ошибки.
+    // 2.7.0: этот след — ЕДИНСТВЕННЫЙ источник и для плашки итога, и для решения
+    // гейта; отдельного счётчика вызовов рядом больше нет.
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       if (!isVerificationToolCall(call)) continue

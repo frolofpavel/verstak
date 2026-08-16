@@ -81,6 +81,66 @@ describe('decideCompletionGate — V2-3', () => {
   })
 })
 
+// 2.7.0 шаг 2: ПРОВЕРКА ПЕРЕСТАЁТ БЫТЬ РЕЖИМОМ, который человек включает кнопкой.
+//
+// Решение Павла 16.08 сняло кнопку «До результата»: «делать надо так, чтобы не
+// требовались доказательства и проверки». Кнопка запускала pipeline с verify-гейтом
+// (`src/lib/pipeline-gate.ts`), и разницу между ним и обычным путём надо было
+// ПЕРЕНЕСТИ, а не строить третью машину рядом.
+//
+// Разница ровно одна, и она вот в чём. Оба гейта спрашивают «доказана ли работа»,
+// но отвечают на разные вопросы: pipeline-гейт смотрит на ИСХОД проверки
+// (`pass` / `fail` / `unknown`), а completion-гейт до сих пор смотрел только на её
+// ФАКТ — `verifications > 0 → allow`. Прогон, который записал файлы, прогнал
+// `npm run test:fast`, получил красное и сказал «готово», проезжал гейт целиком:
+// проверка ведь была. Красный прогон доказательством не является — это и есть то,
+// ради чего кнопка существовала.
+//
+// Второе расхождение оставлено сознательно и расхождением не считается: pipeline на
+// исчерпании попыток даёт `blocked` (отказ), а чат даёт `finish-unverified` — честную
+// пометку. В чате нельзя отказаться отвечать человеку; пометка «сделано, НЕ доказано»
+// и есть чатовая форма того же честного стопа. Машина bounded в обоих случаях.
+describe('decideCompletionGate — исход проверки, а не её факт (2.7.0)', () => {
+  it('проверка была, но УПАЛА → retry: красный прогон доказательством не является', () => {
+    expect(decideCompletionGate({ acceptedWrites: 2, verifications: 1, failedVerifications: 1, nudges: 0 })).toBe(
+      'retry',
+    )
+  })
+
+  it('КОНТРОЛЬ: та же форма, но проверка ПРОШЛА → allow (гейт не кричит всегда)', () => {
+    expect(decideCompletionGate({ acceptedWrites: 2, verifications: 1, failedVerifications: 0, nudges: 0 })).toBe(
+      'allow',
+    )
+  })
+
+  it('часть проверок упала, но хотя бы одна прошла → allow: доказательство есть', () => {
+    expect(decideCompletionGate({ acceptedWrites: 2, verifications: 3, failedVerifications: 2, nudges: 0 })).toBe(
+      'allow',
+    )
+  })
+
+  it('BOUNDED и для красных проверок: попытки исчерпаны → честный финал, а не цикл', () => {
+    expect(
+      decideCompletionGate({
+        acceptedWrites: 1,
+        verifications: 1,
+        failedVerifications: 1,
+        nudges: COMPLETION_GATE_MAX_NUDGES,
+      }),
+    ).toBe('finish-unverified')
+  })
+
+  it('КОНТРОЛЬ: записей не было → красная проверка гейт не включает', () => {
+    expect(decideCompletionGate({ acceptedWrites: 0, verifications: 1, failedVerifications: 1, nudges: 0 })).toBe(
+      'allow',
+    )
+  })
+
+  it('СОВМЕСТИМОСТЬ: без поля failedVerifications правило прежнее (поле не обязательно)', () => {
+    expect(decideCompletionGate({ acceptedWrites: 2, verifications: 1, nudges: 0 })).toBe('allow')
+  })
+})
+
 describe('тексты гейта', () => {
   it('nudge требует ДОКАЗАТЕЛЬСТВА и называет, чем проверить', () => {
     const nudge = buildCompletionGateNudge(['npm run test:fast', 'npm run type'])
@@ -97,5 +157,28 @@ describe('тексты гейта', () => {
     expect(note).toMatch(/не проверен/i)
     expect(note).toContain('3')
     expect(note).not.toMatch(/готово|успешно|проверено успешно/i)
+  })
+
+  // 2.7.0: два разных отказа нельзя описывать одним текстом. «Ты ни разу не
+  // проверил» — ЛОЖЬ для прогона, который проверил и получил красное; модель на
+  // такой упрёк отвечает повторным запуском той же команды, а человек читает
+  // «не проверялось» там, где на самом деле «не прошло». Оба текста ветвятся по
+  // одному признаку — списку упавших проверок.
+  it('nudge при КРАСНОЙ проверке говорит про провал, а не «ты не проверял»', () => {
+    const nudge = buildCompletionGateNudge(['npm run test:fast'], ['npm run test:fast'])
+    expect(nudge).toMatch(/не прошл|упал/i)
+    expect(nudge).toContain('npm run test:fast')
+    expect(nudge).not.toMatch(/ни разу не проверил/i)
+  })
+
+  it('КОНТРОЛЬ: без упавших проверок nudge прежний — «ни разу не проверил»', () => {
+    expect(buildCompletionGateNudge(['npm run test:fast'], [])).toMatch(/ни разу не проверил/i)
+  })
+
+  it('финал при красной проверке ЧЕСТЕН: называет, что именно не прошло', () => {
+    const note = unverifiedWorkNote(3, ['npm run test:fast'])
+    expect(note).toMatch(/не прошл/i)
+    expect(note).toContain('npm run test:fast')
+    expect(note).not.toMatch(/готово|успешно/i)
   })
 })

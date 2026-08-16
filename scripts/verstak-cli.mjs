@@ -1522,6 +1522,9 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
   // на масштабе прогона, а не отдельного хода.
   let runAcceptedWrites = 0
   let runVerifications = 0
+  // 2.7.0: исход проверки, а не только её факт — красный прогон доказательством
+  // не является. Тот же общий модуль, что на десктопном пути.
+  const runFailedChecks = []
   let completionGateNudges = 0
   // V2-4: тот же детект застоя, что на десктопном пути (общий модуль
   // agent-progress.mjs). Здесь он особенно нужен: у CLI-цикла нет вообще никакой
@@ -1615,6 +1618,7 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       const completionDecision = decideCompletionGate({
         acceptedWrites: runAcceptedWrites,
         verifications: runVerifications,
+        failedVerifications: runFailedChecks.length,
         nudges: completionGateNudges,
       })
       if (completionDecision === 'retry') {
@@ -1622,14 +1626,16 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
         trace.completionGateNudges = completionGateNudges
         trace.toolCalls.push({ turn, name: 'completion-gate-nudge', args: {} })
         trace.toolCallsCount = trace.toolCalls.length
-        messages.push({ role: 'user', content: buildCompletionGateNudge(recipe?.verify?.commands ?? []) })
-        recordStep(turn, [], [], 'требую доказательство: файлы изменены, проверок нет', { progressed: false, newFacts: 0 })
+        messages.push({ role: 'user', content: buildCompletionGateNudge(recipe?.verify?.commands ?? [], runFailedChecks) })
+        recordStep(turn, [], [], runFailedChecks.length > 0
+          ? `требую доказательство: проверка не прошла (${runFailedChecks[0]})`
+          : 'требую доказательство: файлы изменены, проверок нет', { progressed: false, newFacts: 0 })
         continue
       }
       if (completionDecision === 'finish-unverified') {
         trace.completionGateNudges = completionGateNudges
         trace.finishedUnverified = true
-        if (!jsonMode) process.stderr.write(`\n${unverifiedWorkNote(runAcceptedWrites)}\n`)
+        if (!jsonMode) process.stderr.write(`\n${unverifiedWorkNote(runAcceptedWrites, runFailedChecks)}\n`)
       }
       recordStep(turn, [], [], completionDecision === 'finish-unverified' ? 'закрываю: сделано, НЕ проверено' : 'готово', { progressed: false, newFacts: 0 })
       break
@@ -1665,8 +1671,20 @@ async function runAgent({ provider, model, apiKey, projectPath, mode, json: json
       // только если инструмент не вернул ошибку — иначе отказ гейта («проверь») мог бы
       // требоваться за работу, которой не произошло.
       const toolFailed = typeof result === 'string' && result.startsWith('Ошибка:')
+      // 2.7.0: ненулевой код возврата команды приходит СТРОКОЙ «Ошибка (exitCode N)»
+      // (toolRunCommand выше), а не отказом инструмента — под `toolFailed` он не
+      // подпадает и до сих пор засчитывался как успешная проверка.
+      const commandFailed = typeof result === 'string' && result.startsWith('Ошибка (exitCode')
       if (!toolFailed && isMutatingToolName(call.name)) runAcceptedWrites++
-      if (!toolFailed && isVerificationToolCall(call)) runVerifications++
+      if (!toolFailed && isVerificationToolCall(call)) {
+        runVerifications++
+        if (commandFailed) {
+          const label = typeof call.args?.command === 'string' && call.args.command.trim()
+            ? call.args.command.trim()
+            : call.name
+          runFailedChecks.push(label)
+        }
+      }
       if (call.name === 'review_before_commit' && typeof result === 'string' && result.includes(REVIEW_GATE_PASS_MARKER)) {
         reviewGatePassed = true
         trace.reviewGate = 'pass'
