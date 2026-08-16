@@ -2955,8 +2955,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
 
   /**
    * Вставить шаблон в композер и сфокусировать textarea (курсор в конце —
-   * пользователь сразу дописывает цель). Используется мультиагентными
-   * slash-командами и кнопкой «Мультиагент». setTimeout(0) — чтобы значение
+   * пользователь сразу дописывает цель). Используется скрытыми мультиагентными
+   * slash-командами (кнопка «Мультиагент» снята — цель 2.7.0, пункт 2:
+   * см. src/lib/multi-agent-templates.ts). setTimeout(0) — чтобы значение
    * не было перетёрто onClear() из SlashCommandPopup.execute() (см. там).
    */
   function injectTemplate(template: string) {

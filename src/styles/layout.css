@@ -19782,9 +19782,11 @@ html[data-theme="light"] .gg-policy {
 
 /* ======================================================================
    Multi-agent UX (UX-слой мультиагента V1):
-   — кнопка/попап «Мультиагент» в композере (переиспользует gg-skill-popup);
-   — полировка панели «Агенты»: empty-state, fade-in карточек, toggle дерева,
+   — полировка панели «Агенты»: fade-in карточек, toggle дерева,
      прогресс-бар TodoGate, аккуратная модалка истории суб-сессии.
+   Цель 2.7.0 (пункт 2–3): кнопка «Мультиагент» и empty-state панели «Агенты»
+   сняты; их правила ушли отсюда вместе с разметкой. Класс `.gg-agents-empty`
+   остаётся — его использует AgentRunsPanel («История работы»).
    ====================================================================== */
 
 /* Кнопка «Мультиагент» — обёртка как у SkillPicker (relative для popup). */
@@ -19807,7 +19809,9 @@ html[data-theme="light"] .gg-policy {
   transition: width 240ms ease;
 }
 
-/* Empty-state панели «Агенты» — осмысленный плейсхолдер с быстрым стартом. */
+/* Пустой список — используется «Историей работы» (AgentRunsPanel). Дочерние
+   правила (-icon/-title/-hint/-actions) сняты вместе с empty-state панели
+   «Агенты»: их разметки в проекте больше нет. */
 .gg-agents-empty {
   display: flex;
   flex-direction: column;
@@ -19816,15 +19820,6 @@ html[data-theme="light"] .gg-policy {
   padding: 48px 24px;
   text-align: center;
 }
-.gg-agents-empty-icon { font-size: 32px; opacity: 0.7; }
-.gg-agents-empty-title { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
-.gg-agents-empty-hint {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  max-width: 340px;
-  line-height: 1.5;
-}
-.gg-agents-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; }
 
 /* Мягкое появление карточки — поллинг раз в 2с не должен дёргать список. */
 .gg-agent-card-anim { animation: gg-fade-in 180ms ease; }
