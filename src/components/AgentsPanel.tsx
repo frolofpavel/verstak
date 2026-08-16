@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
 import type { AgentJob, SubSession, SessionTodo, StoredChatMessage, ProviderDescriptorDTO } from '../types/api'
 import { Markdown } from './Markdown'
-import { MULTI_AGENT_TEMPLATES } from '../lib/multi-agent-templates'
 import { buildAgentTree, type TreeNode } from '../lib/agent-tree'
 import { useT } from '../i18n'
 
@@ -11,9 +10,15 @@ import { useT } from '../i18n'
  *
  * Живой список ВСЕХ суб-сессий проекта (running + done + error + cancelled):
  * роль, провайдер/модель, статус, задача, длительность, счётчик tool-вызовов.
- * Фильтры по роли/провайдеру/статусу. Клик → история суб-сессии (read-only).
+ * Клик → история суб-сессии (read-only).
  * Кнопка «притащить в чат» вставляет результат в композер основного чата.
  * Массовая отмена (Идея 6): «отменить всё» / по роли — через agents.cancel.
+ *
+ * Цель 2.7.0 (пункт 3): панель перестала быть отдельным ИНСТРУМЕНТОМ и стала
+ * инспектором того, что реально идёт. Сняты три фильтра над почти всегда пустым
+ * списком, кнопка «↻» рядом с автообновлением раз в 2 с и пустое состояние,
+ * объяснявшее собственную пустоту и предлагавшее две кнопки оркестрации. Ход
+ * суб-агентов человек видит в потоке работы, там же, где остальные шаги.
  *
  * Данные: window.api.agents (новый IPC). Поллинг раз в 2с пока открыта панель —
  * чтобы статусы running → done обновлялись без ручного refresh.
@@ -118,9 +123,6 @@ export function AgentsPanel() {
   const [todos, setTodos] = useState<SessionTodo[]>([])
   const [queue, setQueue] = useState<{ inFlight: number; queued: number; tracked: number } | null>(null)
   const [viewing, setViewing] = useState<SubSession | null>(null)
-  const [roleFilter, setRoleFilter] = useState<string>('')
-  const [providerFilter, setProviderFilter] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
   const [jobActionMessage, setJobActionMessage] = useState<string>('')
   // Свёрнутые родительские узлы дерева (по sub.id). По умолчанию всё развёрнуто.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
@@ -163,25 +165,10 @@ export function AgentsPanel() {
     return () => clearInterval(t)
   }, [refresh])
 
-  const roles = useMemo(() => Array.from(new Set(subs.map(s => s.role).filter(Boolean))) as string[], [subs])
-  const providers = useMemo(() => Array.from(new Set(subs.map(s => s.providerId).filter(Boolean))) as string[], [subs])
-
-  const filtered = useMemo(() => subs.filter(s =>
-    (!roleFilter || s.role === roleFilter) &&
-    (!providerFilter || s.providerId === providerFilter) &&
-    (!statusFilter || s.status === statusFilter)
-  ), [subs, roleFilter, providerFilter, statusFilter])
-
-  // Дерево делегирования: когда фильтры не активны — показываем иерархию
-  // main → суб → под-суб с отступами. С активным фильтром структура рвётся,
-  // поэтому показываем плоско (level 0, без детей).
-  const treeActive = !roleFilter && !providerFilter && !statusFilter
-  const tree = useMemo<TreeNode[]>(
-    () => treeActive
-      ? buildAgentTree(filtered)
-      : filtered.map(sub => ({ sub, level: 0, hasChildren: false, parentId: null })),
-    [filtered, treeActive]
-  )
+  // Дерево делегирования: иерархия main → суб → под-суб с отступами. Раньше
+  // рядом жила плоская ветка «структура порвана активным фильтром» — фильтров
+  // больше нет, поэтому и ветки нет (цель 2.7.0, пункт 3).
+  const tree = useMemo<TreeNode[]>(() => buildAgentTree(subs), [subs])
 
   // Видимое дерево: скрываем узлы, у которых свёрнут какой-либо предок.
   // Идём по pre-order списку — если родитель в collapsed, прячем всё поддерево.
@@ -220,13 +207,6 @@ export function AgentsPanel() {
     failed: t.agentJobs.status.failed,
     blocked: t.agentJobs.status.blocked,
     cancelled: t.agentJobs.status.cancelled,
-  }
-
-  // Инжект в композер основного чата + переход на вкладку Chat.
-  // Используется empty-state кнопками быстрого старта оркестрации/роя.
-  function injectToChat(text: string) {
-    window.dispatchEvent(new CustomEvent('gg-inject-prompt', { detail: text }))
-    setActiveView('chat')
   }
 
   // Притащить результат суба в композер основного чата (переиспользуем
@@ -297,27 +277,17 @@ export function AgentsPanel() {
       </div>
       {jobActionMessage && <div className="gg-notice">{jobActionMessage}</div>}
 
-      <div className="gg-inspector-toolbar gg-agents-toolbar">
-        <select className="gg-input gg-agents-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
-          <option value="">Все роли</option>
-          {roles.map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <select className="gg-input gg-agents-select" value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
-          <option value="">Все провайдеры</option>
-          {providers.map(p => <option key={p} value={p}>{providerLabel(p)}</option>)}
-        </select>
-        <select className="gg-input gg-agents-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="">Все статусы</option>
-          {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <div className="gg-agents-toolbar-spacer" />
-        {runningCount > 0 && (
+      {/* Панель обновляется сама раз в 2 с — кнопки «↻» рядом с автообновлением
+          быть не должно. «Отменить всё» остаётся: это действие, и оно уже
+          условное — только когда есть кого прерывать. */}
+      {runningCount > 0 && (
+        <div className="gg-inspector-toolbar gg-agents-toolbar">
+          <div className="gg-agents-toolbar-spacer" />
           <button className="gg-btn gg-btn-ghost gg-agents-cancel" onClick={() => void cancelAll()} title="Прервать все активные суб-агенты">
             ⛔ Отменить всё
           </button>
-        )}
-        <button className="gg-btn gg-btn-ghost" onClick={() => void refresh()}>↻</button>
-      </div>
+        </div>
+      )}
 
       <div className="gg-panel-body">
         {jobs.length > 0 && (
@@ -401,31 +371,6 @@ export function AgentsPanel() {
             </div>
           )
         })()}
-        {filtered.length === 0 && (
-          <div className="gg-agents-empty">
-            <div className="gg-agents-empty-icon">🤖</div>
-            <div className="gg-agents-empty-title">Пока агентов нет</div>
-            <div className="gg-agents-empty-hint">
-              Запусти оркестрацию или рой — суб-агенты появятся здесь с живым статусом.
-            </div>
-            <div className="gg-agents-empty-actions">
-              <button
-                className="gg-quick-action"
-                onClick={() => injectToChat(MULTI_AGENT_TEMPLATES.orchestrate.template)}
-                title="Разбить цель на подзадачи по ролям и выполнить параллельно (orchestrate)"
-              >
-                📊 Оркестровать · /orchestrate
-              </button>
-              <button
-                className="gg-quick-action"
-                onClick={() => injectToChat(MULTI_AGENT_TEMPLATES.swarm.template)}
-                title="Несколько агентов разными стратегиями + арбитр (swarm)"
-              >
-                🐝 Запустить рой · /swarm
-              </button>
-            </div>
-          </div>
-        )}
         <div className="gg-run-list">
           {visibleTree.map(({ sub: s, level, hasChildren }) => {
             const cost = fmtCost(s.costCents)

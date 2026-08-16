@@ -4,7 +4,6 @@ import { useActiveChatField } from '../hooks/useActiveChatBundle'
 import { useSkills } from '../store/skillStore'
 import { composeReviewPayload } from '../lib/compose-review-payload'
 import { runExactRewindFlow } from '../lib/exact-rewind-flow'
-import { MULTI_AGENT_LIST } from '../lib/multi-agent-templates'
 import { ContextMeter } from './ContextMeter'
 import { useProvider } from '../hooks/useProvider'
 import { canIsolateChat, isolationBlockedReason, isolationBlockedHint, fileRevertBlockedReason, fileRevertBlockedHint } from '../lib/worktree-honesty'
@@ -21,16 +20,15 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
-type SubId = 'skill' | 'review' | 'checkpoint' | 'multiagent' | 'worktree' | 'export' | 'context'
+// Цель 2.7.0 (пункт 2): подменю 'multiagent' снято — см. system-slash-commands.ts.
+type SubId = 'skill' | 'review' | 'checkpoint' | 'worktree' | 'export' | 'context'
 type WorktreeStatus = { active: false } | { active: true; worktreePath: string; fileCount: number; hasChanges: boolean }
 
 export function ComposerToolsMenu({
-  onInject,
   onSaveHandoff,
   onExportTranscript,
   exportBusy = false,
 }: {
-  onInject: (text: string) => void
   onSaveHandoff?: () => Promise<void> | void
   onExportTranscript?: () => Promise<void> | void
   exportBusy?: boolean
@@ -389,16 +387,11 @@ export function ComposerToolsMenu({
         ? 'уже включена'
         : 'отдельная git-копия'
 
-  function pickMultiAgent(template: string) {
-    onInject(template)
-    setOpen(false)
-  }
-
   const triggerHint = activeSkill
     ? `Инструмент: ${activeSkill.name ?? activeSkill.id}`
     : checkpointId !== null
       ? 'Чекпоинт установлен'
-      : 'Инструмент, ревью, мультиагент, чекпоинт'
+      : 'Инструмент, ревью, чекпоинт'
 
   return (
     <div className={`gg-tools-wrap ${open ? 'is-open' : ''}`} ref={wrapRef}>
@@ -523,39 +516,6 @@ export function ComposerToolsMenu({
                   ) : (
                     <div className="gg-tools-empty">Сначала дождитесь ответа агента</div>
                   )}
-                </div>
-              )}
-            </li>
-
-            <li
-              className={`gg-tools-menu-item ${openSub === 'multiagent' ? 'is-submenu-open' : ''}`}
-              role="none"
-            >
-              <button
-                type="button"
-                className="gg-tools-menu-trigger"
-                role="menuitem"
-                aria-expanded={openSub === 'multiagent'}
-                onClick={() => toggleSub('multiagent')}
-              >
-                <span className="gg-tools-menu-label">Мультиагент</span>
-                <span className="gg-tools-menu-meta">{MULTI_AGENT_LIST.length} режима</span>
-                <span className="gg-tools-menu-arrow" aria-hidden>›</span>
-              </button>
-              {openSub === 'multiagent' && (
-                <div className="gg-tools-submenu gg-mp-popover-opaque" role="menu">
-                  <div className="gg-tools-submenu-title">Мультиагент</div>
-                  {MULTI_AGENT_LIST.map(t => (
-                    <button
-                      key={t.trigger}
-                      type="button"
-                      className="gg-tools-row"
-                      onClick={() => pickMultiAgent(t.template)}
-                    >
-                      <span className="gg-tools-row-label">{t.icon} {t.label}</span>
-                      <span className="gg-tools-row-meta">/{t.trigger}</span>
-                    </button>
-                  ))}
                 </div>
               )}
             </li>

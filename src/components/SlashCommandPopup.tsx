@@ -22,8 +22,19 @@ import type { UserCommand } from '../types/api'
 
 export type SlashCommand =
   | { kind: 'skill'; skillId: string; trigger: string; label: string; description?: string; icon?: string }
-  | { kind: 'system'; trigger: string; label: string; description: string; icon: string; action: () => void }
+  | { kind: 'system'; trigger: string; label: string; description: string; icon: string; action: () => void; hidden?: boolean }
   | { kind: 'user-command'; command: UserCommand; trigger: string; label: string; description?: string; icon?: string }
+
+/**
+ * Цель 2.7.0: `hidden` — команда не на витрине, но досягаема. Всплывает только
+ * когда её набрали осознанно: с MIN_HIDDEN_QUERY букв и строго с начала триггера.
+ * Одной буквы мало — иначе «не на виду» превращается в «на виду через раз».
+ */
+const MIN_HIDDEN_QUERY = 3
+
+function isHiddenCommand(c: SlashCommand): boolean {
+  return c.kind === 'system' && c.hidden === true
+}
 
 interface Props {
   /** Текущий текст композера. Если начинается с "/", popup открыт. */
@@ -84,15 +95,23 @@ export function SlashCommandPopup({ text, onClear, onInject, systemCommands = []
     return [...skillCommands, ...cmdCommands, ...systemCommands]
   }, [skills, userCommands, systemCommands, helpScope])
 
-  // Фильтр по введённому query
+  // Фильтр по введённому query. Скрытые команды в общий список не попадают
+  // никогда — только точным набором с начала триггера (см. MIN_HIDDEN_QUERY).
   const filtered = useMemo(() => {
     if (!slashState) return []
     const q = slashState.query.toLowerCase()
-    if (!q) return allCommands
-    return allCommands.filter(c =>
-      c.trigger.toLowerCase().includes(q) ||
-      c.label.toLowerCase().includes(q)
-    )
+    const visible = allCommands.filter(c => !isHiddenCommand(c))
+    if (!q) return visible
+    const hiddenMatches = q.length >= MIN_HIDDEN_QUERY
+      ? allCommands.filter(c => isHiddenCommand(c) && c.trigger.toLowerCase().startsWith(q))
+      : []
+    return [
+      ...visible.filter(c =>
+        c.trigger.toLowerCase().includes(q) ||
+        c.label.toLowerCase().includes(q)
+      ),
+      ...hiddenMatches,
+    ]
   }, [allCommands, slashState])
 
   // Reset selection at filter change

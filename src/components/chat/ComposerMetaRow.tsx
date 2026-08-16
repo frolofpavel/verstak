@@ -86,7 +86,6 @@ export interface ComposerMetaRowProps {
   agentMode: AgentMode
   applyMode: (m: AgentMode) => Promise<void>
   setAgentMode: (m: AgentMode) => Promise<void>
-  injectTemplate: (template: string) => void
   saveHandoffToDownloads: () => Promise<void>
   exportTranscript: () => Promise<void>
   handoffBusy: boolean
@@ -104,7 +103,7 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
     sessionUsage, sessionStats, undoCount, chatIsolated, revertLastWrite,
     autoScrollEnabled, toggleAutoScroll, composerSettingsRef, composerSettingsOpen,
     setComposerSettingsOpen, onOpenSettings, agentMode, applyMode, setAgentMode,
-    injectTemplate, saveHandoffToDownloads, exportTranscript, handoffBusy,
+    saveHandoffToDownloads, exportTranscript, handoffBusy,
     skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled, activePipeline,
     setPipelineWizardMode, setPipelineWizardOpen, setOutcomeRunsOpen,
   } = props
@@ -281,7 +280,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
                     <div className="gg-chat-settings-item">
                       <span className="gg-chat-settings-label">Инструменты</span>
                       <ComposerToolsMenu
-                        onInject={injectTemplate}
                         onSaveHandoff={saveHandoffToDownloads}
                         onExportTranscript={exportTranscript}
                         exportBusy={handoffBusy}
@@ -366,7 +364,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
           )}
           {!isHelpChat && (
             <ComposerToolsMenu
-              onInject={injectTemplate}
               onSaveHandoff={saveHandoffToDownloads}
               onExportTranscript={exportTranscript}
               exportBusy={handoffBusy}

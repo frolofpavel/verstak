@@ -41,8 +41,14 @@ export function buildSystemSlashCommands(deps: SystemSlashCommandDeps): SlashCom
       icon: '∅',
       action: deps.clearActiveSkill,
     },
+    // Цель 2.7.0 (пункт 2): мультиагентные шаблоны сняты с витрины. Они ничего
+    // не запускали — вставляли в поле текст, ПРОСЯЩИЙ агента вызвать orchestrate/
+    // swarm/delegate_parallel. Инструменты живут у агента, и он вызывает их сам,
+    // как это делает Claude Code. Здесь остаётся отладочный путь: команда
+    // работает, но не предлагается (hidden — см. SlashCommandPopup).
     {
       kind: 'system',
+      hidden: true,
       trigger: MULTI_AGENT_TEMPLATES.orchestrate.trigger,
       label: MULTI_AGENT_TEMPLATES.orchestrate.label,
       description: 'Оркестратор — разбить цель на подзадачи по ролям',
@@ -51,6 +57,7 @@ export function buildSystemSlashCommands(deps: SystemSlashCommandDeps): SlashCom
     },
     {
       kind: 'system',
+      hidden: true,
       trigger: MULTI_AGENT_TEMPLATES.swarm.trigger,
       label: MULTI_AGENT_TEMPLATES.swarm.label,
       description: 'Рой — N агентов разными стратегиями + арбитр',
@@ -59,6 +66,7 @@ export function buildSystemSlashCommands(deps: SystemSlashCommandDeps): SlashCom
     },
     {
       kind: 'system',
+      hidden: true,
       trigger: MULTI_AGENT_TEMPLATES.parallel.trigger,
       label: MULTI_AGENT_TEMPLATES.parallel.label,
       description: 'Параллельно — пакет независимых задач суб-агентам',

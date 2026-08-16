@@ -3037,21 +3037,28 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
               </button>
               {/* Задача 2: инспектор суб-агентов переехал из отдельного пункта меню
                   «Агенты» СЮДА — рядом с прогоном. Живой список суб-сессий этого прогона
-                  и проекта: роль/провайдер/статус/задача, отмена, «притащить в чат». */}
-              <button
-                type="button"
-                className={`gg-terminal-bar-btn gg-terminal-bar-btn-agents ${rightPanel === 'agents' ? 'is-open' : ''}`}
-                onClick={() => onSelectRightPanel(rightPanel === 'agents' ? 'none' : 'agents')}
-                title="Агенты прогона — суб-агенты этого чата и проекта"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <circle cx="12" cy="7" r="3" />
-                  <circle cx="5" cy="17" r="2.5" />
-                  <circle cx="19" cy="17" r="2.5" />
-                  <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
-                </svg>
-                <span>{t.sidebar.agents}</span>
-              </button>
+                  и проекта: роль/провайдер/статус/задача, отмена, «притащить в чат».
+                  Цель 2.7.0 (пункт 3): вход перестал висеть постоянно. Признак, по
+                  которому решает продукт, а не человек, — в этом чате реально шли
+                  суб-агенты. Открытую панель показываем всегда: иначе её нечем было
+                  бы закрыть. История суб-сессий прошлых прогонов не теряется — она
+                  живёт в разделе «История работы» (AgentRunsPanel, detail.subs). */}
+              {(subagentRuns.length > 0 || rightPanel === 'agents') && (
+                <button
+                  type="button"
+                  className={`gg-terminal-bar-btn gg-terminal-bar-btn-agents ${rightPanel === 'agents' ? 'is-open' : ''}`}
+                  onClick={() => onSelectRightPanel(rightPanel === 'agents' ? 'none' : 'agents')}
+                  title="Агенты прогона — суб-агенты этого чата и проекта"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <circle cx="12" cy="7" r="3" />
+                    <circle cx="5" cy="17" r="2.5" />
+                    <circle cx="19" cy="17" r="2.5" />
+                    <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
+                  </svg>
+                  <span>{t.sidebar.agents}</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -3362,7 +3369,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           agentMode={agentMode}
           applyMode={applyMode}
           setAgentMode={setAgentMode}
-          injectTemplate={injectTemplate}
           saveHandoffToDownloads={saveHandoffToDownloads}
           exportTranscript={exportTranscript}
           handoffBusy={handoffBusy}
