@@ -98,6 +98,8 @@ export interface ComposerMetaRowProps {
   handoffBusy: boolean
   skillSuggestionsEnabled: boolean
   setProjectSkillSuggestionsEnabled: (enabled: boolean) => void
+  /** Открыть выбранную папку как проект (переехало из композера, 2.7.0 шаг 2). */
+  onPickMaterialsFolder: () => void
 }
 
 export function ComposerMetaRow(props: ComposerMetaRowProps) {
@@ -107,7 +109,7 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
     autoScrollEnabled, toggleAutoScroll, composerSettingsRef, composerSettingsOpen,
     setComposerSettingsOpen, onOpenSettings, agentMode, applyMode, setAgentMode,
     saveHandoffToDownloads, exportTranscript, handoffBusy,
-    skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled,
+    skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled, onPickMaterialsFolder,
   } = props
   // V1 (волна 2.6.0): телеметрия прогона свёрнута под одну иконку.
   //
@@ -286,6 +288,25 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
                         onExportTranscript={exportTranscript}
                         exportBusy={handoffBusy}
                       />
+                    </div>
+                  )}
+                  {/* 2.7.0 шаг 2: бывшая 📁 из композера. Здесь она названа тем,
+                      что делает НА САМОМ ДЕЛЕ — открывает папку проектом, а не
+                      «прикрепляет папку»; именно неверное имя и делало её
+                      неотличимой от скрепки. Класс `gg-materials-btn` сохранён:
+                      кнопка та же, переехал только её дом и подпись. */}
+                  {!isHelpChat && (
+                    <div className="gg-chat-settings-item">
+                      <span className="gg-chat-settings-label">Документы</span>
+                      <button
+                        type="button"
+                        className="gg-btn gg-btn-ghost gg-btn-xs gg-materials-btn"
+                        onClick={() => { setComposerSettingsOpen(false); onPickMaterialsFolder() }}
+                        title="Открыть папку с документами как проект — агент будет работать с её содержимым"
+                        aria-label="Открыть папку с документами как проект"
+                      >
+                        Открыть папку проектом
+                      </button>
                     </div>
                   )}
                   {!isHelpChat && (

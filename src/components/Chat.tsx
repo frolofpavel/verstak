@@ -3336,7 +3336,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           }}
           onPaste={onPaste}
           onFilesPicked={onFilesPicked}
-          onPickMaterialsFolder={() => { void pickMaterialsFolder() }}
           materialsFolder={materialsFolder}
           send={() => { void send() }}
           stop={asSuspend => { void stop(asSuspend) }}
@@ -3372,6 +3371,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           handoffBusy={handoffBusy}
           skillSuggestionsEnabled={skillSuggestionsEnabled}
           setProjectSkillSuggestionsEnabled={setProjectSkillSuggestionsEnabled}
+          onPickMaterialsFolder={() => { void pickMaterialsFolder() }}
         />
       </div>
     </div>

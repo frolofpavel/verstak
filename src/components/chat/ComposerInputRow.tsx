@@ -49,8 +49,6 @@ export interface ComposerInputRowProps {
   placeholders: { streaming: string; home: string; idle: string }
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
   onFilesPicked: (e: ChangeEvent<HTMLInputElement>) => void
-  /** VSK-PRODUCT-A1: «Папка с документами» — открыть папку как проект. */
-  onPickMaterialsFolder: () => void
   /** Вооружённая на следующую отправку папка материалов (для подписи B1). */
   materialsFolder: { path: string; name: string; docCount: number } | null
   send: () => void
@@ -67,7 +65,7 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
   const {
     input, setInput, textareaRef, fileInputRef, activePath, isHelpChat, isHome,
     helpMode, isStreaming, canSend, providerLabel, providerSupportsTools, placeholders,
-    onPaste, onFilesPicked, onPickMaterialsFolder, materialsFolder, send, stop, queueFollowUp, appendToCurrentContext,
+    onPaste, onFilesPicked, materialsFolder, send, stop, queueFollowUp, appendToCurrentContext,
     injectTemplate, newChatSession, clearActiveSkill,
   } = props
   // B1 (утверждено Павлом): граница «в корне» названа явно — тем же языком, что сводка.
@@ -144,6 +142,15 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
         </div>
       )}
       <div className="gg-composer-actions">
+        {/* 2.7.0 шаг 2, решение Павла 16.08 («кнопки файлов вообще одинаковые, одна
+            функция»): файловая кнопка в композере ОДНА. Рядом стояла вторая, 📁
+            «Папка с документами», и пара выглядела двумя способами сделать одно.
+            Разбор показал, что похожими они казались из-за НЕВЕРНОГО ИМЕНИ: 📁
+            ничего не прикрепляла — она ОТКРЫВАЛА выбранную папку как проект
+            (`pickMaterialsFolder` → `setProject`). Это другое действие, и теперь
+            оно названо своим именем в «Инструментах чата», а не притворяется
+            близнецом скрепки. Возможность не потеряна, потерян выбор между двумя
+            одинаковыми на вид кнопками. */}
         <button
           type="button"
           className="gg-attach-btn"
@@ -156,22 +163,6 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
             <path d="m21.44 11.05 -9.19 9.19a6 6 0 0 1 -8.49 -8.49l9.19 -9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1 -2.83 -2.83l8.49 -8.48" />
           </svg>
         </button>
-        {/* A1 (утверждено Павлом): «Папка с документами» — называет назначение.
-            Не в чате справки. Выбор открывает папку как проект (вариант «а»). */}
-        {!isHelpChat && (
-          <button
-            type="button"
-            className="gg-attach-btn gg-materials-btn"
-            onClick={onPickMaterialsFolder}
-            disabled={isStreaming}
-            title="Папка с документами"
-            aria-label="Папка с документами"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z" />
-            </svg>
-          </button>
-        )}
         <VoiceInput
           disabled={isStreaming}
           onTranscript={chunk => setInput(prev => prev + chunk)}
