@@ -74,12 +74,27 @@ describe('release-notes-official: многострочный пункт (про�
 })
 
 describe('release-notes-official', () => {
-  it('formalizeReleaseBody убирает разговорные вставки', () => {
+  // КОНТРАКТ ИЗМЕНЁН 15.08 (решение штаба по заказу Павла), утверждения переписаны
+  // осознанно: прежний пин стерёг «убирает разговорные вставки» — то самое поведение,
+  // которое отменено. Машина больше не редактирует публичный текст: ноты пишутся
+  // человеческим языком специально, и словарь подмены («больше нет»→«отключено»,
+  // подмена пункта заготовкой про прокрутку) работал против этого.
+  it('formalizeReleaseBody НЕ трогает слова автора — только вёрстку', () => {
     const raw = '- Клик по коннектору скроллит к настройкам (раньше панель за экраном — «жму, ничего не происходит»).'
     const out = formalizeReleaseBody(raw)
-    expect(out).not.toMatch(/жму/i)
-    expect(out).not.toMatch(/«/)
+    expect(out).toMatch(/жму/i)
+    expect(out).toMatch(/«/)
     expect(out).toMatch(/^- /)
+  })
+
+  it('formalizeReleaseBody склеивает мягкий перенос внутри пункта', () => {
+    // Ради чего форматирование вообще осталось: враждебное ревью 2.6.4 §4 —
+    // перенос по ширине давал «…без ваших. входов», испорчены были 6 пунктов из 6.
+    // Точка в конце пункта — законное форматирование и остаётся; ловим именно
+    // ложную точку НА ПЕРЕНОСЕ, из-за которой пункт разрывался посередине.
+    const out = formalizeReleaseBody('- Чистая сессия браузера без ваших\n  входов и куки')
+    expect(out).toBe('- Чистая сессия браузера без ваших входов и куки.')
+    expect(out).not.toMatch(/ваших\.\s/)
   })
 
   it('mergeReleaseNotes: GitHub основной, bundled — дополнение', () => {
@@ -119,10 +134,12 @@ describe('release-notes-official', () => {
       }],
     )
     const polished = polishReleaseNote(merged[0])
-    expect(polished.body).toContain('прокрутка к целевому блоку')
+    // СНЯТО 15.08 вместе со словарём подмены: формализация больше не переписывает
+    // слова автора и не подменяет пункт заготовкой. Живой текст доходит как есть.
+    expect(polished.body).toContain('Жму')
     expect(polished.body).toContain('---')
     expect(polished.body).toContain('прокрутка к карточке')
-    expect(polished.body).not.toMatch(/Жму/i)
+    // текст автора доходит как есть — см. release-notes-official.ts
   })
 
   it('polishReleaseNote формализует версию без каталога', () => {
@@ -133,7 +150,7 @@ describe('release-notes-official', () => {
       htmlUrl: 'https://example.com',
     }
     const polished = polishReleaseNote(note)
-    expect(polished.body).not.toMatch(/тупит/i)
+    expect(polished.body).toContain('тупит') // слово автора сохраняется
     expect(polished.body).toMatch(/^- Something broke/)
   })
 })
