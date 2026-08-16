@@ -300,24 +300,32 @@ describe('композер — нижняя строка', () => {
     expect(document.querySelector('.gg-usage-pill')).toBeNull()
   })
 
-  // Турбо = auto/bypass. ПРЕДПОСЫЛКА ПИНА ИЗМЕНЕНА 11.08 (V5): раньше здесь
-  // стояло «на старте режим ask, значит кнопка выключена». Дефолт стал `auto`
-  // решением Павла, и утверждение про 'false' стерегло бы отменённый контракт.
-  // Проверяемое свойство осталось тем же и стало ПАРОЙ: кнопка отражает
-  // РЕЖИМ — при дефолте включена, при явно выбранном ask выключена. Так пин
-  // переживёт и будущую смену дефолта, а не сломается вместе с ней.
-  // ЗЕРКАЛО этого кейса («явно выбранный ask → кнопка выключена») живёт НЕ здесь,
-  // а в tests/lib/agent-mode-default.test.ts, и это не лень: чтение настроек
-  // асинхронно, а под jsdom любое асинхронное ожидание в смонтированном Chat
-  // вешает прогон без вывода (§3.1, проверено на этом же кейсе). Здесь —
-  // синхронное начальное состояние, там — полная пара по значениям настройки.
-  it('турбо-кнопка при дефолтном режиме (auto) сообщает включённое состояние', () => {
+  // ОБЪЯВЛЯЮ ПРАВКУ ПИНА (§3.1). Здесь стоял пин «турбо-кнопка при дефолтном
+  // режиме (auto) сообщает включённое состояние» — он стерёг САМО СУЩЕСТВОВАНИЕ
+  // 🔥 `.gg-chat-turbo-btn` на виду. Контракт отменён шагом 3 цели 2.7.0.
+  //
+  // Почему кнопка снята, а не переименована. Режим по умолчанию — `auto`
+  // (решение Павла, 11.08), то есть продукт УЖЕ принял это решение; кнопка на
+  // виду предлагала отменить его собственный дефолт. Ровно то же самое сказано
+  // словами строкой «Режим» в «Инструментах чата», где выбор и остаётся. Плюс
+  // «Турбо» на экране было ДВА и означало разное: 🔥 — режим безопасности
+  // (auto/ask), `IntensityToggle` — интенсивность (сколько машинерии). Оси
+  // ортогональны, но две соседние кнопки с одним словом объяснять пришлось бы.
+  //
+  // ЧТО НЕ ПОТЕРЯНО И ЧЕМ ЭТО ДОКАЗАНО. Само СВОЙСТВО, которое пин измерял —
+  // «UI отражает фактический режим агента» — под охраной осталось: полная пара
+  // по значениям настройки живёт в tests/lib/agent-mode-default.test.ts (там
+  // же, где жило зеркало этого кейса, и по той же причине — чтение настроек
+  // асинхронно, а под jsdom асинхронное ожидание в смонтированном Chat вешает
+  // прогон без вывода). Здесь остаётся то, что можно проверить синхронно:
+  // выбор режима доступен в поповере.
+  it('🔥 турбо-кнопки на виду нет — режим выбирается в «Инструментах чата»', () => {
     mountChat()
-    const turbo = document.querySelector('.gg-chat-turbo-btn') as HTMLButtonElement
-    expect(turbo).toBeTruthy()
-    expect(turbo.getAttribute('aria-pressed')).toBe('true')
-    expect(turbo.className).toContain('is-turbo')
-    expect(turbo.getAttribute('aria-label')).toBe('Выключить турбо-режим')
+    expect(document.querySelector('.gg-chat-turbo-btn')).toBeNull()
+    act(() => { fireEvent.click(document.querySelector('.gg-chat-settings-btn') as HTMLButtonElement) })
+    const popover = document.querySelector('.gg-chat-settings-popover') as HTMLElement
+    expect(popover, 'поповер не открылся — пин потерял якорь').toBeTruthy()
+    expect(popover.textContent).toContain('Режим')
   })
 
   it('подсказки стрима нет, пока черновик пуст и прогон не идёт', () => {
@@ -328,11 +336,39 @@ describe('композер — нижняя строка', () => {
     expect(document.querySelector('.gg-composer-streaming-hint')).toBeTruthy()
   })
 
-  it('в конце меты стоят пикеры режима, модели и маршрута', () => {
+  // ОБЪЯВЛЯЮ ПРАВКУ ПИНА (§3.1). Здесь стоял пин «в конце меты стоят пикеры
+  // режима, модели и маршрута» — он стерёг контракт «пикеры висят на виду»,
+  // отменённый критерием 5 цели 2.7.0 дословно: по умолчанию не показывается
+  // ничего, кроме поля ввода и отправки.
+  //
+  // Снятие, а не подгонка: ModelPicker, ModePicker и меню «Выбрать»
+  // рендерились ДВАЖДЫ — в поповере и рядом на виду. Удалён второй экземпляр;
+  // дом остался прежним. Утверждение переворачивается — и это ровно та пара,
+  // без которой «схлопнули» неотличимо от «сломали».
+  it('на виду в конце меты — только вход в «Инструменты чата»', () => {
     mountChat()
     const end = document.querySelector('.gg-composer-meta-cluster--end') as HTMLElement
-    expect(end.querySelector('.gg-mp-wrap')).toBeTruthy()
+    expect(end).toBeTruthy()
     expect(end.querySelector('.gg-chat-settings-wrap')).toBeTruthy()
-    expect(end.querySelector('.gg-chat-turbo-btn')).toBeTruthy()
+    // Пикеры (общий класс .gg-mp-wrap у ModelPicker и ModePicker) в закрытом
+    // состоянии не отрисованы вовсе: поповер монтируется только открытым.
+    expect(end.querySelector('.gg-mp-wrap')).toBeNull()
+    expect(end.querySelector('.gg-intensity-pill')).toBeNull()
+    expect(end.querySelector('.gg-effort-wrap')).toBeNull()
+  })
+
+  it('КОНТРОЛЬ: всё спрятанное живо — поповер отдаёт модель, режим и интенсивность', () => {
+    mountChat()
+    act(() => { fireEvent.click(document.querySelector('.gg-chat-settings-btn') as HTMLButtonElement) })
+    const popover = document.querySelector('.gg-chat-settings-popover') as HTMLElement
+    expect(popover).toBeTruthy()
+    expect(popover.querySelectorAll('.gg-mp-wrap').length, 'пикеры модели/режима потеряны, а не спрятаны').toBeGreaterThanOrEqual(2)
+    expect(popover.querySelector('.gg-intensity-pill'), 'интенсивность потеряна').toBeTruthy()
+    expect(popover.querySelector('.gg-effort-wrap'), 'глубина потеряна').toBeTruthy()
+  })
+
+  it('EffortPicker ушёл из ряда ввода композера', () => {
+    mountChat()
+    expect(document.querySelector('.gg-composer-actions .gg-effort-wrap')).toBeNull()
   })
 })

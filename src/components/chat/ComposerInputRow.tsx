@@ -18,7 +18,6 @@ import type { ChangeEvent, ClipboardEvent, RefObject } from 'react'
 import { MentionPopup } from '../MentionPopup'
 import { SlashCommandPopup } from '../SlashCommandPopup'
 import { VoiceInput } from '../VoiceInput'
-import { EffortPicker } from '../EffortPicker'
 import { buildSystemSlashCommands } from './system-slash-commands'
 import { CHAT_FILE_ACCEPT } from '../../lib/chat-attachments'
 
@@ -167,7 +166,10 @@ export function ComposerInputRow(props: ComposerInputRowProps) {
           disabled={isStreaming}
           onTranscript={chunk => setInput(prev => prev + chunk)}
         />
-        <EffortPicker />
+        {/* 2.7.0 шаг 3: EffortPicker (Быстро/Стандарт/Глубоко) переехал в
+            «Инструменты чата» строкой «Глубина». Он дублировал ось
+            интенсивности, и «насколько глубоко» — решение, которое продукт
+            принимает по задаче сам (маршрутизация по сложности уже есть). */}
         {isStreaming ? (
           <>
           {/* ⏸ только для API-провайдеров с проектом: только этот путь пишет чекпойнт

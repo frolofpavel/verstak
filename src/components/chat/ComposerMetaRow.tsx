@@ -1,23 +1,33 @@
 // Декомпозиция Chat.tsx (2.1.11 срез B-остаток, часть 2): нижняя строка композера.
 //
-// Вынесено из Chat.tsx БЕЗ изменения разметки, классов и порядка узлов — блок
-// `gg-composer-hint` вместе с вложенным `gg-composer-meta`:
-//  · подсказки клавиатуры во время стрима;
-//  · счётчик токенов черновика и ценник, расход за чат, Σ за всю сессию;
-//  · кнопка отката последней правки, переключатель автопрокрутки, DevTaskBadge;
-//  · поповер «Инструменты чата» (модель, режим, инструменты, тумблер рекомендаций
-//    скиллов);
-//  · турбо-кнопка, инструменты, ModePicker, IntensityToggle, ModelPicker,
-//    PromptRouteControl.
+// Блок `gg-composer-hint` вместе с вложенным `gg-composer-meta`.
 //
-// 2.7.0 шаг 2 (решение Павла 16.08): ОБА входа «До результата» и кнопка «Прогоны»
-// сняты отсюда. Кнопка называлась тем, что и так делается по умолчанию (доведение
-// до результата включено всегда — `autoContinueTurns`, `decideAutoContinue`,
-// `run_until_green`), а давала другое: форму брифа и verify-гейт. Форма отменена
-// решением Павла, гейт перенесён в обычный путь тем же движением
-// (`scripts/agent-completion-gate.mjs`) — значит выбирать человеку больше нечего.
-// Сама машина pipeline НЕ удалена: уже активный прогон по-прежнему ведётся
-// баннером и приёмкой контракта, а «Править» в приёмке открывает визард.
+// ЧТО НА ВИДУ ПОСЛЕ ШАГА 3 ЦЕЛИ 2.7.0 — три вещи, и все три условны или ядро:
+//  · 📊 «Показатели прогона» — под ним вся телеметрия (счётчик черновика и его
+//    ценник, расход за чат, Σ за сессию, автопрокрутка);
+//  · ↶ откат последней правки — только когда есть что откатывать; это ДЕЙСТВИЕ
+//    отмены, прятать его значило бы отнять у человека выход;
+//  · «Инструменты чата» — дом всего остального: модель, режим, инструменты,
+//    документы, рекомендации скиллов, интенсивность, глубина, модель на 1 запрос.
+// Плюс DevTaskBadge, который и раньше не рендерился без активной задачи.
+//
+// ЧЕГО ЗДЕСЬ БОЛЬШЕ НЕТ И ПОЧЕМУ (решение Павла 16.08, аудит
+// docs/ui-controls-audit-2026-08.md):
+//  · оба входа «До результата» и «Прогоны» — кнопка называлась тем, что и так
+//    делается по умолчанию (доведение включено всегда: `autoContinueTurns`,
+//    `decideAutoContinue`, `run_until_green`), а давала форму брифа и
+//    verify-гейт; форма отменена, гейт перенесён в обычный путь
+//    (`scripts/agent-completion-gate.mjs`). Выбирать человеку стало нечего.
+//    Сама машина pipeline НЕ удалена: активный прогон ведётся баннером и
+//    приёмкой контракта, «Править» в приёмке открывает визард;
+//  · ModelPicker, ModePicker и меню «Выбрать» — они рендерились ДВАЖДЫ, в
+//    поповере и рядом на виду; снят второй экземпляр, дом остался;
+//  · 🔥 турбо-кнопка (agentMode) — режим по умолчанию уже `auto`, то есть
+//    продукт УЖЕ решил, а кнопка предлагала отменить его собственный дефолт.
+//    То же самое сказано словами строкой «Режим» в поповере. Заодно с экрана
+//    ушло второе «Турбо»: их было два, и означали они разное (режим
+//    безопасности против интенсивности) — классический элемент, назначение
+//    которого пришлось бы объяснять.
 //
 // Вместе с блоком переехали локальные `TokenPreviewMeter` и `formatTokens` —
 // в Chat.tsx их использовал только этот узел.
@@ -31,6 +41,7 @@ import { estimateCost, costSeverity, costBreakdown } from '../../lib/pricing'
 import { ModelPicker } from '../ModelPicker'
 import { ModePicker, type AgentMode } from '../ModePicker'
 import { IntensityToggle } from '../IntensityToggle'
+import { EffortPicker } from '../EffortPicker'
 import { DevTaskBadge } from '../DevTaskBadge'
 import { ComposerToolsMenu } from '../ComposerToolsMenu'
 import { PromptRouteControl } from './PromptRouteControl'
@@ -92,7 +103,6 @@ export interface ComposerMetaRowProps {
   onOpenSettings: () => void
   agentMode: AgentMode
   applyMode: (m: AgentMode) => Promise<void>
-  setAgentMode: (m: AgentMode) => Promise<void>
   saveHandoffToDownloads: () => Promise<void>
   exportTranscript: () => Promise<void>
   handoffBusy: boolean
@@ -107,7 +117,7 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
     input, isStreaming, isHelpChat, t, provider, previewTokens,
     sessionUsage, sessionStats, undoCount, chatIsolated, revertLastWrite,
     autoScrollEnabled, toggleAutoScroll, composerSettingsRef, composerSettingsOpen,
-    setComposerSettingsOpen, onOpenSettings, agentMode, applyMode, setAgentMode,
+    setComposerSettingsOpen, onOpenSettings, agentMode, applyMode,
     saveHandoffToDownloads, exportTranscript, handoffBusy,
     skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled, onPickMaterialsFolder,
   } = props
@@ -157,6 +167,20 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
       )}
       <div className="gg-composer-meta">
         <div className="gg-composer-meta-cluster">
+          <button
+            type="button"
+            className={`gg-telemetry-btn ${telemetryOpen ? 'is-open' : ''}`}
+            onClick={() => setTelemetryOpen(v => !v)}
+            aria-expanded={telemetryOpen}
+            aria-label="Показатели прогона"
+            title="Показатели прогона: токены, стоимость, инструменты, автопрокрутка"
+          >
+            <span aria-hidden>📊</span>
+          </button>
+          <div className={`gg-telemetry-drawer ${telemetryOpen ? 'is-open' : 'is-closed'}`}>
+          {/* ШАГ 3: счётчик черновика и его ценник переехали ПОД раскрытие 📊.
+              Это телеметрия, и вся остальная телеметрия уже жила здесь — снаружи
+              счётчик оставался без причины, единственный из своего класса. */}
           {previewTokens && previewTokens.tokens > 0 && (() => {
             const cost = estimateCost(provider.id, provider.model, previewTokens.tokens, 0, 0)
             const title = previewTokens.exact
@@ -173,17 +197,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
               </>
             )
           })()}
-          <button
-            type="button"
-            className={`gg-telemetry-btn ${telemetryOpen ? 'is-open' : ''}`}
-            onClick={() => setTelemetryOpen(v => !v)}
-            aria-expanded={telemetryOpen}
-            aria-label="Показатели прогона"
-            title="Показатели прогона: токены, стоимость, инструменты, автопрокрутка"
-          >
-            <span aria-hidden>📊</span>
-          </button>
-          <div className={`gg-telemetry-drawer ${telemetryOpen ? 'is-open' : 'is-closed'}`}>
           {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (() => {
             // 2.0.8-E хвост: передаём семантику провайдера — иначе у Claude (exclusive)
             // из input повторно вычитался кэш и ценник занижал реальную стоимость (дефект B).
@@ -325,42 +338,37 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
                       </button>
                     </div>
                   )}
+                  {/* ШАГ 3: «Турбо» существовало на экране ДВАЖДЫ и означало
+                      разное — 🔥 переключала РЕЖИМ БЕЗОПАСНОСТИ (auto/ask), а
+                      этот тумблер переключает ИНТЕНСИВНОСТЬ (сколько машинерии:
+                      рой, делегирование, глубокий контекст, LSP). Оси
+                      ортогональны, но два соседних контрола с одним словом —
+                      ровно тот элемент, назначение которого пришлось бы
+                      объяснять. 🔥 снята совсем (её смысл уже сказан словами
+                      строкой «Режим» выше), интенсивность названа своим именем
+                      здесь. */}
+                  {!isHelpChat && (
+                    <div className="gg-chat-settings-item">
+                      <span className="gg-chat-settings-label">Интенсивность</span>
+                      <IntensityToggle />
+                    </div>
+                  )}
+                  {!isHelpChat && (
+                    <div className="gg-chat-settings-item">
+                      <span className="gg-chat-settings-label">Глубина</span>
+                      <EffortPicker />
+                    </div>
+                  )}
+                  {!isHelpChat && (
+                    <div className="gg-chat-settings-item">
+                      <span className="gg-chat-settings-label">Модель на 1 запрос</span>
+                      <PromptRouteControl />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
-          <button
-            type="button"
-            className={`gg-chat-turbo-btn ${agentMode === 'auto' || agentMode === 'bypass' ? 'is-turbo' : 'is-simple'}`}
-            onClick={() => { void setAgentMode(agentMode === 'auto' || agentMode === 'bypass' ? 'ask' : 'auto') }}
-            disabled={isHelpChat}
-            title={
-              isHelpChat
-                ? 'В справке режим зафиксирован'
-                : agentMode === 'auto' || agentMode === 'bypass'
-                  ? 'Турбо-режим включён. Нажмите, чтобы вернуться в простой режим.'
-                  : 'Включить турбо-режим: агент будет выполнять действия быстрее и принимать правки автоматически.'
-            }
-            aria-label={agentMode === 'auto' || agentMode === 'bypass' ? 'Выключить турбо-режим' : 'Включить турбо-режим'}
-            aria-pressed={agentMode === 'auto' || agentMode === 'bypass'}
-          >
-            <span aria-hidden>🔥</span>
-          </button>
-          {!isHelpChat && (
-            <ComposerToolsMenu
-              onSaveHandoff={saveHandoffToDownloads}
-              onExportTranscript={exportTranscript}
-              exportBusy={handoffBusy}
-            />
-          )}
-          <ModePicker
-            mode={isHelpChat ? HELP_AGENT_MODE : agentMode}
-            onChange={m => { void applyMode(m) }}
-            locked={isHelpChat}
-          />
-          {!isHelpChat && <IntensityToggle />}
-          <ModelPicker onOpenSettings={onOpenSettings} />
-          {!isHelpChat && <PromptRouteControl />}
         </div>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { render, cleanup, act, fireEvent } from '@testing-library/react'
 import { makeApiMock, CHAT_API_DEFAULTS, type ApiMock } from './helpers/window-api-mock'
 
 const { useProject } = await import('../../src/store/projectStore')
+const { useSkills } = await import('../../src/store/skillStore')
 const { emptySessionUsage } = await import('../../src/store/session-snapshot')
 const { Chat } = await import('../../src/components/Chat')
 
@@ -110,8 +111,16 @@ describe('мультиагент — не на виду, но досягаем',
 })
 
 describe('меню «Выбрать» — пункта «Мультиагент» больше нет', () => {
+  // ПРАВКА ФИКСТУРЫ, объявляю (§3.1): утверждения не изменились ни на слово —
+  // изменился путь к меню. Шаг 3 цели 2.7.0 снял ВТОРОЙ экземпляр «Выбрать»,
+  // висевший на виду; единственный оставшийся живёт в «Инструментах чата» и
+  // монтируется только с открытым поповером. Раньше фикстура находила пилюлю
+  // сразу после mountChat — теперь сначала открывает поповер.
   it('в меню нет пункта «Мультиагент», а остальные пункты на месте', () => {
     mountChat()
+    const settings = document.querySelector('.gg-chat-settings-btn') as HTMLButtonElement | null
+    if (!settings) throw new Error('нет входа в «Инструменты чата» — пин потерял якорь')
+    act(() => { fireEvent.click(settings) })
     const pill = document.querySelector('.gg-tools-pill') as HTMLButtonElement | null
     if (!pill) throw new Error('меню «Выбрать» не отрендерилось — пин потерял якорь')
     act(() => { fireEvent.click(pill) })
@@ -121,5 +130,52 @@ describe('меню «Выбрать» — пункта «Мультиагент�
     expect(labels).toContain('Инструмент')
     expect(labels).toContain('Чекпоинт')
     expect(labels).not.toContain('Мультиагент')
+  })
+
+  // Критерий 5 цели 2.7.0 дословно: «Инструмент: 275 доступно» человеку не
+  // адресован вовсе. Число — счётчик реестра: оно меняется от установки чужих
+  // скиллов, а не от чего-либо, что человек делает, и отвечает на вопрос,
+  // которого никто не задавал.
+  //
+  // ПЕРВАЯ РЕДАКЦИЯ ЭТОГО ПИНА БЫЛА ЛОЖНО-ЗЕЛЁНОЙ, объявляю (§3.1). Она просто
+  // открывала меню и убеждалась, что «N доступно» нигде нет, — и проходила ДО
+  // правки тоже, потому что в моке скиллов ноль, а на пустом реестре подпись и
+  // так читается «нет инструментов». Ветка со счётчиком была недостижима, то
+  // есть пин стерёг вход, которого в фикстуре не существует. Поймано мутацией:
+  // возврат `${skills.length} доступно` не уронил ни одного кейса.
+  //
+  // Здесь реестр СЕЯТСЯ явно — только тогда проверяемая ветка достижима.
+  function openToolsMenuWithSkills(): string[] {
+    act(() => {
+      useSkills.setState({
+        skills: [
+          { id: 'a', name: 'Ревью кода', source: 'built-in' },
+          { id: 'b', name: 'Сводка git', source: 'built-in' },
+          { id: 'c', name: 'Объяснить код', source: 'built-in' },
+        ] as never,
+        activeSkillId: null,
+      }, false)
+    })
+    mountChat()
+    act(() => { fireEvent.click(document.querySelector('.gg-chat-settings-btn') as HTMLButtonElement) })
+    act(() => { fireEvent.click(document.querySelector('.gg-tools-pill') as HTMLButtonElement) })
+    return Array.from(document.querySelectorAll('.gg-tools-menu-meta')).map(el => (el.textContent ?? '').trim())
+  }
+
+  it('подпись пункта «Инструмент» не показывает счётчик реестра', () => {
+    const metas = openToolsMenuWithSkills()
+    // КОНТРОЛЬ 1: меню раскрылось и подписи вообще есть — иначе «числа нет»
+    // было бы зелено на пустом DOM.
+    expect(metas.length, 'подписи пунктов не отрисовались — пин потерял якорь').toBeGreaterThan(0)
+    expect(metas.some(m => /\d+\s*доступно/.test(m)), 'счётчик реестра всё ещё на виду').toBe(false)
+  })
+
+  // КОНТРОЛЬ 2 к тому же кейсу: реестр в фикстуре НЕПУСТОЙ, то есть ветка, где
+  // раньше рисовалось число, реально проходится. Без этого утверждения кейс
+  // выше снова стал бы измерять пустоту.
+  it('КОНТРОЛЬ: реестр непустой, и подпись говорит про ВЫБОР, а не про количество', () => {
+    const metas = openToolsMenuWithSkills()
+    expect(useSkills.getState().skills.length, 'реестр пуст — ветка со счётчиком недостижима').toBe(3)
+    expect(metas, 'подпись не сообщает, что инструмент не выбран').toContain('не выбран')
   })
 })

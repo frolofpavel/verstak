@@ -3365,7 +3365,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           onOpenSettings={onOpenSettings}
           agentMode={agentMode}
           applyMode={applyMode}
-          setAgentMode={setAgentMode}
           saveHandoffToDownloads={saveHandoffToDownloads}
           exportTranscript={exportTranscript}
           handoffBusy={handoffBusy}

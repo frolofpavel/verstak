@@ -358,10 +358,16 @@ export function ComposerToolsMenu({
     setOpen(false)
   }
 
+  // 2.7.0 шаг 3 (критерий 5 цели дословно): «275 доступно» человеку не адресовано
+  // вовсе. Это счётчик реестра — он отвечает на вопрос, которого никто не задавал,
+  // и меняется от установки чужих скиллов, а не от чего-либо, что человек делает.
+  // Подпись отвечает на единственный осмысленный вопрос: какой инструмент СЕЙЧАС
+  // активен. Пустой реестр по-прежнему называется честно — иначе «не выбран» и
+  // «выбирать не из чего» слились бы в одно.
   const skillMeta = activeSkill
     ? (activeSkill.name ?? activeSkill.id)
     : skills.length > 0
-      ? `${skills.length} доступно`
+      ? 'не выбран'
       : 'нет инструментов'
   const reviewMeta = hasAssistantContent
     ? (defaultReviewer ? PROVIDER_LABELS[defaultReviewer] ?? defaultReviewer : 'выбрать модель')
