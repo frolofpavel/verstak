@@ -27,7 +27,7 @@ import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-d
 import { routeChangedActivity } from '../lib/route-activity'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
-import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveReviewCandidateRunIds, reviewGateState, SAMPLE_BRIEF } from '../lib/pipeline-brief'
+import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveReviewCandidateRunIds, reviewGateState } from '../lib/pipeline-brief'
 import { decidePipelineGate, type VerifyOutcome } from '../lib/pipeline-gate'
 import { isCliProvider } from '../lib/model-catalog'
 import { toProjectAbsPath } from '../lib/project-path'
@@ -2026,19 +2026,17 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     return () => window.removeEventListener('gg-pipeline-send', onPipelineSend)
   }, [])
 
-  // First Win (спек D10): онбординг ставит флаг «попробовать Pipeline» —
-  // на маунте открываем визард с демо-брифом (race-free через settings, не
-  // зависим от того, смонтирован ли Chat в момент закрытия онбординга).
-  useEffect(() => {
-    void window.api.settings.getKey('pipeline_sample_pending').then(v => {
-      if (v === '1') {
-        void window.api.settings.setKey('pipeline_sample_pending', '')
-        setPipelineInitialBrief(SAMPLE_BRIEF)
-        setPipelineWizardMode('agency')
-        setPipelineWizardOpen(true)
-      }
-    })
-  }, [])
+  // Здесь стоял эффект First Win (спек D10): онбординг ставил флаг
+  // `pipeline_sample_pending`, а Chat на маунте открывал визард с демо-брифом.
+  //
+  // СНЯТ 16.08 вместе с кнопкой «До результата», по двум независимым причинам,
+  // и обе стоит назвать (§3.1):
+  //  1. эффект был МЁРТВЫМ ещё до этой правки — обход по дереву показал, что
+  //     ключ `pipeline_sample_pending` НИКТО не записывает: онбординг, который
+  //     его ставил, к этому дню уже не существовал. Чтение без записи выглядело
+  //     работающей фичей и её же обещало следующему читателю;
+  //  2. форма брифа отменена решением Павла 16.08 — показывать её первому
+  //     запуску было бы ровно тем, чего решение не хочет.
 
   // Pipeline-оркестрация (спек D5): запуск из визарда → активируем прогон + шлём
   // Plan-промпт; «План OK» в баннере → двигаем шаг + шлём Execute-промпт.
@@ -3352,7 +3350,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           input={input}
           isStreaming={isStreaming}
           isHelpChat={isHelpChat}
-          activePath={activePath}
           t={t}
           provider={provider}
           previewTokens={previewTokens}
@@ -3375,10 +3372,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           handoffBusy={handoffBusy}
           skillSuggestionsEnabled={skillSuggestionsEnabled}
           setProjectSkillSuggestionsEnabled={setProjectSkillSuggestionsEnabled}
-          activePipeline={activePipeline}
-          setPipelineWizardMode={setPipelineWizardMode}
-          setPipelineWizardOpen={setPipelineWizardOpen}
-          setOutcomeRunsOpen={setOutcomeRunsOpen}
         />
       </div>
     </div>

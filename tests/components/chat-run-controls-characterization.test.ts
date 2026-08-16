@@ -41,23 +41,9 @@ function click(el: Element | null): void {
   act(() => { fireEvent.click(el) })
 }
 
-/** Кнопки входа в pipeline и «Прогоны» делят класс gg-pipeline-entry. «Прогоны» —
- *  строка захардкожена, подпись входа берётся из локали (в тестах — английской),
- *  поэтому вход опознаём «от противного»: это та кнопка, которая не «Прогоны». */
-function runsButton(): Element {
-  return entryButton(text => text === 'Прогоны', 'Прогоны')
-}
-
-function pipelineEntryButton(): Element {
-  return entryButton(text => text !== 'Прогоны', 'вход в pipeline')
-}
-
-function entryButton(match: (text: string) => boolean, what: string): Element {
-  const all = Array.from(document.querySelectorAll('.gg-pipeline-entry'))
-  const found = all.find(el => match(el.textContent?.trim() ?? ''))
-  if (!found) throw new Error(`нет кнопки «${what}» среди: ${all.map(e => e.textContent?.trim()).join(' | ')}`)
-  return found
-}
+/** Здесь жили хелперы `runsButton` / `pipelineEntryButton` / `entryButton`,
+ *  искавшие кнопки по классу `.gg-pipeline-entry`. Сняты 16.08 вместе с самими
+ *  кнопками — см. describe «входа в pipeline на экране нет» ниже. */
 
 beforeEach(() => {
   mock = makeApiMock({
@@ -136,19 +122,46 @@ describe('панели прогона — состав и место', () => {
   })
 })
 
-describe('панели прогона — модалки открываются кнопками', () => {
-  it('визард pipeline закрыт и открывается кнопкой входа', () => {
+// ОБЪЯВЛЯЮ ПРАВКУ ПИНОВ (§3.1): два пина этого describe стерегли контракт,
+// ОТМЕНЁННЫЙ решением Павла 16.08, и сняты вместе с ним, а не подогнаны.
+//
+// Что они утверждали: «визард pipeline открывается кнопкой входа» и «панель
+// „Прогоны“ открывается своей кнопкой». Обе кнопки были входом «До результата»
+// (`.gg-pipeline-entry`), и цель 2.7.0 требует их исчезновения дословно
+// (критерий 1). Решение Павла: «кнопка-то честная, но не нужная — это всё должно
+// быть около по умолчанию».
+//
+// Почему это снятие, а не подгонка. Пин был ПРАВ, пока существовал контракт «у
+// доведения до результата есть отдельный вход». Контракт снят вместе с причиной:
+// доведение и так включено всегда (`autoContinueTurns`, `decideAutoContinue`,
+// `run_until_green`), а verify-гейт — единственное, что кнопка добавляла сверх —
+// перенесён в обычный путь предыдущим коммитом. Оставить пин зелёным можно было
+// бы, только сохранив кнопку, то есть не сделав работу.
+//
+// Взамен встаёт обратное утверждение — его и стережём.
+describe('входа в pipeline на экране нет (цель 2.7.0, критерий 1)', () => {
+  it('ни одной кнопки .gg-pipeline-entry — ни на виду, ни в поповере', () => {
     mountChat()
-    expect(document.querySelector('.gg-pipeline-wizard')).toBeNull()
-    click(pipelineEntryButton())
-    expect(document.querySelector('.gg-pipeline-wizard')).toBeTruthy()
+    expect(document.querySelectorAll('.gg-pipeline-entry').length).toBe(0)
+    // Поповер «Инструменты чата» — второй дом входа; открываем и смотрим там же.
+    const settings = document.querySelector('.gg-chat-settings-btn')
+    if (settings) click(settings)
+    expect(document.querySelectorAll('.gg-pipeline-entry').length).toBe(0)
   })
 
-  it('панель «Прогоны» закрыта и открывается своей кнопкой', () => {
+  it('визард pipeline и панель «Прогоны» не открыты сами по себе', () => {
     mountChat()
+    expect(document.querySelector('.gg-pipeline-wizard')).toBeNull()
     expect(document.querySelector('.gg-outcome-runs-panel')).toBeNull()
-    click(runsButton())
-    expect(document.querySelector('.gg-outcome-runs-panel')).toBeTruthy()
+  })
+
+  // КОНТРОЛЬ к обоим пинам выше. «Кнопки нет» зелено и тогда, когда не
+  // отрисовался ВЕСЬ композер — тогда пин не измеряет ничего. Здесь показано,
+  // что мета-строка на месте и её оставшиеся жители живы.
+  it('КОНТРОЛЬ: мета-строка композера отрисована — «кнопки нет» сказано о живом экране', () => {
+    mountChat()
+    expect(document.querySelector('.gg-composer-meta')).toBeTruthy()
+    expect(document.querySelector('.gg-chat-settings-btn')).toBeTruthy()
   })
 })
 

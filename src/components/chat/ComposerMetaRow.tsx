@@ -6,9 +6,18 @@
 //  · счётчик токенов черновика и ценник, расход за чат, Σ за всю сессию;
 //  · кнопка отката последней правки, переключатель автопрокрутки, DevTaskBadge;
 //  · поповер «Инструменты чата» (модель, режим, инструменты, тумблер рекомендаций
-//    скиллов, вход в pipeline);
-//  · турбо-кнопка, вход в pipeline, «Прогоны», инструменты, ModePicker,
-//    IntensityToggle, ModelPicker, PromptRouteControl.
+//    скиллов);
+//  · турбо-кнопка, инструменты, ModePicker, IntensityToggle, ModelPicker,
+//    PromptRouteControl.
+//
+// 2.7.0 шаг 2 (решение Павла 16.08): ОБА входа «До результата» и кнопка «Прогоны»
+// сняты отсюда. Кнопка называлась тем, что и так делается по умолчанию (доведение
+// до результата включено всегда — `autoContinueTurns`, `decideAutoContinue`,
+// `run_until_green`), а давала другое: форму брифа и verify-гейт. Форма отменена
+// решением Павла, гейт перенесён в обычный путь тем же движением
+// (`scripts/agent-completion-gate.mjs`) — значит выбирать человеку больше нечего.
+// Сама машина pipeline НЕ удалена: уже активный прогон по-прежнему ведётся
+// баннером и приёмкой контракта, а «Править» в приёмке открывает визард.
 //
 // Вместе с блоком переехали локальные `TokenPreviewMeter` и `formatTokens` —
 // в Chat.tsx их использовал только этот узел.
@@ -30,7 +39,6 @@ import { HELP_AGENT_MODE } from '../../lib/help-scope'
 import type { useProvider } from '../../hooks/useProvider'
 import type { SessionUsage } from '../../store/session-snapshot'
 import type { Translations } from '../../i18n'
-import type { PipelineMode, PipelineRun } from '../../types/api'
 
 function formatTokens(n: number): string {
   if (n < 1000) return String(n)
@@ -67,7 +75,6 @@ export interface ComposerMetaRowProps {
   input: string
   isStreaming: boolean
   isHelpChat: boolean
-  activePath: string | null
   t: Translations
   provider: ReturnType<typeof useProvider>
   /** Оценка черновика: null — превью ещё нет, счётчик не рендерится. */
@@ -91,21 +98,16 @@ export interface ComposerMetaRowProps {
   handoffBusy: boolean
   skillSuggestionsEnabled: boolean
   setProjectSkillSuggestionsEnabled: (enabled: boolean) => void
-  activePipeline: PipelineRun | null
-  setPipelineWizardMode: (mode: PipelineMode) => void
-  setPipelineWizardOpen: (open: boolean) => void
-  setOutcomeRunsOpen: (open: boolean) => void
 }
 
 export function ComposerMetaRow(props: ComposerMetaRowProps) {
   const {
-    input, isStreaming, isHelpChat, activePath, t, provider, previewTokens,
+    input, isStreaming, isHelpChat, t, provider, previewTokens,
     sessionUsage, sessionStats, undoCount, chatIsolated, revertLastWrite,
     autoScrollEnabled, toggleAutoScroll, composerSettingsRef, composerSettingsOpen,
     setComposerSettingsOpen, onOpenSettings, agentMode, applyMode, setAgentMode,
     saveHandoffToDownloads, exportTranscript, handoffBusy,
-    skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled, activePipeline,
-    setPipelineWizardMode, setPipelineWizardOpen, setOutcomeRunsOpen,
+    skillSuggestionsEnabled, setProjectSkillSuggestionsEnabled,
   } = props
   // V1 (волна 2.6.0): телеметрия прогона свёрнута под одну иконку.
   //
@@ -302,24 +304,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
                       </button>
                     </div>
                   )}
-                  {!isHelpChat && !activePipeline && (
-                    <div className="gg-chat-settings-item">
-                      <span className="gg-chat-settings-label">{t.pipeline.entry}</span>
-                      <button
-                        type="button"
-                        className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-                        onClick={() => {
-                          setComposerSettingsOpen(false)
-                          setPipelineWizardMode('agency')
-                          setPipelineWizardOpen(true)
-                        }}
-                        disabled={isCliProvider(provider.id)}
-                        title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
-                      >
-                        {t.pipeline.entry}
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -341,27 +325,6 @@ export function ComposerMetaRow(props: ComposerMetaRowProps) {
           >
             <span aria-hidden>🔥</span>
           </button>
-          {!isHelpChat && !activePipeline && (
-            <button
-              type="button"
-              className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-              onClick={() => { setPipelineWizardMode('agency'); setPipelineWizardOpen(true) }}
-              disabled={isCliProvider(provider.id)}
-              title={isCliProvider(provider.id) ? t.pipeline.cliGate : t.pipeline.title}
-            >
-              {t.pipeline.entry}
-            </button>
-          )}
-          {!isHelpChat && activePath && (
-            <button
-              type="button"
-              className="gg-btn gg-btn-ghost gg-btn-xs gg-pipeline-entry"
-              onClick={() => setOutcomeRunsOpen(true)}
-              title="История задач «До результата»"
-            >
-              Прогоны
-            </button>
-          )}
           {!isHelpChat && (
             <ComposerToolsMenu
               onSaveHandoff={saveHandoffToDownloads}
