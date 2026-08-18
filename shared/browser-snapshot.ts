@@ -414,7 +414,7 @@ export function vskMatchTarget(query: string): boolean {
 
 // VSK-BROWSER-B2: ПОРОГ top-N полного снимка.
 //
-// 150 → 50 по замеру P3 куска 2 (15.08, `docs/browser-token-bench-2026-08-15.md`;
+// 150 → 50 по замеру P3 куска 2 (15.08;
 // воспроизводится `npm run bench:browser-page`). Прежнее значение назначалось по
 // scratchpad-замеру 03.08, который до репозитория не дошёл и потому не проверялся.
 //

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-// Headless-контур (Этап 1а облачного Verstak, docs/headless-core-recon-2026-08-04.md §1):
+// Headless-контур (Этап 1а облачного Verstak, разведка 04.08 §1):
 // runtime-log — единственный жёсткий блокер импорта ядра в чистом Node. Мок кидает на
 // import ровно как require('electron') на сервере, где пакета electron нет. Пока в
 // runtime-log.ts живёт top-level `import { app, ipcMain } from 'electron'` — этот тест

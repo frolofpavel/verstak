@@ -6,6 +6,7 @@ Releases, а завершённые планы и отчёты доступны 
 
 ## Продукт и архитектура
 
+- `PRODUCT_POSITIONING.md` — каноническое позиционирование и публичные формулировки.
 - `PROJECT_BRAIN.md` — долговременный контекст проекта.
 - `RUN_LIFECYCLE.md` — состояния и ожидание агентного запуска.
 - `PROVIDER_CAPABILITIES.md` — границы контроля API- и CLI-провайдеров.
@@ -26,9 +27,6 @@ Releases, а завершённые планы и отчёты доступны 
 
 ## Активная разработка
 
-- `CODE-AUDIT-2026-07-25.md` — результаты чистки и оставшийся технический долг.
-- `PERCHATSTATE-PLAN-2026-07-25.md` — оставшаяся миграция состояния чатов.
-- `2.0.9-A-chat-map.md` — characterization-карта исходного Chat.
 - `superpowers/specs/2026-07-11-mobile-remote-access-design.md` — контракт Mobile Remote.
 - `superpowers/plans/2026-07-11-mobile-remote-access.md` — план Mobile Remote.
 

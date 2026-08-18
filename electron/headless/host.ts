@@ -35,7 +35,7 @@ import type { NewStep, CreatePlanMeta } from '../storage/plans'
 import type { JournalKind } from '../storage/journal'
 
 // Headless-хост агентного ядра (Этап 1а облачного Verstak, блок №2 постановки;
-// карта — docs/headless-core-recon-2026-08-04.md). Второй потребитель ТЕХ ЖЕ модулей
+// карта — разведка headless-ядра 04.08). Второй потребитель ТЕХ ЖЕ модулей
 // ядра, что и десктоп: ни один файл electron/ipc/* и electron/ai/* этим хостом не
 // перекраивается. Один хост = один пользователь (одна sqlite в dataDir — рабочая
 // гипотеза мульти-тенантности из отчёта §3а).

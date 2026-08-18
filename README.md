@@ -6,6 +6,8 @@ Verstak — открытый ИИ-помощник для Windows и униве�
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+**[⬇ Download for Windows](https://github.com/frolofpavel/verstak/releases/latest)** — installer or portable, no account required.
+
 ---
 
 ## What is Verstak
@@ -110,7 +112,7 @@ Each is hand-written over the official API (no scraping), read-only by default. 
 - **No telemetry** — nothing leaves your machine except calls to the providers you configure
 - **No cloud dependency** — SQLite local storage, all state on disk
 
-### Known limitations (1.6.3)
+### Known limitations
 
 - **CLI providers have limited control:** Claude Code, Codex, Gemini CLI, and Grok Build run their own tool loops. Verstak can launch/relay/stop them, but Verstak-side verification artifacts, live tool timeline, MCP, delegation, and crash-resume guards are API-provider features.
 - **Headless recipe-runner parity is intentionally minimal:** `scripts/verstak-cli.mjs recipe run` now shares the recipe protocol, baseline, review gate, and default model policy, but it is not yet a full GUI-equivalent runtime for attachments, timeline, or all provider UX.
@@ -130,8 +132,8 @@ npm run electron-rebuild
 npm run dev
 ```
 
-`legacy-peer-deps` уже зафиксирован в `.npmrc` (vite 8 поверх electron-vite 5) — флаг вручную не нужен.
-Если npm 11+ предупреждает про `allow-scripts` и блокирует postinstall (electron, esbuild, sharp, onnxruntime-node) — одобрить один раз: `npm approve-scripts --allow-scripts-pending`, затем повторить `npm install`.
+`legacy-peer-deps` is already pinned in `.npmrc` (vite 8 over electron-vite 5) — no manual flag needed.
+If npm 11+ warns about `allow-scripts` and blocks postinstall (electron, esbuild, sharp, onnxruntime-node), approve once with `npm approve-scripts --allow-scripts-pending`, then re-run `npm install`.
 
 Then open Settings (⚙), pick a provider, paste your API key — or select a CLI provider if the binary is on your PATH and already logged in.
 

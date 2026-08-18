@@ -16,7 +16,7 @@
 //
 // Чего здесь НЕТ и почему: живого прогона, где модель САМА решает вызвать
 // execute_code. Для него нужен авторизованный провайдер, которого в окружении
-// исполнителя нет (та же причина, что в docs/cli-session-recon-2026-07-27.md).
+// исполнителя нет (та же причина, что в разведке CLI-сессий 27.07).
 import { describe, it, expect } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'

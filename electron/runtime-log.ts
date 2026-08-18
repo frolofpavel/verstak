@@ -3,7 +3,7 @@ import { join } from 'path'
 import { createRequire } from 'module'
 import { redactForDisplay } from './ai/secret-scanner'
 
-// Headless-контур (Этап 1а, docs/headless-core-recon-2026-08-04.md §1): этот модуль
+// Headless-контур (Этап 1а, разведка 04.08 §1): этот модуль
 // импортируют runner-api/runner-plain, поэтому он обязан грузиться в чистом Node без
 // electron. app.getPath берём ЛЕНИВО через createRequire: в headless require('electron')
 // либо кидает (пакета нет), либо отдаёт строку-путь к бинарю — оба случая уходят в
