@@ -171,6 +171,59 @@ On startup, Verstak scans your PATH for installed CLI tools and makes them avail
 
 ---
 
+## Repository layout
+
+What each entry in the root is for — so nothing here needs guessing.
+
+**Source**
+
+| Path | What it is |
+|---|---|
+| `electron/` | Main process: providers, agent loop, tools, connectors, storage, IPC |
+| `src/` | Renderer: React UI, state, styles |
+| `shared/` | Contracts used by both processes — single source for anything both sides must agree on |
+| `tests/` | Test suite |
+| `scripts/` | Build, release gate, benchmarks, maintenance |
+| `mobile/` | Mobile remote line (app + relay) |
+| `docs/` | Product contracts: security model, provider limits, positioning, UI rules |
+| `resources/`, `build/` | Icons, installer assets |
+
+**Entry points** — Vite resolves these by path, they have to sit here.
+
+| File | What it is |
+|---|---|
+| `index.html` | Main window |
+| `installer.html` | Installer window |
+| `notification.html` | Notification overlay |
+
+**Config** — each tool looks for its file by name in the project root.
+
+| File | Tool |
+|---|---|
+| `package.json`, `package-lock.json` | npm: dependencies and scripts |
+| `tsconfig.json` | TypeScript |
+| `vitest.config.ts` | Test runner — also pins git-touching tests to run one at a time |
+| `eslint.config.mjs` | Linter |
+| `electron.vite.config.ts` | App build |
+| `electron.vite.installer.config.ts`, `electron-builder.installer.json` | Installer build |
+| `.prettierrc`, `.prettierignore`, `.editorconfig` | Formatting |
+| `.npmrc` | npm flags (pins `legacy-peer-deps`) |
+| `.gitignore`, `.gitattributes` | What git ignores; line-ending rules |
+| `.githooks/` | Pre-commit gate: encoding, lint, types, full test run |
+| `.github/` | CI workflows |
+
+**Docs**
+
+| File | What it is |
+|---|---|
+| `README.md` | This file |
+| `CHANGELOG.md` | Release history |
+| `STATUS.md` | Current state: what works, what is in progress, open debt |
+| `CLAUDE.md`, `AGENTS.md` | Rules for AI agents working on this repo |
+| `LICENSE` | MIT |
+
+---
+
 ## Stack
 
 Electron 40 · React 19 · TypeScript · Zustand · better-sqlite3 · Vite · node-pty · xterm.js
