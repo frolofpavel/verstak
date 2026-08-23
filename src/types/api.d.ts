@@ -821,6 +821,8 @@ declare global {
         list: (projectPath: string | null, limit?: number) => Promise<FeedbackEntry[]>
         submit: (input: { projectPath: string | null; providerId: string | null; rating: number | null; message: string }) => Promise<FeedbackEntry>
         remove: (id: number) => Promise<void>
+        /** Собрать отчёт о проблеме. Ничего не отправляет — возвращает текст для показа. */
+        buildReport: (input: { message: string; rating: number | null; providerId: string | null; model: string | null }) => Promise<string>
       }
       /** 2.0.8-F: persistence usage (чтение). Формы — из shared/contracts/usage.ts. */
       usage: {
