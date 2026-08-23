@@ -171,6 +171,8 @@ export function ProjectMapPanel() {
   const [refreshing, setRefreshing] = useState(false)
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
   const [openSymbols, setOpenSymbols] = useState<Set<string>>(new Set())
+  // Граф зависимостей свёрнут по умолчанию — см. комментарий у разметки.
+  const [graphOpen, setGraphOpen] = useState(false)
 
   const load = useCallback(async (refresh: boolean) => {
     if (!path) return
@@ -200,6 +202,16 @@ export function ProjectMapPanel() {
   }, [load])
 
   const groups = useMemo(() => (map ? groupByTopFolder(map) : []), [map])
+
+  /** Итог графа строкой — считается из ТОГО ЖЕ layoutGraph, что и рисует граф.
+   *  Иначе заголовок однажды скажет «12 связей» там, где картинка пуста: два
+   *  независимых счёта расходятся молча. */
+  const graphSummary = useMemo(() => {
+    const layout = dep ? layoutGraph(dep) : null
+    if (!layout || layout.nodes.length === 0) return { empty: true, label: 'связей не найдено' }
+    const hubs = layout.nodes.filter(n => n.hub).length
+    return { empty: false, label: `${hubs} узл. · ${layout.edges.length} связ.` }
+  }, [dep])
 
   function toggleFolder(top: string) {
     setOpenFolders(prev => {
@@ -252,11 +264,15 @@ export function ProjectMapPanel() {
 
         {map && (
           <>
-            {/* Граф зависимостей */}
-            <div className="gg-pmap-section-title">Граф зависимостей</div>
-            {dep ? <DependencyGraph dep={dep} /> : <div className="gg-panel-empty">Граф недоступен.</div>}
-
-            {/* Дерево файлов по top-level папкам */}
+            {/* Дерево файлов по top-level папкам — ПЕРВЫМ.
+                До 22.08 верх экрана занимал граф зависимостей, а структура уходила под
+                него. Живая проверка на клиентском проекте (351 файл, 71 с кодом, у
+                большинства разделов «0 строк» — креативы, отчёты, логи) показала: граф
+                там технически верен и практически бесполезен, а полезное вытеснено вниз.
+                Структура папок осмысленна для ЛЮБОГО проекта, граф — только для кода, и
+                продукт не может знать заранее какой перед ним. Поэтому порядок обратный,
+                а решение «нужен ли граф» не выносится человеку вопросом: он свёрнут,
+                итог виден строкой, разворачивается одним кликом. */}
             <div className="gg-pmap-section-title">Структура ({groups.length} разделов)</div>
             <div className="gg-pmap-tree">
               {groups.map(g => {
@@ -305,6 +321,20 @@ export function ProjectMapPanel() {
                 )
               })}
             </div>
+
+            {/* Граф зависимостей — вторым и свёрнутым. Заголовок сам говорит, есть ли
+                что показывать: разворачивать пустоту незачем. */}
+            <button
+              className="gg-pmap-section-title gg-pmap-graph-toggle"
+              onClick={() => setGraphOpen(o => !o)}
+              disabled={graphSummary.empty}
+              title={graphSummary.empty ? 'Связей между файлами не найдено' : 'Показать граф зависимостей'}
+            >
+              <span className="gg-pmap-caret">{graphSummary.empty ? '·' : graphOpen ? '▾' : '▸'}</span>
+              {' '}Граф зависимостей
+              <span className="gg-pmap-folder-meta">{graphSummary.label}</span>
+            </button>
+            {graphOpen && !graphSummary.empty && dep && <DependencyGraph dep={dep} />}
           </>
         )}
       </div>
