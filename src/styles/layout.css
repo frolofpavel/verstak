@@ -4454,6 +4454,23 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   background: #fff;
 }
 
+/* Пустое состояние браузера: пока никуда не ходили, webview показывает about:blank
+   на белом фоне во весь экран, и это читается как «сломано» (живая проверка 22.08).
+   Объяснение кладётся ПОВЕРХ кадра — webview остаётся в лейауте живым, иначе он
+   теряет вьюпорт и кадры (см. shared/browser-slot-style.ts). */
+.gg-browser-frame-wrap { position: relative; }
+.gg-browser-idle {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-primary);
+  z-index: 2;
+}
+.gg-browser-idle .gg-empty-state { max-width: 460px; }
+
 /* File tree */
 .gg-tree,
 .gg-files-view-tree { padding: 0 6px; }

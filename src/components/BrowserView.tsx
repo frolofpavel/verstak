@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { EmptyState } from './EmptyState'
 // VSK-BROWSER-B1 этап 1: ЕДИНЫЙ исходник page-логики (тот же, что в jsdom-пинах,
 // §3.1). Инжектим в webview через executeJavaScript(`(${fn.toString()})(...)`).
 import { vskSnapshot, vskResolveNumbered, vskFill, vskPressKey, vskMatchTarget, vskFind, vskCapSnapshot, VSK_SNAPSHOT_TOP_N, type PageSnapshot, type CappedSnapshot, type FindResult } from '../../shared/browser-snapshot'
@@ -126,6 +127,10 @@ export function BrowserView() {
   const [canBack, setCanBack] = useState(false)
   const [canFwd, setCanFwd] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /** Никуда ещё не ходили: пусто или about:blank. Пока так — над webview висит
+   *  объяснение, иначе человек видит белое полотно и считает браузер сломанным. */
+  const isBlank = !currentUrl || currentUrl === 'about:blank'
 
   useEffect(() => {
     const wv = webviewRef.current
@@ -425,7 +430,7 @@ export function BrowserView() {
       )}
       {error && <div className="gg-browser-error">⚠ {error}</div>}
       <div
-        className="gg-browser-frame"
+        className="gg-browser-frame gg-browser-frame-wrap"
         ref={el => {
           // Insert the webview element manually so React's strict TS intrinsics
           // don't fight with us. Idempotent: only inserts if not already present.
@@ -441,7 +446,23 @@ export function BrowserView() {
           el.appendChild(wv as unknown as Node)
           webviewRef.current = wv
         }}
-      />
+      >
+        {/* Пока никуда не ходили, webview показывает about:blank на белом фоне — во весь
+            экран. Человек видит белое полотно и решает, что браузер не работает (живая
+            проверка 22.08). Кладём объяснение ПОВЕРХ, а не вместо: прятать webview через
+            display:none нельзя — он теряет лейаут-бокс, вьюпорт становится 0×0 и кадры
+            перестают идти (см. shared/browser-slot-style.ts). Оверлей уходит сам, как
+            только появился адрес. */}
+        {isBlank && (
+          <div className="gg-browser-idle">
+            <EmptyState
+              icon="🌐"
+              title="Здесь работает браузер агента"
+              hint="Это то же окно, в котором агент открывает сайты и кабинеты. Войдите в нужный сервис один раз — агент продолжит в этой же сессии, повторно логиниться не придётся. Адрес или поисковый запрос — в строке сверху."
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
