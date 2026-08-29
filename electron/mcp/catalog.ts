@@ -200,6 +200,90 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     noKey: false,
     docsUrl: 'https://github.com/aikts/yandex-tracker-mcp'
   },
+  // ── Рекламный и торговый стек (добавлено 29.08.2026) ──────────────────────
+  // Имена env взяты НЕ из README и не из поиска, а из кода самих пакетов
+  // (npm pack + grep process.env). Поиск при этом дважды предложил пакеты,
+  // которых в реестре нет вовсе (@rezlazy/yandex-metrika-mcp, ru-marketplace-mcp)
+  // — ровно поэтому здесь и стоит правило «проверять по живому реестру».
+  {
+    id: 'yandex-metrika',
+    name: 'Яндекс Метрика',
+    vendor: 'theYahia',
+    description: 'Веб-аналитика: счётчики, цели, отчёты, выгрузка логов. 15 инструментов, ТОЛЬКО ЧТЕНИЕ.',
+    group: 'russian',
+    runtime: 'npx',
+    command: 'npx',
+    args: ['-y', '@theyahia/yandex-metrika-mcp'],
+    env: [
+      { key: 'YANDEX_METRIKA_TOKEN', label: 'OAuth-токен Метрики', required: true, secret: true, hint: 'oauth.yandex.ru → приложение с доступом «Яндекс.Метрика: чтение статистики»' }
+    ],
+    noKey: false,
+    docsUrl: 'https://github.com/theYahia/yandex-metrika-mcp'
+  },
+  {
+    id: 'yandex-direct',
+    name: 'Яндекс Директ',
+    vendor: 'theYahia',
+    description: 'Рекламные кампании: группы, объявления, ключевые фразы, ставки. 20 инструментов. ВНИМАНИЕ: сервер умеет НЕ ТОЛЬКО читать — он создаёт и меняет кампании и ставки, то есть влияет на расход. Для знакомства включите песочницу.',
+    group: 'russian',
+    runtime: 'npx',
+    command: 'npx',
+    args: ['-y', '@theyahia/yandex-direct-mcp'],
+    env: [
+      { key: 'YANDEX_DIRECT_TOKEN', label: 'OAuth-токен Директа', required: true, secret: true, hint: 'OAuth-приложение с доступом к API Директа + заявка на доступ в интерфейсе Директа' },
+      { key: 'YANDEX_DIRECT_SANDBOX', label: 'Песочница (1 — да)', required: false, secret: false, hint: 'поставьте 1, чтобы работать на тестовом сервере и не тратить деньги' },
+      { key: 'YANDEX_DIRECT_LOGIN', label: 'Логин клиента', required: false, secret: false, hint: 'нужен только для агентских токенов' }
+    ],
+    noKey: false,
+    docsUrl: 'https://github.com/theYahia/yandex-direct-mcp'
+  },
+  {
+    id: 'bitrix24',
+    name: 'Битрикс24',
+    vendor: 'theYahia',
+    description: 'CRM: сделки, контакты, задачи через входящий вебхук.',
+    group: 'russian',
+    runtime: 'npx',
+    command: 'npx',
+    args: ['-y', '@theyahia/bitrix24-mcp'],
+    env: [
+      { key: 'BITRIX24_WEBHOOK_URL', label: 'URL входящего вебхука', required: true, secret: true, hint: 'Битрикс24 → Разработчикам → Другое → Входящий вебхук' }
+    ],
+    noKey: false,
+    docsUrl: 'https://www.npmjs.com/package/@theyahia/bitrix24-mcp'
+  },
+  {
+    id: 'wildberries',
+    name: 'Wildberries',
+    vendor: 'theYahia',
+    description: 'Кабинет продавца: товары, заказы, продажи, остатки, цены.',
+    group: 'russian',
+    runtime: 'npx',
+    command: 'npx',
+    args: ['-y', '@theyahia/wildberries-mcp'],
+    env: [
+      { key: 'WB_API_TOKEN', label: 'Токен API продавца', required: true, secret: true, hint: 'Личный кабинет WB → Настройки → Доступ к API' },
+      { key: 'WB_TIMEOUT_MS', label: 'Таймаут запроса, мс', required: false, secret: false }
+    ],
+    noKey: false,
+    docsUrl: 'https://www.npmjs.com/package/@theyahia/wildberries-mcp'
+  },
+  {
+    id: 'dadata',
+    name: 'DaData',
+    vendor: 'theYahia',
+    description: 'Проверка и подсказки: организации по ИНН, адреса, банки, ФИО.',
+    group: 'russian',
+    runtime: 'npx',
+    command: 'npx',
+    args: ['-y', '@theyahia/dadata-mcp'],
+    env: [
+      { key: 'DADATA_API_KEY', label: 'API-ключ', required: true, secret: true, hint: 'dadata.ru → личный кабинет → API-ключи' },
+      { key: 'DADATA_SECRET_KEY', label: 'Секретный ключ', required: false, secret: true, hint: 'нужен только для методов очистки данных' }
+    ],
+    noKey: false,
+    docsUrl: 'https://www.npmjs.com/package/@theyahia/dadata-mcp'
+  },
   // ── Мировые ───────────────────────────────────────────────────────────────
   {
     id: 'playwright',
