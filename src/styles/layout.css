@@ -4058,7 +4058,7 @@ html[data-theme="light"] .gg-folder-icon {
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
   border-left: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-primary) 78%, var(--accent) 8%);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, var(--accent) 8%);
 }
 .gg-agent-progress-now-head {
   display: flex;
@@ -4094,7 +4094,7 @@ html[data-theme="light"] .gg-folder-icon {
   padding: 8px 10px;
   border-left: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
 }
 .gg-agent-progress-focus p {
   margin: 4px 0 0;
@@ -4158,10 +4158,10 @@ html[data-theme="light"] .gg-agent-progress {
   box-shadow: 0 10px 24px rgba(31, 45, 61, 0.08);
 }
 html[data-theme="light"] .gg-agent-progress-now {
-  background: color-mix(in srgb, var(--bg-primary) 88%, var(--accent) 6%);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 6%);
 }
 html[data-theme="light"] .gg-agent-progress-focus {
-  background: color-mix(in srgb, var(--bg-primary) 92%, var(--accent) 3%);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent) 3%);
 }
 @keyframes gg-agent-progress-pulse {
   0%, 100% { opacity: 0.48; transform: scale(0.92); }
@@ -4466,7 +4466,13 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg-primary);
+  /* ФОН ОБЯЗАН БЫТЬ НЕПРОЗРАЧНЫМ. Под оверлеем webview с background:#fff, а текст
+     светлый — на прозрачном фоне получается белое по белому, и объяснение исчезает.
+     Первая редакция ссылалась на несуществующую --bg-primary: переменной в теме нет
+     (есть --bg-base/--bg-elevated/--bg-overlay), CSS молча дал rgba(0,0,0,0). Ни один
+     тест этого не видит — в jsdom стилей нет. Поймано ЖИВЫМ замером computed-стилей
+     22.08. Второй цвет в fallback — на случай, если переменную однажды переименуют. */
+  background: var(--bg-base, #22272e);
   z-index: 2;
 }
 .gg-browser-idle .gg-empty-state { max-width: 460px; }
