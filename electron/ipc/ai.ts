@@ -130,6 +130,9 @@ export interface AiDeps {
   invalidateMemory: (id: string, supersededBy?: string | null) => boolean
   /** Сохранить структурированное Decision Record в Decision Memory (project-brain). */
   saveDecision: (projectPath: string, rec: NewDecisionRecord) => DecisionRecord
+  /** Решения проекта, свежие первыми — для инжекта отвергнутых альтернатив в первый
+   *  ход нового чата (см. ai/decisions-context.ts). Пишущий двойник — saveDecision. */
+  listDecisions?: (projectPath: string) => DecisionRecord[]
   /** Поиск по долговременной памяти проекта. */
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
   /** memory-nudge консолидации: system-хинт если воспоминания накопились, иначе null. */
@@ -770,6 +773,7 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
         getSecret: deps.getSecret,
         recentWrites: deps.recentWrites,
         getBrainContext: deps.getBrainContext,
+        listDecisions: deps.listDecisions,
       },
     })
     messagesWithSystem = assembled.messagesWithSystem

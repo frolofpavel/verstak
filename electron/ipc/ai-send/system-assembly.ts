@@ -49,6 +49,9 @@ export interface SystemAssemblyDeps {
   getSecret: (key: string) => string | null
   recentWrites: (projectPath: string, limit: number) => Array<{ filePath: string; createdAt: number }>
   getBrainContext?: (projectPath: string, lastUserMessage: string) => BrainContext | null
+  /** Решения проекта, свежие первыми. Нужны для инжекта отвергнутых альтернатив
+   *  в ПЕРВЫЙ ход нового чата — см. ai/decisions-context.ts. */
+  listDecisions?: (projectPath: string) => Array<{ title: string; finalDecision: string | null; why: string | null; alternativesRejected: string[]; createdAt: number }>
 }
 
 /**
@@ -127,6 +130,9 @@ export async function assembleSendSystem(input: {
       recentWrites: input.projectPath ? input.deps.recentWrites(input.projectPath, 8) : [],
       projectSystemPrompt,
       memories: input.memories,
+      // Решения прошлых сессий: сам context-pack отдаст их модели ТОЛЬКО на первом
+      // ходе — здесь просто отдаём, что есть, порядок «свежие первыми» уже у store.
+      decisions: input.projectPath && input.deps.listDecisions ? input.deps.listDecisions(input.projectPath) : undefined,
       consolidationHint: input.consolidationHint ?? undefined,
       coreMemory: input.coreMemory,
       agentMode: input.agentMode,

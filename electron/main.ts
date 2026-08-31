@@ -823,6 +823,7 @@ app.whenReady().then(() => {
     },
     invalidateMemory: (id, supersededBy) => invalidateMemory(db, id, supersededBy),
     saveDecision: (projectPath, rec) => brainStore.saveDecisionRecord(projectPath, rec),
+    listDecisions: (projectPath) => brainStore.getDecisionRecords(projectPath),
     searchMemories: (projectPath, query, limit) => {
       return searchMemories(db, projectPath, query, limit)
     },

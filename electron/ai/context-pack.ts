@@ -21,6 +21,7 @@ import { projectMapToText, computeDependencyHubs, getProjectMapIfReady, getDepen
 import type { DependencyMap, ProjectMap } from './project-map'
 import { detectCrossProjectPaths } from './grounding'
 import { buildProfileBlock, loadProjectProfile, type ProjectProfile } from './project-profile'
+import { buildDecisionsBlock, type DecisionForContext } from './decisions-context'
 // Re-export for backward compatibility — tests still import from here.
 export { detectCrossProjectPaths }
 
@@ -54,6 +55,10 @@ export interface ContextPackInput {
   /** memory-nudge консолидации (next-wave #3) — готовый system-хинт или undefined.
    *  Инжектится отдельной секцией, чтобы не вытесняться лимитом топ-5 памяти. */
   consolidationHint?: string
+  /** Решения прошлых сессий (свежие первыми) — инжектятся ТОЛЬКО на первом ходе.
+   *  Смысл блока — отвергнутые альтернативы: агент не должен предлагать заново то,
+   *  что уже разобрали и отклонили. Подробности — decisions-context.ts. */
+  decisions?: DecisionForContext[]
   /** Core memory (Hermes-style) — всегда в system prompt, обновляется агентом через tools.
    *  Инжектируется ДО архивной памяти, т.к. всегда релевантна. */
   coreMemory?: CoreMemoryBlocks
@@ -178,6 +183,14 @@ export async function buildContextPack(input: ContextPackInput): Promise<string>
   // проекта, не собирая его заново (экономия токенов). Идёт сразу после профиля.
   if (input.brainContext && input.brainContext.trim()) {
     parts.push(`## Мозг проекта (прогретый контекст)\n${input.brainContext.trim()}`)
+  }
+
+  // Решения прошлых сессий — ТОЛЬКО на первом ходе: дальше они уже в истории чата,
+  // и повторять их каждый ход значило бы платить за одно и то же многократно.
+  // Главное в блоке — отвергнутые альтернативы (см. decisions-context.ts).
+  if (input.isFirstTurn && input.decisions && input.decisions.length > 0) {
+    const block = buildDecisionsBlock(input.decisions)
+    if (block) parts.push(block)
   }
 
   // 0. Cross-project path warning — if user mentioned an absolute path that

@@ -27,6 +27,7 @@ import { buildModePreset } from './model-presets'
 import { resolveOutputStylePrompt } from './output-styles'
 import { loadUserAgents } from './user-agents'
 import type { AgentMode } from './mode-policy'
+import type { DecisionForContext } from './decisions-context'
 
 export interface PrepareSystemInput {
   projectPath: string | null
@@ -43,6 +44,9 @@ export interface PrepareSystemInput {
   memories?: Array<{ type: string; content: string; tags: string[] }>
   /** memory-nudge консолидации — готовый system-хинт, пробрасывается в context-pack. */
   consolidationHint?: string
+  /** Решения прошлых сессий (свежие первыми). Инжектятся только на первом ходе;
+   *  смысл блока — отвергнутые альтернативы, см. decisions-context.ts. */
+  decisions?: DecisionForContext[]
   /** Core memory (Hermes-style) — MEMORY.md + USER.md, всегда в system prompt.
    *  Загружается при каждом turn'е в отличие от архивной памяти. */
   coreMemory?: CoreMemoryBlocks
@@ -111,6 +115,7 @@ export async function prepareParts(input: PrepareSystemInput): Promise<PreparedP
         isFirstTurn,
         memories,
         consolidationHint: input.consolidationHint,
+        decisions: input.decisions,
         coreMemory,
         brainContext: input.brainContext
       }).catch(err => {
