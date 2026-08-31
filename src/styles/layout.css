@@ -16767,6 +16767,19 @@ html[data-theme="light"] .gg-updates-page {
   background: var(--bg-elevated);
 }
 
+/* Пометка «у Verstak есть свой коннектор к этому же сервису». Не предупреждение об
+   опасности — различение путей, поэтому спокойный тон, а не красный. Переменные взяты
+   объявленные: непроверенная var() молча даёт пустоту (см. tests/styles/css-vars-declared). */
+.gg-mcp-catalog-own {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-subtle, var(--bg-active));
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
 .gg-mcp-catalog-card.is-open {
   border-color: var(--accent);
 }

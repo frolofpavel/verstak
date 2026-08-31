@@ -43,6 +43,19 @@ export interface McpCatalogEntry {
   noKey: boolean
   /** Где взять ключ / документация сервера. */
   docsUrl?: string
+  /**
+   * У Verstak есть СВОЙ коннектор к этому же сервису — здесь его человеческое имя.
+   *
+   * Появилось 29.08 вместе с рекламным стеком в каталоге: пять новых записей
+   * повторяют то, к чему коннектор уже был, и человек стал видеть один сервис в двух
+   * местах. Молчать об этом хуже, чем не добавлять вовсе: выбор между ними не
+   * косметический, у путей разные гарантии.
+   *
+   * Своё: только чтение по построению, ключи в safeStorage, вызов исполняет сам
+   * Verstak и применяет свои правила. Сервер: чужой код, может уметь запись, исполняет
+   * себя сам. Что важнее — решает человек, но знать обязан.
+   */
+  ownConnector?: string
 }
 
 export const MCP_CATALOG: McpCatalogEntry[] = [
@@ -115,6 +128,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     env: [
       { key: 'KONTUR_FOCUS_API_KEY', label: 'API-ключ Контур.Фокус', required: true, secret: true, hint: 'focus.kontur.ru — ключ из личного кабинета' }
     ],
+    ownConnector: 'Контур.Фокус',
     noKey: false,
     docsUrl: 'https://github.com/theYahia/kontur-focus-mcp'
   },
@@ -130,6 +144,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     env: [
       { key: 'VK_ACCESS_TOKEN', label: 'VK access token', required: true, secret: true, hint: 'Токен сообщества: Управление → Работа с API → Ключи доступа' }
     ],
+    ownConnector: 'ВКонтакте',
     noKey: false,
     docsUrl: 'https://github.com/bulatko/vk-mcp-server'
   },
@@ -146,6 +161,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'AMOCRM_SUBDOMAIN', label: 'Поддомен amoCRM', required: true, secret: false, hint: 'из адреса кабинета: <поддомен>.amocrm.ru' },
       { key: 'AMOCRM_ACCESS_TOKEN', label: 'Долгоживущий токен', required: true, secret: true, hint: 'Интеграции → Ключи и доступы → Сгенерировать долгосрочный токен' }
     ],
+    ownConnector: 'amoCRM',
     noKey: false,
     docsUrl: 'https://github.com/nourpups/amo-mcp'
   },
@@ -163,6 +179,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'Client_secret', label: 'Client secret', required: true, secret: true },
       { key: 'Profile_id', label: 'Номер профиля', required: true, secret: false, hint: 'числовой ID профиля Авито' }
     ],
+    ownConnector: 'Авито',
     noKey: false,
     docsUrl: 'https://github.com/elchin92/avito-mcp'
   },
@@ -197,6 +214,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'TRACKER_CLOUD_ORG_ID', label: 'ID организации Yandex Cloud', required: false, secret: false, hint: 'для облачных организаций; для Яндекс 360 задай TRACKER_ORG_ID' },
       { key: 'TRACKER_ORG_ID', label: 'ID организации Яндекс 360', required: false, secret: false }
     ],
+    ownConnector: 'Яндекс.Трекер',
     noKey: false,
     docsUrl: 'https://github.com/aikts/yandex-tracker-mcp'
   },
@@ -217,6 +235,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     env: [
       { key: 'YANDEX_METRIKA_TOKEN', label: 'OAuth-токен Метрики', required: true, secret: true, hint: 'oauth.yandex.ru → приложение с доступом «Яндекс.Метрика: чтение статистики»' }
     ],
+    ownConnector: 'Яндекс.Метрика',
     noKey: false,
     docsUrl: 'https://github.com/theYahia/yandex-metrika-mcp'
   },
@@ -234,6 +253,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'YANDEX_DIRECT_SANDBOX', label: 'Песочница (1 — да)', required: false, secret: false, hint: 'поставьте 1, чтобы работать на тестовом сервере и не тратить деньги' },
       { key: 'YANDEX_DIRECT_LOGIN', label: 'Логин клиента', required: false, secret: false, hint: 'нужен только для агентских токенов' }
     ],
+    ownConnector: 'Яндекс.Директ',
     noKey: false,
     docsUrl: 'https://github.com/theYahia/yandex-direct-mcp'
   },
@@ -249,6 +269,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     env: [
       { key: 'BITRIX24_WEBHOOK_URL', label: 'URL входящего вебхука', required: true, secret: true, hint: 'Битрикс24 → Разработчикам → Другое → Входящий вебхук' }
     ],
+    ownConnector: 'Битрикс24',
     noKey: false,
     docsUrl: 'https://www.npmjs.com/package/@theyahia/bitrix24-mcp'
   },
@@ -265,6 +286,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'WB_API_TOKEN', label: 'Токен API продавца', required: true, secret: true, hint: 'Личный кабинет WB → Настройки → Доступ к API' },
       { key: 'WB_TIMEOUT_MS', label: 'Таймаут запроса, мс', required: false, secret: false }
     ],
+    ownConnector: 'Wildberries',
     noKey: false,
     docsUrl: 'https://www.npmjs.com/package/@theyahia/wildberries-mcp'
   },
@@ -281,6 +303,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       { key: 'DADATA_API_KEY', label: 'API-ключ', required: true, secret: true, hint: 'dadata.ru → личный кабинет → API-ключи' },
       { key: 'DADATA_SECRET_KEY', label: 'Секретный ключ', required: false, secret: true, hint: 'нужен только для методов очистки данных' }
     ],
+    ownConnector: 'DaData',
     noKey: false,
     docsUrl: 'https://www.npmjs.com/package/@theyahia/dadata-mcp'
   },
@@ -323,6 +346,7 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     env: [
       { key: 'NOTION_TOKEN', label: 'Токен интеграции Notion', required: true, secret: true, hint: 'notion.so/profile/integrations — internal integration token (ntn_…)' }
     ],
+    ownConnector: 'Notion',
     noKey: false,
     docsUrl: 'https://github.com/makenotion/notion-mcp-server'
   },

@@ -1864,6 +1864,9 @@ export interface McpCatalogEntry {
   command: string
   args: string[]
   env: McpCatalogEnvField[]
+  /** У Verstak есть свой коннектор к тому же сервису — его человеческое имя.
+   *  Зеркало поля из electron/mcp/catalog.ts; разница путей объяснена там. */
+  ownConnector?: string
   noKey: boolean
   docsUrl?: string
 }
