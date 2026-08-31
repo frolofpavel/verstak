@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { artifactsDir } from '../../ai/artifacts'
 import { splitLargeOutput, commandOutputFileName, COMMAND_OUTPUT_LIMIT } from '../../ai/large-output'
+import { attributeFailure, formatAttribution } from '../../ai/failure-attribution'
 
 export function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
   return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
@@ -194,12 +195,17 @@ export const runCommandHandler: ToolHandler = {
           savedPath = file
         } catch { /* splitLargeOutput честно скажет, что пропущенного нет */ }
       }
+      // Почему упало: условие прогона или код. При падении добавляем шапку с
+      // причиной — иначе модель начинает менять логику там, где виновато окружение
+      // (открытое приложение держит нативный модуль, занят файл, оборвался прогон).
+      // Причина не опознана → шапки нет: молчание честнее догадки.
+      const attribution = result.exitCode === 0 ? '' : formatAttribution(attributeFailure(full, result.exitCode))
       return {
         id: call.id,
         name: call.name,
         result: {
           stdout: splitLargeOutput(stdout, savedPath).forModel,
-          stderr: splitLargeOutput(stderr, savedPath).forModel,
+          stderr: attribution + splitLargeOutput(stderr, savedPath).forModel,
           exitCode: result.exitCode
         }
       }
