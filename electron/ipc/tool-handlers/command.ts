@@ -7,6 +7,10 @@ import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 import { hashCommandForAudit, type SmartApproveResult } from '../../ai/smart-approve'
 import { isVerifierCommand } from '../../ai/command-policy'
+import { mkdirSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { artifactsDir } from '../../ai/artifacts'
+import { splitLargeOutput, commandOutputFileName, COMMAND_OUTPUT_LIMIT } from '../../ai/large-output'
 
 export function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
   return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
@@ -175,7 +179,30 @@ export const runCommandHandler: ToolHandler = {
       // Timeline задачи (Фаза 4): run_command не идёт через emitActivity, поэтому
       // пишем событие здесь, рядом с command-result. exitCode≠0 → status='error'.
       try { ctx.recordRunEvent?.('tool_call', { label: 'run_command', detail: command, status: result.exitCode === 0 ? 'ok' : 'error' }) } catch { /* best-effort */ }
-      return { id: call.id, name: call.name, result: { stdout, stderr, exitCode: result.exitCode } }
+
+      // Человеку в Timeline вывод ушёл ЦЕЛИКОМ (событие выше). Модели отдаём урезанную
+      // копию: `npm test` на десятки тысяч символов иначе съедает окно и деньги.
+      // Полный текст кладём файлом — модель дочитает нужное через read_file.
+      const full = stdout + (stderr ? `\n[stderr]\n${stderr}` : '')
+      let savedPath: string | null = null
+      if (full.length > COMMAND_OUTPUT_LIMIT && ctx.projectPath) {
+        try {
+          const dir = artifactsDir(ctx.projectPath)
+          mkdirSync(dir, { recursive: true })
+          const file = join(dir, commandOutputFileName(Date.now()))
+          writeFileSync(file, `$ ${command}\n\n${full}`, 'utf8')
+          savedPath = file
+        } catch { /* splitLargeOutput честно скажет, что пропущенного нет */ }
+      }
+      return {
+        id: call.id,
+        name: call.name,
+        result: {
+          stdout: splitLargeOutput(stdout, savedPath).forModel,
+          stderr: splitLargeOutput(stderr, savedPath).forModel,
+          exitCode: result.exitCode
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       ctx.sender.send('ai:event', {
