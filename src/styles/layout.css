@@ -3882,6 +3882,15 @@ html[data-theme="light"] .gg-folder-icon {
 .gg-chat-nav-menu-item.is-danger { color: var(--error); }
 .gg-chat-nav-menu-item.is-danger:hover { background: var(--error-muted); }
 
+/* Причина отказа в подвале диффа. Узкое поле рядом с кнопками — не панель: экран
+   не перегружаем, а отказ перестаёт быть безмолвным. Переменные только объявленные
+   (см. tests/styles/css-vars-declared): непроверенная var() молча даёт пустоту. */
+.gg-diff-reject-reason {
+  flex: 0 1 320px;
+  min-width: 160px;
+  font-size: var(--text-xs);
+  padding: 5px 9px;
+}
 .gg-modal-footer-hint {
   flex: 1;
   font-size: var(--text-xs);

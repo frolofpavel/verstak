@@ -29,6 +29,8 @@ export function DiffView() {
     path: s.path,
   })))
   const [activeCallId, setActiveCallId] = useState<string | null>(null)
+  /** Пояснение к отказу: почему правка не годится. Пусто — отказ как прежде. */
+  const [rejectReason, setRejectReason] = useState('')
 
   // Whenever the queue changes, keep activeCallId pointing at something valid
   useEffect(() => {
@@ -95,11 +97,26 @@ export function DiffView() {
     }
     resolvePendingWrite(callId)
   }
-  async function rejectOne(callId: string) {
+  /**
+   * Отклонение правки с ПРИЧИНОЙ.
+   *
+   * До 29.08 агент получал голое «User rejected write to <path>» и переделывал
+   * вслепую — часто то же самое. Причина уходит отдельным каналом
+   * `ai:append-context` (тем же, что и «дополнить контекст на ходу»), а сам механизм
+   * подтверждения НЕ ТРОГАЕТСЯ: это путь паузы на ответственном действии, ошибка в
+   * нём дороже любой пользы. Порядок важен: сначала кладём пояснение в прогон, потом
+   * отпускаем ожидание — иначе агент продолжит раньше, чем увидит причину.
+   */
+  async function rejectOne(callId: string, reason?: string) {
     const w = pendingWrites.find(x => x.callId === callId)
+    const note = (reason ?? '').trim()
+    if (note && w?.sendId) {
+      await window.api.ai.appendContext(w.sendId, `Правку файла ${w.path} человек отклонил. Причина: ${note}`)
+    }
     await window.api.ai.resolveWrite(callId, false, w?.sendId)
-    updateActivity(callId, { status: 'rejected' })
+    updateActivity(callId, { status: 'rejected', detail: note || undefined })
     resolvePendingWrite(callId)
+    setRejectReason('')
   }
   async function acceptAll() {
     const ids = pendingWrites.map(w => w.callId)
@@ -107,7 +124,11 @@ export function DiffView() {
   }
   async function rejectAll() {
     const ids = pendingWrites.map(w => w.callId)
-    for (const id of ids) await rejectOne(id)
+    // Причина одна на пачку — она про подход агента, а не про отдельный файл. Отдаём
+    // её ПЕРВОМУ отказу: rejectOne чистит поле, повторять её в каждом сообщении значило
+    // бы засорять контекст одним и тем же текстом N раз.
+    const reason = rejectReason
+    for (let i = 0; i < ids.length; i++) await rejectOne(ids[i], i === 0 ? reason : undefined)
   }
 
   return (
@@ -171,6 +192,16 @@ export function DiffView() {
               <>{' · '}<span className="gg-kbd">Ctrl+Enter</span> принять все{' · '}<span className="gg-kbd">←→</span> между файлами</>
             )}
           </div>
+          {/* Причина отказа. Новых панелей не добавляем — одно поле в подвале, где и
+              так стоит «Отклонить». Пусто — отказ ведёт себя как прежде; заполнено —
+              агент узнаёт, ЧТО не так, и не переделывает вслепую. */}
+          <input
+            className="gg-input gg-diff-reject-reason"
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+            placeholder="Почему не годится — агент учтёт (необязательно)"
+            spellCheck={false}
+          />
           {pendingWrites.length > 1 ? (
             <>
               <button className="gg-btn gg-btn-danger" onClick={() => void rejectAll()}>Отклонить все</button>
@@ -178,7 +209,7 @@ export function DiffView() {
             </>
           ) : (
             <>
-              <button className="gg-btn gg-btn-danger" onClick={() => void rejectOne(active.callId)}>Отклонить</button>
+              <button className="gg-btn gg-btn-danger" onClick={() => void rejectOne(active.callId, rejectReason)}>Отклонить</button>
               <button className="gg-btn gg-btn-success" onClick={() => void acceptOne(active.callId)}>Принять</button>
             </>
           )}
