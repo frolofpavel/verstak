@@ -4,6 +4,10 @@ import { emitActivity, awaitCommandConfirm } from './shared'
 import { classifyMcpToolScope, mcpDecision, mcpBlockReason, parseMcpScopeOverrides } from '../../ai/mcp-policy'
 import { applyPermissionRules } from '../../ai/permission-rules'
 import { scanText } from '../../ai/secret-scanner'
+import { mkdirSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { artifactsDir } from '../../ai/artifacts'
+import { splitLargeMcpResult, largeResultFileName, MCP_RESULT_INLINE_LIMIT } from '../../mcp/large-result'
 
 export const mcpToolHandler: ToolHandler = {
   mode: 'sequential',
@@ -63,7 +67,26 @@ export const mcpToolHandler: ToolHandler = {
       // Редактируем вывод внешнего MCP-сервера — он не доверенный, может вернуть
       // токены/ключи, которые иначе утекут в контекст модели.
       const raw = typeof result === 'string' ? result : JSON.stringify(result)
-      return { id: call.id, name: call.name, result: scanText(raw).redacted }
+      // Редакция ДО деления: иначе ключ из хвоста уехал бы в файл нетронутым.
+      const redacted = scanText(raw).redacted
+
+      // Крупный ответ (выгрузка товаров, отчёт аналитики) не тащим в контекст целиком —
+      // кладём файлом рядом с остальными артефактами, модели отдаём начало и путь.
+      let savedPath: string | null = null
+      if (redacted.length > MCP_RESULT_INLINE_LIMIT && ctx.projectPath) {
+        try {
+          const dir = artifactsDir(ctx.projectPath)
+          mkdirSync(dir, { recursive: true })
+          const file = join(dir, largeResultFileName(call.name, Date.now()))
+          writeFileSync(file, redacted, 'utf8')
+          savedPath = file
+        } catch {
+          // Не смогли записать — splitLargeMcpResult честно скажет модели, что
+          // остатка у неё нет. Молчаливая обрезка была бы хуже отказа.
+        }
+      }
+      const { inline } = splitLargeMcpResult(redacted, savedPath)
+      return { id: call.id, name: call.name, result: inline }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       emitActivity(ctx, call, 'error', `mcp:${call.name}`, scanText(msg).redacted)
