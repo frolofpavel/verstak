@@ -15,6 +15,9 @@
  *   VERSTAK_DATA_ROOT    каталог данных (по умолчанию ./verstak-agent-data)
  *   VERSTAK_AGENT_PORT / VERSTAK_AGENT_HOST   адрес прослушивания (8020 / 127.0.0.1)
  *   VERSTAK_SKILL_ROOTS  каталоги скиллов через запятую (по умолчанию — никаких)
+ *   VERSTAK_MAX_ACTIVE_RUNS_GLOBAL  общий потолок tenant-прогонов процесса (12)
+ *   VERSTAK_MAX_TENANT_HOSTS        потолок открытых tenant SQLite/scheduler host'ов (32)
+ *   VERSTAK_ENABLE_SCHEDULES=1      opt-in расписаний в multi-tenant (canary: выкл.)
  *   VERSTAK_SINGLE_TENANT=1  одиночный режим; workspace-корень — {DATA_ROOT}/workspaces
  */
 import { mkdirSync } from 'fs'
@@ -96,10 +99,19 @@ export async function main(): Promise<{ port: number; close: () => Promise<void>
     closeExtra = () => host.close()
     server = createHeadlessServer({ host, authToken })
   } else {
+    const schedulesEnabled = envFlag('VERSTAK_ENABLE_SCHEDULES')
     const tenants = createTenantRegistry({
       root: join(dataRoot, 'tenants'),
       masterKey,
-      hostDefaults: skillRoots.length ? { skillRoots } : undefined
+      hostDefaults: {
+        ...(skillRoots.length ? { skillRoots } : {}),
+        // До отдельного durable supervisor enabled job навсегда pin'ит host. Для
+        // рекламного canary эта поверхность закрыта и открывается только осознанно.
+        enableScheduledTasks: schedulesEnabled,
+        // Скрыть tool недостаточно: старые enabled jobs уже лежат в SQLite и
+        // scheduler поднял бы их через 30 секунд. Default-off останавливает и loop.
+        ...(schedulesEnabled ? {} : { schedulerPollMs: null })
+      }
     })
     closeExtra = () => tenants.closeAll()
     server = createHeadlessServer({ tenants, authToken })

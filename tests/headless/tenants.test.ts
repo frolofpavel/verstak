@@ -17,35 +17,44 @@ const { openDb } = await import('../../electron/storage/db')
 describe('мульти-тенантность headless-сервиса (Этап 1а, №7)', () => {
   let root: string
   let registry: ReturnType<typeof createTenantRegistry>
+  let releases: Array<() => void>
   const masterKey = randomBytes(32)
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'vsk-tenants-'))
     registry = createTenantRegistry({ root, masterKey })
+    releases = []
   })
   afterEach(async () => {
+    for (const release of releases.splice(0)) release()
     await registry.closeAll()
     rmSync(root, { recursive: true, force: true })
   })
 
+  async function tenant(id: string) {
+    const lease = await registry.get(id)
+    releases.push(lease.release)
+    return lease
+  }
+
   it('у каждого тенанта свой каталог и своя БД', async () => {
-    const a = await registry.get('user-a@example.com')
-    const b = await registry.get('user-b@example.com')
+    const a = await tenant('user-a@example.com')
+    const b = await tenant('user-b@example.com')
     expect(a.workspaceRoot).not.toBe(b.workspaceRoot)
     expect(readdirSync(root).length).toBe(2)
     expect(existsSync(join(root, tenantDirName('user-a@example.com'), 'verstak.db'))).toBe(true)
   })
 
   it('секрет одного тенанта не виден другому', async () => {
-    const a = await registry.get('user-a')
-    const b = await registry.get('user-b')
+    const a = await tenant('user-a')
+    const b = await tenant('user-b')
     a.host.setSecret('deepseek_api_key', 'ключ-пользователя-A')
     expect(a.host.getSecret('deepseek_api_key')).toBe('ключ-пользователя-A')
     expect(b.host.getSecret('deepseek_api_key')).toBeNull()
   })
 
   it('КЛЮЧЕВОЕ: шифртекст тенанта A не расшифровывается ключом тенанта B', async () => {
-    const a = await registry.get('user-a')
+    const a = await tenant('user-a')
     a.host.setSecret('deepseek_api_key', 'ключ-пользователя-A')
     const raw = openDb(join(root, tenantDirName('user-a'), 'verstak.db'))
     let stored: string
@@ -67,6 +76,7 @@ describe('мульти-тенантность headless-сервиса (Этап 
       // Даже если у процесса есть ключ в окружении, тенант его не видит.
       process.env.DEEPSEEK_API_KEY = 'ключ-процесса'
       expect(t.host.getSecret('deepseek_api_key')).toBeNull()
+      t.release()
     } finally {
       delete process.env.DEEPSEEK_API_KEY
       await withEnv.closeAll()
@@ -74,13 +84,13 @@ describe('мульти-тенантность headless-сервиса (Этап 
   })
 
   it('повторный get отдаёт тот же хост (не плодит подключения к БД)', async () => {
-    const a1 = await registry.get('user-a')
-    const a2 = await registry.get('user-a')
+    const a1 = await tenant('user-a')
+    const a2 = await tenant('user-a')
     expect(a2.host).toBe(a1.host)
   })
 
   it('connectorStatus отдаёт ИМЕНА недостающих ключей и никогда значения', async () => {
-    const a = await registry.get('user-a')
+    const a = await tenant('user-a')
     a.host.setSecret('telegram_bot_token', 'секрет-бота-НЕ-показывать')
     const status = await registry.connectorStatus('user-a')
     const serialized = JSON.stringify(status)

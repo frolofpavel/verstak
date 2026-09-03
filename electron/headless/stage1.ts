@@ -40,5 +40,13 @@ export const STAGE1_TOOLS_ALLOW: string[] = [
   'schedule'
 ]
 
+/**
+ * Рекламный multi-tenant canary: расписание пока не выдаётся модели. Один enabled job
+ * обязан держать tenant-host открытым, иначе его некому разбудить; без отдельного
+ * supervisor 32 дешёвых far-future jobs исчерпали бы весь interactive host pool.
+ */
+export const STAGE1_CANARY_TOOLS_ALLOW: string[] = STAGE1_TOOLS_ALLOW
+  .filter(name => name !== 'schedule')
+
 /** Коннекторы, выключенные на общем сервере Этапа 1 (ssh = удалённый shell). */
 export const STAGE1_CONNECTOR_DENY = new Set(['ssh'])

@@ -674,7 +674,37 @@ const GATE_MAX_WORKERS = 4
 // виду остались 📊, ↶ и «Инструменты чата»). Прирост +4: два пина отменённых
 // контрактов («🔥 на виду», «пикеры в конце меты») сняты, шесть встали взамен —
 // из них три контрольных, без которых «схлопнули» неотличимо от «сломали».
-const EXPECTED_TOTAL_TESTS = 5733
+// → 5740 ИЗМЕРЕНО 02.09 (prelaunch-hardening облачного Gateway). Прирост +7:
+// конкурентные старты/continue, durable суточный лимит, bounded SSE и повторный stop.
+// → 5744 ИЗМЕРЕНО 02.09 (single-flight реестра тенантов). Прирост +4: один
+// pending-host на tenant, независимые tenant, retry после init-error и shutdown race.
+// → 5745 ИЗМЕРЕНО 02.09 (start/close race). Прирост +1: shutdown во время
+// async-сборки контекста не оставляет orphan thread/message и не пишет в закрытую БД.
+// → 5765 ИЗМЕРЕНО 02.09 (prelaunch P1: durable task idempotency +
+// byte/event-bounded SSE replay + per-run/per-tenant/global subscriber caps).
+// Прирост +20: 10 host/storage контрактов и 10 HTTP/SSE регрессий.
+// → 5773 ИЗМЕРЕНО 02.09 (multi-tenant capacity + shutdown lifecycle).
+// Прирост +8: общий run/tenant-host cap и регрессии lease, orphan-workspace,
+// зависшей подготовки, SSE shutdown и disconnect во время tenant init.
+// → 5778 ИЗМЕРЕНО 02.09 (safe tenant-host LRU eviction). Прирост +5:
+// sequential/reopen, protected victims, concurrent newcomers, closeAll race и
+// real-host canEvictIdle contract.
+// → 5785 ИЗМЕРЕНО 02.09 (LRU close/race hardening + canary schedule gate).
+// Прирост +7: publication reservations, quarantine/close retry, same-tenant race,
+// реальная db.close ошибка и schedule-free multi-tenant tool surface.
+// → 5786 ИЗМЕРЕНО 03.09: реальный hung custom-openai stream обрывается repeated stop,
+// освобождая HTTP и active slot для следующего запуска.
+// → 5787 ИЗМЕРЕНО 03.09: canary schedule default-off гасит не только tool,
+// но и scheduler loop; явный opt-in сохраняет штатный polling.
+// → 5788 ИЗМЕРЕНО 03.09: старое enabled-задание при выключенных расписаниях
+// не исполняется и не удерживает tenant-host в глобальном лимите.
+// → 5789 ИЗМЕРЕНО 03.09: scheduler различает undefined (default polling)
+// и null (полный hard-off без setInterval).
+// → 5790 ИЗМЕРЕНО 03.09: process-wide headless sendId изолирует suspend/resolve
+// разных тенантов, а завершение чистит общие pending/suspend markers.
+// → 5792 ИЗМЕРЕНО 03.09: exact resolve с известным sendId fail-closed после miss,
+// плюс прямой pin разных process-wide sendId у двух tenant-host.
+const EXPECTED_TOTAL_TESTS = 5792
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

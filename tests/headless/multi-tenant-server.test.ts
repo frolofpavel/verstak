@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { randomBytes } from 'crypto'
-import { request } from 'http'
+import { request, type IncomingMessage } from 'http'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ChatEvent, ChatProvider } from '../../electron/ai/types'
@@ -32,6 +32,16 @@ function scripted(): ChatProvider {
   }
 }
 
+/** Намеренно игнорирует AbortSignal: worst-case внешний provider никогда не отвечает. */
+function stubborn(): ChatProvider {
+  return {
+    id: 'stubborn', name: 'stubborn', models: ['stubborn'],
+    async *send(): AsyncGenerator<ChatEvent> {
+      await new Promise<void>(() => {})
+    }
+  }
+}
+
 function call(port: number, method: string, path: string, tenant?: string, body?: unknown) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const headers: Record<string, string> = { 'content-type': 'application/json' }
@@ -43,6 +53,31 @@ function call(port: number, method: string, path: string, tenant?: string, body?
     })
     req.on('error', reject)
     if (body !== undefined) req.write(JSON.stringify(body))
+    req.end()
+  })
+}
+
+function openTenantSse(port: number, runId: string, tenant: string) {
+  return new Promise<{ res: IncomingMessage; closed: Promise<void> }>((resolve, reject) => {
+    const req = request({
+      host: '127.0.0.1', port, method: 'GET', path: `/tasks/${runId}/events`,
+      headers: { 'x-verstak-tenant': tenant },
+    }, res => {
+      const closed = new Promise<void>(done => {
+        let settled = false
+        const finish = (): void => {
+          if (settled) return
+          settled = true
+          done()
+        }
+        res.once('end', finish)
+        res.once('close', finish)
+        res.once('error', finish)
+      })
+      res.resume()
+      resolve({ res, closed })
+    })
+    req.once('error', reject)
     req.end()
   })
 }
@@ -173,4 +208,35 @@ describe('headless server — многотенантный режим (возв�
     // Контрольный кейс: остальные ручки под токеном остались закрытыми.
     expect((await call(port, 'GET', '/tasks', 'user-a')).status).toBe(401)
   })
+
+  it('closeAll не зависает на SSE, даже если provider игнорирует abort', async () => {
+    registry = createTenantRegistry({
+      root,
+      masterKey: randomBytes(32),
+      hostDefaults: {
+        providerFactory: () => stubborn(),
+        schedulerPollMs: null,
+      },
+    })
+    const s = createHeadlessServer({ tenants: registry })
+    server = s
+    const port = await s.listen(0)
+    const created = await call(port, 'POST', '/tasks', 'stuck-user', {
+      prompt: 'никогда не заканчивай', agentMode: 'bypass', providerId: 'deepseek',
+    })
+    expect(created.status).toBe(202)
+    const runId = JSON.parse(created.body).runId as string
+    const stream = await openTenantSse(port, runId, 'stuck-user')
+    expect(stream.res.destroyed).toBe(false)
+
+    const outcome = await Promise.race([
+      registry.closeAll({ timeoutMs: 10 }).then(() => 'closed' as const),
+      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 6_000)),
+    ])
+    expect(outcome).toBe('closed')
+    await stream.closed
+    // Не запускаем closeAll второй раз в afterEach; сам HTTP server там ещё
+    // закрывается и доказывает, что принудительно завершённый SSE не держит сокет.
+    registry = null
+  }, 10_000)
 })

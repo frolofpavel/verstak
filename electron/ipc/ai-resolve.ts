@@ -31,7 +31,12 @@ export function resolvePending<T>(
     const key = scopedKey(sendId, callId)
     const exact = map.get(key)
     if (exact) { exact.resolve(value); map.delete(key); return }
+    // Знающий sendId вызывающий уже задал security scope. После exact miss
+    // fallback только по callId мог подтвердить действие другого tenant/run.
+    return
   }
+  // Legacy desktop renderer до sendId: совместимость остаётся только для
+  // действительно нескоупленного вызова, где точный ключ построить невозможно.
   for (const [k, p] of map) {
     if (k.endsWith('::' + callId)) {
       p.resolve(value)

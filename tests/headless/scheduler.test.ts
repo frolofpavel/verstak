@@ -95,4 +95,20 @@ describe('headless scheduler', () => {
     expect(await s.tick(), 'битая задача ретраится в том же tick-цикле').toBe(0)
     s.stop()
   })
+
+  it('pollMs:null полностью отключает timer; пропущенное значение сохраняет default polling', () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
+    const schedulers: Array<ReturnType<typeof startScheduler>> = []
+    try {
+      schedulers.push(startScheduler({ jobs, startTask, pollMs: null, now: () => clock }))
+      expect(setIntervalSpy, 'null не должен превращаться в default 30 секунд').not.toHaveBeenCalled()
+
+      schedulers.push(startScheduler({ jobs, startTask, now: () => clock }))
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+      expect(setIntervalSpy).toHaveBeenLastCalledWith(expect.any(Function), 30_000)
+    } finally {
+      for (const scheduler of schedulers) scheduler.stop()
+      setIntervalSpy.mockRestore()
+    }
+  })
 })

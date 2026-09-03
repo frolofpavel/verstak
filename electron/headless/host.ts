@@ -1,5 +1,5 @@
-import { randomUUID } from 'crypto'
-import { mkdirSync } from 'fs'
+import { createHash, randomUUID } from 'crypto'
+import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 
 import { openDb } from '../storage/db'
@@ -19,16 +19,32 @@ import { createCostGuard } from '../ai/cost-guard'
 import { prepareSystemContext } from '../ai/compose-system'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { runApiConversation } from '../ai/runner-api'
-import { resolveTurnsBudget } from '../ai/runner-shared'
+import {
+  pendingCommands,
+  pendingPlans,
+  pendingWrites,
+  resolveTurnsBudget,
+  suspendedSends,
+} from '../ai/runner-shared'
 import { configureRuntimeLogDir, logRuntime } from '../runtime-log'
 import { createScheduledJobs, type ScheduledJobs } from '../storage/scheduled-jobs'
+import {
+  createHeadlessIdempotencyStore,
+  HeadlessIdempotencyError,
+  HEADLESS_IDEMPOTENCY_CONFLICT,
+  HEADLESS_IDEMPOTENCY_CORRUPT,
+  HEADLESS_IDEMPOTENCY_INVALID,
+  HEADLESS_IDEMPOTENCY_PENDING,
+  type HeadlessIdempotencyClaim,
+  type HeadlessTaskOperation,
+} from '../storage/headless-idempotency'
 import { startScheduler, type Scheduler } from './scheduler'
 import { createSkillRegistry } from '../ai/skills/registry'
 import type { SkillRegistry } from '../ai/skills/types'
 import type { ChatProvider, ChatMessage } from '../ai/types'
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import { buildProviderRuntimeOptions } from '../ipc/ai-send/provider-options'
-import { STAGE1_TOOLS_ALLOW, STAGE1_CONNECTOR_DENY } from './stage1'
+import { STAGE1_CANARY_TOOLS_ALLOW, STAGE1_TOOLS_ALLOW, STAGE1_CONNECTOR_DENY } from './stage1'
 import { CLOUD_SYSTEM_LAYER_PROMPT } from './cloud-layer'
 import type { AgentMode } from '../ai/mode-policy'
 import type { NewStep, CreatePlanMeta } from '../storage/plans'
@@ -39,6 +55,19 @@ import type { JournalKind } from '../storage/journal'
 // ядра, что и десктоп: ни один файл electron/ipc/* и electron/ai/* этим хостом не
 // перекраивается. Один хост = один пользователь (одна sqlite в dataDir — рабочая
 // гипотеза мульти-тенантности из отчёта §3а).
+
+// runner-shared хранит pending/suspend state на весь Node-процесс, поэтому sendId
+// тоже обязан быть process-wide. Счётчик внутри createHeadlessHost давал каждому
+// тенанту 1, 2, ... и позволял suspend/resolve одного хоста задеть другой.
+let nextHeadlessSendId = 0
+
+function allocateHeadlessSendId(): number {
+  if (nextHeadlessSendId >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('headless sendId space exhausted')
+  }
+  nextHeadlessSendId += 1
+  return nextHeadlessSendId
+}
 
 export interface HeadlessHostOptions {
   /** Каталог данных пользователя: {dataDir}/verstak.db + {dataDir}/logs. */
@@ -67,6 +96,60 @@ export interface HeadlessHostOptions {
    * потребители с собственным циклом). По умолчанию 30 секунд.
    */
   schedulerPollMs?: number | null
+  /** Per-tenant abuse guards. Defaults are production-safe; tests may lower them. */
+  maxActiveRuns?: number
+  maxRunsPer24h?: number
+  /** Общий process-local потолок прогонов всех tenant-host'ов. Реестр инжектит один экземпляр во все хосты. */
+  globalRunCapacity?: HeadlessRunCapacity
+  /**
+   * Разрешить модели создавать scheduled jobs. По умолчанию true для совместимости
+   * desktop/single-host; рекламный multi-tenant entrypoint явно ставит false.
+   */
+  enableScheduledTasks?: boolean
+  /**
+   * Внутренний lifecycle-барьер многотенантного registry. Вызывается ПОСЛЕ
+   * остановки прогонов, но ДО закрытия SQLite: уже выданные HTTP request leases
+   * должны закончиться, иначе closeAll может закрыть БД между await и обращением
+   * handler'а к host.
+   */
+  beforeCloseDb?: () => Promise<void>
+}
+
+export interface HeadlessRunCapacityLease {
+  /** Идемпотентное освобождение: completion/ошибка/stop-race не могут увести счётчик ниже нуля. */
+  release: () => void
+}
+
+export interface HeadlessRunCapacity {
+  readonly limit: number
+  tryAcquire: () => HeadlessRunCapacityLease | null
+  activeCount: () => number
+}
+
+/**
+ * Общий атомарный лимитер живых/готовящихся provider run'ов одного Node-процесса.
+ * tryAcquire синхронный: между проверкой и reservation нет await и два tenant-host'а
+ * не могут одновременно забрать последний слот.
+ */
+export function createHeadlessRunCapacity(limit: number): HeadlessRunCapacity {
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1
+  let active = 0
+  return {
+    limit: normalizedLimit,
+    tryAcquire() {
+      if (active >= normalizedLimit) return null
+      active += 1
+      let released = false
+      return {
+        release() {
+          if (released) return
+          released = true
+          active = Math.max(0, active - 1)
+        }
+      }
+    },
+    activeCount: () => active
+  }
 }
 
 /**
@@ -119,6 +202,15 @@ export interface StartTaskOptions {
   /** Маршрут инференса на эту задачу. Задан → прогон идёт через него, секреты
    *  тенанта не читаются и не пишутся. Не задан → прежнее поведение. */
   inference?: TaskInferenceRoute
+  /**
+   * Durable exactly-once acceptance for the cloud HTTP adapter. The key is opaque;
+   * the host binds it to a SHA-256 fingerprint of this semantic request (excluding
+   * inference.apiKey) and returns the original run on a replay.
+   */
+  idempotency?: {
+    key: string
+    operation: HeadlessTaskOperation
+  }
 }
 
 export interface StartedTask {
@@ -126,6 +218,8 @@ export interface StartedTask {
   /** Тред, которому принадлежит прогон. Им продолжают задачу. */
   threadId: number
   sendId: number
+  /** True means no new run was accepted; the original durable mapping was returned. */
+  replayed: boolean
   /** Резолвится по завершении прогона (любой исход; ошибки уже ушли событиями/в agent_runs). */
   completion: Promise<void>
   stop: () => void
@@ -218,6 +312,17 @@ export interface HeadlessHost {
   /** Один проход расписания вручную (тесты, отладка). Возвращает число запущенных. */
   schedulerTick: () => Promise<number>
   /**
+   * Синхронный lifecycle-снимок для bounded tenant registry. `true` означает, что
+   * прямо сейчас у хоста нет активного/готовящегося/idempotency-in-flight прогона,
+   * нет включённого расписания и shutdown ещё не начался. Registry проверяет свои
+   * request leases отдельно и вызывает close() в том же JS turn, без await между
+   * проверкой и изъятием из cache.
+   *
+   * Опциональность сохраняет совместимость с внешними fake/adaptor host'ами:
+   * отсутствие метода трактуется registry как «эвиктить нельзя» (fail-closed).
+   */
+  canEvictIdle?: () => boolean
+  /**
    * Закрыть хост, НЕ оборвав живые прогоны. Ждёт их завершения до `timeoutMs`, затем
    * прерывает и даёт финализации дописать статус. Асинхронный не для красоты: синхронное
    * закрытие рвало sqlite под работающим агентом — финализация не доходила до диска, и
@@ -233,11 +338,84 @@ const NOOP_SENDER: TaggedSender = { send: () => {}, exec: async () => undefined 
 const CLOSE_WAIT_MS = 15_000
 /** Сколько ещё ждать финализации после принудительной остановки по таймауту. */
 const CLOSE_ABORT_GRACE_MS = 3_000
+/**
+ * Claim exists only while request preparation has not yet become a durable accepted run.
+ * Five minutes avoids a second process stealing a legitimately slow context build, while
+ * still allowing a crashed pre-accept request to be retried without manual DB repair.
+ */
+const IDEMPOTENCY_CLAIM_LEASE_MS = 5 * 60_000
+/** A bounded deduplication window; replay never slides this deadline. */
+const IDEMPOTENCY_RETENTION_MS = 7 * 24 * 60 * 60_000
+
+/**
+ * Fingerprint of business intent, not credentials or process-local callbacks. In particular,
+ * Gateway mints a fresh inference.apiKey for a retry; including it would turn a legitimate
+ * replay into a conflict and could leak a secret-derived value into durable state analysis.
+ */
+export function computeHeadlessTaskRequestHash(
+  task: StartTaskOptions,
+  operation: HeadlessTaskOperation,
+): string {
+  const semantic = {
+    operation,
+    threadId: task.threadId ?? null,
+    // A continue always inherits the thread workspace; a supplied workspace is ignored.
+    workspace: operation === 'continue' ? null : (task.workspace ?? null),
+    prompt: task.prompt,
+    providerId: task.providerId ?? (task.inference ? 'custom-openai' : null),
+    model: task.model ?? null,
+    agentMode: task.agentMode ?? null,
+    toolsAllow: task.toolsAllow === undefined ? '__stage1_default__' : task.toolsAllow,
+    turnsBudget: task.turnsBudget ?? null,
+    costCapUsd: task.costCapUsd ?? null,
+    inference: task.inference
+      ? { baseUrl: task.inference.baseUrl, models: task.inference.models ?? null }
+      : null,
+    // Internal/test-only route identity. The callback itself is never serialized.
+    providerOverride: Boolean(task.providerOverride),
+  }
+  return createHash('sha256').update(JSON.stringify(semantic)).digest('hex')
+}
+
+function normalizeTaskIdempotency(task: StartTaskOptions): {
+  key: string
+  operation: HeadlessTaskOperation
+  requestHash: string
+} | null {
+  const input = task.idempotency
+  if (!input) return null
+  if (
+    typeof input.key !== 'string'
+    || input.key.length < 8
+    || input.key.length > 128
+    || !/^[A-Za-z0-9._:-]+$/.test(input.key)
+  ) {
+    throw new HeadlessIdempotencyError(
+      HEADLESS_IDEMPOTENCY_INVALID,
+      'ключ должен содержать 8–128 символов A-Z, a-z, 0-9, ., _, :, -',
+    )
+  }
+  if ((input.operation === 'create') === (task.threadId != null)) {
+    throw new HeadlessIdempotencyError(
+      HEADLESS_IDEMPOTENCY_INVALID,
+      input.operation === 'create'
+        ? 'create-операция не может содержать threadId'
+        : 'continue-операция требует threadId',
+    )
+  }
+  return {
+    key: input.key,
+    operation: input.operation,
+    requestHash: computeHeadlessTaskRequestHash(task, input.operation),
+  }
+}
 
 export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<HeadlessHost> {
   mkdirSync(opts.dataDir, { recursive: true })
   configureRuntimeLogDir(join(opts.dataDir, 'logs'))
   const db = openDb(join(opts.dataDir, 'verstak.db'))
+  let schedulerForInitCleanup: Scheduler | null = null
+  try {
   const settings = createSettings(db, opts.safeStorage)
   const env = opts.env ?? process.env
 
@@ -266,6 +444,8 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   }
 
   const agentRuns = createAgentRuns(db)
+  const taskIdempotency = createHeadlessIdempotencyStore(db)
+  taskIdempotency.cleanupExpired()
   // Тред задачи = чат-сессия ядра. Отдельной сущности «тред» не заводим: agent_runs.chat_id
   // существует с Manager V1 и уже означает ровно это — «прогоны одного разговора».
   const chatSessions = createChatSessions(db)
@@ -288,14 +468,47 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
   // одним запуском (recordRun пересчитывает от момента старта, не навёрстывает).
   const scheduledJobs = createScheduledJobs(db)
 
-  let nextSendId = 1
-
   /**
    * Живые прогоны хоста. Нужны ровно одному потребителю — close(): закрытая под
    * работающим агентом sqlite обрывает финализацию (статус, чекпойнт, ответ в тред),
    * и задача навсегда остаётся 'running'.
    */
-  const active = new Map<string, { completion: Promise<void>; abort: () => void }>()
+  const active = new Map<string, {
+    completion: Promise<void>
+    abort: () => void
+    threadId: number
+    sendId: number
+  }>()
+  /** Coalesces duplicates that arrive while the first request is still preparing context. */
+  const idempotencyInFlight = new Map<string, {
+    operation: HeadlessTaskOperation
+    requestHash: string
+    promise: Promise<StartedTask>
+  }>()
+  // Durable agent_runs появляется только после async-сборки контекста.
+  // До этого момента два concurrent continue могли оба пройти DB-проверку.
+  const startingThreads = new Set<number>()
+  let starting = 0
+  let closing = false
+  /** Одна lifecycle-операция за раз; после ошибки разрешён явный cleanup retry. */
+  let closeInFlight: Promise<void> | null = null
+  // prepareSystemContext не принимает AbortSignal. Оборачиваем только ожидание:
+  // при shutdown исходный promise может остаться зависшим, но startTask немедленно
+  // выходит через catch/finally, освобождает idempotency/global slots и больше не
+  // касается SQLite. Это позволяет close() дождаться ПОЛНОГО unwind, а не закрыть
+  // БД под продолжением async-функции.
+  const preparationAbort = new AbortController()
+  const startingZeroWaiters = new Set<() => void>()
+
+  // One host is one tenant, so these are per-user limits.  They bound both
+  // resource exhaustion (many simultaneous agents) and durable sqlite/workspace
+  // growth from create -> immediately stop loops.
+  const configuredActive = Number(opts.maxActiveRuns ?? process.env.VERSTAK_MAX_ACTIVE_RUNS ?? 3)
+  const maxActiveRuns = Number.isFinite(configuredActive) ? Math.max(1, Math.floor(configuredActive)) : 3
+  const configuredDaily = Number(opts.maxRunsPer24h ?? process.env.VERSTAK_MAX_RUNS_PER_24H ?? 100)
+  const maxRunsPer24h = Number.isFinite(configuredDaily)
+    ? Math.max(maxActiveRuns, Math.floor(configuredDaily))
+    : Math.max(maxActiveRuns, 100)
 
   /** Ждёт завершения активных прогонов, но не дольше ms. */
   function settleActive(ms: number): Promise<void> {
@@ -308,17 +521,151 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     })])
   }
 
-  async function startTask(task: StartTaskOptions): Promise<StartedTask> {
+  function waitForStartingZero(): Promise<void> {
+    if (starting === 0) return Promise.resolve()
+    return new Promise<void>(resolve => { startingZeroWaiters.add(resolve) })
+  }
+
+  function settleStarting(ms: number): Promise<void> {
+    if (starting === 0) return Promise.resolve()
+    const settled = waitForStartingZero()
+    return Promise.race([settled, new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, ms)
+      if (typeof timer.unref === 'function') timer.unref()
+    })])
+  }
+
+  function notifyStartingReleased(): void {
+    if (starting !== 0) return
+    for (const resolve of startingZeroWaiters) resolve()
+    startingZeroWaiters.clear()
+  }
+
+  function awaitPreparation<T>(operation: Promise<T>): Promise<T> {
+    const signal = preparationAbort.signal
+    if (signal.aborted) return Promise.reject(new Error('headless-хост закрывается'))
+    return new Promise<T>((resolve, reject) => {
+      const cleanup = (): void => { signal.removeEventListener('abort', onAbort) }
+      const onAbort = (): void => {
+        cleanup()
+        reject(new Error('headless-хост закрывается'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      // Обе ветки подписаны даже после abort, поэтому поздний reject исходной
+      // подготовки не превращается в unhandled rejection.
+      operation.then(
+        value => { cleanup(); resolve(value) },
+        error => { cleanup(); reject(error) },
+      )
+    })
+  }
+
+  function replayAcceptedTask(replay: { runId: string; threadId: number }): StartedTask {
+    const durable = db.prepare(
+      'SELECT chat_id as threadId, send_id as sendId FROM agent_runs WHERE run_id = ?'
+    ).get(replay.runId) as { threadId: number | null; sendId: number | null } | undefined
+    if (!durable || durable.threadId !== replay.threadId || durable.sendId == null) {
+      throw new HeadlessIdempotencyError(
+        HEADLESS_IDEMPOTENCY_CORRUPT,
+        'сохранённая ссылка на прогон не совпадает с durable agent_runs',
+      )
+    }
+    const live = active.get(replay.runId)
+    return {
+      runId: replay.runId,
+      threadId: replay.threadId,
+      sendId: durable.sendId,
+      replayed: true,
+      completion: live?.completion ?? Promise.resolve(),
+      stop: live?.abort ?? (() => {}),
+    }
+  }
+
+  async function startTaskOnce(
+    task: StartTaskOptions,
+    idempotencyMeta: ReturnType<typeof normalizeTaskIdempotency>,
+  ): Promise<StartedTask> {
+    if (closing) throw new Error('headless-хост закрывается')
+    // Exactly-once replay is not a new start and therefore must not consume or be
+    // rejected by active/daily capacity. Conflict is detected at this same point.
+    if (idempotencyMeta) {
+      const existing = taskIdempotency.lookup(
+        idempotencyMeta.key,
+        idempotencyMeta.operation,
+        idempotencyMeta.requestHash,
+      )
+      if (existing.kind === 'completed') return replayAcceptedTask(existing)
+      if (existing.kind === 'pending') {
+        throw new HeadlessIdempotencyError(
+          HEADLESS_IDEMPOTENCY_PENDING,
+          'первый запрос ещё готовится и не принят durable',
+          existing.retryAfterSeconds,
+        )
+      }
+    }
+    if (active.size + starting >= maxActiveRuns) {
+      throw new Error(`HEADLESS_CAPACITY_ACTIVE: одновременно можно запустить не более ${maxActiveRuns} задач`)
+    }
+    const recentRuns = Number((db.prepare(
+      "SELECT COUNT(*) AS n FROM agent_runs WHERE owner = 'main' AND started_at >= ?"
+    ).get(Date.now() - 24 * 60 * 60 * 1000) as { n: number }).n)
+    if (recentRuns + starting >= maxRunsPer24h) {
+      throw new Error(`HEADLESS_CAPACITY_DAILY: можно запустить не более ${maxRunsPer24h} задач за 24 часа`)
+    }
+
+    // Один общий синхронный reservation на ВСЕ tenant-host'ы процесса. Он берётся
+    // до первого await и держится через context preparation и весь provider run.
+    const globalLease = opts.globalRunCapacity?.tryAcquire() ?? null
+    if (opts.globalRunCapacity && !globalLease) {
+      throw new Error(
+        `HEADLESS_CAPACITY_GLOBAL: одновременно во всём сервисе можно запустить не более ${opts.globalRunCapacity.limit} задач`
+      )
+    }
+    let globalLeaseTransferred = false
+    let idempotencyClaim: HeadlessIdempotencyClaim | null = null
+    let startingReserved = false
+    let reservedThreadId: number | null = null
+    let durableAccepted = false
+    let createdWorkspace: string | null = null
+    try {
+    if (idempotencyMeta) {
+      const claimed = taskIdempotency.claim({
+        ...idempotencyMeta,
+        leaseMs: IDEMPOTENCY_CLAIM_LEASE_MS,
+        retentionMs: IDEMPOTENCY_RETENTION_MS,
+      })
+      if (claimed.kind === 'completed') return replayAcceptedTask(claimed)
+      if (claimed.kind === 'pending') {
+        throw new HeadlessIdempotencyError(
+          HEADLESS_IDEMPOTENCY_PENDING,
+          'первый запрос ещё готовится и не принят durable',
+          claimed.retryAfterSeconds,
+        )
+      }
+      idempotencyClaim = claimed.claim
+    }
+    starting += 1
+    startingReserved = true
     // Продолжение треда: workspace НАСЛЕДУЕТСЯ, а не берётся из запроса. Иначе клиент
     // мог бы «продолжить» задачу в чужом каталоге — и тем увести файлы треда наружу.
     const existingThread = task.threadId != null ? chatSessions.get(task.threadId) : null
     if (task.threadId != null && !existingThread) throw new Error('тред задачи не найден')
+    if (existingThread) {
+      // Async function исполняется синхронно до первого await, поэтому
+      // reservation закрывает TOCTOU без глобальной блокировки других тредов.
+      if (startingThreads.has(existingThread.id)) {
+        throw new Error('в треде уже идёт прогон — дождитесь завершения или остановите его')
+      }
+      startingThreads.add(existingThread.id)
+      reservedThreadId = existingThread.id
+    }
 
     let workspace = existingThread?.projectPath ?? task.workspace
     if (!workspace) {
       // Каталог задачи заводит ядро: имя от времени+случайности, внутри корня тенанта.
       workspace = join(opts.workspaceRoots[0], `task-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`)
       mkdirSync(workspace, { recursive: true })
+      createdWorkspace = workspace
     }
     if (!isWithinKnownRoots(workspace, opts.workspaceRoots)) {
       throw new Error('workspace задачи вне разрешённых корней хоста')
@@ -345,7 +692,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     }
 
     const ctrl = new AbortController()
-    const sendId = nextSendId++
+    const sendId = allocateHeadlessSendId()
     const runId = randomUUID()
     const model = task.model ?? descriptor.defaultModel
     const baseSender = task.sender ?? NOOP_SENDER
@@ -389,41 +736,54 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
 
     const tools = createToolsForProject(workspace, ctrl.signal, {})
 
-    // Тред: существующий продолжаем, иначе заводим. Заголовок треда = ПЕРВАЯ постановка
-    // (уточнения его не переписывают — иначе в списке задача меняла бы имя после
-    // каждого «а теперь то же самое, но за июль»).
-    const thread = existingThread ?? chatSessions.create(workspace, {
-      title: task.prompt.slice(0, 200), providerId, model
-    })
     // История треда идёт в контекст ходом ранее записанными сообщениями — той же
     // формой user/assistant, какую десктопный renderer шлёт в ai:send. Роль 'system'
     // отсеиваем: системный слой собирается заново на каждый прогон.
-    const priorMessages: ChatMessage[] = chats.listBySession(thread.id)
+    const priorMessages: ChatMessage[] = (existingThread ? chats.listBySession(existingThread.id) : [])
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role, content: m.content }))
     const userMsg: ChatMessage = { role: 'user', content: task.prompt }
-    chats.appendToSession(thread.id, workspace, 'user', task.prompt)
 
-    const composed = await prepareSystemContext({
+    const composed = await awaitPreparation(prepareSystemContext({
       // Облачная персона вместо десктопной: в облаке нет проекта и кода, а десктопный
       // слой заставлял агента отказываться от обычных деловых задач.
       systemLayer: CLOUD_SYSTEM_LAYER_PROMPT,
       projectPath: workspace,
       messages: [...priorMessages, userMsg],
       recentWrites: undoStack.list(workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
-    })
+    }))
+    // SIGTERM мог прийти, пока асинхронно собирался контекст. После этой точки до
+    // active.set() нет await: либо старт становится видимым close(), либо не пишет
+    // в уже закрытую БД и не оставляет orphan chat/message без agent_run.
+    if (closing) throw new Error('headless-хост закрывается')
+
     const agentMode = task.agentMode ?? 'auto'
 
-    // Продовая форма старта прогона (openAgentRun, ipc/ai-send/run-bookkeeping.ts):
-    // строка agent_runs + user_msg первым событием таймлайна. chatId = тред: связь
-    // прогона с разговором ядро держит этой колонкой с Manager V1.
-    agentRuns.create({
-      runId, projectPath: workspace, chatId: thread.id, owner: 'main',
-      title: task.prompt.slice(0, 200), providerId, model,
-      requestedProviderId: providerId, requestedModel: model,
-      sendId, agentMode, accountId: null
+    // One acceptance transaction. A process can crash before it (only a fenced pending
+    // claim remains) or after it (the exact run/thread mapping is replayable); it can no
+    // longer leave a thread/message without a run or call the provider before the mapping.
+    const persistAccepted = db.transaction(() => {
+      // Тред: существующий продолжаем, иначе заводим. Заголовок = первая постановка.
+      const acceptedThread = existingThread ?? chatSessions.create(workspace, {
+        title: task.prompt.slice(0, 200), providerId, model
+      })
+      chats.appendToSession(acceptedThread.id, workspace, 'user', task.prompt)
+
+      // Продовая форма старта: agent_runs + user_msg первым событием Timeline.
+      agentRuns.create({
+        runId, projectPath: workspace, chatId: acceptedThread.id, owner: 'main',
+        title: task.prompt.slice(0, 200), providerId, model,
+        requestedProviderId: providerId, requestedModel: model,
+        sendId, agentMode, accountId: null
+      })
+      agentRuns.appendEvent(runId, 'user_msg', { detail: task.prompt.slice(0, 500) })
+      if (idempotencyClaim) {
+        taskIdempotency.complete(idempotencyClaim, runId, acceptedThread.id)
+      }
+      return acceptedThread
     })
-    agentRuns.appendEvent(runId, 'user_msg', { detail: task.prompt.slice(0, 500) })
+    const thread = persistAccepted()
+    durableAccepted = true
     logRuntime('headless.task.start', { runId, sendId, threadId: thread.id, providerId, model, workspace })
 
     // Ответ агента копим из text-событий — того же источника, из которого десктопный
@@ -451,7 +811,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       }
     }
 
-    const completion = runApiConversation({
+    const runCompletion = runApiConversation({
       sender, sendId, provider, tools, projectPath: workspace,
       initialMessages: [{ role: 'system', content: composed.system }, ...priorMessages, userMsg],
       signal: ctrl.signal,
@@ -528,7 +888,9 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         }
       },
       // undefined → дефолт Этапа 1; явный null = «все инструменты» задаётся сознательно.
-      toolsAllow: task.toolsAllow === undefined ? STAGE1_TOOLS_ALLOW : task.toolsAllow
+      toolsAllow: task.toolsAllow === undefined
+        ? (opts.enableScheduledTasks === false ? STAGE1_CANARY_TOOLS_ALLOW : STAGE1_TOOLS_ALLOW)
+        : task.toolsAllow
       // Каст через unknown: опциональные фасады (subSessions, verifications, pipelineRuns…)
       // на Этапе 1 сознательно не поднимаются — им соответствуют выключенные инструменты.
     } as unknown as Parameters<typeof runApiConversation>[0])
@@ -539,15 +901,111 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
 
     // Реестр живых прогонов для close(). Снимаем на ЛЮБОМ исходе — иначе упавший
     // прогон держал бы закрытие хоста до самого таймаута.
-    active.set(runId, { completion, abort: () => ctrl.abort() })
-    void completion.catch(() => undefined).finally(() => { active.delete(runId) })
+    // Awaiting completion must also mean that the capacity slot has been released.
+    // Keeping cleanup on a detached promise left a one-microtask false 429 window.
+    const completion = runCompletion.finally(() => {
+      // Те же реестры общие для всех tenant-host. Уникальный sendId не даёт
+      // перекрёстного resolve, а очистка не оставляет ghost confirmations/markers.
+      for (const [key, pending] of pendingWrites) {
+        if (pending.sendId === sendId) { pending.resolve(false); pendingWrites.delete(key) }
+      }
+      for (const [key, pending] of pendingCommands) {
+        if (pending.sendId === sendId) { pending.resolve(false); pendingCommands.delete(key) }
+      }
+      for (const [key, pending] of pendingPlans) {
+        if (pending.sendId === sendId) {
+          pending.resolve({ decision: 'reject' })
+          pendingPlans.delete(key)
+        }
+      }
+      suspendedSends.delete(sendId)
+      active.delete(runId)
+      globalLease?.release()
+    })
+    active.set(runId, { completion, abort: () => ctrl.abort(), threadId: thread.id, sendId })
+    globalLeaseTransferred = globalLease !== null
+    void completion.catch(() => undefined)
 
     return {
       runId,
       threadId: thread.id,
       sendId,
+      replayed: false,
       completion,
       stop: () => ctrl.abort()
+    }
+    } catch (err) {
+      // Until the acceptance transaction commits there was no provider call and no
+      // durable task. Releasing only our fenced token makes the same request retryable;
+      // after acceptance the completed mapping is deliberately permanent.
+      if (idempotencyClaim && !durableAccepted) {
+        try {
+          taskIdempotency.releaseRetryable(idempotencyClaim)
+        } catch (releaseError) {
+          // close() may already have closed SQLite while async context preparation was
+          // unwinding. The finite lease remains the crash-safe recovery path.
+          logRuntime('headless.idempotency.release-failed', {
+            error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+          })
+        }
+      }
+      // Авто-workspace принадлежит именно этому НОВОМУ старту и до acceptance
+      // недоступен пользователю. При отказе удаляем только его. Явный workspace и
+      // workspace существующего треда никогда не трогаем.
+      if (
+        !durableAccepted
+        && createdWorkspace
+        && isWithinKnownRoots(createdWorkspace, opts.workspaceRoots)
+      ) {
+        try {
+          rmSync(createdWorkspace, { recursive: true, force: true })
+        } catch (cleanupError) {
+          logRuntime('headless.workspace.preaccept-cleanup-failed', {
+            workspace: createdWorkspace,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          })
+        }
+      }
+      throw err
+    } finally {
+      if (startingReserved) starting = Math.max(0, starting - 1)
+      if (reservedThreadId != null) startingThreads.delete(reservedThreadId)
+      if (!globalLeaseTransferred) globalLease?.release()
+      notifyStartingReleased()
+    }
+  }
+
+  async function startTask(task: StartTaskOptions): Promise<StartedTask> {
+    const idempotencyMeta = normalizeTaskIdempotency(task)
+    if (!idempotencyMeta) return startTaskOnce(task, null)
+
+    const inFlight = idempotencyInFlight.get(idempotencyMeta.key)
+    if (inFlight) {
+      if (
+        inFlight.operation !== idempotencyMeta.operation
+        || inFlight.requestHash !== idempotencyMeta.requestHash
+      ) {
+        throw new HeadlessIdempotencyError(
+          HEADLESS_IDEMPOTENCY_CONFLICT,
+          'ключ уже используется другим незавершённым запросом',
+        )
+      }
+      const original = await inFlight.promise
+      return { ...original, replayed: true }
+    }
+
+    const promise = startTaskOnce(task, idempotencyMeta)
+    idempotencyInFlight.set(idempotencyMeta.key, {
+      operation: idempotencyMeta.operation,
+      requestHash: idempotencyMeta.requestHash,
+      promise,
+    })
+    try {
+      return await promise
+    } finally {
+      if (idempotencyInFlight.get(idempotencyMeta.key)?.promise === promise) {
+        idempotencyInFlight.delete(idempotencyMeta.key)
+      }
     }
   }
 
@@ -569,6 +1027,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     startTask: schedulerStart,
     pollMs: opts.schedulerPollMs === undefined ? 30_000 : opts.schedulerPollMs
   })
+  schedulerForInitCleanup = scheduler
 
   return {
     startTask,
@@ -661,18 +1120,35 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     },
     scheduledJobs,
     schedulerTick: () => scheduler.tick(),
-    close: async (closeOpts) => {
-      scheduler.stop()  // новые запуски по расписанию во время закрытия не стартуют
-      const waitMs = closeOpts?.timeoutMs ?? CLOSE_WAIT_MS
-      if (active.size > 0) {
-        logRuntime('headless.host.close.waiting', { active: active.size, waitMs })
-        await settleActive(waitMs)
-        if (active.size > 0) {
-          // Время вышло. Прерываем прогоны и даём финализации дописать статус:
-          // прерванная задача с честным исходом лучше вечного 'running'.
-          logRuntime('headless.host.close.aborting', { active: active.size })
+    canEvictIdle: () => (
+      !closing
+      && active.size === 0
+      && starting === 0
+      && idempotencyInFlight.size === 0
+      // Dormant legacy jobs must not pin all tenant-host slots when the canary
+      // has disabled both the schedule tool and its polling loop.
+      && (opts.enableScheduledTasks === false || !scheduledJobs.list().some(job => job.enabled))
+    ),
+    close: (closeOpts) => {
+      if (closeInFlight) return closeInFlight
+      const operation = (async (): Promise<void> => {
+        closing = true
+        scheduler.stop()  // новые запуски по расписанию во время закрытия не стартуют
+        const waitMs = closeOpts?.timeoutMs ?? CLOSE_WAIT_MS
+        if (active.size > 0 || starting > 0) {
+          logRuntime('headless.host.close.waiting', { active: active.size, starting, waitMs })
+          // Один общий grace period: starting/context preparation и уже принятые
+          // прогоны ждём параллельно, чтобы shutdown budget не складывался.
+          await Promise.all([settleActive(waitMs), settleStarting(waitMs)])
+        }
+        if (active.size > 0 || starting > 0) {
+          // Время вышло. Provider run'ы получают свой AbortSignal; зависшая сборка
+          // контекста — отдельный lifecycle signal, потому что compose API signal не
+          // принимает. После него ОБЯЗАТЕЛЬНО ждём starting=0 до закрытия SQLite.
+          logRuntime('headless.host.close.aborting', { active: active.size, starting })
           for (const entry of [...active.values()]) entry.abort()
-          await settleActive(CLOSE_ABORT_GRACE_MS)
+          preparationAbort.abort()
+          await Promise.all([settleActive(CLOSE_ABORT_GRACE_MS), waitForStartingZero()])
         }
         if (active.size > 0) {
           // Прогон не отпустил даже после abort (провайдер не слушает сигнал). Ставим
@@ -681,8 +1157,26 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           const stuck = agentRuns.reconcileStale()
           logRuntime('headless.host.close.reconciled', { active: active.size, stuck })
         }
-      }
-      try { db.close() } catch { /* уже закрыта */ }
+        // Registry не разрешает новые request leases после начала closeAll. Уже
+        // выданные (включая живой SSE) должны отпуститься до db.close(). Для SSE это
+        // происходит после completion/abort выше, когда server завершает response.
+        await opts.beforeCloseDb?.()
+        // `open` отличает идемпотентный повтор от реальной ошибки close(). Реальную
+        // ошибку нельзя глотать: registry обязан сохранить slot fail-closed.
+        if (db.open) db.close()
+      })()
+      closeInFlight = operation
+      void operation.catch(() => {
+        if (closeInFlight === operation) closeInFlight = null
+      })
+      return operation
     }
+  }
+  } catch (err) {
+    // Неуспешный init не попадает в registry cache. Без явного cleanup повторные
+    // попытки одного tenant обходили бы hard cap, оставляя SQLite handles за бортом.
+    schedulerForInitCleanup?.stop()
+    try { db.close() } catch { /* init уже успел закрыть БД */ }
+    throw err
   }
 }

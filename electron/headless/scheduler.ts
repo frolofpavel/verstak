@@ -41,7 +41,9 @@ export interface Scheduler {
 
 export function startScheduler(opts: SchedulerOptions): Scheduler {
   const now = opts.now ?? Date.now
-  const pollMs = opts.pollMs ?? 30_000
+  // undefined = штатный polling, null = явный hard-off. `??` здесь нельзя:
+  // он превращает canary default-off обратно в 30 секунд и поднимает старые jobs.
+  const pollMs = opts.pollMs === undefined ? 30_000 : opts.pollMs
   let stopped = false
   let ticking = false
 

@@ -1532,6 +1532,34 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('CREATE INDEX IF NOT EXISTS idx_trial_attempts_trial ON result_trial_attempts(trial_id)')
       db.exec('CREATE INDEX IF NOT EXISTS idx_result_trials_project ON result_trials(project_path)')
     }
+  },
+  {
+    version: 65,
+    description: 'Headless P1: durable idempotency for cloud task create/continue. One opaque key maps to one semantic request and one accepted run; a fenced lease makes abandoned pre-accept claims retryable without duplicating an already accepted provider call.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS headless_task_idempotency (
+          idempotency_key TEXT PRIMARY KEY,
+          operation TEXT NOT NULL CHECK (operation IN ('create', 'continue')),
+          request_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'retryable')),
+          claim_token TEXT,
+          lease_expires_at INTEGER NOT NULL,
+          run_id TEXT,
+          thread_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          CHECK (
+            (status = 'pending' AND claim_token IS NOT NULL AND run_id IS NULL AND thread_id IS NULL)
+            OR (status = 'retryable' AND claim_token IS NULL AND run_id IS NULL AND thread_id IS NULL)
+            OR (status = 'completed' AND claim_token IS NULL AND run_id IS NOT NULL AND thread_id IS NOT NULL)
+          )
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_headless_idempotency_lease ON headless_task_idempotency(status, lease_expires_at)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_headless_idempotency_expiry ON headless_task_idempotency(expires_at)')
+    }
   }
 ]
 
