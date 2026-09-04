@@ -46,6 +46,62 @@ function fakeGateway(): Promise<{ url: string; seenAuth: string[]; close: () => 
   })
 }
 
+/** Первый OpenAI-stream зависает после headers, второй отвечает штатно. */
+function abortThenSuccessGateway(): Promise<{
+  url: string
+  firstRequest: Promise<void>
+  firstClosed: Promise<void>
+  close: () => Promise<void>
+}> {
+  let markFirstRequest: () => void = () => {}
+  let markFirstClosed: () => void = () => {}
+  const firstRequest = new Promise<void>(resolve => { markFirstRequest = resolve })
+  const firstClosed = new Promise<void>(resolve => { markFirstClosed = resolve })
+  let calls = 0
+  const server = createServer((req, res) => {
+    calls += 1
+    req.resume()
+    if (calls === 1) {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.flushHeaders()
+      markFirstRequest()
+      let marked = false
+      const mark = (): void => {
+        if (marked) return
+        marked = true
+        markFirstClosed()
+      }
+      req.once('aborted', mark)
+      req.once('close', mark)
+      res.once('close', mark)
+      return
+    }
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        id: 'after-stop', object: 'chat.completion', created: 1, model: 'test-model',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'После stop.' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      }))
+    })
+  })
+  return new Promise(resolve => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+      resolve({
+        url: `http://127.0.0.1:${port}/v1`,
+        firstRequest,
+        firstClosed,
+        close: () => {
+          server.closeAllConnections()
+          return new Promise<void>(done => server.close(() => done()))
+        },
+      })
+    })
+  })
+}
+
 /** Рекурсивно собирает содержимое всех файлов каталога — для грепа секрета. */
 function readAllFiles(dir: string, depth = 0): string {
   if (depth > 6) return ''
@@ -76,10 +132,11 @@ describe('per-task маршрут инференса (запрос №5)', () =>
     rmSync(wsRoot, { recursive: true, force: true })
   })
 
-  async function makeHost() {
+  async function makeHost(extra: Partial<Parameters<typeof createHeadlessHost>[0]> = {}) {
     const host = await createHeadlessHost({
       dataDir, workspaceRoots: [wsRoot],
-      safeStorage: createAesGcmSafeStorage(randomBytes(32)), env: {}
+      safeStorage: createAesGcmSafeStorage(randomBytes(32)), env: {},
+      ...extra,
     })
     hosts.push(host)
     return host
@@ -150,5 +207,39 @@ describe('per-task маршрут инференса (запрос №5)', () =>
     const runs = JSON.stringify(host.listTasks())
     expect(runs).not.toContain(RUN_TOKEN)
     expect(runs).toContain(task.runId) // контроль: данные о прогоне вообще есть
+  }, 30_000)
+
+  it('repeated stop реально обрывает зависший custom-openai stream и освобождает active slot', async () => {
+    const stoppingGw = await abortThenSuccessGateway()
+    const host = await makeHost({ maxActiveRuns: 1, schedulerPollMs: null })
+    try {
+      const first = await host.startTask({
+        prompt: 'зависни до stop',
+        model: 'test-model',
+        agentMode: 'bypass',
+        inference: { baseUrl: stoppingGw.url, apiKey: RUN_TOKEN },
+      })
+      await stoppingGw.firstRequest
+      for (let index = 0; index < 20; index += 1) first.stop()
+      await expect(Promise.race([
+        first.completion.catch(() => undefined).then(() => 'settled' as const),
+        new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 3_000)),
+      ])).resolves.toBe('settled')
+      await stoppingGw.firstClosed
+      expect(host.getRunStatus(first.runId)).not.toBe('running')
+
+      // maxActiveRuns=1: второй старт доказывает, что первый освободил не только HTTP,
+      // но и внутренний active/global lifecycle slot.
+      const second = await host.startTask({
+        prompt: 'после stop',
+        model: 'test-model',
+        agentMode: 'bypass',
+        inference: { baseUrl: stoppingGw.url, apiKey: RUN_TOKEN },
+      })
+      await second.completion
+      expect(host.getRunStatus(second.runId)).toBe('done')
+    } finally {
+      await stoppingGw.close()
+    }
   }, 30_000)
 })

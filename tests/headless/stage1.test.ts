@@ -7,7 +7,11 @@ vi.mock('electron', () => {
   throw new Error("Cannot find module 'electron' (headless Node)")
 })
 
-const { STAGE1_TOOLS_ALLOW, STAGE1_CONNECTOR_DENY } = await import('../../electron/headless/stage1')
+const {
+  STAGE1_CANARY_TOOLS_ALLOW,
+  STAGE1_TOOLS_ALLOW,
+  STAGE1_CONNECTOR_DENY,
+} = await import('../../electron/headless/stage1')
 const { TOOL_DEFS } = await import('../../electron/ai/tools')
 
 describe('Этап 1 — allowlist инструментов', () => {
@@ -39,5 +43,13 @@ describe('Этап 1 — allowlist инструментов', () => {
 
   it('ssh в deny-списке коннекторов', () => {
     expect(STAGE1_CONNECTOR_DENY.has('ssh')).toBe(true)
+  })
+
+  it('multi-tenant canary не выдаёт schedule, но сохраняет основной рабочий набор', () => {
+    expect(STAGE1_TOOLS_ALLOW).toContain('schedule')
+    expect(STAGE1_CANARY_TOOLS_ALLOW).not.toContain('schedule')
+    for (const name of ['web_search', 'connector_query', 'read_file', 'write_file']) {
+      expect(STAGE1_CANARY_TOOLS_ALLOW).toContain(name)
+    }
   })
 })

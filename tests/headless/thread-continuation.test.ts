@@ -76,9 +76,14 @@ describe('облачная задача = тред (W0): продолжение,
   let root: string
   let server: { close: () => Promise<void> } | null = null
   let registry: ReturnType<typeof createTenantRegistry> | null = null
+  let directLeaseReleases: Array<() => void>
 
-  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'vsk-thread-')) })
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'vsk-thread-'))
+    directLeaseReleases = []
+  })
   afterEach(async () => {
+    for (const release of directLeaseReleases.splice(0)) release()
     if (server) { await server.close(); server = null }
     if (registry) { await registry.closeAll(); registry = null }
     rmSync(root, { recursive: true, force: true })
@@ -326,6 +331,79 @@ describe('облачная задача = тред (W0): продолжение,
     expect((await call(port, 'POST', `/tasks/${first.runId}/continue`, 'user-a', {
       prompt: 'теперь можно', agentMode: 'bypass', providerId: 'deepseek'
     })).status).toBe(202)
+  }, 20_000)
+
+  it('гонка двух continue: ровно один ход в треде, другой тред не блокируется', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>(r => { release = r })
+    let holdConcurrentRuns = true
+    const providerPrompts: string[] = []
+    const heldPrompts = new Set(['гонка-A', 'гонка-B', 'другой-тред'])
+    const port = await boot(() => ({
+      id: 'race', name: 'race', models: ['race'],
+      async *send(messages: ChatMessage[]): AsyncGenerator<ChatEvent> {
+        const prompt = [...messages].reverse().find(message => message.role === 'user')?.content ?? ''
+        providerPrompts.push(prompt)
+        if (holdConcurrentRuns && heldPrompts.has(prompt)) await gate
+        yield { type: 'text', text: `ответ: ${prompt}` }
+        yield { type: 'done' }
+      }
+    }))
+
+    const first = JSON.parse((await call(port, 'POST', '/tasks', 'user-a', {
+      prompt: 'первый тред', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1
+    })).body) as { runId: string; threadId: number }
+    expect(await waitDone(port, first.runId, 'user-a')).toBe('done')
+    const other = JSON.parse((await call(port, 'POST', '/tasks', 'user-a', {
+      prompt: 'второй тред', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1
+    })).body) as { runId: string; threadId: number }
+    expect(await waitDone(port, other.runId, 'user-a')).toBe('done')
+
+    const tenantLease = await registry!.get('user-a')
+    directLeaseReleases.push(tenantLease.release)
+    const { host } = tenantLease
+    const before = host.getThread(first.runId)!
+    // Оба вызова запускаются без await: первый уходит в async-подготовку,
+    // второй должен увидеть синхронную reservation до появления agent_runs.
+    const contenders = await Promise.allSettled([
+      host.startTask({ threadId: first.threadId, prompt: 'гонка-A', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1 }),
+      host.startTask({ threadId: first.threadId, prompt: 'гонка-B', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1 })
+    ])
+    const accepted = contenders.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof host.startTask>>> => result.status === 'fulfilled')
+    const denied = contenders.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    const heldCompletions = accepted.map(result => result.value.completion)
+
+    try {
+      expect(accepted).toHaveLength(1)
+      expect(denied).toHaveLength(1)
+      expect(String(denied[0].reason)).toContain('в треде уже идёт прогон')
+
+      const duringRace = host.getThread(first.runId)!
+      expect(duringRace.runs).toHaveLength(before.runs.length + 1)
+      expect(duringRace.messages.filter(message => heldPrompts.has(message.content))).toHaveLength(1)
+
+      // Reservation привязана к threadId, а не ко всему хосту.
+      const otherThread = await host.startTask({
+        threadId: other.threadId, prompt: 'другой-тред', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1
+      })
+      heldCompletions.push(otherThread.completion)
+    } finally {
+      holdConcurrentRuns = false
+      release()
+      await Promise.allSettled(heldCompletions)
+    }
+
+    expect(providerPrompts.filter(prompt => prompt === 'гонка-A' || prompt === 'гонка-B')).toHaveLength(1)
+    // Ошибка после взятия reservation тоже обязана её снять.
+    await expect(host.startTask({
+      threadId: first.threadId, prompt: 'невалидный старт', agentMode: 'bypass', providerId: 'provider-does-not-exist' as never, turnsBudget: 1
+    })).rejects.toThrow('неизвестный провайдер')
+    // После финализации и после ошибки reservation снята, durable live-run закрыт.
+    const next = await host.startTask({
+      threadId: first.threadId, prompt: 'после гонки', agentMode: 'bypass', providerId: 'deepseek', turnsBudget: 1
+    })
+    await next.completion
+    expect(host.getRunStatus(next.runId)).toBe('done')
   }, 20_000)
 
   it('продолжение НЕ принимает чужой workspace из тела: каталог берётся у треда', async () => {

@@ -29,7 +29,12 @@ await build({
     'unpdf',
     'mammoth',
     'exceljs',
-    'sharp'
+    'sharp',
+    // playwright-core loads BiDi only for its browser transport. Stage 1 does
+    // not expose that transport; keeping it external prevents an unused
+    // optional module from making the server bundle impossible to build.
+    'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
+    'chromium-bidi/lib/cjs/cdp/CdpConnection'
   ],
   logLevel: 'info'
 })
