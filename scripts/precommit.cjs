@@ -62,7 +62,15 @@ console.log('✓')
 // 2) тесты — блокируют только реальные падения (ABI-шум пропускаем).
 process.stdout.write('[pre-commit] тесты (safe-rebuild + vitest)… ')
 const abi = ensureNodeAbi({ log: { log: () => {}, warn: () => {} } })
-const vitest = run('npx', ['vitest', 'run'])
+// Параллелизм: по умолчанию vitest берёт число ядер, и на загруженной машине прогон
+// начинает падать по таймаутам от нехватки ПАМЯТИ, а не от дефектов (CLAUDE.md §3.1:
+// при 11 воркерах свободной ОЗУ 129 МБ, при 4 — 2.4 ГБ). Такой прогон вердиктом не
+// является: таймаут говорит о нагрузке, проваленное утверждение — о коде. Ручка даёт
+// зажать параллелизм так же, как это делает релизный гейт, вместо обхода --no-verify.
+const maxWorkers = process.env.VITEST_MAX_WORKERS
+const vitestArgs = ['vitest', 'run']
+if (maxWorkers) vitestArgs.push(`--maxWorkers=${maxWorkers}`)
+const vitest = run('npx', vitestArgs)
 const out = (vitest.stdout || '') + (vitest.stderr || '')
 const gate = decideTestGate({ abiStatus: abi.status, vitestExit: vitest.status, vitestOutput: out })
 if (gate.block) {
