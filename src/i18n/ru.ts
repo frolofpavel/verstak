@@ -19,7 +19,7 @@ export const ru: Translations = {
     enter: 'Войти →',
     profile: 'Профиль',
     features: {
-      providers: 'AI-провайдеры в одном окне',
+      providers: 'Работа с файлами, документами и сайтами',
       memory: 'Память между сессиями',
       agents: 'Параллельные агенты',
     },
@@ -30,7 +30,7 @@ export const ru: Translations = {
     connecting: '…',
     localBadge: 'LOCAL',
     emptyModels: '{name}: сервер найден, но список моделей пуст',
-    tagline: 'AI-ассистент для разработки',
+    tagline: 'ИИ-помощник для твоей работы',
     creatingProfile: 'Создаю профиль…',
     enteringProfile: 'Вхожу…',
     nameHint: 'Как тебя зовут?',

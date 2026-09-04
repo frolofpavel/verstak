@@ -18,7 +18,7 @@ export const en = {
     enter: 'Enter →',
     profile: 'Profile',
     features: {
-      providers: 'AI providers in one window',
+      providers: 'Works with files, documents and websites',
       memory: 'Memory across sessions',
       agents: 'Parallel agents',
     },
@@ -29,7 +29,7 @@ export const en = {
     connecting: '…',
     localBadge: 'LOCAL',
     emptyModels: '{name}: server found, but the model list is empty',
-    tagline: 'AI assistant for development',
+    tagline: 'An AI assistant for your work',
     creatingProfile: 'Creating profile…',
     enteringProfile: 'Signing in…',
     nameHint: 'What is your name?',
