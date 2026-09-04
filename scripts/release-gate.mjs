@@ -694,7 +694,10 @@ const GATE_MAX_WORKERS = 4
 // реальная db.close ошибка и schedule-free multi-tenant tool surface.
 // → 5786 ИЗМЕРЕНО 03.09: реальный hung custom-openai stream обрывается repeated stop,
 // освобождая HTTP и active slot для следующего запуска.
-const EXPECTED_TOTAL_TESTS = 5786
+// → 5804 ИЗМЕРЕНО 04.09 (первый экран приведён к канону позиционирования).
+// Прирост +18: 16 проверок живых строк AuthScreen в двух локалях и 2 контрольных —
+// сетка обязана ловить прежний текст и пропускать канонный.
+const EXPECTED_TOTAL_TESTS = 5804
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он
