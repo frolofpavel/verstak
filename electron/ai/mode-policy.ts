@@ -79,6 +79,21 @@ export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'brow
  */
 export const ARTIFACT_TOOLS: readonly string[] = ['generate_docx', 'generate_html', 'render_chart', 'create_proof_video']
 
+/**
+ * Подпадает ли вызов под режимную политику вообще. Чтения и курирование агентом
+ * СОБСТВЕННОЙ памяти выходят из decide() раньше категорий и всегда проходят —
+ * значит и ужесточать в них нечего.
+ *
+ * Предикат живёт здесь, рядом с категориями, а не у потребителя: вторая редакция
+ * этих списков разошлась бы с первой молча (CLAUDE.md §3.1).
+ */
+export function isGovernedTool(toolName: string): boolean {
+  const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
+  const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
+  return isEdit || isCommand || ARTIFACT_TOOLS.includes(toolName)
+    || MUTATING_BROWSER_TOOLS.includes(toolName) || toolName === 'spawn_task_session'
+}
+
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
   const isArtifact = ARTIFACT_TOOLS.includes(toolName)

@@ -21,9 +21,11 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import { decide, type AgentMode, type AutoApprove, type ToolDecision } from './mode-policy'
+import { decide, isGovernedTool, type AgentMode, type AutoApprove, type ToolDecision } from './mode-policy'
 import { classifyResponsibleAction } from './responsible-action'
 import { canonicalConnectorId } from './connector-id'
+import { tightenByTrust } from '../../shared/contracts/trust'
+import type { TrustLevel } from '../../shared/contracts/capability'
 
 export type RuleDecision = 'allow' | 'deny' | 'ask'
 
@@ -394,7 +396,7 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
  * было единственное значение слова confirm. Теперь причина явная, и allowlist
  * вправе гасить ТОЛЬКО 'mode' — режимную рутину, ради которой он и заведён.
  */
-export type ConfirmCause = 'mode' | 'responsible-action' | 'ask-rule'
+export type ConfirmCause = 'mode' | 'responsible-action' | 'ask-rule' | 'trust'
 
 /**
  * Итоговое решение по вызову с учётом режима И permission-правил.
@@ -412,7 +414,8 @@ export function resolveDecision(
   args: Record<string, unknown> | undefined,
   mode: AgentMode,
   autoApprove: AutoApprove | undefined,
-  rules: CompiledPermissionRules | undefined
+  rules: CompiledPermissionRules | undefined,
+  trust?: TrustLevel
 ): { decision: ToolDecision; reason?: string; confirmCause?: ConfirmCause } {
   const base = decide(toolName, mode, autoApprove)
   const argText = extractArgText(toolName, args)
@@ -435,11 +438,49 @@ export function resolveDecision(
   if (mode !== 'bypass') {
     const responsible = classifyResponsibleAction(toolName, args)
     if (responsible.responsible) {
-      return { decision: 'confirm', reason: responsible.why, confirmCause: 'responsible-action' }
+      // Через govern — но ТОЛЬКО вверх: слой доверия монотонен, ослабить паузу он
+      // не способен по построению. На полу доверия ответственное действие не
+      // предлагается к подтверждению вовсе, а не разрешается легче.
+      return govern(
+        { decision: 'confirm', reason: responsible.why, confirmCause: 'responsible-action' },
+        toolName,
+        trust
+      )
     }
   }
 
-  if (rule?.decision === 'ask') return { decision: 'confirm', confirmCause: 'ask-rule' }
-  if (rule?.decision === 'allow') return { decision: 'auto-accept' }
-  return base === 'confirm' ? { decision: base, confirmCause: 'mode' } : { decision: base }
+  if (rule?.decision === 'ask') return govern({ decision: 'confirm', confirmCause: 'ask-rule' }, toolName, trust)
+  if (rule?.decision === 'allow') return govern({ decision: 'auto-accept' }, toolName, trust)
+  return govern(
+    base === 'confirm' ? { decision: base, confirmCause: 'mode' } : { decision: base },
+    toolName,
+    trust
+  )
+}
+
+/**
+ * Последний слой: доверие возможности. Ставится ПОСЛЕ всего остального
+ * сознательно — он умеет только ужесточать (`tightenByTrust` монотонна и
+ * проверена перебором), поэтому не способен отменить ни deny-правило, ни
+ * plan-режим, ни паузу перед ответственным действием.
+ *
+ * Без уровня доверия (все сегодняшние вызывающие) решение возвращается
+ * НЕТРОНУТЫМ — надстройка не имеет права переписать поведение продукта молча.
+ * Инструменты вне режимной политики (чтения, своя память агента) не трогаются:
+ * там и ужесточать нечего.
+ */
+function govern(
+  result: { decision: ToolDecision; reason?: string; confirmCause?: ConfirmCause },
+  toolName: string,
+  trust: TrustLevel | undefined
+): { decision: ToolDecision; reason?: string; confirmCause?: ConfirmCause } {
+  if (!trust || !isGovernedTool(toolName)) return result
+  const tightened = tightenByTrust(result.decision, trust)
+  if (tightened === result.decision) return result
+  if (tightened === 'block') {
+    return { decision: 'block', reason: `Заблокировано уровнем доверия возможности (${trust}).` }
+  }
+  // Ужесточение до подтверждения обязано называть СВОЮ причину: потребитель,
+  // снимающий модалку по 'mode', не должен снять её здесь.
+  return { decision: tightened, reason: result.reason, confirmCause: 'trust' }
 }
