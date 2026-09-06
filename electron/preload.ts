@@ -316,6 +316,11 @@ contextBridge.exposeInMainWorld('api', {
     // Содержимое бэкапов живёт в main (SEC-SECRET-04); renderer ссылается токеном.
     unrevert: (backupToken: string) => ipcRenderer.invoke('exact-rewind:unrevert', backupToken)
   },
+  capabilities: {
+    list: () => ipcRenderer.invoke('capabilities:list'),
+    get: (id: string) => ipcRenderer.invoke('capabilities:get', id),
+    reason: (id: string) => ipcRenderer.invoke('capabilities:reason', id),
+  },
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
     get: (id: string) => ipcRenderer.invoke('skills:get', id),

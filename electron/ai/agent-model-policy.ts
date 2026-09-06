@@ -38,6 +38,14 @@ export const DEFAULT_AGENT_PLANNER_MODEL = DATA.defaults.planner
 export const DEFAULT_AGENT_FAST_EDIT_MODEL = DATA.defaults.fastEdit
 export const AGENT_MODEL_POLICIES: AgentModelPolicy[] = DATA.policies
 
+/** Версия файла политики. Роли не имеют своего содержимого — это их версия. */
+export const AGENT_MODEL_POLICY_VERSION: string = DATA.version
+
+/** Все роли агента. Порядок стабильный — реестр возможностей выдаёт их как есть. */
+export const AGENT_MODEL_ROLES: readonly AgentModelRole[] = [
+  'coding', 'planner', 'reviewer', 'fast-edit', 'fallback', 'executor', 'verifier', 'cheap-read',
+]
+
 export function canonicalAgentModel(model: string | null | undefined): string | null {
   if (!model) return null
   return DATA.aliases[model] ?? model

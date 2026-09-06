@@ -3,6 +3,7 @@ import { useT } from '../i18n'
 import { useSkills } from '../store/skillStore'
 import type { Skill, SkillImportPreviewResult, SkillUsageRecord } from '../types/api'
 import { normalizeSkillUserTags, withSkillsUserTags, writeSkillUserTags } from '../lib/skill-user-tags'
+import { CapabilityRegistryPanel } from './CapabilityRegistryPanel'
 
 const SEARCH_ALIASES: Record<string, string[]> = {
   минусация: ['минус', 'минус-слова', 'negative', 'поисков', 'площадк', 'rsya', 'рся'],
@@ -216,7 +217,7 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
   const [filter, setFilter] = useState('')
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
   // Задача 6: фильтр по источнику как ЧИП, а не разрез списка на секции.
-  const [sourceFilter, setSourceFilter] = useState<'all' | Skill['source'] | 'archived'>('all')
+  const [sourceFilter, setSourceFilter] = useState<'all' | Skill['source'] | 'archived' | 'registry'>('all')
   const [preview, setPreview] = useState<Extract<SkillImportPreviewResult, { ok: true }> | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -355,7 +356,7 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
               разреза на секции. Источник — техническая ось (откуда файл); человек ищет по
               смыслу «что умеет». Одна строка = один навык, primary-действие «Запустить». */}
           <div className="gg-skills-chips" role="tablist">
-            {([['all', 'Все'], ['user', 'Мои'], ['built-in', 'Встроенные'], ['server', 'Серверные'], ['archived', 'Архив']] as const).map(([key, label]) => (
+            {([['all', 'Все'], ['user', 'Мои'], ['built-in', 'Встроенные'], ['server', 'Серверные'], ['archived', 'Архив'], ['registry', 'Реестр']] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"
@@ -364,7 +365,9 @@ export function SkillsView({ onActivateSkill }: { onActivateSkill: (slash: strin
               >{label}{key === 'archived' && archived.length > 0 ? ` ${archived.length}` : ''}</button>
             ))}
           </div>
-          {sourceFilter === 'archived' ? (
+          {sourceFilter === 'registry' ? (
+            <CapabilityRegistryPanel />
+          ) : sourceFilter === 'archived' ? (
             archived.length === 0 ? (
               <div className="gg-skills-empty">В архиве пусто.</div>
             ) : (

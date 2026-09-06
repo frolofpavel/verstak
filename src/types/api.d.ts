@@ -1,3 +1,4 @@
+import type { Capability } from '../../shared/contracts/capability'
 export interface FileNode { name: string; path: string; isDirectory: boolean; children?: FileNode[] }
 
 // ── Карта проекта (mirror типов из electron/ai/project-map.ts; renderer не
@@ -758,6 +759,11 @@ declare global {
         preflight: (checkpointId: number) => Promise<ExactRewindPreflightDTO>
         execute: (checkpointId: number) => Promise<ExactRewindExecuteSummaryDTO>
         unrevert: (backupToken: string) => Promise<{ ok: boolean } | { disabled: true }>
+      }
+      capabilities: {
+        list: () => Promise<Capability[]>
+        get: (id: string) => Promise<Capability | null>
+        reason: (id: string) => Promise<string | null>
       }
       skills: {
         list: () => Promise<Skill[]>

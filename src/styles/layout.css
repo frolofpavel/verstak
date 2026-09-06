@@ -22557,3 +22557,65 @@ html[data-theme="light"] .gg-connectors-page {
 .gg-trial-warn { margin-top: 6px; font-size: var(--text-sm); color: var(--warning, #facc15); }
 .gg-trial-launch-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
 .gg-run-action-trial:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Реестр возможностей — вкладка на экране «Скиллы». Опирается на переменные темы,
+   объявленные в theme.css; своих цветов не заводит. */
+.gg-capabilities { display: flex; flex-direction: column; gap: 10px; }
+.gg-cap-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.gg-cap-row.is-selected { border-color: var(--accent-border); }
+.gg-cap-row-main {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) minmax(0, 120px) 110px minmax(0, 190px) 120px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.gg-cap-row-main:hover { background: var(--bg-hover); }
+.gg-cap-type {
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 1px 7px;
+  text-align: center;
+}
+.gg-cap-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gg-cap-owner, .gg-cap-risk, .gg-cap-trust, .gg-cap-status {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-cap-risk.is-medium { color: var(--warning, #d9a441); }
+.gg-cap-risk.is-high { color: var(--danger, #d96b6b); }
+.gg-cap-status.is-ready { color: var(--success, #5aa469); }
+.gg-cap-status.is-error { color: var(--danger, #d96b6b); }
+.gg-cap-details {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.gg-cap-details dt { color: var(--text-secondary); }
+.gg-cap-details dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Узкое окно: таблица перестаёт быть таблицей, а не ужимается до нечитаемого. */
+@media (max-width: 900px) {
+  .gg-cap-row-main { grid-template-columns: 84px minmax(0, 1fr); row-gap: 4px; }
+  .gg-cap-details { grid-template-columns: minmax(0, 1fr); }
+}

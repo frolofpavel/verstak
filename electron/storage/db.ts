@@ -1560,6 +1560,25 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('CREATE INDEX IF NOT EXISTS idx_headless_idempotency_lease ON headless_task_idempotency(status, lease_expires_at)')
       db.exec('CREATE INDEX IF NOT EXISTS idx_headless_idempotency_expiry ON headless_task_idempotency(expires_at)')
     }
+  },
+  {
+    version: 66,
+    description: 'Реестр возможностей, шаг 1: capability_overlay — ЕДИНСТВЕННОЕ, что реестр хранит своего. Имя, описание, включённость и права читаются у живых источников (файл скилла, mcp_servers, BUILTINS коннекторов, agent-model-policy.json) и здесь намеренно НЕ дублируются: копия этих полей однажды разойдётся с источником и начнёт врать молча (§3.1). Хранится бездомное: уровень доверия, его причина, оценка, отметка проверки и версия, НА КОТОРОЙ доверие заработано — по расхождению версии уровень падает на пол. Только append, старых данных нет, CREATE TABLE — самый безопасный тип миграции.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS capability_overlay (
+          capability_id TEXT PRIMARY KEY,
+          trust_level TEXT NOT NULL CHECK (trust_level IN ('T0', 'T1', 'T2', 'T3', 'T4')),
+          version TEXT NOT NULL,
+          eval_score REAL,
+          last_verified_at INTEGER,
+          trust_reason TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_capability_overlay_trust ON capability_overlay(trust_level)')
+    }
   }
 ]
 

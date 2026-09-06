@@ -113,6 +113,11 @@ import { activeSnapshot as activeContextSnapshot } from './storage/chat-context-
 import { AGENT_MODES } from './ai/mode-policy'
 import { resolveAgentMode } from '../shared/contracts/agent-mode-policy'
 import { createSkillRegistry } from './ai/skills/registry'
+import { registerCapabilitiesIpc } from './ipc/capabilities'
+import { createCapabilityService } from './capabilities/service'
+import { createCapabilityOverlay } from './storage/capability-overlay'
+import { loadMcpServers } from './mcp/registry'
+import { AGENT_MODEL_POLICY_VERSION, AGENT_MODEL_ROLES } from './ai/agent-model-policy'
 import { registerSkillsIpc } from './ipc/skills'
 import { createUserProfiles } from './storage/user-profiles'
 import { registerUserProfilesIpc } from './ipc/user-profiles'
@@ -1125,6 +1130,18 @@ app.whenReady().then(() => {
   registerMemoryIpc(db)
   registerCommandsIpc(knownRoots)
   registerMcpIpc(settings)
+  // Реестр возможностей: единый паспорт для скиллов, MCP, коннекторов и ролей.
+  // Источники читаются ЖИВЫМИ на каждый запрос — реестр ничего из них не копирует.
+  registerCapabilitiesIpc(createCapabilityService(
+    () => ({
+      skills: skillRegistry.list(),
+      mcpServers: loadMcpServers(settings),
+      connectors: connectorRegistry.list(),
+      roles: AGENT_MODEL_ROLES,
+      policyVersion: AGENT_MODEL_POLICY_VERSION,
+    }),
+    createCapabilityOverlay(db),
+  ))
   registerAuditIpc(db)
   registerDebugIpc(db, chats)
   registerSuggestionsIpc(db)
