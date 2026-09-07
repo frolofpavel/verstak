@@ -298,6 +298,9 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...(toolsAllow?.length ? { toolsAllow } : {}),
         // Этап 4: recipe скилла → main наслаивает workflow-протокол на skill-промпт.
         ...(recipe ? { recipe } : {}),
+        // Реестр возможностей: КТО работал в этом прогоне. Без этого доверие
+        // считать не из чего — agent_runs не знал скилла (см. миграцию 67).
+        ...(activeSkillIdForSend ? { skillId: activeSkillIdForSend } : {}),
         effortLevel: deps.getProjectState().effortLevel,
         agentMode: sendAgentMode,
         ...(resumeFromRunId ? { resumeFromRunId } : {}),

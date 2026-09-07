@@ -4,7 +4,8 @@
 // (CLAUDE.md §3.1).
 import { describe, it, expect } from 'vitest'
 import { buildCapabilities, skillVersion, visibleTo } from '../../electron/capabilities/registry'
-import { TRUST_DEFAULT, TRUST_FLOOR, capabilityId } from '../../shared/contracts/capability'
+import { TRUST_DEFAULT, TRUST_FLOOR, capabilityId, compareTrust } from '../../shared/contracts/capability'
+import { emptyEvidence } from '../../shared/contracts/trust'
 import type { Skill } from '../../electron/ai/skills/types'
 import type { McpServerEntry } from '../../electron/mcp/registry'
 import type { ConnectorInfo } from '../../electron/connectors/types'
@@ -127,19 +128,52 @@ describe('доверие приходит из оверлея и не выдаё
     expect(cap.lastVerifiedAt).toBeNull()
   })
 
-  it('заработанное доверие поднимается из оверлея', () => {
+  // КОНТРАКТ ИЗМЕНЁН СОЗНАТЕЛЬНО. Здесь стояло «заработанное доверие поднимается
+  // из оверлея»: запись в БД выдавала уровень. Это обходило весь смысл губернатора
+  // — доверие по фактам обходилось одной строкой в таблице. Теперь уровень в
+  // оверлее это ПОТОЛОК: ограничить можно, выдать нельзя.
+  it('оверлей не выдаёт доверия, которого возможность не заработала', () => {
     const version = skillVersion(skill())
     const cap = buildCapabilities(sources(), id =>
       id === capabilityId('skill', 'github')
         ? { trustLevel: 'T3' as const, version, evalScore: 0.82, lastVerifiedAt: 1_700_000_000_000 }
         : null,
     ).find(c => c.type === 'skill')!
-    expect(cap.trustLevel).toBe('T3')
+    expect(cap.trustLevel).toBe(TRUST_DEFAULT)
     expect(cap.evalScore).toBe(0.82)
   })
 
+  it('доверие поднимают ДОКАЗАТЕЛЬСТВА, а не запись в БД', () => {
+    const proven = {
+      ...emptyEvidence(),
+      successfulRuns: 20, completedTasks: 20,
+      verificationsPassed: 19, verificationsTotal: 20,
+      humanAccepted: 15, humanRejected: 1,
+    }
+    const cap = buildCapabilities(sources(), () => null, () => proven).find(c => c.type === 'skill')!
+    expect(compareTrust(cap.trustLevel, TRUST_DEFAULT)).toBeGreaterThan(0)
+  })
+
+  it('потолок из оверлея режет заработанное', () => {
+    const proven = {
+      ...emptyEvidence(),
+      successfulRuns: 20, completedTasks: 20,
+      verificationsPassed: 20, verificationsTotal: 20,
+      humanAccepted: 15, humanRejected: 0,
+    }
+    const version = skillVersion(skill())
+    const cap = buildCapabilities(
+      sources(),
+      id => (id === capabilityId('skill', 'github')
+        ? { trustLevel: 'T1' as const, version, evalScore: null, lastVerifiedAt: null }
+        : null),
+      () => proven,
+    ).find(c => c.type === 'skill')!
+    expect(cap.trustLevel).toBe('T1')
+  })
+
   // Главная защита реестра: подменили файл — заработанное не переезжает.
-  it('подмена содержимого скилла роняет доверие на пол', () => {
+  it('подмена содержимого скилла роняет доверие: потолок падает на пол', () => {
     const cap = buildCapabilities(sources(), id =>
       id === capabilityId('skill', 'github')
         ? { trustLevel: 'T4' as const, version: 'версия-до-подмены', evalScore: 0.9, lastVerifiedAt: 1 }

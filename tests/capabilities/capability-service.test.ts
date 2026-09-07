@@ -8,7 +8,8 @@ import { openDb } from '../../electron/storage/db'
 import { createCapabilityOverlay } from '../../electron/storage/capability-overlay'
 import { createCapabilityService } from '../../electron/capabilities/service'
 import { skillVersion } from '../../electron/capabilities/registry'
-import { capabilityId, TRUST_FLOOR } from '../../shared/contracts/capability'
+import { capabilityId, compareTrust, TRUST_DEFAULT, TRUST_FLOOR } from '../../shared/contracts/capability'
+import { emptyEvidence } from '../../shared/contracts/trust'
 import { AGENT_MODEL_ROLES } from '../../electron/ai/agent-model-policy'
 import policyData from '../../electron/ai/agent-model-policy.json'
 import type { Skill } from '../../electron/ai/skills/types'
@@ -28,7 +29,19 @@ describe('служба реестра возможностей', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'verstak-cap-svc-')) })
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-  const build = (prompt: string) => {
+  /** Доказательства «безупречной работы» — ими и зарабатывается высокий уровень. */
+  const proven = {
+    ...emptyEvidence(),
+    successfulRuns: 20, completedTasks: 20,
+    verificationsPassed: 20, verificationsTotal: 20,
+    humanAccepted: 15, humanRejected: 0,
+  }
+
+  /**
+   * `evidenceVersion` — версия, ЗА КОТОРОЙ закреплены доказательства. Прогоны
+   * привязаны к содержимому: у другой версии их нет, и это ядро проверки ниже.
+   */
+  const build = (prompt: string, evidenceVersion?: string) => {
     const db = openDb(join(dir, 'test.db'))
     const overlay = createCapabilityOverlay(db)
     const service = createCapabilityService(
@@ -39,22 +52,19 @@ describe('служба реестра возможностей', () => {
         roles: [],
         policyVersion: 'p1',
       }),
-      overlay
+      overlay,
+      (_id, version) => (evidenceVersion && version === evidenceVersion ? proven : emptyEvidence())
     )
     return { db, overlay, service }
   }
 
   it('собирает паспорт и отдаёт причину уровня', () => {
-    const { db, overlay, service } = build('исходный промпт')
+    const version = skillVersion(skill('исходный промпт'))
+    const { db, overlay, service } = build('исходный промпт', version)
     const id = capabilityId('skill', 'github')
-    overlay.set(id, {
-      trustLevel: 'T3',
-      version: skillVersion(skill('исходный промпт')),
-      evalScore: 0.8,
-      lastVerifiedAt: 5,
-      reason: 'три зелёные проверки',
-    })
-    expect(service.get(id)?.trustLevel).toBe('T3')
+    overlay.set(id, { trustLevel: 'T4', version, evalScore: 0.8, lastVerifiedAt: 5, reason: 'три зелёные проверки' })
+    // Уровень пришёл из ДОКАЗАТЕЛЬСТВ; запись в оверлее лишь не мешает ему.
+    expect(compareTrust(service.get(id)!.trustLevel, TRUST_DEFAULT)).toBeGreaterThan(0)
     expect(service.reason(id)).toBe('три зелёные проверки')
     db.close()
   })
@@ -63,26 +73,22 @@ describe('служба реестра возможностей', () => {
   // только в собранном паспорте, следующий запуск снова показал бы T3 на
   // подменённом содержимом.
   it('подмена промпта роняет доверие НАВСЕГДА, а не до конца вызова', () => {
-    const before = build('исходный промпт')
+    const version = skillVersion(skill('исходный промпт'))
+    const before = build('исходный промпт', version)
     const id = capabilityId('skill', 'github')
-    before.overlay.set(id, {
-      trustLevel: 'T4',
-      version: skillVersion(skill('исходный промпт')),
-      evalScore: 0.9,
-      lastVerifiedAt: 5,
-      reason: 'заслужено',
-    })
-    expect(before.service.get(id)?.trustLevel).toBe('T4')
+    before.overlay.set(id, { trustLevel: 'T4', version, evalScore: 0.9, lastVerifiedAt: 5, reason: 'заслужено' })
+    expect(compareTrust(before.service.get(id)!.trustLevel, TRUST_DEFAULT)).toBeGreaterThan(0)
     before.db.close()
 
-    // Кто-то подменил файл скилла.
-    const after = build('промпт, которого человек не одобрял')
+    // Кто-то подменил файл скилла. Доказательства закреплены за ПРЕЖНЕЙ версией и
+    // на новое содержимое не переезжают, а потолок в оверлее падает на пол.
+    const after = build('промпт, которого человек не одобрял', version)
     expect(after.service.get(id)?.trustLevel).toBe(TRUST_FLOOR)
     expect(after.service.reason(id)).toContain('версия')
     after.db.close()
 
     // И после ещё одного перезапуска доверие НЕ возвращается само.
-    const later = build('промпт, которого человек не одобрял')
+    const later = build('промпт, которого человек не одобрял', version)
     expect(later.service.get(id)?.trustLevel).toBe(TRUST_FLOOR)
     later.db.close()
   })
@@ -90,20 +96,15 @@ describe('служба реестра возможностей', () => {
   // Контроль: без подмены тот же путь обязан сохранять уровень — иначе пин выше
   // зелен просто потому, что служба роняет доверие всегда.
   it('контроль: без подмены уровень переживает перезапуск', () => {
-    const first = build('исходный промпт')
+    const version = skillVersion(skill('исходный промпт'))
+    const first = build('исходный промпт', version)
     const id = capabilityId('skill', 'github')
-    first.overlay.set(id, {
-      trustLevel: 'T4',
-      version: skillVersion(skill('исходный промпт')),
-      evalScore: 0.9,
-      lastVerifiedAt: 5,
-      reason: 'заслужено',
-    })
+    first.overlay.set(id, { trustLevel: 'T4', version, evalScore: 0.9, lastVerifiedAt: 5, reason: 'заслужено' })
     first.service.list()
     first.db.close()
 
-    const second = build('исходный промпт')
-    expect(second.service.get(id)?.trustLevel).toBe('T4')
+    const second = build('исходный промпт', version)
+    expect(compareTrust(second.service.get(id)!.trustLevel, TRUST_DEFAULT)).toBeGreaterThan(0)
     second.db.close()
   })
 })

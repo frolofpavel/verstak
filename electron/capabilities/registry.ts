@@ -17,6 +17,8 @@ import {
   type TrustLevel,
 } from '../../shared/contracts/capability'
 import { keywordScopeAndRisk } from '../../shared/contracts/mcp-scope'
+import { computeTrust, emptyEvidence, type TrustEvidence } from '../../shared/contracts/trust'
+import { compareTrust } from '../../shared/contracts/capability'
 import type { Skill } from '../ai/skills/types'
 import type { McpServerEntry } from '../mcp/registry'
 import type { ConnectorInfo } from '../connectors/types'
@@ -32,6 +34,12 @@ export interface CapabilityOverlay {
 
 /** Читатель оверлея. Отдельным параметром, чтобы сборка не зависела от БД. */
 export type OverlayReader = (id: string) => CapabilityOverlay | null
+
+/**
+ * Читатель доказательств: факты работы ИМЕННО ЭТОЙ версии возможности. Не задан —
+ * доказательств нет, и возможность остаётся на уровне по умолчанию.
+ */
+export type EvidenceReader = (id: string, version: string) => TrustEvidence
 
 export interface CapabilitySources {
   skills: readonly Skill[]
@@ -75,23 +83,35 @@ function mcpVersion(entry: McpServerEntry): string {
  */
 function withOverlay(
   base: Omit<Capability, 'trustLevel' | 'evalScore' | 'lastVerifiedAt'>,
-  overlay: CapabilityOverlay | null
+  overlay: CapabilityOverlay | null,
+  evidence: TrustEvidence
 ): Capability {
+  // Доверие ЗАРАБАТЫВАЕТСЯ фактами: уровень считает `computeTrust` по прогонам
+  // именно этой версии. Без доказательств получается уровень по умолчанию —
+  // только чтение, никаких прав записи авансом.
+  const computed = computeTrust(evidence)
+
   if (!overlay) {
-    return { ...base, trustLevel: TRUST_DEFAULT, evalScore: null, lastVerifiedAt: null }
+    return { ...base, trustLevel: computed.level, evalScore: null, lastVerifiedAt: null }
   }
-  const trustLevel = trustAfterVersionChange(overlay.trustLevel, overlay.version, base.version)
+
+  // Уровень в оверлее — ПОТОЛОК, а не выдача. Человек может ограничить
+  // возможность, которой не доверяет, но не может выдать ей доверие, которого она
+  // не заработала: иначе «доверие по фактам» обходилось бы одной записью в БД.
+  const cap = trustAfterVersionChange(overlay.trustLevel, overlay.version, base.version)
+  const trustLevel = compareTrust(cap, computed.level) < 0 ? cap : computed.level
+  const versionMatches = overlay.version === base.version
   return {
     ...base,
     trustLevel,
     // Оценка и отметка проверки относились к ПРЕЖНЕМУ содержимому: после подмены
     // они не про этот скилл. Показывать их дальше значило бы врать о проверенности.
-    evalScore: trustLevel === overlay.trustLevel ? overlay.evalScore : null,
-    lastVerifiedAt: trustLevel === overlay.trustLevel ? overlay.lastVerifiedAt : null,
+    evalScore: versionMatches ? overlay.evalScore : null,
+    lastVerifiedAt: versionMatches ? overlay.lastVerifiedAt : null,
   }
 }
 
-function skillCapability(skill: Skill, read: OverlayReader): Capability {
+function skillCapability(skill: Skill, read: OverlayReader, evidenceFor: EvidenceReader): Capability {
   const id = capabilityId('skill', skill.id)
   const version = skillVersion(skill)
   // Риск скилла — по тому, что он себе разрешил. Не объявил инструменты вовсе —
@@ -118,12 +138,14 @@ function skillCapability(skill: Skill, read: OverlayReader): Capability {
       dependencies: (skill.context_loaders ?? []).map(l => l.impl),
       riskTier: risk,
     },
-    read(id)
+    read(id),
+    evidenceFor(id, version)
   )
 }
 
-function mcpCapability(entry: McpServerEntry, read: OverlayReader): Capability {
+function mcpCapability(entry: McpServerEntry, read: OverlayReader, evidenceFor: EvidenceReader): Capability {
   const id = capabilityId('mcp', entry.id)
+  const version = mcpVersion(entry)
   // Риск берётся тем же классификатором, что работает на инструментах MCP —
   // второго словаря риска в продукте не заводим.
   const { risk } = keywordScopeAndRisk(entry.name, entry.command)
@@ -136,7 +158,7 @@ function mcpCapability(entry: McpServerEntry, read: OverlayReader): Capability {
       name: entry.name,
       description: entry.catalogId ? `Из каталога: ${entry.catalogId}` : 'Свой сервер',
       owner: entry.catalogId ?? 'user',
-      version: mcpVersion(entry),
+      version,
       source: `${entry.command} ${entry.args}`,
       enabled: entry.enabled,
       status,
@@ -147,12 +169,15 @@ function mcpCapability(entry: McpServerEntry, read: OverlayReader): Capability {
       dependencies: [],
       riskTier: risk,
     },
-    read(id)
+    read(id),
+    evidenceFor(id, version)
   )
 }
 
-function connectorCapability(info: ConnectorInfo, read: OverlayReader): Capability {
+function connectorCapability(info: ConnectorInfo, read: OverlayReader, evidenceFor: EvidenceReader): Capability {
   const id = capabilityId('connector', info.id)
+  // У встроенных коннекторов нет своей версии — они меняются только вместе с продуктом.
+  const version = 'built-in'
   return withOverlay(
     {
       id,
@@ -161,9 +186,7 @@ function connectorCapability(info: ConnectorInfo, read: OverlayReader): Capabili
       name: info.label,
       description: info.detail ?? '',
       owner: 'built-in',
-      // У встроенных коннекторов нет своей версии — их версия это версия продукта,
-      // а меняются они только вместе с ним.
-      version: 'built-in',
+      version,
       source: `connectors/${info.id}`,
       enabled: info.status === 'ready',
       status: info.status,
@@ -174,12 +197,14 @@ function connectorCapability(info: ConnectorInfo, read: OverlayReader): Capabili
       // Коннекторы продукта read-only (CLAUDE.md §1) — низкий риск по построению.
       riskTier: 'low',
     },
-    read(id)
+    read(id),
+    evidenceFor(id, version)
   )
 }
 
-function roleCapability(role: string, policyVersion: string, read: OverlayReader): Capability {
+function roleCapability(role: string, policyVersion: string, read: OverlayReader, evidenceFor: EvidenceReader): Capability {
   const id = capabilityId('agent', role)
+  const version = policyVersion
   return withOverlay(
     {
       id,
@@ -188,7 +213,7 @@ function roleCapability(role: string, policyVersion: string, read: OverlayReader
       name: role,
       description: 'Роль агента из политики моделей',
       owner: 'built-in',
-      version: policyVersion,
+      version,
       source: 'electron/ai/agent-model-policy.json',
       enabled: true,
       status: 'ready',
@@ -198,17 +223,22 @@ function roleCapability(role: string, policyVersion: string, read: OverlayReader
       dependencies: [],
       riskTier: 'medium',
     },
-    read(id)
+    read(id),
+    evidenceFor(id, version)
   )
 }
 
 /** Собрать реестр из всех источников. Порядок — по типам, стабильный. */
-export function buildCapabilities(sources: CapabilitySources, read: OverlayReader): Capability[] {
+export function buildCapabilities(
+  sources: CapabilitySources,
+  read: OverlayReader,
+  evidenceFor: EvidenceReader = () => emptyEvidence()
+): Capability[] {
   return [
-    ...sources.skills.map(s => skillCapability(s, read)),
-    ...sources.mcpServers.map(m => mcpCapability(m, read)),
-    ...sources.connectors.map(c => connectorCapability(c, read)),
-    ...sources.roles.map(r => roleCapability(r, sources.policyVersion, read)),
+    ...sources.skills.map(s => skillCapability(s, read, evidenceFor)),
+    ...sources.mcpServers.map(m => mcpCapability(m, read, evidenceFor)),
+    ...sources.connectors.map(c => connectorCapability(c, read, evidenceFor)),
+    ...sources.roles.map(r => roleCapability(r, sources.policyVersion, read, evidenceFor)),
   ]
 }
 

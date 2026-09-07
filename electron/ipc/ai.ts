@@ -151,6 +151,13 @@ export interface AiDeps {
   skillRegistry?: {
     list: () => Array<{ id: string; name?: string; default_provider?: string; default_model?: string; systemPrompt: string }>
   }
+  /**
+   * Реестр возможностей: записать, КТО работал в прогоне. Версию возможности
+   * резолвит main — там живёт полный реестр скиллов; сюда она не протаскивается,
+   * чтобы учёт не размазывался по слою отправки. Учёт, а не управление: на ход
+   * прогона не влияет и падать не имеет права.
+   */
+  recordRunCapabilities?: (runId: string, skillId: string | null) => void
   /** MCP client — внешние серверы, опционально. */
   mcpClient?: McpClient
   /** Процедурная память — детектирует паттерны решения задач из tool events. */
@@ -438,6 +445,10 @@ export interface AiSendOverrides {
     useReviewerPrompt?: boolean
     /** Уровень усилий: quick / standard / deep. Влияет на max_tokens и extended thinking. */
     effortLevel?: 'quick' | 'standard' | 'deep'
+    /** Реестр возможностей: id активного скилла. Пишется в происхождение прогона
+     *  (agent_run_capabilities) — доказательная база доверия. На поведение самого
+     *  прогона НЕ влияет: это учёт, а не управление. */
+    skillId?: string
     /** Аудит M4: tools_allow активного скилла. Если задан — agent-loop отдаёт
      *  модели ТОЛЬКО эти инструменты (read-only скилл физически не сможет
      *  write_file/run_command). Без него безопасность скиллов была фиктивна. */
@@ -1043,6 +1054,9 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
     const runOwner: AgentRunOwner = overrides?.useReviewerPrompt ? 'review' : 'main'
     const runTitle = ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
     const emitRunEvent = (event: unknown) => taggedSender.send('ai:event', { id: sendId, event })
+    // Происхождение прогона: чем он был сделан. Best-effort — учёт не должен
+    // мешать работе, ради которой прогон и запущен.
+    try { deps.recordRunCapabilities?.(runId, overrides?.skillId ?? null) } catch { /* учёт не критичен */ }
     openAgentRun({
       agentRuns: deps.agentRuns,
       runId,

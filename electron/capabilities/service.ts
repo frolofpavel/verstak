@@ -5,7 +5,7 @@
  * версии. Она нужна, чтобы подмена содержимого скилла роняла доверие САМА, без
  * участия того, кто в этот момент открыл экран.
  */
-import { buildCapabilities, type CapabilitySources, type OverlayReader } from './registry'
+import { buildCapabilities, type CapabilitySources, type EvidenceReader, type OverlayReader } from './registry'
 import type { Capability } from '../../shared/contracts/capability'
 import type { CapabilityOverlayStore } from '../storage/capability-overlay'
 
@@ -18,12 +18,17 @@ export interface CapabilityService {
 
 export function createCapabilityService(
   readSources: () => CapabilitySources,
-  overlay: CapabilityOverlayStore
+  overlay: CapabilityOverlayStore,
+  /**
+   * Факты работы возможности. Не задан — доказательств нет, и всё остаётся на
+   * уровне по умолчанию: доверие не выдаётся авансом ни при каких условиях.
+   */
+  evidenceFor?: EvidenceReader
 ): CapabilityService {
   const read: OverlayReader = id => overlay.get(id)
 
   const listAll = (): Capability[] => {
-    const caps = buildCapabilities(readSources(), read)
+    const caps = buildCapabilities(readSources(), read, evidenceFor)
     // Записываем увиденную версию ПОСЛЕ сборки: сборка уже показала честный
     // уровень для этого содержимого, а отметка закрепляет понижение в БД, чтобы
     // оно пережило перезапуск и не зависело от следующего читателя.

@@ -116,6 +116,10 @@ import { createSkillRegistry } from './ai/skills/registry'
 import { registerCapabilitiesIpc } from './ipc/capabilities'
 import { createCapabilityService } from './capabilities/service'
 import { createCapabilityOverlay } from './storage/capability-overlay'
+import { createRunCapabilities } from './storage/run-capabilities'
+import { skillVersion } from './capabilities/registry'
+import { collectEvidence } from './capabilities/evidence'
+import { capabilityId as makeCapabilityId } from '../shared/contracts/capability'
 import { loadMcpServers } from './mcp/registry'
 import { AGENT_MODEL_POLICY_VERSION, AGENT_MODEL_ROLES } from './ai/agent-model-policy'
 import { registerSkillsIpc } from './ipc/skills'
@@ -861,6 +865,20 @@ app.whenReady().then(() => {
         systemPrompt: s.systemPrompt
       }))
     },
+    /**
+     * Происхождение прогона для реестра возможностей. Версия резолвится ЗДЕСЬ,
+     * где живёт полный реестр скиллов: доказательства принадлежат проверенному
+     * содержимому, и привязка без версии была бы бесполезна. Скилл не выбран —
+     * писать нечего, и это нормальный прогон, а не пробел в учёте.
+     */
+    recordRunCapabilities: (runId: string, skillId: string | null) => {
+      if (!skillId) return
+      const skill = skillRegistry.list().find(s => s.id === skillId)
+      if (!skill) return
+      createRunCapabilities(db).link(runId, [
+        { id: makeCapabilityId('skill', skill.id), version: skillVersion(skill) },
+      ])
+    },
     // MCP client — внешние инструменты через Model Context Protocol
     mcpClient,
     // Процедурная память — детектирует паттерны решения задач
@@ -1141,6 +1159,8 @@ app.whenReady().then(() => {
       policyVersion: AGENT_MODEL_POLICY_VERSION,
     }),
     createCapabilityOverlay(db),
+    // Доверие считается по ФАКТАМ прогонов ИМЕННО ЭТОЙ версии возможности.
+    (id, version) => collectEvidence(db, id, version),
   ))
   registerAuditIpc(db)
   registerDebugIpc(db, chats)

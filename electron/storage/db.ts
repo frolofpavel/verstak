@@ -1579,6 +1579,22 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_capability_overlay_trust ON capability_overlay(trust_level)')
     }
+  },
+  {
+    version: 67,
+    description: 'Реестр возможностей, шаг 4: agent_run_capabilities — происхождение прогона. До неё доверие считать было НЕ ИЗ ЧЕГО: agent_runs не знал ни скилла, ни возможности, а skill_usage считает использования без исходов. Связь многие-ко-многим (прогон может задействовать скилл и несколько серверов сразу), первичный ключ по паре — повтор привязки при возобновлении прогона не удваивает доказательства и не даёт накрутить доверие перезапуском. capability_version в связи — ключевое: доказательства принадлежат ПРОВЕРЕННОМУ СОДЕРЖИМОМУ, а не имени. Без него подменённый скилл унаследовал бы репутацию прежней версии, и правило «обновление не повышает доверие» обходилось бы правкой файла. Только append, CREATE TABLE.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_run_capabilities (
+          run_id TEXT NOT NULL,
+          capability_id TEXT NOT NULL,
+          capability_version TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, capability_id)
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_run_capabilities_capability ON agent_run_capabilities(capability_id)')
+    }
   }
 ]
 
