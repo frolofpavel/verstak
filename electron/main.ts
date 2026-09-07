@@ -119,6 +119,7 @@ import { createCapabilityOverlay } from './storage/capability-overlay'
 import { createRunCapabilities } from './storage/run-capabilities'
 import { skillVersion } from './capabilities/registry'
 import { collectEvidence } from './capabilities/evidence'
+import { computeTrust } from '../shared/contracts/trust'
 import { capabilityId as makeCapabilityId } from '../shared/contracts/capability'
 import { loadMcpServers } from './mcp/registry'
 import { AGENT_MODEL_POLICY_VERSION, AGENT_MODEL_ROLES } from './ai/agent-model-policy'
@@ -878,6 +879,21 @@ app.whenReady().then(() => {
       createRunCapabilities(db).link(runId, [
         { id: makeCapabilityId('skill', skill.id), version: skillVersion(skill) },
       ])
+    },
+    /**
+     * Уровень доверия скилла по фактам ЕГО прошлых прогонов этой же версии.
+     * Считается тем же кодом, что показывает реестр: одна правда на экран и на
+     * гейт — иначе человек видел бы одно, а работало бы другое.
+     */
+    getCapabilityTrust: (skillId: string) => {
+      // Гейт по доверию — opt-in. Пока флаг выключен, уровень не возвращается
+      // вовсе, и решения гейта остаются байт в байт прежними: реестр показывает
+      // доверие, но никого не ограничивает.
+      if (!runtimeFlagOn('capability_trust_gate', getSecret('capability_trust_gate'))) return undefined
+      const skill = skillRegistry.list().find(s => s.id === skillId)
+      if (!skill) return undefined
+      const id = makeCapabilityId('skill', skill.id)
+      return computeTrust(collectEvidence(db, id, skillVersion(skill))).level
     },
     // MCP client — внешние инструменты через Model Context Protocol
     mcpClient,

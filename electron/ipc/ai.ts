@@ -158,6 +158,12 @@ export interface AiDeps {
    * прогона не влияет и падать не имеет права.
    */
   recordRunCapabilities?: (runId: string, skillId: string | null) => void
+  /**
+   * Уровень доверия возможности, которой делается прогон. Считает main по фактам
+   * её прошлых прогонов (реестр возможностей). Не задан — гейт работает как
+   * прежде: слой доверия не имеет права включиться сам собой.
+   */
+  getCapabilityTrust?: (skillId: string) => import('../../shared/contracts/capability').TrustLevel | undefined
   /** MCP client — внешние серверы, опционально. */
   mcpClient?: McpClient
   /** Процедурная память — детектирует паттерны решения задач из tool events. */
@@ -1248,6 +1254,9 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
         toolsAllow: outcomeToolsAllow ?? overrides?.toolsAllow ?? null,
+        // Реестр возможностей: уровень доверия скилла, которым идёт прогон.
+        // Последний слой гейта — ужесточает решение, ослабить не может.
+        capabilityTrust: overrides?.skillId ? deps.getCapabilityTrust?.(overrides.skillId) : undefined,
         recipe: overrides?.recipe,
         outcome,
         pipelineRuns: deps.pipelineRuns,

@@ -18,7 +18,7 @@ export const executeCodeHandler: ToolHandler = {
     // Гейтинг как КОМАНДА (vm не граница безопасности → trust = run_command): plan
     // блокирует, ask показывает код и ждёт подтверждения, auto/bypass — авто. Без
     // эскалации привилегий относительно уже имеющегося run_command.
-    const { decision, reason: denyReason } = resolveDecision('execute_code', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+    const { decision, reason: denyReason } = resolveDecision('execute_code', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
     if (decision === 'block') {
       const reason = denyReason ?? blockReason('execute_code', ctx.agentMode)
       ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'tool-blocked', callId: call.id, name: 'execute_code', command: code, reason } })

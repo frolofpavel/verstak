@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { artifactsDir } from '../../ai/artifacts'
 import { splitLargeMcpResult, largeResultFileName, MCP_RESULT_INLINE_LIMIT } from '../../mcp/large-result'
+import { tightenByTrust } from '../../../shared/contracts/trust'
 
 export const mcpToolHandler: ToolHandler = {
   mode: 'sequential',
@@ -40,6 +41,11 @@ export const mcpToolHandler: ToolHandler = {
       if (permRule?.decision === 'ask') decision = 'confirm'
       else if (permRule?.decision === 'allow') decision = 'auto-accept'
     }
+    // Губернатор доверия. У MCP-инструментов СВОЙ путь решения — они не проходят
+    // через resolveDecision, и без этой строки остались бы единственным путём к
+    // инструменту в обход слоя доверия. Ужесточить может, ослабить — нет:
+    // tightenByTrust монотонна (shared/contracts/trust.ts).
+    if (ctx.capabilityTrust) decision = tightenByTrust(decision, ctx.capabilityTrust)
     // Короткая сводка аргументов для модалки подтверждения (без раскрытия больших значений)
     const argKeys = Object.keys(call.args ?? {})
     const argsSummary = argKeys.length ? argKeys.join(', ') : ''

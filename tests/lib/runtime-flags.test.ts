@@ -31,7 +31,7 @@ describe('RUNTIME_FLAGS — состав', () => {
   // добавлен `plan_approval_gate` (тумблер был спрятан, живая приёмка встала).
   // Восьмым — `mutation_check_enabled` (C2/P6): выключатель обязателен по
   // постановке — второй прогон тестов стоит времени.
-  it('в таблице ровно восемь флагов, без дублей', () => {
+  it('в таблице ровно девять флагов, без дублей', () => {
     const keys = RUNTIME_FLAGS.map(f => f.key)
     expect(keys).toEqual([
       'memory_lifecycle',
@@ -42,6 +42,7 @@ describe('RUNTIME_FLAGS — состав', () => {
       'plan_approval_gate',
       'orchestrator_default',
       'mutation_check_enabled',
+      'capability_trust_gate',
     ])
     expect(new Set(keys).size).toBe(keys.length)
   })
@@ -83,6 +84,12 @@ describe('RUNTIME_FLAGS — дефолты', () => {
     // C2 (P6): включён по умолчанию, осознанное выключение (stored === 'false')
     // уважается — цена проверки объявлена в whenOff.
     mutation_check_enabled: true,
+    // opt-in СОЗНАТЕЛЬНО (07.09): губернатор доверия ужесточает решения по
+    // уровню возможности, а без доказательств уровень — «только чтение». Дефолт
+    // true заставил бы КАЖДЫЙ прогон с любым скиллом спрашивать подтверждение на
+    // каждую правку, включая авто-режим, — то есть переопределил бы осознанный
+    // выбор режима у всех, кто ничего не просил. Мутация в true = красный.
+    capability_trust_gate: false,
   }
 
   for (const [key, defaultOn] of Object.entries(EXPECTED) as Array<[RuntimeFlagKey, boolean]>) {
@@ -132,7 +139,7 @@ describe('RUNTIME_FLAGS — дефолты', () => {
 // таблица renderer берёт `defaultOn` оттуда же. Сверять две редакции больше
 // нечего — их одна. Ровно так с 30.07 жил plan_approval_gate, и его ветка в
 // прежнем страже (`viaSharedHelper`) была образцом: теперь он распространён на
-// все восемь флагов.
+// все девять флагов.
 //
 // Поэтому страж проверяет ДРУГОЕ, и это не ослабление, а перенос на то, что
 // теперь может сломаться:

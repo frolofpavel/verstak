@@ -157,6 +157,13 @@ export interface ToolContext {
    *  Грузятся из ~/.verstak/permissions.json + project. Хендлеры решают через
    *  resolveDecision(). deny бьёт даже bypass; правила не ослабляют plan. См. permission-rules. */
   permissionRules?: import('../../ai/permission-rules').CompiledPermissionRules
+  /**
+   * Уровень доверия возможности, которой сделан этот прогон (реестр
+   * возможностей). Передаётся в resolveDecision последним слоем и умеет ТОЛЬКО
+   * ужесточать решение — ослабить не способен по построению (shared/contracts/
+   * trust.ts). Не задан — гейт ведёт себя ровно как прежде.
+   */
+  capabilityTrust?: import('../../../shared/contracts/capability').TrustLevel
   /** APP-03: optional smart-approval guard for command auto-accept paths. Disabled by default. */
   smartApproveEnabled?: boolean
   smartApprove?: (ctx: SmartApproveContext) => Promise<SmartApproveResult>

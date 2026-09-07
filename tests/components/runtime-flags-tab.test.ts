@@ -56,9 +56,12 @@ describe('вкладка «Поведение агента» — состав', 
   // Число обновляется осознанно (29.07: 5→6; 11.08: 7→8 — mutation_check_enabled,
   // C2/P6): состав вкладки — предмет изменения, а не охраняемый контракт.
   // Утверждение осталось той же силы: лишняя строка по-прежнему даёт красный.
-  it('рисует все восемь флагов, каждый с подписью и тумблером', async () => {
+  it('рисует все девять флагов, каждый с подписью и тумблером', async () => {
     await mountTab()
-    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(8)
+    // Число сверяется с таблицей, а не с константой: девятый флаг
+    // (capability_trust_gate) добавлен 07.09, и захардкоженная восьмёрка иначе
+    // требовала бы правки при каждом новом тумблере, ничего не защищая.
+    expect(document.querySelectorAll('.gg-runtime-flag-row').length).toBe(RUNTIME_FLAGS.length)
     for (const f of RUNTIME_FLAGS) {
       const r = row(f.key)
       expect(r.querySelector('.gg-runtime-flag-title')?.textContent).toContain(f.title)

@@ -241,7 +241,7 @@ export const browserHandler: ToolHandler = {
     // Порог для остальных режимов здесь НЕ решается: сегодня блокируется только
     // `plan`. Спрашивать ли в `ask`/`auto` — выбор человека по фактическим
     // цифрам, которые копит наблюдаемость клика (b13e9e1).
-    const { decision, reason: denyReason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+    const { decision, reason: denyReason } = resolveDecision(call.name, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
     if (decision === 'block') {
       const reason = denyReason ?? blockReason(call.name, ctx.agentMode)
       ctx.sender.send('ai:event', {

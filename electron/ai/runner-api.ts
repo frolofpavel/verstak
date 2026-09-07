@@ -172,6 +172,12 @@ function fireCrossVerify(
  * повторяла все 34 вручную. Теперь сборка одна (в ai:send), fallback = {...ctx}.
  */
 export interface AgentRunContext {
+  /**
+   * Реестр возможностей: уровень доверия возможности, которой сделан прогон.
+   * Доезжает до ToolContext и работает последним слоем гейта — ужесточить
+   * может, ослабить нет. Не задан — поведение гейта прежнее.
+   */
+  capabilityTrust?: import('../../shared/contracts/capability').TrustLevel
   sender: TaggedSender
   sendId: number
   provider: ChatProvider
@@ -274,7 +280,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow,
+    parentChatId, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
@@ -1447,6 +1453,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       : materialsCtx?.source === 'attachments' ? 'downloads' as const
       : undefined
     const ctx: ToolContext = {
+      // Реестр возможностей: уровень доверия возможности, которой сделан прогон.
+      // Последний слой гейта; ослабить решение не может по построению.
+      capabilityTrust,
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,

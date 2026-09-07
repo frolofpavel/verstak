@@ -109,7 +109,7 @@ async function diffConfirmWrite(call: ToolCall, ctx: ToolContext, path: string, 
   // propose_edits молча игнорировались бы (ревью: правило обходится). Исполнение
   // всё равно идёт как write_file, но решение резолвится по исходному имени.
   const decisionName = permissionName ?? call.name
-  const { decision, reason } = resolveDecision(decisionName, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+  const { decision, reason } = resolveDecision(decisionName, call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
   if (decision === 'block') {
     return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(decisionName, ctx.agentMode) }
   }

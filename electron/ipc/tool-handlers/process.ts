@@ -50,7 +50,7 @@ export async function authorizeProcessCommand(call: Parameters<ToolHandler['hand
     return `Blocked by safety policy: ${verdict.reason ?? 'denylist'}`
   }
 
-  const { decision, reason: denyReason, confirmCause } = resolveDecision('run_command', { command }, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+  const { decision, reason: denyReason, confirmCause } = resolveDecision('run_command', { command }, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
   if (decision === 'block') {
     const reason = denyReason ?? blockReason('run_command', ctx.agentMode)
     ctx.sender.send('ai:event', {

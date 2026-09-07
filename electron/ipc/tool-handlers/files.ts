@@ -116,7 +116,7 @@ export const editSpreadsheetHandler: ToolHandler = {
       }
 
       // Mode policy — как write_file: ask/accept-edits/auto/bypass/plan
-      const { decision, reason: denyReason } = resolveDecision('edit_spreadsheet', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules)
+      const { decision, reason: denyReason } = resolveDecision('edit_spreadsheet', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
       if (decision === 'block') {
         const reason = denyReason ?? blockReason('edit_spreadsheet', ctx.agentMode)
         return { id: call.id, name: call.name, result: '', error: reason }
