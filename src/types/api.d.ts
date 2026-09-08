@@ -1,3 +1,4 @@
+import type { PersistentJobV1 } from '../../shared/contracts/persistent-job'
 import type { Capability } from '../../shared/contracts/capability'
 export interface FileNode { name: string; path: string; isDirectory: boolean; children?: FileNode[] }
 
@@ -759,6 +760,15 @@ declare global {
         preflight: (checkpointId: number) => Promise<ExactRewindPreflightDTO>
         execute: (checkpointId: number) => Promise<ExactRewindExecuteSummaryDTO>
         unrevert: (backupToken: string) => Promise<{ ok: boolean } | { disabled: true }>
+      }
+      jobs: {
+        list: (projectPath?: string) => Promise<PersistentJobV1[]>
+        limits: () => Promise<{ maxRunsCap: number; minIntervalMinutes: number }>
+        create: (input: { projectPath: string; title: string; goal: string; everyMinutes: number; maxRuns: number })
+          => Promise<{ job: PersistentJobV1 } | { error: string }>
+        pause: (id: string) => Promise<PersistentJobV1 | null>
+        resume: (id: string) => Promise<PersistentJobV1 | null>
+        remove: (id: string) => Promise<boolean>
       }
       capabilities: {
         list: () => Promise<Capability[]>

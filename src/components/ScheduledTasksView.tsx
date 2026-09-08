@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ScheduledTask, SchedulerHealth } from '../types/api'
 import { SCHEDULER_PRESETS, buildScheduledFixPrompt } from '../lib/scheduler-presets'
+import { PersistentJobsSection } from './PersistentJobsSection'
 
 function formatAge(ms: number | null): string {
   if (ms == null) return 'нет heartbeat'
@@ -163,6 +164,10 @@ export function ScheduledTasksView() {
           </div>
         ))}
       </div>
+
+      {/* Постоянные задачи — соседи расписаний по смыслу, поэтому здесь, а не
+          восемнадцатым пунктом бокового меню. */}
+      <PersistentJobsSection projectPath={projectPath} />
     </div>
   )
 }

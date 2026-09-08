@@ -118,6 +118,7 @@ import { createCapabilityService } from './capabilities/service'
 import { createCapabilityOverlay } from './storage/capability-overlay'
 import { createRunCapabilities } from './storage/run-capabilities'
 import { createPersistentJobs } from './storage/persistent-jobs'
+import { registerPersistentJobsIpc } from './ipc/persistent-jobs'
 import { createJobEventBus } from './jobs/event-bus'
 import { handleSignal, reconcileStaleJobs } from './jobs/wake-cycle'
 import { scanText } from './ai/secret-scanner'
@@ -1044,6 +1045,7 @@ app.whenReady().then(() => {
     runHeadless: (opts) => runScheduledHeadless(aiDeps, opts),
     publishJobSignal: (signal) => jobBus.publish(signal),
   })
+  registerPersistentJobsIpc({ jobs: persistentJobs, publish: (s) => jobBus.publish(s), getKnownRoots: knownRoots })
   registerAgentsIpc(subSessions, chats, sessionTodos)
   // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).
   // abortSend переиспользует ядро ai:stop; db — для getRunInput при resume.

@@ -22619,3 +22619,25 @@ html[data-theme="light"] .gg-connectors-page {
   .gg-cap-row-main { grid-template-columns: 84px minmax(0, 1fr); row-gap: 4px; }
   .gg-cap-details { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Постоянные задачи — секция на экране «Расписание». Переменные темы, своих цветов нет. */
+.gg-jobs { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-subtle); }
+.gg-jobs-title { font-size: 15px; margin: 0 0 6px; }
+.gg-jobs-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.gg-jobs-number { width: 72px; }
+.gg-jobs-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 90px 160px auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+}
+.gg-jobs-result {
+  padding: 0 12px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .gg-jobs-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+}
