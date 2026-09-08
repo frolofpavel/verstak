@@ -117,6 +117,10 @@ import { registerCapabilitiesIpc } from './ipc/capabilities'
 import { createCapabilityService } from './capabilities/service'
 import { createCapabilityOverlay } from './storage/capability-overlay'
 import { createRunCapabilities } from './storage/run-capabilities'
+import { createPersistentJobs } from './storage/persistent-jobs'
+import { createJobEventBus } from './jobs/event-bus'
+import { handleSignal, reconcileStaleJobs } from './jobs/wake-cycle'
+import { scanText } from './ai/secret-scanner'
 import { skillVersion } from './capabilities/registry'
 import { collectEvidence } from './capabilities/evidence'
 import { computeTrust } from '../shared/contracts/trust'
@@ -981,6 +985,56 @@ app.whenReady().then(() => {
     })
   }
   // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
+  // ── Постоянные задачи: фоновый работник, живущий между пробуждениями ──
+  // Своего таймера нет: сигнал приходит из тика планировщика, который уже
+  // работает. Задачи, застрявшие в «выполняется» после падения приложения,
+  // уходят на ПАУЗУ, а не в активные: неизвестно, успело ли пробуждение
+  // выполнить своё действие, и повторить его дороже, чем спросить человека.
+  const persistentJobs = createPersistentJobs(db)
+  const jobBus = createJobEventBus()
+  const stale = reconcileStaleJobs(persistentJobs)
+  if (stale.length) {
+    logRuntime('persistent_jobs.stale_paused', { ids: stale })
+  }
+  jobBus.subscribe(signal => {
+    void handleSignal({
+      jobs: persistentJobs,
+      execute: async (job) => {
+        // Один шаг — один ограниченный прогон тем же путём, что у расписаний.
+        const ac = new AbortController()
+        const cap = job.maxRuntimeMs ?? 5 * 60_000
+        const timeout = setTimeout(() => ac.abort(), cap)
+        try {
+          const providerId = getProviderId()
+          const prompt = job.nextAction
+            ? `${job.goal}
+
+Что делать в этот раз: ${job.nextAction}`
+            : job.goal
+          const res = await runScheduledHeadless(aiDeps, {
+            projectPath: job.projectPath,
+            prompt,
+            providerId,
+            model: getProviderModel(providerId),
+            signal: ac.signal,
+          })
+          // Итог уходит в БД и может содержать секрет из кода или данных — тот же
+          // класс, что итоги расписаний: редактируем перед записью.
+          const raw = (res.ok ? res.text : (res.error ?? 'ошибка')) || '(пустой ответ)'
+          return {
+            ok: res.ok,
+            result: scanText(raw).redacted.slice(0, 4000),
+            state: job.state,
+            nextAction: job.nextAction,
+            costCents: 0,
+          }
+        } finally {
+          clearTimeout(timeout)
+        }
+      },
+    }, signal).catch(() => { /* пробуждение не должно валить процесс */ })
+  })
+
   registerSchedulerIpc(db, {
     getSecret,
     getProviderId,
@@ -988,6 +1042,7 @@ app.whenReady().then(() => {
     getKnownRoots: knownRoots,
     recordJournal: (projectPath, kind, title, detail) => journal.append(projectPath, kind, title, detail ?? null),
     runHeadless: (opts) => runScheduledHeadless(aiDeps, opts),
+    publishJobSignal: (signal) => jobBus.publish(signal),
   })
   registerAgentsIpc(subSessions, chats, sessionTodos)
   // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).

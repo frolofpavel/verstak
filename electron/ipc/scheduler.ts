@@ -22,6 +22,12 @@ import { isWithinKnownRoots } from '../ai/path-policy'
 import { scanText } from '../ai/secret-scanner'
 
 export interface SchedulerDeps {
+  /**
+   * Шина событий постоянных задач. Тик раз в минуту публикует в неё сигнал —
+   * СВОЕГО таймера у постоянных задач нет и не будет: четвёртый цикл опроса
+   * рядом с тремя существующими был бы прямым дублированием.
+   */
+  publishJobSignal?: (signal: import('../../shared/contracts/persistent-job').JobSignal) => void
   getSecret: (key: string) => string | null
   getProviderId: () => ProviderId
   getProviderModel: (id: ProviderId) => string | null
@@ -135,6 +141,9 @@ function tick(db: Database, deps: SchedulerDeps): void {
   const minuteIdx = Math.floor(now.getTime() / 60_000)
   const due = selectDueTasks(listEnabledScheduledTasks(db), nowParts(now), minuteIdx)
   for (const task of due) void runOne(db, deps, task.id, minuteIdx)
+  // Постоянные задачи будятся ТЕМ ЖЕ тиком: он уже есть, живёт минуту и никого
+  // не нагружает. Публикация не имеет права уронить расписания — они важнее.
+  try { deps.publishJobSignal?.({ kind: 'tick', at: now.getTime() }) } catch { /* шина не критична */ }
 }
 
 export function registerSchedulerIpc(db: Database, deps: SchedulerDeps): void {

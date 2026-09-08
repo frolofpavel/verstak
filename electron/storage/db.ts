@@ -1595,6 +1595,39 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_run_capabilities_capability ON agent_run_capabilities(capability_id)')
     }
+  },
+  {
+    version: 68,
+    description: 'Постоянные задачи (persistent_jobs) — фоновый работник, который ЖИВЁТ между пробуждениями. Четвёртым планировщиком НЕ является: расписание исполняет существующий тик, а не свой таймер. Нового здесь ровно две вещи, которых нет ни у одного из трёх сегодняшних планировщиков: расширяемый источник пробуждения (trigger_kind/trigger_config — все три умеют только время) и durable state_json МЕЖДУ пробуждениями (сегодняшние расписания перезапускают промпт с нуля и ничего не помнят). max_runs обязателен и ограничен сверху: фоновая работа не имеет права быть вечным расходом, о котором человек забыл. Только append, CREATE TABLE.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS persistent_jobs (
+          id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          title TEXT NOT NULL,
+          goal TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('active', 'running', 'paused', 'done', 'failed')),
+          trigger_kind TEXT NOT NULL,
+          trigger_config TEXT NOT NULL DEFAULT '{}',
+          state_json TEXT NOT NULL DEFAULT '{}',
+          next_action TEXT,
+          assigned_capability_id TEXT,
+          required_capabilities TEXT NOT NULL DEFAULT '[]',
+          budget_cents INTEGER,
+          max_runtime_ms INTEGER,
+          max_runs INTEGER NOT NULL CHECK (max_runs > 0 AND max_runs <= 100),
+          runs_done INTEGER NOT NULL DEFAULT 0,
+          cost_used_cents INTEGER NOT NULL DEFAULT 0,
+          last_run_at INTEGER,
+          next_run_at INTEGER,
+          last_result TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_persistent_jobs_due ON persistent_jobs(status, next_run_at)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_persistent_jobs_project ON persistent_jobs(project_path)')
+    }
   }
 ]
 
