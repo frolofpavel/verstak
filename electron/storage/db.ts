@@ -1628,6 +1628,37 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('CREATE INDEX IF NOT EXISTS idx_persistent_jobs_due ON persistent_jobs(status, next_run_at)')
       db.exec('CREATE INDEX IF NOT EXISTS idx_persistent_jobs_project ON persistent_jobs(project_path)')
     }
+  },
+  {
+    version: 69,
+    description: 'Workflow Scientist: experiment_results — артефакт контролируемого сравнения. Второго прогонщика экспериментов НЕ заводит: контролируемые прогоны делает существующий харнесс scripts/eval, здесь хранится только ИТОГ. Колонка auto_applied жёстко ограничена нулём на уровне схемы: учёный производит рекомендацию и не имеет права применить её сам — продвижение идёт тем же путём одобрения владельца, что у Model Gym (docs/model-gym-policy.md). Ограничение в CHECK, а не в коде, потому что обойти забывчивостью код можно, а схему нет. changed_factor хранится строкой и ОДИН на запись: два изменённых фактора делают причинность неизвестной. Только append, CREATE TABLE.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS experiment_results (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          hypothesis TEXT NOT NULL,
+          changed_factor TEXT NOT NULL,
+          baseline TEXT NOT NULL,
+          candidate TEXT NOT NULL,
+          task_set TEXT NOT NULL,
+          repeats INTEGER NOT NULL,
+          success_rate_before REAL NOT NULL,
+          success_rate_after REAL NOT NULL,
+          cost_before REAL NOT NULL,
+          cost_after REAL NOT NULL,
+          latency_before REAL NOT NULL,
+          latency_after REAL NOT NULL,
+          verification_before REAL NOT NULL,
+          verification_after REAL NOT NULL,
+          recommendation TEXT NOT NULL CHECK (recommendation IN ('promote', 'reject', 'insufficient')),
+          confidence REAL NOT NULL,
+          auto_applied INTEGER NOT NULL DEFAULT 0 CHECK (auto_applied = 0),
+          created_at INTEGER NOT NULL
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_experiment_results_project ON experiment_results(project_path, created_at)')
+    }
   }
 ]
 
