@@ -3853,6 +3853,8 @@ function ProvidersPage(props: ProvidersPageProps) {
     return true
   }).sort((a, b) => {
     if (filter !== 'all' && filter !== 'cli' && filter !== 'api') return 0
+    if (a.id === 'verstak-gateway') return -1
+    if (b.id === 'verstak-gateway') return 1
     const readyDelta = Number(isReady(b)) - Number(isReady(a))
     if (readyDelta !== 0) return readyDelta
     return a.name.localeCompare(b.name, 'ru')
@@ -3904,7 +3906,7 @@ function ProvidersPage(props: ProvidersPageProps) {
 
   const showEmptyState = readyProviders.length === 0
 
-  function checkProvider(p: ProviderConfig) {
+  async function checkProvider(p: ProviderConfig) {
     if (p.transport === 'CLI') {
       const state = getCliState(p)
       if (!state) {
@@ -3925,6 +3927,18 @@ function ProvidersPage(props: ProvidersPageProps) {
     }
     if (p.secretKey && !keys[p.secretKey]) {
       showToast('err', `${p.name}: нужен API-ключ`)
+      return
+    }
+    if (p.id === 'verstak-gateway' && p.secretKey) {
+      setBusy(p.id)
+      try {
+        const result = await window.api.providers.testConnection(p.id, keys[p.secretKey] ?? '')
+        showToast(result.ok ? 'ok' : 'err', result.message)
+      } catch {
+        showToast('err', `${p.name}: не удалось проверить подключение`)
+      } finally {
+        setBusy(null)
+      }
       return
     }
     if (!p.secretKey) {
@@ -4009,6 +4023,13 @@ function ProvidersPage(props: ProvidersPageProps) {
             Подключи доступ к AI-сервисам. Модели, которые будут видны в чате, выбираются во вкладке «Модели»
           </p>
         </div>
+      </div>
+
+      <div className="gg-providers-empty" role="note">
+        <strong>Быстрый старт с IRI Gateway:</strong>{' '}
+        <a href="https://agi-iri.ru/gateway/" target="_blank" rel="noreferrer">получи ключ в IRI Lab</a>
+        {' → '}открой карточку «Verstak Gateway» ниже{' → '}вставь ключ{' → '}нажми «Сохранить».
+        Модель для работы выбирается во вкладке «Модели»; если не уверен — оставь Kimi K2.7 Code.
       </div>
 
       <div className="gg-providers-summary">
@@ -4180,9 +4201,10 @@ function ProvidersPage(props: ProvidersPageProps) {
                       <button
                         type="button"
                         className="gg-btn gg-btn-ghost"
-                        onClick={() => checkProvider(p)}
+                        onClick={() => void checkProvider(p)}
+                        disabled={busy === p.id}
                       >
-                        Проверить
+                        {busy === p.id ? 'Проверяю…' : 'Проверить'}
                       </button>
                       {ready && (
                         <button

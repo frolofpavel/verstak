@@ -35,11 +35,17 @@ const ROLES: { value: Role; icon: string }[] = [
 ]
 
 const ROLE_DEFAULTS: Record<Role, { provider: string; model: string }> = {
-  developer: { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  designer:  { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  manager:   { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  student:   { provider: 'gemini-api', model: 'gemini-2.5-flash' },
+  developer: { provider: 'verstak-gateway', model: 'kimi-k2.7-code' },
+  designer:  { provider: 'verstak-gateway', model: 'kimi-k2.7-code' },
+  manager:   { provider: 'verstak-gateway', model: 'kimi-k2.7-code' },
+  student:   { provider: 'verstak-gateway', model: 'kimi-k2.7-code' },
 }
+
+const GATEWAY_MODELS = [
+  { id: 'kimi-k2.7-code', label: 'recommended' },
+  { id: 'verstak/free', label: 'free' },
+  { id: 'deepseek-chat', label: 'economy' },
+] as const
 
 interface Profile {
   id: number
@@ -72,6 +78,9 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   const [localServers, setLocalServers] = useState<DetectedLocalServer[]>([])
   const [scanLoading, setScanLoading] = useState(true)
   const [connectingId, setConnectingId] = useState<string | null>(null)
+  const [showGatewaySetup, setShowGatewaySetup] = useState(false)
+  const [gatewayKey, setGatewayKey] = useState('')
+  const [gatewayModel, setGatewayModel] = useState(GATEWAY_MODELS[0].id as string)
 
   useEffect(() => {
     void (async () => {
@@ -184,15 +193,39 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
         defaultModel: preset.model,
       })
       await window.api.userProfiles.setActive(profile.id)
-      await window.api.settings.setKey('provider', preset.provider)
-      await window.api.settings.setKey(`model_${preset.provider}`, preset.model)
       await initEmptyEnabledModelsIfUnset()
-      await window.api.settings.setKey('auth_completed', 'true')
-      await window.api.settings.setKey('onboarding_completed', '1')
+      setShowGatewaySetup(true)
+      setBusy(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  async function connectGateway() {
+    const key = gatewayKey.trim()
+    if (!key) {
+      setError(t.auth.setup.keyRequired)
+      return
+    }
+    setBusy(true)
+    setConnectingId('verstak-gateway')
+    setError(null)
+    try {
+      const checked = await window.api.providers.testConnection('verstak-gateway', key)
+      if (!checked.ok) {
+        setError(checked.message)
+        setBusy(false)
+        setConnectingId(null)
+        return
+      }
+      await window.api.settings.setKey('verstak_gateway_api_key', key)
+      await activateProvider('verstak-gateway', gatewayModel)
       doLeave()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(false)
+      setConnectingId(null)
     }
   }
 
@@ -296,8 +329,8 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
       {/* ── Right panel: auth form ── */}
       <div className="gg-auth-right">
         <div className="gg-auth-form-wrap">
-          {/* Tab toggle — только если есть профили */}
-          {hasProfiles && (
+          {/* Tab toggle — только если есть профили и не идёт подключение модели */}
+          {hasProfiles && !showGatewaySetup && (
             <div className="gg-auth-tabs">
               <button
                 type="button"
@@ -316,15 +349,88 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
             </div>
           )}
 
-          {!hasProfiles && (
+          {!hasProfiles && !showGatewaySetup && (
             <div className="gg-auth-form-header">
               <h1 className="gg-auth-form-title">{t.auth.welcome}</h1>
               <p className="gg-auth-form-sub">{t.auth.createProfile}</p>
             </div>
           )}
 
+          {showGatewaySetup && (
+            <div className="gg-auth-form gg-auth-setup">
+              <div className="gg-auth-form-header">
+                <div className="gg-auth-step-kicker">{t.auth.setup.kicker}</div>
+                <h1 className="gg-auth-form-title">{t.auth.setup.title}</h1>
+                <p className="gg-auth-form-sub">{t.auth.setup.subtitle}</p>
+              </div>
+
+              <ol className="gg-auth-setup-steps">
+                <li>
+                  <span>1</span>
+                  <div>
+                    <strong>{t.auth.setup.getKeyTitle}</strong>
+                    <p>{t.auth.setup.getKeyText}</p>
+                    <a href="https://agi-iri.ru/gateway/" target="_blank" rel="noreferrer">
+                      {t.auth.setup.getKeyAction}
+                    </a>
+                  </div>
+                </li>
+                <li>
+                  <span>2</span>
+                  <div className="gg-auth-setup-field">
+                    <strong>{t.auth.setup.enterKeyTitle}</strong>
+                    <input
+                      type="password"
+                      className="gg-auth-input"
+                      placeholder={t.auth.setup.keyHint}
+                      value={gatewayKey}
+                      onChange={event => setGatewayKey(event.target.value)}
+                      autoComplete="off"
+                      autoFocus
+                    />
+                    <small>{t.auth.setup.keySafety}</small>
+                  </div>
+                </li>
+                <li>
+                  <span>3</span>
+                  <div className="gg-auth-setup-field">
+                    <strong>{t.auth.setup.chooseModelTitle}</strong>
+                    <select
+                      className="gg-auth-input gg-auth-select"
+                      value={gatewayModel}
+                      onChange={event => setGatewayModel(event.target.value)}
+                    >
+                      {GATEWAY_MODELS.map(model => (
+                        <option key={model.id} value={model.id}>
+                          {model.label === 'recommended'
+                            ? t.auth.setup.modelRecommended
+                            : model.label === 'free'
+                              ? t.auth.setup.modelFree
+                              : t.auth.setup.modelEconomy}
+                        </option>
+                      ))}
+                    </select>
+                    <small>{t.auth.setup.chooseModelHint}</small>
+                  </div>
+                </li>
+              </ol>
+
+              {error && <div className="gg-auth-error">{error}</div>}
+
+              <button
+                type="button"
+                className="gg-auth-submit"
+                onClick={() => void connectGateway()}
+                disabled={busy || !gatewayKey.trim()}
+              >
+                {busy ? t.auth.setup.checking : t.auth.setup.checkAndStart}
+              </button>
+              <p className="gg-auth-setup-alternative">{t.auth.setup.alternative}</p>
+            </div>
+          )}
+
           {/* ── Sign In ── */}
-          {mode === 'signin' && hasProfiles && (
+          {!showGatewaySetup && mode === 'signin' && hasProfiles && (
             <div className="gg-auth-form">
               <div className="gg-auth-field">
                 <label className="gg-auth-label">{t.auth.profile}</label>
@@ -355,7 +461,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
           )}
 
           {/* ── Sign Up ── */}
-          {(mode === 'signup' || !hasProfiles) && (
+          {!showGatewaySetup && (mode === 'signup' || !hasProfiles) && (
             <div className="gg-auth-form">
               <div className="gg-auth-field">
                 <label className="gg-auth-label">{t.auth.name}</label>

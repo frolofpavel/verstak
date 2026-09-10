@@ -612,6 +612,8 @@ declare global {
         doctor: (providerId: string) => Promise<ProviderCatalogStatusDTO>
         /** 2.0.7-E: принудительно опросить провайдера и обновить живой каталог (TTL 24ч). */
         refreshModels: (providerId: string) => Promise<ProviderCatalogStatusDTO>
+        /** Проверка ключа без сохранения и без возврата секрета в renderer. */
+        testConnection: (providerId: string, apiKey: string) => Promise<{ ok: boolean; message: string }>
       }
       doctor: {
         run: () => Promise<DoctorReport>

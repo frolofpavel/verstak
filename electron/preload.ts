@@ -154,7 +154,8 @@ contextBridge.exposeInMainWorld('api', {
   providers: {
     list: () => ipcRenderer.invoke('providers:list'),
     doctor: (providerId: string) => ipcRenderer.invoke('providers:doctor', providerId),
-    refreshModels: (providerId: string) => ipcRenderer.invoke('providers:refresh-models', providerId)
+    refreshModels: (providerId: string) => ipcRenderer.invoke('providers:refresh-models', providerId),
+    testConnection: (providerId: string, apiKey: string) => ipcRenderer.invoke('providers:test-connection', providerId, apiKey)
   },
   doctor: {
     run: () => ipcRenderer.invoke('doctor:run')

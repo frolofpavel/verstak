@@ -14984,6 +14984,78 @@ textarea.gg-input {
   gap: 16px;
 }
 
+.gg-auth-setup {
+  gap: 14px;
+}
+.gg-auth-step-kicker {
+  color: #8b92ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.gg-auth-setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gg-auth-setup-steps > li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.gg-auth-setup-steps > li > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(88, 101, 242, 0.18);
+  border: 1px solid rgba(88, 101, 242, 0.5);
+  color: #c9ceff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.gg-auth-setup-steps strong {
+  display: block;
+  color: #f0f3f6;
+  font-size: 13px;
+  margin: 2px 0 4px;
+}
+.gg-auth-setup-steps p,
+.gg-auth-setup-alternative {
+  margin: 0;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.gg-auth-setup-steps a {
+  display: inline-block;
+  margin-top: 5px;
+  color: #aeb5ff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.gg-auth-setup-steps a:hover { text-decoration: underline; }
+.gg-auth-setup-field {
+  min-width: 0;
+}
+.gg-auth-setup-field small {
+  display: block;
+  margin-top: 5px;
+  color: #6e7681;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.gg-auth-setup-alternative {
+  text-align: center;
+}
+
 .gg-auth-field {
   display: flex;
   flex-direction: column;

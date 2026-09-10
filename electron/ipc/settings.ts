@@ -25,6 +25,7 @@ import { recommendTier, type TierRecommendation } from '../ai/tier-router'
 import { AGENT_MODES, decide, type AgentMode, type ToolDecision } from '../ai/mode-policy'
 import { dangerousCommandLabels } from '../ai/command-policy'
 import { envSecretKeys } from '../env-secrets'
+import { testGatewayConnection } from '../ai/gateway-connection-test'
 
 /**
  * Сериализуемый дескриптор провайдера для renderer (без фабричных функций).
@@ -188,6 +189,15 @@ export function registerSettingsIpc(settings: Settings): void {
       source: entry?.source ?? 'bundled', authenticated: entry?.authenticated ?? false,
       fetchedAt: entry?.fetchedAt, expiresAt: entry?.expiresAt,
     }
+  })
+
+  // Первый запуск проверяет ключ ДО сохранения и входа в приложение. Поддерживаем
+  // только IRI Gateway: неизвестный providerId не превращаем в произвольный fetch.
+  ipcMain.handle('providers:test-connection', async (_e, providerId: string, apiKey: string) => {
+    if (providerId !== 'verstak-gateway') {
+      return { ok: false, message: 'Для этого провайдера проверка пока недоступна.' }
+    }
+    return testGatewayConnection(typeof apiKey === 'string' ? apiKey : '')
   })
 
   // Policy Center — снимок «что разрешено агенту»: матрица decide(tool, mode)
