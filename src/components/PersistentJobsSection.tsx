@@ -6,8 +6,10 @@
  * расписанием названа прямо в подписи — постоянная задача ПОМНИТ, чем кончилось
  * прошлое пробуждение, и продолжает с того места.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PersistentJobV1 } from '../../shared/contracts/persistent-job'
+
+const READ_ERROR = 'Не удалось прочитать список задач.'
 
 const STATUS_LABEL: Record<PersistentJobV1['status'], string> = {
   active: 'спит, ждёт своего часа',
@@ -35,17 +37,43 @@ export function PersistentJobsSection({ projectPath }: Props) {
   // падение утащило бы весь экран. Соседняя функция не имеет права ломать чужую.
   const api = () => (window.api as Partial<typeof window.api>).jobs
 
-  const reload = useCallback(async () => {
+  const reloadRef = useRef<() => Promise<void>>(async () => {})
+  const reload = useCallback(() => reloadRef.current(), [])
+
+  useEffect(() => {
+    setJobs([])
+    setError(null)
     const jobsApi = api()
     if (!projectPath || !jobsApi) return
-    try {
-      setJobs(await jobsApi.list(projectPath))
-    } catch {
-      setError('Не удалось прочитать список задач.')
+
+    let cancelled = false
+    let inFlight = false
+    const refresh = async () => {
+      if (cancelled || inFlight) return
+      inFlight = true
+      try {
+        const rows = await jobsApi.list(projectPath)
+        if (!cancelled) {
+          setJobs(rows)
+          setError(current => current === READ_ERROR ? null : current)
+        }
+      } catch {
+        if (!cancelled) setError(READ_ERROR)
+      } finally {
+        inFlight = false
+      }
+    }
+    reloadRef.current = refresh
+    void refresh()
+    // Фоновое пробуждение меняет БД без действий в этой секции.
+    // Медленный IPC не наслаиваем; ответ прошлого проекта не применяем.
+    const timer = window.setInterval(() => { void refresh() }, 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
     }
   }, [projectPath])
 
-  useEffect(() => { void reload() }, [reload])
   useEffect(() => { void api()?.limits().then(setLimits).catch(() => {}) }, [])
 
   const create = async () => {

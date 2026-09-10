@@ -190,7 +190,8 @@ export function createPersistentJobs(db: Database): PersistentJobs {
         status,
         state: JSON.stringify(outcome.state ?? {}),
         nextAction: outcome.nextAction,
-        costCents: Math.max(0, Math.round(outcome.costCents)),
+        // SQLite INTEGER affinity сохраняет REAL: мелкие пробуждения не округляем в ноль.
+        costCents: Number.isFinite(outcome.costCents) ? Math.max(0, outcome.costCents) : 0,
         at,
         nextRunAt: status === 'active' ? outcome.nextRunAt : null,
         result: outcome.result,

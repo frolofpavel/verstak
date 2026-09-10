@@ -297,9 +297,13 @@ export async function runScheduledHeadless(
     role?: 'scheduled' | 'plan-generation'
     /** Свой бюджет раундов агентного цикла. Без него — дефолт узкой подзадачи. */
     maxIterations?: number
+    /** Остаток бюджета постоянной задачи. Обычные расписания не задают. */
+    budgetCents?: number
   }
 ): Promise<{
   ok: boolean; text: string; error?: string
+  /** Измеренный расход по usage и известному тарифу, без округления; null — нет данных. */
+  costCents?: number | null
   /** Сколько инструментов реально выполнил прогон (диагностика вызывающего). */
   toolCallCount?: number
   /** Сколько раундов «модель → инструменты» прогон успел пройти. */
@@ -339,6 +343,11 @@ export async function runScheduledHeadless(
       : `Все аккаунты провайдера (${sub.count}) требуют входа — прогон отменён` }
   }
   const model = opts.model ?? descriptor.defaultModel
+  let costCents: number | null = null
+  const costGuard = createCostGuard(null, {
+    capCents: opts.budgetCents,
+    onMeasuredCentsChange: cents => { costCents = cents },
+  })
 
   try {
     // ОПЦИИ ПРОВАЙДЕРА СОБИРАЕТ ОБЩИЙ БИЛДЕР, А НЕ ЭТОТ ВЫЗОВ (29.07).
@@ -396,7 +405,7 @@ export async function runScheduledHeadless(
       resolveSubscriptionAccount: deps.resolveSubscriptionAccount,
       permissionRules: loadPermissionRules(opts.projectPath),
       currentProviderId: opts.providerId, currentModel: opts.model ?? undefined, mcpClient: deps.mcpClient,
-      subCostGuard: createCostGuard(null), parentChatId: null,
+      subCostGuard: costGuard, subProviderId: opts.providerId, subModel: model, parentChatId: null,
       delegationDepth: 0, agentCounter: new SessionAgentCounter(),
       agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,
     }
@@ -410,8 +419,12 @@ export async function runScheduledHeadless(
     // вызвала инструмент», «модель работала, но результата не сохранила» и
     // «модель не уложилась в лимит шагов» сливались в одно сообщение — а лечатся
     // они по-разному. Для scheduled поля просто игнорируются.
-    const trace = { toolCallCount: result.toolCallCount, iterations: result.iterations, exitReason: result.exitReason }
-    if (result.exitReason === 'error') return { ok: false, text: result.text, error: result.error, ...trace }
+    const trace = { toolCallCount: result.toolCallCount, iterations: result.iterations, exitReason: result.exitReason, costCents }
+    if (result.exitReason !== 'completed') return {
+      ok: false, text: result.text,
+      error: result.error ?? (result.exitReason === 'aborted' ? 'Прогон прерван' : 'Исчерпан лимит шагов прогона'),
+      ...trace,
+    }
     // EF-R1 Б3: успех подтверждён реальным ответом — отмечаем аккаунт, выбранный
     // pre-flight (у scheduled нет agent_run, accountId взят из resolver'а напрямую).
     if (sub && !('blocked' in sub) && !('allBlocked' in sub) && !('unavailable' in sub)) {
@@ -421,7 +434,7 @@ export async function runScheduledHeadless(
     }
     return { ok: true, text: result.text, ...trace }
   } catch (err) {
-    return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, text: '', error: err instanceof Error ? err.message : String(err), costCents }
   }
 }
 
@@ -1316,4 +1329,3 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
 
 // Type re-exports for renderer (api.d.ts)
 export type { UsageDelta } from '../ai/types'
-

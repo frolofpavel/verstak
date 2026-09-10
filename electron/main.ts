@@ -121,7 +121,7 @@ import { createPersistentJobs } from './storage/persistent-jobs'
 import { registerPersistentJobsIpc } from './ipc/persistent-jobs'
 import { createJobEventBus } from './jobs/event-bus'
 import { handleSignal, reconcileStaleJobs } from './jobs/wake-cycle'
-import { scanText } from './ai/secret-scanner'
+import { createHeadlessJobExecutor } from './jobs/headless-executor'
 import { skillVersion } from './capabilities/registry'
 import { collectEvidence } from './capabilities/evidence'
 import { computeTrust } from '../shared/contracts/trust'
@@ -1000,39 +1000,11 @@ app.whenReady().then(() => {
   jobBus.subscribe(signal => {
     void handleSignal({
       jobs: persistentJobs,
-      execute: async (job) => {
-        // Один шаг — один ограниченный прогон тем же путём, что у расписаний.
-        const ac = new AbortController()
-        const cap = job.maxRuntimeMs ?? 5 * 60_000
-        const timeout = setTimeout(() => ac.abort(), cap)
-        try {
-          const providerId = getProviderId()
-          const prompt = job.nextAction
-            ? `${job.goal}
-
-Что делать в этот раз: ${job.nextAction}`
-            : job.goal
-          const res = await runScheduledHeadless(aiDeps, {
-            projectPath: job.projectPath,
-            prompt,
-            providerId,
-            model: getProviderModel(providerId),
-            signal: ac.signal,
-          })
-          // Итог уходит в БД и может содержать секрет из кода или данных — тот же
-          // класс, что итоги расписаний: редактируем перед записью.
-          const raw = (res.ok ? res.text : (res.error ?? 'ошибка')) || '(пустой ответ)'
-          return {
-            ok: res.ok,
-            result: scanText(raw).redacted.slice(0, 4000),
-            state: job.state,
-            nextAction: job.nextAction,
-            costCents: 0,
-          }
-        } finally {
-          clearTimeout(timeout)
-        }
-      },
+      execute: createHeadlessJobExecutor({
+        runHeadless: opts => runScheduledHeadless(aiDeps, opts),
+        getProviderId,
+        getProviderModel,
+      }),
     }, signal).catch(() => { /* пробуждение не должно валить процесс */ })
   })
 

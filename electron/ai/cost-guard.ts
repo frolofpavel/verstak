@@ -58,6 +58,10 @@ export interface CostGuard {
 }
 
 interface CostGuardOptions {
+  /** Точный остаток бюджета постоянной задачи, включая доли цента. */
+  capCents?: number
+  /** Учёт для durable-задач без округления; только известный тариф, не fallback. */
+  onMeasuredCentsChange?: (cents: number) => void
   initialCents?: number
   onDailyCentsChange?: (cents: number) => void
   periodLabel?: string
@@ -67,7 +71,7 @@ interface CostGuardOptions {
  * @param capUsd максимум $ за сессию. Null/0 = guard disabled (поведение прежнее).
  */
 export function createCostGuard(capUsd: number | null, options: CostGuardOptions = {}): CostGuard {
-  const capCents = capUsd && capUsd > 0 ? Math.round(capUsd * 100) : null
+  const capCents = options.capCents ?? (capUsd && capUsd > 0 ? Math.round(capUsd * 100) : null)
   // Аккумулируем ДРОБНЫЕ центы как float — иначе дешёвые ходы роёв (когда
   // total*100 < 1) округлялись бы в 0 на каждом событии, и cap не взводился
   // бы никогда. Округляем только при выдаче наружу (current() / cents).
@@ -95,6 +99,7 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
       }
       const lookup = normalizeModelId(providerId, model)
       let price = PRICES[lookup]
+      const knownPrice = Boolean(price)
       if (!price) {
         // fail-safe: при ВЫКЛЮЧЕННОМ cap неизвестную модель не считаем (прежнее
         // поведение). При ВКЛЮЧЁННОМ cap считаем по консервативному тарифу,
@@ -111,6 +116,7 @@ export function createCostGuard(capUsd: number | null, options: CostGuardOptions
       const outputCost = ((output ?? 0) / 1_000_000) * price.output
       const total = inputCost + cachedCost + cacheWriteCost + outputCost
       cumulativeCents += total * 100
+      if (knownPrice) options.onMeasuredCentsChange?.(cumulativeCents)
       reportDailyCents()
 
       if (capCents != null && totalCents() >= capCents) {
