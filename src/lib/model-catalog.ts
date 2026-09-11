@@ -420,10 +420,10 @@ export function mergeProviderCatalog(
  * в Settings. Страница «Модели» при этом фильтрует пустые каталоги, поэтому без
  * проекции сохранённая custom-модель исчезает из UI, хотя рантайм уже умеет её запускать.
  */
-export function withCustomOpenAiModels(
-  providers: ReadonlyArray<CatalogProvider>,
+export function withCustomOpenAiModels<T extends Pick<CatalogProvider, 'id' | 'models' | 'defaultModel'>>(
+  providers: ReadonlyArray<T>,
   rawModels: string,
-): CatalogProvider[] {
+): T[] {
   const models = [...new Set(rawModels.split(',').map(model => model.trim()).filter(Boolean))]
   if (models.length === 0) return [...providers]
 

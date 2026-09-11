@@ -11,6 +11,7 @@ import type { ProviderDescriptorDTO } from '../types/api'
 import {
   isProviderAuthorized,
   modelPolicyHint,
+  withCustomOpenAiModels,
   type CliAuthId,
   type CliAuthStatus,
 } from '../lib/model-catalog'
@@ -154,11 +155,10 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
       try {
         const list = await window.api.providers.list()
         if (cancelled) return
-        setProviders(list)
-
-        const [rawEnabled, rawCustomUrl, cliStatus, localModels, envKeyNames, ...rest] = await Promise.all([
+        const [rawEnabled, rawCustomUrl, rawCustomModels, cliStatus, localModels, envKeyNames, ...rest] = await Promise.all([
           window.api.settings.getKey('enabled_models'),
           window.api.settings.getKey('custom_openai_baseurl'),
+          window.api.settings.getKey('custom_openai_models'),
           window.api.cliAuth.statusAll().catch(() => null as CliStatusMap | null),
           window.api.localModels.scan().catch(() => []),
           window.api.settings.envSecretKeys().catch(() => [] as string[]),
@@ -169,6 +169,7 @@ export function ModelPicker({ onOpenSettings, variant = 'pill' }: Props) {
           }),
         ])
         if (cancelled) return
+        setProviders(withCustomOpenAiModels(list, rawCustomModels ?? ''))
 
         const keys: Record<string, string> = {}
         const models: Record<string, string> = {}

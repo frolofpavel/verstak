@@ -37,6 +37,7 @@ import {
   type ConnectionStatus
 } from '../lib/model-catalog'
 import { useProviderCatalog } from '../hooks/useProviderCatalog'
+import { useProject } from '../store/projectStore'
 import { modeControlInfo } from '../lib/runtime-capability'
 import {
   IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
@@ -1271,6 +1272,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   // 2.0.7-D: единый каталог провайдеров — модели/транспорт из providers:list (main-реестр),
   // а не из хардкода. bundled-снапшот до прихода live, чтобы список не был пуст на mount.
   const { providers, source: catalogSource } = useProviderCatalog()
+  const activeChatId = useProject(s => s.activeChatId)
+  const refreshChatSessions = useProject(s => s.refreshChatSessions)
   const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
@@ -1278,6 +1281,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
   const [saved, setSaved] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [settingsDirty, setSettingsDirty] = useState(false)
+  const [modelSelectionDirty, setModelSelectionDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const savedSnapshotRef = useRef<string | null>(null)
   const [onec, setOneC] = useState({ url: '', user: '', pass: '' })
@@ -2064,8 +2068,17 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
     await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
     await window.api.settings.setKey('custom_openai_baseurl', customOpenaiBaseUrl)
     await window.api.settings.setKey('custom_openai_models', customOpenaiModels)
+    if (modelSelectionDirty && activeChatId != null) {
+      const selectedModel = models[activeProvider]?.trim()
+      const selectedProvider = providersWithCustomModels.find(p => p.id === activeProvider)
+      if (selectedModel && selectedProvider && resolveModelAvailability(selectedProvider.models, selectedModel) !== 'unavailable') {
+        await window.api.chatSessions.setModel(activeChatId, activeProvider, selectedModel)
+        await refreshChatSessions()
+      }
+    }
     savedSnapshotRef.current = settingsSnapshot
     setSettingsDirty(false)
+    setModelSelectionDirty(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
     } finally {
@@ -3218,6 +3231,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
           setActiveProvider={setActiveProvider}
           keys={keys}
           customOpenaiBaseUrl={customOpenaiBaseUrl}
+          onDefaultChange={() => setModelSelectionDirty(true)}
           onGoToProviders={() => setTab('providers')}
           catalogSource={catalogSource}
         />
@@ -4406,6 +4420,7 @@ interface ModelsPageProps {
   setActiveProvider: (id: ProviderId) => void
   keys: Record<string, string>
   customOpenaiBaseUrl: string
+  onDefaultChange: () => void
   onGoToProviders: () => void
   /** 2.0.7-D: live = каталог из providers:list; bundled = офлайн-снапшот (IPC упал). */
   catalogSource: CatalogSource
@@ -4416,7 +4431,7 @@ type ModelsCliStatusMap = Partial<Record<CliAuthId, CliAuthStatus>>
 function ModelsPage(props: ModelsPageProps) {
   const {
     providers, enabledModels, setEnabledModels, models, setModels,
-    activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onGoToProviders, catalogSource
+    activeProvider, setActiveProvider, keys, customOpenaiBaseUrl, onDefaultChange, onGoToProviders, catalogSource
   } = props
 
   // 2.0.7-D (карточка, шаг 5): сохранённая модель, которой НЕТ в живом каталоге провайдера,
@@ -4577,6 +4592,7 @@ function ModelsPage(props: ModelsPageProps) {
       setActiveProvider(providerId)
       setModels(m => ({ ...m, [providerId]: model }))
       setEnabledModels(prev => new Set(prev).add(modelKey(providerId, model)))
+      onDefaultChange()
     })
   }
 
