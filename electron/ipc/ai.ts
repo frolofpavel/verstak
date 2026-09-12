@@ -23,7 +23,7 @@ import type { ChatMessage, ChatProvider } from '../ai/types'
 import { type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 // Распил ai.ts (1.9.8 #1): эмиссия прогресса (срез 1) + supplements (срез 2).
 import { tagSender, compactProgressText, modelProgressLabel, emitAgentProgress } from '../ai/runner-progress'
-import { resolveTurnsBudget, pendingWrites, pendingCommands, pendingPlans, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
+import { resolveTurnsBudget, pendingWrites, pendingCommands, pendingPlans, pendingBrowserActions, suspendedSends, scopedKey, registerChatRun, unregisterChatRun } from '../ai/runner-shared'
 import { closeIsolatedSession } from '../browser/isolated-session'
 // Распил ai.ts (2.1.10-E): preflight + выбор маршрута + fallback вынесены в ai-send/*.
 import { preflightOutcome, toolsForOutcomePhase, type OutcomeRequest } from './ai-send/outcome-preflight'
@@ -37,6 +37,9 @@ import { assembleSendSystem } from './ai-send/system-assembly'
 import { buildProviderRuntimeOptions } from './ai-send/provider-options'
 import { saveRunInputSnapshot } from './ai-send/run-input'
 import { registerAiResolveIpc } from './ai-resolve'
+import { BROWSER_APPROVAL_TIMEOUT_MS, configureBrowserHandler } from './tool-handlers/browser'
+import { webviewB0Capability } from '../ai/browser/capability'
+import { localWebviewDataPolicy } from '../ai/browser/data-policy'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -184,6 +187,21 @@ export interface AiDeps {
   /** Фасад Multi-agent Manager (Фаза 1) — agent_runs. Прокинут заранее; запись
    *  прогонов (create/finish/recordRunEvent) подключит Фаза 2 — здесь НЕ используется. */
   agentRuns?: AgentRuns
+  /**
+   * EXT-B0/R1 Browser Employee — единый controller. Если передан (production),
+   * все browser_* tool calls проходят через controller dispatch с R0-R4 policy.
+   * Если НЕ передан — browser handler fail-closed блокирует вызов (legacy path
+   * удалён в R1, см. tool-handlers/browser.ts).
+   */
+  browserController?: import('../ai/browser/controller').BrowserController
+  /** EXT-B0/R1 durable storage для browser tasks (для ensureTask перед dispatch). */
+  browserTasks?: import('../storage/browser-tasks').BrowserTasks
+  /** EXT-B0/R1 setter — обновляет exec webview-адаптера под актуальный WebContents. */
+  setWebviewAdapterExec?: (exec: (code: string) => Promise<unknown>) => void
+  /** EXT-B0/R1 map: chatId (string) → task tab ref. */
+  browserTaskTabs?: Map<string, string>
+  /** EXT-B1 Connected Eyes: обновить lineage на bridge (без auto-continue actions). */
+  setBrowserBridgeLineage?: (browserTaskId: string | null, runId: string | null) => void
   /** #5 worktree-lifecycle: ре-рут file-тулзов на persistent worktree изолированного чата. */
   worktreeSessions?: import('../storage/worktree-sessions').WorktreeSessions
   /** Фасад истории Verification Artifact (Фаза 3) — attest_verification пишет
@@ -232,6 +250,8 @@ export function abortSend(sendId: number): boolean {
     for (const [k, p] of pendingWrites) { p.resolve(false); pendingWrites.delete(k) }
     for (const [k, p] of pendingCommands) { p.resolve(false); pendingCommands.delete(k) }
     for (const [k, p] of pendingPlans) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+    // EXT-B0: abort Также сбрасывает pending browser-action approvals (reject).
+    for (const [k, p] of pendingBrowserActions) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
     logRuntime('ai.abort.all')
     return true
   }
@@ -253,6 +273,10 @@ export function abortSend(sendId: number): boolean {
   }
   for (const [k, p] of pendingPlans) {
     if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+  }
+  // EXT-B0: reject только этого send'а pending browser actions.
+  for (const [k, p] of pendingBrowserActions) {
+    if (p.sendId === sendId) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
   }
   logRuntime('ai.abort.ok', { sendId })
   return true
@@ -525,7 +549,74 @@ export type AiSendInvoker = (
   internal?: AiSendInternal,
 ) => Promise<number>
 
-export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
+export interface AiIpcGateway {
+  invokeAiSend: AiSendInvoker
+  sendFromBrowser: (
+    sender: Electron.WebContents,
+    incomingMessages: ChatMessage[],
+    projectPath: string | null,
+    chatId: string,
+  ) => Promise<number>
+  resolveBrowserAction: (
+    actionId: string,
+    approvalDigest: string,
+    browserTaskId: string,
+    runId: string,
+    approved: boolean,
+    sendId: number,
+  ) => void
+}
+
+export function registerAiIpc(deps: AiDeps): AiIpcGateway {
+  configureBrowserHandler({
+    controller: deps.browserController,
+    resolveTaskId: (ctx) => typeof ctx.parentChatId === 'number'
+      ? `bt-${ctx.parentChatId}`
+      : (ctx.runId ? `bt-run-${ctx.runId}` : `bt-send-${ctx.sendId}`),
+    emitPendingBrowserAction: (ctx, payload) => {
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: {
+          type: 'pending-browser-action',
+          callId: payload.callId,
+          actionId: payload.actionId,
+          browserTaskId: payload.browserTaskId,
+          runId: payload.runId,
+          risk: payload.risk,
+          approvalDigest: payload.approvalDigest,
+          snapshot: payload.snapshot,
+          reason: payload.reason,
+        },
+      })
+    },
+    awaitBrowserApproval: (ctx, actionId, abortSignal) => new Promise(resolve => {
+      const action = deps.browserTasks?.getAction(actionId)
+      const expectedDigest = action?.approvalDigest ?? ''
+      const browserTaskId = action?.browserTaskId ?? ''
+      const runId = action?.runId ?? ''
+      if (!expectedDigest || !browserTaskId || !runId) {
+        resolve({ approved: false, approvalDigest: '' })
+        return
+      }
+      const key = scopedKey(ctx.sendId, actionId)
+      let settled = false
+      let timeout: ReturnType<typeof setTimeout> | null = null
+      const finish = (value: { approved: boolean; approvalDigest: string }) => {
+        if (settled) return
+        settled = true
+        pendingBrowserActions.delete(key)
+        abortSignal.removeEventListener('abort', onAbort)
+        if (timeout) clearTimeout(timeout)
+        resolve(value)
+      }
+      const onAbort = () => finish({ approved: false, approvalDigest: expectedDigest })
+      pendingBrowserActions.set(key, { sendId: ctx.sendId, browserTaskId, runId, expectedDigest, resolve: finish })
+      if (abortSignal.aborted) { onAbort(); return }
+      abortSignal.addEventListener('abort', onAbort, { once: true })
+      timeout = setTimeout(() => finish({ approved: false, approvalDigest: expectedDigest }), BROWSER_APPROVAL_TIMEOUT_MS)
+    }),
+  })
+
   const handleAiSend: AiSendInvoker = async (sender, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string, internal?: AiSendInternal) => {
     // Безопасность: projectPath приходит из рендерера. Без проверки агент мог бы
     // получить файловый + shell доступ к произвольной системной папке (C:\Windows,
@@ -621,6 +712,26 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
       }
     }
     const taggedSender = tagSender(sender, projectPath) // route progress and chat events to this project
+    deps.setWebviewAdapterExec?.(taggedSender.exec)
+    const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
+    if (deps.browserController && deps.browserTasks) {
+      try {
+        const existing = deps.browserTasks.get(browserTaskId)
+        const seedCaps = webviewB0Capability(existing?.allowedDomains ?? [])
+        const seedPolicy = localWebviewDataPolicy(providerId)
+        if (!existing) {
+          deps.browserController.ensureTask({
+            browserTaskId, projectPath: projectPath ?? '', chatId: chatIdNum ?? null,
+            runId, providerId, browserMode: 'execute', caps: seedCaps, dataPolicy: seedPolicy,
+          })
+        } else {
+          deps.browserController.attachRun({ browserTaskId, runId, providerId, handoffReason: 'new_send' })
+        }
+        deps.setBrowserBridgeLineage?.(browserTaskId, runId)
+      } catch (err) {
+        logRuntimeError('browser.attach_run.fail', err)
+      }
+    }
     // 2.0.8-D2 + 2.1.3-CD: ранние стопы маршрута ДО создания run/провайдера — чистый выход.
     //  · unavailable: pin/one-shot на удалённый аккаунт → стоп-с-вопросом (НЕ тихая ротация).
     //  · blocked: явно выбранный (one-shot) или закреплённый аккаунт не готов (cooling /
@@ -690,6 +801,10 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
       }
       for (const [k, p] of pendingPlans) {
         if (p.sendId === sendId) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
+      }
+      // EXT-B0: drain pending browser-action approvals этого send'а (reject).
+      for (const [k, p] of pendingBrowserActions) {
+        if (p.sendId === sendId) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
       }
       // #4 suspend: чистим suspendedSends здесь — cleanup идёт для ОБОИХ путей (API+CLI)
       // и любого выхода, иначе CLI-приостановки и race suspend-после-finish копились бы.
@@ -1261,6 +1376,7 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
         fallbackOpts,
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
+        browserTaskIdResolver: () => browserTaskId,
         // Гард глубины спавна (задача C): дочерняя сессия — та, у чьего чата задан
         // parent_chat_id (посчитано выше вместе с бюджетом, единый источник).
         isChildSession,
@@ -1321,10 +1437,39 @@ export function registerAiIpc(deps: AiDeps): { invokeAiSend: AiSendInvoker } {
   // параметром: его ядро (activeAborts + дренаж pending сессии) остаётся здесь.
   registerAiResolveIpc(ipcMain, abortSend)
 
+  const resolveBrowserAction = (
+    actionId: string,
+    approvalDigest: string,
+    browserTaskId: string,
+    runId: string,
+    approved: boolean,
+    sendId?: number,
+  ) => {
+    if (typeof sendId !== 'number' || sendId <= 0 || !actionId || !approvalDigest || !browserTaskId || !runId) return
+    const key = scopedKey(sendId, actionId)
+    const entry = pendingBrowserActions.get(key)
+    if (!entry) return
+    if (entry.browserTaskId !== browserTaskId || entry.runId !== runId || entry.expectedDigest !== approvalDigest) return
+    pendingBrowserActions.delete(key)
+    entry.resolve({ approved, approvalDigest })
+  }
+  ipcMain.handle(
+    'ai:resolve-browser-action',
+    (_e, actionId: string, approvalDigest: string, browserTaskId: string, runId: string, approved: boolean, sendId?: number) => {
+      resolveBrowserAction(actionId, approvalDigest, browserTaskId, runId, approved, sendId)
+    },
+  )
+
   registerAiCountTokensIpc(ipcMain, deps)
 
   // P1: состязание исполнителей запускает попытки ТЕМ ЖЕ кодом, что IPC-канал.
-  return { invokeAiSend: handleAiSend }
+  return {
+    invokeAiSend: handleAiSend,
+    sendFromBrowser: (sender, incomingMessages, projectPath, chatId) =>
+      handleAiSend(sender, incomingMessages, projectPath, undefined, undefined, chatId),
+    resolveBrowserAction: (actionId, approvalDigest, browserTaskId, runId, approved, sendId) =>
+      resolveBrowserAction(actionId, approvalDigest, browserTaskId, runId, approved, sendId),
+  }
 }
 
 // Type re-exports for renderer (api.d.ts)

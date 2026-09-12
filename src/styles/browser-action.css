@@ -1,0 +1,177 @@
+/* EXT-B0/R1 Browser Action Approval modal — отдельный файл (layout.css не трогать).
+   Использует общие .gg-modal-* классы из atelier-global.css + специфичные ниже. */
+
+.gg-browser-action-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gg-browser-action-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.04));
+}
+.gg-browser-action-row:last-child {
+  border-bottom: none;
+}
+
+.gg-browser-action-label {
+  color: var(--text-tertiary, #888);
+  font-size: var(--text-xs, 12px);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+
+.gg-browser-action-value {
+  font-size: var(--text-sm, 13px);
+  word-break: break-all;
+}
+
+.gg-browser-action-value code {
+  font-family: var(--font-mono, 'JetBrains Mono', 'Consolas', monospace);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--text-xs, 12px);
+}
+
+.gg-browser-action-url {
+  word-break: break-all;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.gg-browser-action-text {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.gg-browser-action-risk {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: var(--text-xs, 11px);
+  font-weight: 500;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.gg-browser-action-risk-r0 { background: rgba(40, 180, 80, 0.15); color: #4caf50; }
+.gg-browser-action-risk-r1 { background: rgba(70, 130, 180, 0.15); color: #5fa8d3; }
+.gg-browser-action-risk-r2 { background: rgba(255, 165, 0, 0.15); color: #ffa500; }
+.gg-browser-action-risk-r3 {
+  background: rgba(220, 60, 60, 0.18);
+  color: #ff6b6b;
+  font-weight: 600;
+}
+.gg-browser-action-risk-r4 {
+  background: rgba(180, 0, 0, 0.25);
+  color: #ff3030;
+  font-weight: 700;
+}
+
+.gg-browser-action-warning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 200, 0, 0.07);
+  border: 1px solid rgba(255, 200, 0, 0.2);
+  border-radius: 6px;
+  font-size: var(--text-xs, 12px);
+  color: var(--text-secondary, #aaa);
+  line-height: 1.5;
+}
+
+/* EXT-C1 Browser bridge card */
+.gg-browser-bridge-card {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-elevated, #1a1b1e);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.gg-browser-bridge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.gg-browser-bridge-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.gg-browser-bridge-pill-attached { background: rgba(40, 180, 80, 0.2); color: #6dce7a; }
+.gg-browser-bridge-pill-paired { background: rgba(70, 130, 180, 0.2); color: #7eb6e0; }
+.gg-browser-bridge-pill-offline,
+.gg-browser-bridge-pill-error { background: rgba(220, 60, 60, 0.15); color: #ff8a8a; }
+.gg-browser-bridge-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+.gg-browser-bridge-tab {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-browser-bridge-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.gg-browser-bridge-code code {
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+.gg-browser-bridge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.gg-browser-bridge-hint {
+  margin-top: 8px;
+  color: var(--text-tertiary, #888);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.gg-browser-bridge-msg {
+  margin-top: 6px;
+  color: var(--text-secondary, #aaa);
+  font-size: 11px;
+}
+.gg-browser-bridge-msg-err { color: #ff8a8a; }
+.gg-link-btn {
+  background: none;
+  border: none;
+  color: var(--accent, #6ea8fe);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}

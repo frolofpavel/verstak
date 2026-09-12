@@ -741,7 +741,9 @@ const GATE_MAX_WORKERS = 4
 // сохранения и пользовательский сценарий выбора модели.
 // -> 6007 ИЗМЕРЕНО 11.09: пользовательские модели OpenAI-compatible доходят
 // до селектора чата, а явный выбор модели в Settings закрепляется за активным чатом.
-const EXPECTED_TOTAL_TESTS = 6007
+// -> 6442 ИЗМЕРЕНО 12.09: Browser Employee — controller/policy/approval,
+// durable action ledger, Native Messaging bridge, safe observe и approved click.
+const EXPECTED_TOTAL_TESTS = 6442
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

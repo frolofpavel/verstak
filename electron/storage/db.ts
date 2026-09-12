@@ -1212,7 +1212,7 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
   },
   {
     version: 53,
-    description: '2.0.11-E провенанс отката файлов: file_undo обогащается run_id/chat_id/message_id (КТО менял) + before_hash/after_hash (не переписал ли файл кто-то ПОСЛЕ). Append-only: все колонки nullable — legacy-записи и записи без контекста остаются валидными «непротрассированными» (по ним rewindCoverage не даст complete).',
+    description: '2.0.11-E провенанс отката файлов: file_undo обогащается run_id/chat_id/message_id (КТО менял) + before_hash/after_hash (не переписал ли файл кто-то ПОСЛЕ). Append-only: все колонки nullable — legacy-записии и записи без контекста остаются валидными «непротрассированными» (по ним rewindCoverage не даст complete).',
     run: (db: DB) => {
       const cols = (db.prepare('PRAGMA table_info(file_undo)').all() as Array<{ name: string }>).map(c => c.name)
       const has = (c: string) => cols.includes(c)
@@ -1658,6 +1658,110 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         )
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_experiment_results_project ON experiment_results(project_path, created_at)')
+    }
+  },
+  {
+    version: 70,
+    description: 'Browser Employee: durable task lineage, atomic action ledger, approval TTL and redacted proof references.',
+    run: (db: DB) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_tasks (
+          browser_task_id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          chat_id INTEGER,
+          client_id TEXT,
+          current_run_id TEXT,
+          browser_mode TEXT NOT NULL DEFAULT 'watch' CHECK(browser_mode IN ('watch','prepare','execute')),
+          observation_version INTEGER NOT NULL DEFAULT 0,
+          observation_id TEXT,
+          task_tab_ref TEXT,
+          allowed_domains_json TEXT NOT NULL DEFAULT '[]',
+          caps_json TEXT NOT NULL DEFAULT '{}',
+          data_policy_json TEXT NOT NULL DEFAULT '{}',
+          last_result_status TEXT,
+          last_result_detail TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          ended_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_project ON browser_tasks(project_path, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_chat ON browser_tasks(chat_id);
+
+        CREATE TABLE IF NOT EXISTS browser_task_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          provider_id TEXT,
+          model TEXT,
+          ord INTEGER NOT NULL,
+          handoff_reason TEXT NOT NULL DEFAULT 'new_send',
+          started_at INTEGER NOT NULL,
+          ended_at INTEGER,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_task_runs_unique ON browser_task_runs(browser_task_id, run_id);
+        CREATE INDEX IF NOT EXISTS idx_browser_task_runs_task ON browser_task_runs(browser_task_id, ord);
+
+        CREATE TABLE IF NOT EXISTS browser_actions (
+          action_id TEXT PRIMARY KEY,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL DEFAULT 1,
+          action_type TEXT NOT NULL,
+          risk_level TEXT NOT NULL CHECK(risk_level IN ('R0','R1','R2','R3','R4')),
+          scope_json TEXT NOT NULL DEFAULT '{}',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          preconditions_json TEXT NOT NULL DEFAULT '{}',
+          expected_postcondition_json TEXT,
+          approval_digest TEXT,
+          approval_consumed_at INTEGER,
+          approval_expires_at INTEGER,
+          status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed','approved','executing','verified','uncertain','failed','blocked','rejected','cancelled')),
+          attempt_id TEXT,
+          result_status TEXT,
+          result_detail TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          finalized_at INTEGER,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_task ON browser_actions(browser_task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_status ON browser_actions(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_actions_approval_ttl ON browser_actions(status, approval_expires_at)
+          WHERE status IN ('proposed','approved') AND approval_expires_at IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS browser_action_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT NOT NULL,
+          from_status TEXT,
+          to_status TEXT NOT NULL,
+          reason TEXT,
+          detail_json TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (action_id) REFERENCES browser_actions(action_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_action_events_action ON browser_action_events(action_id, id);
+
+        CREATE TABLE IF NOT EXISTS browser_proof_refs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT,
+          browser_task_id TEXT NOT NULL,
+          run_id TEXT,
+          kind TEXT NOT NULL CHECK(kind IN ('before','after','observe','action')),
+          artifact_path TEXT,
+          artifact_digest TEXT,
+          origin TEXT,
+          url TEXT,
+          redacted_summary TEXT,
+          omissions_json TEXT NOT NULL DEFAULT '[]',
+          retention_until INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (action_id) REFERENCES browser_actions(action_id) ON DELETE SET NULL,
+          FOREIGN KEY (browser_task_id) REFERENCES browser_tasks(browser_task_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_proof_refs_task ON browser_proof_refs(browser_task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_proof_refs_action ON browser_proof_refs(action_id);
+      `)
     }
   }
 ]

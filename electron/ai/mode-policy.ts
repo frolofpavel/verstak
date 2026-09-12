@@ -164,6 +164,11 @@ export function blockReason(toolName: string, mode: AgentMode): string {
              `дочерняя сессия начнёт ВЫПОЛНЯТЬ действия (файлы, команды), а планирование ничего не меняет. ` +
              `Составь план здесь (create_plan); пользователь переключит режим, когда захочет запустить задачу.`
     }
+    if (toolName.startsWith('browser_') && toolName !== 'browser_read_page' && toolName !== 'browser_screenshot' && toolName !== 'browser_observe') {
+      return `Активен режим "Режим планирования" — browser mutations (${toolName}) запрещены. ` +
+             `Доступны только наблюдения (browser_read_page, browser_screenshot, browser_observe). ` +
+             `Пользователь сам переключит режим когда захочет выполнить действие.`
+    }
     return `Активен режим "Режим планирования" — изменение файлов и выполнение команд запрещены. ` +
            `Сосредоточься на чтении кода (read_file, get_project_map, search_project) и составлении плана через create_plan. ` +
            `Пользователь сам переключит режим когда захочет применить изменения.`

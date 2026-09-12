@@ -229,6 +229,8 @@ export interface AgentRunContext {
   appendAuditFn?: (action: string, detail: string) => void
   trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
   parentChatId?: number | null
+  /** Stable Browser Employee task lineage for the current run. */
+  browserTaskIdResolver?: (input: { parentChatId?: number | null; runId?: string }) => string | null
   /** Этот прогон идёт в ДОЧЕРНЕЙ (вынесенной спавном) сессии — у её чата задан
    *  parent_chat_id. Гард глубины: такой сессии НЕ даём spawn_task_session (внучек нет).
    *  Считает main из chat_sessions; НЕ путать с parentChatId (= текущий chatId прогона). */
@@ -280,7 +282,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
+    parentChatId, browserTaskIdResolver, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
@@ -1518,6 +1520,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // appendEvent. Хендлеры дёргают ctx.recordRunEvent рядом с существующими
       // ai:event-эмиттерами; ошибка storage не ломает agent loop (try/catch).
       runId,
+      // EXT-B0/R1: browserTaskId — задан когда прогон работает с browser.
+      // Источник: browserTaskIdResolver или автоматическое bt-${chatId}
+      // если parentChatId есть. Когда задан — tool-dispatch блокирует
+      // forbiddenCrossTools (см. цикл выше).
+      browserTaskId: browserTaskIdResolver
+        ? browserTaskIdResolver({ parentChatId, runId })
+        : (typeof parentChatId === 'number' ? `bt-${parentChatId}` : null),
       recordRunEvent: (kind, p) => {
         if (!agentRuns || !runId) return
         try { agentRuns.appendEvent(runId, kind, p) } catch { /* best-effort */ }
@@ -2047,4 +2056,3 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     }
   }
 }
-

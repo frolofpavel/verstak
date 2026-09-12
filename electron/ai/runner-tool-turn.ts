@@ -1,6 +1,9 @@
 import type { ToolCall, ToolResult } from './types'
 import { runHooks, type CompiledHooks } from './hooks'
 import { lookupHandler, type ToolContext, type ToolHandler } from '../ipc/tool-handlers'
+import { FORBIDDEN_CROSS_TOOLS } from './browser/capability'
+
+const BROWSER_RUN_FORBIDDEN_TOOLS = new Set(FORBIDDEN_CROSS_TOOLS)
 
 interface DispatchToolTurnOptions {
   toolCalls: ToolCall[]
@@ -141,6 +144,14 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
   const blocked = hooks
     ? await collectPreBlocks(toolCalls, context, hooks, invokeHooks, addContext)
     : new Map<number, string>()
+  if (context.browserTaskId) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]
+      if (!blocked.has(i) && BROWSER_RUN_FORBIDDEN_TOOLS.has(call.name)) {
+        blocked.set(i, `Browser run активен — cross-tool "${call.name}" заблокирован capability envelope. Контент страницы не может расширить полномочия задачи.`)
+      }
+    }
+  }
   // Гейт tools_allow на ИСПОЛНЕНИИ (штаб, аудит 09.08): список предлагаемых инструментов —
   // это МЕНЮ для модели, а не граница. Вызов инструмента вне разрешённого набора — будь то
   // галлюцинация, инъекция в читаемый контент, или дочерняя сессия под унаследованным

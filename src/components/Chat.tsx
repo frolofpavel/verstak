@@ -1430,6 +1430,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           timestamp: Date.now()
         })
       }
+      else if (event.type === 'browser-action-result') {
+        // Очистка pending + activity update по факту consume.
+        if (store.pendingBrowserAction?.callId === event.callId) {
+          store.setPendingBrowserAction(null)
+        }
+        store.pushActivity({
+          id: event.callId,
+          kind: 'command',
+          label: 'browser_action',
+          detail: `${event.status}: ${event.detail}`,
+          status: event.status === 'verified' ? 'ok' : event.status === 'blocked' || event.status === 'failed' ? 'error' : 'pending',
+          timestamp: Date.now()
+        })
+      }
       else if (event.type === 'command-result') {
         // Снять модалку CommandConfirm, если команда зарезолвлена НЕ кликом по модалке,
         // а извне (Stop/таймаут/ошибка) — иначе висит ghost-бэкдроп на завершённую

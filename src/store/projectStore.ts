@@ -69,11 +69,34 @@ export type SendOwner =
   | { kind: 'chat'; chatId: number; isHelp?: boolean; projectPath?: string | null; laneGeneration?: number }
   | { kind: 'review'; reviewChatId: number; parentChatId: number }
 
+export interface PendingBrowserAction {
+  callId: string
+  actionId: string
+  browserTaskId: string
+  runId: string
+  risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+  approvalDigest: string
+  snapshot: {
+    browserTaskId: string
+    runId: string
+    clientId?: string | null
+    scope: Record<string, unknown>
+    actionType: string
+    payload: Record<string, unknown>
+    preconditions: Record<string, unknown>
+    expectedPostcondition?: Record<string, unknown> | null
+    risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+  }
+  reason: string
+  sendId?: number
+}
+
 export interface ProjectState extends PipelineSlice, ReviewSlice {
   path: string | null
   tree: FileNode[]
   chatHasMoreBefore: boolean
   chatTotalCount: number
+  pendingBrowserAction: PendingBrowserAction | null
   /** Preflight-карточки текущей сессии. Эфемерные — чистятся на новом send. */
   /** Sub-agent runs текущей сессии (fan-out V1). Эфемерные — чистятся на send. */
   /** Per-session "the AI has touched these files" map — feeds Sidebar markers
@@ -159,6 +182,7 @@ export interface ProjectState extends PipelineSlice, ReviewSlice {
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
   setPendingCommand: (c: PendingCommand | null) => void
+  setPendingBrowserAction: (a: PendingBrowserAction | null) => void
   /** §10: карточка плана АКТИВНОГО чата. */
   setPendingPlan: (p: PendingPlanCard | null) => void
   /** §10 хвост: карточка КОНКРЕТНОГО чата — событие может прийти по фоновому
@@ -418,6 +442,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   streamStartedAt: null,
   pendingWrites: [],
   pendingCommand: null,
+  pendingBrowserAction: null,
   activity: [],
   agentProgress: [],
   preflights: [],
@@ -691,6 +716,7 @@ export const useProject = create<ProjectState>((set, get, store) => ({
   resolvePendingWrite: (callId) => get().updateChatBundle(get().activeChatId, b => ({ pendingWrites: b.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => get().updateChatBundle(get().activeChatId, () => ({ pendingWrites: [] })),
   setPendingCommand: (c) => get().updateChatBundle(get().activeChatId, () => ({ pendingCommand: c })),
+  setPendingBrowserAction: (a) => set({ pendingBrowserAction: a }),
   setPendingPlan: (p) => get().updateChatBundle(get().activeChatId, () => ({ pendingPlan: p })),
   setChatPendingPlan: (chatId, p) => get().updateChatBundle(chatId, () => ({ pendingPlan: p })),
   /**

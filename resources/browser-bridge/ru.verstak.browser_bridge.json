@@ -1,0 +1,9 @@
+{
+  "name": "ru.verstak.browser_bridge",
+  "description": "Verstak Browser Bridge (Connected Eyes)",
+  "path": "host.cmd",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://jbhddmgcngdchlgmilphmbbcccfigadb/"
+  ]
+}

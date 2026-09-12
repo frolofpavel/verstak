@@ -25,6 +25,50 @@ function context(events: unknown[]): ToolContext {
 }
 
 describe('dispatchToolTurn', () => {
+  it('browser run блокирует cross-tool мутацию, но исполняет browser tool', async () => {
+    const events: unknown[] = []
+    const handled: string[] = []
+    const ctx = { ...context(events), browserTaskId: 'bt-1' } as ToolContext
+    const calls = [call('x1', 'run_command'), call('b1', 'browser_read_page')]
+    const results = await dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual(['browser_read_page'])
+    expect(results[0].error).toMatch(/Browser run|capability envelope/i)
+    expect(results[1].result).toBe('browser_read_page')
+  })
+
+  it('обычный run без browserTaskId сохраняет доступ к тем же инструментам', async () => {
+    const handled: string[] = []
+    const toolCall = call('x1', 'run_command')
+    const [res] = await dispatchToolTurn({
+      toolCalls: [toolCall],
+      context: context([]),
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async current => {
+          handled.push(name)
+          return result(current)
+        },
+      }),
+    })
+    expect(handled).toEqual(['run_command'])
+    expect(res.result).toBe('run_command')
+  })
+
   it('сохраняет индекс результатов и контракт scheduling для read/sequential/write', async () => {
     const started: string[] = []
     const finished: string[] = []

@@ -18,8 +18,46 @@ import {
   openIsolatedSession, getIsolatedSession, closeIsolatedSession,
   getActiveBrowserEnv, setActiveBrowserEnv, type IsolatedBrowserApi,
 } from '../../browser/isolated-session'
+import type { BrowserController } from '../../ai/browser/controller'
+import type { BrowserActionType } from '../../ai/browser/types'
 
-async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+const TOOL_TO_ACTION: Partial<Record<string, BrowserActionType>> = {
+  browser_navigate: 'navigate',
+  browser_read_page: 'observe',
+  browser_click: 'click',
+  browser_screenshot: 'screenshot',
+}
+
+export interface BrowserHandlerDeps {
+  controller?: BrowserController
+  resolveTaskId?: (ctx: ToolContext) => string
+  emitPendingBrowserAction?: (ctx: ToolContext, payload: {
+    callId: string
+    actionId: string
+    browserTaskId: string
+    runId: string
+    risk: string
+    decision: string
+    approvalDigest: string
+    snapshot: unknown
+    reason: string
+  }) => void
+  awaitBrowserApproval?: (
+    ctx: ToolContext,
+    actionId: string,
+    abortSignal: AbortSignal,
+  ) => Promise<{ approved: boolean; approvalDigest: string }>
+  approvalTimeoutMs?: number
+}
+
+let depsRef: BrowserHandlerDeps = {}
+export const BROWSER_APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
+
+export function configureBrowserHandler(deps: BrowserHandlerDeps): void {
+  depsRef = { ...deps }
+}
+
+async function dispatchLegacyBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   try {
     // Args are JSON-stringified once and embedded via JSON.stringify(JSON.stringify(...))
     // so the runtime JSON.parse is the only thing that touches LLM-supplied data.
@@ -104,6 +142,171 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
   } catch (err) {
     return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
   }
+
+}
+
+async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const actionType = TOOL_TO_ACTION[call.name] ?? null
+  const controller = depsRef.controller
+  // Новое ядро обслуживает общий вертикальный набор. Остальные зрелые инструменты
+  // встроенного/изолированного браузера продолжают идти по прежнему адаптеру.
+  if (!controller) {
+    if (ctx.browserTaskId) {
+      return {
+        id: call.id,
+        name: call.name,
+        result: '',
+        error: 'BrowserController не сконфигурирован — browser action заблокирован (fail-closed).',
+      }
+    }
+    return dispatchLegacyBrowser(call, ctx)
+  }
+  if (!actionType) return dispatchLegacyBrowser(call, ctx)
+
+  const taskId = depsRef.resolveTaskId ? depsRef.resolveTaskId(ctx) : `bt-${ctx.runId ?? ctx.sendId}`
+  const runId = ctx.runId ?? `run-${ctx.sendId}`
+  const args = call.args ?? {}
+
+  // ── R3 path: показываем approval UI, ждём consume ─────────────────────
+  // Сначала propose (без approval). Если decision=require-approval → emit.
+  const proposeResult = await controller.dispatch({
+    browserTaskId: taskId,
+    runId,
+    actionType,
+    payload: args as Record<string, unknown>,
+    scope: {},
+  })
+
+  if (proposeResult.decision.kind === 'block') {
+    return { id: call.id, name: call.name, result: '', error: proposeResult.error ?? 'blocked by policy' }
+  }
+
+  if (proposeResult.pendingApproval && proposeResult.decision.kind === 'require-approval') {
+    // Emit ai:event для renderer'а показать approval modal.
+    if (depsRef.emitPendingBrowserAction) {
+      depsRef.emitPendingBrowserAction(ctx, {
+        callId: call.id,
+        actionId: proposeResult.actionId,
+        browserTaskId: taskId,
+        runId,
+        risk: proposeResult.risk,
+        decision: proposeResult.decision.kind,
+        approvalDigest: proposeResult.pendingApproval.approvalDigest,
+        snapshot: proposeResult.pendingApproval.snapshot,
+        reason: proposeResult.decision.reason,
+      })
+    }
+    // Ждём решения UI.
+    if (depsRef.awaitBrowserApproval) {
+      const approval = await waitForBrowserApproval(
+        depsRef.awaitBrowserApproval(ctx, proposeResult.actionId, ctx.signal),
+        depsRef.approvalTimeoutMs ?? BROWSER_APPROVAL_TIMEOUT_MS,
+      )
+      const { approved, approvalDigest } = approval
+      if (!approved) {
+        const error = approval.timedOut
+          ? 'Approval UI не ответил вовремя — browser action безопасно отменён.'
+          : approval.failed
+            ? `Approval UI недоступен — browser action отменён: ${approval.failed}`
+            : 'Пользователь отклонил browser action.'
+        return { id: call.id, name: call.name, result: '', error }
+      }
+      // R1 Block 3: approveAndExecute берёт action из ledger по actionId.
+      // Digest из UI — для сверки контроллером (canonical digest должен совпасть).
+      const execResult = await controller.approveAndExecute(proposeResult.actionId, approvalDigest)
+      return finalizeBrowserResult(call, execResult, ctx)
+    }
+    // Нет awaitBrowserApproval — не можем ждать UI; возвращаем модель как error.
+    return { id: call.id, name: call.name, result: '', error: 'Требуется approval browser action, но UI transport не сконфигурирован.' }
+  }
+
+  // ── R0/R1/R2 auto path — результат уже в proposeResult ─────────────────
+  return finalizeBrowserResult(call, proposeResult, ctx)
+}
+
+async function waitForBrowserApproval(
+  pending: Promise<{ approved: boolean; approvalDigest: string }>,
+  timeoutMs: number,
+): Promise<{ approved: boolean; approvalDigest: string; timedOut?: boolean; failed?: string }> {
+  const boundedMs = Number.isFinite(timeoutMs) ? Math.max(1, Math.min(timeoutMs, BROWSER_APPROVAL_TIMEOUT_MS)) : BROWSER_APPROVAL_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      pending.catch(err => ({
+        approved: false,
+        approvalDigest: '',
+        failed: err instanceof Error ? err.message : String(err),
+      })),
+      new Promise<{ approved: false; approvalDigest: ''; timedOut: true }>(resolve => {
+        timer = setTimeout(() => resolve({ approved: false, approvalDigest: '', timedOut: true }), boundedMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function finalizeBrowserResult(call: ToolCall, r: import('../../ai/browser/controller').DispatchResult, ctx: ToolContext): ToolResult {
+  if (!r.ok && !r.result) {
+    return { id: call.id, name: call.name, result: '', error: r.error ?? 'browser action failed' }
+  }
+  const status = r.result?.status ?? 'verified'
+  if (status === 'blocked') {
+    return { id: call.id, name: call.name, result: '', error: `Blocked: ${r.result?.reason ?? 'неизвестно'} — ${r.result?.detail ?? ''}` }
+  }
+  if (status === 'failed') {
+    return { id: call.id, name: call.name, result: '', error: `Failed: ${r.result?.detail ?? 'неизвестно'}` }
+  }
+  // verified / uncertain. R1 Block 5: модель получает UNTRUSTED ENVELOPE
+  // (r.observationForModel.text — это warning + scanText-redacted text), а НЕ
+  // raw obs.text. Контент страницы — данные, не инструкции.
+  const result: Record<string, unknown> = {
+    actionId: r.actionId,
+    risk: r.risk,
+    status,
+    finalUrl: r.result?.finalUrl ?? null,
+  }
+  if (status === 'uncertain') {
+    result.warning = 'Действие выполнено с неясным результатом. Перечитай страницу перед следующим шагом; НЕ повторяй это действие автоматически.'
+  }
+  if (r.observationForModel) {
+    // Untrusted envelope — главная поверхность для модели. Включает warning
+    // о недоверенном содержимом первой строкой + redacted text/tables/controls.
+    result.observationText = r.observationForModel.text
+    if (r.observationForModel.redactionHits.length > 0) {
+      result.redacted = r.observationForModel.redactionHits
+    }
+    if (r.observationForModel.truncated) {
+      result.truncated = true
+    }
+  } else if (r.result?.postObservation) {
+    // Fallback: если controller не собрал envelope (R0 без runExecute path),
+    // передаём минимальные метаданные без raw text.
+    const obs = r.result.postObservation
+    result.url = obs.source.url
+    result.title = obs.source.title
+    result.origin = obs.source.origin
+    result.tenant = obs.tenant
+    result.account = obs.account
+  }
+  if (r.result?.postObservation?.screenshotDataUrl) {
+    // R1 Block 5: screenshot уже прошёл isScreenshotSafeForModel в controller
+    // (fail-closed на sensitive URL). Если он дошёл сюда — можно передать.
+    result.screenshotAttached = true
+    try {
+      const m = /^data:(image\/[\w+-]+);base64,(.+)$/.exec(r.result.postObservation.screenshotDataUrl)
+      if (m) {
+        ctx.pendingAttachments.push({
+          name: `screenshot-${Date.now()}.png`,
+          mimeType: m[1],
+          data: m[2],
+          size: Math.floor(m[2].length * 0.75),
+        })
+        try { addProofFrame(Number(ctx.sendId), Buffer.from(m[2], 'base64')) } catch { /* best-effort */ }
+      }
+    } catch { /* ignore */ }
+  }
+  return { id: call.id, name: call.name, result }
 }
 
 /**

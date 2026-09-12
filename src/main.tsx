@@ -8,6 +8,7 @@ import './styles/shell-atelier.css'
 import './styles/atelier-global.css'
 import './styles/title-bar.css'
 import './styles/markdown.css'
+import './styles/browser-action.css'
 
 document.documentElement.classList.add('gg-atelier')
 void bootstrapAppearance()
