@@ -684,11 +684,11 @@ multi-tab задач без нарушения client data policy.
 |---|---|---|---|
 | Phase A / `VSK-EXT-A1-R2` | ACCEPTED_WITH_DEBT · 19.07.2026 | Navigator повторил targeted: 65/65; manifest и privacy scope подтверждены. Долг: ручной Chrome smoke при первой разрешённой установке — текущий Chrome-control не открывает `chrome://extensions`, обход не применялся | Sensor Core заморожен; не считать Browser Employee MVP |
 | Phase B0 / `EXT-B0` | VERIFIED_IN_CODE | Единый controller/policy, scoped atomic approval, capability/lineage, provider policy и durable ledger перенесены на 2.8.2; security tests и мутации stale/duplicate guards зелёные | Не расширять action scope до живого C1 |
-| Phase B1 / `EXT-B1` | LOCAL_REBUILD_PENDING | Настройки, быстрая локальная авторизация, авто-reconnect и выбор точной вкладки значком реализованы; тесты больше не меняют настоящий HKCU, packaged smoke не должен регистрировать временный host | Собрать свежий локальный package и проверить постоянный HKCU readback |
+| Phase B1 / `EXT-B1` | PACKAGED_SMOKE_PASS · 13.09.2026 | Package коммита `21de87e1`: Setup/Portable/win-unpacked собраны; обе копии `better_sqlite3.node` имеют Electron ABI; smoke получил `startup.ok/db.open.ok` и не изменил HKCU; после promotion Chrome+Edge указывают на постоянный свежий manifest, lifecycle-test оставил readback неизменным | Обновить уже установленное unpacked-расширение и пройти живой Calltouch |
 | Phase C / `EXT-C1` | LIVE_ACCEPTANCE_PENDING | Вертикаль `observe → approved click → readback`, exact request correlation и fail-closed `uncertain` построены; targeted integration/adversarial tests зелёные | Пройти Calltouch 5/5 в одной вкладке |
 | Phase D–F | NOT_STARTED | — | Не запускать раньше своих гейтов |
 
-**Один следующий шаг:** собрать свежий локальный package, обновить уже установленное
-unpacked-расширение и пройти Calltouch
+**Один следующий шаг:** обновить уже установленное unpacked-расширение из свежего
+packaged resources и пройти Calltouch
 `выбор вкладки значком → observe → approved click → readback` 5/5. До этого Browser Employee
 не считать принятым, даже при зелёном полном гейте.
