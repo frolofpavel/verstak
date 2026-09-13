@@ -71,8 +71,9 @@ import { createBrowserTasks } from './storage/browser-tasks'
 import { createBrowserController, type BrowserController } from './ai/browser/controller'
 import { createWebviewAdapter } from './ai/browser/adapters/webview'
 import { createExtensionAdapter } from './ai/browser/adapters/extension'
+import { bindAttachedTabToTask, selectBrowserAdapter } from './ai/browser/adapter-selection'
 import { parseCapabilityEnvelope, webviewB0Capability } from './ai/browser/capability'
-import { localWebviewDataPolicy, parseClientDataPolicy } from './ai/browser/data-policy'
+import { connectedBrowserDataPolicy, localWebviewDataPolicy, parseClientDataPolicy } from './ai/browser/data-policy'
 import type { BrowserAdapter, CapabilityEnvelope, ClientDataPolicy } from './ai/browser/types'
 import { createBridgeServer, installNativeHost, resolveDevHostInstallDir, type BridgeServer } from './ai/browser/bridge'
 import { switchActiveOnLimit, markAccountSuccess } from './storage/subscription-accounts'
@@ -663,7 +664,7 @@ app.whenReady().then(() => {
   // EXT-B0/R2: единый BrowserController. Capability/dataPolicy/mode — из
   // durable browser_tasks (persisted policy), не из module-level defaults.
   // ensureTask (ipc/ai.ts) сидирует webview B0 policy; get* читает storage.
-  const browserTaskTabs = new Map<string, string /* tabRef */>() // chatId → task tab
+  const browserTaskTabs = new Map<string, string /* tabRef */>() // browserTaskId → task tab
   const browserGetCapability = (browserTaskId: string): CapabilityEnvelope => {
     const t = browserTasks.get(browserTaskId)
     const parsed = t ? parseCapabilityEnvelope(t.caps) : null
@@ -674,26 +675,41 @@ app.whenReady().then(() => {
   const browserGetDataPolicy = (browserTaskId: string): ClientDataPolicy => {
     const t = browserTasks.get(browserTaskId)
     const parsed = t ? parseClientDataPolicy(t.dataPolicy) : null
-    if (parsed) return parsed
+    const connectedBrowserIntent = browserResolveAdapter()?.id === 'chrome-extension'
+    const providerId = browserTasks.currentRun(browserTaskId)?.providerId ?? getProviderId()
+    if (parsed) {
+      // Defense in depth for legacy rows: even if a send was interrupted before
+      // migration persisted, connected DOM never sees the webview allow-all.
+      return connectedBrowserIntent
+        ? connectedBrowserDataPolicy(providerId, parsed)
+        : parsed
+    }
     // Local webview B0: allow browser context (DEFAULT_DATA_POLICY.ask блокировал
     // бы весь production-path до явного grant — R2 fix).
-    return localWebviewDataPolicy()
+    return connectedBrowserIntent
+      ? connectedBrowserDataPolicy(providerId)
+      : localWebviewDataPolicy()
   }
   // EXT-B1 Connected Eyes: bridge server + chrome-extension adapter.
-  // Prefer extension when paired+attached; иначе webview (local QA).
+  // Live-auth или durable pairing = connected-browser intent. Даже после обрыва
+  // связи выбор не откатывается молча во встроенный webview: extension adapter
+  // вернёт человеку точную причину недоступности.
   let browserBridge: BridgeServer | null = null
   let aiGateway: AiIpcGateway | null = null
   const extensionAdapter: BrowserAdapter = createExtensionAdapter({
     getBridge: () => browserBridge,
   })
-  // resolveAdapter: chrome-extension (live) → webview (local).
+  // Explicit preferred сохраняет оба режима; без preferred intent определяется
+  // live-auth/durable pairing bridge. Доступность проверяет controller после выбора.
   const browserResolveAdapter = (preferred?: 'electron-webview' | 'chrome-extension'): BrowserAdapter | null => {
-    if (preferred === 'chrome-extension') {
-      return extensionAdapter.available() ? extensionAdapter : null
-    }
-    if (preferred === 'electron-webview') return cachedWebviewAdapter
-    if (extensionAdapter.available()) return extensionAdapter
-    return cachedWebviewAdapter
+    const bridgeState = browserBridge?.getPublicState()
+    return selectBrowserAdapter({
+      preferred,
+      extensionAuthenticated: browserBridge?.isExtensionAuthenticated() ?? false,
+      hasDurablePairing: bridgeState?.hasDurablePairing ?? false,
+      extensionAdapter,
+      webviewAdapter: cachedWebviewAdapter,
+    })
   }
   let cachedWebviewAdapter: BrowserAdapter = createWebviewAdapter({
     // Placeholder exec — будет переопределён в configureBrowserHandler при
@@ -717,7 +733,22 @@ app.whenReady().then(() => {
   })
   logRuntime('startup.browser_controller.ready')
 
+  const bindBrowserTaskToAttachedTab = (browserTaskId: string, tab: { tabRef: string; url: string }): void => {
+    bindAttachedTabToTask({
+      browserTaskId,
+      tab,
+      storage: browserTasks,
+      taskTabs: browserTaskTabs,
+      getCapability: browserGetCapability,
+    })
+  }
+
   // EXT-B1: Native Messaging bridge endpoint + HKCU host install/repair.
+  // Один и тот же путь используется startup и экраном Settings. Иначе Settings
+  // мог чинить второй host, пока Chrome продолжал запускать первый из registry.
+  const browserHostInstallDir = process.resourcesPath && app.isPackaged
+    ? join(process.resourcesPath, 'browser-bridge')
+    : resolveDevHostInstallDir(app.getPath('userData'))
   try {
     browserBridge = createBridgeServer({
       stateDir: dir,
@@ -740,28 +771,7 @@ app.whenReady().then(() => {
         return null
       },
       onAttach: (browserTaskId, tab) => {
-        browserTasks.setTaskTab(browserTaskId, tab.tabRef)
-        browserTaskTabs.set(browserTaskId, tab.tabRef)
-        // Pin domain into task + caps so extension click (R3) is not fail-closed on empty allowlist.
-        try {
-          const host = new URL(tab.url).host
-          if (host) {
-            const t = browserTasks.get(browserTaskId)
-            const domains = t?.allowedDomains?.length ? [...t.allowedDomains] : []
-            if (!domains.includes(host)) domains.push(host)
-            browserTasks.setAllowedDomains(browserTaskId, domains)
-            // Merge into capability envelope (controller reads caps.allowedDomains).
-            const caps = browserGetCapability(browserTaskId)
-            const nextCaps = {
-              ...caps,
-              allowedDomains: Array.from(new Set([...(caps.allowedDomains || []), ...domains])),
-              allowedActionTypes: caps.allowedActionTypes.includes('click')
-                ? caps.allowedActionTypes
-                : [...caps.allowedActionTypes, 'click' as const],
-            }
-            browserTasks.setCaps(browserTaskId, nextCaps as unknown as Record<string, unknown>)
-          }
-        } catch { /* ignore */ }
+        bindBrowserTaskToAttachedTab(browserTaskId, tab)
         logRuntime('browser_bridge.attach', { browserTaskId, tabRef: tab.tabRef })
       },
       onDetach: (browserTaskId) => {
@@ -774,7 +784,9 @@ app.whenReady().then(() => {
         const projectPath = getActiveProjectPath()
         if (!projectPath) throw new Error('Откройте проект в Verstak')
         const state = browserBridge?.getPublicState()
-        if (!state?.attachedTab) throw new Error('Текущая вкладка не прикреплена')
+        if (!state?.attachedTab) {
+          throw new Error('Вкладка не выбрана. Откройте нужную страницу и нажмите значок Verstak в браузере.')
+        }
 
         const priorTask = state.browserTaskId ? browserTasks.get(state.browserTaskId) : null
         const priorChat = priorTask?.chatId ? chatSessions.get(priorTask.chatId) : null
@@ -849,11 +861,8 @@ app.whenReady().then(() => {
     if (hostSrc) {
       // Packaged layout: <app>/Verstak.exe + <app>/resources/browser-bridge/*
       // Relative from host.cmd → ../../Verstak.exe. Absolute bake = primary.
-      const hostInstallDir = process.resourcesPath && app.isPackaged
-        ? join(process.resourcesPath, 'browser-bridge')
-        : resolveDevHostInstallDir(app.getPath('userData'))
       const result = installNativeHost({
-        installDir: hostInstallDir,
+        installDir: browserHostInstallDir,
         hostScriptSource: hostSrc,
         electronExeAbsolute: process.execPath,
         electronExeRelative: app.isPackaged ? '..\\..\\Verstak.exe' : undefined,
@@ -861,6 +870,10 @@ app.whenReady().then(() => {
         // Packaged: fail-closed without Verstak.exe (no system Node dependency).
         allowNodeFallback: !app.isPackaged,
         force: true,
+        // smoke-install launches a temporary app copy that is deleted during
+        // teardown. Registering its manifest would replace the user's working
+        // HKCU NativeMessagingHosts entry with a dangling temp path.
+        registerNativeMessaging: process.env.VERSTAK_SMOKE !== '1',
       })
       logRuntime(result.ok ? 'browser_bridge.host_installed' : 'browser_bridge.host_install_fail', {
         ok: result.ok,
@@ -877,7 +890,7 @@ app.whenReady().then(() => {
   // Browser card IPC: pairing code, host install/repair, status (EXT-B1/C1).
   registerBrowserBridgeIpc({
     getBridge: () => browserBridge,
-    getStateDir: () => dir,
+    getHostInstallDir: () => browserHostInstallDir,
     getHostScriptSource: () => {
       const candidates = [
         join(process.resourcesPath || '', 'browser-bridge', 'host.mjs'),
@@ -1203,8 +1216,22 @@ app.whenReady().then(() => {
     setWebviewAdapterExec: (exec) => {
       cachedWebviewAdapter = createWebviewAdapter({ exec })
     },
-    // Map chatId → task tab ref (B0/R1: tabRef = «current webview», B1 — реальная Chrome tab).
+    resolveBrowserAdapterId: preferred => browserResolveAdapter(preferred)?.id ?? null,
+    // Map browserTaskId → task tab ref (B1 — реальная Chrome/Edge tab).
     browserTaskTabs,
+    syncBrowserContext: ({ browserTaskId, runId }) => {
+      const bridge = browserBridge
+      if (!bridge) return
+      bridge.setActiveLineage(browserTaskId, runId)
+      if (!bridge.isExtensionAuthenticated()) return
+      const tab = bridge.getPublicState().attachedTab
+      if (tab) {
+        bindBrowserTaskToAttachedTab(browserTaskId, tab)
+      } else {
+        browserTasks.setTaskTab(browserTaskId, null)
+        browserTaskTabs.delete(browserTaskId)
+      }
+    },
     setBrowserBridgeLineage: (btId, rId) => {
       try { browserBridge?.setActiveLineage(btId, rId) } catch { /* ignore */ }
     },

@@ -28,7 +28,11 @@ describe('dispatchToolTurn', () => {
   it('browser run блокирует cross-tool мутацию, но исполняет browser tool', async () => {
     const events: unknown[] = []
     const handled: string[] = []
-    const ctx = { ...context(events), browserTaskId: 'bt-1' } as ToolContext
+    const ctx = {
+      ...context(events),
+      browserTaskId: 'bt-1',
+      browserRunState: { active: true },
+    } as ToolContext
     const calls = [call('x1', 'run_command'), call('b1', 'browser_read_page')]
     const results = await dispatchToolTurn({
       toolCalls: calls,
@@ -67,6 +71,101 @@ describe('dispatchToolTurn', () => {
     })
     expect(handled).toEqual(['run_command'])
     expect(res.result).toBe('run_command')
+  })
+
+  it('наличие durable browserTaskId само по себе не превращает обычный чат в browser-only run', async () => {
+    const handled: string[] = []
+    const toolCalls = [call('x1', 'run_command'), call('x2', 'write_file')]
+    const ctx = {
+      ...context([]),
+      browserTaskId: 'bt-ordinary-chat',
+      browserRunState: { active: false },
+    } as ToolContext
+
+    const [res] = await dispatchToolTurn({
+      toolCalls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async current => {
+          handled.push(name)
+          return result(current)
+        },
+      }),
+    })
+
+    expect(handled).toEqual(['run_command', 'write_file'])
+    expect(res.result).toBe('run_command')
+  })
+
+  it('успешное чтение подключённой вкладки включает browser-only gate только для следующего model turn', async () => {
+    const events: unknown[] = []
+    const state = { active: false }
+    const ctx = {
+      ...context(events),
+      browserTaskId: 'bt-1',
+      browserRunState: state,
+    } as ToolContext
+    const resolveHandler = (_name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => result(toolCall),
+    })
+
+    const [read] = await dispatchToolTurn({
+      toolCalls: [call('b1', 'browser_read_page')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(read.error).toBeUndefined()
+    expect(state.active).toBe(true)
+
+    const [command] = await dispatchToolTurn({
+      toolCalls: [call('x1', 'run_command')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(command.error).toMatch(/Browser run|capability envelope/i)
+  })
+
+  it('ошибка чтения вкладки не включает browser-only gate для обычного чата', async () => {
+    const state = { active: false }
+    const ctx = {
+      ...context([]),
+      browserTaskId: 'bt-ordinary-chat',
+      browserRunState: state,
+    } as ToolContext
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => name === 'browser_read_page'
+        ? { ...result(toolCall), error: 'Текущая вкладка не подключена' }
+        : result(toolCall),
+    })
+
+    const [read] = await dispatchToolTurn({
+      toolCalls: [call('b1', 'browser_read_page')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(read.error).toMatch(/не подключена/i)
+    expect(state.active).toBe(false)
+
+    const [command] = await dispatchToolTurn({
+      toolCalls: [call('x1', 'run_command')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(command.error).toBeUndefined()
+    expect(command.result).toBe('run_command')
   })
 
   it('сохраняет индекс результатов и контракт scheduling для read/sequential/write', async () => {

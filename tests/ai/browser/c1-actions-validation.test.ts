@@ -6,6 +6,13 @@ import { describe, it, expect } from 'vitest'
 import { createExtensionAdapterWithTransport } from '../../../electron/ai/browser/adapters/extension'
 import type { BridgePageSnapshot } from '../../../electron/ai/browser/bridge/protocol'
 
+const SCOPE = {
+  browserTaskId: 'bt-1',
+  runId: 'run-1',
+  tabRef: 'tab-1',
+  origin: 'example.com',
+} as const
+
 function makeTestSnapshot(opts?: { url?: string; origin?: string; tabRef?: string }): BridgePageSnapshot {
   const url = opts?.url || 'https://example.com/page1'
   const origin = opts?.origin || 'https://example.com'
@@ -43,11 +50,12 @@ describe('C1 actions validation & fail-closed scope', () => {
     })
 
     // Without observe, no lineage in adapter or state
-    await expect(adapter.navigate('https://example.com/2')).rejects.toThrow(/lineage|observe/i)
-    await expect(adapter.scroll(null, { y: 100 })).rejects.toThrow(/lineage|observe/i)
-    await expect(adapter.focus('input:Select:0')).rejects.toThrow(/lineage|observe|elementRef/i)
-    await expect(adapter.selectOption!('input:Select:0', 'v1')).rejects.toThrow(/lineage|observe|elementRef/i)
-    await expect(adapter.waitFor!({ text: 'test' })).rejects.toThrow(/lineage|observe/i)
+    const missingScope = { ...SCOPE, browserTaskId: '', runId: '' }
+    await expect(adapter.navigate('https://example.com/2', missingScope)).rejects.toThrow(/browserTaskId|runId|scope/i)
+    await expect(adapter.scroll(null, { y: 100 }, missingScope)).rejects.toThrow(/browserTaskId|runId|scope/i)
+    await expect(adapter.focus('input:Select:0', missingScope)).rejects.toThrow(/browserTaskId|runId|scope/i)
+    await expect(adapter.selectOption!('input:Select:0', 'v1', missingScope)).rejects.toThrow(/browserTaskId|runId|scope/i)
+    await expect(adapter.waitFor!({ text: 'test' }, missingScope)).rejects.toThrow(/browserTaskId|runId|scope/i)
   })
 
   it('2. navigate invalidates elementRef map (lastObs = null)', async () => {
@@ -70,10 +78,10 @@ describe('C1 actions validation & fail-closed scope', () => {
     expect(obsCount).toBe(1)
 
     // Navigate must invalidate lastObs
-    await adapter.navigate('https://example.com/page2')
+    await adapter.navigate('https://example.com/page2', SCOPE)
 
     // Click after navigate without fresh observe must fail due to invalidated lastObs
-    await expect(adapter.click('button:Submit:0')).rejects.toThrow(/нет observation|elementRef/i)
+    await expect(adapter.click('button:Submit:0', SCOPE)).rejects.toThrow(/нет observation|elementRef/i)
   })
 
   it('3. scroll / focus / select_option with missing or stale elementRef fail-closed', async () => {
@@ -91,9 +99,9 @@ describe('C1 actions validation & fail-closed scope', () => {
     await adapter.observe({ browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-1' })
 
     // Element ref not in controls map -> throw
-    await expect(adapter.focus('button:NonExistent:99')).rejects.toThrow(/нет в последнем observation/i)
-    await expect(adapter.selectOption!('button:NonExistent:99', 'val')).rejects.toThrow(/нет в последнем observation/i)
-    await expect(adapter.scroll('button:NonExistent:99', { y: 50 })).rejects.toThrow(/нет в последнем observation/i)
+    await expect(adapter.focus('button:NonExistent:99', SCOPE)).rejects.toThrow(/нет в последнем observation/i)
+    await expect(adapter.selectOption!('button:NonExistent:99', 'val', SCOPE)).rejects.toThrow(/нет в последнем observation/i)
+    await expect(adapter.scroll('button:NonExistent:99', { y: 50 }, SCOPE)).rejects.toThrow(/нет в последнем observation/i)
   })
 
   it('4. select_option and focus on wrong origin or wrong tab → STOP', async () => {
@@ -106,12 +114,11 @@ describe('C1 actions validation & fail-closed scope', () => {
       requestObserve: async () => makeTestSnapshot({ tabRef: 'tab-ORIGINAL' }),
     })
 
-    // Observe recorded tab-ORIGINAL
-    await adapter.observe({ browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-ORIGINAL' })
-
-    // Action on tab-WRONG must fail-closed
-    await expect(adapter.focus('input:Select:0')).rejects.toThrow(/wrong tab|другой вкладки/i)
-    await expect(adapter.selectOption!('input:Select:0', 'v1')).rejects.toThrow(/wrong tab|другой вкладки/i)
+    const originalScope = { ...SCOPE, tabRef: 'tab-ORIGINAL' }
+    // Controller scope cannot point at a tab other than the one explicitly attached.
+    await expect(adapter.observe(originalScope)).rejects.toThrow(/wrong tab|вкладк/i)
+    await expect(adapter.focus('input:Select:0', originalScope)).rejects.toThrow(/wrong tab|вкладк/i)
+    await expect(adapter.selectOption!('input:Select:0', 'v1', originalScope)).rejects.toThrow(/wrong tab|вкладк/i)
   })
 
   it('5. reload without prior observation → honest error', async () => {
@@ -125,7 +132,7 @@ describe('C1 actions validation & fail-closed scope', () => {
     })
 
     // Without observe, reload must throw clear error (not quiet no-op)
-    await expect(adapter.reload()).rejects.toThrow(/reload невозможно|нет предшествующего observation/i)
+    await expect(adapter.reload(SCOPE)).rejects.toThrow(/reload невозможно|нет предшествующего observation/i)
   })
 
   it('6. wait_for condition checking across protocol wire', async () => {
@@ -145,7 +152,7 @@ describe('C1 actions validation & fail-closed scope', () => {
     })
 
     await adapter.observe({ browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-1' })
-    const res = await adapter.waitFor!({ text: 'Отчёт готов', timeoutMs: 5000 })
+    const res = await adapter.waitFor!({ text: 'Отчёт готов', timeoutMs: 5000 }, SCOPE)
     expect(res.ok).toBe(true)
     expect(res.reason).toBe('matched')
     expect(waitForCalled).toBe(true)

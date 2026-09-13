@@ -1,8 +1,5 @@
 // sidepanel.mjs — Product AI Employee UI for Verstak (EXT-PRODUCT-RESET).
 
-import { capturePageSnapshot } from './extractor.mjs'
-import { formatSnapshotForVerstak } from './format-prompt.mjs'
-
 const els = {
   // Product UX Elements
   statusPill: document.getElementById('vsk-status-pill'),
@@ -18,39 +15,21 @@ const els = {
   promptInput: document.getElementById('vsk-prompt-input'),
   sendBtn: document.getElementById('vsk-send-btn'),
   stopBtn: document.getElementById('vsk-stop-btn'),
-
-  // Technical / Debug Elements (Backward Compatibility)
-  pair: document.getElementById('vsk-pair'),
-  pairCode: document.getElementById('vsk-pair-code'),
-  attach: document.getElementById('vsk-attach'),
-  detach: document.getElementById('vsk-detach'),
-  observe: document.getElementById('vsk-observe'),
-  capture: document.getElementById('vsk-capture'),
-  copyVerstak: document.getElementById('vsk-copy-verstak'),
-  copyJson: document.getElementById('vsk-copy-json'),
   status: document.getElementById('vsk-status'),
-  meta: document.getElementById('vsk-meta'),
-  metaSource: document.getElementById('vsk-meta-source'),
-  metaTextLen: document.getElementById('vsk-meta-textlen'),
-  metaTables: document.getElementById('vsk-meta-tables'),
-  metaTruncWrap: document.getElementById('vsk-meta-trunc-wrap'),
-  metaTrunc: document.getElementById('vsk-meta-trunc'),
-  metaOmissionsWrap: document.getElementById('vsk-meta-omissions-wrap'),
-  metaOmissions: document.getElementById('vsk-meta-omissions'),
-  output: document.getElementById('vsk-output'),
-  connState: document.getElementById('vsk-conn-state'),
-  connTask: document.getElementById('vsk-conn-task'),
-  connRun: document.getElementById('vsk-conn-run'),
-  connTab: document.getElementById('vsk-conn-tab'),
 }
 
-let lastSnapshot = null
-let lastFormatted = ''
-let activeTabInfo = null
 let pendingApproval = null
 let activeSendId = null
 let streamText = ''
 let streamNode = null
+let promptSubmitting = false
+let approvalSubmitting = false
+let submitSequence = 0
+let activeSubmitSequence = null
+let activeStepCard = null
+const retiredSendIds = new Set()
+const SETTINGS_CONNECTION_HELP =
+  'Откройте Verstak → Настройки → Интеграции → Браузер, нажмите «Подключить браузер», затем снова нажмите значок Verstak на этой странице'
 
 let bridgeState = {
   ui: 'offline',
@@ -75,6 +54,42 @@ function updateStatusPill(state, text) {
   if (!els.statusPill) return
   els.statusPill.className = 'vsk-pill is-' + state
   els.statusPill.textContent = text
+}
+
+function updatePromptAvailability() {
+  const attached = bridgeState.ui === 'attached' && !!bridgeState.attachedTab
+  const enabled = attached && !promptSubmitting && !activeSendId
+  if (els.promptInput) {
+    els.promptInput.disabled = !enabled
+    els.promptInput.placeholder = attached
+      ? 'Что сделать на этой странице?'
+      : 'Сначала подключите вкладку'
+  }
+  if (els.sendBtn) els.sendBtn.disabled = !enabled
+  if (els.stopBtn) {
+    els.stopBtn.classList.toggle('vsk-hidden', !activeSendId)
+    els.stopBtn.disabled = !activeSendId || promptSubmitting
+  }
+}
+
+function normalizeSendId(value) {
+  const sendId = Number(value)
+  return Number.isSafeInteger(sendId) && sendId > 0 ? sendId : null
+}
+
+function rememberRetiredSendId(sendId) {
+  if (!sendId) return
+  retiredSendIds.add(sendId)
+  if (retiredSendIds.size > 32) {
+    retiredSendIds.delete(retiredSendIds.values().next().value)
+  }
+}
+
+function removeActiveStepCard() {
+  if (activeStepCard?.parentNode) {
+    activeStepCard.parentNode.removeChild(activeStepCard)
+  }
+  activeStepCard = null
 }
 
 function addMessage(role, lines) {
@@ -141,68 +156,41 @@ function appendAssistantText(text) {
   if (els.chatFeed) els.chatFeed.scrollTop = els.chatFeed.scrollHeight
 }
 
-function renderResult(snapshot) {
-  lastSnapshot = snapshot
-  lastFormatted = formatSnapshotForVerstak(snapshot)
-  if (els.output) els.output.value = lastFormatted
-
-  const src = (snapshot && snapshot.source) || {}
-  if (els.metaSource) {
-    els.metaSource.textContent = (src.url || '(без URL)') + (src.title ? ' · ' + src.title : '')
-  }
-  if (els.metaTextLen) els.metaTextLen.textContent = String((snapshot.text || '').length)
-  if (els.metaTables) {
-    els.metaTables.textContent = String(Array.isArray(snapshot.tables) ? snapshot.tables.length : 0)
-  }
-
-  const trunc = snapshot.truncated || {}
-  const truncParts = []
-  if (trunc.text) truncParts.push('текст')
-  if (trunc.selection) truncParts.push('выделение')
-  if (trunc.tables) truncParts.push('таблицы')
-  if (truncParts.length && els.metaTrunc && els.metaTruncWrap) {
-    els.metaTrunc.textContent = truncParts.join(', ')
-    els.metaTruncWrap.classList.remove('vsk-hidden')
-  } else if (els.metaTruncWrap) {
-    els.metaTruncWrap.classList.add('vsk-hidden')
-  }
-
-  const omissions = Array.isArray(snapshot.omissions) ? snapshot.omissions.filter(Boolean) : []
-  if (omissions.length && els.metaOmissions && els.metaOmissionsWrap) {
-    els.metaOmissions.textContent = String(omissions.length) + ' шт.'
-    els.metaOmissionsWrap.classList.remove('vsk-hidden')
-  } else if (els.metaOmissionsWrap) {
-    els.metaOmissionsWrap.classList.add('vsk-hidden')
-  }
-
-  if (els.meta) els.meta.classList.remove('vsk-hidden')
-  if (els.copyVerstak) els.copyVerstak.disabled = false
-  if (els.copyJson) els.copyJson.disabled = false
-}
-
 function paintConn(state) {
   bridgeState = state || bridgeState
   const ui = bridgeState.ui || 'offline'
-  if (els.connState) {
-    els.connState.textContent = ui
-    els.connState.className = 'vsk-conn-badge is-' + ui
+  const tab = bridgeState.attachedTab
+  if ((ui === 'offline' || ui === 'error') && (activeSendId || promptSubmitting)) {
+    rememberRetiredSendId(activeSendId)
+    activeSendId = null
+    activeSubmitSequence = null
+    promptSubmitting = false
+    pendingApproval = null
+    removeActiveStepCard()
+    hideApprovalCard()
+    addMessage('assistant', [
+      '⚠️ Связь с Verstak прервалась.',
+      'Проверьте результат в основном чате перед повтором действия.',
+    ])
   }
-  if (els.connTask) els.connTask.textContent = bridgeState.browserTaskId || '—'
-  if (els.connRun) els.connRun.textContent = bridgeState.runId || '—'
-  if (els.connTab) {
-    const t = bridgeState.attachedTab
-    els.connTab.textContent = t
-      ? ((t.title || t.url || t.tabRef || '').slice(0, 80))
-      : 'не прикреплена'
+  if (tab) {
+    if (els.pageTitle) els.pageTitle.textContent = tab.title || 'Текущая страница'
+    try {
+      const u = new URL(tab.url || '')
+      if (els.pageDomain) els.pageDomain.textContent = u.host || u.protocol
+    } catch {
+      if (els.pageDomain) els.pageDomain.textContent = ''
+    }
   }
-
   if (ui === 'attached') {
     updateStatusPill('attached', '● Подключено')
+    setStatus('success', 'Текущая вкладка подключена')
   } else if (ui === 'paired') {
-    updateStatusPill('connected', '● Вкладка готова')
+    updateStatusPill('connecting', '● Связь готова')
   } else {
     updateStatusPill('offline', '○ Авто-подключение')
   }
+  updatePromptAvailability()
 }
 
 async function queryBridgeState() {
@@ -217,36 +205,17 @@ async function queryBridgeState() {
   }
 }
 
-async function autoConnectAndAttach() {
-  if (!chrome?.tabs?.query) return
+async function autoConnect() {
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    const tab = tabs[0]
-    if (tab) {
-      activeTabInfo = tab
-      if (els.pageTitle) els.pageTitle.textContent = tab.title || 'Текущая страница'
-      try {
-        const u = new URL(tab.url || '')
-        if (els.pageDomain) els.pageDomain.textContent = u.host || u.protocol
-      } catch {
-        if (els.pageDomain) els.pageDomain.textContent = tab.url || ''
-      }
-    }
-
-    // Auto connect bridge
     const connRes = await chrome.runtime.sendMessage({ type: 'bridge.connect' })
     if (connRes && connRes.state) {
       paintConn(connRes.state)
     }
-
-    // Auto attach active tab
-    const attachRes = await chrome.runtime.sendMessage({ type: 'bridge.attach' })
-    if (attachRes && attachRes.state) {
-      paintConn(attachRes.state)
-      setStatus('success', 'Автоматически подключено к текущей странице')
+    if (!connRes?.ok) {
+      setStatus('warn', SETTINGS_CONNECTION_HELP)
     }
-  } catch (err) {
-    setStatus('warn', 'Подключение к странице: ' + (err?.message || err))
+  } catch {
+    setStatus('warn', SETTINGS_CONNECTION_HELP)
   }
 }
 
@@ -255,6 +224,11 @@ async function autoConnectAndAttach() {
 async function processUserPrompt(promptText) {
   const p = promptText.trim()
   if (!p) return
+  if (bridgeState.ui !== 'attached' || !bridgeState.attachedTab) {
+    setStatus('warn', 'Сначала нажмите значок Verstak на нужной странице')
+    return
+  }
+  if (promptSubmitting || activeSendId) return
 
   addMessage('user', [p])
   if (els.promptInput) els.promptInput.value = ''
@@ -262,24 +236,51 @@ async function processUserPrompt(promptText) {
   streamText = ''
   streamNode = null
   const stepCard = addStepCard('Передаю задачу в Verstak...')
+  activeStepCard = stepCard
+  const submitId = ++submitSequence
+  activeSubmitSequence = submitId
+  promptSubmitting = true
+  updatePromptAvailability()
 
-  const res = await chrome.runtime.sendMessage({ type: 'bridge.submitTask', prompt: p })
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: 'bridge.submitTask',
+      prompt: p,
+    })
 
-  if (stepCard?.parentNode) stepCard.parentNode.removeChild(stepCard)
-  if (!res?.ok) {
-    const err = String(res?.error || 'offline')
-    if (err.includes('offline') || err.includes('native port') || err.includes('not found')) {
-      addMessage('assistant', [
-        '🔴 Verstak Desktop оффлайн',
-        'Для связи с AI-сотрудником запустите приложение Verstak на ПК.',
-        { text: 'Статус: Native Messaging Host offline', subtext: true },
-      ])
-    } else {
-      addMessage('assistant', ['⚠️ Не удалось запустить задачу: ' + err])
+    // A disconnected request may settle after a later request already started.
+    // Its response belongs to the old bridge generation and must not take over UI.
+    if (activeSubmitSequence !== submitId) return
+
+    if (!res?.ok) {
+      const err = String(res?.error || 'offline')
+      if (err.includes('offline') || err.includes('native port') || err.includes('not found')) {
+        addMessage('assistant', [
+          '🔴 Verstak Desktop оффлайн',
+          'Для связи с AI-сотрудником запустите приложение Verstak на ПК.',
+        ])
+      } else {
+        addMessage('assistant', ['⚠️ Не удалось запустить задачу: ' + err])
+      }
+      return
     }
-    return
+    const returnedSendId = normalizeSendId(res.task?.sendId)
+    if (returnedSendId && !retiredSendIds.has(returnedSendId)) {
+      activeSendId = returnedSendId
+    }
+  } catch (err) {
+    if (activeSubmitSequence === submitId) {
+      addMessage('assistant', ['⚠️ Не удалось запустить задачу: ' + (err?.message || err)])
+    }
+  } finally {
+    if (activeSubmitSequence === submitId) {
+      if (stepCard?.parentNode) stepCard.parentNode.removeChild(stepCard)
+      if (activeStepCard === stepCard) activeStepCard = null
+      activeSubmitSequence = null
+      promptSubmitting = false
+      updatePromptAvailability()
+    }
   }
-  activeSendId = res.task?.sendId ?? activeSendId
 }
 
 function showApprovalCard(payload) {
@@ -293,73 +294,28 @@ function hideApprovalCard() {
   if (els.approvalArea) els.approvalArea.classList.add('vsk-hidden')
 }
 
-// ── ActiveTab Error Flow (Scenario 16) ───────────────────────────────────────
-
-async function onCapture() {
-  setStatus('warn', 'Чтение...')
-  if (!chrome || !chrome.tabs || typeof chrome.tabs.query !== 'function') {
-    setStatus('error', 'Ошибка среды: chrome.tabs недоступен.')
-    return
-  }
-
+async function resolvePendingApproval(approved) {
+  if (!pendingApproval || approvalSubmitting) return
+  const payload = pendingApproval
+  approvalSubmitting = true
+  if (els.approveBtn) els.approveBtn.disabled = true
+  if (els.rejectBtn) els.rejectBtn.disabled = true
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tabs || tabs.length === 0) {
-      setStatus('error', 'Ошибка: нет активной вкладки в текущем окне.')
-      return
-    }
-
-    const tab = tabs[0]
-    if (tab.id === undefined || tab.id === null) {
-      setStatus('error', 'Ошибка: у активной вкладки отсутствует идентификатор.')
-      return
-    }
-
-    if (tab.url) {
-      const u = String(tab.url).trim().toLowerCase()
-      if (
-        u.startsWith('chrome://') ||
-        u.startsWith('chrome-extension://') ||
-        u.startsWith('edge://') ||
-        u.startsWith('about:')
-      ) {
-        setStatus('error', 'Системная страница Chrome недоступна для чтения расширением.')
-        return
-      }
-    }
-
-    if (!chrome.scripting || typeof chrome.scripting.executeScript !== 'function') {
-      setStatus('error', 'Ошибка среды: chrome.scripting.executeScript недоступен.')
-      return
-    }
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: capturePageSnapshot,
-      args: [{ maxTextLength: 40000, maxTables: 10, maxTableRows: 50 }],
+    const res = await chrome.runtime.sendMessage({
+      type: 'bridge.resolveTaskApproval',
+      payload: { ...payload, approved, sendId: payload.sendId || activeSendId },
     })
-
-    if (!results || !Array.isArray(results) || results.length === 0) {
-      setStatus('error', 'Не удалось извлечь содержимое страницы.')
-      return
+    if (!res?.ok) throw new Error(res?.error || 'решение не доставлено')
+    if (pendingApproval === payload) {
+      pendingApproval = null
+      hideApprovalCard()
     }
-
-    const first = results[0]
-    const snapshot = first ? first.result : null
-    if (!snapshot) {
-      setStatus('error', 'Страница не вернула данных.')
-      return
-    }
-
-    renderResult(snapshot)
-    setStatus('success', 'Снимок успешно сохранён в превью.')
   } catch (err) {
-    const msg = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err)
-    if (msg.includes('Cannot access contents') || msg.includes('manifest must request permission')) {
-      setStatus('error', 'Нет доступа к вкладке: нажмите иконку расширения для выдачи разрешения activeTab.')
-    } else {
-      setStatus('error', 'Ошибка выполнения: ' + msg)
-    }
+    setStatus('warn', 'Не удалось отправить решение: ' + (err?.message || err))
+  } finally {
+    approvalSubmitting = false
+    if (els.approveBtn) els.approveBtn.disabled = false
+    if (els.rejectBtn) els.rejectBtn.disabled = false
   }
 }
 
@@ -385,42 +341,55 @@ if (els.promptInput) {
 
 if (els.approveBtn) {
   els.approveBtn.addEventListener('click', async () => {
-    if (!pendingApproval) return
-    const payload = pendingApproval
-    pendingApproval = null
-    hideApprovalCard()
-    await chrome.runtime.sendMessage({
-      type: 'bridge.resolveTaskApproval',
-      payload: { ...payload, approved: true, sendId: payload.sendId || activeSendId },
-    })
+    await resolvePendingApproval(true)
   })
 }
 
 if (els.rejectBtn) {
   els.rejectBtn.addEventListener('click', async () => {
-    if (!pendingApproval) return
-    const payload = pendingApproval
-    pendingApproval = null
-    hideApprovalCard()
-    await chrome.runtime.sendMessage({
-      type: 'bridge.resolveTaskApproval',
-      payload: { ...payload, approved: false, sendId: payload.sendId || activeSendId },
-    })
+    await resolvePendingApproval(false)
   })
 }
 
 if (els.stopBtn) {
   els.stopBtn.addEventListener('click', async () => {
     if (!activeSendId) return
-    await chrome.runtime.sendMessage({ type: 'bridge.cancelTask', sendId: activeSendId })
+    const stoppedSendId = activeSendId
+    els.stopBtn.disabled = true
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'bridge.cancelTask', sendId: stoppedSendId })
+      if (!res?.ok) throw new Error(res?.error || 'остановка не доставлена')
+      rememberRetiredSendId(stoppedSendId)
+      if (activeSendId === stoppedSendId) {
+        activeSendId = null
+        activeSubmitSequence = null
+        promptSubmitting = false
+        removeActiveStepCard()
+        pendingApproval = null
+        hideApprovalCard()
+        setStatus('success', 'Остановлено')
+        updatePromptAvailability()
+      }
+    } catch (err) {
+      setStatus('warn', 'Не удалось остановить задачу: ' + (err?.message || err))
+      els.stopBtn.disabled = false
+    }
   })
 }
 
 chrome.runtime.onMessage?.addListener((message) => {
+  if (message?.type === 'bridge.stateChanged') {
+    paintConn(message.state)
+    return
+  }
   if (message?.type !== 'bridge.taskEvent') return
   const packet = message.payload || {}
   const event = packet.event || {}
-  activeSendId = packet.sendId || activeSendId
+  const eventSendId = normalizeSendId(packet.sendId)
+  if (!eventSendId || retiredSendIds.has(eventSendId)) return
+  if (activeSendId && activeSendId !== eventSendId) return
+  activeSendId = eventSendId
+  updatePromptAvailability()
   if (event.type === 'text' && typeof event.text === 'string') {
     appendAssistantText(event.text)
   } else if (event.type === 'agent-progress') {
@@ -430,51 +399,27 @@ chrome.runtime.onMessage?.addListener((message) => {
   } else if (event.type === 'error') {
     addMessage('assistant', [event.message || 'Ошибка выполнения'])
     updateStatusPill('error', 'Ошибка')
+    rememberRetiredSendId(eventSendId)
     activeSendId = null
+    activeSubmitSequence = null
+    promptSubmitting = false
+    removeActiveStepCard()
+    pendingApproval = null
+    hideApprovalCard()
+    updatePromptAvailability()
   } else if (event.type === 'done') {
     updateStatusPill('ready', 'Готово')
+    rememberRetiredSendId(eventSendId)
     activeSendId = null
+    activeSubmitSequence = null
+    promptSubmitting = false
+    removeActiveStepCard()
+    pendingApproval = null
+    hideApprovalCard()
+    updatePromptAvailability()
   }
 })
 
-if (els.capture) {
-  els.capture.addEventListener('click', () => {
-    onCapture()
-  })
-}
-
-if (els.pair) {
-  els.pair.addEventListener('click', async () => {
-    const code = (els.pairCode && els.pairCode.value ? els.pairCode.value.trim() : '')
-    const res = await chrome.runtime.sendMessage({ type: 'bridge.connect', pairingToken: code })
-    if (res && res.state) paintConn(res.state)
-  })
-}
-
-if (els.attach) {
-  els.attach.addEventListener('click', async () => {
-    const res = await chrome.runtime.sendMessage({ type: 'bridge.attach' })
-    if (res && res.state) paintConn(res.state)
-  })
-}
-
-if (els.detach) {
-  els.detach.addEventListener('click', async () => {
-    const res = await chrome.runtime.sendMessage({ type: 'bridge.detach' })
-    if (res && res.state) paintConn(res.state)
-  })
-}
-
-if (els.observe) {
-  els.observe.addEventListener('click', async () => {
-    const res = await chrome.runtime.sendMessage({ type: 'bridge.observeNow' })
-    if (res && res.observe && res.observe.snapshot) {
-      renderResult(res.observe.snapshot)
-      setStatus('success', 'Observe отправлен в run!')
-    }
-  })
-}
-
 // Auto init on load
 queryBridgeState()
-autoConnectAndAttach()
+autoConnect()

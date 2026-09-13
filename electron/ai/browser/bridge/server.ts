@@ -40,6 +40,14 @@ import {
   type BridgeSessionStore,
   type BridgeSessionState,
 } from './session'
+import { UnknownBrowserEffectError } from '../errors'
+
+const BROWSER_AUTH_REQUIRED_MESSAGE =
+  'Браузер не авторизован. Откройте Настройки → Интеграции → Браузер и нажмите «Подключить браузер».'
+const BROWSER_OFFLINE_MESSAGE =
+  'Браузер не подключён. Откройте Настройки → Интеграции → Браузер и проверьте соединение.'
+const BROWSER_TAB_REQUIRED_MESSAGE =
+  'Вкладка не выбрана. Откройте нужную страницу и нажмите значок Verstak в браузере.'
 
 export interface PendingObserve {
   requestId: string
@@ -171,6 +179,17 @@ interface SocketAuth {
   authenticated: boolean
   extensionId: string | null
 }
+
+interface BrowserSendBinding {
+  socket: Socket
+  requestId: string
+  sendId: number | null
+  live: boolean
+  terminal: boolean
+  cancelIssued: boolean
+}
+
+type BrowserTaskEvent = { requestId: string; sendId: number; event: unknown }
 
 export interface BridgeServerDeps {
   /** Каталог userData/storage для pairing file + socket path file. */
@@ -311,6 +330,11 @@ export interface BridgeServer {
   pushTaskEvent(input: { requestId: string; sendId: number; event: unknown }): void
   setActiveLineage(browserTaskId: string | null, runId: string | null): void
   /**
+   * Settings explicitly authorizes one credential-less first pair for a short
+   * time. The window is kept only in memory and is consumed atomically.
+   */
+  openAutoPairWindow(opts?: { ttlMs?: number }): { expiresAt: number }
+  /**
    * Выдать одноразовый bootstrap code для первого pair.
    * Полный code возвращается caller'у (UI); в logs — только fingerprint.
    */
@@ -346,7 +370,6 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
   let endpoint: string | null = null
   let client: Socket | null = null
   let socketAuth: SocketAuth | null = null
-  const decoder = new NativeFrameDecoder()
   const pendingObserves = new Map<string, PendingObserve>()
   const pendingClicks = new Map<string, PendingClick>()
   const pendingNavigates = new Map<string, PendingNavigate>()
@@ -361,15 +384,99 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
   const observeTimeout = deps.observeTimeoutMs ?? 15_000
   const clickTimeout = 12_000
   const log = deps.log ?? (() => {})
+  const autoPairWindowMaxTtlMs = 60_000
+  let autoPairWindowExpiresAt = 0
+  let activeBrowserSend: BrowserSendBinding | null = null
+  const unresolvedBrowserSends = new Set<BrowserSendBinding>()
+  const bufferedTaskEvents = new Map<number, BrowserTaskEvent[]>()
+  const retiredBrowserSendIds = new Set<number>()
 
-  function send(msg: BridgeOutbound): void {
-    if (!client || client.destroyed) return
+  function consumeAutoPairWindow(): boolean {
+    const expiresAt = autoPairWindowExpiresAt
+    // Consume before any credential minting so repeated blank pair requests
+    // cannot share one Settings authorization.
+    autoPairWindowExpiresAt = 0
+    if (!expiresAt || Date.now() >= expiresAt) return false
+    log('bridge.auto_pair_window_consumed', { expiresAt })
+    return true
+  }
+
+  function sendTo(socket: Socket | null, msg: BridgeOutbound): void {
+    if (!socket || socket.destroyed) return
     try {
       const json = serializeOutbound(msg)
-      client.write(encodeNativeFrame(json))
+      socket.write(encodeNativeFrame(json))
     } catch (err) {
       log('bridge.send_fail', { err: err instanceof Error ? err.message : String(err) })
     }
+  }
+
+  function send(msg: BridgeOutbound): void {
+    sendTo(client, msg)
+  }
+
+  function rememberRetiredBrowserSend(sendId: number): void {
+    retiredBrowserSendIds.add(sendId)
+    bufferedTaskEvents.delete(sendId)
+    if (retiredBrowserSendIds.size > 128) {
+      retiredBrowserSendIds.delete(retiredBrowserSendIds.values().next().value!)
+    }
+  }
+
+  function isLiveBrowserSend(binding: BrowserSendBinding): boolean {
+    return (
+      binding.live
+      && activeBrowserSend === binding
+      && client === binding.socket
+      && socketAuth?.socket === binding.socket
+      && socketAuth.authenticated
+      && !binding.socket.destroyed
+    )
+  }
+
+  function requestBrowserSendCancel(binding: BrowserSendBinding, reason: string): void {
+    if (binding.cancelIssued || binding.terminal || binding.sendId === null) return
+    binding.cancelIssued = true
+    try {
+      deps.onTaskCancel?.(binding.sendId)
+    } catch (err) {
+      log('bridge.task_cancel_fail', {
+        sendId: binding.sendId,
+        reason,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  function retireBrowserSend(binding: BrowserSendBinding, reason: string, cancel: boolean): void {
+    binding.live = false
+    if (activeBrowserSend === binding) activeBrowserSend = null
+    if (cancel) requestBrowserSendCancel(binding, reason)
+    if (binding.sendId !== null) rememberRetiredBrowserSend(binding.sendId)
+  }
+
+  function deliverTaskEvent(binding: BrowserSendBinding, input: BrowserTaskEvent): void {
+    if (!isLiveBrowserSend(binding) || binding.sendId !== input.sendId) return
+    sendTo(binding.socket, {
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'task_event',
+      requestId: input.requestId,
+      sendId: input.sendId,
+      event: input.event,
+    })
+    const eventType = input.event && typeof input.event === 'object'
+      ? String((input.event as { type?: unknown }).type || '')
+      : ''
+    if (eventType === 'done' || eventType === 'error') {
+      binding.terminal = true
+      retireBrowserSend(binding, `task_${eventType}`, false)
+    }
+  }
+
+  function detachActiveBrowserSend(expected?: Socket): void {
+    const binding = activeBrowserSend
+    if (!binding || (expected && binding.socket !== expected)) return
+    retireBrowserSend(binding, 'bridge_detach', true)
   }
 
   function requireHello(requestId: string): boolean {
@@ -398,6 +505,32 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       && expected.runId === got.runId
       && expected.tabRef === got.tabRef
     )
+  }
+
+  function requireResultLineage(
+    kind: string,
+    expected: { browserTaskId: string; runId: string; tabRef: string },
+    got: { requestId: string; browserTaskId: string; runId: string; tabRef: string },
+  ): boolean {
+    if (lineageMatches(expected, got)) return true
+    send(makeError(
+      got.requestId,
+      'lineage_mismatch',
+      `${kind} browserTaskId/runId/tabRef mismatch (fail-closed)`,
+    ))
+    log(`bridge.${kind}_lineage_mismatch`, {
+      expected: {
+        browserTaskId: expected.browserTaskId,
+        runId: expected.runId,
+        tabRef: expected.tabRef,
+      },
+      got: {
+        browserTaskId: got.browserTaskId,
+        runId: got.runId,
+        tabRef: got.tabRef,
+      },
+    })
+    return false
   }
 
   function handleInbound(msg: BridgeInbound): void {
@@ -439,9 +572,28 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       }
       case 'pair': {
         if (!requireHello(msg.requestId)) return
-        const verified = session.verifyPairing(msg.pairingToken, msg.sessionId)
+        // Durable credentials reconnect automatically. A credential-less first
+        // pair additionally needs the short one-shot window opened from Settings.
+        const credentiallessPair = !msg.pairingToken && !msg.sessionId
+        const verified = credentiallessPair
+          ? (consumeAutoPairWindow() ? (() => {
+              const bootstrap = session.issueBootstrapCode()
+              log('bridge.bootstrap_issued', {
+                fp: tokenFingerprint(bootstrap.code),
+                expiresAt: bootstrap.expiresAt,
+                automatic: true,
+                authorizedBySettings: true,
+              })
+              return session.verifyPairing(bootstrap.code, undefined)
+            })() : {
+              ok: false as const,
+              reason: 'автоматический pair не разрешён: откройте окно подключения в Settings',
+            })
+          : session.verifyPairing(msg.pairingToken, msg.sessionId)
         if (!verified.ok) {
-          session.setError(verified.reason)
+          // A blank first attempt is the normal pre-Settings handshake. Keep the
+          // protocol rejection, but do not turn public UI into a repair state.
+          if (!credentiallessPair) session.setError(verified.reason)
           send(makeError(msg.requestId, 'pair_rejected', verified.reason))
           return
         }
@@ -512,28 +664,84 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           send(makeError(msg.requestId, 'task_unavailable', 'Запуск задач из браузера не подключён'))
           return
         }
+        if (activeBrowserSend?.live) {
+          send(makeError(msg.requestId, 'task_busy', 'Предыдущая браузерная задача ещё выполняется'))
+          return
+        }
+        const taskSocket = client
+        if (!taskSocket) {
+          send(makeError(msg.requestId, 'no_socket', 'нет активного socket'))
+          return
+        }
+        const binding: BrowserSendBinding = {
+          socket: taskSocket,
+          requestId: msg.requestId,
+          sendId: null,
+          live: true,
+          terminal: false,
+          cancelIssued: false,
+        }
+        activeBrowserSend = binding
+        unresolvedBrowserSends.add(binding)
         void deps.onTaskSubmit(msg.prompt).then((result) => {
-          send({
+          unresolvedBrowserSends.delete(binding)
+          binding.sendId = result.sendId
+          if (!isLiveBrowserSend(binding)) {
+            retireBrowserSend(binding, 'submit_resolved_after_detach', true)
+            return
+          }
+          sendTo(binding.socket, {
             v: BRIDGE_PROTOCOL_VERSION,
             type: 'task_submit',
             requestId: msg.requestId,
             ok: true,
             ...result,
           })
+          const queued = bufferedTaskEvents.get(result.sendId) || []
+          bufferedTaskEvents.delete(result.sendId)
+          for (const event of queued) {
+            deliverTaskEvent(binding, event)
+            if (!binding.live) break
+          }
         }).catch((err) => {
-          send(makeError(msg.requestId, 'task_start_failed', err instanceof Error ? err.message : String(err)))
+          unresolvedBrowserSends.delete(binding)
+          if (activeBrowserSend === binding) activeBrowserSend = null
+          binding.live = false
+          if (client === binding.socket && socketAuth?.socket === binding.socket && socketAuth.authenticated) {
+            sendTo(binding.socket, makeError(
+              msg.requestId,
+              'task_start_failed',
+              err instanceof Error ? err.message : String(err),
+            ))
+          }
         })
         return
       }
       case 'task_approval': {
         if (!requireAuth(msg.requestId)) return
+        if (
+          !activeBrowserSend
+          || !isLiveBrowserSend(activeBrowserSend)
+          || activeBrowserSend.sendId !== msg.sendId
+        ) {
+          send(makeError(msg.requestId, 'stale_task', 'approval относится не к активной браузерной задаче'))
+          return
+        }
         deps.onTaskApproval?.(msg)
         send({ v: BRIDGE_PROTOCOL_VERSION, type: 'task_approval', requestId: msg.requestId, ok: true })
         return
       }
       case 'task_cancel': {
         if (!requireAuth(msg.requestId)) return
-        deps.onTaskCancel?.(msg.sendId)
+        if (
+          !activeBrowserSend
+          || !isLiveBrowserSend(activeBrowserSend)
+          || activeBrowserSend.sendId !== msg.sendId
+        ) {
+          send(makeError(msg.requestId, 'stale_task', 'cancel относится не к активной браузерной задаче'))
+          return
+        }
+        retireBrowserSend(activeBrowserSend, 'task_cancel', true)
         send({ v: BRIDGE_PROTOCOL_VERSION, type: 'task_cancel', requestId: msg.requestId, ok: true })
         return
       }
@@ -569,6 +777,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         if (!requireAuth(msg.requestId)) return
         const st0 = session.getState()
         const bt = msg.browserTaskId || st0.browserTaskId
+        detachActiveBrowserSend(client || undefined)
         session.detachTab()
         if (bt) {
           try { deps.onDetach?.(bt) } catch { /* ignore */ }
@@ -588,30 +797,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
         const pending = pendingObserves.get(msg.requestId)
         if (pending) {
-          if (!lineageMatches(pending, msg)) {
-            // Mismatch: do NOT resolve pending, do NOT pass snapshot to agent.
-            send(makeError(
-              msg.requestId,
-              'lineage_mismatch',
-              'observe browserTaskId/runId/tabRef не совпали с ожидаемыми (fail-closed)',
-            ))
-            log('bridge.observe_lineage_mismatch', {
-              expected: {
-                browserTaskId: pending.browserTaskId,
-                runId: pending.runId,
-                tabRef: pending.tabRef,
-              },
-              got: {
-                browserTaskId: msg.browserTaskId,
-                runId: msg.runId,
-                tabRef: msg.tabRef,
-              },
-            })
-            return
-          }
+          if (!requireResultLineage('observe', pending, msg)) return
           clearTimeout(pending.timer)
           pendingObserves.delete(msg.requestId)
-          pending.resolve(msg.snapshot)
+          if (!msg.ok || !msg.snapshot) {
+            pending.reject(new Error(`observe failed: ${msg.error || 'extension capture failed'}`))
+          } else {
+            pending.resolve(msg.snapshot)
+          }
           send({
             v: BRIDGE_PROTOCOL_VERSION,
             type: 'observe',
@@ -626,6 +819,10 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         }
 
         // Unsolicited observe: only authenticated+attached + active lineage.
+        if (!msg.ok || !msg.snapshot) {
+          send(makeError(msg.requestId, 'observe_failed', msg.error || 'extension capture failed'))
+          return
+        }
         const st = session.getState()
         if (!st.attachedTab) {
           send(makeError(msg.requestId, 'not_attached', 'unsolicited observe без attach'))
@@ -712,26 +909,22 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         pendingClicks.delete(msg.requestId)
         if (msg.ok) {
           pending.resolve({ ok: true, finalUrl: msg.finalUrl || '' })
-          send({
-            v: BRIDGE_PROTOCOL_VERSION,
-            type: 'click',
-            requestId: msg.requestId,
-            ok: true,
-            browserTaskId: msg.browserTaskId,
-            runId: msg.runId,
-            tabRef: msg.tabRef,
-            elementRef: msg.elementRef,
-          })
         } else {
           pending.resolve({ ok: false, error: msg.error || 'click failed' })
-          send(makeError(msg.requestId, 'click_failed', msg.error || 'click failed'))
         }
+        // ACK receipt independently of the browser operation result, so the
+        // extension does not retry a one-shot effect after a transport timeout.
+        send(msg)
         return
       }
       case 'navigate': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingNavigates.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_navigate', 'нет pending navigate / already settled'))
+          return
+        }
+        if (!requireResultLineage('navigate', pending, msg)) return
         clearTimeout(pending.timer)
         pendingNavigates.delete(msg.requestId)
         if (msg.ok) {
@@ -739,12 +932,17 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'navigate failed' })
         }
+        send(msg)
         return
       }
       case 'scroll': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingScrolls.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_scroll', 'нет pending scroll / already settled'))
+          return
+        }
+        if (!requireResultLineage('scroll', pending, msg)) return
         clearTimeout(pending.timer)
         pendingScrolls.delete(msg.requestId)
         if (msg.ok) {
@@ -752,12 +950,17 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'scroll failed' })
         }
+        send(msg)
         return
       }
       case 'focus': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingFocuses.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_focus', 'нет pending focus / already settled'))
+          return
+        }
+        if (!requireResultLineage('focus', pending, msg)) return
         clearTimeout(pending.timer)
         pendingFocuses.delete(msg.requestId)
         if (msg.ok) {
@@ -765,12 +968,17 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'focus failed' })
         }
+        send(msg)
         return
       }
       case 'select_option': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingSelects.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_select_option', 'нет pending select_option / already settled'))
+          return
+        }
+        if (!requireResultLineage('select_option', pending, msg)) return
         clearTimeout(pending.timer)
         pendingSelects.delete(msg.requestId)
         if (msg.ok) {
@@ -778,12 +986,17 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'select_option failed' })
         }
+        send(msg)
         return
       }
       case 'wait_for': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingWaitFors.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_wait_for', 'нет pending wait_for / already settled'))
+          return
+        }
+        if (!requireResultLineage('wait_for', pending, msg)) return
         clearTimeout(pending.timer)
         pendingWaitFors.delete(msg.requestId)
         if (msg.ok) {
@@ -791,12 +1004,22 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, reason: msg.reason, error: msg.error || 'wait_for failed' })
         }
+        send(msg)
         return
       }
       case 'type_text': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingTypeTexts.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_type_text', 'нет pending type_text / already settled'))
+          return
+        }
+        if (!requireResultLineage('type_text', pending, msg) || pending.elementRef !== msg.elementRef) {
+          if (pending.elementRef !== msg.elementRef) {
+            send(makeError(msg.requestId, 'lineage_mismatch', 'type_text elementRef mismatch (fail-closed)'))
+          }
+          return
+        }
         clearTimeout(pending.timer)
         pendingTypeTexts.delete(msg.requestId)
         if (msg.ok) {
@@ -804,12 +1027,22 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'type_text failed' })
         }
+        send(msg)
         return
       }
       case 'clear_field': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingClearFields.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_clear_field', 'нет pending clear_field / already settled'))
+          return
+        }
+        if (!requireResultLineage('clear_field', pending, msg) || pending.elementRef !== msg.elementRef) {
+          if (pending.elementRef !== msg.elementRef) {
+            send(makeError(msg.requestId, 'lineage_mismatch', 'clear_field elementRef mismatch (fail-closed)'))
+          }
+          return
+        }
         clearTimeout(pending.timer)
         pendingClearFields.delete(msg.requestId)
         if (msg.ok) {
@@ -817,12 +1050,22 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'clear_field failed' })
         }
+        send(msg)
         return
       }
       case 'toggle': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingToggles.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_toggle', 'нет pending toggle / already settled'))
+          return
+        }
+        if (!requireResultLineage('toggle', pending, msg) || pending.elementRef !== msg.elementRef) {
+          if (pending.elementRef !== msg.elementRef) {
+            send(makeError(msg.requestId, 'lineage_mismatch', 'toggle elementRef mismatch (fail-closed)'))
+          }
+          return
+        }
         clearTimeout(pending.timer)
         pendingToggles.delete(msg.requestId)
         if (msg.ok) {
@@ -830,12 +1073,22 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'toggle failed' })
         }
+        send(msg)
         return
       }
       case 'press_key': {
         if (!requireAuth(msg.requestId)) return
         const pending = pendingPressKeys.get(msg.requestId)
-        if (!pending) return
+        if (!pending) {
+          send(makeError(msg.requestId, 'no_pending_press_key', 'нет pending press_key / already settled'))
+          return
+        }
+        if (!requireResultLineage('press_key', pending, msg) || pending.elementRef !== msg.elementRef) {
+          if (pending.elementRef !== msg.elementRef) {
+            send(makeError(msg.requestId, 'lineage_mismatch', 'press_key elementRef mismatch (fail-closed)'))
+          }
+          return
+        }
         clearTimeout(pending.timer)
         pendingPressKeys.delete(msg.requestId)
         if (msg.ok) {
@@ -843,6 +1096,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         } else {
           pending.resolve({ ok: false, error: msg.error || 'press_key failed' })
         }
+        send(msg)
         return
       }
       case 'error': {
@@ -853,7 +1107,8 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
     }
   }
 
-  function onSocketData(chunk: Buffer): void {
+  function onSocketData(socket: Socket, decoder: NativeFrameDecoder, chunk: Buffer): void {
+    if (client !== socket) return
     const frames = decoder.push(chunk)
     for (const frame of frames) {
       if (!frame.ok) {
@@ -870,19 +1125,40 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
   }
 
   function rejectPending(reason: string): void {
-    for (const [id, p] of pendingObserves) {
-      clearTimeout(p.timer)
-      p.reject(new Error(reason))
-      pendingObserves.delete(id)
+    const clear = <T extends { timer: ReturnType<typeof setTimeout>; reject: (err: Error) => void }>(
+      pending: Map<string, T>,
+    ): void => {
+      for (const [id, item] of pending) {
+        clearTimeout(item.timer)
+        item.reject(new Error(reason))
+        pending.delete(id)
+      }
     }
-    for (const [id, p] of pendingClicks) {
-      clearTimeout(p.timer)
-      if (!p.settled) p.reject(new Error(reason))
+    clear(pendingObserves)
+    for (const [id, item] of pendingClicks) {
+      clearTimeout(item.timer)
+      item.settled = true
+      item.reject(new UnknownBrowserEffectError(reason, 'disconnect'))
       pendingClicks.delete(id)
     }
+    for (const [id, item] of pendingNavigates) {
+      clearTimeout(item.timer)
+      item.reject(new UnknownBrowserEffectError(reason, 'disconnect'))
+      pendingNavigates.delete(id)
+    }
+    clear(pendingScrolls)
+    clear(pendingFocuses)
+    clear(pendingSelects)
+    clear(pendingWaitFors)
+    clear(pendingTypeTexts)
+    clear(pendingClearFields)
+    clear(pendingToggles)
+    clear(pendingPressKeys)
   }
 
-  function detachClient(): void {
+  function detachClient(expected?: Socket): void {
+    if (expected && client !== expected) return
+    detachActiveBrowserSend(expected)
     if (client) {
       client.removeAllListeners()
       try { client.destroy() } catch { /* ignore */ }
@@ -927,14 +1203,21 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         // clearLiveAuth already ensures no inherited attach from previous client.
         session.clearLiveAuth()
         log('bridge.client_connected', {})
-        socket.on('data', onSocketData)
+        const socketDecoder = new NativeFrameDecoder()
+        socket.on('data', (chunk) => onSocketData(
+          socket,
+          socketDecoder,
+          Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+        ))
         socket.on('error', (err) => {
+          if (client !== socket) return
           log('bridge.socket_error', { err: err.message })
-          detachClient()
+          detachClient(socket)
         })
         socket.on('close', () => {
+          if (client !== socket) return
           log('bridge.client_closed', {})
-          detachClient()
+          detachClient(socket)
         })
       })
 
@@ -956,6 +1239,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
     },
 
     async stop(): Promise<void> {
+      autoPairWindowExpiresAt = 0
       detachClient()
       session.setDesktopOnline(false)
       if (server) {
@@ -975,14 +1259,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
     },
 
     pushTaskEvent(input) {
-      if (!socketAuth?.authenticated) return
-      send({
-        v: BRIDGE_PROTOCOL_VERSION,
-        type: 'task_event',
-        requestId: input.requestId,
-        sendId: input.sendId,
-        event: input.event,
-      })
+      if (retiredBrowserSendIds.has(input.sendId)) return
+      const binding = activeBrowserSend
+      if (binding?.sendId === input.sendId) {
+        deliverTaskEvent(binding, input)
+        return
+      }
+      // The runner may emit before onTaskSubmit resolves its sendId. Buffer
+      // briefly; the exact submit result will either flush or discard it.
+      if (unresolvedBrowserSends.size > 0) {
+        const queued = bufferedTaskEvents.get(input.sendId) || []
+        if (queued.length < 64 && bufferedTaskEvents.size < 64) {
+          queued.push(input)
+          bufferedTaskEvents.set(input.sendId, queued)
+        }
+        return
+      }
+      log('bridge.task_event_stale_drop', { sendId: input.sendId })
     },
 
     getSession() {
@@ -1005,6 +1298,33 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       session.setActiveRun(btId, rId)
     },
 
+    openAutoPairWindow(opts) {
+      const requestedTtl = opts?.ttlMs ?? autoPairWindowMaxTtlMs
+      const ttlMs = Math.max(1, Math.min(requestedTtl, autoPairWindowMaxTtlMs))
+      autoPairWindowExpiresAt = Date.now() + ttlMs
+      session.setError(null)
+      log('bridge.auto_pair_window_opened', { expiresAt: autoPairWindowExpiresAt })
+      // A first-install worker may already have completed hello and received a
+      // normal pair_rejected before the user opens Settings. Wake that exact
+      // allowlisted socket so Settings alone completes auth; no polling and no
+      // credential crosses this notification.
+      if (
+        client
+        && !client.destroyed
+        && socketAuth?.socket === client
+        && socketAuth.helloOk
+        && !socketAuth.authenticated
+      ) {
+        sendTo(client, {
+          v: BRIDGE_PROTOCOL_VERSION,
+          type: 'auth_available',
+          requestId: `auth-${randomUUID()}`,
+          expiresAt: autoPairWindowExpiresAt,
+        })
+      }
+      return { expiresAt: autoPairWindowExpiresAt }
+    },
+
     issuePairingCode(opts) {
       const code = session.issueBootstrapCode(opts)
       log('bridge.bootstrap_issued', {
@@ -1020,18 +1340,18 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestClick(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) {
-        return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+        return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       }
       if (st.attachedTab && st.attachedTab.tabRef !== tabRef) {
-        return Promise.reject(new Error('wrong tab — click только на attached tab'))
+        return Promise.reject(new Error('wrong tab — click разрешён только на выбранной вкладке'))
       }
       if (input.origin && st.attachedTab?.origin) {
         const a = normalizeOrigin(input.origin)
@@ -1059,7 +1379,10 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
             p.settled = true
             pendingClicks.delete(requestId)
             // Uncertain — no auto-retry.
-            reject(new Error(`click timeout ${timeoutMs}ms (uncertain, no auto-retry)`))
+            reject(new UnknownBrowserEffectError(
+              `click timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+              'timeout',
+            ))
           }
         }, timeoutMs)
         pendingClicks.set(requestId, {
@@ -1098,15 +1421,15 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestObserve(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) {
-        return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+        return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       }
 
       const requestId = randomUUID()
@@ -1140,20 +1463,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestNavigate(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? observeTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingNavigates.delete(requestId)
-          reject(new Error(`navigate timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `navigate timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingNavigates.set(requestId, {
           requestId,
@@ -1179,14 +1505,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestScroll(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1218,14 +1544,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestFocus(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1258,14 +1584,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestSelectOption(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1299,14 +1625,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestWaitFor(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? Math.max(Number(input.condition?.timeoutMs || 15000), 1000)
       return new Promise((resolve, reject) => {
@@ -1337,14 +1663,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestTypeText(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1380,14 +1706,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestClearField(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1420,14 +1746,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestToggle(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
@@ -1460,14 +1786,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
 
     requestPressKey(input) {
       if (!client || client.destroyed) {
-        return Promise.reject(new Error('chrome-extension bridge offline (нет соединения с extension)'))
+        return Promise.reject(new Error(BROWSER_OFFLINE_MESSAGE))
       }
       if (!socketAuth?.authenticated) {
-        return Promise.reject(new Error('chrome-extension не paired — pair из side panel'))
+        return Promise.reject(new Error(BROWSER_AUTH_REQUIRED_MESSAGE))
       }
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
-      if (!tabRef) return Promise.reject(new Error('нет прикреплённой вкладки — attach tab в side panel'))
+      if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {

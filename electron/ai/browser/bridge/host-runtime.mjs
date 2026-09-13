@@ -80,11 +80,11 @@ class FrameDecoder {
   }
 }
 
-function writeStdout(json) {
+function writeStdout(json, onWritten) {
   try {
-    process.stdout.write(encodeFrame(json))
+    process.stdout.write(encodeFrame(json), onWritten)
   } catch {
-    // ignore
+    try { onWritten?.() } catch { /* ignore */ }
   }
 }
 
@@ -93,19 +93,29 @@ function main() {
   const stdinDecoder = new FrameDecoder()
 
   if (!endpoint) {
-    // Still consume stdin; answer offline for every message.
+    // Answer once, then exit so Chrome does not retain a permanently stale
+    // Native Messaging Port. A later action will start a host that re-reads the
+    // endpoint created by Verstak.
+    let closing = false
     process.stdin.on('data', (chunk) => {
+      if (closing) return
       for (const f of stdinDecoder.push(chunk)) {
+        closing = true
+        process.stdin.pause()
         if (!f.ok) {
-          writeStdout(offlineError(undefined, f.message))
-          continue
+          writeStdout(offlineError(undefined, f.message), () => process.exit(1))
+          return
         }
         let requestId = 'none'
         try {
           const m = JSON.parse(f.json)
           if (m && m.requestId) requestId = String(m.requestId)
         } catch { /* ignore */ }
-        writeStdout(offlineError(requestId, 'Verstak desktop offline (нет endpoint)'))
+        writeStdout(
+          offlineError(requestId, 'Verstak desktop offline (нет endpoint)'),
+          () => process.exit(1),
+        )
+        return
       }
     })
     process.stdin.on('end', () => process.exit(0))
@@ -139,7 +149,9 @@ function main() {
 
   socket.on('close', () => {
     ready = false
-    // Keep host alive until Chrome closes stdin — report offline on next msg.
+    // The desktop pipe is the host's only upstream. Exit so Chrome emits
+    // runtime.Port.onDisconnect and the next toolbar action starts cleanly.
+    process.exit(1)
   })
 
   process.stdin.on('data', (chunk) => {
@@ -154,18 +166,21 @@ function main() {
         }))
         continue
       }
-      if (!ready || !socket.writable) {
+      const frame = encodeFrame(f.json)
+      if (ready && socket.writable) {
+        socket.write(frame)
+      } else if (!socket.destroyed) {
+        // Chrome can send hello before the local pipe emits connect. Keep that
+        // first frame until connect instead of reporting a false desktop_offline.
+        pending.push(frame)
+      } else {
         let requestId = 'none'
         try {
           const m = JSON.parse(f.json)
           if (m && m.requestId) requestId = String(m.requestId)
         } catch { /* ignore */ }
         writeStdout(offlineError(requestId, 'Verstak desktop offline (pipe closed)'))
-        continue
       }
-      const frame = encodeFrame(f.json)
-      if (ready) socket.write(frame)
-      else pending.push(frame)
     }
   })
 

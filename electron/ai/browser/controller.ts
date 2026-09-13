@@ -28,7 +28,7 @@
 //   • payload redacted перед proposeAction (secret values не в SQLite).
 
 import { randomUUID } from 'node:crypto'
-import { scanText } from '../secret-scanner'
+import { redactForDisplay, redactUrlSecrets } from '../secret-scanner'
 import type { BrowserTasks, BrowserActionRow } from '../../storage/browser-tasks'
 import type {
   BrowserAdapter,
@@ -78,6 +78,7 @@ import {
   probeForPromptInjection,
   wrapObservationForModel,
 } from './untrusted'
+import { isUnknownBrowserEffectError } from './errors'
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -87,6 +88,10 @@ export interface DispatchInput {
   browserTaskId: BrowserTaskId
   runId: RunId
   actionType: BrowserActionType
+  /** Actual provider of this runner frame. Trusted tool routing sets it explicitly. */
+  providerId?: string | null
+  /** Explicit environment choice from trusted handler routing. Omitted = resolver default. */
+  preferredAdapter?: BrowserAdapter['id']
   payload?: Record<string, unknown>
   scope?: Partial<BrowserActionScope>
   preconditions?: Record<string, unknown>
@@ -149,6 +154,7 @@ export interface BrowserController {
     handoffReason?: 'new_send' | 'pause_resume' | 'provider_switch' | 'forced'
   }): void
   dispatch(input: DispatchInput): Promise<DispatchResult>
+  rejectAction(actionId: ActionId, reason: string): void
   approveAndExecute(actionId: ActionId, approvalDigestFromUi: string): Promise<DispatchResult>
   observe(browserTaskId: BrowserTaskId, runId: RunId): Promise<Observation>
   reconcile(): number
@@ -203,6 +209,12 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       })
     },
 
+    rejectAction(actionId, reason) {
+      const durableReason = redactDurableString(reason)
+      storage.rejectAction(actionId, durableReason)
+      emit(deps, 'browser_reject', `action ${actionId} rejected`, durableReason)
+    },
+
     async dispatch(input): Promise<DispatchResult> {
       const actionId = randomUUID()
 
@@ -215,7 +227,10 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       const agentMode = deps.getAgentMode()
       const caps = deps.getCapability(input.browserTaskId)
       const dataPolicy = deps.getDataPolicy(input.browserTaskId)
-      const providerId = deps.getProviderId(input.browserTaskId)
+      // Smart fallback stays inside the same durable browser run, whose stored
+      // provider can therefore be stale. The tool handler supplies the actual
+      // provider frame; resolver is retained for direct/legacy controller calls.
+      const providerId = resolveDispatchProvider(input, deps)
 
       // ── 0b. R0 task-tab gate: observe без attach'енной task tab block.
       // (В B0/R1 task tab задаётся через task_tab_ref; если его нет — observe
@@ -237,6 +252,9 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       // grantProviderAccess вызывается отдельно (из UI) после решения.
       if (providerCtx && providerCtx.kind === 'ask') {
         return blocked(actionId, 'R3', `Требуется явное решение Павла по data policy: ${providerCtx.reason}`)
+      }
+      if (providerCtx?.kind === 'redact-screenshot-only' && input.actionType === 'screenshot') {
+        return blocked(actionId, 'R4', `Screenshot запрещён data policy для провайдера ${providerId}: разрешён только redacted browser context.`)
       }
 
       // ── 3. Classify risk (BR-012). payload — ещё raw, классификатор смотрит
@@ -265,7 +283,7 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       // и формирует expectedOrigin для fresh-observe перед execute.
       let preflightAdapter: BrowserAdapter | null = null
       if (risk !== 'R0') {
-        preflightAdapter = deps.resolveAdapter()
+        preflightAdapter = deps.resolveAdapter(input.preferredAdapter)
         if (!preflightAdapter || !preflightAdapter.available()) {
           return blocked(actionId, risk, preflightAdapter?.unavailableReason() ?? 'Browser adapter недоступен для live-origin проверки.')
         }
@@ -300,7 +318,7 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       // task (persisted). Chrome-extension (B1) остаётся fail-closed.
       let effectiveCaps = caps
       if (risk !== 'R0' && effectiveCaps.allowedDomains.length === 0) {
-        const adapter = preflightAdapter ?? deps.resolveAdapter()
+        const adapter = preflightAdapter ?? deps.resolveAdapter(input.preferredAdapter)
         const isWebview = adapter?.id === 'electron-webview'
         if (!isWebview) {
           return blocked(actionId, risk, `Mutation риска ${risk} требует явного allowedDomains в capability envelope. Пустой список = «не разрешено нигде» (fail-closed).`)
@@ -345,6 +363,8 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       const fullScope: BrowserActionScope = {
         browserTaskId: input.browserTaskId,
         runId: input.runId,
+        ...(providerId ? { providerId } : {}),
+        ...(input.preferredAdapter ? { adapterId: input.preferredAdapter } : {}),
         clientId: dataPolicy.clientId ?? null,
         tabRef: scope.tabRef ?? null,
         documentId: scope.documentId ?? null,
@@ -357,19 +377,28 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
         elementRef: scope.elementRef ?? payloadElementRef ?? null,
       }
       const preconditions = input.preconditions ?? buildPreconditionsFromScope(fullScope)
+      // Runtime checks keep the live values above. The approval/UI/SQLite copy is
+      // a separate projection: durable state must never become a cookie/token/
+      // OAuth cache merely because the page echoed credentials in its URL or
+      // cabinet metadata.
+      const durableScope = scopeToJsonable(fullScope) as unknown as BrowserActionScope
+      const durablePreconditions = redactDurableRecord(preconditions)
+      const durableExpectedPostcondition = input.expectedPostcondition
+        ? redactDurableRecord(input.expectedPostcondition)
+        : null
       // Digest считается от REDACTED payload (то, что в ledger) — controller при
       // consume пересчитает от того же ledger-row и сравнит.
       const approvalDigestObj = buildDigest({
         actionId,
         browserTaskId: input.browserTaskId,
         runId: input.runId,
-        scope: fullScope,
+        scope: durableScope,
         actionType: input.actionType,
         payload: redactedPayload,
-        preconditions,
-        expectedPostcondition: input.expectedPostcondition ?? null,
+        preconditions: durablePreconditions,
+        expectedPostcondition: durableExpectedPostcondition,
         risk,
-        clientId: dataPolicy.clientId ?? null,
+        clientId: durableScope.clientId ?? null,
       })
       const approvalExpiresAt = (risk === 'R3') ? Date.now() + approvalTtlMs : null
       storage.proposeAction({
@@ -378,10 +407,10 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
         runId: input.runId,
         actionType: input.actionType,
         riskLevel: risk,
-        scope: scopeToJsonable(fullScope),
+        scope: durableScope as unknown as Record<string, unknown>,
         payload: redactedPayload,
-        preconditions,
-        expectedPostcondition: input.expectedPostcondition ?? null,
+        preconditions: durablePreconditions,
+        expectedPostcondition: durableExpectedPostcondition,
         approvalDigest: risk === 'R3' ? approvalDigestObj.digest : null,
         approvalExpiresAt,
       })
@@ -393,8 +422,7 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
         if (deps.awaitApproval) {
           const approved = await deps.awaitApproval(actionId, approvalDigestObj.digest, approvalDigestObj.snapshot, approvalExpiresAt)
           if (!approved) {
-            storage.rejectAction(actionId, 'user_rejected')
-            emit(deps, 'browser_reject', `action ${actionId} rejected`, null)
+            this.rejectAction(actionId, 'user_rejected')
             return { ok: false, actionId, risk, decision, error: 'Пользователь отклонил действие.' }
           }
           // approveAndExecute из ledger (digest из UI передаётся для сверки).
@@ -483,32 +511,37 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       }
 
       // ── R1 Block 7: fresh observation перед execute.
-      const adapter = deps.resolveAdapter()
+      const actionScope = action.scope as unknown as BrowserActionScope
+      const preferredAdapter = adapterIdFromScope(actionScope)
+      const adapter = deps.resolveAdapter(preferredAdapter)
       if (!adapter || !adapter.available()) {
-        storage.finalizeAction(actionId, 'blocked', { resultStatus: 'no_adapter', resultDetail: adapter?.unavailableReason() ?? 'no adapter' })
+        storage.finalizeAction(actionId, 'blocked', {
+          resultStatus: 'no_adapter',
+          resultDetail: redactDurableString(adapter?.unavailableReason() ?? 'no adapter'),
+        })
         return { ok: false, actionId, risk: action.riskLevel, decision: { kind: 'block', reason: 'no adapter' }, error: 'Adapter недоступен.' }
       }
       let freshObs: Observation
       try {
-        freshObs = await adapter.observe({ browserTaskId: action.browserTaskId, runId: action.runId, tabRef: (action.scope as unknown as BrowserActionScope).tabRef ?? null })
+        freshObs = await adapter.observe({ browserTaskId: action.browserTaskId, runId: action.runId, tabRef: actionScope.tabRef ?? null })
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = redactDurableString(err instanceof Error ? err.message : String(err))
         storage.finalizeAction(actionId, 'blocked', { resultStatus: 'observe_failed', resultDetail: msg })
         return { ok: false, actionId, risk: action.riskLevel, decision: { kind: 'block', reason: 'observe failed' }, error: `Fresh observe упал: ${msg}` }
       }
 
       // ── R1 Block 7: check preconditions на СВЕЖЕМ observation.
       const preconditions = action.preconditions as Record<string, unknown>
-      const preCheck = checkPreconditions(preconditions, {
+      const preCheck = checkPreconditions(preconditions, redactDurableRecord({
         origin: freshObs.source.origin,
         observationVersion: freshObs.observationVersion,
         observationId: freshObs.observationId,
         tenant: freshObs.tenant ?? null,
         account: freshObs.account ?? null,
         url: freshObs.source.url,
-      })
+      }))
       if (!preCheck.ok) {
-        const reason = preCheck.reason ?? 'precondition failed on fresh observe'
+        const reason = redactDurableString(preCheck.reason ?? 'precondition failed on fresh observe')
         storage.finalizeAction(actionId, 'blocked', { resultStatus: 'preconditions_failed_on_fresh_observe', resultDetail: reason })
         emit(deps, 'browser_block', 'preconditions failed (fresh observe)', reason)
         return { ok: false, actionId, risk: action.riskLevel, decision: { kind: 'block', reason }, error: `Preconditions нарушены на свежем observation: ${reason}` }
@@ -525,7 +558,7 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
         if (ref && freshObs.controls && freshObs.controls.length > 0) {
           const hit = freshObs.controls.some((c) => c.elementRef === ref)
           if (!hit) {
-            const reason = `elementRef "${ref}" отсутствует в fresh observation — STOP без клика (stale ref / reload)`
+            const reason = redactDurableString(`elementRef "${ref}" отсутствует в fresh observation — STOP без клика (stale ref / reload)`)
             storage.finalizeAction(actionId, 'blocked', { resultStatus: 'stale_element_ref', resultDetail: reason })
             return { ok: false, actionId, risk: action.riskLevel, decision: { kind: 'block', reason }, error: reason }
           }
@@ -546,6 +579,8 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
         browserTaskId: action.browserTaskId,
         runId: action.runId,
         actionType: action.actionType as BrowserActionType,
+        providerId: providerIdFromScope(actionScope) ?? deps.getProviderId(action.browserTaskId),
+        preferredAdapter,
         payload: action.payload,
         scope: action.scope as Partial<BrowserActionScope>,
         preconditions,
@@ -554,7 +589,9 @@ export function createBrowserController(deps: ControllerDeps): BrowserController
       const result = await executeAdapted(deps, reconstructedInput, action.scope as unknown as BrowserActionScope, actionId, attemptId, action.riskLevel, freshObs)
 
       // ── R1 Block 7: verify postcondition на fresh observation.
-      const verifiedResult = verifyPostcondition(result, reconstructedInput.expectedPostcondition ?? null, action.riskLevel)
+      const verifiedResult = redactActionResult(
+        verifyPostcondition(result, reconstructedInput.expectedPostcondition ?? null, action.riskLevel),
+      )
 
       storage.finalizeAction(actionId, verifiedResult.status, {
         resultStatus: verifiedResult.status,
@@ -613,11 +650,35 @@ function blocked(actionId: ActionId, risk: RiskLevel, reason: string): DispatchR
 }
 
 function emit(deps: ControllerDeps, kind: string, label: string | null, detail: string | null): void {
-  try { deps.emitTimeline?.(kind, { label, detail, ref: null, status: null }) } catch { /* best-effort */ }
+  try {
+    deps.emitTimeline?.(kind, {
+      label: label == null ? null : redactDurableString(label),
+      detail: detail == null ? null : redactDurableString(detail),
+      ref: null,
+      status: null,
+    })
+  } catch { /* best-effort */ }
 }
 
 function mergeScope(input: DispatchInput): Partial<BrowserActionScope> {
   return { ...input.scope }
+}
+
+function adapterIdFromScope(scope: BrowserActionScope): BrowserAdapter['id'] | undefined {
+  return scope.adapterId === 'electron-webview' || scope.adapterId === 'chrome-extension'
+    ? scope.adapterId
+    : undefined
+}
+
+function providerIdFromScope(scope: BrowserActionScope): string | null {
+  return typeof scope.providerId === 'string' && scope.providerId.trim()
+    ? scope.providerId.trim()
+    : null
+}
+
+function resolveDispatchProvider(input: DispatchInput, deps: ControllerDeps): string | null {
+  const explicit = typeof input.providerId === 'string' ? input.providerId.trim() : ''
+  return explicit || deps.getProviderId(input.browserTaskId)
 }
 
 function buildPreconditionsFromScope(scope: BrowserActionScope): Record<string, unknown> {
@@ -631,7 +692,15 @@ function buildPreconditionsFromScope(scope: BrowserActionScope): Record<string, 
 }
 
 function scopeToJsonable(scope: BrowserActionScope): Record<string, unknown> {
-  return { ...scope }
+  return {
+    ...scope,
+    clientId: redactDurableNullable(scope.clientId),
+    documentId: redactDurableNullable(scope.documentId),
+    url: redactDurableNullable(scope.url),
+    origin: redactDurableNullable(scope.origin),
+    tenant: redactDurableNullable(scope.tenant),
+    account: redactDurableNullable(scope.account),
+  }
 }
 
 function capsToJsonable(caps: CapabilityEnvelope): Record<string, unknown> {
@@ -642,9 +711,9 @@ function dataPolicyToJsonable(p: ClientDataPolicy): Record<string, unknown> {
   return p as unknown as Record<string, unknown>
 }
 
-/** Рекурсивно прогоняет все строковые значения payload через scanText. */
+/** Рекурсивно очищает все строковые значения payload до записи в durable ledger. */
 function redactPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  return redactDeep(payload, 0) as Record<string, unknown>
+  return redactDurableRecord(payload)
 }
 
 const REDACT_MAX_DEPTH = 8
@@ -653,7 +722,7 @@ function redactDeep(value: unknown, depth: number): unknown {
   if (depth > REDACT_MAX_DEPTH) return null
   if (value == null) return value
   if (typeof value === 'string') {
-    return scanText(value).redacted
+    return redactDurableString(value)
   }
   if (Array.isArray(value)) {
     return value.map(v => redactDeep(v, depth + 1))
@@ -667,6 +736,30 @@ function redactDeep(value: unknown, depth: number): unknown {
     return out
   }
   return value
+}
+
+function redactDurableRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return redactDeep(value, 0) as Record<string, unknown>
+}
+
+function redactDurableString(value: string): string {
+  // redactUrlSecrets handles a standalone URL before generic scanning can make
+  // its userinfo unparsable; redactForDisplay also catches URLs embedded in
+  // error/result prose and format-specific credentials.
+  return redactForDisplay(redactUrlSecrets(value))
+}
+
+function redactDurableNullable(value: string | null | undefined): string | null {
+  return value == null ? null : redactDurableString(value)
+}
+
+function redactActionResult(result: ActionResult): ActionResult {
+  return {
+    ...result,
+    finalUrl: redactDurableNullable(result.finalUrl),
+    reason: result.reason == null ? result.reason : redactDurableString(result.reason),
+    detail: result.detail == null ? result.detail : redactDurableString(result.detail),
+  }
 }
 
 function extractOrigin(url: string): string {
@@ -713,7 +806,7 @@ async function runExecute(
     url: scope.url ?? null,
   })
   if (!preCheck.ok) {
-    const reason = preCheck.reason ?? 'precondition failed'
+    const reason = redactDurableString(preCheck.reason ?? 'precondition failed')
     deps.storage.finalizeAction(actionId, 'blocked', { resultStatus: 'preconditions_failed', resultDetail: reason })
     emit(deps, 'browser_block', `preconditions failed`, reason)
     return blocked(actionId, risk, `Preconditions нарушены до execute: ${reason}`)
@@ -728,7 +821,9 @@ async function runExecute(
   }
   const result = await executeAdapted(deps, input, scope, actionId, attemptId, risk, preObs)
   // Verify postcondition (для R0 verified автоматически, для R1/R2 — по expectedPostcondition).
-  const verified = verifyPostcondition(result, input.expectedPostcondition ?? null, risk)
+  const verified = redactActionResult(
+    verifyPostcondition(result, input.expectedPostcondition ?? null, risk),
+  )
   deps.storage.finalizeAction(actionId, verified.status, {
     resultStatus: verified.status,
     resultDetail: verified.detail,
@@ -788,12 +883,19 @@ function verifyPostcondition(
   if (!obs) {
     return { ...result, status: 'uncertain', detail: (result.detail || '') + ' [нет postObservation для verify → uncertain]' }
   }
-  const urlContains = typeof expectedPostcondition.urlContains === 'string' ? expectedPostcondition.urlContains : undefined
-  const textAppears = typeof expectedPostcondition.textAppears === 'string' ? expectedPostcondition.textAppears : undefined
-  const textDisappears = typeof expectedPostcondition.textDisappears === 'string' ? expectedPostcondition.textDisappears : undefined
-  const obsText = obs.text ?? ''
-  if (urlContains && !obs.source.url.includes(urlContains)) {
-    return { ...result, status: 'uncertain', detail: `postcondition urlContains "${urlContains}" не подтверждён (url=${obs.source.url})` }
+  const urlContains = typeof expectedPostcondition.urlContains === 'string'
+    ? redactDurableString(expectedPostcondition.urlContains)
+    : undefined
+  const textAppears = typeof expectedPostcondition.textAppears === 'string'
+    ? redactDurableString(expectedPostcondition.textAppears)
+    : undefined
+  const textDisappears = typeof expectedPostcondition.textDisappears === 'string'
+    ? redactDurableString(expectedPostcondition.textDisappears)
+    : undefined
+  const obsUrl = redactDurableString(obs.source.url)
+  const obsText = redactDurableString(obs.text ?? '')
+  if (urlContains && !obsUrl.includes(urlContains)) {
+    return { ...result, status: 'uncertain', detail: `postcondition urlContains "${urlContains}" не подтверждён (url=${obsUrl})` }
   }
   if (textAppears && !obsText.includes(textAppears)) {
     return { ...result, status: 'uncertain', detail: `postcondition textAppears "${textAppears}" не подтверждён` }
@@ -815,13 +917,18 @@ async function executeAdapted(
   risk: RiskLevel,
   _preObs: Observation | null,
 ): Promise<ActionResult> {
-  const adapter = deps.resolveAdapter()
+  const adapter = deps.resolveAdapter(input.preferredAdapter)
   if (!adapter) {
     return mkFailed(actionId, attemptId, 'no adapter available', 'В текущей среде нет доступного browser adapter.')
   }
   if (!adapter.available()) {
     return mkFailed(actionId, attemptId, 'adapter unavailable', adapter.unavailableReason() ?? 'adapter not available')
   }
+  const providerId = resolveDispatchProvider(input, deps)
+  const providerCtx = providerId
+    ? decideProviderBrowserContext(deps.getDataPolicy(input.browserTaskId), providerId)
+    : null
+  const redactScreenshot = providerCtx?.kind === 'redact-screenshot-only'
   try {
     // cast к string — иначе @typescript-eslint/switch-exhaustiveness-check
     // требует явной обработки всех BrowserActionType, включая не реализованные
@@ -830,34 +937,55 @@ async function executeAdapted(
     switch (actionType) {
       case 'observe': {
         const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
-        return finalizeObservation(actionId, attemptId, obs, deps)
+        return finalizeObservation(actionId, attemptId, obs, deps, redactScreenshot)
       }
       case 'screenshot': {
-        const dataUrl = await adapter.screenshot()
+        if (redactScreenshot) {
+          return mkBlocked(actionId, attemptId, 'screenshot_redacted_by_data_policy', `Screenshot запрещён data policy для провайдера ${providerId ?? 'unknown'}`)
+        }
+        const dataUrl = await adapter.screenshot(scope)
+        if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+          return mkFailed(
+            actionId,
+            attemptId,
+            'screenshot_unavailable',
+            'screenshot недоступен: adapter не вернул изображение',
+          )
+        }
         const url = scope.url ?? ''
         if (!isScreenshotSafeForModel(url)) {
           return mkBlocked(actionId, attemptId, 'screenshot_blocked_sensitive_url', `Скриншот заблокирован на чувствительной странице: ${url}`)
         }
         const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
         obs.screenshotDataUrl = dataUrl
-        return finalizeObservation(actionId, attemptId, obs, deps)
+        return finalizeObservation(actionId, attemptId, obs, deps, false)
       }
       case 'navigate': {
         const url = String(input.payload?.url ?? '')
         if (!url) return mkFailed(actionId, attemptId, 'no url', 'navigate: payload.url пуст')
-        const r = await adapter.navigate(url)
+        const r = await adapter.navigate(url, scope)
         // R1 Block 4: после redirect перечитываем origin — drift останавливает.
         const finalOrigin = extractOrigin(r.finalUrl)
+        let obs: Observation
+        try {
+          obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return mkUncertain(
+            actionId,
+            attemptId,
+            'unknown_effect',
+            `Navigate выполнен, но post-navigate readback не удался: ${msg}. Автоповтор запрещён; нужен свежий observe.`,
+          )
+        }
         if (scope.origin && finalOrigin && finalOrigin !== scope.origin) {
           // redirect уводит на другой origin — следующий action должен STOP.
           // Сам navigate завершаем verified (он уже произошёл), но пост-condition
           // observation отмечает новый origin для будущих проверок.
-          const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId })
           obs.omissions = [...(obs.omissions ?? []), `redirect drift: navigate ушёл с ${scope.origin} на ${finalOrigin} — следующие actions на старом scope будут заблокированы`]
-          return mkVerified(actionId, attemptId, r.finalUrl, obs, `navigated to ${r.finalUrl} (redirect drift detected)`)
+          return mkVerified(actionId, attemptId, r.finalUrl, applyProviderScreenshotPolicy(obs, redactScreenshot), `navigated to ${r.finalUrl} (redirect drift detected)`)
         }
-        const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId })
-        return mkVerified(actionId, attemptId, r.finalUrl, obs, `navigated to ${r.finalUrl}`)
+        return mkVerified(actionId, attemptId, r.finalUrl, applyProviderScreenshotPolicy(obs, redactScreenshot), `navigated to ${r.finalUrl}`)
       }
       case 'click': {
         const elementRef = String(input.payload?.elementRef ?? input.payload?.selector ?? scope.elementRef ?? '')
@@ -866,16 +994,27 @@ async function executeAdapted(
           return mkBlocked(actionId, attemptId, 'raw_selector', 'raw CSS/JS selector запрещён')
         }
         // Prefer control label for human-readable detail / approval already used payload.
-        const r = await adapter.click(elementRef)
+        const r = await adapter.click(elementRef, scope)
         // Fresh observe after successful click (readback).
-        const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
+        let obs: Observation
+        try {
+          obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return mkUncertain(
+            actionId,
+            attemptId,
+            'unknown_effect',
+            `Click выполнен, но post-click readback не удался: ${msg}. Автоповтор запрещён; нужен свежий observe.`,
+          )
+        }
         // R3 without explicit postcondition → uncertain is handled in verifyPostcondition.
         // If page text clearly changed and postcondition set, verify will mark verified.
-        return mkVerified(actionId, attemptId, r.finalUrl, obs, `clicked ${elementRef}`)
+        return mkVerified(actionId, attemptId, r.finalUrl, applyProviderScreenshotPolicy(obs, redactScreenshot), `clicked ${elementRef}`)
       }
       case 'list_task_tabs': {
-        const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId })
-        return mkVerified(actionId, attemptId, scope.url ?? '', obs, 'list_task_tabs (B0: только текущая webview tab)')
+        const obs = await adapter.observe({ browserTaskId: scope.browserTaskId, runId: scope.runId, tabRef: scope.tabRef })
+        return mkVerified(actionId, attemptId, scope.url ?? '', applyProviderScreenshotPolicy(obs, redactScreenshot), 'list_task_tabs (B0: только текущая webview tab)')
       }
       default: {
         const u = adapter.unsupported(input.actionType)
@@ -884,6 +1023,14 @@ async function executeAdapted(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    if (isUnknownBrowserEffectError(err)) {
+      return mkUncertain(
+        actionId,
+        attemptId,
+        'unknown_effect',
+        `Эффект browser action неизвестен после dispatch: ${msg}. Автоповтор запрещён; нужен свежий readback.`,
+      )
+    }
     const cb = detectCircuitBreaker(msg)
     if (cb) {
       return mkBlocked(actionId, attemptId, cb, `Circuit breaker (${cb}): ${msg}`)
@@ -892,7 +1039,14 @@ async function executeAdapted(
   }
 }
 
-function finalizeObservation(actionId: ActionId, attemptId: string, obs: Observation, deps: ControllerDeps): ActionResult {
+function finalizeObservation(
+  actionId: ActionId,
+  attemptId: string,
+  rawObservation: Observation,
+  deps: ControllerDeps,
+  redactScreenshot = false,
+): ActionResult {
+  const obs = applyProviderScreenshotPolicy(rawObservation, redactScreenshot)
   // probe injection (best-effort): предупреждаем в лог.
   const probe = probeForPromptInjection(obs.text)
   if (probe.detected) {
@@ -904,6 +1058,15 @@ function finalizeObservation(actionId: ActionId, attemptId: string, obs: Observa
     obs.omissions = [...(obs.omissions ?? []), 'screenshot blocked on sensitive URL (fail-closed)']
   }
   return mkVerified(actionId, attemptId, obs.source.url, obs, 'observe ok')
+}
+
+function applyProviderScreenshotPolicy(obs: Observation, redactScreenshot: boolean): Observation {
+  if (!redactScreenshot || !obs.screenshotDataUrl) return obs
+  return {
+    ...obs,
+    screenshotDataUrl: null,
+    omissions: [...(obs.omissions ?? []), 'screenshot redacted by provider data policy'],
+  }
 }
 
 function detectCircuitBreaker(msg: string): string | null {
@@ -921,6 +1084,9 @@ function mkVerified(actionId: ActionId, attemptId: string, finalUrl: string | nu
 }
 function mkFailed(actionId: ActionId, attemptId: string, reason: string, detail: string): ActionResult {
   return { actionId, status: 'failed', finalUrl: null, postObservation: null, detail, reason, finalizedAt: Date.now() }
+}
+function mkUncertain(actionId: ActionId, attemptId: string, reason: string, detail: string): ActionResult {
+  return { actionId, status: 'uncertain', finalUrl: null, postObservation: null, detail, reason, finalizedAt: Date.now() }
 }
 function mkBlocked(actionId: ActionId, attemptId: string, reason: string, detail: string): ActionResult {
   return { actionId, status: 'blocked', finalUrl: null, postObservation: null, detail, reason, finalizedAt: Date.now() }

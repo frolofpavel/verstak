@@ -54,7 +54,8 @@ describe('extension adapter — observe only', () => {
       },
     })
     expect(offline.available()).toBe(false)
-    expect(offline.unavailableReason()).toMatch(/offline|bridge/i)
+    expect(offline.unavailableReason()).toMatch(/Настройки.*Интеграции.*Браузер/i)
+    expect(offline.unavailableReason()).not.toMatch(/bridge|chrome-extension/i)
 
     const paired = createExtensionAdapterWithTransport({
       connected: true,
@@ -65,7 +66,8 @@ describe('extension adapter — observe only', () => {
       },
     })
     expect(paired.available()).toBe(false)
-    expect(paired.unavailableReason()).toMatch(/не прикреп|attach/i)
+    expect(paired.unavailableReason()).toMatch(/значок Verstak/i)
+    expect(paired.unavailableReason()).not.toMatch(/pair|attach/i)
   })
 
   it('click without prior observe map fails; navigate/type still out of C1', async () => {
@@ -81,8 +83,9 @@ describe('extension adapter — observe only', () => {
       requestClick: async () => ({ ok: true, finalUrl: 'https://example.com/' }),
     })
     // No lastObs controls → click blocked before DOM mutation path.
-    await expect(ad.click('button:X:0')).rejects.toThrow(/observation|elementRef|lineage/i)
-    const nav = await ad.navigate('https://x.com')
+    const scope = { browserTaskId: 'bt-test', runId: 'run-test', tabRef: 'tab-1', origin: 'example.com' }
+    await expect(ad.click('button:X:0', scope)).rejects.toThrow(/observation|elementRef|lineage/i)
+    const nav = await ad.navigate('https://x.com', scope)
     expect(nav.finalUrl).toBe('https://x.com')
     const u = ad.unsupported('type_text')
     expect(u.ok).toBe(false)

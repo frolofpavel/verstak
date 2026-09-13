@@ -451,8 +451,26 @@ export function capturePageSnapshot(options) {
       return { controls: [], observationVersion: version }
     }
 
-    const byKey = Object.create(null)
     const controls = []
+
+    // Two seeded FNV-1a passes keep refs deterministic across a fresh observe,
+    // while the public identifier contains no label, value, CSS or DOM path.
+    // The helper stays inside capturePageSnapshot because Chrome serializes this
+    // function for scripting.executeScript({ func }).
+    function opaqueControlRef(value) {
+      const input = String(value || '')
+      let h1 = 0x811c9dc5
+      let h2 = 0x9e3779b9
+      for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i)
+        h1 = Math.imul(h1 ^ code, 0x01000193)
+        h2 = Math.imul(h2 ^ (code + i), 0x85ebca6b)
+      }
+      const hex1 = (h1 >>> 0).toString(16).padStart(8, '0')
+      const hex2 = (h2 >>> 0).toString(16).padStart(8, '0')
+      return 'el-' + hex1 + hex2
+    }
+
     for (let i = 0; i < candidates.length && controls.length < maxControls; i++) {
       const el = candidates[i]
       if (!el || el.nodeType !== 1) continue
@@ -477,6 +495,9 @@ export function capturePageSnapshot(options) {
       } catch { continue }
 
       const tag = String(el.tagName || '').toLowerCase()
+      const inputType = tag === 'input'
+        ? String(el.getAttribute && el.getAttribute('type') || 'text').toLowerCase()
+        : ''
       let role = 'button'
       if (tag === 'a') role = 'link'
       else if (tag === 'input') role = 'button'
@@ -490,10 +511,25 @@ export function capturePageSnapshot(options) {
 
       let label = ''
       try {
+        let associatedLabel = ''
+        const labels = el.labels
+        if (labels && labels.length) {
+          for (let j = 0; j < labels.length; j++) {
+            associatedLabel += ' ' + (labels[j].innerText || labels[j].textContent || '')
+          }
+        }
+        // `value` is a label only for button-like inputs. Reading it from an
+        // editable input would copy form data into the observation/model path.
+        const buttonValue = tag === 'input'
+          && (inputType === 'button' || inputType === 'submit' || inputType === 'reset')
+          ? el.getAttribute('value')
+          : ''
         label = collapseWhitespace(
           el.getAttribute('aria-label')
           || el.getAttribute('title')
-          || el.getAttribute('value')
+          || associatedLabel
+          || el.getAttribute('placeholder')
+          || buttonValue
           || (el.innerText || el.textContent || ''),
         )
       } catch {
@@ -502,15 +538,10 @@ export function capturePageSnapshot(options) {
       label = clip(label, 80)
       if (!label) label = role
 
-      const safeLabel = label
-        .replace(/[^\w\u0400-\u04FF \-]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 40) || 'unnamed'
-      const key = role + ':' + safeLabel
-      const nth = byKey[key] || 0
-      byKey[key] = nth + 1
-      const elementRef = role + ':' + safeLabel + ':' + nth
+      // Fingerprint contains only structural position/type. Labels and values
+      // never influence even the hash input, so a secret accessible name cannot
+      // be recovered from a low-entropy semantic ref.
+      const elementRef = opaqueControlRef(tag + ':' + role + ':' + controls.length)
 
       try {
         el.setAttribute('data-verstak-ref', elementRef)

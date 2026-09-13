@@ -5,6 +5,13 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createExtensionAdapterWithTransport } from '../../../electron/ai/browser/adapters/extension'
 import type { BridgePageSnapshot } from '../../../electron/ai/browser/bridge/protocol'
 
+const SCOPE = {
+  browserTaskId: 'bt-1',
+  runId: 'run-1',
+  tabRef: 'tab-1',
+  origin: '127.0.0.1:8765',
+} as const
+
 function snap(over: Partial<BridgePageSnapshot> = {}): BridgePageSnapshot {
   return {
     text: 'Счётчик: 0',
@@ -64,7 +71,7 @@ describe('EXT-C1 extension click', () => {
     expect(obs.controls?.some((c) => c.label.includes('Увеличить'))).toBe(true)
     expect(obs.text).toContain('Счётчик: 0')
 
-    const r = await adapter.click('button:Увеличить:0')
+    const r = await adapter.click('button:Увеличить:0', SCOPE)
     expect(r.finalUrl).toContain('127.0.0.1')
     expect(clickCount).toBe(1)
     expect(lastClick?.elementRef).toBe('button:Увеличить:0')
@@ -85,7 +92,7 @@ describe('EXT-C1 extension click', () => {
       },
     })
     await adapter.observe({ browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-1' })
-    await expect(adapter.click('document.querySelector("#x")')).rejects.toThrow(/raw CSS|JS/)
+    await expect(adapter.click('document.querySelector("#x")', SCOPE)).rejects.toThrow(/raw CSS|JS/)
     expect(clickCount).toBe(0)
   })
 
@@ -100,7 +107,7 @@ describe('EXT-C1 extension click', () => {
       },
     })
     await adapter.observe({ browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-1' })
-    await expect(adapter.click('button:НетТакой:0')).rejects.toThrow(/нет в последнем observation/)
+    await expect(adapter.click('button:НетТакой:0', SCOPE)).rejects.toThrow(/нет в последнем observation/)
     expect(clickCount).toBe(0)
   })
 
@@ -115,7 +122,7 @@ describe('EXT-C1 extension click', () => {
       },
     })
     expect(adapter.available()).toBe(false)
-    await expect(adapter.click('button:Увеличить:0')).rejects.toThrow()
+    await expect(adapter.click('button:Увеличить:0', SCOPE)).rejects.toThrow()
     expect(clickCount).toBe(0)
   })
 })

@@ -20,6 +20,7 @@ import { createBrowserTasks } from '../../../electron/storage/browser-tasks'
 import type { BrowserTasks } from '../../../electron/storage/browser-tasks'
 import { createBrowserController } from '../../../electron/ai/browser/controller'
 import type { BrowserController, ControllerDeps, AgentMode } from '../../../electron/ai/browser/controller'
+import { UnknownBrowserEffectError } from '../../../electron/ai/browser/errors'
 import { defaultCapability, buildCapabilityFromCommand } from '../../../electron/ai/browser/capability'
 import { DEFAULT_DATA_POLICY } from '../../../electron/ai/browser/data-policy'
 import type { BrowserAdapter, Observation, CapabilityEnvelope, ClientDataPolicy, BrowserMode } from '../../../electron/ai/browser/types'
@@ -36,11 +37,17 @@ class MockAdapter implements BrowserAdapter {
   currentText = 'Сумма: 100 000. Конверсия: 5%.'
   // throwOnClick — если выставить, click бросает ошибку (для теста circuit breaker).
   throwOnClick?: (selector: string) => Error | null
+  throwOnNavigate?: (url: string) => Error | null
+  throwOnObserve?: (observeCount: number) => Error | null
   // observeCount — сколько раз позвали observe.
   observeCount = 0
+  clickCount = 0
+  navigateCount = 0
 
   async observe(scope: { browserTaskId: string; runId: string; tabRef?: string | null }): Promise<Observation> {
     this.observeCount++
+    const observeError = this.throwOnObserve?.(this.observeCount)
+    if (observeError) throw observeError
     return {
       observationId: `obs-${this.observeCount}`,
       observationVersion: this.observeCount,
@@ -66,8 +73,11 @@ class MockAdapter implements BrowserAdapter {
     }
   }
   async navigate(url: string) {
+    this.navigateCount++
     this.currentUrl = url
     this.currentTitle = 'Navigated'
+    const navigateError = this.throwOnNavigate?.(url)
+    if (navigateError) throw navigateError
     return { finalUrl: url, title: 'Navigated' }
   }
   async back(): Promise<void> { throw new Error('unsupported in mock') }
@@ -78,6 +88,7 @@ class MockAdapter implements BrowserAdapter {
       const e = this.throwOnClick(selector)
       if (e) throw e
     }
+    this.clickCount++
     return { finalUrl: this.currentUrl }
   }
   async focus(_e: string): Promise<void> {}
@@ -167,6 +178,43 @@ describe('EXT-B0 controller — R1 navigate в watch', () => {
     expect(r.result?.status).toBe('verified')
     expect(r.result?.finalUrl).toBe('https://calltouch.com/report2')
   })
+
+  it('post-dispatch navigate timeout → durable uncertain без автоповтора', async () => {
+    adapter.throwOnNavigate = () => new UnknownBrowserEffectError(
+      'navigate transport timeout after dispatch',
+      'timeout',
+    )
+
+    const r = await controller.dispatch({
+      browserTaskId: 'bt-1', runId: 'r1', actionType: 'navigate',
+      payload: { url: 'https://calltouch.com/report2' }, scope: {},
+    })
+
+    expect(adapter.navigateCount).toBe(1)
+    expect(r.ok).toBe(true)
+    expect(r.result?.status).toBe('uncertain')
+    expect(r.result?.reason).toBe('unknown_effect')
+    expect(bt.getAction(r.actionId)?.status).toBe('uncertain')
+  })
+
+  it('navigate подтверждён, но post-navigate readback упал → durable uncertain', async () => {
+    // preflight observe #1, successful navigate, post-navigate observe #2 fails.
+    adapter.throwOnObserve = (observeCount) => observeCount === 2
+      ? new Error('readback transport unavailable')
+      : null
+
+    const r = await controller.dispatch({
+      browserTaskId: 'bt-1', runId: 'r1', actionType: 'navigate',
+      payload: { url: 'https://calltouch.com/report2' }, scope: {},
+    })
+
+    expect(adapter.navigateCount).toBe(1)
+    expect(r.ok).toBe(true)
+    expect(r.result?.status).toBe('uncertain')
+    expect(r.result?.reason).toBe('unknown_effect')
+    expect(r.result?.detail).toContain('readback')
+    expect(bt.getAction(r.actionId)?.status).toBe('uncertain')
+  })
 })
 
 describe('EXT-B0 controller — R3 click требует approval', () => {
@@ -229,6 +277,98 @@ describe('EXT-B0 controller — R3 click требует approval', () => {
     })
     expect(r.result?.status).toBe('uncertain')
     expect(r.result?.detail).toContain('postcondition')
+  })
+
+  it('post-dispatch click timeout → durable uncertain и повторное approval заблокировано', async () => {
+    adapter.throwOnClick = () => new UnknownBrowserEffectError(
+      'click transport timeout after dispatch',
+      'timeout',
+    )
+    const deps2: ControllerDeps = {
+      storage: bt,
+      resolveAdapter: () => adapter,
+      getBrowserMode: () => browserMode,
+      getAgentMode: () => agentMode,
+      getCapability: () => caps,
+      getDataPolicy: () => dataPolicy,
+      getProviderId: () => providerId,
+      awaitApproval: async () => true,
+    }
+    controller = createBrowserController(deps2)
+
+    const r = await controller.dispatch({
+      browserTaskId: 'bt-1', runId: 'r1', actionType: 'click',
+      payload: { elementRef: 'btn-submit', action: 'submit' }, scope: {},
+      expectedPostcondition: { urlContains: '/report' },
+    })
+
+    expect(r.ok).toBe(true)
+    expect(r.result?.status).toBe('uncertain')
+    expect(r.result?.reason).toBe('unknown_effect')
+    expect(bt.getAction(r.actionId)?.status).toBe('uncertain')
+    const replay = await controller.approveAndExecute(r.actionId, bt.getAction(r.actionId)?.approvalDigest ?? '')
+    expect(replay.ok).toBe(false)
+    expect(replay.error).toContain('повторное approval невозможно')
+  })
+
+  it('deterministic click rejection → durable failed', async () => {
+    adapter.throwOnClick = () => new Error('element is disabled')
+    const deps2: ControllerDeps = {
+      storage: bt,
+      resolveAdapter: () => adapter,
+      getBrowserMode: () => browserMode,
+      getAgentMode: () => agentMode,
+      getCapability: () => caps,
+      getDataPolicy: () => dataPolicy,
+      getProviderId: () => providerId,
+      awaitApproval: async () => true,
+    }
+    controller = createBrowserController(deps2)
+
+    const r = await controller.dispatch({
+      browserTaskId: 'bt-1', runId: 'r1', actionType: 'click',
+      payload: { elementRef: 'btn-submit', action: 'submit' }, scope: {},
+      expectedPostcondition: { urlContains: '/report' },
+    })
+
+    expect(r.ok).toBe(false)
+    expect(r.result?.status).toBe('failed')
+    expect(r.result?.reason).toBe('execute_error')
+    expect(bt.getAction(r.actionId)?.status).toBe('failed')
+  })
+
+  it('click подтверждён, но post-click readback упал → durable uncertain без повтора', async () => {
+    // Production flow: preflight observe #1, approval-time fresh observe #2,
+    // successful click, then post-click readback observe #3 fails.
+    adapter.throwOnObserve = (observeCount) => observeCount === 3
+      ? new Error('readback transport unavailable')
+      : null
+    const deps2: ControllerDeps = {
+      storage: bt,
+      resolveAdapter: () => adapter,
+      getBrowserMode: () => browserMode,
+      getAgentMode: () => agentMode,
+      getCapability: () => caps,
+      getDataPolicy: () => dataPolicy,
+      getProviderId: () => providerId,
+      awaitApproval: async () => true,
+    }
+    controller = createBrowserController(deps2)
+
+    const r = await controller.dispatch({
+      browserTaskId: 'bt-1', runId: 'r1', actionType: 'click',
+      payload: { elementRef: 'btn-submit', action: 'submit' }, scope: {},
+      expectedPostcondition: { urlContains: '/report' },
+    })
+
+    expect(adapter.clickCount).toBe(1)
+    expect(r.ok).toBe(true)
+    expect(r.result?.status).toBe('uncertain')
+    expect(r.result?.reason).toBe('unknown_effect')
+    expect(r.result?.detail).toContain('readback')
+    expect(bt.getAction(r.actionId)?.status).toBe('uncertain')
+    const replay = await controller.approveAndExecute(r.actionId, bt.getAction(r.actionId)?.approvalDigest ?? '')
+    expect(replay.ok).toBe(false)
   })
 
   it('click с rejected approval → reject action', async () => {

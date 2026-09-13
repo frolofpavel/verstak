@@ -1,6 +1,6 @@
 // bridge-host-lifecycle.test.ts — packaged assets + registry lifecycle (EXT-B1).
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
   existsSync,
   mkdtempSync,
@@ -11,6 +11,45 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:net'
+
+const registryProcess = vi.hoisted(() => {
+  const values = new Map<string, string>()
+  const spawnSync = vi.fn((command: string, args: readonly string[] = [], options?: { encoding?: string }) => {
+    if (command !== 'reg.exe') {
+      throw new Error(`unexpected process in registry unit adapter: ${command}`)
+    }
+    const operation = args[0]
+    const key = args[1]
+    if (operation === 'add' && key) {
+      const valueIndex = args.indexOf('/d')
+      values.set(key, valueIndex >= 0 ? String(args[valueIndex + 1] || '') : '')
+      return { status: 0, stdout: '', stderr: '' }
+    }
+    if (operation === 'query' && key) {
+      const value = values.get(key)
+      if (value === undefined) {
+        return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }
+      }
+      const stdout = Buffer.from(`${key}\r\n    (Default)    REG_SZ    ${value}\r\n`, 'utf8')
+      return options?.encoding === 'buffer'
+        ? { status: 0, stdout, stderr: Buffer.alloc(0) }
+        : { status: 0, stdout: stdout.toString('utf8'), stderr: '' }
+    }
+    if (operation === 'delete' && key) {
+      values.delete(key)
+      return { status: 0, stdout: '', stderr: '' }
+    }
+    return { status: 1, stdout: '', stderr: 'unsupported reg.exe test invocation' }
+  })
+  return { values, spawnSync }
+})
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawnSync: registryProcess.spawnSync }
+})
 import {
   buildHostCmdContent,
   buildHostManifest,
@@ -19,6 +58,7 @@ import {
   uninstallNativeHost,
   readInstalledManifest,
   readNativeMessagingRegistry,
+  decodeRegistryOutput,
   chromeRegistryKey,
   edgeRegistryKey,
   NATIVE_HOST_NAME,
@@ -31,8 +71,10 @@ const ROOT = resolve(HERE, '..', '..', '..')
 
 const temps: string[] = []
 afterEach(() => {
-  // Always cleanup registry keys we may have written (safe HKCU only).
-  try { uninstallNativeHost() } catch { /* ignore */ }
+  // Registry lifecycle is fully in-memory in this unit suite. Never delete a
+  // user's installed NativeMessagingHosts while running ordinary tests.
+  registryProcess.values.clear()
+  registryProcess.spawnSync.mockClear()
   for (const d of temps.splice(0)) {
     try { rmSync(d, { recursive: true, force: true }) } catch { /* ignore */ }
   }
@@ -79,6 +121,84 @@ describe('packaged browser-bridge assets', () => {
     expect(cmd).toMatch(/\.\.\\\.\.\\Verstak\.exe/)
     expect(cmd).not.toMatch(/\bwhere node\b/i)
     expect(cmd).toMatch(/ELECTRON_RUN_AS_NODE=1/)
+  })
+
+  it('native host завершается при закрытом desktop pipe, чтобы Chrome создал свежий transport', async () => {
+    const missingEndpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\verstak-missing-${process.pid}-${Date.now()}`
+      : join(tmpdir(), `verstak-missing-${process.pid}-${Date.now()}.sock`)
+    const child = spawn(process.execPath, [join(ROOT, 'electron', 'ai', 'browser', 'bridge', 'host-runtime.mjs')], {
+      env: { ...process.env, VERSTAK_BRIDGE_ENDPOINT: missingEndpoint },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    const body = Buffer.from(JSON.stringify({ v: 1, type: 'hello', requestId: 'h1' }), 'utf8')
+    const header = Buffer.alloc(4)
+    header.writeUInt32LE(body.length, 0)
+    child.stdin.write(Buffer.concat([header, body]))
+
+    const exitCode = await Promise.race([
+      new Promise<number | null>(resolveExit => child.once('exit', resolveExit)),
+      new Promise<'timeout'>(resolveTimeout => setTimeout(() => resolveTimeout('timeout'), 1500)),
+    ])
+    if (exitCode === 'timeout') child.kill()
+    expect(exitCode).not.toBe('timeout')
+  })
+
+  it('первый Chrome frame до готовности pipe не теряется и доходит после connect', async () => {
+    const endpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\verstak-host-queue-${process.pid}-${Date.now()}`
+      : join(tmpdir(), `verstak-host-queue-${process.pid}-${Date.now()}.sock`)
+    const server = createServer(socket => {
+      // host-runtime is a byte-for-byte framed relay; echo proves its initial
+      // Chrome frame reached the pipe and returned through stdout.
+      socket.on('data', chunk => socket.write(chunk))
+    })
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen)
+      server.listen(endpoint, resolveListen)
+    })
+
+    const child = spawn(process.execPath, [join(ROOT, 'electron', 'ai', 'browser', 'bridge', 'host-runtime.mjs')], {
+      env: { ...process.env, VERSTAK_BRIDGE_ENDPOINT: endpoint },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    try {
+      const body = Buffer.from(JSON.stringify({ v: 1, type: 'hello', requestId: 'queued-h1' }), 'utf8')
+      const header = Buffer.alloc(4)
+      header.writeUInt32LE(body.length, 0)
+      // Write immediately after spawn: the host may not have emitted pipe connect yet.
+      child.stdin.write(Buffer.concat([header, body]))
+
+      const echoed = await Promise.race([
+        new Promise<Record<string, unknown>>((resolveFrame, rejectFrame) => {
+          let buffered = Buffer.alloc(0)
+          child.stdout.on('data', chunk => {
+            buffered = Buffer.concat([buffered, Buffer.from(chunk)])
+            if (buffered.length < 4) return
+            const len = buffered.readUInt32LE(0)
+            if (buffered.length < 4 + len) return
+            try {
+              resolveFrame(JSON.parse(buffered.subarray(4, 4 + len).toString('utf8')))
+            } catch (err) {
+              rejectFrame(err)
+            }
+          })
+          child.once('error', rejectFrame)
+        }),
+        new Promise<'timeout'>(resolveTimeout => setTimeout(() => resolveTimeout('timeout'), 1500)),
+      ])
+      expect(echoed).not.toBe('timeout')
+      expect(echoed).toMatchObject({ type: 'hello', requestId: 'queued-h1' })
+    } finally {
+      try { child.stdin.end() } catch { /* ignore */ }
+      if (!child.killed) child.kill()
+      await new Promise<void>(resolveClose => server.close(() => resolveClose()))
+      if (process.platform !== 'win32') {
+        try { rmSync(endpoint, { force: true }) } catch { /* ignore */ }
+      }
+    }
   })
 })
 
@@ -129,6 +249,14 @@ describe('host manifest validate', () => {
 })
 
 describe('install / repair / uninstall lifecycle', () => {
+  it('декодирует кириллицу из OEM-вывода reg.exe', () => {
+    const prefix = Buffer.from('    (Default)    REG_SZ    C:\\Users\\Pavel\\Progetc\\', 'ascii')
+    const cyrillic = Buffer.from('8fe0aea5aae2eb', 'hex') // «Проекты» в CP866
+    const suffix = Buffer.from('\\verstak\\host.json\r\n', 'ascii')
+    expect(decodeRegistryOutput(Buffer.concat([prefix, cyrillic, suffix])))
+      .toContain('C:\\Users\\Pavel\\Progetc\\Проекты\\verstak\\host.json')
+  })
+
   it('install writes assets + optional HKCU + uninstall cleanup', () => {
     const installDir = mkdtempSync(join(tmpdir(), 'verstak-nm-host-'))
     temps.push(installDir)
@@ -186,6 +314,36 @@ describe('install / repair / uninstall lifecycle', () => {
       const after = readNativeMessagingRegistry()
       expect(after[chromeRegistryKey()]).toBeNull()
       expect(after[edgeRegistryKey()]).toBeNull()
+      expect(registryProcess.spawnSync).toHaveBeenCalled()
+      expect(registryProcess.spawnSync.mock.calls.every(([command]) => command === 'reg.exe')).toBe(true)
+    }
+  })
+
+  it('packaged smoke stages host assets without touching real Native Messaging registry', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'verstak-nm-smoke-'))
+    temps.push(installDir)
+    const fakeExe = join(installDir, 'FakeVerstak.exe')
+    writeFileSync(fakeExe, 'MZ', 'utf8')
+
+    const previousSmoke = process.env.VERSTAK_SMOKE
+    process.env.VERSTAK_SMOKE = '1'
+    try {
+      const result = installNativeHost({
+        installDir,
+        hostScriptSource: '// packaged smoke host\n',
+        electronExeAbsolute: fakeExe,
+        allowNodeFallback: false,
+        force: true,
+      })
+
+      expect(result.ok, result.error).toBe(true)
+      expect(result.registryKeys).toEqual([])
+      expect(existsSync(join(installDir, 'host.cmd'))).toBe(true)
+      expect(existsSync(join(installDir, 'host.mjs'))).toBe(true)
+      expect(registryProcess.spawnSync).not.toHaveBeenCalled()
+    } finally {
+      if (previousSmoke === undefined) delete process.env.VERSTAK_SMOKE
+      else process.env.VERSTAK_SMOKE = previousSmoke
     }
   })
 })

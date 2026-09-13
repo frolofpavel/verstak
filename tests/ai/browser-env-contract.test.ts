@@ -31,6 +31,12 @@ describe('выбор среды браузера — рантайм-часть �
     expect(resolveBrowserEnv(undefined, 'isolated')).toEqual({ ok: true, env: 'isolated', switched: false })
   })
 
+  it('auto-selected connected режим липнет внутри run, но не становится публичным env', () => {
+    expect(resolveBrowserEnv(undefined, 'connected')).toEqual({ ok: true, env: 'connected', switched: false })
+    expect(BROWSER_ENVS).toEqual(['builtin', 'isolated'])
+    expect(resolveBrowserEnv('connected', 'builtin').ok).toBe(false)
+  })
+
   it('явное указание переключает среду и помечает переключение', () => {
     expect(resolveBrowserEnv('isolated', 'builtin')).toEqual({ ok: true, env: 'isolated', switched: true })
     expect(resolveBrowserEnv('builtin', 'isolated')).toEqual({ ok: true, env: 'builtin', switched: true })
@@ -100,6 +106,23 @@ describe('нормализация адреса для инструмента', 
 
 describe('схема инструмента объявляет среду и правило её выбора', () => {
   const nav = TOOL_DEFS.find(t => t.name === 'browser_navigate')
+
+  it('модель не задаёт env для подключённой exact-вкладки, а auto-select выбирает connected adapter', () => {
+    expect(nav!.description).toMatch(/подключена точная вкладка Chrome\/Edge/i)
+    expect(nav!.description).toMatch(/не передавай env/i)
+    expect(nav!.description).toMatch(/автоматически выберет подключ[её]нную вкладку/i)
+  })
+
+  // КОНТРОЛЬ: запрет `env` относится только к connected-tab пути. Явная просьба
+  // человека работать во встроенном браузере обязана оставаться представимой в
+  // том же production-контракте, иначе исправление сделало бы builtin недоступным.
+  it('КОНТРОЛЬ: env=builtin остаётся явным выбором по просьбе пользователя', () => {
+    expect(nav!.description).toMatch(/env="builtin"/i)
+    expect(nav!.description).toMatch(/явно попросил[^.]*встроенн/i)
+    expect(nav!.description).toMatch(/без подключ[её]нной вкладки[^.]*встроенн/i)
+    expect(nav!.description).toMatch(/если подключ[её]нной вкладки нет[^.]*залогиненн[^.]*встроенн/i)
+    expect(nav!.description).not.toMatch(/для залогиненных сайтов бери встроенный/i)
+  })
 
   it('browser_navigate принимает env с закрытым списком значений', () => {
     expect(nav).toBeTruthy()

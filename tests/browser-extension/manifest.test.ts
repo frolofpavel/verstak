@@ -1,6 +1,6 @@
 // manifest.test.ts — гейт контракта VSK-EXT-A1 + EXT-B1 Connected Eyes.
 //
-// MV3, минимум Chrome 114, permissions B1 (activeTab/scripting/sidePanel/
+// MV3, минимум Chrome 116, permissions B1 (activeTab/scripting/sidePanel/
 // nativeMessaging/storage), optional_host_permissions без <all_urls>,
 // русское action.default_title, отсутствие опасных API.
 
@@ -22,10 +22,10 @@ function parseManifest() {
 }
 
 describe('manifest.json — контракт VSK-EXT-A1 + EXT-B1', () => {
-  it('валидный JSON, MV3, минимум Chrome 114', () => {
+  it('валидный JSON, MV3, минимум Chrome 116 для sidePanel.open', () => {
     const m = parseManifest()
     expect(m.manifest_version).toBe(3)
-    expect(m.minimum_chrome_version).toBe('114')
+    expect(Number(m.minimum_chrome_version)).toBeGreaterThanOrEqual(116)
     expect(typeof m.name).toBe('string')
     expect((m.name as string).length).toBeGreaterThan(0)
     expect(typeof m.version).toBe('string')
@@ -115,6 +115,9 @@ describe('manifest.json — контракт VSK-EXT-A1 + EXT-B1', () => {
     expect((title as string).trim().length).toBeGreaterThan(2)
     // Кириллица — индикатор «русского названия».
     expect((title as string)).toMatch(/[А-Яа-яЁё]/)
+    // Popup перехватывает клик по action и не даёт background получить точную
+    // вкладку (и activeTab grant). Панель открывает Side Panel API.
+    expect(action).not.toHaveProperty('default_popup')
   })
 
   it('stable extension key присутствует (для fixed extension id)', () => {

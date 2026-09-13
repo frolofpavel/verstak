@@ -5,6 +5,43 @@ import { FORBIDDEN_CROSS_TOOLS } from './browser/capability'
 
 const BROWSER_RUN_FORBIDDEN_TOOLS = new Set(FORBIDDEN_CROSS_TOOLS)
 
+type BrowserRunAwareContext = ToolContext & {
+  browserRunState?: { active: boolean; contextExposed?: boolean; screenshotExposed?: boolean }
+}
+
+function resultIncludesScreenshot(result: ToolResult | undefined): boolean {
+  if (!result || result.error || !result.result || typeof result.result !== 'object') return false
+  const payload = result.result as Record<string, unknown>
+  return payload.screenshotAttached === true || payload.attached === true
+}
+
+function updateBrowserRunAfterTools(
+  state: BrowserRunAwareContext['browserRunState'],
+  toolCalls: ToolCall[],
+  results: ToolResult[],
+  blocked: Map<number, string>,
+): void {
+  if (!state) return
+  const contextExposed = toolCalls.some((call, index) => (
+    call.name.startsWith('browser_')
+    && !blocked.has(index)
+    && !results[index]?.error
+  ))
+  const observed = toolCalls.some((call, index) => (
+    call.name === 'browser_read_page'
+    && !blocked.has(index)
+    && !results[index]?.error
+  ))
+  const screenshotExposed = toolCalls.some((call, index) => (
+    call.name.startsWith('browser_')
+    && !blocked.has(index)
+    && resultIncludesScreenshot(results[index])
+  ))
+  if (contextExposed) state.contextExposed = true
+  if (screenshotExposed) state.screenshotExposed = true
+  if (observed) state.active = true
+}
+
 interface DispatchToolTurnOptions {
   toolCalls: ToolCall[]
   context: ToolContext
@@ -144,7 +181,8 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
   const blocked = hooks
     ? await collectPreBlocks(toolCalls, context, hooks, invokeHooks, addContext)
     : new Map<number, string>()
-  if (context.browserTaskId) {
+  const browserRunState = (context as BrowserRunAwareContext).browserRunState
+  if (browserRunState?.active === true) {
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
       if (!blocked.has(i) && BROWSER_RUN_FORBIDDEN_TOOLS.has(call.name)) {
@@ -167,6 +205,10 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
     }
   }
   const results = await executeHandlers(toolCalls, context, blocked, resolveHandler)
+  // browserTaskId — лишь durable lineage и заранее существует у обычного чата.
+  // Browser-only capability становится активной только после того, как модель
+  // действительно получила недоверенное содержимое подключённой страницы.
+  updateBrowserRunAfterTools(browserRunState, toolCalls, results, blocked)
   if (hooks) {
     await runPostHooks(toolCalls, results, context, hooks, blocked, invokeHooks, addContext)
   }

@@ -79,6 +79,12 @@ export function edgeRegistryKey(): string {
   return `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`
 }
 
+/** reg.exe пишет консольный вывод в OEM code page; на русской Windows это CP866. */
+export function decodeRegistryOutput(value: Buffer): string {
+  if (process.platform !== 'win32') return value.toString('utf8')
+  return new TextDecoder('ibm866').decode(value)
+}
+
 /**
  * Записать default value registry key → path to host manifest JSON.
  * reg.exe надёжнее PS Set-ItemProperty '(default)' на RU Windows.
@@ -116,14 +122,14 @@ export function readNativeMessagingRegistry(): Record<string, string | null> {
     const r = spawnSync(
       'reg.exe',
       ['query', key, '/ve'],
-      { encoding: 'utf8', shell: false, windowsHide: true },
+      { encoding: 'buffer', shell: false, windowsHide: true },
     )
     if (r.status !== 0) {
       out[key] = null
       continue
     }
     // REG_SZ    C:\path\to\manifest.json
-    const text = (r.stdout || '').trim()
+    const text = decodeRegistryOutput(r.stdout).trim()
     const m = text.match(/REG_SZ\s+(.+)$/im)
     out[key] = m ? m[1].trim() : null
   }
@@ -213,6 +219,12 @@ export interface InstallHostOptions {
   allowNodeFallback?: boolean
   /** Если true — перезаписать (upgrade/repair). */
   force?: boolean
+  /**
+   * Stage host assets without changing browser registry. Used only by the
+   * explicitly isolated packaged startup smoke, whose app directory is deleted
+   * after the run. Normal startup and Settings keep the default true behavior.
+   */
+  registerNativeMessaging?: boolean
 }
 
 /**
@@ -253,7 +265,11 @@ export function installNativeHost(opts: InstallHostOptions): HostInstallResult {
     }
     writeFileSync(manifestPath, JSON.stringify(validated.manifest, null, 2), 'utf8')
 
-    const reg = writeNativeMessagingRegistry(manifestPath)
+    const shouldRegister = opts.registerNativeMessaging
+      ?? process.env.VERSTAK_SMOKE !== '1'
+    const reg = shouldRegister
+      ? writeNativeMessagingRegistry(manifestPath)
+      : { ok: true, keys: [] }
     if (!reg.ok) {
       return {
         ok: false,
@@ -266,7 +282,7 @@ export function installNativeHost(opts: InstallHostOptions): HostInstallResult {
     }
 
     // Readback
-    if (process.platform === 'win32') {
+    if (shouldRegister && process.platform === 'win32') {
       const values = readNativeMessagingRegistry()
       const chromeVal = values[chromeRegistryKey()]
       if (!chromeVal || !chromeVal.toLowerCase().includes(NATIVE_HOST_NAME.toLowerCase())) {

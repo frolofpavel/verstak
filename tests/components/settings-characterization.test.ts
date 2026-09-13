@@ -18,6 +18,13 @@ const { Settings } = await import('../../src/components/Settings')
 // Формы, которые читает контент вкладок при переключении (списки итерируются → нужен []).
 const SETTINGS_DEFAULTS = {
   ...CHAT_API_DEFAULTS,
+  browserBridge: {
+    getState: async () => ({
+      ui: 'offline', connected: false, authenticated: false,
+      host: { installed: false, needsRepair: false },
+      attachedTab: null, lastError: null,
+    }),
+  },
   subscriptionAccounts: { list: async () => [] },
   cliAuth: { statusAll: async () => ({}) },
   localModels: { scan: async () => [] },
@@ -61,6 +68,17 @@ describe('Settings characterization — навигационная оболоч�
     await waitFor(() => expect(sectionTitle()).toBe('Подписки'))
     const activeTab = document.querySelector('[role="tab"][aria-selected="true"]')!
     expect(activeTab.textContent).toContain('Подписки')
+  }, 10000)
+
+  it('браузер живёт в «Интеграциях» и открывает страницу подключения', async () => {
+    mountSettings({ initialTab: 'browser' })
+
+    await waitFor(() => expect(screen.getByTestId('browser-settings-page')).toBeTruthy())
+    const browserTab = screen.getByRole('tab', { name: /Browser|Браузер/i })
+    const navGroupTitle = browserTab.closest('.gg-settings-nav-group')?.querySelector('.gg-settings-nav-title')?.textContent
+    expect(browserTab.getAttribute('aria-selected')).toBe('true')
+    expect(navGroupTitle).toBe('Интеграции')
+    expect(sectionTitle()).toMatch(/Browser|Браузер/i)
   }, 10000)
 
   // 2.1.3-A/B: «Подписки» — единый ЦЕНТР УПРАВЛЕНИЯ аккаунтами, а не read-only обзор.

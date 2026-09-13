@@ -976,23 +976,15 @@ declare global {
       verify: {
         exec: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>
       }
-      /** EXT-B1/C1 Browser bridge card. */
+      /** Browser integration settings. */
       browserBridge: {
         getState: () => Promise<BrowserBridgeStateDTO>
-        issuePairingCode: () => Promise<
-          { ok: true; code: string; expiresAt: number } | { ok: false; error: string }
-        >
-        installHost: () => Promise<{
+        connect: () => Promise<{
           ok: boolean
-          hostName: string
-          manifestPath: string
-          hostLauncherPath: string
-          registryKeys: string[]
+          state: BrowserBridgeStateDTO
+          needsExtensionAction: boolean
           error?: string
-          readback?: BrowserBridgeStateDTO['host']
         }>
-        uninstallHost: () => Promise<{ ok: boolean; error?: string }>
-        extensionDir: () => Promise<{ path: string; extensionId: string }>
       }
       // Git READ + WRITE (Dev Task Flow). WRITE (Фаза 3) — argv-форма + денилист.
       git: {
@@ -1228,30 +1220,13 @@ export interface AutonomousStatus {
 /** EXT-B1/C1 Browser bridge public state (renderer). */
 export interface BrowserBridgeStateDTO {
   ui: string
-  desktopOnline: boolean
   connected: boolean
   authenticated: boolean
-  sessionId: string | null
-  browserTaskId: string | null
-  runId: string | null
-  attachedTab: {
-    tabRef: string
-    url: string
-    title: string
-    origin: string
-  } | null
   lastError: string | null
   host: {
     installed: boolean
     needsRepair: boolean
-    hostName: string
-    extensionId: string
-    registryOk: boolean
-    manifestPath: string | null
   }
-  extensionDir: string
-  activePairingCode: string | null
-  activePairingExpiresAt: number | null
 }
 
 /** Обнаруженный CLI-инструмент на компьютере пользователя. */

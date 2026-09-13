@@ -57,6 +57,10 @@ export type ObservationId = string
 export interface BrowserActionScope {
   browserTaskId: BrowserTaskId
   runId: RunId
+  /** Provider frame that proposed the action. Persisted for approval/readback policy. */
+  providerId?: string | null
+  /** Явно выбранная среда adapter; входит в approval digest и переживает ledger round-trip. */
+  adapterId?: BrowserAdapter['id'] | null
   clientId?: string | null
   /** tab + document refs из наблюдения (план §4.3). */
   tabRef?: string | null
@@ -74,6 +78,14 @@ export interface BrowserActionScope {
   observationVersion?: number | null
   elementRef?: ElementRef | null
 }
+
+/** Trusted execution identity passed by BrowserController to an adapter call.
+ * The adapter must never reconstruct task/run lineage from mutable bridge UI
+ * state: another chat can update that state while this action is in flight. */
+export type BrowserAdapterActionScope = Pick<
+  BrowserActionScope,
+  'browserTaskId' | 'runId' | 'tabRef' | 'origin'
+>
 
 // ── Observation (план §4.3) — снимок страницы под одним scope ────────────────
 
@@ -285,23 +297,23 @@ export interface BrowserAdapter {
   /** Снять observation. Не делает risk-classification — только сбор данных. */
   observe(scope: Pick<BrowserActionScope, 'browserTaskId' | 'runId' | 'tabRef'>): Promise<Observation>
   /** Перейти по URL. Возвращает final URL после редиректов. */
-  navigate(url: string): Promise<{ finalUrl: string; title: string }>
+  navigate(url: string, scope: BrowserAdapterActionScope): Promise<{ finalUrl: string; title: string }>
   /** Browser back/forward/reload. */
-  back(): Promise<void>
-  forward(): Promise<void>
-  reload(): Promise<void>
+  back(scope: BrowserAdapterActionScope): Promise<void>
+  forward(scope: BrowserAdapterActionScope): Promise<void>
+  reload(scope: BrowserAdapterActionScope): Promise<void>
   /** Кликнуть/фокуснуть элемент по elementRef из свежего observation. */
-  click(elementRef: ElementRef): Promise<{ finalUrl: string }>
-  focus(elementRef: ElementRef): Promise<void>
-  scroll(elementRef: ElementRef | null, delta: { x?: number; y?: number }): Promise<void>
-  selectOption?(elementRef: ElementRef, value: string): Promise<void>
-  typeText?(elementRef: ElementRef, text: string, opts?: { clearFirst?: boolean; submitEnter?: boolean }): Promise<void>
-  clearField?(elementRef: ElementRef): Promise<void>
-  toggle?(elementRef: ElementRef): Promise<void>
-  pressKey?(elementRef: ElementRef, key: string): Promise<void>
-  waitFor?(condition: { elementRef?: ElementRef; text?: string; url?: string; timeoutMs?: number }): Promise<{ ok: boolean; reason?: string }>
+  click(elementRef: ElementRef, scope: BrowserAdapterActionScope): Promise<{ finalUrl: string }>
+  focus(elementRef: ElementRef, scope: BrowserAdapterActionScope): Promise<void>
+  scroll(elementRef: ElementRef | null, delta: { x?: number; y?: number }, scope: BrowserAdapterActionScope): Promise<void>
+  selectOption?(elementRef: ElementRef, value: string, scope: BrowserAdapterActionScope): Promise<void>
+  typeText?(elementRef: ElementRef, text: string, opts: { clearFirst?: boolean; submitEnter?: boolean } | undefined, scope: BrowserAdapterActionScope): Promise<void>
+  clearField?(elementRef: ElementRef, scope: BrowserAdapterActionScope): Promise<void>
+  toggle?(elementRef: ElementRef, scope: BrowserAdapterActionScope): Promise<void>
+  pressKey?(elementRef: ElementRef, key: string, scope: BrowserAdapterActionScope): Promise<void>
+  waitFor?(condition: { elementRef?: ElementRef; text?: string; url?: string; timeoutMs?: number }, scope: BrowserAdapterActionScope): Promise<{ ok: boolean; reason?: string }>
   /** Скриншот viewport. Возвращает data URL или null если заблокирован. */
-  screenshot(): Promise<string | null>
+  screenshot(scope: BrowserAdapterActionScope): Promise<string | null>
   /** Универсальный «не знаю этот action» для типов, не реализованных в B0. */
   unsupported(actionType: BrowserActionType): { ok: false; reason: string }
 }

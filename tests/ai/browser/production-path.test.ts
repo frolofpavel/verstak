@@ -218,10 +218,11 @@ describe('EXT-B0-R2 scenario: wrong origin → safe stop', () => {
 
 describe('EXT-B0-R2 scenario: no approval UI → safe stop', () => {
   it('production approval callback без ответа → timeout, 0 кликов, не hang', async () => {
+    let pendingActionId = ''
     configureBrowserHandler({
       controller,
       resolveTaskId: () => 'bt-7',
-      emitPendingBrowserAction: () => {},
+      emitPendingBrowserAction: (_ctx, payload) => { pendingActionId = payload.actionId },
       // Production callback существует, но renderer/widget не отвечает.
       awaitBrowserApproval: async () => await new Promise(() => {}),
       approvalTimeoutMs: 20,
@@ -238,6 +239,69 @@ describe('EXT-B0-R2 scenario: no approval UI → safe stop', () => {
     expect(result.error).toBeTruthy()
     expect(result.error).toMatch(/не ответил|отменён/i)
     expect(adapter.clickCount).toBe(0)
+    expect(bt.getAction(pendingActionId)?.status).toBe('rejected')
+    expect(bt.actionEvents(pendingActionId).at(-1)?.reason).toBe('approval_timeout')
+  })
+
+  it('отсутствующий approval transport → rejected в ledger, 0 кликов', async () => {
+    let pendingActionId = ''
+    configureBrowserHandler({
+      controller,
+      resolveTaskId: () => 'bt-7',
+      emitPendingBrowserAction: (_ctx, payload) => { pendingActionId = payload.actionId },
+    })
+    const result = await browserHandler.handle({
+      id: 'c-no-transport',
+      name: 'browser_click',
+      args: { selector: 'btn', action: 'submit' },
+    }, mockCtx())
+    expect(result.error).toMatch(/не сконфигурирован/i)
+    expect(adapter.clickCount).toBe(0)
+    expect(bt.getAction(pendingActionId)?.status).toBe('rejected')
+    expect(bt.actionEvents(pendingActionId).at(-1)?.reason).toBe('approval_transport_missing')
+  })
+
+  it('ошибка approval transport → rejected в ledger, 0 кликов', async () => {
+    let pendingActionId = ''
+    configureBrowserHandler({
+      controller,
+      resolveTaskId: () => 'bt-7',
+      emitPendingBrowserAction: (_ctx, payload) => { pendingActionId = payload.actionId },
+      awaitBrowserApproval: async () => { throw new Error('renderer unavailable') },
+    })
+    const result = await browserHandler.handle({
+      id: 'c-transport-fail',
+      name: 'browser_click',
+      args: { selector: 'btn', action: 'submit' },
+    }, mockCtx())
+    expect(result.error).toMatch(/недоступен|отменён/i)
+    expect(adapter.clickCount).toBe(0)
+    expect(bt.getAction(pendingActionId)?.status).toBe('rejected')
+    expect(bt.actionEvents(pendingActionId).at(-1)?.reason).toBe('approval_transport_failed')
+  })
+
+  it('Stop/abort во время approval → rejected в ledger, 0 кликов', async () => {
+    let pendingActionId = ''
+    const abort = new AbortController()
+    abort.abort()
+    configureBrowserHandler({
+      controller,
+      resolveTaskId: () => 'bt-7',
+      emitPendingBrowserAction: (_ctx, payload) => { pendingActionId = payload.actionId },
+      awaitBrowserApproval: async (_ctx, _actionId, signal) => {
+        if (signal.aborted) throw new Error('aborted')
+        return { approved: false, approvalDigest: '' }
+      },
+    })
+    const result = await browserHandler.handle({
+      id: 'c-abort',
+      name: 'browser_click',
+      args: { selector: 'btn', action: 'submit' },
+    }, mockCtx({ signal: abort.signal }))
+    expect(result.error).toMatch(/отменён/i)
+    expect(adapter.clickCount).toBe(0)
+    expect(bt.getAction(pendingActionId)?.status).toBe('rejected')
+    expect(bt.actionEvents(pendingActionId).at(-1)?.reason).toBe('approval_aborted')
   })
 })
 
@@ -261,6 +325,9 @@ describe('EXT-B0-R2 scenario: approval widget reject=0 / approve=1', () => {
     expect(emitted[0].approvalDigest).toBeTruthy()
     expect(result.error).toMatch(/отклонил/i)
     expect(adapter.clickCount).toBe(0)
+    const actionId = String(emitted[0].actionId)
+    expect(bt.getAction(actionId)?.status).toBe('rejected')
+    expect(bt.actionEvents(actionId).at(-1)?.reason).toBe('user_rejected')
   })
 
   it('approve → ровно 1 клик + ledger verified/uncertain', async () => {

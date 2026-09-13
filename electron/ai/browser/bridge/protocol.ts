@@ -13,6 +13,7 @@ import {
 
 export type BridgeMsgType =
   | 'hello'
+  | 'auth_available'
   | 'pair'
   | 'status'
   | 'attach'
@@ -116,7 +117,10 @@ export interface ObserveMsg extends BridgeBase {
   browserTaskId: string
   runId: string
   tabRef: string
-  snapshot: BridgePageSnapshot
+  /** Omitted by legacy success senders; explicit false is a capture failure. */
+  ok: boolean
+  snapshot?: BridgePageSnapshot
+  error?: string
 }
 
 /** Desktop → extension: запросить observe активной/прикреплённой вкладки. */
@@ -398,11 +402,22 @@ export type BridgeInbound =
 
 export type BridgeOutbound =
   | HelloOkMsg
+  | AuthAvailableMsg
   | PairOkMsg
   | StatusOkMsg
   | AttachOkMsg
   | DetachOkMsg
   | ObserveOkMsg
+  | ClickResultMsg
+  | NavigateResultMsg
+  | ScrollResultMsg
+  | FocusResultMsg
+  | SelectOptionResultMsg
+  | WaitForResultMsg
+  | TypeTextResultMsg
+  | ClearFieldResultMsg
+  | ToggleResultMsg
+  | PressKeyResultMsg
   | ObserveRequestMsg
   | ClickRequestMsg
   | ClickOkMsg
@@ -436,6 +451,16 @@ export interface HelloOkMsg extends BridgeBase {
   protocolVersion: typeof BRIDGE_PROTOCOL_VERSION
   hostName: string
   desktopOnline: boolean
+}
+
+/**
+ * Desktop → extension: Settings opened the short, in-memory authorization
+ * window. No credential crosses this notification; it only asks an already
+ * allowlisted hello socket to repeat its credential-less pair.
+ */
+export interface AuthAvailableMsg extends BridgeBase {
+  type: 'auth_available'
+  expiresAt: number
 }
 
 export interface PairOkMsg extends BridgeBase {
@@ -664,10 +689,12 @@ export function parseInboundMessage(raw: string | Buffer): ParseResult {
           message: 'observe требует browserTaskId, runId, tabRef',
         }
       }
-      const snapshot = parseSnapshot(data.snapshot)
-      if (!snapshot) {
+      const ok = data.ok !== false
+      const parsedSnapshot = ok ? parseSnapshot(data.snapshot) : null
+      if (ok && !parsedSnapshot) {
         return { ok: false, code: 'bad_snapshot', message: 'observe.snapshot невалиден' }
       }
+      const snapshot = parsedSnapshot ?? undefined
       return {
         ok: true,
         msg: {
@@ -677,7 +704,9 @@ export function parseInboundMessage(raw: string | Buffer): ParseResult {
           browserTaskId,
           runId,
           tabRef,
+          ok,
           snapshot,
+          error: optionalString(data.error, 1000),
         },
       }
     }

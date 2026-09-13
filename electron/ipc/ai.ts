@@ -39,7 +39,7 @@ import { saveRunInputSnapshot } from './ai-send/run-input'
 import { registerAiResolveIpc } from './ai-resolve'
 import { BROWSER_APPROVAL_TIMEOUT_MS, configureBrowserHandler } from './tool-handlers/browser'
 import { webviewB0Capability } from '../ai/browser/capability'
-import { localWebviewDataPolicy } from '../ai/browser/data-policy'
+import { connectedBrowserDataPolicy, decideProviderBrowserContext, localWebviewDataPolicy, parseClientDataPolicy } from '../ai/browser/data-policy'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
 import { runApiConversation } from '../ai/runner-api'
@@ -198,8 +198,15 @@ export interface AiDeps {
   browserTasks?: import('../storage/browser-tasks').BrowserTasks
   /** EXT-B0/R1 setter — обновляет exec webview-адаптера под актуальный WebContents. */
   setWebviewAdapterExec?: (exec: (code: string) => Promise<unknown>) => void
-  /** EXT-B0/R1 map: chatId (string) → task tab ref. */
+  /** Production adapter selection для честного fail-closed legacy routing. */
+  resolveBrowserAdapterId?: (preferred?: import('../ai/browser/types').BrowserAdapter['id']) => import('../ai/browser/types').BrowserAdapter['id'] | null
+  /** EXT-B0/R1 map: browserTaskId → task tab ref. */
   browserTaskTabs?: Map<string, string>
+  /**
+   * Привязать live singleton вкладку extension к lineage текущего ai:send и
+   * записать tab/origin/caps в durable browser task. Вызывается после ensureTask.
+   */
+  syncBrowserContext?: (input: { browserTaskId: string; runId: string }) => void
   /** EXT-B1 Connected Eyes: обновить lineage на bridge (без auto-continue actions). */
   setBrowserBridgeLineage?: (browserTaskId: string | null, runId: string | null) => void
   /** #5 worktree-lifecycle: ре-рут file-тулзов на persistent worktree изолированного чата. */
@@ -535,6 +542,8 @@ export interface AiSendInternal {
    *  действия; контур состязания делает из неё честный failed попытки. Из
    *  renderer'а недостижим — IPC-регистрация internal не форвардит. */
   onConfirmAutoRejected?: (info: { toolName: string; subject: string }) => void
+  /** Запрос пришёл из toolbar side panel и с первого model turn является browser-only. */
+  browserRunActive?: boolean
 }
 
 /** Программный запуск обычного ai:send из main (P1: прогон попытки состязания).
@@ -570,6 +579,7 @@ export interface AiIpcGateway {
 export function registerAiIpc(deps: AiDeps): AiIpcGateway {
   configureBrowserHandler({
     controller: deps.browserController,
+    resolveAdapterId: deps.resolveBrowserAdapterId,
     resolveTaskId: (ctx) => typeof ctx.parentChatId === 'number'
       ? `bt-${ctx.parentChatId}`
       : (ctx.runId ? `bt-run-${ctx.runId}` : `bt-send-${ctx.sendId}`),
@@ -714,20 +724,48 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     const taggedSender = tagSender(sender, projectPath) // route progress and chat events to this project
     deps.setWebviewAdapterExec?.(taggedSender.exec)
     const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
+    const browserContextProviderAllowed = (candidateProviderId: ProviderId): boolean => {
+      const task = deps.browserTasks?.get(browserTaskId)
+      const policy = task ? parseClientDataPolicy(task.dataPolicy) : null
+      if (!policy) return false
+      const decision = decideProviderBrowserContext(policy, candidateProviderId)
+      return decision.kind === 'allow' || decision.kind === 'redact-screenshot-only'
+    }
+    const browserScreenshotProviderAllowed = (candidateProviderId: ProviderId): boolean => {
+      const task = deps.browserTasks?.get(browserTaskId)
+      const policy = task ? parseClientDataPolicy(task.dataPolicy) : null
+      if (!policy) return false
+      return decideProviderBrowserContext(policy, candidateProviderId).kind === 'allow'
+    }
     if (deps.browserController && deps.browserTasks) {
       try {
         const existing = deps.browserTasks.get(browserTaskId)
         const seedCaps = webviewB0Capability(existing?.allowedDomains ?? [])
-        const seedPolicy = localWebviewDataPolicy(providerId)
+        const connectedBrowserIntent = deps.resolveBrowserAdapterId?.() === 'chrome-extension'
+        const existingPolicy = existing ? parseClientDataPolicy(existing.dataPolicy) : null
+        const seedPolicy = connectedBrowserIntent
+          ? connectedBrowserDataPolicy(providerId, existingPolicy)
+          : localWebviewDataPolicy(providerId)
         if (!existing) {
           deps.browserController.ensureTask({
             browserTaskId, projectPath: projectPath ?? '', chatId: chatIdNum ?? null,
             runId, providerId, browserMode: 'execute', caps: seedCaps, dataPolicy: seedPolicy,
           })
         } else {
+          // Tasks created by the pre-connected-browser path may carry the local
+          // webview's empty allowlist (= allow every provider). Narrow it before
+          // binding an authenticated Chrome/Edge tab to this run. An existing
+          // scoped policy is preserved, so provider fallback cannot grant itself.
+          if (connectedBrowserIntent) {
+            deps.browserTasks.setDataPolicy(browserTaskId, seedPolicy as unknown as Record<string, unknown>)
+          }
           deps.browserController.attachRun({ browserTaskId, runId, providerId, handoffReason: 'new_send' })
         }
-        deps.setBrowserBridgeLineage?.(browserTaskId, runId)
+        if (deps.syncBrowserContext) {
+          deps.syncBrowserContext({ browserTaskId, runId })
+        } else {
+          deps.setBrowserBridgeLineage?.(browserTaskId, runId)
+        }
       } catch (err) {
         logRuntimeError('browser.attach_run.fail', err)
       }
@@ -1377,6 +1415,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         mcpClientRef: deps.mcpClient, appendAuditFn: auditFn, trackToolPatternFn: deps.trackToolPattern,
         parentChatId: chatId ? Number(chatId) : null,
         browserTaskIdResolver: () => browserTaskId,
+        browserRunActive: internal?.browserRunActive === true,
+        browserContextProviderAllowed,
+        browserScreenshotProviderAllowed,
         // Гард глубины спавна (задача C): дочерняя сессия — та, у чьего чата задан
         // parent_chat_id (посчитано выше вместе с бюджетом, единый источник).
         isChildSession,
@@ -1466,7 +1507,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
   return {
     invokeAiSend: handleAiSend,
     sendFromBrowser: (sender, incomingMessages, projectPath, chatId) =>
-      handleAiSend(sender, incomingMessages, projectPath, undefined, undefined, chatId),
+      handleAiSend(sender, incomingMessages, projectPath, undefined, undefined, chatId, { browserRunActive: true }),
     resolveBrowserAction: (actionId, approvalDigest, browserTaskId, runId, approved, sendId) =>
       resolveBrowserAction(actionId, approvalDigest, browserTaskId, runId, approved, sendId),
   }

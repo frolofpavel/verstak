@@ -18,6 +18,7 @@ import type { PlanOutcomes } from '../../storage/plan-outcomes'
 import type { AgentJobs } from '../../storage/agent-jobs'
 import type { AgentJobScheduler } from '../../ai/agent-job-scheduler'
 import type { ScheduleSpec } from '../../storage/scheduled-jobs'
+import type { BrowserAdapter } from '../../ai/browser/types'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -230,11 +231,12 @@ export interface ToolContext {
   }
   /** ID агентного прогона этого ai:send (Multi-agent Manager, Фаза 4). */
   runId?: string
-  /** EXT-B0/R1: stable browserTaskId для этого чата (bt-${chatId}). Когда
-   *  задан — tool-dispatch loop блокирует forbiddenCrossTools (run_command,
-   *  write_file, connector_query, delegate_*, execute_code, ...) — контент
-   *  страницы не может заставить browser run вызвать cross-tool мутацию. */
+  /** EXT-B0/R1: stable browserTaskId для этого чата (bt-${chatId}). Это lineage
+   *  browser tools, а не признак browser-only run: cross-tool gate включается
+   *  отдельно после чтения страницы или для явного toolbar-run. */
   browserTaskId?: string | null
+  /** Явный adapter выбора среды, липкий только внутри текущего agent run. */
+  browserAdapterState?: { preferred?: BrowserAdapter['id'] }
   /** Этап 6 P1: авто-снятый baseline verify active recipe (до первой правки).
    *  review_before_commit берёт его, если модель не передала baseline аргументом.
    *  undefined → baseline не снимался (нет recipe/verify) → гейт строгий. */
@@ -471,7 +473,7 @@ export function summarizeToolCall(name: string, args: Record<string, unknown>, r
   // фактам. URL берём из результата (страница возвращает { ok, url }); нет
   // результата — отдаём хотя бы цель.
   if (name === 'browser_click') {
-    const target = String(args.selector ?? '')
+    const target = String(args.elementRef ?? args.selector ?? '').trim() || 'элемент страницы'
     const url = (result && typeof result === 'object' && 'url' in result)
       ? String((result as { url?: unknown }).url ?? '')
       : ''

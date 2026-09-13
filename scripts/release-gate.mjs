@@ -741,9 +741,11 @@ const GATE_MAX_WORKERS = 4
 // сохранения и пользовательский сценарий выбора модели.
 // -> 6007 ИЗМЕРЕНО 11.09: пользовательские модели OpenAI-compatible доходят
 // до селектора чата, а явный выбор модели в Settings закрепляется за активным чатом.
-// -> 6442 ИЗМЕРЕНО 12.09: Browser Employee — controller/policy/approval,
-// durable action ledger, Native Messaging bridge, safe observe и approved click.
-const EXPECTED_TOTAL_TESTS = 6442
+// -> 6447 ИЗМЕРЕНО 13.09: Browser Employee — доступный first-pair UI,
+// системный clipboard, корректный CP866 readback реестра и automatic self-healing pair.
+// -> 6541 ИЗМЕРЕНО 13.09: Settings-first Browser Employee, exact request correlation,
+// durable privacy/lineage, bounded auth wake, honest connected mode и HKCU-safe smoke/tests.
+const EXPECTED_TOTAL_TESTS = 6541
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

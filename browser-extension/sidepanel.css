@@ -333,40 +333,4 @@ html, body {
   color: white;
 }
 
-/* Collapsible Dev Drawer */
-.vsk-dev-drawer {
-  margin-top: 8px;
-  border-top: 1px solid var(--vsk-border);
-  padding-top: 6px;
-  font-size: 11px;
-}
-
-.vsk-dev-summary {
-  cursor: pointer;
-  color: var(--vsk-muted);
-  user-select: none;
-}
-
-.vsk-dev-content {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.vsk-dev-btns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.vsk-output {
-  width: 100%;
-  background: var(--vsk-bg);
-  color: var(--vsk-muted);
-  border: 1px solid var(--vsk-border);
-  font-family: monospace;
-  font-size: 10px;
-}
-
 .vsk-hidden { display: none !important; }

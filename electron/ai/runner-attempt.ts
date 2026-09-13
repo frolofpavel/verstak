@@ -46,6 +46,15 @@ export interface ApiFallbackControllerInput<TTools> {
     extras?: RouteChangeExtras
   ) => void
   onHandedOff: () => void
+  /** Browser context is already present in currentMessages. */
+  hasBrowserContext?: () => boolean
+  /** Server-owned provider policy check before currentMessages cross a route. */
+  browserContextProviderAllowed?: (providerId: ProviderId) => boolean
+  /** A browser-origin image attachment is already present in currentMessages. */
+  hasBrowserScreenshot?: () => boolean
+  /** Screenshot-specific policy check; absent is fail-closed once one was exposed. */
+  browserScreenshotProviderAllowed?: (providerId: ProviderId) => boolean
+  onBrowserContextFallbackBlocked?: (providerId: ProviderId) => void
   runFallbackFrame: (patch: FallbackFramePatch<TTools>) => Promise<void>
 }
 
@@ -117,6 +126,17 @@ export function createApiFallbackController<TTools>(
       fallbackOpts.triedProviders,
       fallbackOpts.configuredProviders
     )
+    // currentMessages may already contain authorised DOM/screenshot tool results.
+    // Check the candidate BEFORE provider construction, route lineage mutation,
+    // or runFallbackFrame; absent policy is fail-closed once context was exposed.
+    const contextDenied = !!nextId && input.hasBrowserContext?.() === true
+      && input.browserContextProviderAllowed?.(nextId) !== true
+    const screenshotDenied = !!nextId && input.hasBrowserScreenshot?.() === true
+      && input.browserScreenshotProviderAllowed?.(nextId) !== true
+    if (nextId && (contextDenied || screenshotDenied)) {
+      input.onBrowserContextFallbackBlocked?.(nextId)
+      return null
+    }
     const attempt = nextId ? createAttempt(fallbackOpts, nextId) : null
     if (!attempt || !nextId) return null
 

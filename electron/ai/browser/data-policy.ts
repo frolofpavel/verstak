@@ -36,6 +36,44 @@ export function localWebviewDataPolicy(_providerId?: string | null): ClientDataP
   }
 }
 
+/**
+ * Connected browser reads an already-authorised browser tab, so its default
+ * grant is deliberately narrower than the local webview policy: only the
+ * provider selected for this user command may receive DOM data. A later
+ * provider fallback/switch must pass the same allowlist instead of silently
+ * inheriting access to the tab.
+ *
+ * `existing` is accepted for migration of browser tasks created before this
+ * distinction existed. Only the legacy local allow-all shape is narrowed.
+ * An already-scoped/client policy is preserved byte-for-byte semantically;
+ * changing the current provider does not add it to allowedProviders.
+ */
+export function connectedBrowserDataPolicy(
+  providerId: string | null | undefined,
+  existing?: ClientDataPolicy | null,
+): ClientDataPolicy {
+  const selectedProvider = String(providerId ?? '').trim()
+  if (existing && !isLegacyLocalAllowAll(existing)) return existing
+  if (!selectedProvider) return { ...DEFAULT_DATA_POLICY }
+
+  const base = existing ?? DEFAULT_DATA_POLICY
+  return {
+    ...base,
+    providerAllow: 'allow',
+    allowedProviders: [selectedProvider],
+    deniedProviders: [...(base.deniedProviders ?? [])],
+    dataClassification: base.dataClassification ?? 'internal',
+    redactScreenshotsByDefault: true,
+  }
+}
+
+function isLegacyLocalAllowAll(policy: ClientDataPolicy): boolean {
+  return policy.clientId == null
+    && policy.providerAllow === 'allow'
+    && (policy.allowedProviders?.length ?? 0) === 0
+    && (policy.dataClassification ?? 'internal') === 'internal'
+}
+
 /** Восстановить ClientDataPolicy из persisted JSON (browser_tasks.data_policy_json). */
 export function parseClientDataPolicy(raw: Record<string, unknown> | null | undefined): ClientDataPolicy | null {
   if (!raw || typeof raw !== 'object') return null

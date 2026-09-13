@@ -14,7 +14,7 @@
 // scanText импортируется из существующего electron/ai/secret-scanner.ts —
 // переиспользуем, не плодим второй scanner.
 
-import { scanText } from '../secret-scanner'
+import { redactUrlSecrets, scanText } from '../secret-scanner'
 import type { Observation } from './types'
 
 const UNTRUSTED_WARNING =
@@ -42,19 +42,30 @@ const MAX_OBSERVATION_TEXT_FOR_MODEL = 50_000
 
 export function wrapObservationForModel(obs: Observation): ObservationForModel {
   const parts: string[] = [UNTRUSTED_WARNING]
+  const redactionHits: string[] = []
 
   // source block
   const src = obs.source
+  const url = redactMetadata(src.url, true)
+  const title = redactMetadata(src.title)
+  const origin = redactMetadata(src.origin, true)
+  redactionHits.push(...url.hits, ...title.hits, ...origin.hits)
   parts.push('')
   parts.push('— Источник —')
-  parts.push(`URL: ${src.url}`)
-  parts.push(`Заголовок: ${src.title}`)
-  parts.push(`Origin: ${src.origin}`)
+  parts.push(`URL: ${url.redacted}`)
+  parts.push(`Заголовок: ${title.redacted}`)
+  parts.push(`Origin: ${origin.redacted}`)
   if (src.kind) parts.push(`Адаптер: ${src.kind}`)
-  if (obs.tenant) parts.push(`Кабинет (tenant): ${obs.tenant}`)
-  if (obs.account) parts.push(`Аккаунт: ${obs.account}`)
-
-  const redactionHits: string[] = []
+  if (obs.tenant) {
+    const tenant = redactMetadata(obs.tenant)
+    redactionHits.push(...tenant.hits)
+    parts.push(`Кабинет (tenant): ${tenant.redacted}`)
+  }
+  if (obs.account) {
+    const account = redactMetadata(obs.account)
+    redactionHits.push(...account.hits)
+    parts.push(`Аккаунт: ${account.redacted}`)
+  }
 
   // text
   if (obs.text) {
@@ -98,8 +109,9 @@ export function wrapObservationForModel(obs: Observation): ObservationForModel {
     for (let i = 0; i < limit; i++) {
       const c = obs.controls[i]
       // label проходит через scanText — на случай если в нём секрет.
-      const label = scanText(c.label || '').redacted
-      parts.push(`[${c.elementRef}] ${c.role}: ${label}${c.state ? ' (' + c.state + ')' : ''}`)
+      const label = scanText(c.label || '')
+      redactionHits.push(...label.hits)
+      parts.push(`[${c.elementRef}] ${c.role}: ${label.redacted}${c.state ? ' (' + c.state + ')' : ''}`)
     }
     if (obs.controls.length > limit) {
       parts.push(`... и ещё ${obs.controls.length - limit} элементов (не показаны)`)
@@ -110,7 +122,11 @@ export function wrapObservationForModel(obs: Observation): ObservationForModel {
   if (obs.omissions && obs.omissions.length > 0) {
     parts.push('')
     parts.push('— Замечания о сборе —')
-    for (const o of obs.omissions) parts.push(`• ${o}`)
+    for (const o of obs.omissions) {
+      const omission = redactMetadata(o)
+      redactionHits.push(...omission.hits)
+      parts.push(`• ${omission.redacted}`)
+    }
   }
 
   const fullText = parts.join('\n')
@@ -136,22 +152,28 @@ export interface ObservationProofProjection {
 export function projectObservationForProof(obs: Observation): ObservationProofProjection {
   // Короткая summary: первые N символов отсканированного текста + кол-во таблиц.
   const scanned = scanText(obs.text || '')
+  const url = redactMetadata(obs.source.url, true).redacted
+  const title = redactMetadata(obs.source.title).redacted
+  const origin = redactMetadata(obs.source.origin, true).redacted
+  const tenant = obs.tenant ? redactMetadata(obs.tenant).redacted : null
+  const account = obs.account ? redactMetadata(obs.account).redacted : null
+  const omissions = (obs.omissions ?? []).map(o => redactMetadata(o).redacted)
   const summaryText = scanned.redacted.slice(0, 500)
   const tablesCount = obs.tables?.length ?? 0
   const controlsCount = obs.controls?.length ?? 0
   const summary = [
-    `URL: ${obs.source.url}`,
-    `Title: ${obs.source.title}`,
+    `URL: ${url}`,
+    `Title: ${title}`,
     `Text(500): ${summaryText}`,
     `Tables: ${tablesCount}, Controls: ${controlsCount}`,
-    obs.tenant ? `Tenant: ${obs.tenant}` : '',
-    obs.account ? `Account: ${obs.account}` : '',
+    tenant ? `Tenant: ${tenant}` : '',
+    account ? `Account: ${account}` : '',
   ].filter(Boolean).join(' | ')
   return {
     redactedSummary: summary,
-    omissions: obs.omissions ?? [],
-    url: obs.source.url,
-    origin: obs.source.origin,
+    omissions,
+    url,
+    origin,
   }
 }
 
@@ -216,4 +238,29 @@ export function probeForPromptInjection(text: string | null | undefined): Inject
 
 function dedupe(arr: string[]): string[] {
   return Array.from(new Set(arr))
+}
+
+interface RedactedMetadata {
+  redacted: string
+  hits: string[]
+}
+
+/**
+ * Redacts observation metadata before it crosses the model or durable-proof
+ * boundary. URL-shaped values need both value-based scanning and parameter-name
+ * redaction because short opaque OAuth/session tokens have no distinctive format.
+ */
+function redactMetadata(value: string, urlLike = false): RedactedMetadata {
+  if (!urlLike) return scanText(value)
+
+  // URL-параметры и userinfo редактируем до scanText: после текстовой замены
+  // `user:password@` строка может перестать разбираться как URL, оставив рядом
+  // короткий opaque query/fragment token.
+  const urlSafe = redactUrlSecrets(value)
+  const scanned = scanText(urlSafe)
+  const urlSecretWasRedacted = urlSafe !== value
+  return {
+    redacted: scanned.redacted,
+    hits: urlSecretWasRedacted ? dedupe([...scanned.hits, 'url-secret']) : scanned.hits,
+  }
 }

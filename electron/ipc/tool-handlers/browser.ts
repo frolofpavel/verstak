@@ -10,16 +10,17 @@ import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
 import { execAwaitingBrowserApi, isBrowserNotReady } from './browser-ready'
 import { capConsoleErrors, capNetwork } from './browser-redact'
+import { redactForDisplay, redactUrlSecrets, scanText } from '../../ai/secret-scanner'
 import { readCapture } from '../../browser/network-capture'
 import {
-  resolveBrowserEnv, localhostEnvHint, BROWSER_ENV_LABEL, type BrowserEnv,
+  resolveBrowserEnv, localhostEnvHint, BROWSER_ENV_LABEL, type BrowserRunMode,
 } from '../../../shared/browser-env'
 import {
   openIsolatedSession, getIsolatedSession, closeIsolatedSession,
   getActiveBrowserEnv, setActiveBrowserEnv, type IsolatedBrowserApi,
 } from '../../browser/isolated-session'
 import type { BrowserController } from '../../ai/browser/controller'
-import type { BrowserActionType } from '../../ai/browser/types'
+import type { BrowserActionType, BrowserAdapter } from '../../ai/browser/types'
 
 const TOOL_TO_ACTION: Partial<Record<string, BrowserActionType>> = {
   browser_navigate: 'navigate',
@@ -31,6 +32,9 @@ const TOOL_TO_ACTION: Partial<Record<string, BrowserActionType>> = {
 export interface BrowserHandlerDeps {
   controller?: BrowserController
   resolveTaskId?: (ctx: ToolContext) => string
+  /** Та же production selection, что использует controller; нужна, чтобы
+   *  неподдержанный extension-tool не ушёл молча в legacy webview. */
+  resolveAdapterId?: (preferred?: BrowserAdapter['id']) => BrowserAdapter['id'] | null
   emitPendingBrowserAction?: (ctx: ToolContext, payload: {
     callId: string
     actionId: string
@@ -145,7 +149,11 @@ async function dispatchLegacyBrowser(call: ToolCall, ctx: ToolContext): Promise<
 
 }
 
-async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+async function dispatchBrowser(
+  call: ToolCall,
+  ctx: ToolContext,
+  preferredAdapter?: BrowserAdapter['id'],
+): Promise<ToolResult> {
   const actionType = TOOL_TO_ACTION[call.name] ?? null
   const controller = depsRef.controller
   // Новое ядро обслуживает общий вертикальный набор. Остальные зрелые инструменты
@@ -161,11 +169,22 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     }
     return dispatchLegacyBrowser(call, ctx)
   }
-  if (!actionType) return dispatchLegacyBrowser(call, ctx)
+  const args = call.args ?? {}
+  if (!actionType) {
+    const selectedAdapter = depsRef.resolveAdapterId?.(preferredAdapter)
+    if (selectedAdapter === 'chrome-extension') {
+      return {
+        id: call.id,
+        name: call.name,
+        result: '',
+        error: `Инструмент "${call.name}" пока не поддерживается для подключённой вкладки Chrome/Edge. Встроенный браузер не использован без явного env="builtin".`,
+      }
+    }
+    return dispatchLegacyBrowser(call, ctx)
+  }
 
   const taskId = depsRef.resolveTaskId ? depsRef.resolveTaskId(ctx) : `bt-${ctx.runId ?? ctx.sendId}`
   const runId = ctx.runId ?? `run-${ctx.sendId}`
-  const args = call.args ?? {}
 
   // ── R3 path: показываем approval UI, ждём consume ─────────────────────
   // Сначала propose (без approval). Если decision=require-approval → emit.
@@ -173,6 +192,8 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     browserTaskId: taskId,
     runId,
     actionType,
+    providerId: ctx.currentProviderId ?? null,
+    preferredAdapter,
     payload: args as Record<string, unknown>,
     scope: {},
   })
@@ -199,11 +220,19 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
     // Ждём решения UI.
     if (depsRef.awaitBrowserApproval) {
       const approval = await waitForBrowserApproval(
-        depsRef.awaitBrowserApproval(ctx, proposeResult.actionId, ctx.signal),
+        Promise.resolve().then(() => depsRef.awaitBrowserApproval!(ctx, proposeResult.actionId, ctx.signal)),
         depsRef.approvalTimeoutMs ?? BROWSER_APPROVAL_TIMEOUT_MS,
       )
       const { approved, approvalDigest } = approval
       if (!approved) {
+        const rejectionReason = approval.timedOut
+          ? 'approval_timeout'
+          : ctx.signal.aborted
+            ? 'approval_aborted'
+            : approval.failed
+              ? 'approval_transport_failed'
+              : 'user_rejected'
+        controller.rejectAction(proposeResult.actionId, rejectionReason)
         const error = approval.timedOut
           ? 'Approval UI не ответил вовремя — browser action безопасно отменён.'
           : approval.failed
@@ -217,6 +246,7 @@ async function dispatchBrowser(call: ToolCall, ctx: ToolContext): Promise<ToolRe
       return finalizeBrowserResult(call, execResult, ctx)
     }
     // Нет awaitBrowserApproval — не можем ждать UI; возвращаем модель как error.
+    controller.rejectAction(proposeResult.actionId, 'approval_transport_missing')
     return { id: call.id, name: call.name, result: '', error: 'Требуется approval browser action, но UI transport не сконфигурирован.' }
   }
 
@@ -264,7 +294,7 @@ function finalizeBrowserResult(call: ToolCall, r: import('../../ai/browser/contr
     actionId: r.actionId,
     risk: r.risk,
     status,
-    finalUrl: r.result?.finalUrl ?? null,
+    finalUrl: redactBrowserResultUrl(r.result?.finalUrl ?? null),
   }
   if (status === 'uncertain') {
     result.warning = 'Действие выполнено с неясным результатом. Перечитай страницу перед следующим шагом; НЕ повторяй это действие автоматически.'
@@ -283,11 +313,11 @@ function finalizeBrowserResult(call: ToolCall, r: import('../../ai/browser/contr
     // Fallback: если controller не собрал envelope (R0 без runExecute path),
     // передаём минимальные метаданные без raw text.
     const obs = r.result.postObservation
-    result.url = obs.source.url
-    result.title = obs.source.title
-    result.origin = obs.source.origin
-    result.tenant = obs.tenant
-    result.account = obs.account
+    result.url = redactBrowserResultUrl(obs.source.url)
+    result.title = redactBrowserResultText(obs.source.title)
+    result.origin = redactBrowserResultUrl(obs.source.origin)
+    result.tenant = redactBrowserResultText(obs.tenant)
+    result.account = redactBrowserResultText(obs.account)
   }
   if (r.result?.postObservation?.screenshotDataUrl) {
     // R1 Block 5: screenshot уже прошёл isScreenshotSafeForModel в controller
@@ -307,6 +337,18 @@ function finalizeBrowserResult(call: ToolCall, r: import('../../ai/browser/contr
     } catch { /* ignore */ }
   }
   return { id: call.id, name: call.name, result }
+}
+
+function redactBrowserResultText(value: string | null | undefined): string | null {
+  if (value == null) return null
+  return redactForDisplay(value)
+}
+
+function redactBrowserResultUrl(value: string | null | undefined): string | null {
+  if (value == null) return null
+  // Сначала редактируем чистый URL, пока userinfo/query/fragment ещё образуют
+  // валидный URL; затем общий display-scanner скрывает форматные секреты.
+  return scanText(redactUrlSecrets(value)).redacted
 }
 
 /**
@@ -412,7 +454,7 @@ export const browserHandler: ToolHandler = {
     // собой значило бы оставлять процессы (урок C7).
     if (call.name === BROWSER_SESSION_TOOL) {
       const closed = await closeIsolatedSession(ctx.sendId)
-      const result = { closed, mode: 'builtin' as BrowserEnv }
+      const result = { closed, mode: 'builtin' as BrowserRunMode }
       try { ctx.recordJournal(ctx.projectPath, 'tool', closed ? 'Браузер: чистая сессия закрыта' : 'Браузер: чистой сессии не было', null) } catch { /* журнал не критичен */ }
       // Подпись берётся у summarizeToolCall, а не пишется здесь второй раз: сетка
       // browser-activity-labels требует её от КАЖДОГО браузерного инструмента, и две
@@ -428,7 +470,7 @@ export const browserHandler: ToolHandler = {
     if (!envRes.ok) {
       return { id: call.id, name: call.name, result: '', error: envRes.error }
     }
-    const env: BrowserEnv = envRes.env
+    const env: BrowserRunMode = envRes.env
 
     // ГЕЙТ РЕЖИМА (SEC-CMD-06). До 30.07 этот файл не звал ни resolveDecision,
     // ни decide — клик исполнялся во всех пяти режимах, включая `plan`, где
@@ -481,6 +523,7 @@ export const browserHandler: ToolHandler = {
     // закрывали дважды.
     let result: ToolResult
     let openNote: string | undefined
+    let mode: BrowserRunMode = env
     if (env === 'isolated') {
       const ready = await ensureIsolated(call, ctx)
       if (!ready.ok) {
@@ -492,8 +535,18 @@ export const browserHandler: ToolHandler = {
       setActiveBrowserEnv(ctx.sendId, 'isolated')
       result = await dispatchIsolated(call, ready.api)
     } else {
-      setActiveBrowserEnv(ctx.sendId, 'builtin')
-      result = await dispatchBrowser(call, ctx)
+      // Один и тот же production resolver выбирает адаптер и для
+      // controller, и для честного `mode`. Передаём уже разрешённый id
+      // в controller, чтобы адаптер не сменился между выбором и исполнением.
+      const explicitAdapter = (call.args ?? {}).env === 'builtin' ? 'electron-webview' as const : undefined
+      if (explicitAdapter && ctx.browserAdapterState) {
+        ctx.browserAdapterState.preferred = explicitAdapter
+      }
+      const requestedAdapter = explicitAdapter ?? ctx.browserAdapterState?.preferred
+      const selectedAdapter = depsRef.resolveAdapterId?.(requestedAdapter) ?? requestedAdapter
+      mode = selectedAdapter === 'chrome-extension' ? 'connected' : 'builtin'
+      setActiveBrowserEnv(ctx.sendId, mode)
+      result = await dispatchBrowser(call, ctx, selectedAdapter)
     }
     // Journal what AI looked at on the web
     try {
@@ -559,10 +612,10 @@ export const browserHandler: ToolHandler = {
     // контрольным кейсом с НАСТОЯЩИМ base64, а не перечитыванием.
     if (result.result && typeof result.result === 'object') {
       const r = result.result as Record<string, unknown>
-      r.mode = env
+      r.mode = mode
       if (openNote) r.session = openNote
       if (call.name === 'browser_navigate') {
-        const hint = localhostEnvHint(env, String(call.args.url ?? ''))
+        const hint = localhostEnvHint(mode, String(call.args.url ?? ''))
         if (hint) r.hint = hint
       }
     }

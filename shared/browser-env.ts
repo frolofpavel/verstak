@@ -25,6 +25,13 @@
 
 export type BrowserEnv = 'builtin' | 'isolated'
 
+/**
+ * Фактический путь исполнения. `connected` выбирается resolver'ом для
+ * точной вкладки Chrome/Edge, но не является публичным значением
+ * аргумента `env`. Так схема остаётся закрытой: builtin | isolated.
+ */
+export type BrowserRunMode = BrowserEnv | 'connected'
+
 /** Допустимые значения `env` — ЗАКРЫТЫЙ список (схема инструмента = этот массив). */
 export const BROWSER_ENVS: readonly BrowserEnv[] = ['builtin', 'isolated']
 
@@ -50,11 +57,13 @@ export const BROWSER_ENV_LABEL: Record<BrowserEnv, string> = {
  * модель — всю задачу («проверь мою правку», «повтори дважды одинаково»).
  */
 export const BROWSER_ENV_RULE =
-  'По умолчанию работает встроенный браузер (env="builtin") — он же остаётся, если env не указан. ' +
+  'Если к задаче подключена точная вкладка Chrome/Edge, не передавай env: auto-select автоматически выберет подключённую вкладку. ' +
+  'Передавай env="builtin" только когда пользователь явно попросил работать во встроенном браузере. ' +
+  'Без подключённой вкладки и без env по умолчанию работает встроенный браузер; уже выбранная среда остаётся активной. ' +
   'Бери env="isolated" (чистая изолированная сессия), когда нужен localhost/dev-сервер, ' +
   'когда сценарий должен быть повторяемым, или когда чужие куки и ручные действия человека ' +
   'исказили бы результат. Чистая сессия НЕ видит входов пользователя в кабинеты — ' +
-  'для залогиненных сайтов бери встроенный.'
+  'если подключённой вкладки нет, залогиненная сессия пользователя доступна только во встроенном браузере.'
 
 /** Локальный ли адрес — признак задачи «своя правка / dev-сервер». */
 export function isLocalhostUrl(url: string): boolean {
@@ -73,7 +82,7 @@ export function isLocalhostUrl(url: string): boolean {
 }
 
 export type EnvResolution =
-  | { ok: true; env: BrowserEnv; switched: boolean }
+  | { ok: true; env: BrowserRunMode; switched: boolean }
   | { ok: false; error: string }
 
 /**
@@ -84,7 +93,7 @@ export type EnvResolution =
  * был бы худшим видом фолбэка: модель просила изоляцию, получила бы общий браузер с
  * куками человека и не узнала бы об этом (§3.1 про фолбэк без следа).
  */
-export function resolveBrowserEnv(requested: unknown, active: BrowserEnv): EnvResolution {
+export function resolveBrowserEnv(requested: unknown, active: BrowserRunMode): EnvResolution {
   if (requested === undefined || requested === null || requested === '') {
     return { ok: true, env: active, switched: false }
   }
@@ -105,7 +114,7 @@ export function resolveBrowserEnv(requested: unknown, active: BrowserEnv): EnvRe
  * повод его пересмотреть. Ставится только там, где правило однозначно: localhost
  * открыт во встроенном браузере, который копит состояние по построению.
  */
-export function localhostEnvHint(env: BrowserEnv, url: string): string | undefined {
+export function localhostEnvHint(env: BrowserRunMode, url: string): string | undefined {
   if (env !== 'builtin' || !isLocalhostUrl(url)) return undefined
   return 'Это локальный адрес. Для повторяемой проверки своей правки бери browser_navigate с env="isolated" — ' +
          'чистую сессию без чужих кук, которая закроется вместе с задачей.'

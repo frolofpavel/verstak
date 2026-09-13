@@ -382,7 +382,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
       type: 'object',
       properties: {
         url: { type: 'string', description: 'URL или поисковый запрос. Без схемы — будет добавлено https://.' },
-        env: { type: 'string', enum: [...BROWSER_ENVS], description: 'Среда исполнения: "builtin" — встроенный браузер (по умолчанию, состояние и входы пользователя), "isolated" — чистая изолированная сессия под эту задачу (свой пустой профиль, без кук пользователя, закрывается вместе с задачей). Не указан — остаётся та среда, в которой ты уже работаешь.' }
+        env: { type: 'string', enum: [...BROWSER_ENVS], description: 'Явный выбор среды: "builtin" — встроенный браузер, только когда пользователь прямо попросил работать в нём; "isolated" — чистая изолированная сессия под эту задачу (свой пустой профиль, без кук пользователя, закрывается вместе с задачей). Для подключённой точной вкладки Chrome/Edge не указывай env — auto-select выберет её. Без подключённой вкладки и без env используется встроенный браузер; уже выбранная среда остаётся активной.' }
       },
       required: ['url']
     }
@@ -399,7 +399,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'browser_read_page',
-    description: 'Получить текстовое содержимое текущей страницы во встроенном браузере (innerText, до 50 000 символов). Опционально передай CSS-селектор чтобы достать только нужный кусок.',
+    description: 'Получить текст и интерактивные элементы текущей подключённой вкладки браузера (до 50 000 символов). В подключённом Chrome/Edge ответ содержит opaque elementRef: передай точный elementRef в browser_click, не угадывай CSS. Во встроенном браузере можно передать CSS-селектор, чтобы достать только нужный кусок.',
     parameters: {
       type: 'object',
       properties: { selector: { type: 'string', description: 'Опциональный CSS-селектор, например "main article" или "#content".' } }
@@ -509,13 +509,13 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'browser_click',
-    description: 'Кликнуть по элементу на текущей странице во встроенном браузере (кнопка, ссылка, submit). Надёжнее адресоваться через browser_find + browser_click_by_number (по номеру, не по селектору). Для интерактивной проверки: пройти UI-сценарий (войти, заполнить, нажать). Вкладку открывать не нужно.',
+    description: 'Кликнуть по элементу текущей страницы. Для подключённой вкладки Chrome/Edge передай точный opaque elementRef из последнего browser_read_page; CSS и догадки по тексту там запрещены. Для встроенного браузера передай selector или используй browser_find + browser_click_by_number. Ответственное действие остановится на подтверждение человека и после клика страница будет перечитана.',
     parameters: {
       type: 'object',
       properties: {
-        selector: { type: 'string', description: 'CSS-селектор (#id, .class, button[type=submit]) ИЛИ видимый текст ссылки/кнопки (например "Войти", "Отправить").' }
-      },
-      required: ['selector']
+        elementRef: { type: 'string', description: 'Для подключённого Chrome/Edge: точный opaque elementRef из последнего browser_read_page.' },
+        selector: { type: 'string', description: 'Для встроенного браузера: CSS-селектор (#id, .class, button[type=submit]) или видимый текст ссылки/кнопки.' }
+      }
     }
   },
   {

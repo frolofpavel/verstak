@@ -1,13 +1,15 @@
 // extension.ts — Chrome extension adapter (EXT-B1 Eyes + EXT-C1 first hand: click).
 //
-// Observe + click идут только через BridgeServer → Native Messaging → extension.
-// Никакого clipboard. Controller — единственный chokepoint; adapter только
-// исполняет observe/click. type_text/select — out of scope.
+// Observe + actions идут только через BridgeServer → Native Messaging → extension.
+// Никакого clipboard. Controller — единственный chokepoint; adapter исполняет
+// только нормализованные действия по trusted scope и opaque elementRef.
 
 import { randomUUID } from 'node:crypto'
 import { scanText } from '../../secret-scanner'
 import type {
   BrowserAdapter,
+  BrowserAdapterActionScope,
+  BrowserActionScope,
   ElementRef,
   Observation,
   ObservationId,
@@ -22,7 +24,9 @@ export interface ExtensionAdapterDeps {
 }
 
 const NOT_CONNECTED =
-  'chrome-extension bridge offline. Запустите Verstak, откройте side panel расширения и pair/attach вкладку.'
+  'Браузер не подключён. Откройте Настройки → Интеграции → Браузер и нажмите «Подключить браузер».'
+const TAB_NOT_SELECTED =
+  'Вкладка не выбрана. Откройте нужную страницу и нажмите значок Verstak в браузере.'
 
 function extractOrigin(url: string): string {
   try {
@@ -103,8 +107,10 @@ class ExtensionAdapter implements BrowserAdapter {
   readonly id = 'chrome-extension' as const
   private readonly getBridge: () => BridgeServer | null
   private readonly genObsId: () => ObservationId
-  /** Last successful observation (for elementRef + version on click). */
-  private lastObs: Observation | null = null
+  /** Observations are isolated by trusted controller lineage. A single global
+   * observation is unsafe because another chat may observe the same tab while
+   * an approved action is waiting to execute. */
+  private readonly observations = new Map<string, Observation>()
 
   constructor(deps: ExtensionAdapterDeps) {
     this.getBridge = deps.getBridge
@@ -125,11 +131,9 @@ class ExtensionAdapter implements BrowserAdapter {
     if (!b) return NOT_CONNECTED
     if (!b.isExtensionConnected()) return NOT_CONNECTED
     const st = b.getPublicState()
-    if (st.ui === 'offline') return 'Verstak bridge offline'
-    if (st.ui === 'connecting') return 'chrome-extension connecting…'
-    if (st.ui === 'error') return st.lastError || 'bridge error'
+    if (st.ui === 'offline' || st.ui === 'connecting' || st.ui === 'error') return NOT_CONNECTED
     if (st.ui === 'paired' && !st.attachedTab) {
-      return 'вкладка не прикреплена — Attach в side panel'
+      return TAB_NOT_SELECTED
     }
     if (!this.available()) return NOT_CONNECTED
     return null
@@ -139,43 +143,91 @@ class ExtensionAdapter implements BrowserAdapter {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = scope.tabRef || st.attachedTab?.tabRef
-    if (!tabRef) {
-      throw new Error('нет task tab — attach вкладку в side panel расширения Verstak')
-    }
+    const resolved = this.resolveActionScope(scope, st)
     const snapshot = await bridge.requestObserve({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef,
+      browserTaskId: resolved.browserTaskId,
+      runId: resolved.runId,
+      tabRef: resolved.tabRef,
     })
-    const obs = snapshotToObservation(snapshot, { ...scope, tabRef }, this.genObsId())
-    this.lastObs = obs
+    const obs = snapshotToObservation(snapshot, resolved, this.genObsId())
+    this.rememberObservation(resolved, obs)
     return obs
   }
 
-  private extractStrictScope(st: { browserTaskId?: string | null; runId?: string | null }): {
+  private resolveActionScope(
+    scope: Pick<BrowserActionScope, 'browserTaskId' | 'runId' | 'tabRef'> | BrowserAdapterActionScope,
+    st: ReturnType<BridgeServer['getPublicState']>,
+  ): {
     browserTaskId: string
     runId: string
+    tabRef: string
+    origin?: string | null
   } {
-    const bt = (st.browserTaskId || this.lastObs?.browserTaskId || '').trim()
-    const run = (st.runId || this.lastObs?.runId || '').trim()
+    const bt = String(scope?.browserTaskId || '').trim()
+    const run = String(scope?.runId || '').trim()
     if (!bt || !run) {
-      throw new Error('нет active browserTaskId/runId lineage — observe перед действием (fail-closed)')
+      throw new Error('нет browserTaskId/runId в scope controller — действие остановлено (fail-closed)')
     }
-    return { browserTaskId: bt, runId: run }
+    const attachedTabRef = st.attachedTab?.tabRef
+    if (!attachedTabRef) {
+      throw new Error(TAB_NOT_SELECTED)
+    }
+    const tabRef = String(scope?.tabRef || attachedTabRef).trim()
+    if (!tabRef || tabRef !== attachedTabRef) {
+      throw new Error('wrong tab — scope controller не совпадает с прикреплённой вкладкой')
+    }
+    const expectedOrigin = hostOnly('origin' in scope ? scope.origin || '' : '')
+    const attachedOrigin = hostOnly(st.attachedTab?.origin || '')
+    if (expectedOrigin && attachedOrigin && expectedOrigin !== attachedOrigin) {
+      throw new Error(`wrong origin — scope ${expectedOrigin} ≠ attached ${attachedOrigin}`)
+    }
+    return {
+      browserTaskId: bt,
+      runId: run,
+      tabRef,
+      origin: 'origin' in scope ? scope.origin : null,
+    }
   }
 
-  private validateRefContext(elementRef: ElementRef, tabRef: string, attachedOrigin?: string) {
+  private observationKey(scope: { browserTaskId: string; runId: string; tabRef: string }): string {
+    return JSON.stringify([scope.browserTaskId, scope.runId, scope.tabRef])
+  }
+
+  private rememberObservation(
+    scope: { browserTaskId: string; runId: string; tabRef: string },
+    observation: Observation,
+  ): void {
+    const key = this.observationKey(scope)
+    this.observations.delete(key)
+    this.observations.set(key, observation)
+    if (this.observations.size > 64) {
+      const oldest = this.observations.keys().next().value
+      if (oldest) this.observations.delete(oldest)
+    }
+  }
+
+  private invalidateObservation(scope: { browserTaskId: string; runId: string; tabRef: string }): void {
+    this.observations.delete(this.observationKey(scope))
+  }
+
+  private validateRefContext(
+    elementRef: ElementRef,
+    scope: { browserTaskId: string; runId: string; tabRef: string },
+    attachedOrigin?: string,
+  ) {
     const ref = String(elementRef || '').trim()
     if (!ref) throw new Error('elementRef пуст')
     if (/[{};<>]|document\.|querySelector|eval\(/i.test(ref)) {
       throw new Error('raw CSS/JS selector запрещён — только elementRef из observation')
     }
-    const last = this.lastObs
+    const last = this.observations.get(this.observationKey(scope))
     if (!last) {
-      throw new Error('нет observation — observe перед действием (elementRef map)')
+      throw new Error('нет observation для task/run/tab scope — observe перед действием (elementRef map)')
     }
-    if (last.source.tabRef && last.source.tabRef !== tabRef) {
+    if (last.browserTaskId !== scope.browserTaskId || last.runId !== scope.runId) {
+      throw new Error('wrong lineage — observation принадлежит другой задаче или run')
+    }
+    if (last.source.tabRef && last.source.tabRef !== scope.tabRef) {
       throw new Error('wrong tab — elementRef из другой вкладки, действие остановлено')
     }
     const origin = hostOnly(attachedOrigin || '')
@@ -189,58 +241,57 @@ class ExtensionAdapter implements BrowserAdapter {
     return { ctrl, ref, observationVersion: ctrl.observationVersion || last.observationVersion }
   }
 
-  async navigate(url: string): Promise<{ finalUrl: string; title: string }> {
+  async navigate(url: string, actionScope: BrowserAdapterActionScope): Promise<{ finalUrl: string; title: string }> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) {
       throw new Error(this.unavailableReason() || NOT_CONNECTED)
     }
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const targetUrl = String(url || '').trim()
     if (!targetUrl) throw new Error('url пуст')
     const res = await bridge.requestNavigate({
       browserTaskId: scope.browserTaskId,
       runId: scope.runId,
-      tabRef,
+      tabRef: scope.tabRef,
       url: targetUrl,
     })
     if (!res.ok) {
       throw new Error(res.error || 'navigate failed')
     }
-    this.lastObs = null
+    this.invalidateObservation(scope)
     return { finalUrl: res.finalUrl, title: res.title }
   }
 
-  async back(): Promise<void> {
+  async back(_scope: BrowserAdapterActionScope): Promise<void> {
     throw new Error('back — используйте navigate')
   }
-  async forward(): Promise<void> {
+  async forward(_scope: BrowserAdapterActionScope): Promise<void> {
     throw new Error('forward — используйте navigate')
   }
-  async reload(): Promise<void> {
-    const lastUrl = this.lastObs?.source.url
+  async reload(actionScope: BrowserAdapterActionScope): Promise<void> {
+    const bridge = this.getBridge()
+    if (!bridge) throw new Error(NOT_CONNECTED)
+    const scope = this.resolveActionScope(actionScope, bridge.getPublicState())
+    const lastUrl = this.observations.get(this.observationKey(scope))?.source.url
     if (!lastUrl) {
       throw new Error('reload невозможно — нет предшествующего observation с URL')
     }
-    await this.navigate(lastUrl)
+    await this.navigate(lastUrl, actionScope)
   }
 
-  async click(elementRef: ElementRef): Promise<{ finalUrl: string }> {
+  async click(elementRef: ElementRef, actionScope: BrowserAdapterActionScope): Promise<{ finalUrl: string }> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) {
       throw new Error(this.unavailableReason() || NOT_CONNECTED)
     }
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
 
@@ -248,7 +299,7 @@ class ExtensionAdapter implements BrowserAdapter {
       const result = await bridge.requestClick({
         browserTaskId: scope.browserTaskId,
         runId: scope.runId,
-        tabRef,
+        tabRef: scope.tabRef,
         elementRef: ref,
         observationVersion,
         origin: st.attachedTab?.origin,
@@ -258,106 +309,107 @@ class ExtensionAdapter implements BrowserAdapter {
       }
       return { finalUrl: result.finalUrl || st.attachedTab?.url || '' }
     } finally {
-      this.lastObs = null
+      this.invalidateObservation(scope)
     }
   }
 
-  async focus(elementRef: ElementRef): Promise<void> {
+  async focus(elementRef: ElementRef, actionScope: BrowserAdapterActionScope): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
     const res = await bridge.requestFocus({
       browserTaskId: scope.browserTaskId,
       runId: scope.runId,
-      tabRef,
+      tabRef: scope.tabRef,
       elementRef: ref,
       observationVersion,
     })
     if (!res.ok) throw new Error(res.error || 'focus failed')
   }
 
-  async scroll(elementRef: ElementRef | null, delta: { x?: number; y?: number }): Promise<void> {
+  async scroll(
+    elementRef: ElementRef | null,
+    delta: { x?: number; y?: number },
+    actionScope: BrowserAdapterActionScope,
+  ): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     let refStr: string | undefined
     if (elementRef) {
-      const v = this.validateRefContext(elementRef, tabRef, st.attachedTab?.origin)
+      const v = this.validateRefContext(elementRef, scope, st.attachedTab?.origin)
       refStr = v.ref
     }
     const res = await bridge.requestScroll({
       browserTaskId: scope.browserTaskId,
       runId: scope.runId,
-      tabRef,
+      tabRef: scope.tabRef,
       elementRef: refStr,
       delta,
     })
     if (!res.ok) throw new Error(res.error || 'scroll failed')
   }
 
-  async selectOption(elementRef: ElementRef, value: string): Promise<void> {
+  async selectOption(
+    elementRef: ElementRef,
+    value: string,
+    actionScope: BrowserAdapterActionScope,
+  ): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
     try {
       const res = await bridge.requestSelectOption({
         browserTaskId: scope.browserTaskId,
         runId: scope.runId,
-        tabRef,
+        tabRef: scope.tabRef,
         elementRef: ref,
         observationVersion,
         value,
       })
       if (!res.ok) throw new Error(res.error || 'select_option failed')
     } finally {
-      this.lastObs = null
+      this.invalidateObservation(scope)
     }
   }
 
   async typeText(
     elementRef: ElementRef,
     text: string,
-    opts?: { clearFirst?: boolean; submitEnter?: boolean },
+    opts: { clearFirst?: boolean; submitEnter?: boolean } | undefined,
+    actionScope: BrowserAdapterActionScope,
   ): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
     try {
       const res = await bridge.requestTypeText({
         browserTaskId: scope.browserTaskId,
         runId: scope.runId,
-        tabRef,
+        tabRef: scope.tabRef,
         elementRef: ref,
         observationVersion,
         text,
@@ -366,86 +418,88 @@ class ExtensionAdapter implements BrowserAdapter {
       })
       if (!res.ok) throw new Error(res.error || 'type_text failed')
     } finally {
-      this.lastObs = null
+      this.invalidateObservation(scope)
     }
   }
 
-  async clearField(elementRef: ElementRef): Promise<void> {
+  async clearField(elementRef: ElementRef, actionScope: BrowserAdapterActionScope): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
     try {
       const res = await bridge.requestClearField({
         browserTaskId: scope.browserTaskId,
         runId: scope.runId,
-        tabRef,
+        tabRef: scope.tabRef,
         elementRef: ref,
         observationVersion,
       })
       if (!res.ok) throw new Error(res.error || 'clear_field failed')
     } finally {
-      this.lastObs = null
+      this.invalidateObservation(scope)
     }
   }
 
-  async toggle(elementRef: ElementRef): Promise<void> {
+  async toggle(elementRef: ElementRef, actionScope: BrowserAdapterActionScope): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
     try {
       const res = await bridge.requestToggle({
         browserTaskId: scope.browserTaskId,
         runId: scope.runId,
-        tabRef,
+        tabRef: scope.tabRef,
         elementRef: ref,
         observationVersion,
       })
       if (!res.ok) throw new Error(res.error || 'toggle failed')
     } finally {
-      this.lastObs = null
+      this.invalidateObservation(scope)
     }
   }
 
-  async pressKey(elementRef: ElementRef, key: string): Promise<void> {
+  async pressKey(
+    elementRef: ElementRef,
+    key: string,
+    actionScope: BrowserAdapterActionScope,
+  ): Promise<void> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     const { ref, observationVersion } = this.validateRefContext(
       elementRef,
-      tabRef,
+      scope,
       st.attachedTab?.origin,
     )
-    const res = await bridge.requestPressKey({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef,
-      elementRef: ref,
-      observationVersion,
-      key,
-    })
-    if (!res.ok) throw new Error(res.error || 'press_key failed')
+    try {
+      const res = await bridge.requestPressKey({
+        browserTaskId: scope.browserTaskId,
+        runId: scope.runId,
+        tabRef: scope.tabRef,
+        elementRef: ref,
+        observationVersion,
+        key,
+      })
+      if (!res.ok) throw new Error(res.error || 'press_key failed')
+    } finally {
+      this.invalidateObservation(scope)
+    }
   }
 
   async waitFor(condition: {
@@ -453,26 +507,27 @@ class ExtensionAdapter implements BrowserAdapter {
     text?: string
     url?: string
     timeoutMs?: number
-  }): Promise<{ ok: boolean; reason?: string }> {
+  }, actionScope: BrowserAdapterActionScope): Promise<{ ok: boolean; reason?: string }> {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     if (!this.available()) throw new Error(this.unavailableReason() || NOT_CONNECTED)
     const st = bridge.getPublicState()
-    const tabRef = st.attachedTab?.tabRef
-    if (!tabRef) throw new Error('нет attached tab')
-    const scope = this.extractStrictScope(st)
+    const scope = this.resolveActionScope(actionScope, st)
     if (condition.elementRef) {
-      this.validateRefContext(condition.elementRef, tabRef, st.attachedTab?.origin)
+      this.validateRefContext(condition.elementRef, scope, st.attachedTab?.origin)
     }
     return bridge.requestWaitFor({
       browserTaskId: scope.browserTaskId,
       runId: scope.runId,
-      tabRef,
+      tabRef: scope.tabRef,
       condition,
     })
   }
 
-  async screenshot(): Promise<string | null> {
+  async screenshot(actionScope: BrowserAdapterActionScope): Promise<string | null> {
+    const bridge = this.getBridge()
+    if (!bridge) throw new Error(NOT_CONNECTED)
+    this.resolveActionScope(actionScope, bridge.getPublicState())
     return null
   }
 

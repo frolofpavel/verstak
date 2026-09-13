@@ -92,6 +92,64 @@ describe('wrapObservationForModel — scanText ловит секреты', () =>
     const r = wrapObservationForModel(obs)
     expect(r.text).not.toContain('sk-ant-abc123def456ghi789jkl012mno345pqr678stu901vwx234')
   })
+
+  it('редактирует metadata и omissions до передачи модели и учитывает hits', () => {
+    const secrets = {
+      urlPassword: 'urlPassword12',
+      urlQuery: 'urlOpaque12',
+      urlFragment: 'fragmentOpaque12',
+      originQuery: 'originOpaque12',
+      title: 'sk-titleSecret1234567890abcd',
+      tenant: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789AB',
+      account: 'accountBearerSecret12345',
+      omission: 'AKIAIOSFODNN7EXAMPLE',
+    }
+    const r = wrapObservationForModel(mkObs({
+      source: {
+        kind: 'chrome-extension',
+        url: `https://observer:${secrets.urlPassword}@app.example/callback?page=2&access_token=${secrets.urlQuery}#token=${secrets.urlFragment}`,
+        title: `Отчёт ${secrets.title}`,
+        origin: `https://app.example/?session_id=${secrets.originQuery}`,
+      },
+      tenant: `Кабинет ${secrets.tenant}`,
+      account: `Authorization: Bearer ${secrets.account}`,
+      omissions: [`Скрыт блок с ключом ${secrets.omission}`],
+    }))
+
+    for (const secret of Object.values(secrets)) expect(r.text).not.toContain(secret)
+    expect(r.text).toContain('page=2')
+    expect(r.text).toContain('Кабинет (tenant): Кабинет [REDACTED:github-token]')
+    expect(r.text).toContain('• Скрыт блок с ключом [REDACTED:aws-access-key]')
+    expect(r.redactionHits).toEqual(expect.arrayContaining([
+      'url-secret',
+      'openai-key',
+      'github-token',
+      'auth-keyword-value',
+      'aws-access-key',
+    ]))
+  })
+
+  it('оставляет безопасные metadata и omissions читаемыми', () => {
+    const r = wrapObservationForModel(mkObs({
+      source: {
+        kind: 'chrome-extension',
+        url: 'https://app.example/report?page=2',
+        title: 'Продажи за сентябрь',
+        origin: 'https://app.example',
+      },
+      tenant: 'Мой кабинет',
+      account: 'Маркетинг',
+      omissions: ['Скрыта невидимая навигация'],
+    }))
+
+    expect(r.text).toContain('URL: https://app.example/report?page=2')
+    expect(r.text).toContain('Заголовок: Продажи за сентябрь')
+    expect(r.text).toContain('Origin: https://app.example')
+    expect(r.text).toContain('Кабинет (tenant): Мой кабинет')
+    expect(r.text).toContain('Аккаунт: Маркетинг')
+    expect(r.text).toContain('• Скрыта невидимая навигация')
+    expect(r.redactionHits).toEqual([])
+  })
 })
 
 describe('wrapObservationForModel — raw HTML/JS не передаётся', () => {
@@ -147,6 +205,58 @@ describe('projectObservationForProof — redacted summary', () => {
       text: 'secret: AKIAIOSFODNN7EXAMPLE',
     }))
     expect(proj.redactedSummary).not.toContain('AKIAIOSFODNN7EXAMPLE')
+  })
+
+
+  it('не сохраняет секреты из metadata и omissions в durable proof', () => {
+    const secrets = {
+      urlPassword: 'urlPassword12',
+      urlQuery: 'urlOpaque12',
+      urlFragment: 'fragmentOpaque12',
+      originQuery: 'originOpaque12',
+      title: 'sk-titleSecret1234567890abcd',
+      tenant: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789AB',
+      account: 'accountBearerSecret12345',
+      omission: 'AKIAIOSFODNN7EXAMPLE',
+    }
+    const proj = projectObservationForProof(mkObs({
+      source: {
+        kind: 'chrome-extension',
+        url: `https://observer:${secrets.urlPassword}@app.example/callback?page=2&access_token=${secrets.urlQuery}#token=${secrets.urlFragment}`,
+        title: `Отчёт ${secrets.title}`,
+        origin: `https://app.example/?session_id=${secrets.originQuery}`,
+      },
+      tenant: `Кабинет ${secrets.tenant}`,
+      account: `Authorization: Bearer ${secrets.account}`,
+      omissions: [`Скрыт блок с ключом ${secrets.omission}`],
+    }))
+    const durablePayload = JSON.stringify(proj)
+
+    for (const secret of Object.values(secrets)) expect(durablePayload).not.toContain(secret)
+    expect(proj.url).toContain('page=2')
+    expect(proj.redactedSummary).toContain('Title: Отчёт [REDACTED:openai-key]')
+    expect(proj.omissions).toEqual(['Скрыт блок с ключом [REDACTED:aws-access-key]'])
+  })
+
+  it('сохраняет безопасные metadata и omissions без потери смысла', () => {
+    const proj = projectObservationForProof(mkObs({
+      source: {
+        kind: 'chrome-extension',
+        url: 'https://app.example/report?page=2',
+        title: 'Продажи за сентябрь',
+        origin: 'https://app.example',
+      },
+      tenant: 'Мой кабинет',
+      account: 'Маркетинг',
+      omissions: ['Скрыта невидимая навигация'],
+    }))
+
+    expect(proj.url).toBe('https://app.example/report?page=2')
+    expect(proj.origin).toBe('https://app.example')
+    expect(proj.redactedSummary).toContain('Title: Продажи за сентябрь')
+    expect(proj.redactedSummary).toContain('Tenant: Мой кабинет')
+    expect(proj.redactedSummary).toContain('Account: Маркетинг')
+    expect(proj.omissions).toEqual(['Скрыта невидимая навигация'])
   })
 })
 

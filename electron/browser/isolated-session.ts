@@ -34,7 +34,7 @@ import {
   vskSnapshot, vskResolveNumbered, vskFill, vskPressKey, vskMatchTarget, vskFind, vskCapSnapshot,
   VSK_SNAPSHOT_TOP_N, type CappedSnapshot, type FindResult,
 } from '../../shared/browser-snapshot'
-import { normalizeAgentUrl, DEFAULT_BROWSER_ENV, type BrowserEnv } from '../../shared/browser-env'
+import { normalizeAgentUrl, DEFAULT_BROWSER_ENV, type BrowserRunMode } from '../../shared/browser-env'
 import { resolveBrowserExecutable, type BrowserSourceKind } from './isolated-launch'
 import { logRuntime } from '../runtime-log'
 
@@ -400,13 +400,13 @@ export function getIsolatedSession(key: IsolatedKey): IsolatedSession | undefine
  * волны §4 — молчаливая смена среды запрещена). Закрытие сессии возвращает прогон во
  * встроенный браузер, и это не «умолчание», а следствие: чистой сессии больше нет.
  */
-const activeEnv = new Map<IsolatedKey, BrowserEnv>()
+const activeEnv = new Map<IsolatedKey, BrowserRunMode>()
 
-export function getActiveBrowserEnv(key: IsolatedKey): BrowserEnv {
+export function getActiveBrowserEnv(key: IsolatedKey): BrowserRunMode {
   return activeEnv.get(key) ?? DEFAULT_BROWSER_ENV
 }
 
-export function setActiveBrowserEnv(key: IsolatedKey, env: BrowserEnv): void {
+export function setActiveBrowserEnv(key: IsolatedKey, env: BrowserRunMode): void {
   if (env === DEFAULT_BROWSER_ENV) activeEnv.delete(key)
   else activeEnv.set(key, env)
 }

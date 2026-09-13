@@ -71,6 +71,7 @@ import { collectToolTurnOutcome, reviewGatePassedInTurn } from './runner-tool-ou
 import { buildTurnVerificationHint } from './runner-verification'
 import { summarizeMaterials, formatMaterialsLine, type ReadOutcome } from './materials-summary'
 import { runtimeFlagOn } from '../../shared/contracts/runtime-flag-policy'
+import type { BrowserAdapter } from './browser/types'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -231,6 +232,19 @@ export interface AgentRunContext {
   parentChatId?: number | null
   /** Stable Browser Employee task lineage for the current run. */
   browserTaskIdResolver?: (input: { parentChatId?: number | null; runId?: string }) => string | null
+  /** Side-panel/toolbar run starts browser-only immediately; ordinary chat flips
+   *  this state only after a successful browser_read_page observation. */
+  browserRunActive?: boolean
+  /** Successful browser tool output is already present in provider-visible history. */
+  browserContextExposed?: boolean
+  /** Durable data-policy gate for provider fallback after browser context exposure. */
+  browserContextProviderAllowed?: (providerId: ProviderId) => boolean
+  /** Browser-origin screenshot attachment is already present in provider-visible history. */
+  browserScreenshotExposed?: boolean
+  /** Stricter screenshot gate for fallback frames; redacted-only is not sufficient. */
+  browserScreenshotProviderAllowed?: (providerId: ProviderId) => boolean
+  /** Explicit browser adapter carried across fallback frames of the same run. */
+  browserAdapterPreference?: BrowserAdapter['id']
   /** Этот прогон идёт в ДОЧЕРНЕЙ (вынесенной спавном) сессии — у её чата задан
    *  parent_chat_id. Гард глубины: такой сессии НЕ даём spawn_task_session (внучек нет).
    *  Считает main из chat_sessions; НЕ путать с parentChatId (= текущий chatId прогона). */
@@ -274,6 +288,19 @@ export interface AgentRunContext {
   artifactsDownloadsDir?: string
 }
 
+function messagesContainBrowserContext(messages: ChatMessage[]): boolean {
+  return messages.some(message => message.toolResults?.some(result => (
+    result.name.startsWith('browser_') && !result.error
+  )) === true)
+}
+
+function messagesContainBrowserScreenshot(messages: ChatMessage[]): boolean {
+  return messages.some(message => (
+    message.attachments?.some(attachment => attachment.mimeType.startsWith('image/')) === true
+    && message.toolResults?.some(result => result.name.startsWith('browser_') && !result.error) === true
+  ))
+}
+
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender: rawSender, sendId, provider, tools, projectPath, initialMessages, signal,
@@ -282,10 +309,23 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, browserTaskIdResolver, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
+    parentChatId, browserTaskIdResolver, browserRunActive, browserContextExposed, browserContextProviderAllowed, browserScreenshotExposed, browserScreenshotProviderAllowed, browserAdapterPreference, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
+  // Один mutable state на весь agent loop: durable browserTaskId существует у
+  // обычного чата заранее, но cross-tool capability включается только после
+  // фактического чтения недоверенной страницы либо для явного toolbar-run.
+  const browserRunState = {
+    active: browserRunActive === true,
+    contextExposed: browserContextExposed === true || messagesContainBrowserContext(initialMessages),
+    screenshotExposed: browserScreenshotExposed === true || messagesContainBrowserScreenshot(initialMessages),
+  }
+  // Явный env=builtin должен переживать все model turns и fallback frames этого
+  // run; новый ai:send получает новый объект и снова использует default resolver.
+  const browserAdapterState: { preferred?: BrowserAdapter['id'] } = {
+    preferred: browserAdapterPreference,
+  }
   // V2 ось B (волна 2.6.0): текстовые дельты склеиваются окном ~30 мс. Обёртка
   // стоит на САМОМ sender, а не расставлена по веткам цикла, и это главное в
   // решении: порядок событий тогда гарантирован КОНСТРУКЦИЕЙ, а не дисциплиной
@@ -674,7 +714,40 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     onHandedOff: () => {
       handedOff = true
     },
-    runFallbackFrame: patch => runApiConversation({ ...ctx, ...patch }),
+    hasBrowserContext: () => browserRunState.contextExposed,
+    browserContextProviderAllowed,
+    hasBrowserScreenshot: () => browserRunState.screenshotExposed,
+    browserScreenshotProviderAllowed,
+    onBrowserContextFallbackBlocked: blockedProviderId => {
+      const reason = `Browser context уже получен; fallback на ${blockedProviderId} заблокирован data policy, чтобы DOM/screenshot не ушли новому провайдеру.`
+      sender.send('ai:event', {
+        id: sendId,
+        event: {
+          type: 'tool-blocked',
+          callId: `browser-provider-fallback-${blockedProviderId}`,
+          name: 'browser_provider_fallback',
+          reason,
+        },
+      })
+      if (agentRuns && runId) {
+        try {
+          agentRuns.appendEvent(runId, 'browser_policy', {
+            label: 'provider fallback blocked',
+            detail: reason,
+            ref: blockedProviderId,
+            status: 'blocked',
+          })
+        } catch { /* best-effort */ }
+      }
+    },
+    runFallbackFrame: patch => runApiConversation({
+      ...ctx,
+      ...patch,
+      browserRunActive: browserRunState.active,
+      browserContextExposed: browserRunState.contextExposed,
+      browserScreenshotExposed: browserRunState.screenshotExposed,
+      browserAdapterPreference: browserAdapterState.preferred,
+    }),
   })
   const { attemptProviderFallback, attemptAccountSwitch } = fallbackController
 
@@ -690,7 +763,18 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     const jsonTools = createToolsForProject(projectPath, signal, {
       allowedWriteRoots: parseAllowedWriteRoots(getSecretForDelegate?.(ALLOWED_WRITE_ROOTS_KEY))
     })
-    return runApiConversation({ ...ctx, isFallbackFrame: true, forceToolMode: 'json', tools: jsonTools, initialMessages: currentMessages, nudgeBudgetUsed: plainReplyNudges })
+    return runApiConversation({
+      ...ctx,
+      isFallbackFrame: true,
+      forceToolMode: 'json',
+      tools: jsonTools,
+      initialMessages: currentMessages,
+      nudgeBudgetUsed: plainReplyNudges,
+      browserRunActive: browserRunState.active,
+      browserContextExposed: browserRunState.contextExposed,
+      browserScreenshotExposed: browserRunState.screenshotExposed,
+      browserAdapterPreference: browserAdapterState.preferred,
+    })
   }
 
   // Этап 2, приоритет 1+2: модель так и не вызвала инструмент (после corrective nudge).
@@ -1454,7 +1538,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       materialsCtx?.source === 'folder' ? 'alongside' as const
       : materialsCtx?.source === 'attachments' ? 'downloads' as const
       : undefined
-    const ctx: ToolContext = {
+    const ctx = {
       // Реестр возможностей: уровень доверия возможности, которой сделан прогон.
       // Последний слой гейта; ослабить решение не может по построению.
       capabilityTrust,
@@ -1520,13 +1604,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // appendEvent. Хендлеры дёргают ctx.recordRunEvent рядом с существующими
       // ai:event-эмиттерами; ошибка storage не ломает agent loop (try/catch).
       runId,
-      // EXT-B0/R1: browserTaskId — задан когда прогон работает с browser.
-      // Источник: browserTaskIdResolver или автоматическое bt-${chatId}
-      // если parentChatId есть. Когда задан — tool-dispatch блокирует
-      // forbiddenCrossTools (см. цикл выше).
+      // EXT-B0/R1: browserTaskId — durable lineage browser tools. Он заранее
+      // существует и у обычного чата; browserRunState отдельно включает
+      // cross-tool gate после реального чтения страницы / для toolbar-run.
       browserTaskId: browserTaskIdResolver
         ? browserTaskIdResolver({ parentChatId, runId })
         : (typeof parentChatId === 'number' ? `bt-${parentChatId}` : null),
+      browserRunState,
+      browserAdapterState,
       recordRunEvent: (kind, p) => {
         if (!agentRuns || !runId) return
         try { agentRuns.appendEvent(runId, kind, p) } catch { /* best-effort */ }
@@ -1540,6 +1625,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Verification Фаза 3: фасад истории — attest_verification пишет строку
       // после writeVerificationArtifact (best-effort, для latest в Review DoD).
       verifications
+    } as ToolContext & {
+      browserRunState: { active: boolean; contextExposed: boolean; screenshotExposed: boolean }
+      browserAdapterState: { preferred?: BrowserAdapter['id'] }
     }
     const toolResults = await dispatchToolTurn({
       toolCalls,

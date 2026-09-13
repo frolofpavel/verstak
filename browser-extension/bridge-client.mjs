@@ -1,6 +1,6 @@
 // bridge-client.mjs — Native Messaging client (extension side).
 //
-// Протокол v1: hello/pair/status/attach/detach/observe/click + observe_request/click_request.
+// Протокол v1: lifecycle, task transport и scoped browser actions.
 // Нет clipboard fallback. Нет shell. Fail-closed offline.
 
 export const NATIVE_HOST_NAME = 'ru.verstak.browser_bridge'
@@ -46,7 +46,9 @@ export function createBridgeClient(opts = {}) {
     return {
       ui: uiState,
       sessionId,
-      pairingToken,
+      // Durable credential stays private inside this client. UI/background
+      // consumers only need to know whether automatic recovery is possible.
+      hasPairing: !!pairingToken,
       browserTaskId,
       runId,
       attachedTab,
@@ -67,6 +69,12 @@ export function createBridgeClient(opts = {}) {
       p.reject(err || new Error('bridge closed'))
       pending.delete(id)
     }
+  }
+
+  function clearTransientState() {
+    browserTaskId = null
+    runId = null
+    attachedTab = null
   }
 
   function sendRaw(msg) {
@@ -100,6 +108,12 @@ export function createBridgeClient(opts = {}) {
   function onMessage(msg) {
     if (!msg || typeof msg !== 'object') return
     const requestId = msg.requestId
+    if (msg.type === 'auth_available') {
+      if (typeof opts.onAuthAvailable === 'function') {
+        Promise.resolve(opts.onAuthAvailable(msg)).catch(() => {})
+      }
+      return
+    }
     if (msg.type === 'task_event') {
       if (typeof opts.onTaskEvent === 'function') {
         try { opts.onTaskEvent(msg) } catch { /* ignore */ }
@@ -178,7 +192,9 @@ export function createBridgeClient(opts = {}) {
       pending.delete(requestId)
       clearTimeout(p.timer)
       if (msg.type === 'error' && !msg.ok) {
-        p.reject(new Error(msg.message || msg.code || 'error'))
+        const err = new Error(msg.message || msg.code || 'error')
+        err.code = msg.code || 'error'
+        p.reject(err)
         return
       }
       p.resolve(msg)
@@ -190,11 +206,13 @@ export function createBridgeClient(opts = {}) {
   }
 
   function disconnect() {
-    if (port) {
-      try { port.disconnect() } catch { /* ignore */ }
-      port = null
+    const openedPort = port
+    port = null
+    if (openedPort) {
+      try { openedPort.disconnect() } catch { /* ignore */ }
     }
     uiState = 'offline'
+    clearTransientState()
     clearPending(new Error('disconnected'))
     emit()
   }
@@ -230,11 +248,16 @@ export function createBridgeClient(opts = {}) {
       emit()
       return false
     }
-    port.onMessage.addListener(onMessage)
-    port.onDisconnect.addListener(() => {
+    const openedPort = port
+    openedPort.onMessage.addListener((msg) => {
+      if (port === openedPort) onMessage(msg)
+    })
+    openedPort.onDisconnect.addListener(() => {
+      if (port !== openedPort) return
       const err = chrome.runtime.lastError?.message
       port = null
       uiState = 'offline'
+      clearTransientState()
       if (err) lastError = err
       clearPending(new Error(err || 'native disconnect'))
       emit()
@@ -253,14 +276,14 @@ export function createBridgeClient(opts = {}) {
     return res
   }
 
-  async function pair(token, sid) {
+  async function pair(token, sid, opts = {}) {
     if (!connect()) throw new Error(lastError || 'offline')
-    const useToken = token || pairingToken || undefined
-    const useSid = sid || sessionId || undefined
-    // Empty pair is rejected by desktop (fail-closed). Require bootstrap or durable creds.
-    if (!useToken && !useSid) {
-      throw new Error('нужен pairing code с desktop или сохранённые credentials')
-    }
+    const fresh = opts.fresh === true
+    const explicitBootstrap = !fresh && typeof token === 'string' && token.length > 0
+    const useToken = fresh ? undefined : (explicitBootstrap ? token : (pairingToken || undefined))
+    // Новый bootstrap-код заменяет старую пару целиком. Иначе свежий код вместе
+    // со stale sessionId отклонялся desktop как несовпадающая пара.
+    const useSid = fresh || explicitBootstrap ? undefined : (sid || sessionId || undefined)
     const res = await request({
       type: 'pair',
       pairingToken: useToken,
@@ -274,20 +297,21 @@ export function createBridgeClient(opts = {}) {
     if (typeof res.pairingToken === 'string' && res.pairingToken) {
       pairingToken = res.pairingToken
     }
-    browserTaskId = res.browserTaskId ?? browserTaskId
-    runId = res.runId ?? runId
+    browserTaskId = res.browserTaskId ?? null
+    runId = res.runId ?? null
+    attachedTab = res.attachedTab ?? null
     if (res.state) uiState = res.state
     else uiState = 'paired'
     lastError = null
     connectAttempts = 0
-    // Persist for restart restore (pairing only — no auto browser action).
+    // Persist only durable credentials. Task/run/tab belong to the live socket
+    // and must be re-read from desktop after every reconnect.
     try {
       await chrome.storage.local.set({
         verstakSessionId: sessionId,
         verstakPairingToken: pairingToken,
-        verstakBrowserTaskId: browserTaskId,
-        verstakRunId: runId,
       })
+      await chrome.storage.local.remove?.(['verstakBrowserTaskId', 'verstakRunId'])
     } catch { /* storage may be denied in tests */ }
     emit()
     return res
@@ -302,9 +326,9 @@ export function createBridgeClient(opts = {}) {
       if (res.ok) {
         uiState = res.state || uiState
         sessionId = res.sessionId ?? sessionId
-        browserTaskId = res.browserTaskId ?? browserTaskId
-        runId = res.runId ?? runId
-        attachedTab = res.attachedTab ?? attachedTab
+        browserTaskId = res.browserTaskId ?? null
+        runId = res.runId ?? null
+        attachedTab = res.attachedTab ?? null
         lastError = res.error || null
         emit()
       }
@@ -322,6 +346,7 @@ export function createBridgeClient(opts = {}) {
     if (res.ok) {
       attachedTab = tab
       browserTaskId = res.browserTaskId || browserTaskId
+      runId = res.runId ?? runId
       uiState = res.state || 'attached'
       lastError = null
       emit()
@@ -346,16 +371,20 @@ export function createBridgeClient(opts = {}) {
   async function sendObserve(payload) {
     return request({
       type: 'observe',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
+      ok: payload.ok !== false,
       snapshot: payload.snapshot,
+      error: payload.error,
     }, 20000)
   }
 
   async function sendClickResult(payload) {
     return request({
       type: 'click',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -370,6 +399,7 @@ export function createBridgeClient(opts = {}) {
   async function sendNavigateResult(payload) {
     return request({
       type: 'navigate',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -383,6 +413,7 @@ export function createBridgeClient(opts = {}) {
   async function sendScrollResult(payload) {
     return request({
       type: 'scroll',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -394,6 +425,7 @@ export function createBridgeClient(opts = {}) {
   async function sendFocusResult(payload) {
     return request({
       type: 'focus',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -405,6 +437,7 @@ export function createBridgeClient(opts = {}) {
   async function sendSelectOptionResult(payload) {
     return request({
       type: 'select_option',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -416,6 +449,7 @@ export function createBridgeClient(opts = {}) {
   async function sendWaitForResult(payload) {
     return request({
       type: 'wait_for',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -428,6 +462,7 @@ export function createBridgeClient(opts = {}) {
   async function sendTypeTextResult(payload) {
     return request({
       type: 'type_text',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -440,6 +475,7 @@ export function createBridgeClient(opts = {}) {
   async function sendClearFieldResult(payload) {
     return request({
       type: 'clear_field',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -452,6 +488,7 @@ export function createBridgeClient(opts = {}) {
   async function sendToggleResult(payload) {
     return request({
       type: 'toggle',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -464,6 +501,7 @@ export function createBridgeClient(opts = {}) {
   async function sendPressKeyResult(payload) {
     return request({
       type: 'press_key',
+      requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
       runId: payload.runId,
       tabRef: payload.tabRef,
@@ -498,13 +536,10 @@ export function createBridgeClient(opts = {}) {
       const data = await chrome.storage.local.get([
         'verstakSessionId',
         'verstakPairingToken',
-        'verstakBrowserTaskId',
-        'verstakRunId',
       ])
       if (data.verstakSessionId) sessionId = data.verstakSessionId
       if (data.verstakPairingToken) pairingToken = data.verstakPairingToken
-      if (data.verstakBrowserTaskId) browserTaskId = data.verstakBrowserTaskId
-      if (data.verstakRunId) runId = data.verstakRunId
+      clearTransientState()
     } catch { /* ignore */ }
   }
 
@@ -546,6 +581,9 @@ export function createBridgeClient(opts = {}) {
     restoreFromStorage,
     setPairingToken,
     onState,
+    setAuthAvailableHandler(fn) {
+      opts.onAuthAvailable = fn
+    },
     setObserveRequestHandler(fn) {
       opts.onObserveRequest = fn
     },

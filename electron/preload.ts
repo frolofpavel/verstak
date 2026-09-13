@@ -490,13 +490,10 @@ contextBridge.exposeInMainWorld('api', {
   verify: {
     exec: (command: string) => ipcRenderer.invoke('verify:exec', command) as Promise<{ exitCode: number; stdout: string; stderr: string }>
   },
-  /** EXT-B1/C1: Browser bridge card — host, pairing, attach status. */
+  /** Browser integration settings — one-click host setup and connection state. */
   browserBridge: {
     getState: () => ipcRenderer.invoke('browser-bridge:get-state'),
-    issuePairingCode: () => ipcRenderer.invoke('browser-bridge:issue-pairing-code'),
-    installHost: () => ipcRenderer.invoke('browser-bridge:install-host'),
-    uninstallHost: () => ipcRenderer.invoke('browser-bridge:uninstall-host'),
-    extensionDir: () => ipcRenderer.invoke('browser-bridge:extension-dir'),
+    connect: () => ipcRenderer.invoke('browser-bridge:connect'),
   },
   // Git READ + WRITE (Dev Task Flow). READ: status/diff/log. WRITE (Фаза 3,
   // argv-форма + денилист push/force/reset): branchCreate/checkout/add/commit.

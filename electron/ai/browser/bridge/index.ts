@@ -46,6 +46,7 @@ export {
   uninstallNativeHost,
   writeNativeMessagingRegistry,
   readNativeMessagingRegistry,
+  decodeRegistryOutput,
   removeNativeMessagingRegistry,
   chromeRegistryKey,
   edgeRegistryKey,

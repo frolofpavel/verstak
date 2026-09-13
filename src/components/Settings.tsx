@@ -22,6 +22,7 @@ import { PolicyTab } from './settings/PolicyTab'
 import { RuntimeFlagsTab } from './RuntimeFlagsTab'
 import { SubscriptionAccountsPanel } from './SubscriptionAccountsPanel'
 import { ProfilesTab } from './ProfilesTab'
+import { BrowserSettingsTab } from './settings/BrowserSettingsTab'
 import {
   buildCatalog,
   connectionStatus,
@@ -61,8 +62,8 @@ import type { AgentMode } from './ModePicker'
  *  main-реестра, презентация из PROVIDER_UI_META. */
 type ProviderConfig = CatalogProvider
 
-type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
-type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
+type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'browser' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
+type SettingsNavIconName = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'modelModes' | 'browser' | 'connectors' | 'mcp' | 'policy' | 'runtimeFlags' | 'subscriptions' | 'usage'
 type SettingsNavTab = { id: Tab; label: string; icon: SettingsNavIconName; soon?: boolean; disabled?: boolean; keywords?: string }
 type SettingsNavGroup = { title: string; tabs: ReadonlyArray<SettingsNavTab> }
 
@@ -136,6 +137,14 @@ function SettingsNavIcon({ name }: { name: SettingsNavIconName }) {
           <circle cx="10" cy="9" r="1.25" className="gg-settings-nav-fill" />
           <circle cx="14" cy="12" r="1.25" className="gg-settings-nav-fill" />
           <circle cx="11.7" cy="15" r="1.25" className="gg-settings-nav-fill" />
+        </svg>
+      )
+    case 'browser':
+      return (
+        <svg {...svgProps}>
+          <rect x="3.8" y="5" width="16.4" height="13.2" rx="3" {...strokeProps} />
+          <path d="M3.8 8.7h16.4M7 6.9h.01M9.5 6.9h.01" {...strokeProps} />
+          <path d="M9 13.4h6M12 10.7v5.4" {...strokeProps} />
         </svg>
       )
     case 'connectors':
@@ -1252,6 +1261,7 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
       { id: 'usage', label: 'Расход', icon: 'usage', keywords: 'расход расходы токены деньги стоимость сколько потратил кэш кеш история статистика отчёт провайдер модель за неделю за месяц' },
     ] },
     { title: 'Интеграции', tabs: [
+      { id: 'browser', label: t.settings.browser, icon: 'browser', keywords: 'browser chrome edge браузер расширение extension подключить browser employee computer use вкладка' },
       { id: 'connectors', label: t.settings.connectors, icon: 'connectors', keywords: 'telegram bitrix bitrix24 битрикс б24 sheets таблицы google github yandex яндекс direct директ metrika метрика wordstat вордстат диск drive http ssh api webhook вебхук токен ключ crm сделки задачи контакты реклама семантика' },
       { id: 'mcp', label: 'Внешние инструменты', icon: 'mcp', keywords: 'mcp model context protocol servers tools внешние инструменты продвинутые подключения серверы инструменты браузер поиск файлы интеграции' }
     ] }
@@ -3243,6 +3253,8 @@ export function Settings({ onClose, initialTab }: { onClose: () => void; initial
         <ModeModelBinding providers={providers} />
         </div>
         )}
+
+        {tab === 'browser' && <BrowserSettingsTab />}
 
         {tab === 'connectors' && (
         <div className="gg-settings-extra">

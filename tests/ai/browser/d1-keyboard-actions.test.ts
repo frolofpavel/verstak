@@ -3,6 +3,13 @@ import { describe, it, expect } from 'vitest'
 import { createExtensionAdapterWithTransport } from '../../../electron/ai/browser/adapters/extension'
 import type { BridgePageSnapshot } from '../../../electron/ai/browser/bridge/protocol'
 
+const SCOPE = {
+  browserTaskId: 'bt-d1',
+  runId: 'run-d1',
+  tabRef: 'tab-1',
+  origin: 'example.com',
+} as const
+
 function makeTestSnapshot(): BridgePageSnapshot {
   return {
     text: 'Form test',
@@ -48,14 +55,14 @@ describe('Stage D1: Keyboard & Text Input actions', () => {
     })
 
     await adapter.observe({ browserTaskId: 'bt-d1', runId: 'run-d1', tabRef: 'tab-1' })
-    await adapter.typeText!('input:Username:0', 'admin_user', { clearFirst: true, submitEnter: true })
+    await adapter.typeText!('input:Username:0', 'admin_user', { clearFirst: true, submitEnter: true }, SCOPE)
 
     expect(typedText).toBe('admin_user')
     expect(clearFirst).toBe(true)
     expect(submitEnter).toBe(true)
 
     // Invalidation check: call without re-observe must fail
-    await expect(adapter.typeText!('input:Username:0', 'other')).rejects.toThrow(/нет observation|elementRef/i)
+    await expect(adapter.typeText!('input:Username:0', 'other', undefined, SCOPE)).rejects.toThrow(/нет observation|elementRef/i)
   })
 
   it('2. clearField sends clear request and invalidates lastObs', async () => {
@@ -74,7 +81,7 @@ describe('Stage D1: Keyboard & Text Input actions', () => {
     })
 
     await adapter.observe({ browserTaskId: 'bt-d1', runId: 'run-d1', tabRef: 'tab-1' })
-    await adapter.clearField!('input:Username:0')
+    await adapter.clearField!('input:Username:0', SCOPE)
     expect(clearedRef).toBe('input:Username:0')
   })
 
@@ -94,7 +101,7 @@ describe('Stage D1: Keyboard & Text Input actions', () => {
     })
 
     await adapter.observe({ browserTaskId: 'bt-d1', runId: 'run-d1', tabRef: 'tab-1' })
-    await adapter.toggle!('checkbox:Agree:0')
+    await adapter.toggle!('checkbox:Agree:0', SCOPE)
     expect(toggledRef).toBe('checkbox:Agree:0')
   })
 
@@ -114,7 +121,7 @@ describe('Stage D1: Keyboard & Text Input actions', () => {
     })
 
     await adapter.observe({ browserTaskId: 'bt-d1', runId: 'run-d1', tabRef: 'tab-1' })
-    await adapter.pressKey!('input:Username:0', 'Enter')
+    await adapter.pressKey!('input:Username:0', 'Enter', SCOPE)
     expect(pressedKey).toBe('Enter')
   })
 })

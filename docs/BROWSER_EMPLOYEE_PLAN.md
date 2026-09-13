@@ -59,6 +59,11 @@ Codex/ChatGPT и Claude используют один продуктовый п�
 расширение или native bridge наблюдает браузер и исполняет атомарные действия, policy-слой решает,
 что можно выполнить автоматически, после чего агент перечитывает результат.
 
+Локально установленный OpenClaw 2.3.0 проверен 13.09.2026 как ещё один референс этого
+паттерна: Native Messaging bootstrap выдаёт закрытую пару, relay проходит отдельную
+аутентификацию, а service worker восстанавливает соединение с bounded backoff. В Verstak этот
+путь сужен до вкладки, которую человек выбрал нажатием на значок расширения.
+
 Их ограничение для Павла: браузерный исполнитель жёстко привязан к одному аккаунту и его лимитам.
 Если лимит исчерпан или аккаунт недоступен, браузерная задача останавливается.
 
@@ -84,17 +89,17 @@ Codex/ChatGPT и Claude используют один продуктовый п�
 
 | Слой | Что уже есть | Ограничение сейчас |
 |---|---|---|
-| Chrome extension | `browser-extension/`: MV3 side panel, безопасный extractor текста/таблиц | Нет связи с desktop, действий, вкладок, снимков, task state |
+| Chrome extension | MV3 side panel, `activeTab`, Native Messaging, автоматическая локальная пара и reconnect, выбор точной вкладки значком | До публикации в Web Store первая загрузка остаётся unpacked; живой Calltouch ещё не принят |
 | Встроенный Browser | `src/components/BrowserView.tsx` | Отдельная Electron-сессия, а не Chrome пользователя |
-| Browser tools | `browser_navigate`, `browser_read_page`, `browser_click`, `browser_screenshot` | Работают только со встроенным BrowserView; контракт действий слишком узкий |
-| Tool dispatch | `electron/ipc/tool-handlers/browser.ts` | `browser_click` имеет режим `sequential`, а не внешний mutation-gate |
-| Подтверждения | `electron/ai/mode-policy.ts` + существующий pending-command flow | Browser actions не классифицируются по риску; `plan` сейчас не блокирует click |
-| Прогоны | `agent_runs`, события, checkpoints, provider fallback | Нет browser-specific checkpoint и защиты от повторного submit после неопределённого результата |
-| Proof | screenshots, proof frames, Proof Pack | Нет обязательной пары before/after для внешних мутаций |
-| Security | `secret-scanner`, `INBOUND_MUTATION_THREAT_MODEL.md` | Текстовый scanner не делает снимок экрана безопасным; web prompt injection остаётся угрозой |
+| Browser tools | Обычный tool loop выбирает `electron-webview` или `chrome-extension`; connected-контур умеет read/navigate/approved click | Остальные действия расширяются только после своих security-гейтов |
+| Tool dispatch | Единый BrowserController, opaque `elementRef`, exact task/run/tab/origin и fail-closed adapter selection | Живой сайт всё ещё обязан подтвердить production-форму вызова |
+| Подтверждения | R3 получает scoped digest, atomic consume и readback; ошибка транспорта сохраняет карточку решения | Неизвестный внешний эффект остаётся `uncertain` |
+| Прогоны | Stable `browserTaskId`, отдельные run lineage, durable ledger и provider-aware fallback | Calltouch 5/5 ещё не дал живой proof |
+| Proof | Результат действия связывается с before/after observation; null screenshot не считается успехом | Screenshot connected-extension пока не входит в принятый MVP |
+| Security | DOM и screenshot проходят client data policy до provider/fallback; формы, storage, cookies и raw JS исключены | Публикация extension и clean-install canary остаются отдельным релизным гейтом |
 
-Текущий `EXT-A1-R2` принимается только как **Browser Sensor Core** — безопасный read-only модуль.
-Его side panel и clipboard UX не определяют конечный продукт.
+`EXT-A1-R2` остаётся принятым Sensor Core. Рабочий продуктовый интерфейс теперь задают Settings,
+обычный чат и новая side panel; старый clipboard/pair/debug UX удалён.
 
 ---
 
@@ -375,7 +380,8 @@ CLI/tunnel-провайдер получает полный Browser Employee т�
 - список прикреплённых task tabs;
 - текущий режим Смотреть / Подготовить / Выполнить;
 - последнее действие и состояние Pause/Running/Needs approval;
-- быстрые кнопки Attach/Detach, Pause, Take over, Open in Verstak.
+- один статус выбранной вкладки, Stop и переход в Verstak; технические
+  Pair/Attach/Detach/JSON-кнопки в пользовательском интерфейсе отсутствуют.
 
 Side panel не заводит отдельную историю и отдельного AI. Поле короткой команды допустимо только
 как вход в тот же chat/run Verstak.
@@ -389,7 +395,8 @@ Side panel не заводит отдельную историю и отдель
 Вход:
 
 - Calltouch открыт и авторизован Павлом в рабочем Chrome-профиле;
-- Павел прикрепляет вкладку к задаче;
+- Павел нажимает значок расширения на нужной вкладке; вкладка выбирается и
+  боковая панель открывается одним действием;
 - в Verstak указаны клиент и период.
 
 Verstak должен:
@@ -473,8 +480,10 @@ Pause/restart/provider switch не теряют `browserTaskId`, не переи
 2. Добавить Native Messaging host manifest с точным `allowed_origins`.
 3. Включить host binary/script и extension assets в desktop package.
 4. Реализовать Windows lifecycle: HKCU registration, install, upgrade, repair и uninstall cleanup.
-5. Pair extension с запущенным Verstak поверх Native Messaging.
-6. Attach/detach текущей вкладки и task tab group.
+5. Быстро авторизовать extension из Settings поверх Native Messaging без
+   пользовательского Pair-кода.
+6. Выбирать точную текущую вкладку нажатием значка; технический attach остаётся
+   внутренним протоколом и не показывается как отдельный шаг.
 7. Передать `observe` прямо в текущий `run_id` с сохранением стабильного `browserTaskId`.
 8. Показать состояние соединения в desktop и side panel.
 9. Запрашивать optional site permissions только для прикреплённых доменов; без `<all_urls>`.
@@ -483,7 +492,8 @@ Pause/restart/provider switch не теряют `browserTaskId`, не переи
 
 - без bridge расширение явно offline;
 - чужой extension id/process не подключается;
-- desktop restart восстанавливает pairing, но не самовольно продолжает mutation;
+- desktop restart ограниченно восстанавливает авторизацию, но не самовольно
+  продолжает mutation;
 - page content появляется у агента без copy/paste;
 - packaged build после чистой установки видит host, а upgrade/uninstall не оставляют сломанный HKCU
   registration; dev-only unpacked smoke не считается production proof;
@@ -674,10 +684,11 @@ multi-tab задач без нарушения client data policy.
 |---|---|---|---|
 | Phase A / `VSK-EXT-A1-R2` | ACCEPTED_WITH_DEBT · 19.07.2026 | Navigator повторил targeted: 65/65; manifest и privacy scope подтверждены. Долг: ручной Chrome smoke при первой разрешённой установке — текущий Chrome-control не открывает `chrome://extensions`, обход не применялся | Sensor Core заморожен; не считать Browser Employee MVP |
 | Phase B0 / `EXT-B0` | VERIFIED_IN_CODE | Единый controller/policy, scoped atomic approval, capability/lineage, provider policy и durable ledger перенесены на 2.8.2; security tests и мутации stale/duplicate guards зелёные | Не расширять action scope до живого C1 |
-| Phase B1 / `EXT-B1` | PACKAGED_SMOKE_PASS | Extension/host входят в packaged resources; packaged `Verstak.exe` стартовал, bridge поднялся, Chrome+Edge HKCU readback указывает на существующий manifest | Ручная загрузка extension и живой pair |
-| Phase C / `EXT-C1` | LIVE_ACCEPTANCE_PENDING | Вертикаль `observe → approved click → readback` и fail-closed `uncertain` построена; targeted integration/adversarial tests зелёные | Пройти Calltouch 5/5 в одной вкладке |
+| Phase B1 / `EXT-B1` | LOCAL_REBUILD_PENDING | Настройки, быстрая локальная авторизация, авто-reconnect и выбор точной вкладки значком реализованы; тесты больше не меняют настоящий HKCU, packaged smoke не должен регистрировать временный host | Собрать свежий локальный package и проверить постоянный HKCU readback |
+| Phase C / `EXT-C1` | LIVE_ACCEPTANCE_PENDING | Вертикаль `observe → approved click → readback`, exact request correlation и fail-closed `uncertain` построены; targeted integration/adversarial tests зелёные | Пройти Calltouch 5/5 в одной вкладке |
 | Phase D–F | NOT_STARTED | — | Не запускать раньше своих гейтов |
 
-**Один следующий шаг:** загрузить packaged unpacked-extension в Chrome, выполнить pair и пройти
-Calltouch `attach → observe → approved click → readback` 5/5. До этого Browser Employee не считать
-принятым, даже при зелёном полном гейте.
+**Один следующий шаг:** собрать свежий локальный package, обновить уже установленное
+unpacked-расширение и пройти Calltouch
+`выбор вкладки значком → observe → approved click → readback` 5/5. До этого Browser Employee
+не считать принятым, даже при зелёном полном гейте.
