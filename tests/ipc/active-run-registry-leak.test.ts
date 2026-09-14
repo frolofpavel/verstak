@@ -101,4 +101,40 @@ describe('реестр «чат занят» не течёт (ревью B #5/#7
     // теста, а не дефект кода.
     await vi.waitFor(() => expect(hasActiveRunForChat(CHAT + 1)).toBe(false))
   })
+
+  it('R0 acceptance: 20 обычных send подряд terminal и освобождают lane при отсутствующих optional browser/MCP', async () => {
+    // Production считает browserController/browserTasks/mcpClient optional:
+    // ни одна из трёх deps в baseDeps не задана. Это и есть штатный
+    // unavailable-контракт, а не мок успешного внешнего сервиса.
+    registerAiIpc(baseDeps as unknown as Parameters<typeof registerAiIpc>[0])
+
+    const terminalIds: number[] = []
+    for (let i = 0; i < 20; i++) {
+      let resolveDone!: () => void
+      const done = new Promise<void>(resolve => { resolveDone = resolve })
+      const event = {
+        sender: {
+          isDestroyed: () => false,
+          send: (_ch: string, payload?: { id?: number; event?: { type?: string } }) => {
+            if (payload?.event?.type === 'done' && typeof payload.id === 'number') {
+              terminalIds.push(payload.id)
+              resolveDone()
+            }
+          },
+        },
+      }
+      const sendId = await handlers.get('ai:send')!(
+        event, [{ role: 'user', content: `обычная отправка ${i + 1}` }],
+        dir, undefined, undefined, String(CHAT + 2),
+      ) as number
+      expect(sendId).toBeGreaterThan(0)
+      await done
+      await vi.waitFor(() => expect(hasActiveRunForChat(CHAT + 2)).toBe(false))
+      expect(await handlers.get('ai:stop')!({}, sendId), `send #${i + 1} оставил AbortController`).toBe(false)
+    }
+
+    expect(terminalIds).toHaveLength(20)
+    expect(new Set(terminalIds).size).toBe(20)
+    expect(hasActiveRunForChat(CHAT + 2)).toBe(false)
+  })
 })

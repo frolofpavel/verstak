@@ -69,7 +69,7 @@ export const mcpToolHandler: ToolHandler = {
     }
     try {
       emitActivity(ctx, call, 'ok', `mcp:${call.name}`, matchedTool.serverId)
-      const result = await ctx.mcpClient.callTool(matchedTool.serverId, call.name, call.args)
+      const result = await ctx.mcpClient.callTool(matchedTool.serverId, call.name, call.args, ctx.signal)
       // Редактируем вывод внешнего MCP-сервера — он не доверенный, может вернуть
       // токены/ключи, которые иначе утекут в контекст модели.
       const raw = typeof result === 'string' ? result : JSON.stringify(result)

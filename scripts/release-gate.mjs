@@ -745,7 +745,10 @@ const GATE_MAX_WORKERS = 4
 // системный clipboard, корректный CP866 readback реестра и automatic self-healing pair.
 // -> 6541 ИЗМЕРЕНО 13.09: Settings-first Browser Employee, exact request correlation,
 // durable privacy/lineage, bounded auth wake, honest connected mode и HKCU-safe smoke/tests.
-const EXPECTED_TOTAL_TESTS = 6541
+// -> 6564 ИЗМЕРЕНО 15.09 (R0): request-scoped MCP Stop, connection identity,
+// renderer-reload recovery, exact approval scope, terminal/secret/size guards,
+// 20-send acceptance и 30-цикловый teardown/reconnect.
+const EXPECTED_TOTAL_TESTS = 6564
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

@@ -86,7 +86,7 @@ rl.on('line', l => {
       id: 'crashy', name: 'crashy', command: process.execPath, args: ['-e', DIES_ON_CALL]
     })
     expect(tools.length).toBe(1)
-    const err = await client.callTool('crashy', 'ping', {}).then(() => null, (e: Error) => e)
+    const err = await client.callTool('crashy', 'ping', {}, new AbortController().signal).then(() => null, (e: Error) => e)
     expect(err).not.toBeNull()
     expect(err!.message).toMatch(/код 3/)
     expect(err!.message).toContain('SERVER CRASH')

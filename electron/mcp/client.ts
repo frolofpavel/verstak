@@ -67,6 +67,14 @@ const TOOL_CALL_TIMEOUT_MS = 30_000
 // явное действие с «Подключаю…» в UI, длинное ожидание здесь честнее отказа.
 const INIT_TIMEOUT_MS = 90_000
 
+function mcpAbortError(dispatched = false): Error {
+  const error = new Error(dispatched
+    ? 'MCP request aborted after dispatch; outcome uncertain'
+    : 'MCP request aborted')
+  error.name = 'AbortError'
+  return error
+}
+
 /**
  * Allowlist переменных окружения, которые прокидываем в дочерний MCP-процесс.
  * Раньше мы лили весь process.env (включая API-ключи провайдеров, OAuth-токены,
@@ -208,7 +216,7 @@ export class McpClient extends EventEmitter {
             : config.command === 'uvx' ? 'Нужен Python с установленным uv.'
             : 'Проверь, что программа установлена и видна в PATH.')
         : `Не удалось запустить "${config.command}": ${err.message}`
-      this._handleDisconnect(config.id, friendly)
+      this._handleDisconnect(config.id, conn, friendly)
     })
 
     // 'close', не 'exit': к close потоки дочитаны, и хвост stderr уже собран.
@@ -217,7 +225,7 @@ export class McpClient extends EventEmitter {
       console.warn(`[mcp:${config.id}] process exited: ${codeStr}`)
       const tail = stderrTailText(conn)
       const reason = `сервер завершился (${codeStr})${tail ? `. Вывод сервера:\n${tail}` : ''}`
-      this._handleDisconnect(config.id, reason)
+      this._handleDisconnect(config.id, conn, reason)
     })
 
     this.connections.set(config.id, conn)
@@ -248,8 +256,9 @@ export class McpClient extends EventEmitter {
       this.emit('connected', config.id, tools)
       return tools
     } catch (err) {
-      // Чистим после неудачного подключения
-      await this.disconnect(config.id)
+      // Чистим ИМЕННО эту попытку. Параллельный reconnect уже мог установить
+      // successor с тем же serverId — generic disconnect(id) снёс бы его.
+      this._disconnectConnection(config.id, conn, true)
       throw err
     }
   }
@@ -257,14 +266,14 @@ export class McpClient extends EventEmitter {
   /**
    * Вызвать tool на подключённом MCP-сервере.
    */
-  async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(serverId: string, toolName: string, args: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
     const conn = this.connections.get(serverId)
     if (!conn) throw new Error(`MCP server "${serverId}" not connected`)
 
     const result = await this._request(conn, 'tools/call', {
       name: toolName,
       arguments: args
-    }, TOOL_CALL_TIMEOUT_MS) as { content?: Array<{ type: string; text?: string }>; isError?: boolean }
+    }, TOOL_CALL_TIMEOUT_MS, signal) as { content?: Array<{ type: string; text?: string }>; isError?: boolean }
 
     // MCP tool result format: { content: [{type, text}], isError }
     if (result?.isError) {
@@ -288,21 +297,7 @@ export class McpClient extends EventEmitter {
   async disconnect(serverId: string): Promise<void> {
     const conn = this.connections.get(serverId)
     if (!conn) return
-    this.connections.delete(serverId)
-
-    // Отклоняем все pending запросы
-    for (const [, p] of conn.pending) {
-      p.reject(new Error('MCP server disconnected'))
-    }
-    conn.pending.clear()
-
-    // Убиваем всё дерево: при shell:true kill() снимает только cmd.exe-обёртку,
-    // а сам сервер (node.exe под npx) осиротел бы и продолжал жить.
-    try {
-      treeKill(conn.process)
-    } catch { /* уже мёртв */ }
-
-    this.emit('disconnected', serverId)
+    this._disconnectConnection(serverId, conn, true)
   }
 
   getConnectedServers(): McpServerConfig[] {
@@ -331,9 +326,28 @@ export class McpClient extends EventEmitter {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private _handleDisconnect(serverId: string, reason: string): void {
-    const conn = this.connections.get(serverId)
-    if (!conn) return
+  private _disconnectConnection(serverId: string, conn: McpConnection, emitEvent = false): void {
+    const owned = this.connections.get(serverId) === conn
+    if (owned) this.connections.delete(serverId)
+
+    for (const [, p] of conn.pending) p.reject(new Error('MCP server disconnected'))
+    conn.pending.clear()
+
+    // Убиваем всё дерево: при shell:true kill() снимает только cmd.exe-обёртку,
+    // а сам сервер (node.exe под npx) осиротел бы и продолжал жить.
+    try { treeKill(conn.process) } catch { /* уже мёртв */ }
+
+    if (owned && emitEvent) this.emit('disconnected', serverId)
+  }
+
+  private _handleDisconnect(serverId: string, conn: McpConnection, reason: string): void {
+    // close/error старого поколения может прийти уже после reconnect. Такой callback
+    // владеет только captured conn и не имеет права удалить successor по тому же id.
+    if (this.connections.get(serverId) !== conn) {
+      for (const [, p] of conn.pending) p.reject(new Error(`MCP server disconnected: ${reason}`))
+      conn.pending.clear()
+      return
+    }
     this.connections.delete(serverId)
 
     for (const [, p] of conn.pending) {
@@ -358,25 +372,65 @@ export class McpClient extends EventEmitter {
     this._send(conn, { jsonrpc: '2.0', method, ...(params ? { params } : {}) })
   }
 
-  private _request(conn: McpConnection, method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+  private _request(conn: McpConnection, method: string, params: unknown, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(mcpAbortError())
+        return
+      }
       const id = ++conn.requestId
-      const timer = setTimeout(() => {
+      let settled = false
+      let sent = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const cleanup = () => {
+        if (timer) clearTimeout(timer)
+        timer = null
         conn.pending.delete(id)
-        reject(new Error(`MCP request "${method}" timed out after ${timeoutMs}ms`))
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const finishResolve = (value: unknown) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(value)
+      }
+      const finishReject = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
+      const onAbort = () => {
+        const notifyServer = sent && !settled
+        finishReject(mcpAbortError(notifyServer))
+        // MCP cancellation адресована одному JSON-RPC request. Сервер общий для
+        // параллельных чатов, поэтому disconnect/treeKill здесь запрещены.
+        if (notifyServer) {
+          try {
+            this._notify(conn, 'notifications/cancelled', {
+              requestId: id,
+              reason: 'Client request aborted',
+            })
+          } catch { /* сервер уже закрыл stdin — локальная отмена всё равно завершена */ }
+        }
+      }
+
+      timer = setTimeout(() => {
+        finishReject(new Error(`MCP request "${method}" timed out after ${timeoutMs}ms`))
       }, timeoutMs)
 
       conn.pending.set(id, {
-        resolve: (v) => { clearTimeout(timer); resolve(v) },
-        reject: (e) => { clearTimeout(timer); reject(e) }
+        resolve: finishResolve,
+        reject: finishReject,
       })
+      signal?.addEventListener('abort', onAbort, { once: true })
 
       try {
         this._send(conn, { jsonrpc: '2.0', id, method, params })
+        sent = true
+        if (signal?.aborted) onAbort()
       } catch (err) {
-        conn.pending.delete(id)
-        clearTimeout(timer)
-        reject(err)
+        finishReject(err instanceof Error ? err : new Error(String(err)))
       }
     })
   }

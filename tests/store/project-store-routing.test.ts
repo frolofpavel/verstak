@@ -8,7 +8,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // Keep it minimal — only the methods the tested actions actually call.
 const appendSpy = vi.fn(async () => {})
 const agentRunsListSpy = vi.fn(async (_path?: string, _opts?: { status?: string }) => [] as Array<{ runId: string }>)
-const windowStub = { api: { chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), append: appendSpy }, agentRuns: { list: agentRunsListSpy } } }
+const aiLiveStateSpy = vi.fn(async (_path?: string) => ({ sends: [] as unknown[] }))
+const windowStub = { api: { chats: { listWindow: vi.fn(async () => ({ messages: [], totalCount: 0, hasMoreBefore: false })), append: appendSpy }, agentRuns: { list: agentRunsListSpy }, ai: { liveState: aiLiveStateSpy } } }
 // Стабим ДО импорта стора (безопасность загрузки модуля). Переставляем в
 // beforeEach: глобальный afterEach (tests/setup.ts) снимает все стабы после
 // каждого теста, иначе window исчезает со второго теста файла.
@@ -45,6 +46,8 @@ beforeEach(() => {
   appendSpy.mockClear()
   agentRunsListSpy.mockClear()
   agentRunsListSpy.mockResolvedValue([] as Array<{ runId: string }>)
+  aiLiveStateSpy.mockClear()
+  aiLiveStateSpy.mockResolvedValue({ sends: [] })
 })
 
 // Со стороны пользователя: фоновый чат, чей прогон закончился, не держит
@@ -119,6 +122,113 @@ describe('reconcileStreamingState', () => {
     expect(active(st).streamStartedAt).toBeNull()
     expect(st.chats[2].isStreaming).toBe(false)
     expect(st.chats[2].streamStartedAt).toBeNull()
+  })
+
+  it('renderer reload восстанавливает только актуального owner, streaming и ровно один masked approval', async () => {
+    aiLiveStateSpy.mockResolvedValue({
+      sends: [{
+        sendId: 42,
+        runId: 'run-current',
+        projectPath: 'C:/proj',
+        chatId: 1,
+        generation: 7,
+        startedAt: 1234,
+        pendingWrites: [{ callId: 'w1', path: 'a.ts', before: 'old', after: 'new', sendId: 42 }],
+        pendingCommand: null,
+        pendingBrowserAction: null,
+      }],
+    })
+    useProject.setState({
+      path: 'C:/proj',
+      activeChatId: 1,
+      chats: { 1: { ...freshSnapshot(), chatId: 1 } },
+      sendOwners: {},
+      chatLaneGenerations: {},
+    }, false)
+
+    await useProject.getState().reconcileStreamingState('C:/proj')
+    await useProject.getState().reconcileStreamingState('C:/proj')
+
+    const st = useProject.getState()
+    expect(st.lookupSendOwner(42)).toMatchObject({ kind: 'chat', chatId: 1, projectPath: 'C:/proj' })
+    expect(active(st).isStreaming).toBe(true)
+    expect(active(st).streamStartedAt).toBe(1234)
+    expect(active(st).pendingWrites).toEqual([
+      { callId: 'w1', path: 'a.ts', before: 'old', after: 'new', sendId: 42 },
+    ])
+  })
+
+  it('late live-state старого поколения не отбирает lane у второго обычного send', async () => {
+    aiLiveStateSpy.mockResolvedValue({
+      sends: [{
+        sendId: 50, runId: 'run-old', projectPath: 'C:/proj', chatId: 1,
+        generation: 2, startedAt: 1000, pendingWrites: [], pendingCommand: null,
+        pendingBrowserAction: null,
+      }],
+    })
+    useProject.setState({ path: 'C:/proj', activeChatId: 1, chats: { 1: { ...freshSnapshot(), chatId: 1 } } }, false)
+    await useProject.getState().reconcileStreamingState('C:/proj')
+    expect(useProject.getState().lookupSendOwner(50)).toMatchObject({ kind: 'chat', chatId: 1 })
+
+    // Обычный send после recovery повышает renderer lane generation. Late event
+    // восстановленного старого send больше не имеет owner, новый работает штатно.
+    useProject.getState().registerSendOwner(51, { kind: 'chat', chatId: 1, projectPath: 'C:/proj' })
+
+    expect(useProject.getState().lookupSendOwner(50)).toBeNull()
+    expect(useProject.getState().lookupSendOwner(51)).toMatchObject({ kind: 'chat', chatId: 1 })
+  })
+
+  it('live-state, начатый до второго send, не перезаписывает owner после await', async () => {
+    let release!: (value: { sends: unknown[] }) => void
+    aiLiveStateSpy.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    useProject.setState({ path: 'C:/proj', activeChatId: 1, chats: { 1: { ...freshSnapshot(), chatId: 1 } } }, false)
+
+    const pendingHydrate = useProject.getState().reconcileStreamingState('C:/proj')
+    useProject.getState().registerSendOwner(61, { kind: 'chat', chatId: 1, projectPath: 'C:/proj' })
+    release({
+      sends: [{
+        sendId: 60, runId: 'run-reload', projectPath: 'C:/proj', chatId: 1,
+        generation: 4, startedAt: 1000, pendingWrites: [], pendingCommand: null,
+        pendingBrowserAction: null,
+      }],
+    })
+    await pendingHydrate
+
+    expect(useProject.getState().lookupSendOwner(60)).toBeNull()
+    expect(useProject.getState().lookupSendOwner(61)).toMatchObject({ kind: 'chat', chatId: 1 })
+  })
+
+  it('browser approval показывается только в своём активном чате и возвращается при входе', async () => {
+    const pendingBrowserAction = {
+      callId: 'bc1', actionId: 'ba1', browserTaskId: 'bt-1', runId: 'run-browser',
+      risk: 'R2' as const, approvalDigest: 'digest', reason: 'click', sendId: 70,
+      snapshot: {
+        browserTaskId: 'bt-1', runId: 'run-browser', scope: {}, actionType: 'browser_click',
+        payload: {}, preconditions: {}, risk: 'R2' as const,
+      },
+    }
+    aiLiveStateSpy.mockResolvedValue({
+      sends: [{
+        sendId: 70, runId: 'run-browser', projectPath: 'C:/proj', chatId: 1,
+        generation: 1, startedAt: 1000, pendingWrites: [], pendingCommand: null,
+        pendingBrowserAction,
+      }],
+    })
+    useProject.setState({
+      path: 'C:/proj', activeChatId: 1,
+      chats: { 1: { ...freshSnapshot(), chatId: 1 }, 2: { ...freshSnapshot(), chatId: 2 } },
+    }, false)
+
+    await useProject.getState().reconcileStreamingState('C:/proj')
+    expect(useProject.getState().pendingBrowserAction).toEqual(pendingBrowserAction)
+
+    useProject.setState({ activeChatId: 2 }, false)
+    await useProject.getState().reconcileStreamingState('C:/proj')
+    expect(useProject.getState().pendingBrowserAction).toBeNull()
+
+    useProject.setState({ activeChatId: 1 }, false)
+    await useProject.getState().reconcileStreamingState('C:/proj')
+    expect(useProject.getState().pendingBrowserAction).toEqual(pendingBrowserAction)
   })
 })
 

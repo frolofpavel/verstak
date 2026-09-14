@@ -20,6 +20,7 @@ function context(events: unknown[]): ToolContext {
   return {
     sender,
     sendId: 42,
+    signal: new AbortController().signal,
     projectPath: 'C:\\repo',
   } as unknown as ToolContext
 }
@@ -207,6 +208,79 @@ describe('dispatchToolTurn', () => {
 
     await expect(pending).resolves.toEqual(calls.map(result))
     expect(finished).toEqual(['sequential', 'read-b', 'read-a', 'write-a'])
+  })
+
+  it('после Stop не запускает следующий sequential tool и сохраняет парный ToolResult', async () => {
+    const ctrl = new AbortController()
+    const started: string[] = []
+    const calls = [call('m1', 'mcp_long'), call('m2', 'mcp_next')]
+    const ctx = { ...context([]), signal: ctrl.signal } as ToolContext
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>(resolve => { markFirstStarted = resolve })
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => {
+        started.push(name)
+        if (name === 'mcp_long') {
+          markFirstStarted()
+          await new Promise<void>(resolve => {
+            if (ctrl.signal.aborted) resolve()
+            else ctrl.signal.addEventListener('abort', () => resolve(), { once: true })
+          })
+          return { id: toolCall.id, name: toolCall.name, result: '', error: 'MCP request aborted' }
+        }
+        return result(toolCall)
+      },
+    })
+
+    const pending = dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    await firstStarted
+    ctrl.abort()
+    const results = await pending
+
+    expect(started).toEqual(['mcp_long'])
+    expect(results).toHaveLength(2)
+    expect(results[0].error).toMatch(/aborted/i)
+    expect(results[1]).toMatchObject({ id: 'm2', name: 'mcp_next' })
+    expect(results[1].error).toMatch(/остановлен|aborted/i)
+  })
+
+  it('после Stop выполняет PostToolUse для уже запущенного tool, но не для заблокированного следующего', async () => {
+    const ctrl = new AbortController()
+    const calls = [call('m1', 'mcp_long'), call('m2', 'mcp_next')]
+    const hookEvents: string[] = []
+    const hooks = {} as CompiledHooks
+    const invokeHooks = vi.fn(async (event: string, _hooks: CompiledHooks, payload: { tool_name?: string }) => {
+      hookEvents.push(`${event}:${payload.tool_name}`)
+      return { block: false }
+    })
+
+    const results = await dispatchToolTurn({
+      toolCalls: calls,
+      context: { ...context([]), signal: ctrl.signal } as ToolContext,
+      hooks,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          if (name === 'mcp_long') ctrl.abort()
+          return name === 'mcp_long'
+            ? { id: toolCall.id, name: toolCall.name, result: '', error: 'MCP request aborted' }
+            : result(toolCall)
+        },
+      }),
+      invokeHooks: invokeHooks as never,
+    })
+
+    expect(results[1].error).toMatch(/остановлен|aborted/i)
+    expect(hookEvents).toContain('PostToolUse:mcp_long')
+    expect(hookEvents).not.toContain('PostToolUse:mcp_next')
   })
 
   it('PreToolUse блокирует вызов fail-closed, PostToolUse его не получает', async () => {

@@ -194,6 +194,25 @@ describe('sendChatMessage — characterization бывшего основного
     expect(h.sentCalls[0].overrides).toEqual({ agentMode: 'auto' })
   })
 
+  it('R0 acceptance: композер сброшен на каждой из 20 последовательных обычных отправок', async () => {
+    const h = makeHarness()
+    for (let i = 0; i < 20; i++) {
+      const result = await sendChatMessage({
+        ...baseInput,
+        text: `сообщение ${i + 1}`,
+        modelText: `сообщение ${i + 1}`,
+        displayText: `сообщение ${i + 1}`,
+      }, h.deps)
+      expect(result.kind).toBe('sent')
+      // Terminal диспетчер снимает этот флаг; его 20-цикловой пин живёт
+      // в chat-event-dispatcher.test.ts. Здесь изолирован контракт самого send pipeline.
+      h.state.setStreaming(false)
+    }
+
+    expect(h.deps.resetComposerAfterSend).toHaveBeenCalledTimes(20)
+    expect(h.sentCalls).toHaveLength(20)
+  })
+
   it('фиксирует выбранный UI-маршрут на весь async send без strict one-shot', async () => {
     const h = makeHarness()
     await sendChatMessage({

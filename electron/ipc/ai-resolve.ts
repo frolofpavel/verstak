@@ -31,6 +31,10 @@ export function resolvePending<T>(
     const key = scopedKey(sendId, callId)
     const exact = map.get(key)
     if (exact) { exact.resolve(value); map.delete(key); return }
+    // Renderer передал scope явно: отсутствие exact-key означает, что карточка
+    // уже устарела/зарезолвлена. Нельзя падать в legacy suffix-scan — совпавший
+    // callId другого (более нового) send тогда подтверждал бы чужое действие.
+    return
   }
   for (const [k, p] of map) {
     if (k.endsWith('::' + callId)) {

@@ -88,6 +88,21 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     expect(mock.aiEvents.lostEvents).toBe(0)
   })
 
+  it('R0 acceptance: 20 terminal подряд снимают streaming/owner, а следующий обычный send принимается', () => {
+    mountChat()
+    for (let i = 0; i < 20; i++) {
+      const sendId = 1_000 + i
+      startRun(sendId, 7)
+      expect(useProject.getState().lookupSendOwner(sendId)).not.toBeNull()
+      act(() => { mock.aiEvents.emit({ id: sendId, event: { type: 'done' } }) })
+      expect(useProject.getState().lookupSendOwner(sendId), `owner #${i + 1} не освобождён`).toBeNull()
+      expect(active(useProject.getState()).isStreaming, `stream #${i + 1} не terminal`).toBe(false)
+    }
+    expect(mock.aiEvents.subscribeCount).toBe(1)
+    expect(mock.aiEvents.offCount).toBe(0)
+    expect(mock.aiEvents.lostEvents).toBe(0)
+  })
+
   it('чужой sendId (owner не зарегистрирован) НЕ трогает активный чат', () => {
     mountChat()
     startRun(103, 7)
@@ -95,6 +110,36 @@ describe('Chat: диспетчер ai.onEvent — характеризация (
     act(() => { mock.aiEvents.emit({ id: 999, event: { type: 'text', text: 'ЧУЖОЕ' } }) })
     act(() => { mock.aiEvents.emit({ id: 103, event: { type: 'done' } }) })
     expect(active(useProject.getState()).messages.at(-1)?.content).toBe('моё')
+  })
+
+  it('production pending-browser-action попадает в approval ровно один раз без переподписки', () => {
+    mountChat()
+    startRun(105, 7)
+    const event = {
+      type: 'pending-browser-action' as const,
+      callId: 'browser-call-1',
+      actionId: 'action-1',
+      browserTaskId: 'bt-7',
+      runId: 'run-1',
+      risk: 'R2' as const,
+      approvalDigest: 'digest-1',
+      snapshot: {
+        browserTaskId: 'bt-7', runId: 'run-1', clientId: 'client-1',
+        scope: { origin: 'https://example.test' }, actionType: 'browser_click',
+        payload: { selector: '#pay' }, preconditions: { visible: true }, risk: 'R2' as const,
+      },
+      reason: 'Ответственное действие',
+    }
+
+    act(() => {
+      mock.aiEvents.emit({ id: 105, event })
+      mock.aiEvents.emit({ id: 105, event })
+    })
+
+    const { type: _type, ...approval } = event
+    expect(useProject.getState().pendingBrowserAction).toEqual({ ...approval, sendId: 105 })
+    expect(mock.aiEvents.subscribeCount).toBe(1)
+    expect(mock.aiEvents.offCount).toBe(0)
   })
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -254,6 +299,30 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
   // восстановимым, а на экране была пустая карточка. Проверяем ВЫЗОВ перечитывания
   // синхронно (сам await списка — в store-тесте ниже, чтобы не ждать под jsdom).
   describe('задача 1: run-finalized перечитывает resumableRuns', () => {
+    it('lost done: run-finalized снимает ghost owner/streaming через live reconcile без переподписки', async () => {
+      mock = makeApiMock({
+        ...CHAT_API_DEFAULTS,
+        ai: { liveState: async () => ({ sends: [] }) },
+      })
+      vi.stubGlobal('window', Object.assign(globalThis.window, { api: mock.api }))
+      mountChat()
+      startRun(59, 7)
+
+      act(() => {
+        // `done` не дошёл до renderer; run-finalized — терминальная
+        // правда main после agentRuns.finish().
+        mock.aiEvents.emit({ id: 59, event: { type: 'run-finalized', runId: 'r-lost-done', projectPath: '/p' } as never })
+      })
+
+      await vi.waitFor(() => {
+        expect(useProject.getState().lookupSendOwner(59)).toBeNull()
+        expect(active(useProject.getState()).isStreaming).toBe(false)
+      })
+      expect(mock.calls.get('ai.liveState')).toHaveBeenCalledWith('/p')
+      expect(mock.aiEvents.subscribeCount).toBe(1)
+      expect(mock.aiEvents.offCount).toBe(0)
+    })
+
     it('run-finalized активного проекта → listResumable вызван с этим проектом', () => {
       mountChat() // path='/p'
       act(() => {

@@ -196,6 +196,8 @@ contextBridge.exposeInMainWorld('api', {
       overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec; resumeFromRunId?: string; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
       chatId?: string
     ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId),
+    /** Read-only recovery snapshot for a renderer reload; never starts/resumes a run. */
+    liveState: (projectPath: string) => ipcRenderer.invoke('ai:live-state', projectPath),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>
       ipcRenderer.invoke('ai:resolve-write', callId, accept, sendId),
     resolveCommand: (callId: string, accept: boolean, sendId?: number) =>

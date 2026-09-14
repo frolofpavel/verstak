@@ -28,7 +28,7 @@ import type { ToolCall } from '../../electron/ai/types'
 
 interface Harness {
   ctx: ToolContext
-  calls: Array<{ serverId: string; name: string; args: unknown }>
+  calls: Array<{ serverId: string; name: string; args: unknown; signal?: AbortSignal }>
   events: Array<{ type: string; [k: string]: unknown }>
 }
 
@@ -40,7 +40,7 @@ const TOOLS = [
 ]
 
 function harness(mode: AgentMode, opts?: { deny?: string[]; onConfirm?: boolean }): Harness {
-  const calls: Array<{ serverId: string; name: string; args: unknown }> = []
+  const calls: Array<{ serverId: string; name: string; args: unknown; signal?: AbortSignal }> = []
   const events: Array<{ type: string; [k: string]: unknown }> = []
   const controller = new AbortController()
   const ctx = {
@@ -59,8 +59,8 @@ function harness(mode: AgentMode, opts?: { deny?: string[]; onConfirm?: boolean 
     permissionRules: opts?.deny ? compilePermissionConfig({ deny: opts.deny }) : undefined,
     mcpClient: {
       getAllTools: () => TOOLS,
-      callTool: async (serverId: string, name: string, args: unknown) => {
-        calls.push({ serverId, name, args })
+      callTool: async (serverId: string, name: string, args: unknown, signal?: AbortSignal) => {
+        calls.push({ serverId, name, args, signal })
         return 'ok'
       },
     },
@@ -111,6 +111,13 @@ describe('mcpToolHandler — боевой гейт (§2.3 ревизии 15.08)'
     const h = harness('plan')
     await mcpToolHandler.handle(call('list_repos'), h.ctx)
     expect(h.calls.length).toBe(1)
+  })
+
+  it('боевой MCP-вызов получает AbortSignal текущего send', async () => {
+    const h = harness('auto')
+    await mcpToolHandler.handle(call('list_repos'), h.ctx)
+    expect(h.calls).toHaveLength(1)
+    expect(h.calls[0].signal).toBe(h.ctx.signal)
   })
 })
 

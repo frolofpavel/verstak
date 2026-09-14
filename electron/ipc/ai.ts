@@ -56,6 +56,7 @@ import { deriveAttachmentMaterials, listFolderMaterials, buildMaterialsManifest,
 import type { MaterialsRunContext } from '../ai/runner-api'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { registerAiCountTokensIpc } from './ai-count-tokens'
+import { maskSecretsForDiff, redactForDisplay } from '../ai/secret-scanner'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -228,7 +229,242 @@ export interface AiDeps {
 
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
+// `done`/`run-finalized` уже ушёл из main, но async runner ещё может не успеть
+// финализировать DB и снять AbortController. В этом окне reload не
+// имеет права воскрешать send. Set bounded числом active run и чистится cleanup.
+const terminalLiveSends = new Set<number>()
 const autoProofReportsSent = new Set<string>()
+
+type LivePendingApprovalEvent =
+  | { type: 'pending-write'; callId: string; path: string; before: string; after: string }
+  | { type: 'pending-command'; callId: string; command: string; toolName?: string }
+  | {
+      type: 'pending-browser-action'
+      callId: string
+      actionId: string
+      browserTaskId: string
+      runId: string
+      risk: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
+      approvalDigest: string
+      snapshot: Record<string, unknown>
+      reason: string
+    }
+
+interface LivePendingApprovalEntry {
+  sendId: number
+  projectPath: string | null
+  event: LivePendingApprovalEvent
+  bytes: number
+}
+
+/**
+ * Renderer reload теряет карточки подтверждений, но main-процесс продолжает ждать.
+ * Sink не доверяет upstream-маске: write diff маскируется повторно,
+ * command/code редактируется, browser snapshot глубоко клонируется.
+ * Сырые tool args/содержимое файла в cache не попадают; cache эфемерный.
+ */
+const livePendingApprovals = new Map<string, LivePendingApprovalEntry>()
+const MAX_LIVE_PENDING_APPROVALS = 256
+const MAX_LIVE_PENDING_APPROVAL_BYTES = 256 * 1024
+const MAX_LIVE_APPROVAL_TEXT_BYTES = 4 * 1024
+const MAX_LIVE_APPROVAL_ID_BYTES = 512
+const MAX_LIVE_BROWSER_SNAPSHOT_BYTES = 16 * 1024
+const MAX_LIVE_BROWSER_SNAPSHOT_DEPTH = 6
+const MAX_LIVE_BROWSER_COLLECTION_ITEMS = 64
+let livePendingApprovalBytes = 0
+
+function safeDisplayText(value: unknown): string | null {
+  const raw = String(value ?? '')
+  // Effectful approval нельзя показывать с молча скрытым хвостом: renderer
+  // одобрил бы не тот payload, который видит. Oversize целиком нереплеибелен.
+  if (Buffer.byteLength(raw, 'utf8') > MAX_LIVE_APPROVAL_TEXT_BYTES) return null
+  const redacted = redactForDisplay(raw)
+  return Buffer.byteLength(redacted, 'utf8') <= MAX_LIVE_APPROVAL_TEXT_BYTES ? redacted : null
+}
+
+/** Identifier участвует в exact resolver lookup, поэтому его нельзя редактировать.
+ * Секретоподобный/чрезмерный id делает approval нереплеибельным (fail closed). */
+function safeExactId(value: unknown): string | null {
+  if (typeof value !== 'string' || !value || Buffer.byteLength(value, 'utf8') > MAX_LIVE_APPROVAL_ID_BYTES) return null
+  return redactForDisplay(value) === value ? value : null
+}
+
+function sanitizeBrowserSnapshot(value: unknown): Record<string, unknown> | null {
+  let remaining = MAX_LIVE_BROWSER_SNAPSHOT_BYTES
+  const seen = new WeakSet<object>()
+  const consume = (bytes: number) => {
+    remaining -= bytes
+    if (remaining < 0) throw new Error('browser approval snapshot byte limit')
+  }
+  const visit = (candidate: unknown, depth: number): unknown => {
+    if (depth > MAX_LIVE_BROWSER_SNAPSHOT_DEPTH) throw new Error('browser approval snapshot depth limit')
+    if (candidate === null) { consume(4); return null }
+    if (typeof candidate === 'string') {
+      // До редактора проверяем грубую верхнюю границу: не копируем
+      // в cache огромную строку даже если она похожа на один длинный секрет.
+      if (Buffer.byteLength(candidate, 'utf8') > MAX_LIVE_BROWSER_SNAPSHOT_BYTES) {
+        throw new Error('browser approval snapshot string limit')
+      }
+      const redacted = redactForDisplay(candidate)
+      consume(Buffer.byteLength(redacted, 'utf8') + 2)
+      return redacted
+    }
+    if (typeof candidate === 'boolean') { consume(candidate ? 4 : 5); return candidate }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      consume(Buffer.byteLength(String(candidate), 'utf8'))
+      return candidate
+    }
+    if (typeof candidate !== 'object') throw new Error('browser approval snapshot unsupported value')
+    if (seen.has(candidate)) throw new Error('browser approval snapshot cycle')
+    seen.add(candidate)
+    try {
+      if (Array.isArray(candidate)) {
+        if (candidate.length > MAX_LIVE_BROWSER_COLLECTION_ITEMS) throw new Error('browser approval snapshot array limit')
+        consume(2 + candidate.length)
+        return candidate.map(item => visit(item, depth + 1))
+      }
+      const prototype = Object.getPrototypeOf(candidate)
+      if (prototype !== Object.prototype && prototype !== null) throw new Error('browser approval snapshot prototype')
+      const keys = Object.keys(candidate)
+      if (keys.length > MAX_LIVE_BROWSER_COLLECTION_ITEMS) throw new Error('browser approval snapshot key limit')
+      const clone: Record<string, unknown> = {}
+      consume(2 + keys.length)
+      for (const key of keys) {
+        if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+          throw new Error('browser approval snapshot unsafe key')
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(candidate, key)
+        if (!descriptor || !('value' in descriptor)) throw new Error('browser approval snapshot accessor')
+        const safeKey = redactForDisplay(key)
+        if (!safeKey || Object.prototype.hasOwnProperty.call(clone, safeKey)) {
+          throw new Error('browser approval snapshot duplicate key')
+        }
+        consume(Buffer.byteLength(safeKey, 'utf8') + 3)
+        clone[safeKey] = visit(descriptor.value, depth + 1)
+      }
+      return clone
+    } finally {
+      seen.delete(candidate)
+    }
+  }
+  try {
+    const snapshot = visit(value, 0)
+    if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== 'object') return null
+    if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_LIVE_BROWSER_SNAPSHOT_BYTES) return null
+    return snapshot as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function liveApprovalKey(sendId: number, event: LivePendingApprovalEvent): string {
+  return `${sendId}:${event.type}:${event.type === 'pending-browser-action' ? event.actionId : event.callId}`
+}
+
+function deleteLivePendingApproval(key: string): void {
+  const previous = livePendingApprovals.get(key)
+  if (!previous) return
+  livePendingApprovalBytes = Math.max(0, livePendingApprovalBytes - previous.bytes)
+  livePendingApprovals.delete(key)
+}
+
+function clearLivePendingApprovals(): void {
+  livePendingApprovals.clear()
+  livePendingApprovalBytes = 0
+}
+
+function rememberLivePendingApproval(sendId: number, projectPath: string | null, value: unknown): void {
+  try {
+    if (!value || typeof value !== 'object') return
+    if (projectPath != null && Buffer.byteLength(projectPath, 'utf8') > MAX_LIVE_APPROVAL_TEXT_BYTES) return
+    const event = value as Record<string, unknown>
+    const type = event.type
+    const callId = safeExactId(event.callId)
+    let safe: LivePendingApprovalEvent | null = null
+    if (type === 'pending-write' && callId) {
+      // Upstream уже маскирует diff, но replay-cache — отдельный security sink:
+      // повторяем маску здесь, чтобы не полагаться на каждого producer'а.
+      const rawBefore = String(event.before ?? '')
+      const rawAfter = String(event.after ?? '')
+      const path = safeDisplayText(event.path)
+      if (
+        path != null
+        && Buffer.byteLength(rawBefore, 'utf8') <= MAX_LIVE_APPROVAL_TEXT_BYTES
+        && Buffer.byteLength(rawAfter, 'utf8') <= MAX_LIVE_APPROVAL_TEXT_BYTES
+      ) {
+        const masked = maskSecretsForDiff(rawBefore, rawAfter)
+        const before = safeDisplayText(masked.before)
+        const after = safeDisplayText(masked.after)
+        if (before != null && after != null) safe = { type, callId, path, before, after }
+      }
+    } else if (type === 'pending-command' && callId) {
+      const command = safeDisplayText(event.command)
+      const toolName = typeof event.toolName === 'string' ? safeDisplayText(event.toolName) : undefined
+      if (command != null && toolName !== null) {
+        safe = { type, callId, command, ...(toolName === undefined ? {} : { toolName }) }
+      }
+    } else if (type === 'pending-browser-action' && callId) {
+      const actionId = safeExactId(event.actionId)
+      const browserTaskId = safeExactId(event.browserTaskId)
+      const runId = safeExactId(event.runId)
+      const approvalDigest = safeExactId(event.approvalDigest)
+      const snapshot = sanitizeBrowserSnapshot(event.snapshot)
+      const reason = safeDisplayText(event.reason)
+      const risk = String(event.risk ?? '')
+      if (
+        actionId && browserTaskId && runId && approvalDigest && snapshot && reason != null
+        && (risk === 'R0' || risk === 'R1' || risk === 'R2' || risk === 'R3' || risk === 'R4')
+      ) {
+        safe = {
+          type,
+          callId,
+          actionId,
+          browserTaskId,
+          runId,
+          risk,
+          approvalDigest,
+          snapshot,
+          reason,
+        }
+      }
+    }
+    if (!safe) return
+    const bytes = Buffer.byteLength(JSON.stringify({ sendId, projectPath, event: safe }), 'utf8')
+    if (bytes > MAX_LIVE_PENDING_APPROVAL_BYTES) return
+    const key = liveApprovalKey(sendId, safe)
+    deleteLivePendingApproval(key)
+    livePendingApprovals.set(key, { sendId, projectPath, event: safe, bytes })
+    livePendingApprovalBytes += bytes
+    while (
+      livePendingApprovals.size > MAX_LIVE_PENDING_APPROVALS
+      || livePendingApprovalBytes > MAX_LIVE_PENDING_APPROVAL_BYTES
+    ) {
+      const oldest = livePendingApprovals.keys().next().value as string | undefined
+      if (!oldest) break
+      deleteLivePendingApproval(oldest)
+    }
+  } catch {
+    // Approval replay — convenience, а не authority. Любой странный payload
+    // отбрасываем; основной resolver и текущий renderer event не трогаем.
+  }
+}
+
+function forgetLivePendingApprovals(sendId: number): void {
+  for (const [key, entry] of livePendingApprovals) {
+    if (entry.sendId === sendId) deleteLivePendingApproval(key)
+  }
+}
+
+function observeLiveEvent(sendId: number, projectPath: string | null, value: unknown): void {
+  let type: unknown
+  try { type = value && typeof value === 'object' ? (value as { type?: unknown }).type : null } catch { return }
+  if (type === 'done' || type === 'run-finalized') {
+    if (sendId > 0) terminalLiveSends.add(sendId)
+    forgetLivePendingApprovals(sendId)
+    return
+  }
+  rememberLivePendingApproval(sendId, projectPath, value)
+}
 
 // Реестр прогретых памятью чатов переехал в ai-send/memory-context вместе с блоком
 // recall'а (2.1.10-G). Публичная поверхность ai.ts сохранена: main.ts и тесты
@@ -259,6 +495,7 @@ export function abortSend(sendId: number): boolean {
     for (const [k, p] of pendingPlans) { p.resolve({ decision: 'reject' }); pendingPlans.delete(k) }
     // EXT-B0: abort Также сбрасывает pending browser-action approvals (reject).
     for (const [k, p] of pendingBrowserActions) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
+    clearLivePendingApprovals()
     logRuntime('ai.abort.all')
     return true
   }
@@ -285,6 +522,7 @@ export function abortSend(sendId: number): boolean {
   for (const [k, p] of pendingBrowserActions) {
     if (p.sendId === sendId) { p.resolve({ approved: false, approvalDigest: p.expectedDigest }); pendingBrowserActions.delete(k) }
   }
+  forgetLivePendingApprovals(sendId)
   logRuntime('ai.abort.ok', { sendId })
   return true
 }
@@ -713,6 +951,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // явно, а не по эвристике (gap/chatId). Закладка под Debug Packet / Workflow.
     const runId = randomUUID()
     const ctrl = new AbortController()
+    terminalLiveSends.delete(sendId)
     activeAborts.set(sendId, ctrl)
     let runTimeout: ReturnType<typeof setTimeout> | null = null
     const clearRunTimeout = () => {
@@ -721,7 +960,14 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         runTimeout = null
       }
     }
-    const taggedSender = tagSender(sender, projectPath) // route progress and chat events to this project
+    const baseTaggedSender = tagSender(sender, projectPath)
+    const taggedSender: TaggedSender = {
+      send: (channel, payload) => {
+        if (channel === 'ai:event') observeLiveEvent(payload.id, projectPath, payload.event)
+        baseTaggedSender.send(channel, payload)
+      },
+      exec: baseTaggedSender.exec,
+    }
     deps.setWebviewAdapterExec?.(taggedSender.exec)
     const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
     const browserContextProviderAllowed = (candidateProviderId: ProviderId): boolean => {
@@ -828,6 +1074,8 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     const cleanup = () => {
       clearRunTimeout()
       activeAborts.delete(sendId)
+      forgetLivePendingApprovals(sendId)
+      terminalLiveSends.delete(sendId)
       unregisterChatRun(sendId)
       // Drain pending confirmations for this sendId — resolving with false so
       // any awaiter unwinds cleanly instead of leaking the Promise.
@@ -1472,6 +1720,76 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
   // из IPC недостижим — см. AiSendInternal.
   ipcMain.handle('ai:send', (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) =>
     handleAiSend(e.sender, incomingMessages, projectPath, budget, overrides, chatId))
+
+  // Renderer reload не должен останавливать живой main-run. Возвращаем только
+  // пересечение durable agent_runs с реально живым AbortController и только
+  // максимальное generation на chat lane. Endpoint read-only и не возобновляет run.
+  ipcMain.handle('ai:live-state', async (_e, projectPath: string) => {
+    if (!projectPath || !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
+      throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
+    }
+    // Pending event отправляется непосредственно перед синхронной регистрацией
+    // resolver map. Один microtask закрывает это узкое окно для reload-snapshot.
+    await Promise.resolve()
+    // Берём все поколения: сначала выбираем абсолютный max lane, и только потом
+    // проверяем его live-статус. Иначе после Stop нового send старый, всё ещё
+    // висящий в activeAborts, ошибочно воскрес бы как «текущий».
+    const rows = deps.agentRuns?.list(projectPath, { owner: 'main', limit: -1 }) ?? []
+    const latestByChat = new Map<number, (typeof rows)[number]>()
+    for (const row of rows) {
+      if (row.chatId == null || row.sendId == null || row.sendId <= 0) continue
+      const previous = latestByChat.get(row.chatId)
+      if (
+        !previous
+        || row.generation > previous.generation
+        || (row.generation === previous.generation && row.sendId > (previous.sendId ?? 0))
+      ) latestByChat.set(row.chatId, row)
+    }
+
+    const sends = [...latestByChat.values()].filter(row => (
+      row.status === 'running'
+      && row.sendId != null
+      && activeAborts.has(row.sendId)
+      && !terminalLiveSends.has(row.sendId)
+    )).map(row => {
+      const sendId = row.sendId as number
+      const cached = [...livePendingApprovals.values()].filter(entry => (
+        entry.sendId === sendId && entry.projectPath === projectPath
+      ))
+      const liveWrites = cached.flatMap(({ event }) => (
+        event.type === 'pending-write' && pendingWrites.has(scopedKey(sendId, event.callId))
+          ? [{ callId: event.callId, path: event.path, before: event.before, after: event.after, sendId }]
+          : []
+      ))
+      const pendingCommandEvent = [...cached].reverse().find(({ event }) => (
+        event.type === 'pending-command' && pendingCommands.has(scopedKey(sendId, event.callId))
+      ))?.event
+      const pendingBrowserEvent = [...cached].reverse().find(({ event }) => (
+        event.type === 'pending-browser-action'
+        && pendingBrowserActions.has(scopedKey(sendId, event.actionId))
+      ))?.event
+      const pendingBrowserAction = pendingBrowserEvent?.type === 'pending-browser-action'
+        ? (() => {
+            const { type: _type, ...approval } = pendingBrowserEvent
+            return { ...approval, sendId }
+          })()
+        : null
+      return {
+        sendId,
+        runId: row.runId,
+        projectPath: row.projectPath,
+        chatId: row.chatId as number,
+        generation: row.generation,
+        startedAt: row.startedAt,
+        pendingWrites: liveWrites,
+        pendingCommand: pendingCommandEvent?.type === 'pending-command'
+          ? { callId: pendingCommandEvent.callId, command: pendingCommandEvent.command, toolName: pendingCommandEvent.toolName, sendId }
+          : null,
+        pendingBrowserAction,
+      }
+    })
+    return { sends }
+  })
 
   // Управление идущим прогоном (стоп / приостановка / append-context) и резолв
   // pending-подтверждений — самостоятельный модуль (2.1.10-F). abortSend передаётся

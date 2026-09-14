@@ -4,6 +4,7 @@ import { lookupHandler, type ToolContext, type ToolHandler } from '../ipc/tool-h
 import { FORBIDDEN_CROSS_TOOLS } from './browser/capability'
 
 const BROWSER_RUN_FORBIDDEN_TOOLS = new Set(FORBIDDEN_CROSS_TOOLS)
+const STOPPED_TOOL_REASON = 'Запрос остановлен: инструмент не запущен.'
 
 type BrowserRunAwareContext = ToolContext & {
   browserRunState?: { active: boolean; contextExposed?: boolean; screenshotExposed?: boolean }
@@ -62,6 +63,10 @@ async function collectPreBlocks(
 ): Promise<Map<number, string>> {
   const blocked = new Map<number, string>()
   for (let i = 0; i < toolCalls.length; i++) {
+    if (context.signal?.aborted) {
+      for (let j = i; j < toolCalls.length; j++) blocked.set(j, STOPPED_TOOL_REASON)
+      break
+    }
     const call = toolCalls[i]
     try {
       const pre = await invokeHooks('PreToolUse', hooks, {
@@ -104,8 +109,9 @@ async function executeHandlers(
   const writes: Array<{ index: number; promise: Promise<ToolResult> }> = []
   for (let i = 0; i < toolCalls.length; i++) {
     const call = toolCalls[i]
-    const reason = preBlocked.get(i)
+    const reason = preBlocked.get(i) ?? (context.signal?.aborted ? STOPPED_TOOL_REASON : undefined)
     if (reason) {
+      preBlocked.set(i, reason)
       results[i] = blockedResult(context, call, reason)
       continue
     }

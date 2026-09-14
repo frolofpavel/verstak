@@ -499,6 +499,34 @@ export type ChatEvent =
   // electron/ai/types.ts (§5 анти-дрейф). Рендер по нему перечитывает resumableRuns.
   | { type: 'run-finalized'; runId: string; projectPath: string }
 
+/** Read-only main-process snapshot used only to recover a still-live send after renderer reload. */
+export interface AiLivePendingWrite {
+  callId: string
+  path: string
+  before: string
+  after: string
+  sendId: number
+}
+export interface AiLivePendingCommand {
+  callId: string
+  command: string
+  toolName?: string
+  sendId: number
+}
+export type AiLivePendingBrowserAction = Omit<Extract<ChatEvent, { type: 'pending-browser-action' }>, 'type'> & { sendId: number }
+export interface AiLiveSendState {
+  sendId: number
+  runId: string
+  projectPath: string
+  chatId: number
+  generation: number
+  startedAt: number
+  pendingWrites: AiLivePendingWrite[]
+  pendingCommand: AiLivePendingCommand | null
+  pendingBrowserAction: AiLivePendingBrowserAction | null
+}
+export interface AiLiveState { sends: AiLiveSendState[] }
+
 declare global {
   interface Window {
     api: {
@@ -673,6 +701,8 @@ declare global {
           overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }; materialsFolder?: string },
           chatId?: string
         ) => Promise<number>
+        /** Живые main-send'ы проекта для восстановления volatile renderer state. Read-only. */
+        liveState: (projectPath: string) => Promise<AiLiveState>
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolvePlan: (callId: string, decision: 'approve' | 'revise' | 'reject', feedback?: string, sendId?: number) => Promise<void>

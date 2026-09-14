@@ -550,6 +550,10 @@ export const useProject = create<ProjectState>((set, get, store) => ({
       chatSessions: [],
       activeChatId: optimisticChatId,
     }))
+    // Стартуем recovery до чтения списка/истории: пока owner пуст, обычный
+    // ai:event справедливо считается late и дропается. Ранний read сокращает это
+    // окно; повтор после окончательного activeChatId ниже нужен для approval UI.
+    void get().reconcileStreamingState(path)
 
     void window.api.projects.list().then(projectList => {
       if (myToken !== setProjectToken) return
@@ -1074,6 +1078,9 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     // карточки-следы с правдой БД (см. reconcileSpawnCards). Fire-and-forget —
     // не блокирует переключение; no-op, если бегущих карточек нет.
     void get().reconcileSpawnCards(id)
+    // Renderer мог перезагрузиться, пока main продолжает этот chat lane. После
+    // switch перечитываем только live snapshot; повторный вызов идемпотентен.
+    void get().reconcileStreamingState(s.path)
   },
   registerSendOwner: (sendId, owner) => set(s => {
     if (owner.kind !== 'chat') {
@@ -1429,35 +1436,107 @@ export const useProject = create<ProjectState>((set, get, store) => ({
     }
   },
   reconcileStreamingState: async (path) => {
+    // Owner, зарегистрированный ПОСЛЕ начала await, принадлежит новому обычному
+    // send и не может быть вытеснен приехавшим поздно reload-snapshot.
+    const ownerIdsAtRequest = new Set(Object.keys(get().sendOwners).map(Number))
     try {
-      const [running, queued] = await Promise.all([
-        window.api.agentRuns.list(path, { status: 'running', owner: 'main', limit: 1 }),
-        window.api.agentRuns.list(path, { status: 'queued', owner: 'main', limit: 1 }),
-      ])
-      // PerChatState 4.2: per-chat правки — через единую точку (поддерживает chats
-      // SSOT). Раньше был один атомарный set; теперь несколько последовательных —
-      // reconcile идёт на открытии проекта, промежуточные рендеры безвредны.
-      // sessions (проектный уровень) — вне chat-bundle, патчится отдельно.
-      const s = get()
-      const hasLiveOwner = hasInflightProjectSend(s.sendOwners, path)
-      if ((running.length > 0 || queued.length > 0) && hasLiveOwner) return
-      if (s.path === path && activeChatBundle(s).isStreaming && !hasLiveOwner) {
-        get().updateChatBundle(s.activeChatId, () => ({ isStreaming: false, streamStartedAt: null }))
-      }
-      if (s.sessions[path]?.isStreaming && !hasLiveOwner) {
-        set(s2 => ({
-          sessions: {
-            ...s2.sessions,
-            [path]: { ...s2.sessions[path], isStreaming: false, streamStartedAt: null }
+      const live = await window.api.ai.liveState(path)
+      if (get().path !== path) return
+      set(s => {
+        if (s.path !== path) return {}
+        const candidates = live.sends.filter(run => (
+          run.projectPath === path
+          && Number.isFinite(run.sendId) && run.sendId > 0
+          && Number.isFinite(run.chatId)
+          && Number.isFinite(run.generation)
+        ))
+        const liveIds = new Set(candidates.map(run => run.sendId))
+        const sendOwners = { ...s.sendOwners }
+        const chatLaneGenerations = { ...s.chatLaneGenerations }
+        const chats = { ...s.chats }
+        const appliedByChat = new Map<number, (typeof candidates)[number]>()
+
+        // Удаляем только owner'ы, существовавшие до read. Owner нового send,
+        // зарегистрированный во время IPC roundtrip, ниже защищён от late snapshot.
+        for (const [rawId, owner] of Object.entries(sendOwners)) {
+          const sendId = Number(rawId)
+          if (
+            owner.kind === 'chat' && !owner.isHelp && owner.projectPath === path
+            && ownerIdsAtRequest.has(sendId) && !liveIds.has(sendId)
+          ) delete sendOwners[sendId]
+        }
+
+        for (const run of candidates) {
+          const key = chatLaneKey(run.chatId, false)
+          const concurrentNewOwner = Object.entries(sendOwners).find(([rawId, owner]) => (
+            owner.kind === 'chat' && !owner.isHelp && owner.chatId === run.chatId
+            && owner.laneGeneration === chatLaneGenerations[key]
+            && Number(rawId) !== run.sendId
+            && !ownerIdsAtRequest.has(Number(rawId))
+          ))
+          if (concurrentNewOwner) continue
+
+          const existing = sendOwners[run.sendId]
+          const laneGeneration = existing?.kind === 'chat'
+            && existing.chatId === run.chatId
+            && existing.laneGeneration === chatLaneGenerations[key]
+            ? existing.laneGeneration
+            : Math.max(chatLaneGenerations[key] ?? 0, Math.max(0, Math.trunc(run.generation)) + 1)
+
+          // На lane возвращается только max generation, выбранный main. Старые
+          // sendId намеренно остаются без owner и late event штатно дропается.
+          for (const [rawId, owner] of Object.entries(sendOwners)) {
+            if (owner.kind === 'chat' && !owner.isHelp && owner.chatId === run.chatId) {
+              delete sendOwners[Number(rawId)]
+            }
           }
-        }))
-      }
-      for (const [chatIdRaw, snap] of Object.entries(s.chats)) {
-        const chatId = Number(chatIdRaw)
-        if (chatId === s.activeChatId) continue
-        if (!snap.isStreaming || hasInflightChatSend(s.sendOwners, chatId, false, s.chatLaneGenerations)) continue
-        get().updateChatBundle(chatId, () => ({ isStreaming: false, streamStartedAt: null }))
-      }
+          chatLaneGenerations[key] = laneGeneration
+          sendOwners[run.sendId] = {
+            kind: 'chat', chatId: run.chatId, projectPath: path, laneGeneration,
+          }
+          const previous = chats[run.chatId] ?? { ...freshSnapshot(), chatId: run.chatId }
+          chats[run.chatId] = {
+            ...previous,
+            chatId: run.chatId,
+            isStreaming: true,
+            streamStartedAt: run.startedAt,
+            // REPLACE, не append: повторный hydrate не размножает одну карточку.
+            pendingWrites: run.pendingWrites,
+            pendingCommand: run.pendingCommand,
+          }
+          appliedByChat.set(run.chatId, run)
+        }
+
+        for (const [rawChatId, snapshot] of Object.entries(chats)) {
+          const chatId = Number(rawChatId)
+          if (appliedByChat.has(chatId)) continue
+          if (hasInflightChatSend(sendOwners, chatId, false, chatLaneGenerations)) continue
+          if (!snapshot.isStreaming && snapshot.pendingWrites.length === 0 && !snapshot.pendingCommand) continue
+          chats[chatId] = {
+            ...snapshot,
+            isStreaming: false,
+            streamStartedAt: null,
+            pendingWrites: [],
+            pendingCommand: null,
+          }
+        }
+
+        const activeLive = s.activeChatId == null ? undefined : appliedByChat.get(s.activeChatId)
+        const currentBrowserSendId = s.pendingBrowserAction?.sendId
+        const browserOwner = currentBrowserSendId == null ? undefined : sendOwners[currentBrowserSendId]
+        const browserOwnerStillLive = browserOwner?.kind === 'chat'
+          && !browserOwner.isHelp
+          && browserOwner.chatId === s.activeChatId
+          && browserOwner.laneGeneration === chatLaneGenerations[chatLaneKey(browserOwner.chatId, false)]
+        return {
+          sendOwners,
+          chatLaneGenerations,
+          chats,
+          pendingBrowserAction: activeLive
+            ? activeLive.pendingBrowserAction
+            : (browserOwnerStillLive ? s.pendingBrowserAction : null),
+        }
+      })
     } catch (err) {
       console.warn('[projectStore] reconcileStreamingState failed:', err)
     }

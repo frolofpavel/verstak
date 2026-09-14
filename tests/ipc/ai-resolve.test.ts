@@ -47,6 +47,26 @@ describe('ai-resolve — IPC управления прогоном', () => {
     expect(pendingWrites.has(scopedKey(2, 'call-a')), 'чужая запись остаётся ждать').toBe(true)
   })
 
+  it('resolve-write с известным, но уже устаревшим sendId НЕ падает в suffix чужого прогона', () => {
+    const foreign = vi.fn()
+    pendingWrites.set(scopedKey(2, 'same-call'), { sendId: 2, resolve: foreign })
+
+    call('ai:resolve-write', 'same-call', true, 1)
+
+    expect(foreign, 'late approval старого renderer поколения разблокировал новый прогон').not.toHaveBeenCalled()
+    expect(pendingWrites.has(scopedKey(2, 'same-call'))).toBe(true)
+  })
+
+  it('resolve-command держит тот же exact-miss guard при совпавшем callId', () => {
+    const foreign = vi.fn()
+    pendingCommands.set(scopedKey(9, 'same-call'), { sendId: 9, resolve: foreign })
+
+    call('ai:resolve-command', 'same-call', true, 8)
+
+    expect(foreign).not.toHaveBeenCalled()
+    expect(pendingCommands.has(scopedKey(9, 'same-call'))).toBe(true)
+  })
+
   it('resolve-write БЕЗ sendId — обратная совместимость: скан по суффиксу callId', () => {
     const resolve = vi.fn()
     pendingWrites.set(scopedKey(7, 'call-b'), { sendId: 7, resolve })

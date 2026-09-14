@@ -17,7 +17,7 @@
 import { seedActive } from '../store/_active-bundle'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
-import { render, cleanup, act, fireEvent } from '@testing-library/react'
+import { render, cleanup, act, fireEvent, waitFor } from '@testing-library/react'
 import { makeApiMock, CHAT_API_DEFAULTS, type ApiMock } from './helpers/window-api-mock'
 
 const { useProject } = await import('../../src/store/projectStore')
@@ -62,6 +62,36 @@ beforeEach(() => {
   seedActive(useProject, { messages: [], isStreaming: false })
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
+
+describe('R0 renderer reload — управление восстановленным send', () => {
+  it('Stop берёт id из восстановленного owner при пустом currentSendIdRef и снимает approval', async () => {
+    act(() => {
+      // Chat.send в этом маунте НЕ вызывался: currentSendIdRef как после reload пуст.
+      useProject.getState().registerSendOwner(77, { kind: 'chat', chatId: 7, projectPath: '/p' })
+      seedActive(useProject, {
+        isStreaming: true,
+        streamStartedAt: 1000,
+        pendingWrites: [{ callId: 'w1', path: 'a.ts', before: 'old', after: 'new', sendId: 77 }],
+      })
+      useProject.getState().setPendingBrowserAction({
+        callId: 'bc1', actionId: 'ba1', browserTaskId: 'bt-7', runId: 'run-7',
+        risk: 'R2', approvalDigest: 'digest', reason: 'click', sendId: 77,
+        snapshot: {
+          browserTaskId: 'bt-7', runId: 'run-7', scope: {}, actionType: 'browser_click',
+          payload: {}, preconditions: {}, risk: 'R2',
+        },
+      })
+    })
+    mountChat()
+
+    click(document.querySelector('.gg-stop-btn'))
+
+    await waitFor(() => expect(mock.calls.get('ai.stop')).toHaveBeenCalledWith(77))
+    expect(useProject.getState().lookupSendOwner(77)).toBeNull()
+    expect(useProject.getState().chats[7].pendingWrites).toEqual([])
+    expect(useProject.getState().pendingBrowserAction).toBeNull()
+  })
+})
 
 describe('панели прогона — состав и место', () => {
   it('активности нет — лейн таймлайна не рендерится', () => {

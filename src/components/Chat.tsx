@@ -1235,7 +1235,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
         const finalizedProject = typeof (event as { projectPath?: unknown }).projectPath === 'string'
           ? (event as { projectPath: string }).projectPath
           : store.path
-        if (finalizedProject) void store.loadResumableRuns(finalizedProject)
+        if (finalizedProject) {
+          void store.loadResumableRuns(finalizedProject)
+          // `done` мог потеряться в reload/offline-окне. run-finalized идёт
+          // после DB finish, поэтому на той же однократной подписке сверяем
+          // owner/streaming с live-state. Reconcile защищает новый send, начатый во время await.
+          void store.reconcileStreamingState(finalizedProject)
+        }
         return
       }
       const chatOwnerProjectPath = owner?.kind === 'chat' && !owner.isHelp
@@ -1426,6 +1432,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           kind: 'command',
           label: 'run_command',
           detail: event.command,
+          status: 'pending',
+          timestamp: Date.now()
+        })
+      }
+      else if (event.type === 'pending-browser-action') {
+        // Та же единственная lifetime-подписка: browser approval нельзя выносить
+        // в отдельный effect — окно off→on молча теряет событие.
+        const { type: _type, ...approval } = event
+        store.setPendingBrowserAction({ ...approval, sendId: id })
+        store.pushActivity({
+          id: event.callId,
+          kind: 'command',
+          label: 'browser_action',
+          detail: event.reason,
           status: 'pending',
           timestamp: Date.now()
         })
@@ -2955,8 +2975,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // подтверждения команды → main зарезолвил pendingCommand в false, но command-result
     // мог дропнуться (owner забыт выше) → модалка осталась бы (ревью 24.06).
     const cur = useProject.getState()
+    const activePendingWrites = cur.activeChatId != null ? cur.chats[cur.activeChatId]?.pendingWrites ?? [] : []
+    for (const pending of activePendingWrites) {
+      if (pending.sendId === id) cur.resolvePendingWrite(pending.callId)
+    }
     const curPending = cur.activeChatId != null ? cur.chats[cur.activeChatId]?.pendingCommand : null
     if (curPending?.sendId === id) cur.setPendingCommand(null)
+    if (cur.pendingBrowserAction?.sendId === id) cur.setPendingBrowserAction(null)
     // §10 хвост: карточка этого прогона снимается ВМЕСТЕ с освобождением
     // чекпойнта — Stop означает «продолжения не будет», а раньше уходила только
     // карточка и снапшот истории оставался в БД навсегда.
