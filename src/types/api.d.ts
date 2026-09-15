@@ -1252,6 +1252,9 @@ export interface BrowserBridgeStateDTO {
   ui: string
   connected: boolean
   authenticated: boolean
+  connectionGeneration: number
+  exactTabAttached: boolean
+  freshObservation: boolean
   lastError: string | null
   host: {
     installed: boolean

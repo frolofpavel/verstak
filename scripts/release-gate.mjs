@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import asar from '@electron/asar'
+import { decideBrowserPackageGate } from './check-browser-bridge-package.mjs'
 
 const require = createRequire(import.meta.url)
 const { comparePayloadTrees, describeCompareResult } = require('./payload-compare.cjs')
@@ -256,6 +257,40 @@ if (haveSetup && existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
   notes.push('[3.55] сверка пейлоада пропущена: release/win-unpacked отсутствует (release-build.mjs должен его сохранять)')
 }
 
+// ─── 3.58 Browser Employee package contract ────────────────────────────────────────
+// Before launching, prove that the exact reviewed host/extension bytes reached
+// the real payload, metadata hashes match, and app/extension/host/protocol form
+// one compatible triplet. The checker is read-only and never opens HKCU.
+console.log('\n[3.58] Browser Employee package contract')
+const browserPackageDecision = decideBrowserPackageGate({
+  haveSetup,
+  payloadTreeDir,
+  smokeUnpacked,
+})
+let browserPackageSource = null
+if (browserPackageDecision.kind === 'run') {
+  browserPackageSource = browserPackageDecision.sourceDir
+  const browserPackage = spawnSync(
+    'node',
+    [join(ROOT, 'scripts', 'check-browser-bridge-package.mjs'), '--root', ROOT, '--source', browserPackageSource],
+    { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  )
+  const browserPackageOut = ((browserPackage.stdout || '') + (browserPackage.stderr || '')).trim()
+  check(
+    'Browser Employee: exact package bytes + hashes + version triplet',
+    browserPackage.status === 0,
+    browserPackageOut.split('\n').filter(Boolean).pop() || `exit ${browserPackage.status}`,
+  )
+} else if (browserPackageDecision.kind === 'fail') {
+  check(
+    'Browser Employee: exact package bytes + hashes + version triplet',
+    false,
+    browserPackageDecision.reason,
+  )
+} else {
+  notes.push(`[3.58] Browser Employee package check пропущен: ${browserPackageDecision.reason}`)
+}
+
 // ─── 3.6 Install smoke: приложение ЖИВЁТ, а не просто распаковано ─────────────
 // Шаг [3.5] считает пакеты в asar, но не запускает приложение — и гейт дважды был
 // зелёным на нежизнеспособной сборке (31.07 недоупакованный asar; 08.08 серое окно
@@ -269,8 +304,8 @@ if (haveSetup && existsSync(join(smokeUnpacked, 'Verstak.exe'))) {
 // (scripts/smoke-install.mjs, --break db|renderer --expect FAIL; класс locales smoke
 // не ловит — см. [3.55]).
 console.log('\n[3.6] Install smoke (приложение живёт)')
-const smokeSource = payloadTreeDir ?? smokeUnpacked
-if (existsSync(join(smokeSource, 'Verstak.exe'))) {
+const smokeSource = browserPackageSource
+if (smokeSource && existsSync(join(smokeSource, 'Verstak.exe'))) {
   const r = spawnSync(
     'node',
     [join(ROOT, 'scripts', 'smoke-install.mjs'), '--source', smokeSource, '--break', 'none', '--expect', 'PASS', '--timeout', '45000', '--settle', '8000'],
@@ -748,7 +783,11 @@ const GATE_MAX_WORKERS = 4
 // -> 6564 ИЗМЕРЕНО 15.09 (R0): request-scoped MCP Stop, connection identity,
 // renderer-reload recovery, exact approval scope, terminal/secret/size guards,
 // 20-send acceptance и 30-цикловый teardown/reconnect.
-const EXPECTED_TOTAL_TESTS = 6564
+// -> 6700 ИЗМЕРЕНО 15.09 (R1): Settings-first Browser Employee, fresh attach
+// epochs, session/log redaction, stable-owner lifecycle, package/version contract,
+// mutex-serialized install/update/uninstall, successor-safe rollback и точная
+// семантика definite wait против unknown-effect после effectful dispatch.
+const EXPECTED_TOTAL_TESTS = 6700
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

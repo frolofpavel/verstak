@@ -50,6 +50,11 @@ export function helperPath(): string {
   return join(resourcesDir(), 'verstak-auto-update-helper.cjs')
 }
 
+/** Install must execute the helper from the already verified target payload. */
+export function payloadHelperPath(payloadRootPath: string): string {
+  return join(payloadRootPath, 'resources', 'verstak-auto-update-helper.cjs')
+}
+
 export function legacyStagingRoot(): string {
   return join(localAppDataRoot(), 'verstak-update-staging')
 }

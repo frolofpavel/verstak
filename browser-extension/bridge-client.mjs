@@ -5,6 +5,7 @@
 
 export const NATIVE_HOST_NAME = 'ru.verstak.browser_bridge'
 export const BRIDGE_PROTOCOL_VERSION = 1
+export const BROWSER_EXTENSION_VERSION = '0.2.0'
 export const EXTENSION_ID_EXPECTED = 'jbhddmgcngdchlgmilphmbbcccfigadb'
 
 /**
@@ -31,6 +32,9 @@ export function createBridgeClient(opts = {}) {
   let runId = null
   let attachedTab = null
   let lastError = null
+  let connectionGeneration = 0
+  let attachEpoch = 0
+  let freshObservation = false
   /** @type {Array<(s: any) => void>} */
   const listeners = []
   let connectAttempts = 0
@@ -45,7 +49,6 @@ export function createBridgeClient(opts = {}) {
   function getState() {
     return {
       ui: uiState,
-      sessionId,
       // Durable credential stays private inside this client. UI/background
       // consumers only need to know whether automatic recovery is possible.
       hasPairing: !!pairingToken,
@@ -54,12 +57,16 @@ export function createBridgeClient(opts = {}) {
       attachedTab,
       lastError,
       connected: !!port,
+      connectionGeneration,
+      attachEpoch,
+      freshObservation,
     }
   }
 
   function setError(msg) {
     lastError = msg
     uiState = 'error'
+    freshObservation = false
     emit()
   }
 
@@ -75,6 +82,14 @@ export function createBridgeClient(opts = {}) {
     browserTaskId = null
     runId = null
     attachedTab = null
+    attachEpoch = 0
+    freshObservation = false
+  }
+
+  function invalidateFreshObservation() {
+    if (!freshObservation) return
+    freshObservation = false
+    emit()
   }
 
   function sendRaw(msg) {
@@ -108,6 +123,20 @@ export function createBridgeClient(opts = {}) {
   function onMessage(msg) {
     if (!msg || typeof msg !== 'object') return
     const requestId = msg.requestId
+    if (
+      msg.type === 'click_request'
+      || msg.type === 'navigate_request'
+      || msg.type === 'scroll_request'
+      || msg.type === 'focus_request'
+      || msg.type === 'select_option_request'
+      || msg.type === 'wait_for_request'
+      || msg.type === 'type_text_request'
+      || msg.type === 'clear_field_request'
+      || msg.type === 'toggle_request'
+      || msg.type === 'press_key_request'
+    ) {
+      invalidateFreshObservation()
+    }
     if (msg.type === 'auth_available') {
       if (typeof opts.onAuthAvailable === 'function') {
         Promise.resolve(opts.onAuthAvailable(msg)).catch(() => {})
@@ -248,6 +277,8 @@ export function createBridgeClient(opts = {}) {
       emit()
       return false
     }
+    connectionGeneration += 1
+    freshObservation = false
     const openedPort = port
     openedPort.onMessage.addListener((msg) => {
       if (port === openedPort) onMessage(msg)
@@ -271,8 +302,24 @@ export function createBridgeClient(opts = {}) {
       type: 'hello',
       client: 'chrome-extension',
       extensionId,
+      extensionVersion: BROWSER_EXTENSION_VERSION,
     })
     if (res.type === 'error') throw new Error(res.message)
+    if (res.hostName !== NATIVE_HOST_NAME) {
+      throw new Error(`Browser Employee несовместим: native host ${String(res.hostName || 'нет')}`)
+    }
+    const compatible = (
+      res.protocolVersion === BRIDGE_PROTOCOL_VERSION
+      && res.extensionVersion === BROWSER_EXTENSION_VERSION
+      && typeof res.appVersion === 'string'
+      && res.appVersion.length > 0
+      && res.hostVersion === res.appVersion
+    )
+    if (!compatible) {
+      throw new Error(
+        `Browser Employee несовместим: app=${String(res.appVersion || 'нет')}, extension=${String(res.extensionVersion || 'нет')}, host=${String(res.hostVersion || 'нет')}, protocol=${String(res.protocolVersion ?? 'нет')}`,
+      )
+    }
     return res
   }
 
@@ -300,6 +347,8 @@ export function createBridgeClient(opts = {}) {
     browserTaskId = res.browserTaskId ?? null
     runId = res.runId ?? null
     attachedTab = res.attachedTab ?? null
+    attachEpoch = Number.isInteger(res.attachEpoch) ? res.attachEpoch : 0
+    freshObservation = false
     if (res.state) uiState = res.state
     else uiState = 'paired'
     lastError = null
@@ -324,11 +373,24 @@ export function createBridgeClient(opts = {}) {
     try {
       const res = await request({ type: 'status' })
       if (res.ok) {
+        const nextBrowserTaskId = res.browserTaskId ?? null
+        const nextRunId = res.runId ?? null
+        const nextAttachedTab = res.attachedTab ?? null
+        const nextAttachEpoch = Number.isInteger(res.attachEpoch) ? res.attachEpoch : 0
+        if (
+          browserTaskId !== nextBrowserTaskId
+          || runId !== nextRunId
+          || attachedTab?.tabRef !== nextAttachedTab?.tabRef
+          || attachEpoch !== nextAttachEpoch
+        ) {
+          freshObservation = false
+        }
         uiState = res.state || uiState
         sessionId = res.sessionId ?? sessionId
-        browserTaskId = res.browserTaskId ?? null
-        runId = res.runId ?? null
-        attachedTab = res.attachedTab ?? null
+        browserTaskId = nextBrowserTaskId
+        runId = nextRunId
+        attachedTab = nextAttachedTab
+        attachEpoch = nextAttachEpoch
         lastError = res.error || null
         emit()
       }
@@ -347,8 +409,10 @@ export function createBridgeClient(opts = {}) {
       attachedTab = tab
       browserTaskId = res.browserTaskId || browserTaskId
       runId = res.runId ?? runId
+      attachEpoch = Number.isInteger(res.attachEpoch) ? res.attachEpoch : attachEpoch
       uiState = res.state || 'attached'
       lastError = null
+      freshObservation = false
       emit()
     }
     return res
@@ -362,14 +426,17 @@ export function createBridgeClient(opts = {}) {
     })
     if (res.ok) {
       attachedTab = null
+      attachEpoch = Number.isInteger(res.attachEpoch) ? res.attachEpoch : attachEpoch
       uiState = res.state || 'paired'
+      freshObservation = false
       emit()
     }
     return res
   }
 
   async function sendObserve(payload) {
-    return request({
+    const observedGeneration = connectionGeneration
+    const res = await request({
       type: 'observe',
       requestId: payload.requestId,
       browserTaskId: payload.browserTaskId,
@@ -379,6 +446,20 @@ export function createBridgeClient(opts = {}) {
       snapshot: payload.snapshot,
       error: payload.error,
     }, 20000)
+    if (payload.ok !== false && payload.establishFresh === true) {
+      if (
+        connectionGeneration !== observedGeneration
+        || !attachedTab
+        || attachedTab.tabRef !== payload.tabRef
+      ) {
+        freshObservation = false
+        emit()
+        throw new Error('observe устарел после reconnect/reattach')
+      }
+      freshObservation = true
+      emit()
+    }
+    return res
   }
 
   async function sendClickResult(payload) {

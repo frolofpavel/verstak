@@ -33,12 +33,13 @@ const SETTINGS_CONNECTION_HELP =
 
 let bridgeState = {
   ui: 'offline',
-  sessionId: null,
   browserTaskId: null,
   runId: null,
   attachedTab: null,
   lastError: null,
   connected: false,
+  connectionGeneration: 0,
+  freshObservation: false,
 }
 
 function setStatus(kind, text) {
@@ -183,8 +184,13 @@ function paintConn(state) {
     }
   }
   if (ui === 'attached') {
-    updateStatusPill('attached', '● Подключено')
-    setStatus('success', 'Текущая вкладка подключена')
+    if (bridgeState.freshObservation) {
+      updateStatusPill('attached', '● Готово')
+      setStatus('success', 'Текущая вкладка прочитана')
+    } else {
+      updateStatusPill('connecting', '● Вкладка выбрана')
+      setStatus('warn', 'Ждём свежий снимок текущей вкладки')
+    }
   } else if (ui === 'paired') {
     updateStatusPill('connecting', '● Связь готова')
   } else {

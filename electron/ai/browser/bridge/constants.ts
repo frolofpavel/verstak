@@ -20,6 +20,16 @@ export const NATIVE_HOST_NAME = 'ru.verstak.browser_bridge'
 export const BRIDGE_PROTOCOL_VERSION = 1 as const
 
 /**
+ * Version of the unpacked/Web Store extension bundle expected by this app.
+ * A test pins this value to browser-extension/manifest.json so a release bump
+ * cannot silently leave the desktop and extension on different contracts.
+ */
+export const BROWSER_EXTENSION_VERSION = '0.2.0' as const
+
+/** Metadata shipped beside host.cmd/host.mjs and rewritten transactionally. */
+export const NATIVE_HOST_METADATA_FILE = 'host-metadata.json' as const
+
+/**
  * Максимальный размер одного NM-сообщения (байт JSON UTF-8).
  * Chrome hard-limit ≈ 1 MiB; fail-closed раньше — 256 KiB.
  */

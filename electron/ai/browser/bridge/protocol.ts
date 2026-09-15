@@ -85,6 +85,10 @@ export interface HelloMsg extends BridgeBase {
   type: 'hello'
   client: 'chrome-extension'
   extensionId?: string
+  /** Extension manifest version; supplied by the extension itself. */
+  extensionVersion?: string
+  /** Injected/overwritten by host-runtime.mjs from signed bundle metadata. */
+  hostVersion?: string
 }
 
 export interface PairMsg extends BridgeBase {
@@ -451,6 +455,9 @@ export interface HelloOkMsg extends BridgeBase {
   protocolVersion: typeof BRIDGE_PROTOCOL_VERSION
   hostName: string
   desktopOnline: boolean
+  appVersion: string
+  extensionVersion: string
+  hostVersion: string
 }
 
 /**
@@ -475,6 +482,8 @@ export interface PairOkMsg extends BridgeBase {
   browserTaskId: string | null
   runId: string | null
   state: BridgeUiState
+  /** Monotonic identity of the current desktop attach (0 before first attach). */
+  attachEpoch: number
 }
 
 export interface StatusOkMsg extends BridgeBase {
@@ -486,6 +495,7 @@ export interface StatusOkMsg extends BridgeBase {
   browserTaskId: string | null
   runId: string | null
   attachedTab: BridgeTabInfo | null
+  attachEpoch: number
   error?: string | null
 }
 
@@ -495,12 +505,14 @@ export interface AttachOkMsg extends BridgeBase {
   browserTaskId: string
   tabRef: string
   state: BridgeUiState
+  attachEpoch: number
 }
 
 export interface DetachOkMsg extends BridgeBase {
   type: 'detach'
   ok: true
   state: BridgeUiState
+  attachEpoch: number
 }
 
 export interface ObserveOkMsg extends BridgeBase {
@@ -603,6 +615,8 @@ export function parseInboundMessage(raw: string | Buffer): ParseResult {
         requestId,
         client: 'chrome-extension',
         extensionId: optionalString(data.extensionId, 64),
+        extensionVersion: optionalString(data.extensionVersion, 64),
+        hostVersion: optionalString(data.hostVersion, 64),
       }
       return { ok: true, msg }
     }

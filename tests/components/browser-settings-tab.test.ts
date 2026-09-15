@@ -104,19 +104,38 @@ describe('BrowserSettingsTab', () => {
     expect(screen.getByRole('button', { name: 'Восстановить' })).toBeTruthy()
   })
 
-  it('для готового соединения оставляет только проверку', async () => {
+  it('paired bridge без exact tab и fresh observe не называет готовым', async () => {
     const { getState } = installApi({
       ui: 'paired', connected: true, authenticated: true,
+      connectionGeneration: 4,
+      exactTabAttached: false,
+      freshObservation: false,
       host: { installed: true, needsRepair: false },
       attachedTab: null,
       lastError: null,
     })
 
     renderBrowserSettings()
+    expect(await screen.findByText('Связь подтверждена')).toBeTruthy()
+    expect(screen.queryByText('Готово к работе')).toBeNull()
     const check = await screen.findByRole('button', { name: 'Проверить' })
     fireEvent.click(check)
 
     await waitFor(() => expect(getState).toHaveBeenCalledTimes(2))
+  })
+
+  it('называет готовым только exact attached tab со свежим observe текущего соединения', async () => {
+    installApi({
+      ui: 'attached', connected: true, authenticated: true,
+      connectionGeneration: 4,
+      exactTabAttached: true,
+      freshObservation: true,
+      host: { installed: true, needsRepair: false },
+      lastError: null,
+    })
+
+    renderBrowserSettings()
+    expect(await screen.findByText('Готово к работе')).toBeTruthy()
   })
 
   it('при готовом host без auth кнопка заново открывает подключение через Connect', async () => {

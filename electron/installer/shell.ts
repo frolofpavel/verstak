@@ -47,25 +47,91 @@ $lnk.Save()
   runPowerShell(script)
 }
 
-export function setUninstallRegistry(entry: {
+type UninstallRegistryEntry = {
   displayName: string
   displayVersion: string
   publisher: string
   installLocation: string
   uninstallString: string
   displayIcon: string
-}): void {
+}
+
+export function buildUninstallRegistryScript(entry: UninstallRegistryEntry, alreadyHeld = false): string {
   const key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ru.verstak.ide'
-  const script = `
+  return `
+$ErrorActionPreference = 'Stop'
+$ownershipMutex = [Threading.Mutex]::new($false, 'Local\\Verstak.StableOwnership.v1')
+$ownershipLockAcquired = $false
+try {
+  try { if (-not $${alreadyHeld}) { $ownershipLockAcquired = $ownershipMutex.WaitOne(15000) } }
+  catch [Threading.AbandonedMutexException] { $ownershipLockAcquired = $true }
+  if (-not $${alreadyHeld} -and -not $ownershipLockAcquired) { throw 'Stable ownership mutex timeout' }
+$expected = @{
+  DisplayName = '${psQuote(entry.displayName)}'
+  DisplayVersion = '${psQuote(entry.displayVersion)}'
+  Publisher = '${psQuote(entry.publisher)}'
+  InstallLocation = '${psQuote(entry.installLocation)}'
+  UninstallString = '${psQuote(entry.uninstallString)}'
+  DisplayIcon = '${psQuote(entry.displayIcon)}'
+  NoModify = 1
+  NoRepair = 1
+}
+$beforeExists = Test-Path -LiteralPath '${psQuote(key)}'
+$before = @{}
+if ($beforeExists) {
+  $old = Get-ItemProperty -LiteralPath '${psQuote(key)}'
+  $oldKey = Get-Item -LiteralPath '${psQuote(key)}'
+  foreach ($name in $expected.Keys) {
+    if ($old.PSObject.Properties.Name -contains $name) {
+      $before[$name] = @{ Value = $oldKey.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); Kind = [string]$oldKey.GetValueKind($name) }
+    }
+  }
+}
+try {
 New-Item -Path '${psQuote(key)}' -Force | Out-Null
-Set-ItemProperty -Path '${psQuote(key)}' -Name DisplayName -Value '${psQuote(entry.displayName)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name DisplayVersion -Value '${psQuote(entry.displayVersion)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name Publisher -Value '${psQuote(entry.publisher)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name InstallLocation -Value '${psQuote(entry.installLocation)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name UninstallString -Value '${psQuote(entry.uninstallString)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name DisplayIcon -Value '${psQuote(entry.displayIcon)}'
-Set-ItemProperty -Path '${psQuote(key)}' -Name NoModify -Value 1 -Type DWord
-Set-ItemProperty -Path '${psQuote(key)}' -Name NoRepair -Value 1 -Type DWord
+foreach ($name in $expected.Keys) {
+  $kind = if ($name -eq 'NoModify' -or $name -eq 'NoRepair') { 'DWord' } else { 'String' }
+  Set-ItemProperty -Path '${psQuote(key)}' -Name $name -Value $expected[$name] -Type $kind
+}
+$actual = Get-ItemProperty -LiteralPath '${psQuote(key)}'
+foreach ($name in $expected.Keys) {
+  if ($actual.$name -cne $expected[$name]) { throw "Stable uninstall registry readback mismatch: $name" }
+}
+} catch {
+  $failure = $_.Exception.Message
+  try {
+    if ($beforeExists) {
+      foreach ($name in $expected.Keys) {
+        if ($before.ContainsKey($name)) {
+          Set-ItemProperty -Path '${psQuote(key)}' -Name $name -Value $before[$name].Value -Type $before[$name].Kind
+        } else {
+          Remove-ItemProperty -LiteralPath '${psQuote(key)}' -Name $name -ErrorAction SilentlyContinue
+        }
+      }
+      $restored = Get-ItemProperty -LiteralPath '${psQuote(key)}'
+      $restoredKey = Get-Item -LiteralPath '${psQuote(key)}'
+      foreach ($name in $expected.Keys) {
+        if ($before.ContainsKey($name)) {
+          $restoredValue = $restoredKey.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          if ($restoredValue -cne $before[$name].Value -or [string]$restoredKey.GetValueKind($name) -cne $before[$name].Kind) {
+            throw "Stable uninstall rollback readback mismatch: $name"
+          }
+        } elseif ($restored.PSObject.Properties.Name -contains $name) { throw "Stable uninstall rollback unexpected value: $name" }
+      }
+    } else {
+      Remove-Item -LiteralPath '${psQuote(key)}' -Recurse -Force -ErrorAction Stop
+      if (Test-Path -LiteralPath '${psQuote(key)}') { throw 'Stable uninstall rollback key still present' }
+    }
+  } catch { throw "$failure; registry rollback failed: $($_.Exception.Message)" }
+  throw "$failure; registry rollback completed"
+}
+} finally {
+  if ($ownershipLockAcquired) { $ownershipMutex.ReleaseMutex() }
+  $ownershipMutex.Dispose()
+}
 `
-  runPowerShell(script)
+}
+
+export function setUninstallRegistry(entry: UninstallRegistryEntry, alreadyHeld = false): void {
+  runPowerShell(buildUninstallRegistryScript(entry, alreadyHeld))
 }

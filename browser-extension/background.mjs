@@ -172,6 +172,7 @@ function tabIdFromRef(tabRef) {
 }
 
 async function captureTabById(tabId) {
+  const captureIdentity = bridge.getState()
   const tab = await chrome.tabs.get(tabId)
   if (!tab || tab.id == null) throw new Error('Нет вкладки')
   if (!tab.url) {
@@ -195,11 +196,21 @@ async function captureTabById(tabId) {
   let origin = ''
   try { origin = new URL(tab.url).origin } catch { origin = '' }
   const tabRef = `tab-${tab.id}`
+  const completedIdentity = bridge.getState()
+  if (
+    completedIdentity.connectionGeneration !== captureIdentity.connectionGeneration
+    || completedIdentity.attachEpoch !== captureIdentity.attachEpoch
+    || (captureIdentity.attachedTab?.tabRef || null) !== (completedIdentity.attachedTab?.tabRef || null)
+  ) {
+    throw new Error('capture устарел после reconnect/reattach')
+  }
   if (snapshot.observationVersion != null) {
     lastObsByTab.set(tab.id, {
       version: snapshot.observationVersion,
       origin,
       tabRef,
+      connectionGeneration: completedIdentity.connectionGeneration,
+      attachEpoch: completedIdentity.attachEpoch,
     })
   }
   return {
@@ -284,7 +295,25 @@ if (chrome?.action?.onClicked) {
   })
 }
 
+let stateConnectionGeneration = bridge.getState().connectionGeneration
+let stateAttachedTabRef = bridge.getState().attachedTab?.tabRef || null
+let stateAttachEpoch = bridge.getState().attachEpoch
+
 bridge.onState((state) => {
+  const nextGeneration = state.connectionGeneration
+  const nextTabRef = state.attachedTab?.tabRef || null
+  const nextAttachEpoch = state.attachEpoch
+  if (
+    nextGeneration !== stateConnectionGeneration
+    || nextTabRef !== stateAttachedTabRef
+    || nextAttachEpoch !== stateAttachEpoch
+    || state.ui !== 'attached'
+  ) {
+    lastObsByTab.clear()
+  }
+  stateConnectionGeneration = nextGeneration
+  stateAttachedTabRef = nextTabRef
+  stateAttachEpoch = nextAttachEpoch
   try {
     chrome.runtime.sendMessage({ type: 'bridge.stateChanged', state }).catch(() => {})
   } catch { /* side panel may be closed */ }
@@ -326,6 +355,9 @@ bridge.setObserveRequestHandler(async (msg) => {
         browserTaskId: msg.browserTaskId,
         runId: msg.runId,
         tabRef: msg.tabRef,
+        establishFresh: true,
+        ok: false,
+        error: `wrong tab: attached ${msg.tabRef}, got ${tab.tabRef}`,
         snapshot: {
           text: '',
           tables: [],
@@ -342,6 +374,8 @@ bridge.setObserveRequestHandler(async (msg) => {
         version: snapshot.observationVersion,
         origin: tab.origin,
         tabRef,
+        connectionGeneration: bridge.getState().connectionGeneration,
+        attachEpoch: bridge.getState().attachEpoch,
       })
     }
     await bridge.sendObserve({
@@ -349,6 +383,7 @@ bridge.setObserveRequestHandler(async (msg) => {
       browserTaskId: msg.browserTaskId,
       runId: msg.runId,
       tabRef,
+      establishFresh: true,
       snapshot: snapshotPayload(snapshot, tab),
     })
   } catch (err) {
@@ -359,6 +394,7 @@ bridge.setObserveRequestHandler(async (msg) => {
         browserTaskId: msg.browserTaskId,
         runId: msg.runId,
         tabRef: msg.tabRef,
+        establishFresh: true,
         ok: false,
         error: String(err?.message || err),
       })
@@ -414,7 +450,31 @@ bridge.setClickRequestHandler(async (msg) => {
       return
     }
     const lastObs = lastObsByTab.get(tabId)
-    if (lastObs && lastObs.version !== msg.observationVersion) {
+    if (!lastObs) {
+      await bridge.sendClickResult({
+        ...base,
+        ok: false,
+        error: 'fresh observe required after reconnect before click',
+      })
+      return
+    }
+    let currentOrigin = ''
+    try { currentOrigin = new URL(tab.url).origin } catch { currentOrigin = '' }
+    if (
+      lastObs.connectionGeneration !== st.connectionGeneration
+      || lastObs.attachEpoch !== st.attachEpoch
+      || lastObs.tabRef !== msg.tabRef
+      || (lastObs.origin && currentOrigin && lastObs.origin !== currentOrigin)
+    ) {
+      lastObsByTab.delete(tabId)
+      await bridge.sendClickResult({
+        ...base,
+        ok: false,
+        error: 'fresh observe required for current connection/tab before click',
+      })
+      return
+    }
+    if (lastObs.version !== msg.observationVersion) {
       await bridge.sendClickResult({
         ...base,
         ok: false,
@@ -423,8 +483,6 @@ bridge.setClickRequestHandler(async (msg) => {
       return
     }
 
-    // Ensure refs stamped: if page never observed this session in SW memory,
-    // still try click by data attributes (observe always stamps them).
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: performClickByRef,
@@ -743,8 +801,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       case 'bridge.status': {
         try {
-          const res = await bridge.status()
-          return { ok: true, status: res, state: bridge.getState() }
+          await bridge.status()
+          return { ok: true, state: bridge.getState() }
         } catch (err) {
           return { ok: false, error: err?.message || String(err), state: bridge.getState() }
         }

@@ -110,7 +110,10 @@ class ExtensionAdapter implements BrowserAdapter {
   /** Observations are isolated by trusted controller lineage. A single global
    * observation is unsafe because another chat may observe the same tab while
    * an approved action is waiting to execute. */
-  private readonly observations = new Map<string, Observation>()
+  private readonly observations = new Map<string, {
+    observation: Observation
+    connectionGeneration: number
+  }>()
 
   constructor(deps: ExtensionAdapterDeps) {
     this.getBridge = deps.getBridge
@@ -143,14 +146,24 @@ class ExtensionAdapter implements BrowserAdapter {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     const st = bridge.getPublicState()
+    const startedGeneration = Number.isSafeInteger(st.connectionGeneration)
+      ? st.connectionGeneration
+      : 0
     const resolved = this.resolveActionScope(scope, st)
     const snapshot = await bridge.requestObserve({
       browserTaskId: resolved.browserTaskId,
       runId: resolved.runId,
       tabRef: resolved.tabRef,
     })
+    const stateAfterObserve = bridge.getPublicState()
+    const completedGeneration = Number.isSafeInteger(stateAfterObserve.connectionGeneration)
+      ? stateAfterObserve.connectionGeneration
+      : 0
+    if (completedGeneration !== startedGeneration) {
+      throw new Error('соединение браузера сменилось во время observe — нужен свежий observe после reconnect')
+    }
     const obs = snapshotToObservation(snapshot, resolved, this.genObsId())
-    this.rememberObservation(resolved, obs)
+    this.rememberObservation(resolved, obs, completedGeneration)
     return obs
   }
 
@@ -196,10 +209,11 @@ class ExtensionAdapter implements BrowserAdapter {
   private rememberObservation(
     scope: { browserTaskId: string; runId: string; tabRef: string },
     observation: Observation,
+    connectionGeneration: number,
   ): void {
     const key = this.observationKey(scope)
     this.observations.delete(key)
-    this.observations.set(key, observation)
+    this.observations.set(key, { observation, connectionGeneration })
     if (this.observations.size > 64) {
       const oldest = this.observations.keys().next().value
       if (oldest) this.observations.delete(oldest)
@@ -214,16 +228,23 @@ class ExtensionAdapter implements BrowserAdapter {
     elementRef: ElementRef,
     scope: { browserTaskId: string; runId: string; tabRef: string },
     attachedOrigin?: string,
+    connectionGeneration = 0,
   ) {
     const ref = String(elementRef || '').trim()
     if (!ref) throw new Error('elementRef пуст')
     if (/[{};<>]|document\.|querySelector|eval\(/i.test(ref)) {
       throw new Error('raw CSS/JS selector запрещён — только elementRef из observation')
     }
-    const last = this.observations.get(this.observationKey(scope))
-    if (!last) {
+    const key = this.observationKey(scope)
+    const cached = this.observations.get(key)
+    if (!cached) {
       throw new Error('нет observation для task/run/tab scope — observe перед действием (elementRef map)')
     }
+    if (cached.connectionGeneration !== connectionGeneration) {
+      this.observations.delete(key)
+      throw new Error('reconnect инвалидировал elementRef — нужен свежий observe текущего соединения')
+    }
+    const last = cached.observation
     if (last.browserTaskId !== scope.browserTaskId || last.runId !== scope.runId) {
       throw new Error('wrong lineage — observation принадлежит другой задаче или run')
     }
@@ -251,17 +272,20 @@ class ExtensionAdapter implements BrowserAdapter {
     const scope = this.resolveActionScope(actionScope, st)
     const targetUrl = String(url || '').trim()
     if (!targetUrl) throw new Error('url пуст')
-    const res = await bridge.requestNavigate({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef: scope.tabRef,
-      url: targetUrl,
-    })
-    if (!res.ok) {
-      throw new Error(res.error || 'navigate failed')
+    try {
+      const res = await bridge.requestNavigate({
+        browserTaskId: scope.browserTaskId,
+        runId: scope.runId,
+        tabRef: scope.tabRef,
+        url: targetUrl,
+      })
+      if (!res.ok) {
+        throw new Error(res.error || 'navigate failed')
+      }
+      return { finalUrl: res.finalUrl, title: res.title }
+    } finally {
+      this.invalidateObservation(scope)
     }
-    this.invalidateObservation(scope)
-    return { finalUrl: res.finalUrl, title: res.title }
   }
 
   async back(_scope: BrowserAdapterActionScope): Promise<void> {
@@ -274,7 +298,7 @@ class ExtensionAdapter implements BrowserAdapter {
     const bridge = this.getBridge()
     if (!bridge) throw new Error(NOT_CONNECTED)
     const scope = this.resolveActionScope(actionScope, bridge.getPublicState())
-    const lastUrl = this.observations.get(this.observationKey(scope))?.source.url
+    const lastUrl = this.observations.get(this.observationKey(scope))?.observation.source.url
     if (!lastUrl) {
       throw new Error('reload невозможно — нет предшествующего observation с URL')
     }
@@ -293,6 +317,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
 
     try {
@@ -323,15 +348,20 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
-    const res = await bridge.requestFocus({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef: scope.tabRef,
-      elementRef: ref,
-      observationVersion,
-    })
-    if (!res.ok) throw new Error(res.error || 'focus failed')
+    try {
+      const res = await bridge.requestFocus({
+        browserTaskId: scope.browserTaskId,
+        runId: scope.runId,
+        tabRef: scope.tabRef,
+        elementRef: ref,
+        observationVersion,
+      })
+      if (!res.ok) throw new Error(res.error || 'focus failed')
+    } finally {
+      this.invalidateObservation(scope)
+    }
   }
 
   async scroll(
@@ -346,17 +376,26 @@ class ExtensionAdapter implements BrowserAdapter {
     const scope = this.resolveActionScope(actionScope, st)
     let refStr: string | undefined
     if (elementRef) {
-      const v = this.validateRefContext(elementRef, scope, st.attachedTab?.origin)
+      const v = this.validateRefContext(
+        elementRef,
+        scope,
+        st.attachedTab?.origin,
+        st.connectionGeneration,
+      )
       refStr = v.ref
     }
-    const res = await bridge.requestScroll({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef: scope.tabRef,
-      elementRef: refStr,
-      delta,
-    })
-    if (!res.ok) throw new Error(res.error || 'scroll failed')
+    try {
+      const res = await bridge.requestScroll({
+        browserTaskId: scope.browserTaskId,
+        runId: scope.runId,
+        tabRef: scope.tabRef,
+        elementRef: refStr,
+        delta,
+      })
+      if (!res.ok) throw new Error(res.error || 'scroll failed')
+    } finally {
+      this.invalidateObservation(scope)
+    }
   }
 
   async selectOption(
@@ -373,6 +412,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
     try {
       const res = await bridge.requestSelectOption({
@@ -404,6 +444,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
     try {
       const res = await bridge.requestTypeText({
@@ -432,6 +473,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
     try {
       const res = await bridge.requestClearField({
@@ -457,6 +499,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
     try {
       const res = await bridge.requestToggle({
@@ -486,6 +529,7 @@ class ExtensionAdapter implements BrowserAdapter {
       elementRef,
       scope,
       st.attachedTab?.origin,
+      st.connectionGeneration,
     )
     try {
       const res = await bridge.requestPressKey({
@@ -514,14 +558,23 @@ class ExtensionAdapter implements BrowserAdapter {
     const st = bridge.getPublicState()
     const scope = this.resolveActionScope(actionScope, st)
     if (condition.elementRef) {
-      this.validateRefContext(condition.elementRef, scope, st.attachedTab?.origin)
+      this.validateRefContext(
+        condition.elementRef,
+        scope,
+        st.attachedTab?.origin,
+        st.connectionGeneration,
+      )
     }
-    return bridge.requestWaitFor({
-      browserTaskId: scope.browserTaskId,
-      runId: scope.runId,
-      tabRef: scope.tabRef,
-      condition,
-    })
+    try {
+      return await bridge.requestWaitFor({
+        browserTaskId: scope.browserTaskId,
+        runId: scope.runId,
+        tabRef: scope.tabRef,
+        condition,
+      })
+    } finally {
+      this.invalidateObservation(scope)
+    }
   }
 
   async screenshot(actionScope: BrowserAdapterActionScope): Promise<string | null> {
@@ -628,6 +681,8 @@ export function createExtensionAdapterWithTransport(opts: {
   sessionId?: string | null
   browserTaskId?: string
   runId?: string
+  /** Injectable live socket generation for reconnect tests. */
+  getConnectionGeneration?: () => number
 }): BrowserAdapter {
   const fakeBridge = {
     isExtensionConnected: () => opts.connected !== false,
@@ -647,6 +702,8 @@ export function createExtensionAdapterWithTransport(opts: {
         : null,
       lastError: null,
       connected: opts.connected !== false,
+      connectionGeneration: opts.getConnectionGeneration?.() ?? 1,
+      freshObservation: null,
       desktopOnline: true,
     }),
     requestObserve: async (input: { browserTaskId: string; runId: string; tabRef: string }) =>

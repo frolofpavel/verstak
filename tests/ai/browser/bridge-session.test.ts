@@ -176,6 +176,71 @@ describe('bridge session store', () => {
     expect(loaded?.sessionId).toBe(first.session.sessionId)
   })
 
+  it('connectionGeneration монотонен, а reconnect требует fresh observe даже для той же tabRef', () => {
+    const s = createBridgeSessionStore({ stateDir: dir })
+    const boot = s.issueBootstrapCode()
+    const first = s.verifyPairing(boot.code, undefined)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+
+    expect(s.getState().connectionGeneration).toBe(0)
+    expect(s.beginConnection()).toBe(1)
+    s.markPaired(first.session)
+    s.setActiveRun('bt-1', 'run-1')
+    s.attachTab(
+      { tabRef: 'tab-1', url: 'https://example.com/', title: 'Ex', origin: 'https://example.com' },
+      'bt-1',
+    )
+    expect(s.markFreshObservation({
+      connectionGeneration: s.getState().connectionGeneration,
+      attachEpoch: s.getState().attachEpoch,
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-1',
+      observationVersion: 100,
+    })).toBe(true)
+    expect(s.getState().freshObservation?.connectionGeneration).toBe(1)
+
+    s.setConnected(false)
+    s.clearLiveAuth()
+    expect(s.beginConnection()).toBe(2)
+    s.markPaired(first.session)
+    s.setActiveRun('bt-1', 'run-1')
+    s.attachTab(
+      { tabRef: 'tab-1', url: 'https://example.com/', title: 'Ex', origin: 'https://example.com' },
+      'bt-1',
+    )
+    expect(s.getState().freshObservation).toBeNull()
+  })
+
+  it('attachEpoch монотонен и ABA reattach той же tabRef не принимает старую observation', () => {
+    const s = createBridgeSessionStore({ stateDir: dir })
+    const boot = s.issueBootstrapCode()
+    const first = s.verifyPairing(boot.code, undefined)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    s.beginConnection()
+    s.markPaired(first.session)
+    s.setActiveRun('bt-1', 'run-1')
+    const tab = { tabRef: 'tab-1', url: 'https://example.com/', title: 'Ex', origin: 'https://example.com' }
+    s.attachTab(tab, 'bt-1')
+    const oldIdentity = s.getState()
+
+    s.detachTab()
+    s.attachTab(tab, 'bt-1')
+    const currentIdentity = s.getState()
+    expect(currentIdentity.attachEpoch).toBeGreaterThan(oldIdentity.attachEpoch)
+    expect(s.markFreshObservation({
+      connectionGeneration: oldIdentity.connectionGeneration,
+      attachEpoch: oldIdentity.attachEpoch,
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-1',
+      observationVersion: 1,
+    })).toBe(false)
+    expect(s.getState().freshObservation).toBeNull()
+  })
+
   it('restart preserves pairing file, not attach', () => {
     const s = createBridgeSessionStore({ stateDir: dir })
     const boot = s.issueBootstrapCode()

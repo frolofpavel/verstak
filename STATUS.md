@@ -1,6 +1,6 @@
 # STATUS — Verstak
 
-**Версия: 2.8.2** (релизный код подготовлен 12.09.2026) · эталон тестов **6564**.
+**Версия: 2.8.2** (релизный код подготовлен 12.09.2026) · эталон тестов **6700**.
 Публикация считается состоявшейся только когда GitHub и `agi-iri.ru/verstak`
 отдают одну версию; финальный релизный гейт выполняется по собранному коммиту.
 
@@ -51,6 +51,20 @@
   заблокированы. Пины включают exact cancel-ID, bounded Stop, PostToolUse для
   реально выполненного действия и 30 циклов teardown/reconnect без owned orphan.
   Полный code-гейт пройден; packaged sleep/reload/reconnect canary ведётся отдельно.
+
+- **R1 — Browser Employee, Settings-first и lifecycle.** Путь подключения теперь
+  разделяет `connected → paired → exact tab attached → fresh observe`; reconnect
+  всегда требует новый snapshot. Потерянный ответ после любого effectful action
+  (`navigate/click/scroll/focus/select/type/clear/toggle/key`) фиксируется как
+  `unknown-effect` без автоматического повтора, а `observe/wait_for` остаются
+  definite read-only ошибками. Stable Native Host устанавливается и обновляется
+  одной межпроцессной lease-транзакцией с точным owner/readback/rollback;
+  dev/portable/smoke не публикуют stable registration. Version triplet,
+  manifest key/extension ID, host launcher/runtime/metadata и точные packaged
+  bytes проверяются fail-closed. Полный R1-набор: 6700 собрано, 6684 PASS,
+  16 штатных skip, 0 failed; локальный `dist:win`, package contract и smoke
+  `startup.ok/db.open.ok` на отдельном userData — PASS. Unpacked остаётся preview;
+  живой Calltouch 5/5 и Chrome Web Store не выдаются за принятую поставку.
 
 - **Реестр возможностей (шаг 1 из 7)** — скиллы, MCP-серверы, коннекторы и роли
   агента получили единый паспорт: происхождение, владелец, версия, риск, доверие,
@@ -142,9 +156,11 @@
   точную текущую вкладку; задачу можно дать в обычном чате Verstak или в боковой
   панели без Pair-кода, ручного Attach и JSON. Connected-контур умеет читать,
   переходить по адресу и выполнять подтверждённый click со свежим `elementRef`,
-  обязательным readback и durable action ledger. Локальный package коммита
-  `21de87e1` прошёл Electron ABI и packaged smoke; постоянный Native Host для
-  Chrome/Edge восстановлен и повторно прочитан. Живой Calltouch 5/5 ещё не принят.
+  обязательным readback и durable action ledger. Локальная R1-сборка прошла
+  Electron ABI, точный package contract и изолированный packaged smoke. Stable
+  lifecycle теперь successor-safe для взаимодействующих установщиков текущего
+  поколения; старые установщики без общей lease не считаются координированными.
+  Живой Calltouch 5/5 ещё не принят.
 - **Computer Use** — построена половина: `screen_capture` и `screen_info` (агент видит
   экран). Управления мышью и клавиатурой на уровне ОС нет.
 
@@ -156,10 +172,12 @@
   открыл утром, продукт знает, где остановился и что не сработало. Половина закрыта в
   2.8.0: решения и отвергнутые альтернативы доезжают до агента на первом ходе. Не
   хватает верхнего уровня — самой цели и её состояния.
-- **Browser Employee** — один раз обновить уже установленное unpacked-расширение
-  из свежего packaged resources и пройти живой Calltouch
-  `выбор вкладки значком → observe → approved click → readback` 5/5. Публикация в
-  Web Store остаётся отдельным долгом распространения.
+- **Browser Employee** — утром обновить уже установленное unpacked-расширение
+  только из `release/win-unpacked/resources/browser-extension`, открыть
+  «Настройки → Интеграции → Браузер» и нажать «Подключить», затем значком
+  расширения выбрать точную вкладку Calltouch и пройти пять раз
+  `observe → approved click → independent readback`. Pair-код для штатного пути
+  не нужен. Публикация в Web Store остаётся отдельным долгом распространения.
 - **Публикатор** не прибирает пустой релиз при сорванной заливке.
 
 ## Как проверять работу

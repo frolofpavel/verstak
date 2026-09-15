@@ -2,7 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../../i18n'
 import type { BrowserBridgeStateDTO } from '../../types/api'
 
-type BrowserSetupStatus = 'loading' | 'disconnected' | 'ready' | 'connected' | 'repair'
+type BrowserSetupStatus =
+  | 'loading'
+  | 'disconnected'
+  | 'ready'
+  | 'bridge'
+  | 'paired'
+  | 'attached'
+  | 'connected'
+  | 'repair'
 type BrowserSetupCopy = ReturnType<typeof useT>['settings']['browserSetup']
 
 function browserSetupStatus(state: BrowserBridgeStateDTO | null, failed: boolean): BrowserSetupStatus {
@@ -10,8 +18,11 @@ function browserSetupStatus(state: BrowserBridgeStateDTO | null, failed: boolean
   if (failed || state?.ui === 'error' || Boolean(state?.lastError)) return 'repair'
   if (!state?.host.installed) return 'disconnected'
   if (state.host.needsRepair) return 'repair'
-  if (state.connected && state.authenticated) return 'connected'
-  return 'ready'
+  if (!state.connected) return 'ready'
+  if (!state.authenticated) return 'bridge'
+  if (!state.exactTabAttached) return 'paired'
+  if (!state.freshObservation) return 'attached'
+  return 'connected'
 }
 
 function statusCopy(status: BrowserSetupStatus, t: BrowserSetupCopy): { label: string; hint: string } {
@@ -19,6 +30,9 @@ function statusCopy(status: BrowserSetupStatus, t: BrowserSetupCopy): { label: s
     case 'loading': return { label: t.loading, hint: t.connectHint }
     case 'disconnected': return { label: t.disconnected, hint: t.connectHint }
     case 'ready': return { label: t.ready, hint: t.readyHint }
+    case 'bridge': return { label: t.bridge, hint: t.bridgeHint }
+    case 'paired': return { label: t.paired, hint: t.pairedHint }
+    case 'attached': return { label: t.attached, hint: t.attachedHint }
     case 'connected': return { label: t.connected, hint: t.connectedHint }
     case 'repair': return { label: t.repair, hint: t.repairHint }
   }
@@ -26,14 +40,13 @@ function statusCopy(status: BrowserSetupStatus, t: BrowserSetupCopy): { label: s
 
 function primaryActionLabel(status: BrowserSetupStatus, busy: boolean, t: BrowserSetupCopy): string {
   if (busy) return t.working
-  if (status === 'disconnected' || status === 'ready') return t.connect
+  if (status === 'disconnected' || status === 'ready' || status === 'bridge') return t.connect
   if (status === 'repair') return t.recover
   return t.check
 }
 
 function BrowserConnectionDetails({ state, t }: { state: BrowserBridgeStateDTO | null; t: BrowserSetupCopy }) {
   const hostReady = Boolean(state?.host.installed && !state.host.needsRepair)
-  const extensionReady = Boolean(state?.connected && state.authenticated)
   const hostLabel = hostReady ? t.componentReady : state?.host.needsRepair ? t.componentRepair : t.componentMissing
 
   return (
@@ -41,7 +54,10 @@ function BrowserConnectionDetails({ state, t }: { state: BrowserBridgeStateDTO |
       <summary>{t.diagnostics}</summary>
       <dl>
         <div><dt>{t.localComponent}</dt><dd>{hostLabel}</dd></div>
-        <div><dt>{t.extension}</dt><dd>{extensionReady ? t.extensionReady : t.extensionWaiting}</dd></div>
+        <div><dt>{t.bridgeConnection}</dt><dd>{state?.connected ? t.stageReady : t.stageWaiting}</dd></div>
+        <div><dt>{t.pairing}</dt><dd>{state?.authenticated ? t.stageReady : t.stageWaiting}</dd></div>
+        <div><dt>{t.exactTab}</dt><dd>{state?.exactTabAttached ? t.stageReady : t.stageWaiting}</dd></div>
+        <div><dt>{t.freshObserve}</dt><dd>{state?.freshObservation ? t.stageReady : t.stageWaiting}</dd></div>
       </dl>
     </details>
   )
@@ -97,7 +113,7 @@ export function BrowserSettingsTab() {
   }
 
   async function runPrimaryAction() {
-    if (status === 'connected') {
+    if (status === 'paired' || status === 'attached' || status === 'connected') {
       setBusy(true)
       setNotice(null)
       try {

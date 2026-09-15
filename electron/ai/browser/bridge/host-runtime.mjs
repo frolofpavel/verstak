@@ -8,19 +8,74 @@
 import { createConnection } from 'node:net'
 import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const MAX_MESSAGE_BYTES = 256 * 1024
 const BRIDGE_PROTOCOL_VERSION = 1
 const NATIVE_HOST_NAME = 'ru.verstak.browser_bridge'
+const HOST_METADATA_FILE = 'host-metadata.json'
+
+/**
+ * Host identity comes from the installed bundle, never from the extension.
+ * Native hosts inherit Chrome's ambient environment, so environment variables
+ * are not an authority for the installed host version.
+ */
+function readHostVersion() {
+  try {
+    const path = join(dirname(fileURLToPath(import.meta.url)), HOST_METADATA_FILE)
+    const metadata = JSON.parse(readFileSync(path, 'utf8'))
+    if (
+      metadata?.schemaVersion === 1
+      && metadata?.protocolVersion === BRIDGE_PROTOCOL_VERSION
+      && typeof metadata?.hostVersion === 'string'
+      && metadata.hostVersion.length > 0
+      && metadata.hostVersion.length <= 64
+    ) return metadata.hostVersion
+  } catch { /* desktop will reject the hello with one compatibility reason */ }
+  return null
+}
+
+const HOST_VERSION = readHostVersion()
+
+function enrichHostIdentity(json) {
+  try {
+    const message = JSON.parse(json)
+    if (message?.type !== 'hello' || typeof message !== 'object') return json
+    // Always overwrite an extension-supplied value: the host is the authority
+    // for its own installed version.
+    return JSON.stringify({ ...message, hostVersion: HOST_VERSION })
+  } catch {
+    return json
+  }
+}
+
+function explicitIsolatedEndpointContract() {
+  if (process.env.VERSTAK_BROWSER_HOST_DEV_ISOLATED !== '1') return false
+  if (process.env.NODE_ENV === 'test') return true
+  const devUserDataDir = process.env.VERSTAK_DEV_USER_DATA_DIR
+  return process.env.VERSTAK_DEV_NATIVE_HOST === '1'
+    && typeof devUserDataDir === 'string'
+    && isAbsolute(devUserDataDir)
+    && !/^\\\\[?.]\\/.test(devUserDataDir)
+}
 
 function findEndpoint() {
-  // 1) VERSTAK_BRIDGE_ENDPOINT env (tests/dev)
-  if (process.env.VERSTAK_BRIDGE_ENDPOINT) {
+  // Native hosts inherit Chrome's ambient environment. An endpoint override is
+  // therefore accepted only under the same explicit isolated dev/test contract
+  // that permits a non-installed build to own Native Messaging registration.
+  if (process.env.VERSTAK_BRIDGE_ENDPOINT && explicitIsolatedEndpointContract()) {
     return process.env.VERSTAK_BRIDGE_ENDPOINT
   }
-  // 2) userData storage endpoint file (Electron app name = verstak)
+  // Production authority: userData endpoint file written by the desktop.
   const candidates = []
+  if (
+    explicitIsolatedEndpointContract()
+    && process.env.VERSTAK_DEV_USER_DATA_DIR
+    && isAbsolute(process.env.VERSTAK_DEV_USER_DATA_DIR)
+  ) {
+    candidates.push(join(process.env.VERSTAK_DEV_USER_DATA_DIR, 'storage', 'browser-bridge-endpoint.json'))
+  }
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
     candidates.push(join(appData, 'verstak', 'storage', 'browser-bridge-endpoint.json'))
@@ -166,7 +221,7 @@ function main() {
         }))
         continue
       }
-      const frame = encodeFrame(f.json)
+      const frame = encodeFrame(enrichHostIdentity(f.json))
       if (ready && socket.writable) {
         socket.write(frame)
       } else if (!socket.destroyed) {

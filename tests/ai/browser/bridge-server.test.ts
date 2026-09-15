@@ -11,6 +11,7 @@ import {
   encodeNativeFrame,
   NativeFrameDecoder,
   BRIDGE_PROTOCOL_VERSION,
+  BROWSER_EXTENSION_VERSION,
   EXTENSION_ID,
   type BridgeServer,
   type BridgeOutbound,
@@ -23,15 +24,19 @@ let activeBt = 'bt-lineage-1'
 let activeRun = 'run-lineage-1'
 const attaches: Array<{ bt: string; tabRef: string }> = []
 const taskPrompts: string[] = []
+const runtimeLogs: Array<{ event: string; detail?: Record<string, unknown> }> = []
+const TEST_APP_VERSION = '2.8.2'
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'verstak-bridge-srv-'))
   attaches.length = 0
   taskPrompts.length = 0
+  runtimeLogs.length = 0
   activeBt = 'bt-lineage-1'
   activeRun = 'run-lineage-1'
   server = createBridgeServer({
     stateDir: dir,
+    appVersion: TEST_APP_VERSION,
     getActiveBrowserTaskId: () => activeBt,
     getActiveRunId: () => activeRun,
     onAttach: (bt, tab) => attaches.push({ bt, tabRef: tab.tabRef }),
@@ -39,6 +44,7 @@ beforeEach(async () => {
       taskPrompts.push(prompt)
       return { sendId: 7, browserTaskId: 'bt-chat-1', chatId: 1 }
     },
+    log: (event, detail) => runtimeLogs.push({ event, detail }),
     observeTimeoutMs: 3000,
   })
   await server.start()
@@ -95,6 +101,8 @@ async function helloOk(c: Awaited<ReturnType<typeof connectClient>>): Promise<vo
     requestId: 'h1',
     client: 'chrome-extension',
     extensionId: EXTENSION_ID,
+    extensionVersion: BROWSER_EXTENSION_VERSION,
+    hostVersion: TEST_APP_VERSION,
   })
   const hello = await c.next()
   expect(hello.type).toBe('hello')
@@ -119,13 +127,120 @@ async function pairWithBootstrap(
   }
   expect(pair.sessionId).toBeTruthy()
   expect(pair.pairingToken).toBeTruthy()
+  const logged = JSON.stringify(runtimeLogs)
+  expect(logged).not.toContain(String(pair.sessionId))
+  expect(logged).not.toContain(String(pair.pairingToken))
   return {
     sessionId: pair.sessionId as string,
     pairingToken: pair.pairingToken as string,
   }
 }
 
+function markFresh(tabRef: string, observationVersion = 1): void {
+  const state = server.getSession().getState()
+  expect(server.getSession().markFreshObservation({
+    connectionGeneration: state.connectionGeneration,
+    attachEpoch: state.attachEpoch,
+    browserTaskId: activeBt,
+    runId: activeRun,
+    tabRef,
+    observationVersion,
+  })).toBe(true)
+}
+
 describe('bridge server — security fail-closed', () => {
+  it.each(['timeout', 'disconnect', 'reattach'] as const)('read-only wait_for %s is a definite ordinary error', async loss => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    const tab = { tabRef: 'tab-wait-loss', url: 'https://example.com/', title: 'fixture', origin: 'https://example.com' }
+    c.send({ v: BRIDGE_PROTOCOL_VERSION, type: 'attach', requestId: 'attach-wait-loss', tab })
+    expect(await c.next()).toMatchObject({ type: 'attach', ok: true })
+    const common = { browserTaskId: activeBt, runId: activeRun, tabRef: tab.tabRef }
+    const observing = server.requestObserve({ ...common, timeoutMs: 2000 })
+    const observeRequest = await c.next()
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION, type: 'observe', requestId: observeRequest.requestId,
+      ...common, ok: true,
+      snapshot: { text: 'waiting', tables: [], observationVersion: 1, source: tab },
+    })
+    await observing
+    expect(await c.next()).toMatchObject({ type: 'observe', ok: true })
+    const outcome = server.requestWaitFor({
+      ...common, condition: { text: 'ready' }, timeoutMs: loss === 'timeout' ? 1 : 3000,
+    }).catch((error: unknown) => error)
+    expect((await c.next()).type).toBe('wait_for_request')
+    if (loss === 'disconnect') c.close()
+    if (loss === 'reattach') {
+      c.send({ v: BRIDGE_PROTOCOL_VERSION, type: 'attach', requestId: 'reattach-wait-loss', tab })
+      expect(await c.next()).toMatchObject({ type: 'attach', ok: true })
+    }
+    const error = await outcome
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(UnknownBrowserEffectError)
+    expect(error).not.toHaveProperty('code', 'BROWSER_EFFECT_UNKNOWN')
+    c.close()
+  })
+
+  const effectfulActions = ['click', 'navigate', 'scroll', 'focus', 'select_option',
+    'type_text', 'clear_field', 'toggle', 'press_key'] as const
+  const effectLossCases = effectfulActions.flatMap(action => (
+    (['timeout', 'disconnect'] as const).map(loss => ({ action, loss }))
+  ))
+
+  it.each(effectLossCases)('$action dispatch followed by $loss retains typed unknown-effect', async ({ action, loss }) => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    const tabRef = 'tab-effect-loss'
+    const common = { browserTaskId: activeBt, runId: activeRun, tabRef }
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION, type: 'attach', requestId: 'attach-effect-loss',
+      tab: { tabRef, url: 'https://example.com/', title: 'fixture', origin: 'https://example.com' },
+    })
+    expect(await c.next()).toMatchObject({ type: 'attach', ok: true })
+    // Freshness comes through the actual request/response protocol, not through
+    // a direct mutation of the session store.
+    const observing = server.requestObserve({ ...common, timeoutMs: 2000 })
+    const observeRequest = await c.next()
+    expect(observeRequest.type).toBe('observe_request')
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION, type: 'observe', requestId: observeRequest.requestId,
+      ...common, ok: true,
+      snapshot: {
+        text: 'ready', tables: [], observationVersion: 1,
+        source: { url: 'https://example.com/', title: 'fixture', origin: 'https://example.com' },
+        controls: [
+          { elementRef: 'button:Save:0', role: 'button', label: 'Save', observationVersion: 1 },
+          { elementRef: 'input:Name:0', role: 'textbox', label: 'Name', observationVersion: 1 },
+          { elementRef: 'select:Role:0', role: 'combobox', label: 'Role', observationVersion: 1 },
+          { elementRef: 'checkbox:Agree:0', role: 'checkbox', label: 'Agree', observationVersion: 1 },
+        ],
+      },
+    })
+    await observing
+    expect(await c.next()).toMatchObject({ type: 'observe', ok: true })
+    const input = { ...common, timeoutMs: loss === 'timeout' ? 40 : 2000 }
+    const element = { ...input, elementRef: 'input:Name:0', observationVersion: 1 }
+    const starters: Record<typeof action, () => Promise<unknown>> = {
+      click: () => server.requestClick({ ...element, elementRef: 'button:Save:0', origin: 'https://example.com' }),
+      navigate: () => server.requestNavigate({ ...input, url: 'https://example.com/next' }),
+      scroll: () => server.requestScroll({ ...input, delta: { y: 50 } }),
+      focus: () => server.requestFocus(element),
+      select_option: () => server.requestSelectOption({ ...element, elementRef: 'select:Role:0', value: 'selected' }),
+      type_text: () => server.requestTypeText({ ...element, text: 'fixture' }),
+      clear_field: () => server.requestClearField(element),
+      toggle: () => server.requestToggle({ ...element, elementRef: 'checkbox:Agree:0' }),
+      press_key: () => server.requestPressKey({ ...element, key: 'Enter' }),
+    }
+    const outcome = starters[action]().catch((error: unknown) => error)
+    const request = await c.next()
+    expect(request.type).toBe(`${action}_request`)
+    if (loss === 'disconnect') c.close()
+    const error = await outcome
+    expect(error).toBeInstanceOf(UnknownBrowserEffectError)
+    expect(error).toMatchObject({ code: 'BROWSER_EFFECT_UNKNOWN', effectReason: loss })
+    c.close()
+  })
+
   it('offline action ведёт в Settings без технического bridge-текста', async () => {
     const pending = server.requestObserve({
       browserTaskId: activeBt,
@@ -203,6 +318,7 @@ describe('bridge server — security fail-closed', () => {
     })
     server = createBridgeServer({
       stateDir: dir,
+      appVersion: TEST_APP_VERSION,
       getActiveBrowserTaskId: () => activeBt,
       getActiveRunId: () => activeRun,
       onTaskSubmit: (prompt) => {
@@ -492,6 +608,8 @@ describe('bridge server — security fail-closed', () => {
       requestId: 'hello-after-partial',
       client: 'chrome-extension',
       extensionId: EXTENSION_ID,
+      extensionVersion: BROWSER_EXTENSION_VERSION,
+      hostVersion: TEST_APP_VERSION,
     })
     const response = await c2.next()
     expect(response.type).toBe('hello')
@@ -660,6 +778,168 @@ describe('bridge server — pair attach observe lineage', () => {
     c.close()
   })
 
+  it('late solicited observe reply after timeout never becomes an unsolicited fresh snapshot', async () => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-late-observe',
+      tab: {
+        tabRef: 'tab-late-observe',
+        url: 'https://example.com/',
+        title: 't',
+        origin: 'https://example.com',
+      },
+      browserTaskId: activeBt,
+    })
+    await c.next()
+
+    const pending = server.requestObserve({
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-late-observe',
+      timeoutMs: 20,
+    })
+    const request = await c.next()
+    expect(request.type).toBe('observe_request')
+    await expect(pending).rejects.toThrow(/observe timeout/i)
+
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'observe',
+      requestId: request.requestId,
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-late-observe',
+      snapshot: {
+        text: 'too late',
+        tables: [],
+        source: { url: 'https://example.com/', title: 't', origin: 'https://example.com' },
+        omissions: [],
+      },
+    })
+
+    const lateAck = await c.next()
+    expect(lateAck.type).toBe('error')
+    expect(server.getSession().getState().freshObservation).toBeNull()
+    c.close()
+  })
+
+  it('same-tab detach and reattach rejects an observe reply from the prior attach epoch', async () => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    const tab = {
+      tabRef: 'tab-same-reattach',
+      url: 'https://example.com/',
+      title: 't',
+      origin: 'https://example.com',
+    }
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-epoch-1',
+      tab,
+      browserTaskId: activeBt,
+    })
+    await c.next()
+
+    const pending = server.requestObserve({
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: tab.tabRef,
+      timeoutMs: 2000,
+    })
+    const oldRequest = await c.next()
+
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'detach',
+      requestId: 'd-epoch-1',
+      browserTaskId: activeBt,
+    })
+    await c.next()
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-epoch-2',
+      tab,
+      browserTaskId: activeBt,
+    })
+    await c.next()
+
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'observe',
+      requestId: oldRequest.requestId,
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: tab.tabRef,
+      snapshot: {
+        text: 'old attach epoch',
+        tables: [],
+        source: { url: tab.url, title: tab.title, origin: tab.origin },
+        omissions: [],
+      },
+    })
+
+    await expect(pending).rejects.toThrow(/attach|устарел/i)
+    const staleAck = await c.next()
+    expect(staleAck.type).toBe('error')
+    expect(server.getSession().getState().freshObservation).toBeNull()
+    c.close()
+  })
+
+  it('an unsolicited capture crossing same-tab reattach never establishes action freshness', async () => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    const tab = {
+      tabRef: 'tab-push-reattach',
+      url: 'https://example.com/',
+      title: 't',
+      origin: 'https://example.com',
+    }
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-push-1',
+      tab,
+      browserTaskId: activeBt,
+    })
+    await c.next()
+    // The extension-side capture begins here, before the attach identity changes.
+    c.send({ v: BRIDGE_PROTOCOL_VERSION, type: 'detach', requestId: 'd-push-1', browserTaskId: activeBt })
+    await c.next()
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-push-2',
+      tab,
+      browserTaskId: activeBt,
+    })
+    await c.next()
+
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'observe',
+      requestId: 'extension-push-started-before-reattach',
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: tab.tabRef,
+      snapshot: {
+        text: 'old unsolicited capture',
+        tables: [],
+        source: { url: tab.url, title: tab.title, origin: tab.origin },
+        omissions: [],
+      },
+    })
+
+    const ack = await c.next()
+    expect(ack.type).toBe('observe')
+    expect(server.getSession().getState().freshObservation).toBeNull()
+    c.close()
+  })
+
   it('disconnect fails pending observe, no auto-continue', async () => {
     const c = await connectClient()
     await pairWithBootstrap(c)
@@ -693,6 +973,84 @@ describe('bridge server — pair attach observe lineage', () => {
     expect(server.getPublicState().desktopOnline).toBe(false)
   })
 
+  it('action fail-closed без fresh observe, а новый snapshot текущей lineage открывает ровно один click', async () => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'attach',
+      requestId: 'a-fresh-gate',
+      tab: {
+        tabRef: 'tab-fresh-gate',
+        url: 'https://example.com/',
+        title: 't',
+        origin: 'https://example.com',
+      },
+    })
+    await c.next()
+
+    const clickInput = {
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-fresh-gate',
+      elementRef: 'button:Save:0',
+      observationVersion: 1,
+      origin: 'https://example.com',
+      timeoutMs: 2000,
+    }
+    await expect(server.requestClick(clickInput)).rejects.toThrow(/fresh observe/i)
+
+    const observe = server.requestObserve({
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-fresh-gate',
+      timeoutMs: 2000,
+    })
+    const observeRequest = await c.next()
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'observe',
+      requestId: observeRequest.requestId,
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-fresh-gate',
+      ok: true,
+      snapshot: {
+        text: 'Save',
+        tables: [],
+        source: { url: 'https://example.com/', title: 't', origin: 'https://example.com' },
+        controls: [{
+          elementRef: 'button:Save:0',
+          role: 'button',
+          label: 'Save',
+          observationVersion: 1,
+        }],
+        observationVersion: 1,
+      },
+    })
+    await expect(observe).resolves.toMatchObject({ observationVersion: 1 })
+    expect(await c.next()).toMatchObject({ type: 'observe', requestId: observeRequest.requestId, ok: true })
+
+    const click = server.requestClick(clickInput)
+    const clickRequest = await c.next()
+    expect(clickRequest).toMatchObject({ type: 'click_request', observationVersion: 1 })
+    c.send({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: 'click',
+      requestId: clickRequest.requestId,
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-fresh-gate',
+      elementRef: 'button:Save:0',
+      observationVersion: 1,
+      ok: true,
+      finalUrl: 'https://example.com/',
+    })
+    expect(await c.next()).toMatchObject({ type: 'click', requestId: clickRequest.requestId, ok: true })
+    await expect(click).resolves.toMatchObject({ ok: true })
+    c.close()
+  })
+
   it('disconnect после отправки click_request возвращает typed unknown-effect', async () => {
     const c = await connectClient()
     await pairWithBootstrap(c)
@@ -708,6 +1066,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-click')
 
     const pending = server.requestClick({
       browserTaskId: activeBt,
@@ -727,6 +1086,41 @@ describe('bridge server — pair attach observe lineage', () => {
     expect((error as UnknownBrowserEffectError).effectReason).toBe('disconnect')
   })
 
+  it('same-tab reattach завершает уже отправленный action как typed unknown-effect', async () => {
+    const c = await connectClient()
+    await pairWithBootstrap(c)
+    const tab = {
+      tabRef: 'tab-reattach',
+      url: 'https://example.com/',
+      title: 't',
+      origin: 'https://example.com',
+    }
+    c.send({ v: BRIDGE_PROTOCOL_VERSION, type: 'attach', requestId: 'a-reattach-1', tab })
+    const firstAttach = await c.next()
+    expect(firstAttach).toMatchObject({ type: 'attach', attachEpoch: 1 })
+    markFresh('tab-reattach')
+
+    const pending = server.requestClick({
+      browserTaskId: activeBt,
+      runId: activeRun,
+      tabRef: 'tab-reattach',
+      elementRef: 'button:Save:0',
+      observationVersion: 1,
+      origin: 'https://example.com',
+      timeoutMs: 2000,
+    })
+    const pendingResult = pending.catch((caught: unknown) => caught)
+    expect(await c.next()).toMatchObject({ type: 'click_request' })
+
+    c.send({ v: BRIDGE_PROTOCOL_VERSION, type: 'attach', requestId: 'a-reattach-2', tab })
+    const secondAttach = await c.next()
+    expect(secondAttach).toMatchObject({ type: 'attach', attachEpoch: 2 })
+    const error = await pendingResult
+    expect(error).toBeInstanceOf(UnknownBrowserEffectError)
+    expect((error as UnknownBrowserEffectError).effectReason).toBe('transport')
+    c.close()
+  })
+
   it('timeout после отправки click_request возвращает typed unknown-effect', async () => {
     const c = await connectClient()
     await pairWithBootstrap(c)
@@ -742,6 +1136,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-click-timeout')
 
     const pending = server.requestClick({
       browserTaskId: activeBt,
@@ -776,6 +1171,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-12')
 
     const pending = server.requestNavigate({
       browserTaskId: activeBt,
@@ -808,6 +1204,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-nav-timeout')
 
     const pending = server.requestNavigate({
       browserTaskId: activeBt,
@@ -840,6 +1237,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-nav-correlation')
 
     const first = server.requestNavigate({
       browserTaskId: activeBt,
@@ -849,6 +1247,7 @@ describe('bridge server — pair attach observe lineage', () => {
       timeoutMs: 2000,
     })
     const firstRequest = await c.next()
+    markFresh('tab-nav-correlation')
     const second = server.requestNavigate({
       browserTaskId: activeBt,
       runId: activeRun,
@@ -917,6 +1316,7 @@ describe('bridge server — pair attach observe lineage', () => {
       },
     })
     await c.next()
+    markFresh('tab-nav-lineage')
 
     const pending = server.requestNavigate({
       browserTaskId: activeBt,
@@ -1038,6 +1438,7 @@ describe('bridge server — pair attach observe lineage', () => {
     ]
 
     for (const action of actions) {
+      markFresh('tab-all-actions')
       const pending = action.start()
       const request = await c.next()
       expect(request.type).toBe(`${action.resultType}_request`)
@@ -1077,6 +1478,7 @@ describe('bridge server — pair attach observe lineage', () => {
     // New server instance = desktop restart
     server = createBridgeServer({
       stateDir: dir,
+      appVersion: TEST_APP_VERSION,
       getActiveBrowserTaskId: () => activeBt,
       getActiveRunId: () => activeRun,
     })
@@ -1094,6 +1496,8 @@ describe('bridge server — pair attach observe lineage', () => {
       requestId: 'h2',
       client: 'chrome-extension',
       extensionId: EXTENSION_ID,
+      extensionVersion: BROWSER_EXTENSION_VERSION,
+      hostVersion: TEST_APP_VERSION,
     })
     await c2.next()
     c2.send({

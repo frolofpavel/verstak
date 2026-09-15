@@ -75,7 +75,16 @@ import { bindAttachedTabToTask, selectBrowserAdapter } from './ai/browser/adapte
 import { parseCapabilityEnvelope, webviewB0Capability } from './ai/browser/capability'
 import { connectedBrowserDataPolicy, localWebviewDataPolicy, parseClientDataPolicy } from './ai/browser/data-policy'
 import type { BrowserAdapter, CapabilityEnvelope, ClientDataPolicy } from './ai/browser/types'
-import { createBridgeServer, installNativeHost, resolveDevHostInstallDir, type BridgeServer } from './ai/browser/bridge'
+import {
+  browserBridgeVersions,
+  createBridgeServer,
+  hasStableInstallOwnerMarker,
+  installNativeHost,
+  resolveDevUserDataOverride,
+  resolveDevHostInstallDir,
+  resolveNativeHostPolicy,
+  type BridgeServer,
+} from './ai/browser/bridge'
 import { switchActiveOnLimit, markAccountSuccess } from './storage/subscription-accounts'
 import { createResolveSubscriptionAccount } from './ai/resolve-subscription-account'
 import { markSuccessForRun, wrapFinishWithSuccess } from './ai/subscription-success'
@@ -163,6 +172,10 @@ import { createReminderService } from './reminders-service'
 import { isInsideProjectIcons } from './storage/project-icons'
 import { registerVoiceIpc } from './ipc/voice'
 import { registerBrowserBridgeIpc } from './ipc/browser-bridge'
+import {
+  isStableOwnershipConfirmed,
+  migrateStableInstallOwnershipOnStartup,
+} from './installer/stable-ownership'
 import { registerMobileRunProxy } from './mobile-bridge/run-proxy'
 import { startMobileBridge } from './mobile-bridge/bootstrap'
 import { bindUiScaleToWindow } from './ui-scale'
@@ -374,8 +387,17 @@ installGlobalQuitHandlers()
 // память/whisper-модель осели в dev-папке) и создавало пустую. setName ДО whenReady и
 // первого getPath('userData'). Держать до любого обращения к путям приложения.
 app.setName('verstak')
-if (!app.isPackaged && process.env.VERSTAK_DEV_USER_DATA_DIR?.trim()) {
-  app.setPath('userData', process.env.VERSTAK_DEV_USER_DATA_DIR.trim())
+const defaultElectronUserDataDir = app.getPath('userData')
+const stableElectronUserDataDir = join(app.getPath('appData'), APP_DISPLAY_NAME)
+const requestedDevUserDataDir = process.env.VERSTAK_DEV_USER_DATA_DIR?.trim()
+const devUserDataOverride = resolveDevUserDataOverride({
+  isPackaged: app.isPackaged,
+  devUserDataDir: requestedDevUserDataDir,
+  defaultUserDataDir: defaultElectronUserDataDir,
+  stableUserDataDir: stableElectronUserDataDir,
+})
+if (devUserDataOverride) {
+  app.setPath('userData', devUserDataOverride)
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
@@ -415,6 +437,19 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   logRuntime('app.ready', { userData: app.getPath('userData') })
   if (!gotSingleInstanceLock) return // вторая копия — ранний выход до операций с БД
+  // Forward migration is deliberately before Native Host ownership policy.
+  // This repairs the first update even when the source installation launched a
+  // pre-R1 helper that copied target bytes without the new marker/uninstaller.
+  const ownershipMigration = migrateStableInstallOwnershipOnStartup({
+    isPackaged: app.isPackaged,
+    installDir: dirname(process.execPath),
+    executablePath: process.execPath,
+    appVersion: app.getVersion(),
+    portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE,
+    portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+    smoke: process.env.VERSTAK_SMOKE,
+  })
+  logRuntime('browser_bridge.stable_ownership_migration', ownershipMigration)
   Menu.setApplicationMenu(null)
   // 2.0.0 security (аудит): webviewTag включён для in-app браузера. Форсим безопасные
   // webPreferences на КАЖДОМ <webview> (renderer-заданные атрибуты не должны их ослабить)
@@ -749,9 +784,26 @@ app.whenReady().then(() => {
   const browserHostInstallDir = process.resourcesPath && app.isPackaged
     ? join(process.resourcesPath, 'browser-bridge')
     : resolveDevHostInstallDir(app.getPath('userData'))
+  const browserHostVersions = browserBridgeVersions(app.getVersion())
+  const browserHostPolicy = resolveNativeHostPolicy({
+    isPackaged: app.isPackaged,
+    portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE,
+    portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+    smoke: process.env.VERSTAK_SMOKE,
+    devNativeHostOptIn: process.env.VERSTAK_DEV_NATIVE_HOST,
+    devUserDataDir: process.env.VERSTAK_DEV_USER_DATA_DIR,
+    defaultUserDataDir: defaultElectronUserDataDir,
+    stableUserDataDir: stableElectronUserDataDir,
+    installedOwnerMarker: app.isPackaged
+      && hasStableInstallOwnerMarker(dirname(process.execPath), process.execPath, app.getVersion()),
+    installedRegistryOwner: app.isPackaged
+      && isStableOwnershipConfirmed(ownershipMigration),
+  })
   try {
-    browserBridge = createBridgeServer({
+    browserBridge = browserHostPolicy.canRegister
+      ? createBridgeServer({
       stateDir: dir,
+      appVersion: app.getVersion(),
       getActiveBrowserTaskId: () => {
         // Prefer lineage from last ai:send (setActiveLineage), then attached tabs map.
         try {
@@ -835,15 +887,24 @@ app.whenReady().then(() => {
       },
       onTaskCancel: (sendId) => { abortSend(sendId) },
       log: (event, detail) => logRuntime(event, detail ?? {}),
-    })
-    void browserBridge.start().then((endpoint) => {
-      logRuntime('browser_bridge.started', { endpoint })
-    }).catch((err) => {
-      logRuntimeError('browser_bridge.start.fail', err)
-      browserBridge = null
-    })
+      })
+      : null
+    if (browserBridge) {
+      void browserBridge.start().then((endpoint) => {
+        logRuntime('browser_bridge.started', { endpoint })
+      }).catch((err) => {
+        logRuntimeError('browser_bridge.start.fail', err)
+        browserBridge = null
+      })
+    } else {
+      logRuntime('browser_bridge.endpoint_skipped', {
+        mode: browserHostPolicy.mode,
+        reason: browserHostPolicy.reason,
+      })
+    }
 
-    // Install/repair native host (HKCU) — dev + packaged.
+    // Install/repair Native Host assets. Stable HKCU ownership is available
+    // only to a confirmed installed package; dev/portable/smoke stay isolated.
     const hostScriptCandidates = [
       join(process.resourcesPath || '', 'browser-bridge', 'host.mjs'),
       join(app.getAppPath(), 'electron', 'ai', 'browser', 'bridge', 'host-runtime.mjs'),
@@ -858,7 +919,7 @@ app.whenReady().then(() => {
         }
       } catch { /* next */ }
     }
-    if (hostSrc) {
+    if (hostSrc && browserHostPolicy.canInstall) {
       // Packaged layout: <app>/Verstak.exe + <app>/resources/browser-bridge/*
       // Relative from host.cmd → ../../Verstak.exe. Absolute bake = primary.
       const result = installNativeHost({
@@ -870,18 +931,24 @@ app.whenReady().then(() => {
         // Packaged: fail-closed without Verstak.exe (no system Node dependency).
         allowNodeFallback: !app.isPackaged,
         force: true,
+        versions: browserHostVersions,
         // smoke-install launches a temporary app copy that is deleted during
         // teardown. Registering its manifest would replace the user's working
         // HKCU NativeMessagingHosts entry with a dangling temp path.
-        registerNativeMessaging: process.env.VERSTAK_SMOKE !== '1',
+        registerNativeMessaging: browserHostPolicy.canRegister,
       })
       logRuntime(result.ok ? 'browser_bridge.host_installed' : 'browser_bridge.host_install_fail', {
         ok: result.ok,
         manifestPath: result.manifestPath,
         error: result.error ?? null,
       })
-    } else {
+    } else if (!hostSrc) {
       logRuntime('browser_bridge.host_script_missing', {})
+    } else {
+      logRuntime('browser_bridge.host_install_skipped', {
+        mode: browserHostPolicy.mode,
+        reason: browserHostPolicy.reason,
+      })
     }
   } catch (err) {
     logRuntimeError('browser_bridge.init.fail', err)
@@ -904,6 +971,8 @@ app.whenReady().then(() => {
       }
       return null
     },
+    hostPolicy: browserHostPolicy,
+    hostVersions: browserHostVersions,
   })
   // Verification Artifact (Фаза 3) — история DoD поверх файла-артефакта.
   // attest_verification пишет строку, Review подтягивает latest по чату.

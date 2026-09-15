@@ -2,11 +2,79 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Browser extension runtime is shipped as plain ESM JavaScript.
 import { createBridgeClient } from '../../browser-extension/bridge-client.mjs'
 
+function bridgeResponseBase(message: Record<string, unknown>): Record<string, unknown> {
+  const base = { type: message.type, requestId: message.requestId, ok: true }
+  return message.type === 'hello'
+    ? {
+        ...base,
+        protocolVersion: 1,
+        hostName: 'ru.verstak.browser_bridge',
+        appVersion: '2.8.2',
+        extensionVersion: '0.2.0',
+        hostVersion: '2.8.2',
+      }
+    : base
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe('browser extension pairing client', () => {
+  it('sends its manifest version and rejects a stale desktop/host response', async () => {
+    const sent: Array<Record<string, unknown>> = []
+    let deliver: ((message: Record<string, unknown>) => void) | null = null
+    const port = {
+      postMessage(message: Record<string, unknown>) {
+        sent.push(message)
+        queueMicrotask(() => deliver?.({
+           type: 'hello', requestId: message.requestId, ok: true,
+          protocolVersion: 1, hostName: 'ru.verstak.browser_bridge',
+          appVersion: '2.8.2', extensionVersion: '0.2.0', hostVersion: '2.8.1',
+        }))
+      },
+      disconnect: vi.fn(),
+      onMessage: { addListener: (fn: typeof deliver) => { deliver = fn } },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    vi.stubGlobal('chrome', {
+      runtime: { id: 'jbhddmgcngdchlgmilphmbbcccfigadb', connectNative: () => port, lastError: null },
+      storage: { local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) } },
+    })
+
+    const client = createBridgeClient()
+    await expect(client.hello()).rejects.toThrow(
+      'Browser Employee несовместим: app=2.8.2, extension=0.2.0, host=2.8.1, protocol=1',
+    )
+    expect(sent[0]).toMatchObject({ type: 'hello', extensionVersion: '0.2.0' })
+  })
+
+  it('rejects a version-compatible response from a foreign Native Host identity', async () => {
+    let deliver: ((message: Record<string, unknown>) => void) | null = null
+    const port = {
+      postMessage(message: Record<string, unknown>) {
+        queueMicrotask(() => deliver?.({
+          ...bridgeResponseBase(message),
+          hostName: 'ru.verstak.foreign_bridge',
+        }))
+      },
+      disconnect: vi.fn(),
+      onMessage: { addListener: (fn: typeof deliver) => { deliver = fn } },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    const connectNative = vi.fn(() => port)
+    vi.stubGlobal('chrome', {
+      runtime: { id: 'jbhddmgcngdchlgmilphmbbcccfigadb', connectNative, lastError: null },
+      storage: { local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) } },
+    })
+
+    const client = createBridgeClient()
+    await expect(client.hello()).rejects.toThrow(
+      'Browser Employee несовместим: native host ru.verstak.foreign_bridge',
+    )
+    expect(connectNative).toHaveBeenCalledWith('ru.verstak.browser_bridge')
+  })
+
   it('все action-result helpers сохраняют requestId входного desktop request', async () => {
     const sent: Array<Record<string, unknown>> = []
     let deliver: ((message: Record<string, unknown>) => void) | null = null
@@ -26,6 +94,13 @@ describe('browser extension pairing client', () => {
 
     const client = createBridgeClient()
     expect(client.connect()).toBe(true)
+    await client.pair(undefined, undefined, { fresh: true })
+    await client.attach({
+      tabRef: 'tab-42',
+      url: 'https://example.com',
+      title: 'Example',
+      origin: 'https://example.com',
+    })
     const common = { browserTaskId: 'bt-1', runId: 'run-1', tabRef: 'tab-42', ok: true }
     const calls: Array<[string, string, Record<string, unknown>]> = [
       ['sendObserve', 'observe', { ...common, snapshot: { text: '', tables: [], source: { url: 'https://example.com', title: 't' } } }],
@@ -48,6 +123,52 @@ describe('browser extension pairing client', () => {
     }
   })
 
+  it('только ответ на desktop observe_request открывает fresh action gate', async () => {
+    let deliver: ((message: Record<string, unknown>) => void) | null = null
+    let attachEpoch = 0
+    const port = {
+      postMessage: (message: Record<string, unknown>) => queueMicrotask(() => {
+        const base = bridgeResponseBase(message)
+        if (message.type === 'pair') {
+          deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired', attachEpoch })
+        } else if (message.type === 'attach') {
+          attachEpoch += 1
+          deliver?.({ ...base, browserTaskId: 'bt-1', runId: 'run-1', state: 'attached', attachEpoch })
+        } else {
+          deliver?.(base)
+        }
+      }),
+      disconnect: vi.fn(),
+      onMessage: { addListener: (fn: typeof deliver) => { deliver = fn } },
+      onDisconnect: { addListener: vi.fn() },
+    }
+    vi.stubGlobal('chrome', {
+      runtime: { id: 'jbhddmgcngdchlgmilphmbbcccfigadb', connectNative: () => port, lastError: null },
+      storage: { local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) } },
+    })
+
+    const client = createBridgeClient()
+    await client.hello()
+    await client.pair(undefined, undefined, { fresh: true })
+    await client.attach({ tabRef: 'tab-42', url: 'https://example.com', origin: 'https://example.com' })
+    const observe = {
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+      snapshot: { text: 'fresh', tables: [], source: { url: 'https://example.com', title: 'Example' } },
+    }
+
+    await client.sendObserve({ ...observe, requestId: 'manual-push' })
+    expect(client.getState()).toMatchObject({ attachEpoch: 1, freshObservation: false })
+
+    await client.sendObserve({
+      ...observe,
+      requestId: 'desktop-observe:1',
+      establishFresh: true,
+    })
+    expect(client.getState()).toMatchObject({ attachEpoch: 1, freshObservation: true })
+  })
+
   it('явный bootstrap-код не смешивается со старым sessionId', async () => {
     const sent: Array<Record<string, unknown>> = []
     let deliver: ((message: Record<string, unknown>) => void) | null = null
@@ -56,7 +177,7 @@ describe('browser extension pairing client', () => {
         sent.push(message)
         queueMicrotask(() => {
           if (message.type === 'hello') {
-            deliver?.({ type: 'hello', requestId: message.requestId, ok: true })
+            deliver?.(bridgeResponseBase(message))
           } else if (message.type === 'pair') {
             deliver?.({
               type: 'pair', requestId: message.requestId, ok: true,
@@ -94,7 +215,7 @@ describe('browser extension pairing client', () => {
       postMessage: (message: Record<string, unknown>) => {
         sent.push(message)
         queueMicrotask(() => deliver?.({
-          type: message.type, requestId: message.requestId, ok: true,
+          ...bridgeResponseBase(message),
           sessionId: 'recovered-session', pairingToken: 'recovered-token', state: 'paired',
         }))
       },
@@ -124,7 +245,7 @@ describe('browser extension pairing client', () => {
     let deliver: ((message: Record<string, unknown>) => void) | null = null
     const port = {
       postMessage: (message: Record<string, unknown>) => queueMicrotask(() => {
-        const base = { type: message.type, requestId: message.requestId, ok: true }
+        const base = bridgeResponseBase(message)
         if (message.type === 'pair') {
           deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
         } else if (message.type === 'attach') {
@@ -173,7 +294,7 @@ describe('browser extension pairing client', () => {
       postMessage(message: Record<string, unknown>) {
         const deliver = messageListeners.at(-1)
         queueMicrotask(() => {
-          const base = { type: message.type, requestId: message.requestId, ok: true }
+          const base = bridgeResponseBase(message)
           if (message.type === 'pair') {
             deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
           } else if (message.type === 'attach') {
@@ -198,19 +319,41 @@ describe('browser extension pairing client', () => {
     await client.hello()
     await client.pair(undefined, undefined, { fresh: true })
     await client.attach({ tabRef: 'tab-42', url: 'https://example.com', origin: 'https://example.com' })
+    await client.sendObserve({
+      requestId: 'observe-before-reconnect',
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+      establishFresh: true,
+      snapshot: {
+        text: 'fresh',
+        tables: [],
+        source: { url: 'https://example.com', title: 'Example' },
+      },
+    })
+    expect(client.getState()).toMatchObject({
+      connectionGeneration: 1,
+      freshObservation: true,
+    })
     client.disconnect()
     const disconnectedState = client.getState()
     expect(disconnectedState).toMatchObject({
       connected: false,
-      sessionId: 'session-1',
       hasPairing: true,
       browserTaskId: null,
       runId: null,
       attachedTab: null,
+      connectionGeneration: 1,
+      freshObservation: false,
     })
+    expect(disconnectedState).not.toHaveProperty('sessionId')
     expect(disconnectedState).not.toHaveProperty('pairingToken')
 
     expect(client.connect()).toBe(true)
+    expect(client.getState()).toMatchObject({
+      connectionGeneration: 2,
+      freshObservation: false,
+    })
     disconnectListeners[0]?.()
     expect(client.getState().connected).toBe(true)
     expect(connectNative).toHaveBeenCalledTimes(2)
@@ -221,7 +364,7 @@ describe('browser extension pairing client', () => {
     let disconnectListener: (() => void) | null = null
     const port = {
       postMessage: (message: Record<string, unknown>) => queueMicrotask(() => {
-        const base = { type: message.type, requestId: message.requestId, ok: true }
+        const base = bridgeResponseBase(message)
         if (message.type === 'pair') {
           deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
         } else if (message.type === 'attach') {
@@ -252,12 +395,12 @@ describe('browser extension pairing client', () => {
     const disconnectedState = client.getState()
     expect(disconnectedState).toMatchObject({
       connected: false,
-      sessionId: 'session-1',
       hasPairing: true,
       browserTaskId: null,
       runId: null,
       attachedTab: null,
     })
+    expect(disconnectedState).not.toHaveProperty('sessionId')
     expect(disconnectedState).not.toHaveProperty('pairingToken')
   })
 })

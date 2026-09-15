@@ -106,6 +106,7 @@ describe('sidepanel activeTab error flow — VSK-EXT-A1-R1 (сценарий 16)
       type: 'bridge.stateChanged',
       state: {
         ui: 'attached',
+        freshObservation: false,
         attachedTab: {
           tabRef: 'tab-42',
           url: 'https://my.calltouch.ru/accounts',
@@ -114,10 +115,25 @@ describe('sidepanel activeTab error flow — VSK-EXT-A1-R1 (сценарий 16)
         },
       },
     })
-    expect(document.getElementById('vsk-status-pill')?.textContent).toMatch(/подключено/i)
+    expect(document.getElementById('vsk-status-pill')?.textContent).toMatch(/вкладка выбрана/i)
     expect(document.getElementById('vsk-page-title')?.textContent).toBe('Calltouch')
     expect((document.getElementById('vsk-prompt-input') as HTMLTextAreaElement).disabled).toBe(false)
     expect((document.getElementById('vsk-send-btn') as HTMLButtonElement).disabled).toBe(false)
+
+    listeners[0]?.({
+      type: 'bridge.stateChanged',
+      state: {
+        ui: 'attached',
+        freshObservation: true,
+        attachedTab: {
+          tabRef: 'tab-42',
+          url: 'https://my.calltouch.ru/accounts',
+          title: 'Calltouch',
+          origin: 'https://my.calltouch.ru',
+        },
+      },
+    })
+    expect(document.getElementById('vsk-status-pill')?.textContent).toMatch(/готово/i)
   })
 
   it('ошибка первого подключения ведёт в Settings без сырого Native Messaging текста', async () => {

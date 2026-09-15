@@ -88,6 +88,10 @@
         "to": "browser-bridge/ru.verstak.browser_bridge.json"
       },
       {
+        "from": "resources/browser-bridge/host-metadata.json",
+        "to": "browser-bridge/host-metadata.json"
+      },
+      {
         "from": "browser-extension",
         "to": "browser-extension",
         "filter": ["**/*", "!**/*.md"]

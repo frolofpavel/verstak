@@ -12,10 +12,11 @@
 
 import { createServer, type Server, type Socket } from 'node:net'
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import {
   BRIDGE_PROTOCOL_VERSION,
+  BROWSER_EXTENSION_VERSION,
   BRIDGE_PIPE_BASENAME,
   EXTENSION_ID,
   NATIVE_HOST_NAME,
@@ -48,9 +49,12 @@ const BROWSER_OFFLINE_MESSAGE =
   'Браузер не подключён. Откройте Настройки → Интеграции → Браузер и проверьте соединение.'
 const BROWSER_TAB_REQUIRED_MESSAGE =
   'Вкладка не выбрана. Откройте нужную страницу и нажмите значок Verstak в браузере.'
+const SOLICITED_OBSERVE_REQUEST_PREFIX = 'desktop-observe:'
 
 export interface PendingObserve {
   requestId: string
+  connectionGeneration: number
+  attachEpoch: number
   browserTaskId: string
   runId: string
   tabRef: string
@@ -59,7 +63,12 @@ export interface PendingObserve {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingClick {
+interface PendingActionIdentity {
+  connectionGeneration: number
+  attachEpoch: number
+}
+
+export interface PendingClick extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -73,7 +82,7 @@ export interface PendingClick {
   settled: boolean
 }
 
-export interface PendingNavigate {
+export interface PendingNavigate extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -84,7 +93,7 @@ export interface PendingNavigate {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingScroll {
+export interface PendingScroll extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -94,18 +103,7 @@ export interface PendingScroll {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingFocus {
-  requestId: string
-  browserTaskId: string
-  runId: string
-  tabRef: string
-  elementRef: string
-  resolve: (result: { ok: true } | { ok: false; error: string }) => void
-  reject: (err: Error) => void
-  timer: ReturnType<typeof setTimeout>
-}
-
-export interface PendingSelect {
+export interface PendingFocus extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -116,7 +114,18 @@ export interface PendingSelect {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingWaitFor {
+export interface PendingSelect extends PendingActionIdentity {
+  requestId: string
+  browserTaskId: string
+  runId: string
+  tabRef: string
+  elementRef: string
+  resolve: (result: { ok: true } | { ok: false; error: string }) => void
+  reject: (err: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+export interface PendingWaitFor extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -126,7 +135,7 @@ export interface PendingWaitFor {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingTypeText {
+export interface PendingTypeText extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -137,7 +146,7 @@ export interface PendingTypeText {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingClearField {
+export interface PendingClearField extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -148,7 +157,7 @@ export interface PendingClearField {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingToggle {
+export interface PendingToggle extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -159,7 +168,7 @@ export interface PendingToggle {
   timer: ReturnType<typeof setTimeout>
 }
 
-export interface PendingPressKey {
+export interface PendingPressKey extends PendingActionIdentity {
   requestId: string
   browserTaskId: string
   runId: string
@@ -194,6 +203,8 @@ type BrowserTaskEvent = { requestId: string; sendId: number; event: unknown }
 export interface BridgeServerDeps {
   /** Каталог userData/storage для pairing file + socket path file. */
   stateDir: string
+  /** Running desktop version. Native host must match it exactly. */
+  appVersion: string
   /** Текущий active browserTaskId (из controller/main). */
   getActiveBrowserTaskId: () => string | null
   /** Текущий active runId. */
@@ -533,6 +544,104 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
     return false
   }
 
+  type PendingAction =
+    | PendingClick
+    | PendingNavigate
+    | PendingScroll
+    | PendingFocus
+    | PendingSelect
+    | PendingWaitFor
+    | PendingTypeText
+    | PendingClearField
+    | PendingToggle
+    | PendingPressKey
+
+  function settlePendingAction(item: PendingAction): void {
+    clearTimeout(item.timer)
+    if ('settled' in item) item.settled = true
+  }
+
+  function rejectPendingActionMap<T extends PendingAction>(
+    pending: Map<string, T>,
+    reason: string,
+    effectReason: 'disconnect' | 'transport' | null,
+  ): void {
+    for (const [id, item] of pending) {
+      settlePendingAction(item)
+      item.reject(effectReason === null
+        ? new Error(reason)
+        : new UnknownBrowserEffectError(reason, effectReason))
+      pending.delete(id)
+    }
+  }
+
+  function rejectPendingActions(
+    reason: string,
+    effectReason: 'disconnect' | 'transport',
+  ): void {
+    rejectPendingActionMap(pendingClicks, reason, effectReason)
+    rejectPendingActionMap(pendingNavigates, reason, effectReason)
+    rejectPendingActionMap(pendingScrolls, reason, effectReason)
+    rejectPendingActionMap(pendingFocuses, reason, effectReason)
+    rejectPendingActionMap(pendingSelects, reason, effectReason)
+    rejectPendingActionMap(pendingWaitFors, reason, null)
+    rejectPendingActionMap(pendingTypeTexts, reason, effectReason)
+    rejectPendingActionMap(pendingClearFields, reason, effectReason)
+    rejectPendingActionMap(pendingToggles, reason, effectReason)
+    rejectPendingActionMap(pendingPressKeys, reason, effectReason)
+  }
+
+  function requireCurrentActionIdentity<T extends PendingAction>(
+    kind: string,
+    pending: T,
+    requestId: string,
+    remove: () => void,
+  ): boolean {
+    const st = session.getState()
+    if (
+      st.connected
+      && st.connectionGeneration === pending.connectionGeneration
+      && st.attachEpoch === pending.attachEpoch
+      && st.attachedTab?.tabRef === pending.tabRef
+      && st.browserTaskId === pending.browserTaskId
+      && st.runId === pending.runId
+    ) {
+      return true
+    }
+    settlePendingAction(pending)
+    remove()
+    const message = `${kind} result устарел после reconnect/reattach/lineage change`
+    pending.reject(kind === 'wait_for'
+      ? new Error(message)
+      : new UnknownBrowserEffectError(message, 'transport'))
+    send(makeError(requestId, 'stale_action', `${kind} result не совпадает с текущим attach epoch`))
+    return false
+  }
+
+  function freshActionError(
+    input: { browserTaskId: string; runId: string; tabRef: string },
+    observationVersion?: number,
+  ): Error | null {
+    const st = session.getState()
+    const fresh = st.freshObservation
+    if (
+      !fresh
+      || fresh.connectionGeneration !== st.connectionGeneration
+      || fresh.attachEpoch !== st.attachEpoch
+      || fresh.browserTaskId !== input.browserTaskId
+      || fresh.runId !== input.runId
+      || fresh.tabRef !== input.tabRef
+    ) {
+      return new Error('fresh observe текущего connection/task/run/tab обязателен перед action')
+    }
+    if (observationVersion != null && fresh.observationVersion !== observationVersion) {
+      return new Error(
+        `stale observation version — expected ${fresh.observationVersion}, got ${observationVersion}`,
+      )
+    }
+    return null
+  }
+
   function handleInbound(msg: BridgeInbound): void {
     switch (msg.type) {
       case 'hello': {
@@ -547,6 +656,16 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
             'forbidden_extension',
             `extension id ${msg.extensionId} не в allowlist`,
           ))
+          return
+        }
+        const versionReason = (
+          msg.extensionVersion !== BROWSER_EXTENSION_VERSION
+          || msg.hostVersion !== deps.appVersion
+        )
+          ? `Browser Employee несовместим: app=${deps.appVersion}, extension=${String(msg.extensionVersion || 'нет')}, host=${String(msg.hostVersion || 'нет')}, protocol=${BRIDGE_PROTOCOL_VERSION}`
+          : null
+        if (versionReason) {
+          send(makeError(msg.requestId, 'version_incompatible', versionReason))
           return
         }
         if (!socketAuth || socketAuth.socket !== client) {
@@ -567,6 +686,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           protocolVersion: BRIDGE_PROTOCOL_VERSION,
           hostName: NATIVE_HOST_NAME,
           desktopOnline: true,
+          appVersion: deps.appVersion,
+          extensionVersion: BROWSER_EXTENSION_VERSION,
+          hostVersion: deps.appVersion,
         })
         return
       }
@@ -614,9 +736,10 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           browserTaskId: st.browserTaskId,
           runId: st.runId,
           state: st.ui,
+          attachEpoch: st.attachEpoch,
         })
         log('bridge.paired', {
-          sessionId: verified.session.sessionId,
+          sessionFp: tokenFingerprint(verified.session.sessionId),
           isBootstrap: verified.isBootstrap,
           tokenFp: tokenFingerprint(verified.session.pairingToken),
         })
@@ -638,6 +761,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
             browserTaskId: null,
             runId: null,
             attachedTab: null,
+            attachEpoch: 0,
             error: session.getState().lastError,
           })
           return
@@ -654,6 +778,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           browserTaskId: st.browserTaskId ?? deps.getActiveBrowserTaskId(),
           runId: st.runId ?? deps.getActiveRunId(),
           attachedTab: st.attachedTab,
+          attachEpoch: st.attachEpoch,
           error: st.lastError,
         })
         return
@@ -747,6 +872,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       }
       case 'attach': {
         if (!requireAuth(msg.requestId)) return
+        rejectPendingActions('attach identity changed after browser action dispatch', 'transport')
         // Prefer explicit browserTaskId from msg or active desktop lineage.
         // Never invent attach auth from global file alone (already gated by requireAuth).
         const bt =
@@ -769,12 +895,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           browserTaskId: bt,
           tabRef: msg.tab.tabRef,
           state: st.ui,
+          attachEpoch: st.attachEpoch,
         })
         log('bridge.attach', { browserTaskId: bt, tabRef: msg.tab.tabRef, origin: msg.tab.origin })
         return
       }
       case 'detach': {
         if (!requireAuth(msg.requestId)) return
+        rejectPendingActions('detach changed identity after browser action dispatch', 'transport')
         const st0 = session.getState()
         const bt = msg.browserTaskId || st0.browserTaskId
         detachActiveBrowserSend(client || undefined)
@@ -788,6 +916,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           requestId: msg.requestId,
           ok: true,
           state: session.getState().ui,
+          attachEpoch: session.getState().attachEpoch,
         })
         log('bridge.detach', { browserTaskId: bt })
         return
@@ -803,6 +932,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           if (!msg.ok || !msg.snapshot) {
             pending.reject(new Error(`observe failed: ${msg.error || 'extension capture failed'}`))
           } else {
+            const markedFresh = session.markFreshObservation({
+              connectionGeneration: pending.connectionGeneration,
+              attachEpoch: pending.attachEpoch,
+              browserTaskId: msg.browserTaskId,
+              runId: msg.runId,
+              tabRef: msg.tabRef,
+              observationVersion: msg.snapshot.observationVersion ?? 0,
+            })
+            if (!markedFresh) {
+              pending.reject(new Error('observe устарел: connection/attach lineage изменился'))
+              send(makeError(
+                msg.requestId,
+                'stale_observe',
+                'observe устарел: connection/attach lineage изменился (fail-closed)',
+              ))
+              return
+            }
             pending.resolve(msg.snapshot)
           }
           send({
@@ -815,6 +961,15 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
             browserTaskId: msg.browserTaskId,
             runId: msg.runId,
           })
+          return
+        }
+
+        // Desktop-issued request ids use a reserved namespace. Once their
+        // pending entry is gone (timeout/disconnect/settle), a late reply can
+        // never be reclassified as an unsolicited push and refresh action state.
+        if (msg.requestId.startsWith(SOLICITED_OBSERVE_REQUEST_PREFIX)) {
+          send(makeError(msg.requestId, 'stale_observe', 'observe reply больше не ожидается (fail-closed)'))
+          log('bridge.observe_late_or_replay', { requestId: msg.requestId })
           return
         }
 
@@ -846,6 +1001,11 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           ))
           return
         }
+        // A push has no request-bound attachEpoch on the wire. It may have
+        // started before a same-tab detach/reattach, so it is advisory only:
+        // deliver it to the optional observer, but never establish (and always
+        // invalidate) action freshness. Actions require solicited requestObserve.
+        session.invalidateFreshObservation()
         try {
           deps.onObservePush?.({
             browserTaskId: msg.browserTaskId,
@@ -904,6 +1064,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           })
           return
         }
+        if (!requireCurrentActionIdentity('click', pending, msg.requestId, () => {
+          pendingClicks.delete(msg.requestId)
+        })) return
         pending.settled = true
         clearTimeout(pending.timer)
         pendingClicks.delete(msg.requestId)
@@ -925,6 +1088,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           return
         }
         if (!requireResultLineage('navigate', pending, msg)) return
+        if (!requireCurrentActionIdentity('navigate', pending, msg.requestId, () => {
+          pendingNavigates.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingNavigates.delete(msg.requestId)
         if (msg.ok) {
@@ -943,6 +1109,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           return
         }
         if (!requireResultLineage('scroll', pending, msg)) return
+        if (!requireCurrentActionIdentity('scroll', pending, msg.requestId, () => {
+          pendingScrolls.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingScrolls.delete(msg.requestId)
         if (msg.ok) {
@@ -961,6 +1130,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           return
         }
         if (!requireResultLineage('focus', pending, msg)) return
+        if (!requireCurrentActionIdentity('focus', pending, msg.requestId, () => {
+          pendingFocuses.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingFocuses.delete(msg.requestId)
         if (msg.ok) {
@@ -979,6 +1151,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           return
         }
         if (!requireResultLineage('select_option', pending, msg)) return
+        if (!requireCurrentActionIdentity('select_option', pending, msg.requestId, () => {
+          pendingSelects.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingSelects.delete(msg.requestId)
         if (msg.ok) {
@@ -997,6 +1172,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           return
         }
         if (!requireResultLineage('wait_for', pending, msg)) return
+        if (!requireCurrentActionIdentity('wait_for', pending, msg.requestId, () => {
+          pendingWaitFors.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingWaitFors.delete(msg.requestId)
         if (msg.ok) {
@@ -1020,6 +1198,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           }
           return
         }
+        if (!requireCurrentActionIdentity('type_text', pending, msg.requestId, () => {
+          pendingTypeTexts.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingTypeTexts.delete(msg.requestId)
         if (msg.ok) {
@@ -1043,6 +1224,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           }
           return
         }
+        if (!requireCurrentActionIdentity('clear_field', pending, msg.requestId, () => {
+          pendingClearFields.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingClearFields.delete(msg.requestId)
         if (msg.ok) {
@@ -1066,6 +1250,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           }
           return
         }
+        if (!requireCurrentActionIdentity('toggle', pending, msg.requestId, () => {
+          pendingToggles.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingToggles.delete(msg.requestId)
         if (msg.ok) {
@@ -1089,6 +1276,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           }
           return
         }
+        if (!requireCurrentActionIdentity('press_key', pending, msg.requestId, () => {
+          pendingPressKeys.delete(msg.requestId)
+        })) return
         clearTimeout(pending.timer)
         pendingPressKeys.delete(msg.requestId)
         if (msg.ok) {
@@ -1135,25 +1325,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       }
     }
     clear(pendingObserves)
-    for (const [id, item] of pendingClicks) {
-      clearTimeout(item.timer)
-      item.settled = true
-      item.reject(new UnknownBrowserEffectError(reason, 'disconnect'))
-      pendingClicks.delete(id)
-    }
-    for (const [id, item] of pendingNavigates) {
-      clearTimeout(item.timer)
-      item.reject(new UnknownBrowserEffectError(reason, 'disconnect'))
-      pendingNavigates.delete(id)
-    }
-    clear(pendingScrolls)
-    clear(pendingFocuses)
-    clear(pendingSelects)
-    clear(pendingWaitFors)
-    clear(pendingTypeTexts)
-    clear(pendingClearFields)
-    clear(pendingToggles)
-    clear(pendingPressKeys)
+    rejectPendingActions(reason, 'disconnect')
   }
 
   function detachClient(expected?: Socket): void {
@@ -1198,10 +1370,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           authenticated: false,
           extensionId: null,
         }
-        session.setConnected(true)
-        session.setError(null)
-        // clearLiveAuth already ensures no inherited attach from previous client.
         session.clearLiveAuth()
+        session.beginConnection()
+        session.setError(null)
         log('bridge.client_connected', {})
         const socketDecoder = new NativeFrameDecoder()
         socket.on('data', (chunk) => onSocketData(
@@ -1295,6 +1466,10 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
     },
 
     setActiveLineage(btId, rId) {
+      const st = session.getState()
+      if (st.browserTaskId !== btId || st.runId !== rId) {
+        rejectPendingActions('browser task lineage changed after action dispatch', 'transport')
+      }
       session.setActiveRun(btId, rId)
     },
 
@@ -1368,7 +1543,14 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       if (/[{};<>]|document\.|querySelector|eval\(/i.test(elementRef)) {
         return Promise.reject(new Error('elementRef looks like raw CSS/JS — rejected'))
       }
+      const freshnessError = freshActionError({
+        browserTaskId: input.browserTaskId,
+        runId: input.runId,
+        tabRef,
+      }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
 
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
 
@@ -1387,6 +1569,8 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         }, timeoutMs)
         pendingClicks.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1432,7 +1616,7 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
       }
 
-      const requestId = randomUUID()
+      const requestId = `${SOLICITED_OBSERVE_REQUEST_PREFIX}${randomUUID()}`
       const timeoutMs = input.timeoutMs ?? observeTimeout
 
       return new Promise<BridgePageSnapshot>((resolve, reject) => {
@@ -1442,6 +1626,8 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         }, timeoutMs)
         pendingObserves.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1471,6 +1657,9 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef })
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? observeTimeout
       return new Promise((resolve, reject) => {
@@ -1483,6 +1672,8 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
         }, timeoutMs)
         pendingNavigates.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1513,15 +1704,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef })
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingScrolls.delete(requestId)
-          reject(new Error(`scroll timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `scroll timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingScrolls.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1552,15 +1751,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingFocuses.delete(requestId)
-          reject(new Error(`focus timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `focus timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingFocuses.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1592,15 +1799,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingSelects.delete(requestId)
-          reject(new Error(`select_option timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `select_option timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingSelects.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1633,15 +1848,20 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef })
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? Math.max(Number(input.condition?.timeoutMs || 15000), 1000)
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingWaitFors.delete(requestId)
-          resolve({ ok: false, reason: 'timeout' })
+          reject(new Error(`wait_for timeout ${timeoutMs}ms`))
         }, timeoutMs + 2000)
         pendingWaitFors.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1671,15 +1891,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingTypeTexts.delete(requestId)
-          reject(new Error(`type_text timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `type_text timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingTypeTexts.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1714,15 +1942,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingClearFields.delete(requestId)
-          reject(new Error(`clear_field timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `clear_field timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingClearFields.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1754,15 +1990,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingToggles.delete(requestId)
-          reject(new Error(`toggle timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `toggle timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingToggles.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,
@@ -1794,15 +2038,23 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
       const st = session.getState()
       const tabRef = input.tabRef || st.attachedTab?.tabRef
       if (!tabRef) return Promise.reject(new Error(BROWSER_TAB_REQUIRED_MESSAGE))
+      const freshnessError = freshActionError({ ...input, tabRef }, input.observationVersion)
+      if (freshnessError) return Promise.reject(freshnessError)
+      session.invalidateFreshObservation()
       const requestId = randomUUID()
       const timeoutMs = input.timeoutMs ?? clickTimeout
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pendingPressKeys.delete(requestId)
-          reject(new Error(`press_key timeout ${timeoutMs}ms`))
+          reject(new UnknownBrowserEffectError(
+            `press_key timeout ${timeoutMs}ms (uncertain, no auto-retry)`,
+            'timeout',
+          ))
         }, timeoutMs)
         pendingPressKeys.set(requestId, {
           requestId,
+          connectionGeneration: st.connectionGeneration,
+          attachEpoch: st.attachEpoch,
           browserTaskId: input.browserTaskId,
           runId: input.runId,
           tabRef,

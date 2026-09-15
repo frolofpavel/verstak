@@ -1,6 +1,10 @@
 import { existsSync } from 'fs'
 import { dirname, join, relative } from 'path'
 import { nativeFsPromises } from './native-fs'
+import {
+  NATIVE_HOST_OWNER_MARKER,
+  nativeHostOwnerMarker,
+} from '../../shared/contracts/native-host-owner'
 
 const { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } = nativeFsPromises
 
@@ -14,6 +18,7 @@ import { homedir } from 'os'
 import type { InstallDefaults, InstallProgress, InstallResult } from './types'
 import { detectRunningInstall, probeLock, RUNNING_INSTALL_MESSAGE, type LockProbe } from './running-check'
 import { createShortcut, psQuote, runPowerShell, setUninstallRegistry } from './shell'
+import { acquireNativeHostOwnershipLease } from '../ai/browser/bridge/host-lifecycle'
 import {
   defaultInstallDir,
   installedExePath,
@@ -171,26 +176,253 @@ export async function commitInstall(installDir: string, ledger: InstallLedger): 
   }
 }
 
-function buildUninstallScript(installDir: string): string {
+export function buildUninstallScript(installDir: string): string {
   const desktop = join(homedir(), 'Desktop', 'Verstak.lnk')
   const startMenu = join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Verstak.lnk')
   return `# Verstak uninstall helper
 $ErrorActionPreference = 'Stop'
 $dir = '${psQuote(installDir)}'
+$ownedNativeHostManifest = [IO.Path]::GetFullPath((Join-Path $dir 'resources\\browser-bridge\\ru.verstak.browser_bridge.json'))
 $shortcuts = @(
   '${psQuote(desktop)}',
   '${psQuote(startMenu)}'
 )
-foreach ($lnk in $shortcuts) {
-  if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+# EXT-B1 Connected Eyes: compare-and-delete. An old uninstaller must not remove
+# a registry value already transferred to a newer/different stable install.
+$nativeHostKeys = @(
+  [PSCustomObject]@{ Key = 'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\ru.verstak.browser_bridge'; SubKey = 'Software\\Google\\Chrome\\NativeMessagingHosts\\ru.verstak.browser_bridge' },
+  [PSCustomObject]@{ Key = 'HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\ru.verstak.browser_bridge'; SubKey = 'Software\\Microsoft\\Edge\\NativeMessagingHosts\\ru.verstak.browser_bridge' }
+)
+
+function Test-VerstakNativeHostPathEqual {
+  param([string]$Left, [string]$Right)
+  if (-not $Left -or -not $Right) { return $false }
+  try {
+    return [string]::Equals([IO.Path]::GetFullPath($Left), [IO.Path]::GetFullPath($Right), [StringComparison]::OrdinalIgnoreCase)
+  } catch {
+    return $false
+  }
 }
-if (Test-Path -LiteralPath $dir) {
-  Remove-Item -LiteralPath $dir -Recurse -Force
+
+# These function guards let the production-shaped test harness replace only
+# the registry transport. Production always uses one writable parent key for
+# compare + delete and one writable child key for compare + restore + readback.
+if (-not (Get-Command -Name Get-VerstakNativeHostSnapshot -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Get-VerstakNativeHostSnapshot {
+    param([string]$SubKeyPath)
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($SubKeyPath, $false)
+    if ($null -eq $key) { return [PSCustomObject]@{ State = 'absent'; Value = $null } }
+    try {
+      $value = $key.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      if ($null -eq $value) { return [PSCustomObject]@{ State = 'absent'; Value = $null } }
+      return [PSCustomObject]@{ State = 'present'; Value = [string]$value }
+    } finally {
+      $key.Dispose()
+    }
+  }
 }
-Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ru.verstak.ide' -Recurse -Force -ErrorAction SilentlyContinue
-# EXT-B1 Connected Eyes: native messaging host cleanup
-Remove-Item -Path 'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\ru.verstak.browser_bridge' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\ru.verstak.browser_bridge' -Recurse -Force -ErrorAction SilentlyContinue
+
+if (-not (Get-Command -Name Remove-VerstakNativeHostIfOwned -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Remove-VerstakNativeHostIfOwned {
+    param([string]$SubKeyPath, [string]$ExpectedValue)
+    $operation = 'VERSTAK_NATIVE_HOST_DELETE_IF_MATCH_V2'
+    $slash = $SubKeyPath.LastIndexOf('\\')
+    if ($slash -lt 1) { throw 'Native Host registry key has no parent' }
+    $parentPath = $SubKeyPath.Substring(0, $slash)
+    $leaf = $SubKeyPath.Substring($slash + 1)
+    $parent = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($parentPath, $true)
+    if ($null -eq $parent) { return [PSCustomObject]@{ State = 'absent'; Value = $null } }
+    try {
+      $currentKey = $parent.OpenSubKey($leaf, $false)
+      if ($null -eq $currentKey) { return [PSCustomObject]@{ State = 'absent'; Value = $null } }
+      try {
+        $current = $currentKey.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      } finally {
+        $currentKey.Dispose()
+      }
+      if ($null -eq $current) { return [PSCustomObject]@{ State = 'absent'; Value = $null } }
+      if (-not (Test-VerstakNativeHostPathEqual ([string]$current) $ExpectedValue)) {
+        return [PSCustomObject]@{ State = 'successor'; Value = [string]$current }
+      }
+      # Compare and delete are performed through the same writable parent
+      # RegistryKey. No provider-level Test-Path/Get-Item/Remove-Item split.
+      $parent.DeleteSubKeyTree($leaf, $false)
+      $afterKey = $parent.OpenSubKey($leaf, $false)
+      if ($null -eq $afterKey) { return [PSCustomObject]@{ State = 'deleted'; Value = $null } }
+      try {
+        $after = $afterKey.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      } finally {
+        $afterKey.Dispose()
+      }
+      if ($null -ne $after -and -not (Test-VerstakNativeHostPathEqual ([string]$after) $ExpectedValue)) {
+        return [PSCustomObject]@{ State = 'successor'; Value = [string]$after }
+      }
+      throw "Native Host registry key still exists after delete: $SubKeyPath"
+    } finally {
+      $parent.Dispose()
+    }
+  }
+}
+
+if (-not (Get-Command -Name Restore-VerstakNativeHostIfUnchanged -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Restore-VerstakNativeHostIfUnchanged {
+    param([string]$SubKeyPath, [string]$ExpectedState, [string]$ExpectedValue, [string]$PreviousValue)
+    $operation = 'VERSTAK_NATIVE_HOST_RESTORE_IF_UNCHANGED_V2'
+    $slash = $SubKeyPath.LastIndexOf('\\')
+    if ($slash -lt 1) { throw 'Native Host registry key has no parent' }
+    $parentPath = $SubKeyPath.Substring(0, $slash)
+    $leaf = $SubKeyPath.Substring($slash + 1)
+    $parent = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($parentPath, $true)
+    if ($null -eq $parent -and $ExpectedState -eq 'absent') {
+      $parent = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($parentPath)
+    }
+    if ($null -eq $parent) { return [PSCustomObject]@{ State = 'successor'; Value = $null } }
+    try {
+      # Open the child writable once. The expected-current comparison, write,
+      # flush and readback all happen on this same RegistryKey handle.
+      $currentKey = $parent.OpenSubKey($leaf, $true)
+      $current = if ($null -eq $currentKey) {
+        $null
+      } else {
+        $currentKey.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      }
+      $matchesExpected = ($ExpectedState -eq 'absent' -and $null -eq $current) -or (
+        $ExpectedState -eq 'present' -and $null -ne $current -and (Test-VerstakNativeHostPathEqual ([string]$current) $ExpectedValue)
+      )
+      if (-not $matchesExpected) {
+        if ($null -ne $currentKey) { $currentKey.Dispose() }
+        $successorValue = if ($null -eq $current) { $null } else { [string]$current }
+        return [PSCustomObject]@{ State = 'successor'; Value = $successorValue }
+      }
+      if ($null -eq $currentKey) {
+        $currentKey = $parent.CreateSubKey($leaf)
+        $racedValue = $currentKey.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -ne $racedValue) {
+          $currentKey.Dispose()
+          return [PSCustomObject]@{ State = 'successor'; Value = [string]$racedValue }
+        }
+      }
+      try {
+        $currentKey.SetValue($null, $PreviousValue, [Microsoft.Win32.RegistryValueKind]::String)
+        $currentKey.Flush()
+        $restored = $currentKey.GetValue($null, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -eq $restored -or -not (Test-VerstakNativeHostPathEqual ([string]$restored) $PreviousValue)) {
+          throw "Native Host registry rollback readback mismatch: $SubKeyPath"
+        }
+      } finally {
+        $currentKey.Dispose()
+      }
+      return [PSCustomObject]@{ State = 'restored'; Value = $PreviousValue }
+    } finally {
+      $parent.Dispose()
+    }
+  }
+}
+
+
+if (-not (Get-Command -Name Get-VerstakInstallLocation -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Get-VerstakInstallLocation {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ru.verstak.ide', $false)
+    if ($null -eq $key) { return $null }
+    try {
+      return $key.GetValue('InstallLocation', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    } finally { $key.Dispose() }
+  }
+}
+if (-not (Get-Command -Name Remove-VerstakInstallRegistrationIfOwned -CommandType Function -ErrorAction SilentlyContinue)) {
+  function Remove-VerstakInstallRegistrationIfOwned {
+    param([string]$ExpectedDir)
+    $parent = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', $true)
+    if ($null -eq $parent) { return $false }
+    try {
+      $key = $parent.OpenSubKey('ru.verstak.ide', $false)
+      if ($null -eq $key) { return $false }
+      try {
+        $current = $key.GetValue('InstallLocation', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      } finally { $key.Dispose() }
+      if (-not [string]::Equals([string]$current, $ExpectedDir, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+      $parent.DeleteSubKeyTree('ru.verstak.ide', $false)
+      $after = $parent.OpenSubKey('ru.verstak.ide', $false)
+      if ($null -ne $after) {
+        $after.Dispose()
+        throw 'Stable uninstall registry deletion readback mismatch'
+      }
+      return $true
+    } finally { $parent.Dispose() }
+  }
+}
+$ownershipMutex = [Threading.Mutex]::new($false, 'Local\\Verstak.StableOwnership.v1')
+$ownershipLockAcquired = $false
+try {
+  try { $ownershipLockAcquired = $ownershipMutex.WaitOne(15000) }
+  catch [Threading.AbandonedMutexException] { $ownershipLockAcquired = $true }
+  if (-not $ownershipLockAcquired) { throw 'Stable ownership mutex timeout' }
+  $currentInstallLocation = Get-VerstakInstallLocation
+  if (-not [string]::Equals([string]$currentInstallLocation, $dir, [StringComparison]::OrdinalIgnoreCase)) { return }
+
+$nativeHostOwnership = @()
+$nativeHostPreflightErrors = @()
+foreach ($keySpec in $nativeHostKeys) {
+  try {
+    $snapshot = Get-VerstakNativeHostSnapshot $keySpec.SubKey
+    if ($snapshot.State -eq 'present' -and (Test-VerstakNativeHostPathEqual ([string]$snapshot.Value) $ownedNativeHostManifest)) {
+      $nativeHostOwnership += [PSCustomObject]@{ Key = $keySpec.Key; SubKey = $keySpec.SubKey; Value = [string]$snapshot.Value }
+    }
+  } catch {
+    $nativeHostPreflightErrors += "$($keySpec.Key): $($_.Exception.Message)"
+  }
+}
+if ($nativeHostPreflightErrors.Count -gt 0) {
+  throw "Native Host cleanup preflight failed: $($nativeHostPreflightErrors -join '; ')"
+}
+
+$deletedNativeHostKeys = @()
+try {
+  foreach ($entry in $nativeHostOwnership) {
+    $deleteResult = Remove-VerstakNativeHostIfOwned $entry.SubKey $entry.Value
+    if ($deleteResult.State -eq 'deleted') {
+      $deletedNativeHostKeys += $entry
+    } elseif ($deleteResult.State -ne 'absent' -and $deleteResult.State -ne 'successor') {
+      throw "Native Host registry key still exists after delete: $($entry.Key)"
+    }
+  }
+
+  # File cleanup is part of the same Native Host transaction. If it fails while
+  # the owned manifest still exists, restore registry ownership with CAS.
+  foreach ($lnk in $shortcuts) {
+    if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force -ErrorAction Stop }
+  }
+  if (Test-Path -LiteralPath $dir) {
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop
+  }
+} catch {
+  $nativeHostCleanupFailure = $_.Exception.Message
+  $nativeHostRollbackErrors = @()
+  if (-not (Test-Path -LiteralPath $ownedNativeHostManifest)) {
+    $nativeHostRollbackErrors += 'owned Native Host manifest is missing; registry rollback would be unsafe'
+  } else {
+    foreach ($entry in $deletedNativeHostKeys) {
+      try {
+        $restoreResult = Restore-VerstakNativeHostIfUnchanged $entry.SubKey 'absent' $null $entry.Value
+        if ($restoreResult.State -ne 'restored' -and $restoreResult.State -ne 'already' -and $restoreResult.State -ne 'successor') {
+          throw "Native Host registry rollback readback mismatch: $($entry.Key)"
+        }
+      } catch {
+        $nativeHostRollbackErrors += "$($entry.Key): $($_.Exception.Message)"
+      }
+    }
+  }
+  if ($nativeHostRollbackErrors.Count -gt 0) {
+    throw "Native Host cleanup failed: $nativeHostCleanupFailure; rollback failed: $($nativeHostRollbackErrors -join '; ')"
+  }
+  throw "Native Host cleanup failed: $nativeHostCleanupFailure; registry rollback completed"
+}
+
+Remove-VerstakInstallRegistrationIfOwned $dir | Out-Null
+} finally {
+  if ($ownershipLockAcquired) { $ownershipMutex.ReleaseMutex() }
+  $ownershipMutex.Dispose()
+}
 `
 }
 
@@ -209,6 +441,27 @@ async function writeUninstaller(installDir: string, ledger: InstallLedger): Prom
   }
   await writeFile(scriptPath, buildUninstallScript(installDir), 'utf8')
   return scriptPath
+}
+
+async function writeNativeHostOwnerMarker(
+  installDir: string,
+  version: string,
+  ledger: InstallLedger,
+): Promise<void> {
+  const path = join(installDir, NATIVE_HOST_OWNER_MARKER)
+  if (existsSync(path)) {
+    const backup = `${path}${INSTALL_BACKUP_SUFFIX}`
+    await rm(backup, { force: true }).catch(() => {})
+    await rename(path, backup)
+    ledger.replaced.push(NATIVE_HOST_OWNER_MARKER)
+  } else {
+    ledger.created.push(NATIVE_HOST_OWNER_MARKER)
+  }
+  await writeFile(
+    path,
+    JSON.stringify(nativeHostOwnerMarker(version, installDir, installedExePath(installDir)), null, 2),
+    'utf8',
+  )
 }
 
 async function createShortcuts(installDir: string): Promise<void> {
@@ -268,11 +521,32 @@ export async function rollbackInstall(
   }
 }
 
-export async function runInstall(
+type InstallDependencies = {
+  acquireOwnershipLease?: typeof acquireNativeHostOwnershipLease
+  probeLock?: LockProbe
+  payloadRoot?: string
+  createShortcuts?: typeof createShortcuts
+  setUninstallRegistry?: typeof setUninstallRegistry
+}
+
+export async function runInstall(installDir: string, version: string,
+  onProgress: (p: InstallProgress) => void, deps: InstallDependencies = {}): Promise<InstallResult> {
+  let lease: ReturnType<typeof acquireNativeHostOwnershipLease> | undefined
+  try {
+    lease = (deps.acquireOwnershipLease ?? acquireNativeHostOwnershipLease)()
+    return await runInstallLocked(installDir, version, onProgress, deps)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    lease?.release()
+  }
+}
+
+async function runInstallLocked(
   installDir: string,
   version: string,
   onProgress: (p: InstallProgress) => void,
-  deps: { probeLock?: LockProbe } = {},
+  deps: InstallDependencies,
 ): Promise<InstallResult> {
   const normalized = installDir.trim()
   if (!normalized) return { ok: false, error: 'Укажите папку установки.' }
@@ -289,30 +563,36 @@ export async function runInstall(
   let payloadRoot = ''
   try {
     emit(onProgress, { phase: 'preparing' }, 0, 0, 0, 0, '')
-    payloadRoot = resolvePayloadRoot()
+    payloadRoot = deps.payloadRoot ?? resolvePayloadRoot()
 
     await removeStaleUnpacked(normalized)
     await copyPayload(payloadRoot, normalized, onProgress, ledger)
+    // Only the real installer writes this marker. win-unpacked and Portable do
+    // not get ordinary HKCU NativeMessagingHosts ownership merely by launching.
+    await writeNativeHostOwnerMarker(normalized, version, ledger)
 
     emit(onProgress, { phase: 'shortcuts' }, 0, 0, 0, 0, '')
-    await createShortcuts(normalized)
+    await (deps.createShortcuts ?? createShortcuts)(normalized)
 
     const uninstallPs1 = await writeUninstaller(normalized, ledger)
     const exe = installedExePath(normalized)
     const uninstallString = `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${uninstallPs1}"`
 
     emit(onProgress, { phase: 'registry' }, 0, 0, 0, 0, '')
-    setUninstallRegistry({
+    const writeRegistry = deps.setUninstallRegistry ?? setUninstallRegistry
+    writeRegistry({
       displayName: 'Verstak',
       displayVersion: version,
       publisher: 'Pavel Frolov',
       installLocation: normalized,
       uninstallString,
       displayIcon: `${exe},0`,
-    })
+    }, true)
 
     await commitInstall(normalized, ledger)
-    emit(onProgress, { phase: 'done', percent: 100 }, 0, 0, 0, 0, '')
+    // Backups are gone: a closed renderer cannot turn a committed install into
+    // rollback. Terminal notification is best-effort after the commit boundary.
+    try { emit(onProgress, { phase: 'done', percent: 100 }, 0, 0, 0, 0, '') } catch { /* committed */ }
     return { ok: true, installDir: normalized }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

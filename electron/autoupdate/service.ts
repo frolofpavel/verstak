@@ -23,6 +23,7 @@ import {
   legacyStagingRoot,
   legacyUpdaterRoot,
   payloadRoot,
+  payloadHelperPath,
   payloadVersionDir,
   sevenZipPath,
 } from './paths'
@@ -575,17 +576,19 @@ export class AutoUpdateService {
       this.fail(version, 'Не удалось установить обновление автоматически. Скачайте новую версию вручную со страницы релизов на GitHub.', true, 'install-failed')
       return { ok: false, reason: 'node-missing' }
     }
-    if (!existsSync(helperPath())) {
+    const installHelper = payloadHelperPath(root)
+    if (!existsSync(installHelper)) {
       this.fail(version, 'Не найден helper автообновления', true, 'install-failed')
-      logAutoUpdate('install.reject', { version, root, reason: 'helper-missing', helperPath: helperPath() })
+      logAutoUpdate('install.reject', { version, root, reason: 'target-helper-missing', helperPath: installHelper })
       return { ok: false, reason: 'helper-missing' }
     }
     this.setState({ status: 'install_requested', version, payloadRoot: root, installDir: currentInstallDir(), percent: 100, step: 'install' })
     const args = [
-      helperPath(),
+      installHelper,
       '--command=install',
       `--root=${autoUpdateRoot()}`,
       `--version=${version}`,
+      `--source-version=${app.getVersion()}`,
       `--payload=${root}`,
       `--install-dir=${currentInstallDir()}`,
       `--parent-pid=${process.pid}`,

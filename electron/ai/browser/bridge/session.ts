@@ -32,6 +32,18 @@ export interface BootstrapCode {
   used: boolean
 }
 
+export interface BridgeFreshObservation {
+  /** Monotonic generation of the accepted native socket that produced this snapshot. */
+  connectionGeneration: number
+  /** Monotonic identity of the attach that produced this snapshot. */
+  attachEpoch: number
+  browserTaskId: string
+  runId: string
+  tabRef: string
+  observationVersion: number
+  observedAt: number
+}
+
 export interface BridgeSessionState {
   ui: BridgeUiState
   /** Live sessionId только после успешного pair на текущем соединении. */
@@ -46,6 +58,12 @@ export interface BridgeSessionState {
   attachedTab: BridgeTabInfo | null
   lastError: string | null
   connected: boolean
+  /** Increments for every newly accepted native socket. Never restored from disk. */
+  connectionGeneration: number
+  /** Increments for every attach, even when the same tabRef is attached again. */
+  attachEpoch: number
+  /** Fresh only for the exact current generation + task/run/tab lineage. */
+  freshObservation: BridgeFreshObservation | null
   desktopOnline: boolean
   /** Есть ли durable pairing file (для UI «нужен re-pair» / bootstrap). */
   hasDurablePairing: boolean
@@ -77,6 +95,18 @@ export interface BridgeSessionStore {
     sessionId: string | undefined,
   ): { ok: true; session: PairingFile; isBootstrap: boolean } | { ok: false; reason: string }
   markPaired(session: PairingFile): void
+  /** Start a new native-socket generation and invalidate all prior snapshots. */
+  beginConnection(): number
+  /** Record a successful observe only when it still matches the live attach lineage. */
+  markFreshObservation(input: {
+    connectionGeneration: number
+    attachEpoch: number
+    browserTaskId: string
+    runId: string
+    tabRef: string
+    observationVersion: number
+  }): boolean
+  invalidateFreshObservation(): void
   /** Сброс live-auth (disconnect/reconnect). Durable file не трогаем. */
   clearLiveAuth(): void
   setActiveRun(browserTaskId: string | null, runId: string | null): void
@@ -152,6 +182,9 @@ export function createBridgeSessionStore(opts: {
   let attachedTab: BridgeTabInfo | null = null
   let lastError: string | null = null
   let connected = false
+  let connectionGeneration = 0
+  let attachEpoch = 0
+  let freshObservation: BridgeFreshObservation | null = null
   let desktopOnline = true
 
   let bootstrap: BootstrapCode | null = null
@@ -200,6 +233,9 @@ export function createBridgeSessionStore(opts: {
       attachedTab,
       lastError,
       connected,
+      connectionGeneration,
+      attachEpoch,
+      freshObservation,
       desktopOnline,
       hasDurablePairing: !!loadPairing(),
       hasActiveBootstrap: !!bootstrapActive(),
@@ -294,38 +330,81 @@ export function createBridgeSessionStore(opts: {
       sessionId = session.sessionId
       lastError = null
       connected = true
+      freshObservation = null
       const next: PairingFile = {
         ...session,
         lastPairedAt: now(),
       }
       persist(next)
     },
+    beginConnection() {
+      connectionGeneration += 1
+      connected = true
+      freshObservation = null
+      return connectionGeneration
+    },
+    markFreshObservation(input) {
+      if (
+        !connected
+        || !sessionId
+        || !attachedTab
+        || connectionGeneration !== input.connectionGeneration
+        || attachEpoch !== input.attachEpoch
+        || attachedTab.tabRef !== input.tabRef
+        || (browserTaskId != null && browserTaskId !== input.browserTaskId)
+        || (runId != null && runId !== input.runId)
+      ) {
+        freshObservation = null
+        return false
+      }
+      freshObservation = {
+        connectionGeneration,
+        attachEpoch,
+        browserTaskId: input.browserTaskId,
+        runId: input.runId,
+        tabRef: input.tabRef,
+        observationVersion: input.observationVersion,
+        observedAt: now(),
+      }
+      return true
+    },
+    invalidateFreshObservation() {
+      freshObservation = null
+    },
     clearLiveAuth() {
       // Disconnect / new socket: durable file stays; live auth + attach gone.
       pairingToken = null
       sessionId = null
       attachedTab = null
+      freshObservation = null
       // Keep browserTaskId/runId? Spec: no auto-continue actions; lineage for next attach
       // can be re-set by setActiveRun from desktop. Clear attach-bound, keep run hints? Safer clear attach only.
       // browserTaskId/runId are desktop lineage — keep for status after re-pair.
     },
     setActiveRun(btId, rId) {
+      if (browserTaskId !== btId || runId !== rId) freshObservation = null
       browserTaskId = btId
       runId = rId
     },
     attachTab(tab, btId) {
+      attachEpoch += 1
       attachedTab = tab
       browserTaskId = btId
       lastError = null
+      freshObservation = null
     },
     detachTab() {
+      attachEpoch += 1
       attachedTab = null
+      freshObservation = null
     },
     setConnected(c) {
       connected = c
+      if (!c) freshObservation = null
     },
     setDesktopOnline(online) {
       desktopOnline = online
+      if (!online) freshObservation = null
     },
     setError(message) {
       lastError = message
@@ -340,6 +419,7 @@ export function createBridgeSessionStore(opts: {
       browserTaskId = null
       runId = null
       bootstrap = null
+      freshObservation = null
     },
   }
 }

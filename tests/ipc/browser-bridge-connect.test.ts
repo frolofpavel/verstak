@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { handlers, hostManifest, installNativeHost, readNativeMessagingRegistry } = vi.hoisted(() => ({
+const { handlers, hostManifest, installNativeHost, readNativeMessagingRegistry, validateInstalledHostBundle } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   hostManifest: {
     content: JSON.stringify({
@@ -24,6 +25,7 @@ const { handlers, hostManifest, installNativeHost, readNativeMessagingRegistry }
     chrome: 'C:\\bridge\\ru.verstak.browser_bridge.json',
     edge: 'C:\\bridge\\ru.verstak.browser_bridge.json',
   })),
+  validateInstalledHostBundle: vi.fn(() => ({ ok: true })),
 }))
 
 vi.mock('electron', () => ({
@@ -55,11 +57,72 @@ vi.mock('../../electron/ai/browser/bridge/host-lifecycle', async (importOriginal
   installNativeHost,
   uninstallNativeHost: vi.fn(() => ({ ok: true })),
   readNativeMessagingRegistry,
+  validateInstalledHostBundle,
 }))
 
-import { registerBrowserBridgeIpc } from '../../electron/ipc/browser-bridge'
+import { registerBrowserBridgeIpc as registerBrowserBridgeIpcRaw } from '../../electron/ipc/browser-bridge'
+
+type BrowserBridgeTestDeps = Omit<
+  Parameters<typeof registerBrowserBridgeIpcRaw>[0],
+  'hostPolicy' | 'hostVersions'
+>
+
+function registerBrowserBridgeIpc(deps: BrowserBridgeTestDeps): void {
+  registerBrowserBridgeIpcRaw({
+    ...deps,
+    hostPolicy: { mode: 'installed', canInstall: true, canRegister: true, reason: null },
+    hostVersions: {
+      protocolVersion: 1,
+      appVersion: '2.8.2',
+      extensionVersion: '0.2.0',
+      hostVersion: '2.8.2',
+    },
+  })
+}
 
 describe('browser bridge connect IPC', () => {
+  const isolatedRoots: string[] = []
+  afterEach(() => {
+    for (const root of isolatedRoots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+  it('Settings repair rejects moved ownership after startup approved its cached policy', async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), 'verstak-settings-owner-moved-'))
+    isolatedRoots.push(isolatedRoot)
+    const actual = await vi.importActual<typeof import('../../electron/ai/browser/bridge/host-lifecycle')>(
+      '../../electron/ai/browser/bridge/host-lifecycle',
+    )
+    let currentOwner = 'this-install'
+    let locked = false
+    const write = vi.fn(() => ({ ok: true, keys: [] }))
+    const snapshot = vi.fn(() => ({}))
+    const registry: import('../../electron/ai/browser/bridge/host-lifecycle').NativeMessagingRegistryAdapter = {
+      withExclusive: work => {
+        locked = true
+        try { return work() } finally { locked = false }
+      },
+      verifyStableOwner: () => {
+        expect(locked).toBe(true)
+        return currentOwner === 'this-install'
+          ? { ok: true }
+          : { ok: false, error: 'Stable InstallLocation moved' }
+      },
+      write, snapshot, read: () => ({}), remove: () => ({ ok: true }), restore: () => ({ ok: true }),
+    }
+    registerBrowserBridgeIpc({
+      getBridge: () => null,
+      getHostInstallDir: () => join(isolatedRoot, 'host'),
+      getHostScriptSource: () => 'host source',
+    })
+    currentOwner = 'successor-install'
+    installNativeHost.mockImplementationOnce((...args: unknown[]) => (
+      actual.installNativeHost({ ...(args[0] as Parameters<typeof actual.installNativeHost>[0]), registry })
+    ))
+    const result = await handlers.get('browser-bridge:connect')?.()
+    expect(result).toMatchObject({ ok: false, error: 'Stable InstallLocation moved' })
+    expect(write).not.toHaveBeenCalled()
+    expect(snapshot).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     handlers.clear()
     installNativeHost.mockClear()
@@ -102,6 +165,9 @@ describe('browser bridge connect IPC', () => {
     expect(Object.keys(state as Record<string, unknown>).sort()).toEqual([
       'authenticated',
       'connected',
+      'connectionGeneration',
+      'exactTabAttached',
+      'freshObservation',
       'host',
       'lastError',
       'ui',
@@ -145,9 +211,61 @@ describe('browser bridge connect IPC', () => {
       state: {
         authenticated: true,
         connected: true,
+        exactTabAttached: false,
+        freshObservation: false,
         host: { installed: true, needsRepair: false },
       },
     })
+  })
+
+  it('readiness публикует только exact-tab/fresh booleans текущего connectionGeneration', async () => {
+    let freshGeneration = 7
+    const bridge = {
+      getPublicState: () => ({
+        ui: 'attached',
+        desktopOnline: true,
+        sessionId: 'session-secret',
+        browserTaskId: 'bt-1',
+        runId: 'run-1',
+        connectionGeneration: 7,
+        attachedTab: {
+          tabRef: 'tab-42',
+          url: 'https://secret.example/account',
+          title: 'Secret account',
+          origin: 'https://secret.example',
+        },
+        freshObservation: {
+          connectionGeneration: freshGeneration,
+          browserTaskId: 'bt-1',
+          runId: 'run-1',
+          tabRef: 'tab-42',
+          observationVersion: 100,
+          observedAt: Date.now(),
+        },
+        lastError: null,
+      }),
+      isExtensionConnected: () => true,
+      isExtensionAuthenticated: () => true,
+    }
+    registerBrowserBridgeIpc({
+      getBridge: () => bridge as never,
+      getHostInstallDir: () => 'C:\\bridge',
+      getHostScriptSource: () => 'host source',
+    })
+
+    const getState = handlers.get('browser-bridge:get-state')
+    const ready = await getState?.() as Record<string, unknown>
+    expect(ready).toMatchObject({
+      connectionGeneration: 7,
+      exactTabAttached: true,
+      freshObservation: true,
+    })
+    expect(ready).not.toHaveProperty('attachedTab')
+    expect(JSON.stringify(ready)).not.toContain('secret.example')
+
+    freshGeneration = 6
+    const stale = await getState?.()
+    expect(stale).toMatchObject({ exactTabAttached: true, freshObservation: false })
   })
 
   it('Connect при готовом host и unauthenticated extension открывает одноразовое окно pair', async () => {
@@ -238,5 +356,29 @@ describe('browser bridge connect IPC', () => {
     expect(main).toContain('installDir: browserHostInstallDir')
     expect(main).toContain('getHostInstallDir: () => browserHostInstallDir')
     expect(main).not.toContain('getStateDir: () => dir')
+  })
+
+  it('Settings cannot bypass portable ownership policy and write HKCU', async () => {
+    const reason = 'Портативная сборка не регистрирует Native Host; установите стабильную версию Verstak'
+    registerBrowserBridgeIpcRaw({
+      getBridge: () => null,
+      getHostInstallDir: () => 'C:\\portable-temp\\resources\\browser-bridge',
+      getHostScriptSource: () => 'host source',
+      hostPolicy: { mode: 'portable', canInstall: false, canRegister: false, reason },
+      hostVersions: {
+        protocolVersion: 1,
+        appVersion: '2.8.2',
+        extensionVersion: '0.2.0',
+        hostVersion: '2.8.2',
+      },
+    })
+
+    const result = await handlers.get('browser-bridge:connect')?.()
+    expect(installNativeHost).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: false,
+      error: reason,
+      state: { host: { installed: false, needsRepair: false } },
+    })
   })
 })

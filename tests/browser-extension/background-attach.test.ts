@@ -3,9 +3,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { NATIVE_HOST_NAME } from '../../electron/ai/browser/bridge/constants'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BACKGROUND_URL = pathToFileURL(resolve(HERE, '..', '..', 'browser-extension', 'background.mjs')).href
+
+function bridgeResponseBase(message: Record<string, unknown>): Record<string, unknown> {
+  const base = { type: message.type, requestId: message.requestId, ok: true }
+  return message.type === 'hello'
+    ? {
+        ...base,
+        hostName: NATIVE_HOST_NAME,
+        protocolVersion: 1,
+        appVersion: '2.8.2',
+        extensionVersion: '0.2.0',
+        hostVersion: '2.8.2',
+      }
+    : base
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -29,13 +44,15 @@ describe('browser extension attach flow', () => {
       postMessage(message: Record<string, unknown>) {
         sent.push(message)
         queueMicrotask(() => {
-          const base = { type: message.type, requestId: message.requestId, ok: true }
+          const base = bridgeResponseBase(message)
           if (message.type === 'pair') {
             deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
           } else if (message.type === 'attach') {
             deliver?.({ ...base, browserTaskId: 'bt-1', state: 'attached' })
           } else if (message.type === 'task_submit') {
             deliver?.({ ...base, sendId: 7, browserTaskId: 'bt-1', chatId: 1 })
+          } else if (message.type === 'status') {
+            deliver?.({ ...base, state: 'paired', sessionId: 'raw-session-secret' })
           } else {
             deliver?.(base)
           }
@@ -85,6 +102,13 @@ describe('browser extension attach flow', () => {
     expect(query).not.toHaveBeenCalled()
     expect(executeScript).not.toHaveBeenCalled()
 
+    const status = await new Promise<Record<string, unknown>>((resolveResponse) => {
+      onRuntimeMessage({ type: 'bridge.status' }, null, resolveResponse)
+    })
+    expect(status).toMatchObject({ ok: true, state: { ui: 'paired' } })
+    expect(status).not.toHaveProperty('status')
+    expect(JSON.stringify(status)).not.toContain('raw-session-secret')
+
     const noUrl = await new Promise<Record<string, unknown>>((resolveResponse) => {
       onRuntimeMessage({ type: 'bridge.attach', tabId: 43 }, null, resolveResponse)
     })
@@ -123,7 +147,7 @@ describe('browser extension attach flow', () => {
       postMessage(message: Record<string, unknown>) {
         sent.push(message)
         queueMicrotask(() => {
-          const base = { type: message.type, requestId: message.requestId, ok: true }
+          const base = bridgeResponseBase(message)
           if (message.type === 'pair') {
             deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
           } else if (message.type === 'attach') {
@@ -220,7 +244,7 @@ describe('browser extension attach flow', () => {
               })
               return
             }
-            const base = { type: message.type, requestId: message.requestId, ok: true }
+            const base = bridgeResponseBase(message)
             if (message.type === 'pair') {
               deliver?.({ ...base, sessionId: 'session-2', pairingToken: 'token-2', state: 'paired' })
             } else if (message.type === 'attach') {
@@ -276,7 +300,7 @@ describe('browser extension attach flow', () => {
         sent.push(message)
         queueMicrotask(() => {
           if (message.type === 'hello') {
-            deliver?.({ type: 'hello', requestId: message.requestId, ok: true })
+            deliver?.(bridgeResponseBase(message))
             return
           }
           if (message.type === 'pair') {
@@ -355,7 +379,7 @@ describe('browser extension attach flow', () => {
         postMessage(message: Record<string, unknown>) {
           sentByPort[index].push(message)
           queueMicrotask(() => {
-            const base = { type: message.type, requestId: message.requestId, ok: true }
+            const base = bridgeResponseBase(message)
             if (message.type === 'pair') {
               deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
             } else {
@@ -408,6 +432,175 @@ describe('browser extension attach flow', () => {
     expect(sentByPort[1].some((message) => message.type === 'pair')).toBe(true)
   })
 
+  it('reconnect на той же tabRef не исполняет старый elementRef до fresh observe', async () => {
+    vi.useFakeTimers()
+    type ActionListener = (tab: Record<string, unknown>) => void
+    let actionListener: ActionListener | null = null
+    let firstDisconnect: (() => void) | null = null
+    const sentByPort: Array<Array<Record<string, unknown>>> = [[], []]
+    const deliverByPort: Array<((message: Record<string, unknown>) => void) | null> = [null, null]
+
+    const makePort = (index: number) => {
+      let deliver: ((message: Record<string, unknown>) => void) | null = null
+      return {
+        postMessage(message: Record<string, unknown>) {
+          sentByPort[index].push(message)
+          queueMicrotask(() => {
+            const base = bridgeResponseBase(message)
+            if (message.type === 'pair') {
+              deliver?.({
+                ...base,
+                sessionId: 'session-1',
+                pairingToken: 'token-1',
+                browserTaskId: 'bt-1',
+                runId: 'run-1',
+                state: 'paired',
+              })
+            } else if (message.type === 'attach') {
+              deliver?.({ ...base, browserTaskId: 'bt-1', runId: 'run-1', state: 'attached' })
+            } else {
+              deliver?.(base)
+            }
+          })
+        },
+        disconnect: vi.fn(),
+        onMessage: {
+          addListener: (fn: typeof deliver) => {
+            deliver = fn
+            deliverByPort[index] = fn
+          },
+        },
+        onDisconnect: {
+          addListener: (fn: () => void) => {
+            if (index === 0) firstDisconnect = fn
+          },
+        },
+      }
+    }
+
+    const ports = [makePort(0), makePort(1)]
+    const connectNative = vi.fn(() => ports.shift()!)
+    let observationVersion = 100
+    const executeScript = vi.fn(async (input: { args?: unknown[] }) => {
+      if (input.args?.length === 1 && typeof input.args[0] === 'object') {
+        return [{
+          result: {
+            text: `snapshot-${observationVersion}`,
+            tables: [],
+            source: { url: 'https://my.calltouch.ru/accounts', title: 'Calltouch' },
+            controls: [{
+              elementRef: 'button:Сохранить:0',
+              role: 'button',
+              label: 'Сохранить',
+              observationVersion,
+            }],
+            observationVersion,
+          },
+        }]
+      }
+      return [{ result: { ok: true, finalUrl: 'https://my.calltouch.ru/accounts' } }]
+    })
+
+    vi.stubGlobal('chrome', {
+      runtime: {
+        id: 'jbhddmgcngdchlgmilphmbbcccfigadb',
+        lastError: null,
+        connectNative,
+        sendMessage: vi.fn(async () => ({})),
+        onMessage: { addListener: vi.fn() },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ verstakSessionId: 'session-1', verstakPairingToken: 'token-1' })),
+          set: vi.fn(async () => {}),
+          remove: vi.fn(async () => {}),
+        },
+      },
+      sidePanel: { open: vi.fn(async () => {}) },
+      action: { onClicked: { addListener: (fn: typeof actionListener) => { actionListener = fn } } },
+      tabs: {
+        query: vi.fn(),
+        get: vi.fn(async () => ({
+          id: 42,
+          active: true,
+          url: 'https://my.calltouch.ru/accounts',
+          title: 'Calltouch',
+        })),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
+      scripting: { executeScript },
+    })
+
+    await import(`${BACKGROUND_URL}?same-tab-reconnect=${Date.now()}`)
+    await vi.waitFor(() => expect(sentByPort[0].some((message) => message.type === 'pair')).toBe(true))
+    await vi.waitFor(() => expect(actionListener).toBeTypeOf('function'))
+    const clickToolbar = actionListener as unknown as ActionListener
+    clickToolbar({ id: 42, url: 'https://my.calltouch.ru/accounts', title: 'Calltouch' })
+    await vi.waitFor(() => expect(sentByPort[0].some((message) => message.type === 'attach')).toBe(true))
+
+    const deliverFirst = deliverByPort[0] as unknown as (message: Record<string, unknown>) => void
+    deliverFirst({
+      type: 'observe_request',
+      requestId: 'observe-old',
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+    })
+    await vi.waitFor(() => expect(sentByPort[0].some((message) => (
+      message.type === 'observe' && message.requestId === 'observe-old'
+    ))).toBe(true))
+
+    expect(firstDisconnect).toBeTypeOf('function')
+    ;(firstDisconnect as unknown as () => void)()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.waitFor(() => expect(sentByPort[1].some((message) => message.type === 'pair')).toBe(true))
+    clickToolbar({ id: 42, url: 'https://my.calltouch.ru/accounts', title: 'Calltouch' })
+    await vi.waitFor(() => expect(sentByPort[1].some((message) => message.type === 'attach')).toBe(true))
+
+    const deliverSecond = deliverByPort[1] as unknown as (message: Record<string, unknown>) => void
+    deliverSecond({
+      type: 'click_request',
+      requestId: 'click-stale',
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+      elementRef: 'button:Сохранить:0',
+      observationVersion: 100,
+      origin: 'https://my.calltouch.ru',
+    })
+    await vi.waitFor(() => expect(sentByPort[1].find((message) => (
+      message.type === 'click' && message.requestId === 'click-stale'
+    ))).toMatchObject({ ok: false }))
+    expect(executeScript.mock.calls.filter(([input]) => input.args?.length === 2)).toHaveLength(0)
+
+    observationVersion = 200
+    deliverSecond({
+      type: 'observe_request',
+      requestId: 'observe-fresh',
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+    })
+    await vi.waitFor(() => expect(sentByPort[1].some((message) => (
+      message.type === 'observe' && message.requestId === 'observe-fresh'
+    ))).toBe(true))
+    deliverSecond({
+      type: 'click_request',
+      requestId: 'click-fresh',
+      browserTaskId: 'bt-1',
+      runId: 'run-1',
+      tabRef: 'tab-42',
+      elementRef: 'button:Сохранить:0',
+      observationVersion: 200,
+      origin: 'https://my.calltouch.ru',
+    })
+    await vi.waitFor(() => expect(sentByPort[1].find((message) => (
+      message.type === 'click' && message.requestId === 'click-fresh'
+    ))).toMatchObject({ ok: true }))
+    expect(executeScript.mock.calls.filter(([input]) => input.args?.length === 2)).toHaveLength(1)
+  })
+
   it('переход на новый origin вне user gesture не запрашивает Chrome permission и останавливается честно', async () => {
     type ActionListener = (tab: Record<string, unknown>) => void
     let actionListener: ActionListener | null = null
@@ -424,7 +617,7 @@ describe('browser extension attach flow', () => {
       postMessage(message: Record<string, unknown>) {
         sent.push(message)
         queueMicrotask(() => {
-          const base = { type: message.type, requestId: message.requestId, ok: true }
+          const base = bridgeResponseBase(message)
           if (message.type === 'pair') {
             deliver?.({ ...base, sessionId: 'session-1', pairingToken: 'token-1', state: 'paired' })
           } else if (message.type === 'attach') {
@@ -530,7 +723,7 @@ describe('browser extension attach flow', () => {
       postMessage(message: Record<string, unknown>) {
         sent.push(message)
         queueMicrotask(() => {
-          const base = { type: message.type, requestId: message.requestId, ok: true }
+          const base = bridgeResponseBase(message)
           if (message.type === 'pair') {
             deliver?.({ ...base, sessionId: 'session-correlation', pairingToken: 'token-correlation', state: 'paired' })
           } else if (message.type === 'attach') {
