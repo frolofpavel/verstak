@@ -53,6 +53,20 @@ function candidatePrefilterIsArmedSafely(source: string): boolean {
   ].every(Boolean)
 }
 
+function bindingSurfaceBudgetIsPinned(source: string): boolean {
+  const handler = source.match(
+    /private\s+static\s+void\s+HandleProbe[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleObserve)/,
+  )?.[0] ?? ''
+  const probe = source.match(
+    /private\s+static\s+WindowProbe\s+ProbeExact\s*\([\s\S]*?(?=\n\s*private\s+static\s+bool\s+IsDestroyedWindowInstance)/,
+  )?.[0] ?? ''
+  return /private\s+const\s+int\s+BindingSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source)
+    && /ProbeExact\s*\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*BindingSurfaceInspectionTimeoutMs\s*\)/.test(handler)
+    && /return\s+ProbeExact\s*\(\s*expected,\s*blockUnsafe,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs\s*\)\s*;/.test(probe)
+    && /ProbeExact\s*\(\s*WindowIdentity\s+expected,\s*bool\s+blockUnsafe,\s*int\s+surfaceMaxElements,\s*int\s+surfaceMaxMilliseconds\s*\)/.test(probe)
+    && /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds\s*\)/.test(probe)
+}
+
 function ownerCreationIdentityIsPinned(source: string): boolean {
   const watchdog = source.match(
     /private\s+static\s+void\s+StartOwnerWatchdog[\s\S]*?(?=\n\s*private\s+static\s+void\s+StartInputHooks)/,
@@ -235,6 +249,18 @@ describe('computer helper hardening contracts', () => {
     )
     expect(armFirstMutation).not.toBe(source)
     expect(candidatePrefilterIsArmedSafely(armFirstMutation)).toBe(false)
+  })
+
+  it('uses a bounded one-time surface budget for binding while action probes retain the 50 ms guard', () => {
+    const source = helperSource()
+    expect(bindingSurfaceBudgetIsPinned(source)).toBe(true)
+
+    const actionBudgetMutation = source.replace(
+      'MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs',
+      'MaxSurfaceInspectionElements, BindingSurfaceInspectionTimeoutMs',
+    )
+    expect(actionBudgetMutation).not.toBe(source)
+    expect(bindingSurfaceBudgetIsPinned(actionBudgetMutation)).toBe(false)
   })
 
   it('pins the exact owner creation FILETIME before the watchdog handle is retained', () => {

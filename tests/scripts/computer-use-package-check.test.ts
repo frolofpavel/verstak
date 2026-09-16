@@ -154,7 +154,10 @@ function auditHelperLifecyclePins(source: string): string[] {
   const leasedTokenGeneration = handleProbe.indexOf('CandidateLease lease = ConsumeCandidateLease(candidateToken, expected);', armLock)
   const tokenGeneration = inlineTokenGeneration >= 0 ? inlineTokenGeneration : leasedTokenGeneration
   const pendingArm = handleProbe.indexOf('PendingProbeWindowInstance = expected;', tokenGeneration)
-  const bindProbe = handleProbe.indexOf('WindowProbe probe = ProbeExact(expected, true);', pendingArm)
+  const bindProbe = handleProbe.indexOf(
+    'WindowProbe probe = ProbeExact(\n                    expected, true, MaxSurfaceInspectionElements, BindingSurfaceInspectionTimeoutMs);',
+    pendingArm,
+  )
   const assignmentDrain = handleProbe.indexOf('DrainForegroundEvents();', bindProbe)
   const assignmentLock = handleProbe.indexOf('lock (WindowLifecycleLock)', assignmentDrain)
   const assignmentGenerationCheck = handleProbe.indexOf('bindDestroyGeneration != WindowDestroyGeneration(expected.Hwnd)', assignmentLock)

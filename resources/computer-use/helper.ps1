@@ -51,6 +51,7 @@ namespace VerstakComputerUse
         private const int MaxWindowTitleChars = 32767;
         private const int MaxWindowTitleDisplayChars = 300;
         private const int MaxSurfaceInspectionElements = 512;
+        private const int BindingSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationTimeoutMs = 1500;
         private const int MaxDestroyedWindowTombstones = 256;
         private const uint ProcessQueryLimitedInformation = 0x1000;
@@ -533,7 +534,8 @@ namespace VerstakComputerUse
             }
             try
             {
-                WindowProbe probe = ProbeExact(expected, true);
+                WindowProbe probe = ProbeExact(
+                    expected, true, MaxSurfaceInspectionElements, BindingSurfaceInspectionTimeoutMs);
                 DrainForegroundEvents();
                 lock (WindowLifecycleLock)
                 {
@@ -1182,6 +1184,12 @@ namespace VerstakComputerUse
 
         private static WindowProbe ProbeExact(WindowIdentity expected, bool blockUnsafe)
         {
+            return ProbeExact(expected, blockUnsafe, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs);
+        }
+
+        private static WindowProbe ProbeExact(
+            WindowIdentity expected, bool blockUnsafe, int surfaceMaxElements, int surfaceMaxMilliseconds)
+        {
             DrainForegroundEvents();
             long destroyGeneration = WindowDestroyGeneration(expected.Hwnd);
             if (IsDestroyedWindowInstance(expected)) throw new SafeError("target_destroyed", "selected HWND instance was destroyed");
@@ -1197,7 +1205,7 @@ namespace VerstakComputerUse
                 throw new SafeError("forbidden_target", "Verstak, terminal, shell or development surface blocked");
             bool protectedProcess;
             bool elevated = IsElevated(actual.Pid, out protectedProcess);
-            bool secure = IsSecureSurface(actual.Hwnd, title);
+            bool secure = IsSecureSurface(actual.Hwnd, title, surfaceMaxElements, surfaceMaxMilliseconds);
             if (blockUnsafe && (protectedProcess || elevated || secure)) throw new SafeError("protected_target", "elevated, protected or secure surface blocked");
             RECT rect;
             if (DwmGetWindowAttribute(actual.Hwnd, DwmwaExtendedFrameBounds, out rect, Marshal.SizeOf(typeof(RECT))) != 0 && !GetWindowRect(actual.Hwnd, out rect))
