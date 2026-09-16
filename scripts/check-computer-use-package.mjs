@@ -474,7 +474,7 @@ export function auditComputerCandidateLeaseSources({ helper, protocol, types, cl
   const armedSameTitle = candidateCallback.indexOf('String.Equals(armedTitle, prefilteredTitle, StringComparison.Ordinal)', armedTitle)
   const armedBlocked = candidateCallback.indexOf('IsBlockedApplication(armedIdentity, armedTitle)', armedTitle)
   const elevatedScan = candidateCallback.indexOf('IsElevated(armedIdentity.Pid', armedBlocked)
-  const secureScan = candidateCallback.indexOf('IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 20)', elevatedScan)
+  const secureScan = candidateCallback.indexOf('IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 500)', elevatedScan)
   const enumerationEnd = listCandidates.indexOf('}, IntPtr.Zero);')
   const postEnumerationDrain = listCandidates.indexOf('DrainForegroundEvents();', enumerationEnd)
   const snapshotGenerationCheck = listCandidates.indexOf('snapshot.DestroyGeneration != WindowDestroyGeneration(snapshot.Identity.Hwnd)')

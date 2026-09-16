@@ -24,7 +24,7 @@ function candidatePrefilterIsArmedSafely(source: string): boolean {
   const armedSameTitle = callback.indexOf('String.Equals(armedTitle, prefilteredTitle, StringComparison.Ordinal)', armedTitle)
   const armedBlocked = callback.indexOf('IsBlockedApplication(armedIdentity, armedTitle)', armedTitle)
   const elevated = callback.indexOf('IsElevated(armedIdentity.Pid', armLock)
-  const secure = callback.indexOf('IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 20)', armLock)
+  const secure = callback.indexOf('IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 500)', armLock)
   const postEnumerationDrain = callback.indexOf('DrainForegroundEvents();', callback.indexOf('}, IntPtr.Zero);'))
   const generationRecheck = callback.indexOf(
     'snapshot.DestroyGeneration != WindowDestroyGeneration(snapshot.Identity.Hwnd)',

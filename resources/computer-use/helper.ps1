@@ -462,7 +462,7 @@ namespace VerstakComputerUse
                 // Candidate discovery is read-only and globally bounded. Any
                 // surface that cannot be classified inside the small budget is
                 // omitted; exact probe/observe still run the deeper guard.
-                bool secure = IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 20);
+                bool secure = IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 500);
                 if (secure) return true;
                 snapshots.Add(new CandidateSnapshot {
                     Identity = armedIdentity, DestroyGeneration = destroyGeneration,
