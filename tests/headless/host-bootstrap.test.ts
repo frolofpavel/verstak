@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs'
 import { randomBytes } from 'crypto'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -100,6 +100,27 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     const events = host.listRunEvents(task.runId)
     expect(events.length).toBeGreaterThan(1)
     expect(events[0].kind).toBe('user_msg')
+  })
+
+  it('headless Computer Use attempt fails before workspace, append, provider or run creation', async () => {
+    const providerFactory = vi.fn(() => scriptedProvider())
+    const host = await makeHost({ providerFactory })
+    const privateCommand = '/computer-use: введи HEADLESS_PRIVATE в выбранном окне'
+
+    await expect(host.startTask({
+      prompt: privateCommand,
+      providerId: 'deepseek',
+      agentMode: 'bypass',
+    })).rejects.toThrow('COMPUTER_USE_FRESH_COMPOSER_REQUIRED')
+
+    expect(providerFactory).not.toHaveBeenCalled()
+    expect(host.listTasks()).toEqual([])
+    expect(readdirSync(wsRoot)).toEqual([])
+    await expect(host.startTask({
+      prompt: privateCommand,
+      providerId: 'deepseek',
+      agentMode: 'bypass',
+    })).rejects.not.toThrow(privateCommand)
   })
 
   it('контрольный кейс allowlist: run_command НЕ исполняется на хосте Этапа 1', async () => {

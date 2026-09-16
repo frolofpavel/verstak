@@ -6,7 +6,7 @@
 // он и подтверждает идентичность поведения после переезда.
 
 import type { TaggedSender } from '../ipc/tool-handlers/shared'
-import type { ChatProvider, ChatMessage } from './types'
+import type { ChatProvider, ChatMessage, ChatEvent, ToolCall } from './types'
 import { PROVIDERS, type ProviderId } from './registry'
 import type { InputAccounting } from '../../shared/contracts/usage'
 import type { AgentRuns } from '../storage/agent-runs'
@@ -25,6 +25,11 @@ import { isAgentRunTimeoutAbort, exitReasonToAgentRunStatus } from './run-lifecy
 import { classifyProviderError } from './provider-error'
 import { shouldFallback, getNextFallback } from './smart-fallback'
 import { classifyRouteReason, cooldownReasonForLimitKind } from './route-policy'
+import {
+  COMPUTER_CONTEXT_OMITTED,
+  COMPUTER_PROVIDER_ERROR,
+  createToolCallProjector,
+} from './tool-telemetry'
 
 // EF-R2 Б2: единая точка создания attempt — предпочтительно getNextAttempt (несёт
 // accountId попытки); legacy getNextProvider → accountId=undefined («не трогать»).
@@ -56,6 +61,8 @@ export interface PlainRunContext {
   fallbackOpts?: FallbackOpts
   agentRuns?: AgentRuns
   runId?: string
+  /** Main-derived Computer authority; affects technical/durable sinks only. */
+  computerContextActive?: boolean
 }
 
 export async function runPlainConversation(context: PlainRunContext): Promise<void> {
@@ -73,7 +80,26 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
     fallbackOpts,
     agentRuns,
     runId,
+    computerContextActive = false,
   } = context
+  const toolCallProjector = createToolCallProjector()
+  const projectProviderToolCall = (call: ToolCall): ToolCall => toolCallProjector(call, {
+    omitNonComputerArgs: computerContextActive,
+  })
+  const projectProviderEvent = (event: ChatEvent): ChatEvent | null => {
+    if (!computerContextActive) return event
+    if (event.type === 'text' || event.type === 'usage' || event.type === 'done') return event
+    if (event.type === 'thought') return { type: 'thought', text: COMPUTER_CONTEXT_OMITTED }
+    if (event.type === 'tool-call') {
+      return { type: 'tool-call', call: projectProviderToolCall(event.call) }
+    }
+    if (event.type === 'error') return { type: 'error', message: COMPUTER_PROVIDER_ERROR }
+    if (event.type === 'info') return { type: 'info', text: COMPUTER_CONTEXT_OMITTED }
+    // CLI provider metadata is not authoritative application state. Once
+    // desktop context is active, unknown progress/tool envelopes are omitted
+    // instead of becoming renderer or durable journal input.
+    return null
+  }
   const startedAt = Date.now()
   logRuntime('ai.runner.loop_start', {
     sendId,
@@ -138,11 +164,12 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
     pendingSupplements.push(text)
-  })
+  }, { allow: !computerContextActive })
   const drainSupplements = (): boolean => {
     let added = false
     while (pendingSupplements.length > 0) {
       const text = pendingSupplements.shift()!
+      const technicalDetail = computerContextActive ? COMPUTER_CONTEXT_OMITTED : text
       currentMessages.push({
         role: 'user',
         content: formatConversationSupplement(text)
@@ -151,12 +178,12 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
         id: `supplement-${Date.now()}`,
         phase: 'context',
         title: 'Добавил новый контекст в текущую задачу',
-        detail: compactProgressText(text, 180),
+        detail: compactProgressText(technicalDetail, 180),
         status: 'done'
       })
       added = true
       if (agentRuns && runId) {
-        try { agentRuns.appendEvent(runId, 'user_msg', { detail: text.slice(0, 500) }) } catch { /* best-effort */ }
+        try { agentRuns.appendEvent(runId, 'user_msg', { detail: technicalDetail.slice(0, 500) }) } catch { /* best-effort */ }
       }
     }
     return added
@@ -237,7 +264,9 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
               id: `plain-first-text-${Date.now()}`,
               phase: 'final',
               title: 'Модель начала писать ответ',
-              detail: compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
+              detail: computerContextActive
+                ? COMPUTER_CONTEXT_OMITTED
+                : compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
               status: 'running'
             })
           }
@@ -261,10 +290,11 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
           // executor его НЕ запускает (plain-путь без tool-loop) → без двойного исполнения.
           // redactForDisplay ОБЯЗАТЕЛЕН (1.9.6 #4): args могут нести inline-креды
           // (curl -H "Authorization: Bearer …", git remote https://user:pass@, ?token=).
-          const detail = compactProgressText(redactForDisplay(JSON.stringify(event.call.args ?? {})), 120) ?? ''
+          const safeCall = projectProviderToolCall(event.call)
+          const detail = compactProgressText(redactForDisplay(JSON.stringify(safeCall.args ?? {})), 120) ?? ''
           sender.send('ai:event', {
             id: sendId,
-            event: { type: 'tool-activity', callId: event.call.id, name: event.call.name, label: `${event.call.name} · CLI`, detail, status: 'ok' }
+            event: { type: 'tool-activity', callId: safeCall.id, name: safeCall.name, label: `${safeCall.name} · CLI`, detail, status: 'ok' }
           })
         } else if (event.type === 'usage' && event.usage) {
           sessionUsage.inputTokens += event.usage.inputTokens ?? 0
@@ -305,7 +335,8 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
           waitHeartbeat.stop('error', 'Провайдер вернул ошибку.')
         }
         if (event.type !== 'done') {
-          sender.send('ai:event', { id: sendId, event })
+          const safeEvent = projectProviderEvent(event)
+          if (safeEvent) sender.send('ai:event', { id: sendId, event: safeEvent })
         }
         if (event.type === 'done' || event.type === 'error') break
       }
@@ -324,7 +355,11 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
         // сдавался (done+return) — авто-свитч (1.9.4) был мёртв для CLI-подписок,
         // хотя аккаунты именно у CLI-провайдеров. Зеркалит attemptAccountSwitch API-пути.
         // 2.0.8-D2: pinned-чат — ротация аккаунта запрещена (инвариант 1). Зеркалит runner-api.
-        if (fallbackOpts && !fallbackOpts.pinnedAccount && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
+        // Computer Use prompt may carry the exact private value intended for
+        // computer_type. A different account is a separate data boundary even
+        // when providerId stays the same, so fail closed before switchAccount,
+        // attempt construction, route mutation, or a recursive frame.
+        if (!computerContextActive && fallbackOpts && !fallbackOpts.pinnedAccount && providerId && roundErrorMessage && (fallbackOpts.accountSwitchCount ?? 0) < MAX_ACCOUNT_SWITCHES) {
           const hit = detectSubscriptionLimit(roundErrorMessage)
           if (hit.limited) {
             const sw = fallbackOpts.switchAccountOnLimit?.(providerId, hit.resetEta, cooldownReasonForLimitKind(hit.kind))
@@ -379,7 +414,7 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
-    logRuntimeError('ai.runner.error', err, {
+    logRuntimeError('ai.runner.error', computerContextActive ? new Error(COMPUTER_PROVIDER_ERROR) : err, {
       sendId,
       runId: runId ?? null,
       path: 'plain',
@@ -388,7 +423,10 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
       model: model ?? null
     })
     // Smart fallback: если ошибка retriable и есть ещё кандидаты — пробуем.
-    if (fallbackOpts && !fallbackOpts.pinnedAccount && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
+    // Same boundary for cross-provider handoff: the selected provider may see
+    // the live Computer command, but it must never be replayed to an automatic
+    // fallback route without a separate grant.
+    if (!computerContextActive && fallbackOpts && !fallbackOpts.pinnedAccount && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
       fallbackOpts.triedProviders.add(providerId)
       if (shouldFallback(err)) {
         const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
@@ -433,7 +471,10 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
-      event: { type: 'error', message: classifyProviderError(err).userMessage }
+      event: {
+        type: 'error',
+        message: computerContextActive ? COMPUTER_PROVIDER_ERROR : classifyProviderError(err).userMessage,
+      }
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
@@ -457,10 +498,11 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
     // future may not have one). #15: при fallback журнал/finish делает рекурсивный фрейм.
     if (!handedOff && projectPath) {
       try {
+        const durableAssistantText = computerContextActive ? '' : lastAssistantText
         writeSessionJournal(
           recordJournal,
           projectPath,
-          lastAssistantText,
+          durableAssistantText,
           new Set<string>(),   // CLI path: no tool-driven file writes tracked here
           [],                  // CLI path: no command-tool dispatch (CLI runs them inside)
           sessionUsage,
@@ -479,12 +521,13 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
       try {
         // Timeline: финальный ответ агента — итог CLI-прогона (на CLI-пути нет
         // recordRunEvent, так что это единственное содержательное событие ленты).
-        if (lastAssistantText.trim()) {
-          agentRuns.appendEvent(runId, 'assistant_msg', { detail: lastAssistantText.slice(0, 500), status: exitReason })
+        const durableAssistantText = computerContextActive ? '' : lastAssistantText
+        if (durableAssistantText.trim()) {
+          agentRuns.appendEvent(runId, 'assistant_msg', { detail: durableAssistantText.slice(0, 500), status: exitReason })
         }
         agentRuns.finish(runId, exitReasonToAgentRunStatus(exitReason), {
           costCents: costGuard?.current() ?? 0,
-          error: exitReason === 'error' || exitReason === 'crashed' ? lastAssistantText.slice(0, 500) || exitReason : null
+          error: exitReason === 'error' || exitReason === 'crashed' ? durableAssistantText.slice(0, 500) || exitReason : null
         })
       } catch (err) {
         console.warn('[agent-runs] finish (plain) failed:', err instanceof Error ? err.message : err)
@@ -502,7 +545,9 @@ export async function runPlainConversation(context: PlainRunContext): Promise<vo
             inputTokens: sessionUsage.inputTokens, outputTokens: sessionUsage.outputTokens,
             cacheReadTokens: sessionUsage.cachedInputTokens, cacheWriteTokens: sessionUsage.cacheWriteTokens,
             inputAccounting: sessionUsage.inputAccounting,
-            systemPromptHash: systemText ? usageHash(systemText) : null,
+            systemPromptHash: systemText
+              ? usageHash(computerContextActive ? COMPUTER_CONTEXT_OMITTED : systemText)
+              : null,
             toolsHash: null
           })
         } catch { /* best-effort: персистенс не роняет финализацию */ }

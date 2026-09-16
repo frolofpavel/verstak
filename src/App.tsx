@@ -24,6 +24,7 @@ import { useProject } from './store/projectStore'
 import { useActiveChatField } from './hooks/useActiveChatBundle'
 import { useSkills as useSkillsStore } from './store/skillStore'
 import { readAgentMode, writeAgentMode } from './hooks/useAgentMode'
+import { settleEmergencyStop } from './lib/emergency-stop'
 
 const AUTH_CACHE_KEY = 'gg.auth_completed'
 
@@ -353,18 +354,22 @@ export function App() {
           await writeAgentMode(state.activeChatId, state.helpMode, next)
         })()
       } else if (e.key === 'Escape' && e.shiftKey) {
-        // Shift+Esc = emergency abort. Tell main to kill every active stream
-        // and clear any pending confirmations, then reset renderer state so
-        // the UI never sticks in a stuck-streaming state.
+        // Shift+Esc = emergency abort. Main resolves only after every owned
+        // helper lineage has closed its queue. Until then renderer stays
+        // streaming, so it cannot acknowledge Stop or start a successor early.
         e.preventDefault()
-        void window.api.ai.stop(0).catch(() => {})
-        setStreaming(false)
-        clearPendingWrites()
-        setPendingCommand(null)
-        // §10 хвост: аварийный выход снимает карточки планов ВМЕСТЕ с
-        // освобождением удержанных чекпойнтов — решения не будет, а снапшоты
-        // истории иначе оставались бы в БД навсегда.
-        dismissAllPendingPlans()
+        void settleEmergencyStop(
+          sendId => window.api.ai.stop(sendId),
+          () => {
+            setStreaming(false)
+            clearPendingWrites()
+            setPendingCommand(null)
+            // §10 хвост: аварийный выход снимает карточки планов ВМЕСТЕ с
+            // освобождением удержанных чекпойнтов — решения не будет, а снапшоты
+            // истории иначе оставались бы в БД навсегда.
+            dismissAllPendingPlans()
+          },
+        )
       }
     }
     window.addEventListener('keydown', onKey)

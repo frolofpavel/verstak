@@ -15,6 +15,7 @@ import { tmpdir } from 'os'
 const { openDb } = await import('../../electron/storage/db')
 const {
   createSubscriptionAccount,
+  getActiveAccount,
   markAccountCooling,
   setActiveAccount,
 } = await import('../../electron/storage/subscription-accounts')
@@ -278,6 +279,42 @@ describe('createResolveSubscriptionAccount — Auto pre-flight (EF)', () => {
     secrets['subacct:b'] = 'sk-b' // у A секрета нет
     const r = resolve()('claude-cli', 42)
     expect(r).toMatchObject({ accountId: b.id, skipped: { fromLabel: 'Без входа A', reason: 'login-required', resetAt: null } })
+  })
+
+  it('Computer Use: активный cooling + B готов → стоп на A без auto-ротации и setActiveAccount', () => {
+    const a = addToken('Остывший A', 'subacct:a')
+    const b = addToken('Готовый B', 'subacct:b')
+    secrets['subacct:a'] = 'sk-a'
+    secrets['subacct:b'] = 'sk-b'
+    markAccountCooling(db, a.id, NOW + 2 * 3600_000, { scope: 'account', reason: 'quota' })
+
+    const r = resolve()('claude-cli', 42, { allowAutoRotation: false })
+
+    expect(r).toEqual({
+      blocked: true,
+      reason: 'cooling',
+      resetAt: NOW + 2 * 3600_000,
+      label: 'Остывший A',
+    })
+    expect(getActiveAccount(db, 'claude-cli')?.id).toBe(a.id)
+    expect(getActiveAccount(db, 'claude-cli')?.id).not.toBe(b.id)
+  })
+
+  it('Computer Use: активный login-required + B готов → стоп на A без auto-ротации и setActiveAccount', () => {
+    const a = addToken('Без входа A', 'subacct:a')
+    const b = addToken('Готовый B', 'subacct:b')
+    secrets['subacct:b'] = 'sk-b'
+
+    const r = resolve()('claude-cli', 42, { allowAutoRotation: false })
+
+    expect(r).toEqual({
+      blocked: true,
+      reason: 'login-required',
+      resetAt: null,
+      label: 'Без входа A',
+    })
+    expect(getActiveAccount(db, 'claude-cli')?.id).toBe(a.id)
+    expect(getActiveAccount(db, 'claude-cli')?.id).not.toBe(b.id)
   })
 
   it('cooling-аккаунт с until=null НЕ выбирается как «готовый» кандидат', () => {

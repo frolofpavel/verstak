@@ -72,6 +72,16 @@ import { buildTurnVerificationHint } from './runner-verification'
 import { summarizeMaterials, formatMaterialsLine, type ReadOutcome } from './materials-summary'
 import { runtimeFlagOn } from '../../shared/contracts/runtime-flag-policy'
 import type { BrowserAdapter } from './browser/types'
+import {
+  COMPUTER_CONTEXT_OMITTED,
+  COMPUTER_CONTEXT_OMITTED_ERROR,
+  COMPUTER_PROVIDER_ERROR,
+  projectMessagesForPersistence,
+  createToolCallProjector,
+  createEphemeralToolCallProjector,
+  projectToolResultForTelemetry,
+} from './tool-telemetry'
+import { COMPUTER_TOOL_ACTION, isComputerToolName } from './computer/tool-names'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -179,6 +189,11 @@ export interface AgentRunContext {
    * может, ослабить нет. Не задан — поведение гейта прежнее.
    */
   capabilityTrust?: import('../../shared/contracts/capability').TrustLevel
+  /** Original-user desktop action scope fixed for the whole run/fallback chain. */
+  computerUseAllowedActions?: ToolContext['computerUseAllowedActions']
+  /** Main-owned proof that initialMessages came from the exact fresh composer
+   * ticket envelope, not from history/resume/browser/headless reconstruction. */
+  computerUseProviderEnvelope?: 'fresh-composer-ticket-v1'
   sender: TaggedSender
   sendId: number
   provider: ChatProvider
@@ -245,6 +260,9 @@ export interface AgentRunContext {
   browserScreenshotProviderAllowed?: (providerId: ProviderId) => boolean
   /** Explicit browser adapter carried across fallback frames of the same run. */
   browserAdapterPreference?: BrowserAdapter['id']
+  /** Selected-window UI content is already present in provider-visible history.
+   *  It is untrusted just like page DOM and cannot cross into other capabilities. */
+  computerContextExposed?: boolean
   /** Этот прогон идёт в ДОЧЕРНЕЙ (вынесенной спавном) сессии — у её чата задан
    *  parent_chat_id. Гард глубины: такой сессии НЕ даём spawn_task_session (внучек нет).
    *  Считает main из chat_sessions; НЕ путать с parentChatId (= текущий chatId прогона). */
@@ -301,6 +319,25 @@ function messagesContainBrowserScreenshot(messages: ChatMessage[]): boolean {
   ))
 }
 
+function messagesContainComputerContext(messages: ChatMessage[]): boolean {
+  return messages.some(message => message.toolResults?.some(result => (
+    isComputerToolName(result.name) && !result.error
+  )) === true)
+}
+
+/** Provider-visible Computer tools come only from the built-in registry. An
+ * MCP server cannot shadow an exact computer_* name with hostile metadata. */
+function selectComputerToolDefs<T extends { name: string }>(
+  builtins: readonly T[],
+  allowedActions: readonly string[] | undefined,
+): T[] {
+  const allowed = new Set(allowedActions ?? [])
+  return builtins.filter(definition => (
+    isComputerToolName(definition.name)
+    && allowed.has(COMPUTER_TOOL_ACTION[definition.name])
+  ))
+}
+
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender: rawSender, sendId, provider, tools, projectPath, initialMessages, signal,
@@ -309,7 +346,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, browserTaskIdResolver, browserRunActive, browserContextExposed, browserContextProviderAllowed, browserScreenshotExposed, browserScreenshotProviderAllowed, browserAdapterPreference, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
+    parentChatId, browserTaskIdResolver, browserRunActive, browserContextExposed, browserContextProviderAllowed, browserScreenshotExposed, browserScreenshotProviderAllowed, browserAdapterPreference, computerContextExposed, computerUseAllowedActions, computerUseProviderEnvelope, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
@@ -321,6 +358,42 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     contextExposed: browserContextExposed === true || messagesContainBrowserContext(initialMessages),
     screenshotExposed: browserScreenshotExposed === true || messagesContainBrowserScreenshot(initialMessages),
   }
+  const computerRunState = {
+    // The capability envelope starts at original-user intent, before the first
+    // desktop tool. Otherwise a first-turn screen_capture/read_file could read
+    // an unselected surface and only the following turn would become fenced.
+    active: (computerUseAllowedActions?.length ?? 0) > 0
+      || computerContextExposed === true
+      || messagesContainComputerContext(initialMessages),
+    contextExposed: computerContextExposed === true || messagesContainComputerContext(initialMessages),
+  }
+  const exactComputerSystem = initialMessages[0]
+  const exactComputerUser = initialMessages[1]
+  const computerUseProviderEnvelopeTrusted = computerRunState.active
+    && computerUseProviderEnvelope === 'fresh-composer-ticket-v1'
+    && initialMessages.length === 2
+    && exactComputerSystem?.role === 'system'
+    && typeof exactComputerSystem.content === 'string'
+    && exactComputerSystem.content.includes('VERSTAK_COMPUTER_USE_ENVELOPE_V1')
+    && Object.keys(exactComputerSystem).every(key => key === 'role' || key === 'content')
+    && exactComputerUser?.role === 'user'
+    && typeof exactComputerUser.content === 'string'
+    && Object.keys(exactComputerUser).every(key => key === 'role' || key === 'content')
+  const computerUseProviderEnvelopeInvalid = computerRunState.active
+    && !computerUseProviderEnvelopeTrusted
+  // Project todos are user-controlled instructions. They remain available to
+  // ordinary runs but never enter the exact selected-window envelope.
+  const activeSessionTodos = computerRunState.active ? undefined : sessionTodos
+  const projectToolCallForRun = createToolCallProjector()
+  const projectRunToolCall = (call: ToolCall): ToolCall => projectToolCallForRun(call, {
+    omitNonComputerArgs: computerRunState.active,
+  })
+  const projectRunToolError = (error: unknown): unknown => (
+    computerRunState.active && error ? COMPUTER_CONTEXT_OMITTED_ERROR : error
+  )
+  const projectProviderError = (error: unknown): unknown => (
+    computerRunState.active ? new Error(COMPUTER_PROVIDER_ERROR) : error
+  )
   // Явный env=builtin должен переживать все model turns и fallback frames этого
   // run; новый ai:send получает новый объект и снова использует default resolver.
   const browserAdapterState: { preferred?: BrowserAdapter['id'] } = {
@@ -393,13 +466,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // per-turn) тем же предикатом, что фильтрует предлагаемый список (resolveToolsAllowSet):
   // список инструментов — меню, а не граница; гейт диспетчера (dispatchToolTurn) блокирует
   // вызов вне набора. Универсум = base TOOL_DEFS + mcp (стабильны в пределах прогона).
-  const mcpNamesForAllow = mcpClientRef ? mcpClientRef.getAllTools().map(t => t.name) : []
+  const mcpNamesForAllow = !computerRunState.active && mcpClientRef
+    ? mcpClientRef.getAllTools().map(t => t.name)
+    : []
   const toolsAllowResolution = resolveToolsAllowSet(toolsAllow, TOOL_DEFS.map(d => d.name), mcpNamesForAllow)
-  const allowedToolNames = toolsAllowResolution.allowed
+  const allowedToolNames = computerRunState.active
+    ? new Set(selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions).map(definition => definition.name))
+    : toolsAllowResolution.allowed
   // Fail-open ОСТАВЛЯЕТ СЛЕД (штаб): сломанный tools_allow → ограничение НЕ применяется,
   // но это обязано быть ВИДНО в журнале прогона — иначе опечатка тихо снимает защиту, и
   // «read-only скилл» молча станет полным. Тот же принцип, что «фолбэк без следа».
-  if (toolsAllowResolution.unmatchedFailOpen) {
+  if (!computerRunState.active && toolsAllowResolution.unmatchedFailOpen) {
     recordJournal(
       projectPath,
       'note',
@@ -422,18 +499,30 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // его уже ловит parseTextToolCalls. Только при наличии тулзов и не в fallback-
   // фрейме (иначе дубль). Для 'native' — no-op, поведение не меняется.
   if (projectPath && resolveToolMode(providerId, model, ctx.forceToolMode) === 'json'
-      && (!isFallbackFrame || ctx.forceToolMode === 'json')) {
+      && (!isFallbackFrame || ctx.forceToolMode === 'json')
+      && !computerUseProviderEnvelopeInvalid) {
     const sysIdx = currentMessages.findIndex(m => m.role === 'system')
-    currentMessages.splice(sysIdx >= 0 ? sysIdx + 1 : 0, 0, { role: 'system', content: JSON_TOOL_INSTRUCTION })
+    if (computerUseProviderEnvelopeTrusted && sysIdx === 0) {
+      currentMessages[0] = {
+        role: 'system',
+        content: `${currentMessages[0].content}\n\n${JSON_TOOL_INSTRUCTION}`,
+      }
+    } else {
+      currentMessages.splice(sysIdx >= 0 ? sysIdx + 1 : 0, 0, { role: 'system', content: JSON_TOOL_INSTRUCTION })
+    }
   }
   const pendingSupplements: string[] = []
   registerConversationSupplements(sendId, (text: string) => {
     pendingSupplements.push(text)
-  })
+  }, { allow: !computerRunState.active })
+  const addSupplement = (text: string): void => {
+    if (!computerRunState.active) pendingSupplements.push(text)
+  }
   const drainSupplements = (): boolean => {
     let added = false
     while (pendingSupplements.length > 0) {
       const text = pendingSupplements.shift()!
+      const technicalDetail = computerRunState.active ? COMPUTER_CONTEXT_OMITTED : text
       currentMessages.push({
         role: 'user',
         content: formatConversationSupplement(text)
@@ -442,12 +531,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         id: `supplement-${Date.now()}`,
         phase: 'context',
         title: 'Добавил новый контекст в текущую задачу',
-        detail: compactProgressText(text, 180),
+        detail: compactProgressText(technicalDetail, 180),
         status: 'done'
       })
       added = true
       if (agentRuns && runId) {
-        try { agentRuns.appendEvent(runId, 'user_msg', { detail: text.slice(0, 500) }) } catch { /* best-effort */ }
+        try { agentRuns.appendEvent(runId, 'user_msg', { detail: technicalDetail.slice(0, 500) }) } catch { /* best-effort */ }
       }
     }
     return added
@@ -552,6 +641,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   // (the threshold the UI tells the user). Tracking via Map avoids the
   // sliding-window eviction problem of the previous flat-array approach.
   const signatureCounts = new Map<string, number>()
+  const projectToolCallForLoop = createEphemeralToolCallProjector(projectToolCallForRun)
   // Д4: наблюдения безаргументных инструментов — их подпись строится не из
   // аргументов (которых нет), а из того, что вызов увидел. См. loop-detect.ts.
   const observationState = createObservationState()
@@ -589,6 +679,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const sessionChanges: TurnChange[] = []
   let lastAssistantText = ''
   const drainProcessCompletionsForRun = (assistantTextBeforeNote = ''): boolean => {
+    if (computerRunState.active) return false
     const completions = processRegistry.drainCompletions({ ownerSendId: sendId })
     if (completions.length === 0) return false
     if (assistantTextBeforeNote.trim()) {
@@ -633,7 +724,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const agentCounter = new SessionAgentCounter()
   // F1: пользовательский lifecycle-hooks движок (opt-in, default OFF — security:
   // хуки исполняют произвольный shell из конфига проекта). Грузим один раз на прогон.
-  const hooks: CompiledHooks | null = hooksEnabled(getSecretForDelegate)
+  const hooks: CompiledHooks | null = !computerRunState.active && hooksEnabled(getSecretForDelegate)
     ? loadHooks(projectPath, { projectEnabled: hooksProjectEnabled(getSecretForDelegate) })
     : null
   // SessionStart + UserPromptSubmit — фаер до петли; additionalContext инжектится в
@@ -642,10 +733,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   if (hooks && !isFallbackFrame) {
     try {
       const ss = await runHooks('SessionStart', hooks, { event: 'SessionStart', cwd: projectPath })
-      if (ss.additionalContext) pendingSupplements.push(ss.additionalContext)
-      const up = typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : ''
+      if (ss.additionalContext) addSupplement(ss.additionalContext)
+      // A Computer Use command can contain the exact private value requested
+      // for `computer_type`. UserPromptSubmit hooks are arbitrary opt-in child
+      // processes, so they receive the same content-free boundary as every
+      // other durable/external observability sink. Ordinary chat hooks retain
+      // their existing prompt contract.
+      const up = computerRunState.active
+        ? COMPUTER_CONTEXT_OMITTED
+        : typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : ''
       const ups = await runHooks('UserPromptSubmit', hooks, { event: 'UserPromptSubmit', cwd: projectPath, prompt: up })
-      if (ups.additionalContext) pendingSupplements.push(ups.additionalContext)
+      if (ups.additionalContext) addSupplement(ups.additionalContext)
     } catch { /* хуки best-effort — ошибка не ломает прогон */ }
   }
 
@@ -714,12 +812,19 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     onHandedOff: () => {
       handedOff = true
     },
-    hasBrowserContext: () => browserRunState.contextExposed,
-    browserContextProviderAllowed,
+    hasBrowserContext: () => browserRunState.contextExposed || computerRunState.active,
+    // There is no cross-provider/account data policy for desktop execution in
+    // R2. The original Computer intent may already contain the private value to
+    // type, so route changes are fail-closed from authorization, not only after
+    // the first observation/tool result reached currentMessages.
+    browserContextProviderAllowed: candidateProviderId => (
+      !computerRunState.active
+      && browserContextProviderAllowed?.(candidateProviderId) === true
+    ),
     hasBrowserScreenshot: () => browserRunState.screenshotExposed,
     browserScreenshotProviderAllowed,
     onBrowserContextFallbackBlocked: blockedProviderId => {
-      const reason = `Browser context уже получен; fallback на ${blockedProviderId} заблокирован data policy, чтобы DOM/screenshot не ушли новому провайдеру.`
+      const reason = `Недоверенный browser/desktop context уже получен; fallback на ${blockedProviderId} заблокирован data policy, чтобы DOM, desktop UI или screenshot не ушли новому провайдеру.`
       sender.send('ai:event', {
         id: sendId,
         event: {
@@ -747,6 +852,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       browserContextExposed: browserRunState.contextExposed,
       browserScreenshotExposed: browserRunState.screenshotExposed,
       browserAdapterPreference: browserAdapterState.preferred,
+      computerContextExposed: computerRunState.contextExposed,
     }),
   })
   const { attemptProviderFallback, attemptAccountSwitch } = fallbackController
@@ -774,6 +880,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       browserContextExposed: browserRunState.contextExposed,
       browserScreenshotExposed: browserRunState.screenshotExposed,
       browserAdapterPreference: browserAdapterState.preferred,
+      computerContextExposed: computerRunState.contextExposed,
     })
   }
 
@@ -949,14 +1056,26 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   let lastTurnProgress: { progressed: boolean; newFacts: number } = { progressed: false, newFacts: 0 }
   const emitStepLine = (turn: number, calls: ToolCall[], decision: string, results?: ToolResult[]): void => {
     if (!agentRuns || !runId) return
-    const goal = (sessionTodos && projectPath)
-      ? firstOpenFocusItem(sessionTodos.list(projectPath, parentChatId ?? null))
+    const goal = (activeSessionTodos && projectPath)
+      ? firstOpenFocusItem(activeSessionTodos.list(projectPath, parentChatId ?? null))
       : null
     const line = formatStepLine({
       step: turn + 1,
       budget: effectiveTurnsBudget,
-      goal: goal ?? (typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : null),
-      calls: calls.map((call, i) => ({ name: call.name, args: call.args, error: results?.[i]?.error })),
+      // A Computer Use goal may itself contain private text the user asked to
+      // type. Step events are durable telemetry, so keep only an explicit
+      // omission marker for the whole active desktop capability envelope.
+      goal: computerRunState.active
+        ? COMPUTER_CONTEXT_OMITTED
+        : (goal ?? (typeof originalUserMsg?.content === 'string' ? originalUserMsg.content : null)),
+      calls: calls.map((call, i) => {
+        const telemetryCall = projectRunToolCall(call)
+        return {
+          name: telemetryCall.name,
+          args: telemetryCall.args,
+          error: projectRunToolError(results?.[i]?.error),
+        }
+      }),
       decision,
       progressed: lastTurnProgress.progressed,
       newFacts: lastTurnProgress.newFacts,
@@ -966,6 +1085,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   }
 
   try {
+  if (computerUseProviderEnvelopeInvalid) {
+    throw new Error('COMPUTER_USE_PROVIDER_ENVELOPE_INVALID: exact fresh composer envelope required.')
+  }
 
   turnLoop: for (let turn = 0; turn < effectiveTurnsBudget; turn++) {
     drainSupplements()
@@ -979,7 +1101,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // (как компакция). Безопасно: dangling toolCalls предыдущего turn'а уходят ВМЕСТЕ с их
     // toolResults. Focus Chain (todo) сохраняем — анти-дрейф переживает и new_task.
     if (pendingNewTask) {
-      const focus = (sessionTodos && projectPath) ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+      const focus = (activeSessionTodos && projectPath) ? formatFocusChain(activeSessionTodos.list(projectPath, parentChatId ?? null)) : null
       const rebuilt = buildNewTaskContext(baseSystemMsg, originalUserMsg, pendingNewTask, focus)
       currentMessages.length = 0
       currentMessages.push(...rebuilt)
@@ -993,8 +1115,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // напоминание — длинная сессия дрейфует, чеклист уезжает из внимания (§5.4).
     // Решение — shouldReinjectFocus: по признаку (незакрытые пункты + ходы С ПРОШЛОГО
     // реинжекта) и сразу после компакции, а не по модулю совпавшей константы.
-    if (sessionTodos && projectPath) {
-      const focus = formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null))
+    if (activeSessionTodos && projectPath) {
+      const focus = formatFocusChain(activeSessionTodos.list(projectPath, parentChatId ?? null))
       const reinject = shouldReinjectFocus({
         turn,
         lastReinjectTurn: lastFocusReinjectTurn,
@@ -1062,13 +1184,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // продублировал текст).
     const turnNum = turn + 1
     // MCP tools: добавляем к стандартным TOOL_DEFS если есть подключённые серверы
-    const mcpToolDefs = mcpClientRef ? mcpClientRef.getAllTools().map(t => ({
+    const mcpToolDefs = !computerRunState.active && mcpClientRef ? mcpClientRef.getAllTools().map(t => ({
       name: t.name,
       description: t.description,
       parameters: t.inputSchema
     })) : []
     const isLastTurn = effectiveTurnsBudget > 1 && turn === effectiveTurnsBudget - 1
-    let allToolDefs = isLastTurn ? [] : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
+    let allToolDefs = isLastTurn
+      ? []
+      : computerRunState.active
+        ? selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions)
+        : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
     // PTC (T1.4) пока opt-in: execute_code предлагается модели только при
     // ptc_enabled='true' (по умолчанию выкл — фича ждёт live-проверки петли).
     if (getSecretForDelegate?.('ptc_enabled') !== 'true') {
@@ -1130,7 +1256,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         retriableValue: retriableErrorEvent,
         onRetry: ({ attempt, delayMs, error }) => {
           const msg = error instanceof Error ? error.message : String(error)
-          console.warn(`[agent] turn ${turnNum} retry ${attempt + 1} in ${delayMs}ms: ${msg.slice(0, 200)}`)
+          const safeMessage = computerRunState.active ? COMPUTER_PROVIDER_ERROR : msg.slice(0, 200)
+          console.warn(`[agent] turn ${turnNum} retry ${attempt + 1} in ${delayMs}ms: ${safeMessage}`)
           sender.send('ai:event', {
             id: sendId,
             event: {
@@ -1157,7 +1284,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             id: `turn-${turnNum}-text`,
             phase: 'final',
             title: `Шаг ${turnNum}: пишу ответ`,
-            detail: compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
+            detail: computerRunState.active
+              ? COMPUTER_CONTEXT_OMITTED
+              : compactProgressText(event.text, 140) ?? 'Получен первый видимый текст.',
             status: 'running'
           })
         }
@@ -1178,23 +1307,34 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         }
         // Forward chain-of-thought verbatim — renderer accumulates into the
         // assistant message's `thinking` field for collapsed display.
-        sender.send('ai:event', { id: sendId, event })
+        sender.send('ai:event', {
+          id: sendId,
+          event: computerRunState.active
+            ? { type: 'thought', text: COMPUTER_CONTEXT_OMITTED }
+            : event,
+        })
       } else if (event.type === 'info') {
         // Дефект 3 (vision per-provider): провайдер сам объявляет честную деградацию —
         // напр. openai-compat без vision: «X не принимает изображения — вложение пропущено».
         // Форвардим как обычный info-ивент, иначе уведомление молча терялось (ветки цикла
         // его не обрабатывали) и деградация была невидима юзеру (жалоба Павла на скринах zai).
-        sender.send('ai:event', { id: sendId, event })
+        sender.send('ai:event', {
+          id: sendId,
+          event: computerRunState.active
+            ? { type: 'info', text: COMPUTER_CONTEXT_OMITTED }
+            : event,
+        })
       } else if (event.type === 'tool-call') {
         if (!turnSawTool) {
           turnSawTool = true
           turnHeartbeat.stop('done', 'Модель выбрала инструмент для следующего действия.')
         }
+        const safeCall = projectRunToolCall(event.call)
         emitAgentProgress(sender, sendId, {
-          id: `turn-${turnNum}-tool-${event.call.id}`,
+          id: `turn-${turnNum}-tool-${safeCall.id}`,
           phase: 'tool',
           title: `Шаг ${turnNum}: выбран инструмент`,
-          detail: event.call.name,
+          detail: safeCall.name,
           status: 'running'
         })
         toolCalls.push(event.call)
@@ -1300,10 +1440,16 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         // Этап 2, приоритет 4: context_overflow → форс-компакция существующим summary-
         // компактором + один retry той же моделью. Не помогло → понятная ошибка, НЕ
         // бесконечный retry (bounded MAX_CONTEXT_RETRIES).
-        if (reason === 'context_overflow' && contextRetries < MAX_CONTEXT_RETRIES && model) {
+        if (reason === 'context_overflow' && !computerRunState.active && contextRetries < MAX_CONTEXT_RETRIES && model) {
           contextRetries++
           try {
-            const summaryMessages = buildCompactSummaryPrompt(currentMessages, { previousSummary: lastSummary })
+            const summaryMessages = buildCompactSummaryPrompt(
+              projectMessagesForPersistence(currentMessages, {
+                computerContextInitiallyExposed: computerRunState.active,
+                omitConversationContent: computerRunState.active,
+              }),
+              { previousSummary: lastSummary },
+            )
             let summaryText = ''
             let summaryDone = false
             for await (const ev of provider.send(summaryMessages, [], undefined, signal)) {
@@ -1313,8 +1459,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             }
             if (summaryDone && summaryText.trim()) {
               lastSummary = summaryText
-              const focusAtCompact = (sessionTodos && projectPath)
-                ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+              const focusAtCompact = (activeSessionTodos && projectPath)
+                ? formatFocusChain(activeSessionTodos.list(projectPath, parentChatId ?? null)) : null
               const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
               currentMessages.length = 0
               currentMessages.push(...compacted)
@@ -1325,7 +1471,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
             }
           } catch { /* компакция не удалась → понятная ошибка ниже */ }
           exitReason = 'error'
-          sender.send('ai:event', { id: sendId, event: { type: 'error', message: classifyProviderError(provErr).userMessage } })
+          sender.send('ai:event', {
+            id: sendId,
+            event: {
+              type: 'error',
+              message: computerRunState.active
+                ? COMPUTER_PROVIDER_ERROR
+                : classifyProviderError(provErr).userMessage,
+            },
+          })
           return
         }
         // Этап 2, приоритет 5: auth-ошибка (ключ/провайдер мёртв — как бан Claude) →
@@ -1340,7 +1494,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           if (fb) return fb
         }
         exitReason = 'error'
-        sender.send('ai:event', { id: sendId, event })
+        sender.send('ai:event', {
+          id: sendId,
+          event: computerRunState.active
+            ? { type: 'error', message: COMPUTER_PROVIDER_ERROR }
+            : event,
+        })
         return
       }
     }
@@ -1419,7 +1578,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       if (malformed.length > 0) {
         if (malformedRetries < MAX_MALFORMED_RETRIES) {
           malformedRetries++
-          const names = [...new Set(malformed.map(c => c.name))].join(', ')
+          const names = [...new Set(malformed.map(c => projectRunToolCall(c).name))].join(', ')
           if (assistantText.trim()) currentMessages.push({ role: 'assistant', content: assistantText })
           currentMessages.push({ role: 'user', content: `Вызов инструмента (${names}) содержал невалидный JSON в поле arguments. Повтори вызов одним валидным JSON-объектом arguments, без пояснений и текста вокруг.` })
           sender.send('ai:event', { id: sendId, event: { type: 'tool-blocked', callId: `malformed-${turn}`, name: names, reason: 'Битый JSON в аргументах вызова — прошу повторить валидным JSON' } })
@@ -1438,7 +1597,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       const seen = new Set<string>()
       const deduped: ToolCall[] = []
       for (const c of toolCalls) {
-        const sig = callSignature(c)
+        const sig = callSignature(projectToolCallForLoop(c, {
+          omitNonComputerArgs: computerRunState.active,
+        }))
         if (seen.has(sig)) continue
         seen.add(sig)
         deduped.push(c)
@@ -1465,7 +1626,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         if (shouldBlockArgless(observationState, c.name, LOOP_THRESHOLD)) loopHits.push(c)
         continue
       }
-      const sig = callSignature(c)
+      const sig = callSignature(projectToolCallForLoop(c, {
+        omitNonComputerArgs: computerRunState.active,
+      }))
       const next = (signatureCounts.get(sig) ?? 0) + 1
       signatureCounts.set(sig, next)
       if (next >= LOOP_THRESHOLD) loopHits.push(c)
@@ -1494,23 +1657,25 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       })
       if (loopNudges < MAX_LOOP_NUDGES) {
         loopNudges++
+        const safeLoopCall = projectRunToolCall(loopHits[0])
         sender.send('ai:event', {
           id: sendId,
           event: {
             type: 'tool-blocked',
-            callId: loopHits[0].id,
-            name: loopHits[0].name,
+            callId: safeLoopCall.id,
+            name: safeLoopCall.name,
             reason: `Зацикливание: один и тот же вызов повторён 3+ раза. Прошу сменить подход.`
           }
         })
         continue turnLoop
       }
+      const safeLoopCall = projectRunToolCall(loopHits[0])
       sender.send('ai:event', {
         id: sendId,
         event: {
           type: 'tool-blocked',
-          callId: loopHits[0].id,
-          name: loopHits[0].name,
+          callId: safeLoopCall.id,
+          name: safeLoopCall.name,
           reason: `Зацикливание продолжается после подсказки — цикл остановлен.`
         }
       })
@@ -1554,6 +1719,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Б2: скрытому прогону (попытка состязания) подтверждение показать некому —
       // авто-отказ вместо вечного ожидания; хук доносит причину до таблицы попыток.
       autoRejectConfirms,
+      computerUseAllowedActions,
+      // Original user action scope is run-scoped and survives fallback via ctx spread.
       agentMode: runAgentMode, setAgentMode: (m) => { runAgentMode = m }, skillRegistry, getSecretForDelegate,
       // tools_allow: сырой список — для наследования дочерней сессией (spawn_task_session);
       // allowedToolNames — набор для гейта диспетчера (enforcement на исполнении);
@@ -1594,7 +1761,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       parentChatId,
       subSessions,
       // TodoGate (Фаза 3): оркестрационный todo-лист сессии.
-      sessionTodos,
+      sessionTodos: activeSessionTodos,
       // Дерево делегирования (Фаза 4): главный агент — depth 0, без родителя.
       // Счётчик агентов один на весь прогон → общий потолок на всё дерево.
       delegationDepth: 0,
@@ -1611,6 +1778,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         ? browserTaskIdResolver({ parentChatId, runId })
         : (typeof parentChatId === 'number' ? `bt-${parentChatId}` : null),
       browserRunState,
+      computerRunState,
       browserAdapterState,
       recordRunEvent: (kind, p) => {
         if (!agentRuns || !runId) return
@@ -1627,13 +1795,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       verifications
     } as ToolContext & {
       browserRunState: { active: boolean; contextExposed: boolean; screenshotExposed: boolean }
+      computerRunState: { active: boolean; contextExposed: boolean }
       browserAdapterState: { preferred?: BrowserAdapter['id'] }
     }
     const toolResults = await dispatchToolTurn({
       toolCalls,
       context: ctx,
       hooks,
-      addContext: context => pendingSupplements.push(context),
+      addContext: addSupplement,
     })
     // P2 (Этап 6): зафиксировать успешный проход обязательного review gate по
     // результату его tool-вызова (маркер REVIEW_GATE_PASS_MARKER). Только при
@@ -1661,6 +1830,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       const call = toolCalls[i]
       const result = toolResults[i]
       if (!result) continue
+      const telemetryCall = projectRunToolCall(call)
+      const telemetryArgs = telemetryCall.args
+      const telemetryResult = projectToolResultForTelemetry(call.name, result.result)
       // VSK-PRODUCT-A1 3b: трекинг read-исходов набора «папка». Только для folder —
       // у вложений исход из конвейера, а не из tool-вызовов (иначе ложная тревога).
       if (materialsCtx?.source === 'folder' && MATERIAL_READ_TOOLS.has(call.name)) {
@@ -1678,9 +1850,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       captureToolObservation(
         saveMemory,
         {
-          tool: call.name,
-          args: call.args,
-          result: typeof result.result === 'string' ? result.result : JSON.stringify(result.result ?? ''),
+          tool: telemetryCall.name,
+          args: telemetryArgs,
+          result: typeof telemetryResult === 'string' ? telemetryResult : JSON.stringify(telemetryResult ?? ''),
           projectPath
         },
         autoCaptureEnabled
@@ -1689,8 +1861,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       if (trackToolPatternFn) {
         try {
           trackToolPatternFn(projectPath, {
-            tool: call.name,
-            args: call.args,
+            tool: telemetryCall.name,
+            args: telemetryArgs,
             success: !result.error,
             timestamp: Date.now()
           })
@@ -1713,6 +1885,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // гейта; отдельного счётчика вызовов рядом больше нет.
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
+      // Active Computer Use rejects every non-computer call before execution.
+      // Its model-authored args can repeat private desktop text, so it is not a
+      // verification fact and must never become a user-visible telemetry label.
+      if (computerRunState.active && !isComputerToolName(call.name)) continue
       if (!isVerificationToolCall(call)) continue
       const res = toolResults[i]
       const exitCode = (res?.result as { exitCode?: unknown } | null | undefined)?.exitCode
@@ -1770,12 +1946,15 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         error: toolResults[i]?.error,
       })
     }
-    lastTurnProgress = recordTurn(progressState, toolCalls.map((call, i) => ({
-      name: call.name,
-      args: call.args,
-      result: toolResults[i]?.result,
-      error: toolResults[i]?.error,
-    })))
+    lastTurnProgress = recordTurn(progressState, toolCalls.map((call, i) => {
+      const telemetryCall = projectRunToolCall(call)
+      return {
+        name: telemetryCall.name,
+        args: telemetryCall.args,
+        result: projectToolResultForTelemetry(call.name, toolResults[i]?.result),
+        error: projectRunToolError(toolResults[i]?.error),
+      }
+    }))
     const stagnation = detectStagnation(progressState)
     let turnDecision = 'продолжаю'
     if (stagnation.stagnant) {
@@ -1785,7 +1964,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         currentMessages.push({ role: 'user', content: buildStrategyChangeHint(stagnation.reason, stagnation.staleTurns) })
         sender.send('ai:event', {
           id: sendId,
-          event: { type: 'tool-blocked', callId: `stagnation-${progressState.strategyNudges}`, name: toolCalls[0]?.name ?? 'run_command',
+          event: { type: 'tool-blocked', callId: `stagnation-${progressState.strategyNudges}`, name: toolCalls[0] ? projectRunToolCall(toolCalls[0]).name : 'run_command',
             reason: 'Прогресса нет несколько ходов подряд — прошу сменить подход.' },
         })
       } else {
@@ -1810,7 +1989,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       try {
         // Гард резюма: «самый опасный» tool turn'а, а не просто последний —
         // иначе write→run→read дал бы last=read → ложный autoResumable (аудит P1 #11).
-        const lastTool = pickResumeGuardTool(toolCalls.map(c => c.name))
+        const lastTool = pickResumeGuardTool(toolCalls.map(c => projectRunToolCall(c).name))
         agentRuns.tick(runId, {
           turnIndex: turn + 1,
           lastToolName: lastTool,
@@ -1828,7 +2007,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // 1.9.7 #7: троттлинг против write-amplification — не пишем идентичный
       // снапшот, на длинных прогонах не чаще every-N, size-cap как backstop.
       try {
-        const messagesJson = JSON.stringify(currentMessages)
+        const messagesJson = JSON.stringify(projectMessagesForPersistence(currentMessages, {
+          computerContextInitiallyExposed: computerRunState.active,
+          omitConversationContent: computerRunState.active,
+        }))
         const dec = decideCheckpointSave(turn + 1, messagesJson, checkpointThrottle.get(runId))
         if (dec.save) {
           agentRuns.saveCheckpoint(runId, turn + 1, messagesJson)
@@ -1843,7 +2025,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     // от sliding window (compactToolHistory выше) который работает на уровне
     // отдельных tool results.
     // auto_compact = 'false' отключает фичу; по умолчанию включена.
-    const autoCompactEnabled = getSecretForDelegate?.('auto_compact') !== 'false'
+    const autoCompactEnabled = !computerRunState.active && getSecretForDelegate?.('auto_compact') !== 'false'
     // Microcompact (Tier-2 #2): дешёвый обратимый прунинг по размеру при ~70% окна —
     // ДО дорогого full-compact (LLM-суммаризация). Без вызова модели. Маркеры обратимы.
     if (autoCompactEnabled && model) {
@@ -1873,7 +2055,13 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           chars: currentMessages.reduce((sum, m) => sum + (m.content ?? '').length, 0)
         })
         // Получаем резюме от той же модели — один non-streamed вызов
-        const summaryMessages = buildCompactSummaryPrompt(currentMessages, { previousSummary: lastSummary })
+        const summaryMessages = buildCompactSummaryPrompt(
+          projectMessagesForPersistence(currentMessages, {
+            computerContextInitiallyExposed: computerRunState.active,
+            omitConversationContent: computerRunState.active,
+          }),
+          { previousSummary: lastSummary },
+        )
         let summaryText = ''
         let summaryDone = false
         for await (const ev of provider.send(summaryMessages, [], undefined, signal)) {
@@ -1899,8 +2087,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           const beforeLen = currentMessages.length
           // Focus Chain (ось 3 C): незакрытый todo-лист переживает сжатие — якорем в
           // первое сообщение, чтобы агент не потерял исходные пункты задачи.
-          const focusAtCompact = (sessionTodos && projectPath)
-            ? formatFocusChain(sessionTodos.list(projectPath, parentChatId ?? null)) : null
+          const focusAtCompact = (activeSessionTodos && projectPath)
+            ? formatFocusChain(activeSessionTodos.list(projectPath, parentChatId ?? null)) : null
           const beforeChars = currentMessages.reduce((sum, m) => sum + (m.content ?? '').length, 0)
           const compacted = createCompactedHistory(summaryText, currentMessages, focusAtCompact, baseSystemMsg?.content ?? null)
           const afterChars = compacted.reduce((sum, m) => sum + (m.content ?? '').length, 0)
@@ -1960,14 +2148,17 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
           id: sendId,
           event: { type: 'context-compact', phase: 'cancel', reason: 'context-window' }
         })
-        logRuntimeError('ai.context_compact.fail', err, {
+        logRuntimeError('ai.context_compact.fail', projectProviderError(err), {
           sendId,
           runId: runId ?? null,
           projectPath,
           providerId: providerId ?? null,
           model: model ?? null
         })
-        console.warn('[agent] auto-compact failed, continuing without compaction:', err instanceof Error ? err.message : err)
+        console.warn(
+          '[agent] auto-compact failed, continuing without compaction:',
+          computerRunState.active ? COMPUTER_PROVIDER_ERROR : err instanceof Error ? err.message : err,
+        )
       }
     }
   }
@@ -2012,7 +2203,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
       return
     }
-    logRuntimeError('ai.runner.error', err, {
+    logRuntimeError('ai.runner.error', projectProviderError(err), {
       sendId,
       runId: runId ?? null,
       path: 'api-tools',
@@ -2029,7 +2220,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
-      event: { type: 'error', message: classifyProviderError(err).userMessage }
+      event: {
+        type: 'error',
+        message: computerRunState.active ? COMPUTER_PROVIDER_ERROR : classifyProviderError(err).userMessage,
+      }
     })
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } finally {
@@ -2098,12 +2292,14 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       commandsCount: commandsRun.length
     }, exitReason === 'completed' || exitReason === 'aborted' || handedOff ? 'info' : 'warn')
     if (!handedOff) {
+      const durableAssistantText = computerRunState.active ? '' : lastAssistantText
+      const durableSummary = computerRunState.active ? '' : lastSummary
       finalizeApiRun({
         sendId,
         projectPath,
         exitReason,
-        lastAssistantText,
-        lastSummary,
+        lastAssistantText: durableAssistantText,
+        lastSummary: durableSummary,
         filesTouched,
         commandsRun,
         sessionUsage,
@@ -2113,7 +2309,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         // иначе каждая похожая сессия добавляла бы ещё один почти такой же дамп.
         existingMemoryContents: p => {
           try {
-            return searchMemories(p, lastSummary, 20).map(m => m.content)
+            return searchMemories(p, durableSummary, 20).map(m => m.content)
           } catch {
             return []
           }
@@ -2122,7 +2318,12 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         runId,
         providerId,
         model,
-        initialMessages,
+        initialMessages: computerRunState.active
+          ? projectMessagesForPersistence(initialMessages, {
+              computerContextInitiallyExposed: true,
+              omitConversationContent: true,
+            })
+          : initialMessages,
         toolsSignature,
         attestedThisRun,
         toolCallCount,

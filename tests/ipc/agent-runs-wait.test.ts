@@ -39,7 +39,7 @@ describe('agent-runs ai:wait ipc', () => {
 
   it('registers ai:wait and resolves final run status', async () => {
     const runs = createAgentRuns(db)
-    registerAgentRunsIpc(runs, {} as never, { list: () => [] } as never, db, () => false, Date.now())
+    registerAgentRunsIpc(runs, {} as never, { list: () => [] } as never, db, async () => false, Date.now())
     runs.create({ runId: 'r1', projectPath: '/p', title: 'Done' })
     runs.finish('r1', 'done', { costCents: 12 })
 
@@ -53,9 +53,38 @@ describe('agent-runs ai:wait ipc', () => {
 
   it('rejects through ipc on timeout', async () => {
     const runs = createAgentRuns(db)
-    registerAgentRunsIpc(runs, {} as never, { list: () => [] } as never, db, () => false, Date.now())
+    registerAgentRunsIpc(runs, {} as never, { list: () => [] } as never, db, async () => false, Date.now())
     runs.create({ runId: 'r1', projectPath: '/p', title: 'Running' })
 
     await expect(invoke('ai:wait', 'r1', { timeoutMs: 0, pollMs: 10 })).rejects.toThrow('timeout')
+  })
+
+  it('does not mark a running task stopped before the exact Computer Stop ACK barrier resolves', async () => {
+    const runs = createAgentRuns(db)
+    let acknowledge!: (value: boolean) => void
+    const ack = new Promise<boolean>(resolve => { acknowledge = resolve })
+    const abortSendAndWait = vi.fn(() => ack)
+    registerAgentRunsIpc(
+      runs,
+      {} as never,
+      { list: () => [] } as never,
+      db,
+      abortSendAndWait,
+      Date.now(),
+    )
+    runs.create({ runId: 'r-stop', projectPath: '/p', title: 'Computer run', sendId: 42 })
+
+    let settled = false
+    const stopping = invoke<boolean>('agent-runs:stop', 'r-stop').then(result => {
+      settled = true
+      return result
+    })
+    await vi.waitFor(() => expect(abortSendAndWait).toHaveBeenCalledWith(42))
+    expect(settled).toBe(false)
+    expect(runs.get('r-stop')).toMatchObject({ status: 'running', endedAt: null })
+
+    acknowledge(true)
+    await expect(stopping).resolves.toBe(true)
+    expect(runs.get('r-stop')).toMatchObject({ status: 'stopped' })
   })
 })

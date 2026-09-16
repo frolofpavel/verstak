@@ -2,14 +2,31 @@ import { ipcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { Chats } from '../storage/chats'
 import type { ChatSessions, ChatKind } from '../storage/chat-sessions'
+import type { BrowserTasks } from '../storage/browser-tasks'
 import { forgetMemorizedChat } from './ai'
 import { summarizeAndSaveSession } from '../ai/session-summary'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { isChatSubscriptionBinding, type ChatSubscriptionBindingDTO } from '../../shared/contracts/subscription'
 import { invalidateSnapshotsAfter } from '../storage/chat-context-snapshots'
 import { isKnownProviderId } from '../../shared/contracts/provider'
+import {
+  isChatComputerTainted,
+  materializeChatComputerTaint,
+  omitConversationContentForComputerTaint,
+} from '../ai/computer/durable-taint'
+import { isComputerUseComposerAttempt } from '../ai/computer/intent'
 
-export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Database): void {
+interface ChatsComputerTaintDeps {
+  browserTasks: BrowserTasks
+  getChatParentChatId: (chatId: number) => number | null
+}
+
+export function registerChatsIpc(
+  chats: Chats,
+  sessions: ChatSessions,
+  db: Database,
+  computerTaintDeps?: ChatsComputerTaintDeps,
+): void {
   // Sessions
   ipcMain.handle('chat-sessions:list', (_e, projectPath: string) => sessions.list(projectPath))
   /** Review sub-chats для родительского — для рендера pills в Timeline. */
@@ -33,9 +50,25 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
     })
     return session
   })
-  ipcMain.handle('chat-sessions:fork', (_e, sourceId: number, opts?: { uptoMessageId?: number; title?: string }) =>
-    sessions.fork(sourceId, opts)
-  )
+  ipcMain.handle('chat-sessions:fork', (_e, sourceId: number, opts?: { uptoMessageId?: number; title?: string }) => {
+    const inheritedComputerTaint = computerTaintDeps
+      ? isChatComputerTainted(sourceId, computerTaintDeps)
+      : false
+    const branch = sessions.fork(sourceId, opts)
+    if (!branch || !inheritedComputerTaint) return branch
+    const browserTasks = computerTaintDeps?.browserTasks
+    if (!browserTasks) {
+      sessions.remove(branch.id)
+      throw new Error('Computer Use provenance storage is unavailable; fork was not created')
+    }
+    try {
+      materializeChatComputerTaint(browserTasks, branch.id, branch.projectPath)
+    } catch (err) {
+      sessions.remove(branch.id)
+      throw err
+    }
+    return branch
+  })
   ipcMain.handle('chat-sessions:rename', (_e, id: number, title: string) => sessions.rename(id, title))
   ipcMain.handle('chat-sessions:set-model', (_e, id: number, providerId: string | null, model: string | null) =>
     sessions.setProviderModel(id, providerId, model)
@@ -46,7 +79,15 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
     if (session) {
       const messages = chats.listBySession(id)
       try {
-        summarizeAndSaveSession(db, id, session.projectPath, messages)
+        const tainted = computerTaintDeps
+          ? isChatComputerTainted(id, computerTaintDeps)
+          : false
+        summarizeAndSaveSession(
+          db,
+          id,
+          session.projectPath,
+          omitConversationContentForComputerTaint(messages, tainted),
+        )
       } catch (err) {
         logRuntimeError('chat_session.summary_before_remove.fail', err, { sessionId: id, projectPath: session.projectPath })
         console.error('[chats] summarizeAndSaveSession failed, proceeding with deletion:', err instanceof Error ? err.message : err)
@@ -63,6 +104,20 @@ export function registerChatsIpc(chats: Chats, sessions: ChatSessions, db: Datab
   ipcMain.handle('chats:list', (_e, sessionId: number) => chats.listBySession(sessionId))
   ipcMain.handle('chats:list-window', (_e, sessionId: number, opts?: { beforeId?: number | null; limit?: number }) => chats.listWindowBySession(sessionId, opts))
   ipcMain.handle('chats:append', (_e, sessionId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: Array<{ id: string; name?: string; icon?: string; description?: string }> }) => {
+    if (role === 'user' && isComputerUseComposerAttempt(content)) {
+      const session = sessions.get(sessionId)
+      const browserTasks = computerTaintDeps?.browserTasks
+      if (!session || !browserTasks) {
+        throw new Error('COMPUTER_USE_STATE_UNAVAILABLE: private Computer Use boundary was not persisted')
+      }
+      if (session.projectPath !== projectPath) {
+        throw new Error('COMPUTER_USE_SESSION_MISMATCH: chat project does not match the persisted message')
+      }
+      // Deliberately commit the content-free marker first. A crash between
+      // these synchronous writes may leave a conservative marker, but can
+      // never leave raw Computer Use text in an untainted chat.
+      materializeChatComputerTaint(browserTasks, sessionId, session.projectPath)
+    }
     const message = chats.appendToSession(sessionId, projectPath, role, content, meta)
     logRuntime('chat_message.append', {
       sessionId,

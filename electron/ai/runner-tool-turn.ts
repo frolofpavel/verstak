@@ -2,12 +2,20 @@ import type { ToolCall, ToolResult } from './types'
 import { runHooks, type CompiledHooks } from './hooks'
 import { lookupHandler, type ToolContext, type ToolHandler } from '../ipc/tool-handlers'
 import { FORBIDDEN_CROSS_TOOLS } from './browser/capability'
+import {
+  projectToolArgsForTelemetry,
+  projectToolCallForTelemetry,
+  projectToolResultForTelemetry,
+} from './tool-telemetry'
+import { isComputerToolName } from './computer/tool-names'
 
 const BROWSER_RUN_FORBIDDEN_TOOLS = new Set(FORBIDDEN_CROSS_TOOLS)
 const STOPPED_TOOL_REASON = 'Запрос остановлен: инструмент не запущен.'
+const COMPUTER_CROSS_TOOL_BLOCKED_REASON = 'Computer Use заблокировал инструмент вне capability выбранного окна. Содержимое окна не может расширить полномочия задачи.'
 
-type BrowserRunAwareContext = ToolContext & {
+type UntrustedSurfaceAwareContext = ToolContext & {
   browserRunState?: { active: boolean; contextExposed?: boolean; screenshotExposed?: boolean }
+  computerRunState?: { active: boolean; contextExposed?: boolean }
 }
 
 function resultIncludesScreenshot(result: ToolResult | undefined): boolean {
@@ -17,7 +25,7 @@ function resultIncludesScreenshot(result: ToolResult | undefined): boolean {
 }
 
 function updateBrowserRunAfterTools(
-  state: BrowserRunAwareContext['browserRunState'],
+  state: UntrustedSurfaceAwareContext['browserRunState'],
   toolCalls: ToolCall[],
   results: ToolResult[],
   blocked: Map<number, string>,
@@ -40,7 +48,81 @@ function updateBrowserRunAfterTools(
   ))
   if (contextExposed) state.contextExposed = true
   if (screenshotExposed) state.screenshotExposed = true
-  if (observed) state.active = true
+  if (contextExposed || observed || screenshotExposed) state.active = true
+}
+
+function updateComputerRunAfterTools(
+  state: UntrustedSurfaceAwareContext['computerRunState'],
+  toolCalls: ToolCall[],
+  results: ToolResult[],
+  blocked: Map<number, string>,
+): void {
+  if (!state) return
+  const contextExposed = toolCalls.some((call, index) => (
+    isComputerToolName(call.name)
+    && !blocked.has(index)
+    && !results[index]?.error
+  ))
+  if (contextExposed) {
+    state.active = true
+    state.contextExposed = true
+  }
+}
+
+function computerRunForbids(toolName: string): boolean {
+  // Keep the selected-window tools available for the task that owns the
+  // binding, but prevent desktop-derived text from escaping through ANY other
+  // capability. R3 may later add a structured, explicitly approved handoff;
+  // R2 has no such cross-capability grant and therefore fails closed.
+  return !isComputerToolName(toolName)
+}
+
+function applyUntrustedSurfaceBlocks(
+  toolCalls: ToolCall[],
+  context: UntrustedSurfaceAwareContext,
+  blocked: Map<number, string>,
+): void {
+  const browserRunState = context.browserRunState
+  const computerRunState = context.computerRunState
+  // A model can emit several calls in one batch. Treat the batch as tainted as
+  // soon as it asks to expose an untrusted surface, otherwise
+  // observe→run_command in one turn bypasses the next-turn state transition.
+  const firstBrowserExposure = toolCalls.findIndex((call, index) => (
+    call.name.startsWith('browser_') && !blocked.has(index)
+  ))
+  const firstComputerExposure = toolCalls.findIndex((call, index) => (
+    isComputerToolName(call.name) && !blocked.has(index)
+  ))
+  const hasActiveSurface = browserRunState?.active === true || computerRunState?.active === true
+  // If a fresh batch tries both surfaces, the first declared producer wins and
+  // the other capability is blocked. This preserves order without permitting
+  // either surface to bootstrap the other.
+  const browserGateActive = browserRunState?.active === true || (
+    !hasActiveSurface
+    && firstBrowserExposure >= 0
+    && (firstComputerExposure < 0 || firstBrowserExposure < firstComputerExposure)
+  )
+  const computerGateActive = computerRunState?.active === true || (
+    !hasActiveSurface
+    && firstComputerExposure >= 0
+    && (firstBrowserExposure < 0 || firstComputerExposure < firstBrowserExposure)
+  )
+  if (browserGateActive) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]
+      if (!blocked.has(i) && BROWSER_RUN_FORBIDDEN_TOOLS.has(call.name)) {
+        blocked.set(i, `Browser run активен — cross-tool "${call.name}" заблокирован capability envelope. Контент страницы не может расширить полномочия задачи.`)
+      }
+    }
+  }
+  if (computerGateActive) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i]
+      if (!blocked.has(i) && computerRunForbids(call.name)) {
+        blocked.set(i, COMPUTER_CROSS_TOOL_BLOCKED_REASON)
+      }
+    }
+  }
 }
 
 interface DispatchToolTurnOptions {
@@ -60,9 +142,10 @@ async function collectPreBlocks(
   hooks: CompiledHooks,
   invokeHooks: HookRunner,
   addContext: (context: string) => void,
+  blocked: Map<number, string>,
 ): Promise<Map<number, string>> {
-  const blocked = new Map<number, string>()
   for (let i = 0; i < toolCalls.length; i++) {
+    if (blocked.has(i)) continue
     if (context.signal?.aborted) {
       for (let j = i; j < toolCalls.length; j++) blocked.set(j, STOPPED_TOOL_REASON)
       break
@@ -73,7 +156,9 @@ async function collectPreBlocks(
         event: 'PreToolUse',
         cwd: context.projectPath,
         tool_name: call.name,
-        tool_input: call.args,
+        // Hooks are external observability/policy surfaces, not executors.
+        // Desktop input and wait text must not leave the in-process handler.
+        tool_input: projectToolArgsForTelemetry(call.name, call.args),
       })
       if (pre.additionalContext) addContext(pre.additionalContext)
       if (pre.block) blocked.set(i, pre.reason ?? `Вызов "${call.name}" заблокирован PreToolUse-хуком.`)
@@ -85,14 +170,17 @@ async function collectPreBlocks(
 }
 
 function blockedResult(context: ToolContext, call: ToolCall, reason: string): ToolResult {
+  const computerActive = (context as UntrustedSurfaceAwareContext).computerRunState?.active === true
+  const omitNonComputer = computerActive && !isComputerToolName(call.name)
+  const telemetryCall = projectToolCallForTelemetry(call, { omitNonComputerArgs: computerActive })
   context.sender.send('ai:event', {
     id: context.sendId,
     event: {
       type: 'tool-blocked',
-      callId: call.id,
-      name: call.name,
+      callId: telemetryCall.id,
+      name: telemetryCall.name,
       command: '',
-      reason,
+      reason: omitNonComputer ? COMPUTER_CROSS_TOOL_BLOCKED_REASON : reason,
     },
   })
   return { id: call.id, name: call.name, result: '', error: reason }
@@ -146,8 +234,8 @@ async function runPostHooks(
         event: 'PostToolUse',
         cwd: context.projectPath,
         tool_name: call.name,
-        tool_input: call.args,
-        tool_output: results[i]?.result,
+        tool_input: projectToolArgsForTelemetry(call.name, call.args),
+        tool_output: projectToolResultForTelemetry(call.name, results[i]?.result),
       })
       if (post.additionalContext) addContext(post.additionalContext)
     } catch {
@@ -184,18 +272,14 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
     resolveHandler = lookupHandler,
     invokeHooks = runHooks,
   } = opts
-  const blocked = hooks
-    ? await collectPreBlocks(toolCalls, context, hooks, invokeHooks, addContext)
-    : new Map<number, string>()
-  const browserRunState = (context as BrowserRunAwareContext).browserRunState
-  if (browserRunState?.active === true) {
-    for (let i = 0; i < toolCalls.length; i++) {
-      const call = toolCalls[i]
-      if (!blocked.has(i) && BROWSER_RUN_FORBIDDEN_TOOLS.has(call.name)) {
-        blocked.set(i, `Browser run активен — cross-tool "${call.name}" заблокирован capability envelope. Контент страницы не может расширить полномочия задачи.`)
-      }
-    }
-  }
+  const untrustedContext = context as UntrustedSurfaceAwareContext
+  const browserRunState = untrustedContext.browserRunState
+  const computerRunState = untrustedContext.computerRunState
+  // Capability envelope runs before external hooks, so blocked desktop/browser
+  // arguments cannot escape through an observability hook.
+  const blocked = new Map<number, string>()
+  applyUntrustedSurfaceBlocks(toolCalls, untrustedContext, blocked)
+  if (hooks) await collectPreBlocks(toolCalls, context, hooks, invokeHooks, addContext, blocked)
   // Гейт tools_allow на ИСПОЛНЕНИИ (штаб, аудит 09.08): список предлагаемых инструментов —
   // это МЕНЮ для модели, а не граница. Вызов инструмента вне разрешённого набора — будь то
   // галлюцинация, инъекция в читаемый контент, или дочерняя сессия под унаследованным
@@ -215,6 +299,7 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
   // Browser-only capability становится активной только после того, как модель
   // действительно получила недоверенное содержимое подключённой страницы.
   updateBrowserRunAfterTools(browserRunState, toolCalls, results, blocked)
+  updateComputerRunAfterTools(computerRunState, toolCalls, results, blocked)
   if (hooks) {
     await runPostHooks(toolCalls, results, context, hooks, blocked, invokeHooks, addContext)
   }

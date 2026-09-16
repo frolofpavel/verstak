@@ -37,6 +37,12 @@ export const FORBIDDEN_CROSS_TOOLS: readonly string[] = [
   'spawn_process', 'stop_process',
   'memory_save',                  // страница не может заставить сохранить память
   'new_task',
+  // Generic desktop-wide capture bypasses the attached browser tab boundary.
+  'screen_capture', 'screen_info',
+  // Desktop UI is a separate user-granted capability. Untrusted page content
+  // cannot inspect or operate it, including through nominally read-only observe.
+  'computer_observe', 'computer_click', 'computer_type',
+  'computer_key', 'computer_scroll', 'computer_wait_for',
 ] as const
 
 /**

@@ -188,14 +188,30 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ai:send', messages, projectPath, undefined, route ? { promptRoute: route } : undefined, chatId),
     sendWithBudget: (messages: unknown[], projectPath: string | null, budget: number, chatId?: string, route?: PromptRouteOverride) =>
       ipcRenderer.invoke('ai:send', messages, projectPath, budget, route ? { promptRoute: route } : undefined, chatId),
+    /** Tiny synchronous mint keeps Chromium's transient user-activation proof
+     *  attached to the visible composer click/keypress. No raw text is accepted
+     *  by generic ai:send; main returns an opaque, short-lived one-shot ticket. */
+    mintComputerUseComposerTicket: (
+      chatId: string,
+      canonicalUserContent: string,
+    ): string | null => {
+      if (navigator.userActivation.isActive !== true) return null
+      const ticket = ipcRenderer.sendSync(
+        'ai:mint-computer-use-composer-ticket',
+        chatId,
+        canonicalUserContent,
+      )
+      return typeof ticket === 'string' && ticket.length > 0 ? ticket : null
+    },
     /** Send with provider/model/systemPrompt override. Used by Explicit Review:
      *  routes through ai:send with overrides so reviewer ≠ chat provider. */
     sendWithOverrides: (
       messages: unknown[],
       projectPath: string | null,
       overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; recipe?: RecipeSpec; resumeFromRunId?: string; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number } },
-      chatId?: string
-    ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId),
+      chatId?: string,
+      computerUseGrant?: { ticket: string; userMessageId: number },
+    ) => ipcRenderer.invoke('ai:send', messages, projectPath, undefined, overrides, chatId, computerUseGrant),
     /** Read-only recovery snapshot for a renderer reload; never starts/resumes a run. */
     liveState: (projectPath: string) => ipcRenderer.invoke('ai:live-state', projectPath),
     resolveWrite: (callId: string, accept: boolean, sendId?: number) =>
@@ -225,7 +241,7 @@ contextBridge.exposeInMainWorld('api', {
     suspend: (sendId: number) => ipcRenderer.invoke('ai:suspend', sendId),
     appendContext: (sendId: number, text: string) =>
       ipcRenderer.invoke('ai:append-context', sendId, text) as Promise<
-        { ok: true } | { ok: false; fallback: 'invalid' | 'unavailable' }
+        { ok: true; mode: 'deferred' } | { ok: false; fallback: 'invalid' | 'unavailable' | 'computer-use-active' }
       >,
     countTokens: (text: string, projectPath: string | null, historyMessages?: unknown[]) =>
       ipcRenderer.invoke('ai:count-tokens', text, projectPath, historyMessages) as Promise<{ tokens: number; exact: boolean; providerId: string }>,
@@ -496,6 +512,16 @@ contextBridge.exposeInMainWorld('api', {
   browserBridge: {
     getState: () => ipcRenderer.invoke('browser-bridge:get-state'),
     connect: () => ipcRenderer.invoke('browser-bridge:connect'),
+  },
+  /** R2 Computer Use — renderer gets opaque candidates, never PID/HWND. */
+  computerUse: {
+    getState: () => ipcRenderer.invoke('computer-use:get-state'),
+    isChatTainted: (chatId: number) => ipcRenderer.invoke('computer-use:is-chat-tainted', chatId),
+    listCandidates: () => ipcRenderer.invoke('computer-use:list-candidates'),
+    bind: (candidateId: string) => ipcRenderer.invoke('computer-use:bind', candidateId),
+    acknowledgeUncertain: () => ipcRenderer.invoke('computer-use:acknowledge-uncertain'),
+    unbind: () => ipcRenderer.invoke('computer-use:unbind'),
+    stop: () => ipcRenderer.invoke('computer-use:stop'),
   },
   // Git READ + WRITE (Dev Task Flow). READ: status/diff/log. WRITE (Фаза 3,
   // argv-форма + денилист push/force/reset): branchCreate/checkout/add/commit.

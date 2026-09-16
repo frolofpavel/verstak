@@ -54,6 +54,300 @@ describe('dispatchToolTurn', () => {
     expect(results[1].result).toBe('browser_read_page')
   })
 
+  it('browser page context cannot cross into any Computer Use capability', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: true },
+      computerRunState: { active: false },
+    } as ToolContext
+    const calls = [call('c1', 'computer_observe'), call('c2', 'computer_click')]
+    const results = await dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual([])
+    expect(results.every(item => /Browser run|capability envelope/i.test(item.error ?? ''))).toBe(true)
+  })
+
+  it('browser page context cannot escape through desktop-wide capture tools', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserTaskId: 'bt-1',
+      browserRunState: { active: true, contextExposed: true },
+      computerRunState: { active: false },
+    } as ToolContext
+    const results = await dispatchToolTurn({
+      toolCalls: [call('s1', 'screen_capture'), call('s2', 'screen_info')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: name => ({
+        mode: 'parallel-read',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual([])
+    expect(results.every(item => /Browser run|capability envelope/i.test(item.error ?? ''))).toBe(true)
+  })
+
+  it('desktop observation enables an untrusted-surface gate for the next turn', async () => {
+    const handled: string[] = []
+    const state = { active: false, contextExposed: false }
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      computerRunState: state,
+    } as ToolContext
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => {
+        handled.push(name)
+        return name === 'computer_observe'
+          ? { ...result(toolCall), result: { observation: { text: 'untrusted desktop text' } } }
+          : result(toolCall)
+      },
+    })
+
+    const [observed] = await dispatchToolTurn({
+      toolCalls: [call('c1', 'computer_observe')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(observed.error).toBeUndefined()
+    expect(state).toEqual({ active: true, contextExposed: true })
+
+    const next = await dispatchToolTurn({
+      toolCalls: [
+        call('x1', 'run_command'), call('b1', 'browser_read_page'),
+        call('f1', 'read_file'), call('a1', 'generate_docx'),
+        call('c2', 'computer_click'),
+      ],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler,
+    })
+    expect(next[0].error).toMatch(/Computer Use|недоверенн/i)
+    expect(next[1].error).toMatch(/Computer Use|недоверенн/i)
+    expect(next[2].error).toMatch(/Computer Use|недоверенн/i)
+    expect(next[3].error).toMatch(/Computer Use|недоверенн/i)
+    expect(next[4].error).toBeUndefined()
+    expect(handled).toEqual(['computer_observe', 'computer_click'])
+  })
+
+  it('an explicit Computer Use run blocks a first-turn generic screen capture before exposure', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      // Production runner initializes this from the original-user action grant.
+      computerRunState: { active: true, contextExposed: false },
+    } as ToolContext
+
+    const [capture] = await dispatchToolTurn({
+      toolCalls: [call('screen-1', 'screen_capture')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: name => ({
+        mode: 'parallel-read',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual([])
+    expect(capture.error).toMatch(/Computer Use|недоверенн/i)
+  })
+
+  it('any successful browser-visible result enables its cross-capability gate', async () => {
+    const handled: string[] = []
+    const state = { active: false, contextExposed: false, screenshotExposed: false }
+    const ctx = {
+      ...context([]),
+      browserRunState: state,
+      computerRunState: { active: false },
+    } as ToolContext
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => {
+        handled.push(name)
+        return name === 'browser_screenshot'
+          ? { ...result(toolCall), result: { screenshotAttached: true } }
+          : result(toolCall)
+      },
+    })
+    await dispatchToolTurn({
+      toolCalls: [call('b1', 'browser_screenshot')], context: ctx, hooks: null,
+      addContext: vi.fn(), resolveHandler,
+    })
+    expect(state).toEqual({ active: true, contextExposed: true, screenshotExposed: true })
+
+    const [computer] = await dispatchToolTurn({
+      toolCalls: [call('c1', 'computer_observe')], context: ctx, hooks: null,
+      addContext: vi.fn(), resolveHandler,
+    })
+    expect(computer.error).toMatch(/Browser run|capability envelope/i)
+    expect(handled).toEqual(['browser_screenshot'])
+  })
+
+  it('pre-blocks cross-tools in the same batch as an untrusted desktop observation', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      computerRunState: { active: false, contextExposed: false },
+    } as ToolContext
+    const calls = [call('c1', 'computer_observe'), call('x1', 'run_command'), call('x2', 'connector_send')]
+    const results = await dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual(['computer_observe'])
+    expect(results[1].error).toMatch(/Computer Use|недоверенн/i)
+    expect(results[2].error).toMatch(/Computer Use|недоверенн/i)
+  })
+
+  it('does not trust an MCP tool that only collides with the computer_ prefix', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      computerRunState: { active: true, contextExposed: true },
+    } as ToolContext
+
+    const [collision] = await dispatchToolTurn({
+      toolCalls: [call('mcp-collision', 'computer_upload')],
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: name => ({
+        mode: 'confirm-write',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(collision.error).toMatch(/Computer Use|недоверенн/i)
+    expect(handled).toEqual([])
+  })
+
+  it('durable computer context blocks command, connector, browser and MCP classes before handlers', async () => {
+    const handled: string[] = []
+    const toolCalls = [
+      call('cmd', 'run_command'),
+      call('connector', 'connector_query'),
+      call('browser', 'browser_read_page'),
+      call('mcp', 'mcp_external_send'),
+    ]
+    const results = await dispatchToolTurn({
+      toolCalls,
+      context: {
+        ...context([]),
+        browserRunState: { active: false },
+        computerRunState: { active: true, contextExposed: true },
+      } as ToolContext,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: name => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual([])
+    expect(results).toHaveLength(toolCalls.length)
+    for (const blocked of results) expect(blocked.error).toMatch(/Computer Use|недоверенн/i)
+  })
+
+  it('blocks desktop-derived cross-tools before external PreToolUse hooks can observe their arguments', async () => {
+    const secret = 'desktop-private-value-never-leaves-envelope'
+    const preInputs: unknown[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      computerRunState: { active: true, contextExposed: true },
+    } as ToolContext
+    const calls: ToolCall[] = [{ id: 'x1', name: 'run_command', args: { command: `send ${secret}` } }]
+
+    const [blocked] = await dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: {} as CompiledHooks,
+      addContext: vi.fn(),
+      resolveHandler: () => ({ mode: 'sequential', handle: async current => result(current) }),
+      invokeHooks: vi.fn(async (event, _hooks, payload) => {
+        if (event === 'PreToolUse') preInputs.push(payload)
+        return { block: false }
+      }),
+    })
+
+    expect(blocked.error).toMatch(/Computer Use|недоверенн/i)
+    expect(preInputs).toEqual([])
+    expect(JSON.stringify(preInputs)).not.toContain(secret)
+  })
+
+  it('pre-blocks Computer Use in the same batch as browser page observation', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]),
+      browserRunState: { active: false },
+      computerRunState: { active: false },
+    } as ToolContext
+    const calls = [call('b1', 'browser_screenshot'), call('c1', 'computer_observe')]
+    const results = await dispatchToolTurn({
+      toolCalls: calls,
+      context: ctx,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: (name) => ({
+        mode: 'sequential',
+        handle: async toolCall => {
+          handled.push(name)
+          return result(toolCall)
+        },
+      }),
+    })
+
+    expect(handled).toEqual(['browser_screenshot'])
+    expect(results[1].error).toMatch(/Browser run|capability envelope/i)
+  })
+
   it('обычный run без browserTaskId сохраняет доступ к тем же инструментам', async () => {
     const handled: string[] = []
     const toolCall = call('x1', 'run_command')

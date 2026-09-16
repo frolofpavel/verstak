@@ -381,6 +381,13 @@ export function extractArgText(toolName: string, args: Record<string, unknown> |
       return String(args.url ?? '')
     case 'browser_click':
       return String(args.selector ?? '')
+    case 'computer_click':
+    case 'computer_type':
+    case 'computer_key':
+    case 'computer_scroll':
+      // Desktop text may be document/client data. Rules target the opaque UIA
+      // element capability, never copy raw input into policy/audit plumbing.
+      return 'selected-element'
     default:
       return ''
   }

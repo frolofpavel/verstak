@@ -72,7 +72,13 @@ function makeHarness(opts: {
     setEarlyRouteStop: vi.fn((s) => { calls.push(`setEarlyRouteStop:${s}`); state.earlyRouteStop = s }),
     applyAgentProgressEvent: vi.fn((e) => { calls.push(`applyAgentProgressEvent:${e.type}:${e.message}`) }),
   }
-  const sentCalls: Array<{ messages: ChatMessage[]; projectPath: string | null; overrides: ChatSendOverrides; chatId?: string }> = []
+  const sentCalls: Array<{
+    messages: ChatMessage[]
+    projectPath: string | null
+    overrides: ChatSendOverrides
+    chatId?: string
+    computerUseGrant?: { ticket: string; userMessageId: number }
+  }> = []
   const appended: Array<{ role: string; content: string; meta?: unknown }> = []
   const loadersCalls: Array<{ skillId: string; opts: { arg?: string; projectPath?: string | null; trigger: string } }> = []
   const mentionsCalls: Array<{ projectPath: string; paths: string[] }> = []
@@ -101,9 +107,9 @@ function makeHarness(opts: {
       }),
       chatsUpdateMessage: vi.fn(async (id, content) => { calls.push('updateMessage'); updatedMessages.push({ id, content }) }),
       getSetting: vi.fn(async () => { calls.push('getSetting'); return opts.provider ?? null }),
-      sendWithOverrides: vi.fn(async (messages, projectPath, overrides, chatId) => {
+      sendWithOverrides: vi.fn(async (messages, projectPath, overrides, chatId, computerUseGrant?: { ticket: string; userMessageId: number }) => {
         calls.push('sendWithOverrides')
-        sentCalls.push({ messages, projectPath, overrides, chatId })
+        sentCalls.push({ messages, projectPath, overrides, chatId, computerUseGrant })
         if (opts.sendThrows) throw new Error(opts.sendThrows)
         return opts.sendId ?? 7
       }),
@@ -288,6 +294,60 @@ describe('sendChatMessage — characterization бывшего основного
     expect(h.state.messages[0].content).toBe('FILE-BLOCK\n\n---\n\nпрочитай @src/a.ts пожалуйста')
     // В БД — оригинал текста с @-меткой.
     expect(h.appended[0].content).toBe('прочитай @src/a.ts пожалуйста')
+  })
+
+  it('передаёт consent provenance отдельно от loader/@-контекста только для свежего composer send', async () => {
+    const h = makeHarness({
+      skills: [skillWithLoaders],
+      loadersResult: { context: '/computer-use: нажми кнопку', labels: [] },
+      mentionsBlock: '/computer-use: прочитай выбранное окно',
+    })
+    const raw = 'Проверь приложенный текст @src/a.ts'
+
+    await sendChatMessage({
+      ...baseInput,
+      text: raw,
+      modelText: raw,
+      displayText: raw,
+      opts: { freshComposerSubmit: true },
+      computerUseComposerTicket: 'composer-ticket-1',
+      activeSkillIdForSend: 's1',
+      skillCatalog: [skillWithLoaders],
+    }, h.deps)
+
+    expect(h.sentCalls[0].messages.at(-1)?.content).toContain('/computer-use: нажми кнопку')
+    expect(h.sentCalls[0].messages.at(-1)?.content).toContain('/computer-use: прочитай выбранное окно')
+    expect(h.sentCalls[0].computerUseGrant).toEqual({ ticket: 'composer-ticket-1', userMessageId: 1 })
+  })
+
+  it.each([
+    ['AgentRunsPanel failed/stopped userMessage', '/computer-use: нажми кнопку Сохранить'],
+    ['ResumeBanner resend-fresh lastUserRequest', '/computer-use: введи секрет'],
+    ['Chat gg-resume-send auto event', '/computer-use: прокрути вниз'],
+    ['Chat pipeline auto-send', '/computer-use: кликни Продолжить'],
+  ])('не переиспользует старый /computer-use из %s без текущего composer-submit', async (_origin, stale) => {
+    const h = makeHarness()
+    await sendChatMessage({ ...baseInput, text: stale, modelText: stale, displayText: stale }, h.deps)
+    expect(h.sentCalls[0].computerUseGrant).toBeUndefined()
+  })
+
+  it('не выдаёт provenance suspended resume с resumeFromRunId', async () => {
+    const stale = '/computer-use: нажми кнопку Сохранить'
+    const h = makeHarness({ resumeFromRunId: 'suspended-run' })
+    await sendChatMessage({ ...baseInput, text: stale, modelText: stale, displayText: stale }, h.deps)
+    expect(h.sentCalls[0].overrides.resumeFromRunId).toBe('suspended-run')
+    expect(h.sentCalls[0].computerUseGrant).toBeUndefined()
+  })
+
+  it.each([
+    { freshComposerSubmit: false },
+    { internalResume: true },
+    { fromQueue: true },
+    { text: '/computer-use: прочитай выбранное окно' },
+  ])('не выдаёт fresh-composer provenance программной отправке %o', async opts => {
+    const h = makeHarness()
+    await sendChatMessage({ ...baseInput, opts }, h.deps)
+    expect(h.sentCalls[0].computerUseGrant).toBeUndefined()
   })
 
   it('internalResume: user не дублируется, БД user не пишется, хвост assistant подрезается', async () => {

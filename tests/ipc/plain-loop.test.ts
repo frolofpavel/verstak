@@ -3,8 +3,10 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import type { ChatProvider, ChatEvent } from '../../electron/ai/types'
+import type { ChatProvider, ChatEvent, ChatMessage } from '../../electron/ai/types'
 import type { ProviderId } from '../../electron/ai/registry'
+import { usageHash } from '../../electron/storage/agent-run-usage'
+import { COMPUTER_CONTEXT_OMITTED } from '../../electron/ai/tool-telemetry'
 
 /**
  * Тест-харнес CLI-пути (runPlainConversation) — 1.9.6 #5. Весь релиз 1.9.5
@@ -15,6 +17,15 @@ import type { ProviderId } from '../../electron/ai/registry'
  * ipcMain мокаем — ai.ts тянет его на загрузке модуля.
  */
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, app: { getPath: () => tmpdir() } }))
+
+const captured = vi.hoisted(() => ({ runtimeErrors: [] as unknown[][] }))
+vi.mock('../../electron/runtime-log', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../electron/runtime-log')>()
+  return {
+    ...actual,
+    logRuntimeError: (...args: unknown[]) => { captured.runtimeErrors.push(args) },
+  }
+})
 
 // Распил 1.9.8: CLI-путь вынесен в runner-plain.
 const { runPlainConversation } = await import('../../electron/ai/runner-plain')
@@ -36,25 +47,26 @@ function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefine
 type Sender = ReturnType<typeof makeSender>
 // Отправляются и ChatEvent, и UI-события (tool-activity/agent-progress) — берём
 // широкий тип, а не ChatEvent (у последнего нет 'tool-activity').
-type SentEvent = { type: string; text?: string; title?: string; detail?: string }
+type SentEvent = { type: string; text?: string; title?: string; detail?: string; message?: string; callId?: string; name?: string }
 function sentEvents(sender: Sender): SentEvent[] {
   return sender.send.mock.calls.map(c => (c[1] as { event: SentEvent }).event)
 }
 
-function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown; providerId?: ProviderId; model?: string } = {}) {
+function run(dir: string, p: ChatProvider, sender: Sender, opts: { signal?: AbortSignal; agentRuns?: unknown; runId?: string; fallbackOpts?: unknown; providerId?: ProviderId; model?: string; messages?: ChatMessage[]; recordJournal?: (projectPath: string, kind: 'tool' | 'session' | 'note', title: string, detail?: string | null) => void; computerContextActive?: boolean } = {}) {
   return runPlainConversation({
     sender: sender as never,
     sendId: 1,
     provider: p,
     projectPath: dir,
-    messages: [{ role: 'user', content: 'сделай' }],
+    messages: opts.messages ?? [{ role: 'user', content: 'сделай' }],
     signal: opts.signal ?? new AbortController().signal,
-    recordJournal: vi.fn(),
+    recordJournal: opts.recordJournal ?? vi.fn(),
     providerId: opts.providerId ?? 'claude-cli',
     model: opts.model ?? 'auto',
     fallbackOpts: opts.fallbackOpts as never,
     agentRuns: opts.agentRuns as never,
     runId: opts.runId,
+    computerContextActive: opts.computerContextActive,
   })
 }
 
@@ -64,7 +76,10 @@ const BOUNDED_SWITCH_TEST_TIMEOUT_MS = 60_000
 
 describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
   let dir: string
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'plain-loop-')) })
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'plain-loop-'))
+    captured.runtimeErrors.length = 0
+  })
   afterEach(() => { try { rmSync(dir, { recursive: true, force: true }) } catch { /* win lock */ } })
 
   it('нормальный текстовый стрим → текст доходит + терминальный done', async () => {
@@ -73,6 +88,179 @@ describe('runPlainConversation — CLI-путь (1.9.6 #5)', () => {
     const evs = sentEvents(sender)
     expect(evs.some(e => e.type === 'text' && (e as { text: string }).text.includes('Готово'))).toBe(true)
     expect(evs.some(e => e.type === 'done')).toBe(true)
+  })
+
+  it('Computer Use CLI оставляет ответ live, но не пишет raw command/response в journal или run timeline', async () => {
+    const privateUser = '/computer-use: введи PLAIN_PRIVATE_TYPE_VALUE'
+    const privateResponse = 'PLAIN_PRIVATE_DESKTOP_RESPONSE'
+    const sender = makeSender()
+    const appendEvent = vi.fn()
+    const finish = vi.fn()
+    const persistUsage = vi.fn()
+    const recordJournal = vi.fn()
+
+    await run(dir, provider([
+      { type: 'usage', usage: { inputTokens: 3, outputTokens: 2 } },
+      { type: 'text', text: privateResponse },
+      { type: 'done' },
+    ]), sender, {
+      agentRuns: { appendEvent, finish, persistUsage },
+      runId: 'plain-computer-run',
+      messages: [
+        { role: 'system', content: `static policy; echoed request=${privateUser}` },
+        { role: 'user', content: privateUser },
+      ],
+      recordJournal,
+      computerContextActive: true,
+    })
+
+    expect(JSON.stringify(sentEvents(sender))).toContain(privateResponse)
+    const technicalProgress = sentEvents(sender).filter(event => event.type === 'agent-progress')
+    expect(JSON.stringify(technicalProgress)).not.toContain(privateResponse)
+    expect(JSON.stringify({ journal: recordJournal.mock.calls, events: appendEvent.mock.calls, finish: finish.mock.calls })).not.toContain(privateUser)
+    expect(JSON.stringify({ journal: recordJournal.mock.calls, events: appendEvent.mock.calls, finish: finish.mock.calls })).not.toContain(privateResponse)
+    expect(persistUsage).toHaveBeenCalledWith(expect.objectContaining({
+      systemPromptHash: usageHash(COMPUTER_CONTEXT_OMITTED),
+    }))
+  })
+
+  it('Computer Use CLI projects provider tool/progress/error envelopes before renderer and runtime sinks', async () => {
+    const privateEnvelope = 'PLAIN_PROVIDER_PRIVATE_ENVELOPE'
+    const sender = makeSender()
+    const providerEvents: ChatEvent[] = [
+      {
+        type: 'tool-call',
+        call: {
+          id: `provider-call-${privateEnvelope}`,
+          name: `provider_tool_${privateEnvelope}`,
+          args: { note: privateEnvelope },
+          thoughtSignature: privateEnvelope,
+        },
+      },
+      {
+        type: 'agent-progress',
+        id: privateEnvelope,
+        phase: 'tool',
+        title: privateEnvelope,
+        detail: privateEnvelope,
+      },
+      { type: 'error', message: `provider-error-${privateEnvelope}` },
+    ]
+
+    await run(dir, provider(providerEvents), sender, { computerContextActive: true })
+
+    const rendererSink = JSON.stringify(sentEvents(sender))
+    expect(rendererSink).not.toContain(privateEnvelope)
+    expect(rendererSink).toContain('computer_context_omitted')
+    expect(rendererSink).toContain('Computer Use: ошибка провайдера')
+
+    const thrown = `${privateEnvelope}-THROWN`
+    const throwingProvider: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send(): AsyncGenerator<ChatEvent> { throw new Error(thrown) },
+    }
+    const thrownSender = makeSender()
+    await run(dir, throwingProvider, thrownSender, { computerContextActive: true })
+    expect(JSON.stringify(sentEvents(thrownSender))).not.toContain(thrown)
+    expect(captured.runtimeErrors.map(args => String(args[1])).join('\n')).not.toContain(thrown)
+    expect(captured.runtimeErrors.map(args => String(args[1])).join('\n')).toContain('Computer Use: ошибка провайдера')
+  })
+
+  it('Computer Use CLI fail-closed до account rotation и не отдаёт raw command новому аккаунту', async () => {
+    const privateCommand = '/computer-use: введи PLAIN_ACCOUNT_PRIVATE_VALUE'
+    const firstAttemptMessages = vi.fn()
+    const limited: ChatProvider = {
+      id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+      async *send(messages) {
+        firstAttemptMessages(messages)
+        yield { type: 'error', message: 'Claude usage limit reached. Try again in 2 hours.' }
+      },
+    }
+    const nextAttemptSend = vi.fn()
+    const switchAccountOnLimit = vi.fn(() => ({
+      switched: true, newAccountId: 7, fromLabel: 'A', toLabel: 'B',
+    }))
+    const getNextAttempt = vi.fn(() => ({
+      provider: {
+        id: 'claude-cli', name: 'claude-cli', models: ['claude-cli'],
+        async *send(messages: ChatMessage[]) {
+          nextAttemptSend(messages)
+          yield { type: 'done' as const }
+        },
+      } as ChatProvider,
+      accountId: 7,
+    }))
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+
+    await run(dir, limited, sender, {
+      messages: [{ role: 'user', content: privateCommand }],
+      computerContextActive: true,
+      fallbackOpts: {
+        getNextAttempt,
+        getProviderModel: () => 'auto',
+        configuredProviders: new Set(['claude-cli']),
+        triedProviders: new Set(['claude-cli']),
+        switchAccountOnLimit,
+      },
+      agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActualAccount },
+      runId: 'plain-computer-account-boundary',
+    })
+
+    expect(JSON.stringify(firstAttemptMessages.mock.calls)).toContain(privateCommand)
+    expect(switchAccountOnLimit).not.toHaveBeenCalled()
+    expect(getNextAttempt).not.toHaveBeenCalled()
+    expect(nextAttemptSend).not.toHaveBeenCalled()
+    expect(updateActualAccount).not.toHaveBeenCalled()
+    expect(sentEvents(sender).some(e => e.type === 'route-changed')).toBe(false)
+  })
+
+  it('Computer Use plain fail-closed до provider fallback и не отдаёт raw command другому провайдеру', async () => {
+    const privateCommand = '/computer-use: введи PLAIN_PROVIDER_PRIVATE_VALUE'
+    const firstAttemptMessages = vi.fn()
+    const broken: ChatProvider = {
+      id: 'gemini-api', name: 'gemini-api', models: ['gemini-3-flash'],
+      async *send(messages) {
+        firstAttemptMessages(messages)
+        throw new Error('HTTP 503 service unavailable')
+      },
+    }
+    const fallbackSend = vi.fn()
+    const getNextAttempt = vi.fn(() => ({
+      provider: {
+        id: 'claude', name: 'claude', models: ['claude-sonnet'],
+        async *send(messages: ChatMessage[]) {
+          fallbackSend(messages)
+          yield { type: 'done' as const }
+        },
+      } as ChatProvider,
+      accountId: null,
+    }))
+    const updateActual = vi.fn()
+    const updateActualAccount = vi.fn()
+    const sender = makeSender()
+
+    await run(dir, broken, sender, {
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      messages: [{ role: 'user', content: privateCommand }],
+      computerContextActive: true,
+      fallbackOpts: {
+        getNextAttempt,
+        getProviderModel: () => 'claude-sonnet',
+        configuredProviders: new Set(['gemini-api', 'claude']),
+        triedProviders: new Set(['gemini-api']),
+      },
+      agentRuns: { appendEvent: vi.fn(), finish: vi.fn(), updateActual, updateActualAccount },
+      runId: 'plain-computer-provider-boundary',
+    })
+
+    expect(JSON.stringify(firstAttemptMessages.mock.calls)).toContain(privateCommand)
+    expect(getNextAttempt).not.toHaveBeenCalled()
+    expect(fallbackSend).not.toHaveBeenCalled()
+    expect(updateActual).not.toHaveBeenCalled()
+    expect(updateActualAccount).not.toHaveBeenCalled()
+    expect(sentEvents(sender).some(e => e.type === 'route-changed')).toBe(false)
   })
 
   it('Control Envelope: перед CLI-прогоном эмитится контрольная точка', async () => {

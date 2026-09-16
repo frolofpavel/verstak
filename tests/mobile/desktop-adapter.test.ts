@@ -18,4 +18,29 @@ describe('mobile desktop adapter', () => {
     expect(appendToSession).toHaveBeenCalledWith(3, 'C:/project', 'user', 'Do it')
     expect(startRun).toHaveBeenCalledWith({ chatId: 3, projectPath: 'C:/project', text: 'Do it' })
   })
+
+  it('rejects a Computer Use attempt before durable append or desktop run dispatch', async () => {
+    const appendToSession = vi.fn()
+    const startRun = vi.fn(async () => ({ runId: 'run-should-not-start' }))
+    const handlers = createMobileHandlers({
+      roots: { list: () => [{ rootId: 'r', name: 'Project', available: true }], projectPath: () => 'C:/project', resolve: vi.fn() },
+      sessions: { list: vi.fn(() => []), create: vi.fn(), get: vi.fn(() => ({ id: 3, projectPath: 'C:/project', kind: 'main' })) } as never,
+      chats: { listBySession: vi.fn(() => []), appendToSession } as never,
+      startRun,
+      stopRun: vi.fn(async () => true),
+    })
+    const privateCommand = '/computer-use: введи MOBILE_PRIVATE в выбранном окне'
+
+    await expect(handlers['chat.send']!(
+      { rootId: 'r', chatId: 3, text: privateCommand },
+      {} as never,
+    )).rejects.toThrow('COMPUTER_USE_FRESH_COMPOSER_REQUIRED')
+
+    expect(appendToSession).not.toHaveBeenCalled()
+    expect(startRun).not.toHaveBeenCalled()
+    await expect(handlers['chat.send']!(
+      { rootId: 'r', chatId: 3, text: privateCommand },
+      {} as never,
+    )).rejects.not.toThrow(privateCommand)
+  })
 })

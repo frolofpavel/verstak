@@ -165,12 +165,17 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
         }
       }
     }))
-    // 2b. Логируем старт ревью в журнал проекта — это аудит-trail, чтобы
-    //     потом можно было посмотреть когда / какой провайдер / каким был
-    //     payload. Detail обрезаем до разумного размера.
+    // 2b. Логируем только структурный аудит-trail. Payload содержит
+    //     последний assistant/thinking родительского чата; даже обрезанный
+    //     фрагмент затем попадает в session-summary и read_journal.
     void window.api.journal.append(s.path, 'note',
       `🔍 Запущено ревью: ${providerId}`,
-      payload.length > 500 ? payload.slice(0, 500) + '…' : payload
+      JSON.stringify({
+        reviewChatId: reviewChat.id,
+        providerId,
+        model,
+        payloadChars: payload.length,
+      })
     ).catch(() => {})
     // 3. Стартуем ai:send с override провайдером + флагом useReviewerPrompt.
     //    Сам текст REVIEWER_SYSTEM_PROMPT живёт в electron/ai/ — renderer не

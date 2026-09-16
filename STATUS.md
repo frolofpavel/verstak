@@ -161,8 +161,34 @@
   lifecycle теперь successor-safe для взаимодействующих установщиков текущего
   поколения; старые установщики без общей lease не считаются координированными.
   Живой Calltouch 5/5 ещё не принят.
-- **Computer Use** — построена половина: `screen_capture` и `screen_info` (агент видит
-  экран). Управления мышью и клавиатурой на уровне ОС нет.
+- **R2 — Computer Use для выбранного Windows-окна.** В ветке
+  `codex/next-r0-r3` собран кандидат отдельного Windows-helper: пользователь
+  выбирает разрешённое окно в Settings, а main-процесс хранит точную связку
+  PID + process start time + HWND + generation и выдаёт её только исходной явно
+  сформулированной Computer Use-задаче. Шесть task/run-scoped tool-контрактов
+  подключены через свежие UIA `observationId`/`elementRef`, двухфазный
+  `prepare → commit`, независимый readback и `uncertain` без автоматического
+  повтора. В production-кандидате эффект разрешён только UIA-паттернам с
+  доказуемым postcondition; координаты, `SendInput`, весь `computer_key` и
+  Invoke-only click закрыты до живой adversarial-приёмки. Stop ждёт ACK
+  очищенной очереди; физический ввод, смена foreground, геометрии/DPI, процесса,
+  окна или UIA-элемента инвалидируют действие. Парольные/auth/CAPTCHA/2FA,
+  elevated/protected, shell/IDE/Explorer/Verstak поверхности закрыты fail-closed;
+  CLI/tunnel/no-tools/projectless transport и предмодельная auto-ротация
+  аккаунта при активном Computer intent также блокируются до helper/provider;
+  raw typed text и содержимое окна не попадают в технические hooks, telemetry,
+  checkpoints (включая renderer skill/system echo), agent-run journal или
+  memory; обычный пользовательский текст видимого чата этим слоем не скрывается.
+  Exact JSON provider envelope, все out-of-band ingress, oversized-intent
+  boundary, durable taint после restart и successor-safe teardown helper
+  дополнительно закрыты fail-closed. Component/integration, реальный read-only
+  Windows helper smoke и независимый review проходят; полный автоматический
+  замер: 773 test files (767 passed, 6 skipped), 7328 tests (7312 passed,
+  16 skipped), 0 failed.
+  Живые действия 10/10, DPI/monitor/move/resize/occlusion/focus/recreate/Stop/crash
+  матрица и desktop-пилот 5/5 ещё не выполнены; visual/screenshot fallback в
+  кандидате отключён. Поэтому R2 технически собран, но не принят; R3 и S2-A1
+  удерживаются и не начаты.
 
 ## Открытый долг
 

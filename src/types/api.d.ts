@@ -65,7 +65,7 @@ export interface ContextSnapshotDTO {
 export type CompactResultDTO =
   | { ok: true; snapshot: ContextSnapshotDTO; compactedCount: number; keptCount: number }
   /** Осечка. detail — человеческая причина для UI. Контекст при этом ЦЕЛ. */
-  | { ok: false; reason: 'busy' | 'nothing-to-compact' | 'summary-failed' | 'conflict'; detail: string }
+  | { ok: false; reason: 'busy' | 'nothing-to-compact' | 'summary-failed' | 'conflict' | 'computer-context-tainted'; detail: string }
 export type ChatKind = 'main' | 'review' | 'help'
 export interface ChatSession {
   id: number
@@ -695,11 +695,19 @@ declare global {
       ai: {
         send: (messages: ChatMessage[], projectPath: string | null, chatId?: string, route?: PromptRouteOverride) => Promise<number>
         sendWithBudget: (messages: ChatMessage[], projectPath: string | null, budget: number, chatId?: string, route?: PromptRouteOverride) => Promise<number>
+        /** Main-owned one-shot Computer Use ticket. The preload implementation
+         * returns null unless Chromium reports a current user activation. */
+        mintComputerUseComposerTicket: (
+          chatId: string,
+          canonicalUserContent: string,
+        ) => string | null
         sendWithOverrides: (
           messages: ChatMessage[],
           projectPath: string | null,
           overrides: { providerId?: string; model?: string | null; selectedProviderId?: string; selectedModel?: string | null; noTools?: boolean; systemPrompt?: string; useReviewerPrompt?: boolean; effortLevel?: 'quick' | 'standard' | 'deep'; toolsAllow?: string[]; agentMode?: 'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'; resumeFromRunId?: string; recipe?: RecipeSpec; promptRoute?: PromptRouteOverride; outcome?: { pipelineId: number; phase: 'refine' | 'plan' | 'execute-step' | 'verify' | 'replan'; planStepId?: number; attempt?: number }; materialsFolder?: string },
-          chatId?: string
+          chatId?: string,
+          /** Opaque ticket plus the exact user row persisted by the composer. */
+          computerUseGrant?: { ticket: string; userMessageId: number },
         ) => Promise<number>
         /** Живые main-send'ы проекта для восстановления volatile renderer state. Read-only. */
         liveState: (projectPath: string) => Promise<AiLiveState>
@@ -725,7 +733,7 @@ declare global {
         suspend: (sendId: number) => Promise<boolean>
         /** Дополнить контекст активного API agent-loop (Ctrl+Enter во время стрима). */
         appendContext: (sendId: number, text: string) => Promise<
-          { ok: true; mode: 'deferred' } | { ok: false; fallback: 'invalid' | 'unavailable' }
+          { ok: true; mode: 'deferred' } | { ok: false; fallback: 'invalid' | 'unavailable' | 'computer-use-active' }
         >
         countTokens: (text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => Promise<{ tokens: number; exact: boolean; providerId: string }>
         onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null; chatId?: number | null }) => void) => () => void
@@ -1016,6 +1024,16 @@ declare global {
           error?: string
         }>
       }
+      /** R2 Computer Use: explicit exact-window capability; identities stay in main. */
+      computerUse: {
+        getState: () => Promise<ComputerUseStateDTO>
+        isChatTainted: (chatId: number) => Promise<boolean>
+        listCandidates: () => Promise<ComputerUseCandidateDTO[]>
+        bind: (candidateId: string) => Promise<{ ok: boolean; bindingGeneration?: number; error?: string }>
+        acknowledgeUncertain: () => Promise<{ ok: boolean; error?: string }>
+        unbind: () => Promise<{ ok: true }>
+        stop: () => Promise<{ acknowledged: true; targetAckMs: number; realTimeGuaranteed: false }>
+      }
       // Git READ + WRITE (Dev Task Flow). WRITE (Фаза 3) — argv-форма + денилист.
       git: {
         status(): Promise<GitStatus>
@@ -1260,6 +1278,26 @@ export interface BrowserBridgeStateDTO {
     installed: boolean
     needsRepair: boolean
   }
+}
+
+/** Public Computer Use DTOs intentionally contain no PID/HWND/start time. */
+export interface ComputerUseStateDTO {
+  supported: boolean
+  helperReady: boolean
+  bound: boolean
+  bindingGeneration: number
+  target: { processName: string; title: string } | null
+  /** Fixed run-claim expiry; null while a window is selected but no task owns it. */
+  expiresAt: number | null
+  reconciliationRequired: boolean
+  reconciliationAcknowledgementAvailable?: boolean
+}
+
+export interface ComputerUseCandidateDTO {
+  candidateId: string
+  processName: string
+  title: string
+  blockedReason: string | null
 }
 
 /** Обнаруженный CLI-инструмент на компьютере пользователя. */

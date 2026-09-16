@@ -30,6 +30,7 @@ import { runCommandHandler, runUntilGreenHandler } from './tool-handlers/command
 import { spawnProcessHandler, processStatusHandler, readProcessHandler, stopProcessHandler } from './tool-handlers/process'
 import { devServerHandler } from './tool-handlers/dev-server'
 import { browserHandler } from './tool-handlers/browser'
+import { computerHandler } from './tool-handlers/computer'
 import { readHandler, unknownToolHandler, writeFileHandler, applyPatchHandler, proposeEditsHandler } from './tool-handlers/file-ops'
 import { listConnectorsHandler, connectorQueryHandler } from './tool-handlers/connectors'
 import { readJournalHandler } from './tool-handlers/journal'
@@ -88,6 +89,12 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'browser_console_errors': browserHandler,    // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
   'browser_network': browserHandler,           // VSK-BROWSER-B2 блок 2 (чтение, редакция в main)
   'browser_close_session': browserHandler,     // P3 кусок 3: жизненный цикл чистой сессии
+  'computer_observe': computerHandler,
+  'computer_click': computerHandler,
+  'computer_type': computerHandler,
+  'computer_key': computerHandler,
+  'computer_scroll': computerHandler,
+  'computer_wait_for': computerHandler,
   'create_proof_video': createProofVideoHandler,  // Tier-2 #5
   'list_connectors': listConnectorsHandler,
   'connector_query': connectorQueryHandler,

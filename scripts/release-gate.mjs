@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import asar from '@electron/asar'
 import { decideBrowserPackageGate } from './check-browser-bridge-package.mjs'
+import { decideComputerUsePackageGate } from './check-computer-use-package.mjs'
 
 const require = createRequire(import.meta.url)
 const { comparePayloadTrees, describeCompareResult } = require('./payload-compare.cjs')
@@ -289,6 +290,38 @@ if (browserPackageDecision.kind === 'run') {
   )
 } else {
   notes.push(`[3.58] Browser Employee package check пропущен: ${browserPackageDecision.reason}`)
+}
+
+// ─── 3.59 Computer Use package contract ─────────────────────────────────────
+// The desktop helper is a reviewed, narrow JSONL executable surface. Prove the
+// exact bytes and protocol/app/helper triplet on the tree that users receive,
+// then run only hello/ping/shutdown. No window enumeration or input is sent.
+console.log('\n[3.59] Computer Use package contract')
+const computerPackageDecision = decideComputerUsePackageGate({
+  haveSetup,
+  payloadTreeDir,
+  smokeUnpacked,
+})
+if (computerPackageDecision.kind === 'run') {
+  const computerPackage = spawnSync(
+    'node',
+    [join(ROOT, 'scripts', 'check-computer-use-package.mjs'), '--root', ROOT, '--source', computerPackageDecision.sourceDir, '--smoke'],
+    { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  )
+  const computerPackageOut = ((computerPackage.stdout || '') + (computerPackage.stderr || '')).trim()
+  check(
+    'Computer Use: exact helper bytes + version triplet + read-only handshake',
+    computerPackage.status === 0,
+    computerPackageOut.split('\n').filter(Boolean).pop() || `exit ${computerPackage.status}`,
+  )
+} else if (computerPackageDecision.kind === 'fail') {
+  check(
+    'Computer Use: exact helper bytes + version triplet + read-only handshake',
+    false,
+    computerPackageDecision.reason,
+  )
+} else {
+  notes.push(`[3.59] Computer Use package check пропущен: ${computerPackageDecision.reason}`)
 }
 
 // ─── 3.6 Install smoke: приложение ЖИВЁТ, а не просто распаковано ─────────────
@@ -787,7 +820,13 @@ const GATE_MAX_WORKERS = 4
 // epochs, session/log redaction, stable-owner lifecycle, package/version contract,
 // mutex-serialized install/update/uninstall, successor-safe rollback и точная
 // семантика definite wait против unknown-effect после effectful dispatch.
-const EXPECTED_TOTAL_TESTS = 6700
+// -> 7262 ИЗМЕРЕНО 16.09 (R2): selected-window executor, exact-title
+// reconciliation, isolated provider envelope, pre-persist privacy taint,
+// unsupported-intent fail-closed и successor-safe helper teardown.
+// -> 7328 ИЗМЕРЕНО 16.09 (R2 hardening): exact JSON provider envelope,
+// out-of-band ingress guards, oversized-intent boundary, durable taint across
+// restart and package-helper teardown/owner timeout regressions.
+const EXPECTED_TOTAL_TESTS = 7328
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

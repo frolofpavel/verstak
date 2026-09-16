@@ -177,7 +177,11 @@ export function createApiFallbackController<TTools>(
     if (!providerId || !canSwitchAccount(fallbackOpts)) return null
 
     const hit = detectSubscriptionLimit(err)
-    if (!hit.limited) return null
+    // Account rotation is a separate data boundary even when providerId stays
+    // the same. Once browser/desktop context entered currentMessages there is
+    // no account-level grant, so stop before switching or constructing a new
+    // provider attempt that would receive that history.
+    if (!hit.limited || input.hasBrowserContext?.() === true) return null
     const switched = fallbackOpts.switchAccountOnLimit?.(
       providerId,
       hit.resetEta,

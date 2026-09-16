@@ -39,6 +39,12 @@ export interface ResponsibleVerdict {
   why?: string
 }
 
+export interface ResponsibleComputerTarget {
+  role: string
+  label: string
+  state?: string
+}
+
 interface Rule {
   kind: ResponsibleKind
   pattern: RegExp
@@ -150,6 +156,123 @@ const RESPONSIBLE_CONNECTOR_OPS: Record<string, (args: Record<string, unknown>) 
 }
 
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '')
+
+interface ComputerSemanticRule {
+  kind: ResponsibleKind
+  matches(words: readonly string[], normalized: string): boolean
+  why: string
+}
+
+function semanticWords(value: string): string[] {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase('ru-RU')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+}
+
+function hasWord(words: readonly string[], ...values: string[]): boolean {
+  return values.some(value => words.includes(value))
+}
+
+function hasPhrase(normalized: string, ...values: string[]): boolean {
+  const padded = ` ${normalized} `
+  return values.some(value => padded.includes(` ${value} `))
+}
+
+const COMPUTER_SEMANTIC_RULES: readonly ComputerSemanticRule[] = [
+  {
+    kind: 'delete',
+    matches: (words, normalized) => hasWord(words, 'delete', 'erase', 'destroy', 'удалить', 'стереть', 'уничтожить')
+      || hasPhrase(
+        normalized,
+        'remove permanently', 'permanently remove', 'permanent removal',
+        'remove forever', 'remove for good', 'delete forever',
+        'удалить навсегда', 'безвозвратно удалить', 'удалить безвозвратно', 'окончательно удалить',
+      ),
+    why: 'элемент интерфейса означает удаление данных',
+  },
+  {
+    kind: 'publish',
+    matches: words => hasWord(words, 'publish', 'release', 'опубликовать', 'публиковать', 'выпустить'),
+    why: 'элемент интерфейса означает публикацию наружу',
+  },
+  {
+    kind: 'send',
+    matches: words => hasWord(
+      words,
+      'send', 'submit', 'share', 'отправить', 'отправка', 'подать', 'отослать', 'поделиться',
+    ),
+    why: 'элемент интерфейса означает отправку наружу',
+  },
+  {
+    kind: 'payment',
+    matches: (words, normalized) => hasWord(
+      words,
+      'pay', 'payment', 'buy', 'purchase', 'checkout', 'transfer',
+      'оплатить', 'оплата', 'купить', 'покупка', 'перевести', 'перевод',
+    ) || hasPhrase(
+      normalized,
+      'place order', 'разместить заказ',
+      'auto renew', 'automatic renewal', 'автопродление', 'автоматическое продление',
+    ),
+    why: 'элемент интерфейса означает платёж или покупку',
+  },
+  {
+    kind: 'permissions',
+    matches: (words, normalized) => hasWord(words, 'administrator', 'администратор') || hasPhrase(
+      normalized,
+      'grant access', 'grant permission', 'grant permissions',
+      'allow access', 'allow permission', 'allow permissions',
+      'give access', 'give permission', 'give permissions',
+      'предоставить доступ', 'дать доступ', 'разрешить доступ',
+      'выдать права', 'разрешить права',
+      'disable protection', 'disable security', 'turn off protection',
+      'отключить защиту', 'выключить защиту', 'отключить безопасность',
+      'public network', 'публичная сеть', 'общедоступная сеть',
+      'anyone with the link', 'anyone with link',
+      'все у кого есть ссылка', 'любой у кого есть ссылка',
+    ),
+    why: 'элемент интерфейса меняет права или отключает защиту',
+  },
+]
+
+const STANDALONE_PERMISSION_LABELS = new Set([
+  'allow',
+  'grant',
+  'разрешить',
+  'предоставить',
+])
+
+/**
+ * Классифицирует только уже разрешённый main-процессом UIA-элемент текущего
+ * наблюдения. Аргументы модели сюда не передаются: текст команды не может ни
+ * создать, ни скрыть ответственную семантику выбранного контрола.
+ */
+export function classifyResponsibleComputerTarget(target: ResponsibleComputerTarget): ResponsibleVerdict {
+  // Some native permission dialogs expose only the imperative verb as the
+  // Toggle/SelectionItem name. Match the complete normalized label so nearby
+  // descriptive text ("Allowance", "Granted total", "Grant summary") cannot
+  // turn into an over-broad substring rule.
+  const normalizedLabel = semanticWords(target.label).join(' ')
+  if (STANDALONE_PERMISSION_LABELS.has(normalizedLabel)) {
+    return {
+      responsible: true,
+      kind: 'permissions',
+      why: 'элемент интерфейса меняет права или отключает защиту',
+    }
+  }
+  const words = semanticWords(`${target.role} ${target.label} ${target.state ?? ''}`)
+  const normalized = words.join(' ')
+  for (const rule of COMPUTER_SEMANTIC_RULES) {
+    if (rule.matches(words, normalized)) {
+      return { responsible: true, kind: rule.kind, why: rule.why }
+    }
+  }
+  return { responsible: false }
+}
 
 /**
  * Ответственное ли это действие. Вызов идёт из `resolveDecision`, то есть на

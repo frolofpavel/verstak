@@ -260,6 +260,120 @@ describe('EXT-B0: crash recovery — executing → uncertain без повтор
     expect(sameAction.status).toBe('uncertain')
   })
 
+  it('находит только неподтверждённый uncertain Computer effect через всю run lineage', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    bt.appendRun({ browserTaskId: 'bt', runId: 'r2', handoffReason: 'new_send' })
+
+    const makeUncertain = (actionId: string, actionType: string, runId = 'r1') => {
+      bt.proposeAction({ actionId, browserTaskId: 'bt', runId, actionType, riskLevel: 'R1' })
+      bt.startExecute(actionId, `${actionId}-attempt`)
+      bt.finalizeAction(actionId, 'uncertain', { resultStatus: 'helper-crashed' })
+    }
+    makeUncertain('browser-click', 'click')
+    makeUncertain('computer-observe', 'computer:observe')
+    makeUncertain('computer-wait', 'computer:wait_for')
+    makeUncertain('computer-click-old', 'computer:click')
+    makeUncertain('computer-type-new', 'computer:type', 'r2')
+
+    expect(bt.findUnacknowledgedComputerEffect('bt')?.actionId).toBe('computer-type-new')
+    expect(bt.findUnacknowledgedComputerEffect('missing')).toBeNull()
+  })
+
+  it('не даёт новому task/chat обойти uncertain той же exact Windows цели', () => {
+    const sameFingerprint = 'a'.repeat(64)
+    const otherFingerprint = 'b'.repeat(64)
+    bt.create({ browserTaskId: 'task-a', projectPath: '/p', runId: 'run-a' })
+    bt.create({ browserTaskId: 'task-b', projectPath: '/p', runId: 'run-b' })
+    bt.create({ browserTaskId: 'task-c', projectPath: '/p', runId: 'run-c' })
+    bt.proposeAction({
+      actionId: 'uncertain-on-a', browserTaskId: 'task-a', runId: 'run-a',
+      actionType: 'computer:click', riskLevel: 'R1',
+      scope: { targetFingerprint: sameFingerprint },
+    })
+    bt.startExecute('uncertain-on-a', 'attempt-a')
+    bt.finalizeAction('uncertain-on-a', 'uncertain', { resultStatus: 'helper-crashed' })
+
+    expect(bt.findUnacknowledgedComputerEffect('task-a', otherFingerprint)?.actionId)
+      .toBe('uncertain-on-a')
+    expect(bt.findUnacknowledgedComputerEffect('task-b', sameFingerprint)?.actionId)
+      .toBe('uncertain-on-a')
+    expect(bt.findUnacknowledgedComputerEffect('task-c', otherFingerprint)).toBeNull()
+    expect(bt.findUnacknowledgedComputerEffect('task-b')).toBeNull()
+  })
+
+  it('считает executing Computer effect unresolved даже если startup reconcile не записал uncertain', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    bt.proposeAction({
+      actionId: 'computer-executing', browserTaskId: 'bt', runId: 'r1',
+      actionType: 'computer:scroll', riskLevel: 'R1',
+      scope: { targetFingerprint: 'a'.repeat(64) },
+    })
+    bt.startExecute('computer-executing', 'attempt-in-flight-at-crash')
+
+    expect(bt.findUnacknowledgedComputerEffect('bt')?.actionId).toBe('computer-executing')
+    expect(bt.acknowledgeComputerEffect('computer-executing')).toBe(false)
+    expect(bt.getAction('computer-executing')?.status).toBe('executing')
+    expect(bt.actionEvents('computer-executing').some(event => (
+      event.reason === 'computer_uncertain_owner_acknowledged'
+    ))).toBe(false)
+  })
+
+  it('фиксирует owner acknowledgement append-only, не переписывая uncertain', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    bt.proposeAction({
+      actionId: 'computer-click', browserTaskId: 'bt', runId: 'r1',
+      actionType: 'computer:click', riskLevel: 'R1',
+    })
+    bt.startExecute('computer-click', 'attempt-1')
+    bt.finalizeAction('computer-click', 'uncertain', {
+      resultStatus: 'helper-crashed',
+      resultDetail: 'Эффект не доказан.',
+    })
+
+    expect(bt.findUnacknowledgedComputerEffect('bt')?.actionId).toBe('computer-click')
+    expect(bt.acknowledgeComputerEffect('computer-click')).toBe(true)
+    expect(bt.acknowledgeComputerEffect('computer-click')).toBe(false)
+    expect(bt.findUnacknowledgedComputerEffect('bt')).toBeNull()
+
+    const row = bt.getAction('computer-click')!
+    expect(row.status).toBe('uncertain')
+    expect(row.resultStatus).toBe('helper-crashed')
+    expect(row.resultDetail).toBe('Эффект не доказан.')
+    expect(bt.actionEvents('computer-click').filter(event => (
+      event.reason === 'computer_uncertain_owner_acknowledged'
+    ))).toEqual([expect.objectContaining({
+      fromStatus: 'uncertain',
+      toStatus: 'uncertain',
+      detailJson: null,
+    })])
+
+    // Reopen the durable DB: acknowledgement is not an in-memory exception and
+    // must survive a new controller/process.
+    db.close()
+    db = openDb(join(dir, 'test.db'))
+    bt = createBrowserTasks(db)
+    expect(bt.findUnacknowledgedComputerEffect('bt')).toBeNull()
+    expect(bt.getAction('computer-click')?.status).toBe('uncertain')
+  })
+
+  it('не даёт acknowledgement не-Computer, read-only или не-uncertain action', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    for (const [actionId, actionType] of [
+      ['browser', 'click'],
+      ['observe', 'computer:observe'],
+      ['wait', 'computer:wait_for'],
+      ['verified', 'computer:key'],
+    ] as const) {
+      bt.proposeAction({ actionId, browserTaskId: 'bt', runId: 'r1', actionType, riskLevel: 'R1' })
+      bt.startExecute(actionId, `${actionId}-attempt`)
+      bt.finalizeAction(actionId, actionId === 'verified' ? 'verified' : 'uncertain')
+      expect(bt.acknowledgeComputerEffect(actionId)).toBe(false)
+      expect(bt.actionEvents(actionId).some(event => (
+        event.reason === 'computer_uncertain_owner_acknowledged'
+      ))).toBe(false)
+    }
+  })
+
   it('reconcile не трогает verified/failed/proposed actions', () => {
     bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
     bt.proposeAction({ actionId: 'p', browserTaskId: 'bt', runId: 'r1', actionType: 'click', riskLevel: 'R3' })

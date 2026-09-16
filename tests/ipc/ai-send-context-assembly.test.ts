@@ -29,6 +29,7 @@ const { assembleSendSystem } = await import('../../electron/ipc/ai-send/system-a
 const { buildSendMemoryContext, resetMemorizedChats } = await import('../../electron/ipc/ai-send/memory-context')
 const { buildProviderRuntimeOptions } = await import('../../electron/ipc/ai-send/provider-options')
 const { saveRunInputSnapshot } = await import('../../electron/ipc/ai-send/run-input')
+const { COMPUTER_CONTEXT_OMITTED } = await import('../../electron/ai/tool-telemetry')
 const { REVIEWER_SYSTEM_PROMPT } = await import('../../electron/ai/review-prompt')
 const { PROVIDERS } = await import('../../electron/ai/registry')
 
@@ -276,6 +277,24 @@ describe('saveRunInputSnapshot — снапшот Debug Packet не критич
     })
     expect(save.mock.calls[0][0].userMessage).toBe('последнее')
     expect(save.mock.calls[0][0].systemPrompt).toBe('SYS')
+  })
+
+  it('Computer Use не дублирует исходный prompt или CLI payload в Debug Packet', () => {
+    const privateText = '/computer-use: введи PRIVATE-DESKTOP-TEXT в выбранном окне'
+    const save = vi.fn()
+    saveRunInputSnapshot({
+      ...common,
+      save,
+      systemPrompt: `CLI PAYLOAD WITH ${privateText}`,
+      messages: [{ role: 'user', content: privateText }],
+      omitComputerContext: true,
+    })
+
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: COMPUTER_CONTEXT_OMITTED,
+      userMessage: COMPUTER_CONTEXT_OMITTED,
+    }))
+    expect(JSON.stringify(save.mock.calls)).not.toContain(privateText)
   })
 
   it('без saveRunInput — тихий no-op', () => {

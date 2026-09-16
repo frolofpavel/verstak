@@ -21,6 +21,12 @@ import { logRuntime } from '../runtime-log'
 export interface ContextCompactionDeps {
   db: Database
   chats: Chats
+  /**
+   * Durable Computer Use provenance for this chat (including inherited/forked
+   * lineage). A lookup failure is security-significant and therefore must be
+   * treated exactly like a positive taint result by the mutating handler.
+   */
+  isChatComputerTainted?: (chatId: number) => boolean
   /** Провайдер для summary. null — нет ключей/настроек (честная ошибка, не молчание). */
   createSummaryProvider: () => { provider: ChatProvider; providerId: string; model: string | null } | null
   /** Проект чата — граница памяти события pre-compress. null = писать некуда. */
@@ -62,6 +68,24 @@ export function registerContextCompactionIpc(deps: ContextCompactionDeps): void 
 
   /** Сжать контекст чата. Долгая операция: внутри — вызов модели. */
   ipcMain.handle('context:compact', async (_e, chatId: number) => {
+    // Computer observations are untrusted desktop data. Manual compaction would
+    // otherwise send stored assistant/thinking text to a separate summary call,
+    // persist its output as a snapshot, and feed it into memory extraction. The
+    // durable provenance lookup must happen before *any* of those side effects.
+    let computerContextTainted = false
+    try {
+      computerContextTainted = deps.isChatComputerTainted?.(chatId) === true
+    } catch {
+      computerContextTainted = true
+    }
+    if (computerContextTainted) {
+      return {
+        ok: false,
+        reason: 'computer-context-tainted' as const,
+        detail: 'Сжатие недоступно: в истории чата есть контекст Computer Use.',
+      }
+    }
+
     const resolved = deps.createSummaryProvider()
     if (!resolved) {
       return { ok: false, reason: 'summary-failed', detail: 'провайдер для сжатия не настроен' }

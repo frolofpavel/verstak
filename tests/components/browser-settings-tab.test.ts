@@ -54,7 +54,7 @@ describe('BrowserSettingsTab', () => {
     renderBrowserSettings()
 
     const connectButton = await screen.findByRole('button', { name: 'Подключить браузер' })
-    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Подключить браузер' })).toHaveLength(1)
     expect(screen.queryByText(/Pair-код/i)).toBeNull()
     expect(screen.queryByText(/Путь к расширению/i)).toBeNull()
     expect(screen.queryByText('Secret tab')).toBeNull()

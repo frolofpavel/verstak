@@ -1233,6 +1233,80 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'computer_observe',
+    description: 'Прочитать свежую структуру UI Automation только из окна, которое пользователь явно выбрал в Настройки → Браузер и Computer Use. Возвращает opaque observationId и elementRef; PID/HWND наружу не выдаются. Парольные и защищённые поля блокируются.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'computer_click',
+    description: 'Нажать elementRef из свежего computer_observe только когда UIA Toggle/SelectionItem даёт проверяемый semantic readback. Generic Invoke-only кнопки и координатный fallback в production-кандидате отключены до живой приёмки. Неизвестный исход не повторяется.',
+    parameters: {
+      type: 'object',
+      properties: {
+        observationId: { type: 'string', description: 'Точный id свежего наблюдения.' },
+        elementRef: { type: 'string', description: 'Opaque ссылка на разрешённый UIA-элемент.' }
+      },
+      required: ['observationId', 'elementRef']
+    }
+  },
+  {
+    name: 'computer_type',
+    description: 'Добавить непустой текст в проверенное непарольное поле выбранного окна через UIA ValuePattern. Длинный ввод идёт чанками до 16 Unicode-символов с проверкой цели и точным финальным readback; глобальный SendInput отключён. Нужны свежие observationId и elementRef. Текст не сохраняется в телеметрии.',
+    parameters: {
+      type: 'object',
+      properties: {
+        observationId: { type: 'string' },
+        elementRef: { type: 'string' },
+        text: { type: 'string', minLength: 1 }
+      },
+      required: ['observationId', 'elementRef', 'text']
+    }
+  },
+  {
+    name: 'computer_key',
+    description: 'Зарезервированный bounded-key контракт. Его глобальный SendInput путь в production-кандидате отключён до живой приёмки, поэтому действие сейчас будет заблокировано fail-closed. Системные сочетания, секреты и повышенные окна запрещены.',
+    parameters: {
+      type: 'object',
+      properties: {
+        observationId: { type: 'string' },
+        elementRef: { type: 'string', description: 'Opaque ссылка на фокусируемый UIA-элемент.' },
+        key: { type: 'string', enum: ['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown'] }
+      },
+      required: ['observationId', 'elementRef', 'key']
+    }
+  },
+  {
+    name: 'computer_scroll',
+    description: 'Прокрутить элемент только через UIA ScrollPattern ровно на один small step по каждой выбранной оси (-1, 0 или 1), со свежими observationId/elementRef и точным readback. SendInput fallback отключён.',
+    parameters: {
+      type: 'object',
+      properties: {
+        observationId: { type: 'string' },
+        elementRef: { type: 'string', description: 'Opaque ссылка на прокручиваемый UIA-элемент.' },
+        deltaX: { type: 'number', enum: [-1, 0, 1] },
+        deltaY: { type: 'number', enum: [-1, 0, 1] }
+      },
+      required: ['observationId', 'elementRef', 'deltaY']
+    }
+  },
+  {
+    name: 'computer_wait_for',
+    description: 'Дождаться конкретного состояния в выбранном окне и вернуть новое наблюдение. Это read-only операция; timeout означает определённую ошибку без побочного эффекта.',
+    parameters: {
+      type: 'object',
+      properties: {
+        elementRef: { type: 'string', description: 'Опциональная opaque ссылка на UIA-элемент из предыдущего наблюдения.' },
+        text: { type: 'string', minLength: 1, description: 'Непустой текст или подпись UIA-элемента, появления которых нужно дождаться.' },
+        timeoutMs: { type: 'integer', minimum: 0, maximum: 5000, description: 'Ограниченный таймаут ожидания от 0 до 5000 мс.' }
+      },
+      required: ['text']
+    }
+  },
+  {
     name: 'generate_docx',
     description: 'Сохранить артефакт в формате Word (.docx). Принимает структуру секций — каждая с heading и параграфами. Куда сохранить — задаётся параметром save_to (по умолчанию — папка артефактов проекта).',
     parameters: {

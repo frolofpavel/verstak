@@ -23,7 +23,7 @@
 import { seedActive } from '../store/_active-bundle'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
-import { render, cleanup, act, fireEvent } from '@testing-library/react'
+import { render, cleanup, act, fireEvent, waitFor } from '@testing-library/react'
 import { makeApiMock, CHAT_API_DEFAULTS, type ApiMock } from './helpers/window-api-mock'
 
 const { useProject } = await import('../../src/store/projectStore')
@@ -183,6 +183,23 @@ describe('композер во время стрима', () => {
     type('уточнение на лету')
     press('Enter', { ctrlKey: true })
     expect(callCount('ai.sendWithOverrides')).toBe(0)
+  })
+
+  it('Computer Use отклоняет Ctrl+Enter до записи в чат и сохраняет черновик', async () => {
+    mock = makeApiMock({
+      ...CHAT_API_DEFAULTS,
+      commands: { list: async () => [] },
+      ai: { appendContext: async () => ({ ok: false, fallback: 'computer-use-active' as const }) },
+    })
+    vi.stubGlobal('window', Object.assign(globalThis.window, { api: mock.api }))
+    mountChat()
+    startStreaming(778)
+    type('не смешивать с exact Computer-командой')
+    press('Enter', { ctrlKey: true })
+
+    await waitFor(() => expect(callCount('ai.appendContext')).toBe(1))
+    expect(callCount('chats.append')).toBe(0)
+    expect(textarea().value).toBe('не смешивать с exact Computer-командой')
   })
 
   it('во время стрима показывается стоп, а не отправка', () => {

@@ -135,6 +135,16 @@ const BROWSER_NON_MUTATING_TOOLS = new Set<string>([
   'browser_observe',
   'browser_wait_for',
 ])
+const COMPUTER_MUTATING_TOOLS = new Set<string>([
+  'computer_click',
+  'computer_type',
+  'computer_key',
+  'computer_scroll',
+])
+const COMPUTER_NON_MUTATING_TOOLS = new Set<string>([
+  'computer_observe',
+  'computer_wait_for',
+])
 
 /** Режимы, в которых мог пройти незаметный деструктив без подтверждения. */
 const UNSAFE_MODES = new Set<string>(['auto', 'bypass'])
@@ -161,6 +171,13 @@ export function isMutatingTool(name: string | null | undefined): boolean {
     if (BROWSER_MUTATING_TOOLS.has(name)) return true
     // unknown browser_* tool — fail-closed, считаем мутацией (см. policy.ts
     // classifyRisk, который тоже fail-closed для unknown actionType).
+    return true
+  }
+  if (name.startsWith('computer_')) {
+    if (COMPUTER_NON_MUTATING_TOOLS.has(name)) return false
+    if (COMPUTER_MUTATING_TOOLS.has(name)) return true
+    // A future desktop action must never become crash-resumable merely because
+    // the classifier has not learned its name yet.
     return true
   }
   return false

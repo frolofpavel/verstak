@@ -49,7 +49,10 @@ export function resolvePending<T>(
  * Регистрирует IPC управления прогоном. abortSend приходит параметром — его ядро
  * (activeAborts + дренаж pending этой сессии) живёт в ipc/ai.ts.
  */
-export function registerAiResolveIpc(ipcMain: IpcMain, abortSend: (sendId: number) => boolean): void {
+export function registerAiResolveIpc(
+  ipcMain: IpcMain,
+  abortSend: (sendId: number) => boolean | Promise<boolean>,
+): void {
   ipcMain.handle('ai:stop', (_e, sendId: number) => abortSend(sendId))
 
   // #4 suspend: приостановить прогон = abort, НО прогон помечается 'suspended'
@@ -64,6 +67,9 @@ export function registerAiResolveIpc(ipcMain: IpcMain, abortSend: (sendId: numbe
     if (!trimmed || sendId <= 0) return { ok: false as const, fallback: 'invalid' as const }
     const mode = pushConversationSupplement(sendId, trimmed)
     if (!mode) return { ok: false as const, fallback: 'unavailable' as const }
+    if (mode === 'blocked') {
+      return { ok: false as const, fallback: 'computer-use-active' as const }
+    }
     return { ok: true as const, mode }
   })
 

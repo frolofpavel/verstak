@@ -21,7 +21,7 @@ import { ChatHome } from './ChatHome'
 import { notifyResponseReady } from '../lib/response-notify'
 import { HELP_PROJECT_PATH } from '../lib/help-scope'
 import { sendHelpMessage } from './chat/send-help-message'
-import { sendChatMessage } from './chat/send-chat-message'
+import { buildPersistedUserMessageContent, sendChatMessage } from './chat/send-chat-message'
 import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, toAppliedSkillRef } from './chat/skill-prompts'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
 import { routeChangedActivity } from '../lib/route-activity'
@@ -2014,8 +2014,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     return () => window.removeEventListener('gg-inject-prompt', onInject)
   }, [])
 
-  // Crash-resume dispatches an internal prompt directly to the model. It must not
-  // create a visible user bubble or reuse the normal composer auto-send path.
+  // Crash-resume injects stored text into the automatic send path. It must never
+  // be marked as a fresh submit from the visible composer.
   useEffect(() => {
     function onResume(e: Event) {
       // detail: либо строка (legacy — AgentRunsPanel/PipelineBanner), либо объект
@@ -2220,9 +2220,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     }
   }
 
-  // Автоотправка после resume: когда input обновился из gg-resume-send и взведён
-  // флаг — шлём ровно как при ручной отправке (через send()). Флаг гасим сразу,
-  // чтобы обычный ввод пользователя не уезжал в авто-send.
+  // Автоотправка pipeline: используем общий send(), но без fresh-composer
+  // provenance. Флаг гасим сразу, чтобы обычный ввод не уезжал в авто-send.
   useEffect(() => {
     if (pipelineSendModeRef.current && input.trim() && !isStreaming) {
       // §10 хвост, доработка: ждать больше нечего — режим не пишется в настройку
@@ -2245,7 +2244,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // §10 (дефект 2): режим продолжения НЕ применяется к чату. Раньше здесь
       // стоял setAgentMode + ожидание, пока настройка чата станет нужной, —
       // одобрение одного плана оставляло чат в accept-edits навсегда. Теперь
-      // режим уезжает одноразовым параметром: send() заберёт его из ref'а.
+      // режим уезжает одноразовым параметром: send() заберёт его из ref'а. Вызов
+      // без freshComposerSubmit принципиален: retry/resend не даёт нового согласия.
       resumeAutoSendRef.current = false
       void send()
     }
@@ -2640,6 +2640,16 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     const st = useProject.getState()
     const sendId = findRunForChat(st.sendOwners, st.helpMode ? st.helpChatId : st.activeChatId, { help: st.helpMode })
     const ctx = await ensureProjectForChat()
+    const appendResult = sendId != null
+      ? await window.api.ai.appendContext(sendId, clean)
+      : null
+    if (appendResult && !appendResult.ok && appendResult.fallback === 'computer-use-active') {
+      // The running desktop grant is tied to one exact persisted composer
+      // command. Keep this text in the composer and out of DB/model history;
+      // the user must Stop and send it as a fresh, independently authorized turn.
+      flashQueueNotice(t.chat.streamingAppendComputerBlocked)
+      return false
+    }
     const formatted = formatSupplementForAgent(clean)
     let messageId: number | undefined
     if (ctx?.path && ctx.activeChatId) {
@@ -2654,11 +2664,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     armAutoScrollForOutgoing()
 
     let status: PendingSupplementStatus = 'deferred'
-    if (sendId != null) {
-      const res = await window.api.ai.appendContext(sendId, clean)
-      if (res.ok) {
-        status = res.mode
-        if (res.mode === 'deferred') {
+    if (appendResult) {
+      if (appendResult.ok) {
+        status = appendResult.mode
+        if (appendResult.mode === 'deferred') {
           flashQueueNotice(t.chat.streamingAppendCliNote)
         } else {
           flashQueueNotice(t.chat.streamingAppendAccepted)
@@ -2725,7 +2734,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     setAppliedSkills(prev => prev.filter(skill => skill.id !== id))
   }
 
-  async function send(opts?: { text?: string; modelText?: string; displayText?: string; internalResume?: boolean; fromQueue?: boolean }) {
+  async function send(opts?: {
+    text?: string
+    modelText?: string
+    displayText?: string
+    internalResume?: boolean
+    fromQueue?: boolean
+    freshComposerSubmit?: boolean
+  }) {
     const text = (opts?.text ?? input).trim()
     const modelText = (opts?.modelText ?? text).trim()
     const displayText = (opts?.displayText ?? text).trim()
@@ -2735,6 +2751,20 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       return
     }
     const store = useProject.getState()
+    // Mint while the actual DOM submit activation is still live and before the
+    // first await. The preload guard returns null for retry/queue/review/scripted
+    // callers even if they can reach this renderer function.
+    const computerUseComposerTicket = opts?.freshComposerSubmit === true
+      && !opts.text
+      && !opts.internalResume
+      && !opts.fromQueue
+      && !store.helpMode
+      && store.activeChatId != null
+      ? window.api.ai.mintComputerUseComposerTicket(
+          String(store.activeChatId),
+          buildPersistedUserMessageContent(text, attachments),
+        )
+      : null
     const messageAppliedSkills = (!opts?.text && !opts?.internalResume && !opts?.fromQueue)
       ? appliedSkills
       : []
@@ -2790,7 +2820,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
     // Основной путь отправки вынесен в chat/send-chat-message.ts (фаза 5, срез 2).
     // Харнес: tests/components/send-chat-message.test.ts.
     await sendChatMessage(
-      { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
+      { text, modelText, displayText, attachments, providerLabel: agentModelLabel, selectedRoute, computerUseComposerTicket, opts, messageAppliedSkills, messageAppliedSkillDetails, skillCatalog, activeSkillIdForSend, autoBoundSkillDetails },
       {
         // 4.4: bundle-поля живут в chats — подмешиваем их к состоянию стора,
         // контракт отправки не трогаем.
@@ -2806,7 +2836,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           chatsAppend: (chatId, projectPath, role, content, meta) => window.api.chats.append(chatId, projectPath, role, content, meta),
           chatsUpdateMessage: (messageId, content) => window.api.chats.updateMessage(messageId, content),
           getSetting: (key) => window.api.settings.getKey(key),
-          sendWithOverrides: (messages, projectPath, overrides, chatId) => window.api.ai.sendWithOverrides(messages, projectPath, overrides, chatId),
+          sendWithOverrides: (messages, projectPath, overrides, chatId, computerUseGrant) => window.api.ai.sendWithOverrides(messages, projectPath, overrides, chatId, computerUseGrant),
         },
         ensureProjectForChat,
         flashWarning,
@@ -3376,7 +3406,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
           onPaste={onPaste}
           onFilesPicked={onFilesPicked}
           materialsFolder={materialsFolder}
-          send={() => { void send() }}
+          send={() => { void send({ freshComposerSubmit: true }) }}
           stop={asSuspend => { void stop(asSuspend) }}
           queueFollowUp={queueFollowUp}
           appendToCurrentContext={() => { void appendToCurrentContext() }}

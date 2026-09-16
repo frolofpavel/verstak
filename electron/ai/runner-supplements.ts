@@ -4,11 +4,16 @@
 // Вынесено из ipc/ai.ts БЕЗ изменения логики — самодостаточный кластер: Map
 // слушателей + форматирование supplement-сообщения.
 
-/** Дополнения user-сообщений в активный API agent-loop (sendId → push). */
-const conversationSupplements = new Map<number, (text: string) => void>()
+/** Дополнения user-сообщений в активный API agent-loop (sendId → push). null
+ * означает активный Computer Use run: его exact ticket envelope неизменяем. */
+const conversationSupplements = new Map<number, ((text: string) => void) | null>()
 
-export function registerConversationSupplements(sendId: number, push: (text: string) => void): void {
-  conversationSupplements.set(sendId, push)
+export function registerConversationSupplements(
+  sendId: number,
+  push: (text: string) => void,
+  options?: { allow?: boolean },
+): void {
+  conversationSupplements.set(sendId, options?.allow === false ? null : push)
 }
 
 export function unregisterConversationSupplements(sendId: number): void {
@@ -17,9 +22,10 @@ export function unregisterConversationSupplements(sendId: number): void {
 
 /** Инъекция догруженного контекста (supplement) в активный прогон по sendId.
  *  false — если для sendId нет активного слушателя. Используется ai:append-context. */
-export function pushConversationSupplement(sendId: number, text: string): 'deferred' | false {
+export function pushConversationSupplement(sendId: number, text: string): 'deferred' | 'blocked' | false {
+  if (!conversationSupplements.has(sendId)) return false
   const push = conversationSupplements.get(sendId)
-  if (!push) return false
+  if (!push) return 'blocked'
   push(text)
   return 'deferred'
 }

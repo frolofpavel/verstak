@@ -22,7 +22,7 @@ export type SubscriptionSuccess = Extract<ResolvedSubscription, { accountId: num
 export type ResolveSubscriptionAccountFn = (
   providerId: string,
   chatId?: number,
-  opts?: { accountId?: number | null },
+  opts?: { accountId?: number | null; allowAutoRotation?: boolean },
 ) => ResolvedSubscription | null
 
 export type AccountPreflight =
@@ -52,10 +52,21 @@ export function preflightSubscriptionAccount(input: {
   providerId: ProviderId
   chatId: number | undefined
   oneShotAccountId: number | null
+  /** Computer Use binds authority to the selected account as well as the window.
+   *  A pre-flight readiness failure must stop instead of silently changing identity. */
+  allowAutoRotation?: boolean
   resolve?: ResolveSubscriptionAccountFn
 }): AccountPreflight {
+  const resolveOpts = input.oneShotAccountId != null
+    ? {
+        accountId: input.oneShotAccountId,
+        ...(input.allowAutoRotation === false ? { allowAutoRotation: false } : {}),
+      }
+    : input.allowAutoRotation === false
+      ? { allowAutoRotation: false }
+      : undefined
   const resolution = input.resolve?.(
-    input.providerId, input.chatId, input.oneShotAccountId != null ? { accountId: input.oneShotAccountId } : undefined)
+    input.providerId, input.chatId, resolveOpts)
 
   if (resolution && 'unavailable' in resolution) {
     return { ok: false, message: input.oneShotAccountId != null

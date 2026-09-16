@@ -32,6 +32,9 @@ export type ActionStatus =
 
 export type HandoffReason = 'new_send' | 'pause_resume' | 'provider_switch' | 'forced'
 
+/** Reserved, content-free provenance bit. It is monotonic once set. */
+export const COMPUTER_CONTEXT_TAINT_CAP = 'computerContextTainted'
+
 export interface BrowserTaskRow {
   browserTaskId: string
   projectPath: string
@@ -161,6 +164,13 @@ export interface FinalizeActionInput {
 }
 
 const DETAIL_CAP = 1000
+const COMPUTER_UNCERTAIN_ACK_REASON = 'computer_uncertain_owner_acknowledged'
+const COMPUTER_EFFECT_ACTION_TYPES = [
+  'computer:click',
+  'computer:type',
+  'computer:key',
+  'computer:scroll',
+] as const
 
 // ── Factory: createBrowserTasks(db) ──────────────────────────────────────────
 // Pattern зеркалит agent-runs.ts: factory возвращает объект с методами; методы
@@ -201,6 +211,15 @@ export interface BrowserTasks {
   cancelAction(actionId: string, reason?: string): void
   startExecute(actionId: string, attemptId: string): void
   actionEvents(actionId: string): BrowserActionEventRow[]
+  /** Latest effect whose outcome is still unknown and has not been explicitly
+   * reconciled by the local owner. `executing` is unresolved too: a failed
+   * startup reconcile must not reopen the executor. Read-only Computer actions
+   * and Browser Employee actions never poison the Windows executor. */
+  findUnacknowledgedComputerEffect(browserTaskId: string, targetFingerprint?: string): BrowserActionRow | null
+  /** Append an owner-reconciliation event without rewriting the immutable
+   * uncertain outcome. false means the action is absent, ineligible or was
+   * already acknowledged. */
+  acknowledgeComputerEffect(actionId: string): boolean
 
   // proof refs (BR-016)
   appendProofRef(ref: Omit<BrowserProofRefRow, 'id' | 'createdAt'>): number
@@ -451,8 +470,13 @@ export function createBrowserTasks(db: DB): BrowserTasks {
     },
 
     setCaps(browserTaskId, caps) {
+      const row = db.prepare(`SELECT caps_json FROM browser_tasks WHERE browser_task_id = ?`).get(browserTaskId) as { caps_json?: string | null } | undefined
+      const previous = parseJsonObject(row?.caps_json)
+      const next = previous[COMPUTER_CONTEXT_TAINT_CAP] === true
+        ? { ...caps, [COMPUTER_CONTEXT_TAINT_CAP]: true }
+        : caps
       db.prepare(`UPDATE browser_tasks SET caps_json = ?, updated_at = ? WHERE browser_task_id = ?`)
-        .run(JSON.stringify(caps), Date.now(), browserTaskId)
+        .run(JSON.stringify(next), Date.now(), browserTaskId)
     },
 
     setDataPolicy(browserTaskId, policy) {
@@ -739,6 +763,73 @@ export function createBrowserTasks(db: DB): BrowserTasks {
         `SELECT * FROM browser_action_events WHERE action_id = ? ORDER BY id ASC`
       ).all(actionId) as Record<string, unknown>[]
       return rows.map(mapEventRow)
+    },
+
+    findUnacknowledgedComputerEffect(browserTaskId, targetFingerprint) {
+      const placeholders = COMPUTER_EFFECT_ACTION_TYPES.map(() => '?').join(', ')
+      const row = db.prepare(
+        `SELECT a.*
+           FROM browser_actions a
+          WHERE (
+              a.browser_task_id = ?
+              OR (
+                ? IS NOT NULL
+                AND CASE
+                  WHEN json_valid(a.scope_json) THEN json_extract(a.scope_json, '$.targetFingerprint')
+                  ELSE NULL
+                END = ?
+              )
+            )
+            AND a.status IN ('executing', 'uncertain')
+            AND a.action_type IN (${placeholders})
+            AND NOT EXISTS (
+              SELECT 1
+                FROM browser_action_events e
+               WHERE e.action_id = a.action_id
+                 AND e.reason = ?
+            )
+          ORDER BY a.created_at DESC, a.rowid DESC
+          LIMIT 1`
+      ).get(
+        browserTaskId,
+        targetFingerprint ?? null,
+        targetFingerprint ?? null,
+        ...COMPUTER_EFFECT_ACTION_TYPES,
+        COMPUTER_UNCERTAIN_ACK_REASON,
+      ) as Record<string, unknown> | undefined
+      return mapActionRow(row)
+    },
+
+    acknowledgeComputerEffect(actionId) {
+      const placeholders = COMPUTER_EFFECT_ACTION_TYPES.map(() => '?').join(', ')
+      const tx = db.transaction(() => {
+        // INSERT..SELECT keeps eligibility, deduplication and the audit append
+        // atomic. The browser_actions row intentionally stays `uncertain`:
+        // acknowledgement permits future work but never invents an outcome.
+        const result = db.prepare(
+          `INSERT INTO browser_action_events
+             (action_id, from_status, to_status, reason, detail_json, created_at)
+           SELECT a.action_id, 'uncertain', 'uncertain', ?, NULL, ?
+             FROM browser_actions a
+            WHERE a.action_id = ?
+              AND a.status = 'uncertain'
+              AND a.action_type IN (${placeholders})
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM browser_action_events e
+                 WHERE e.action_id = a.action_id
+                   AND e.reason = ?
+              )`
+        ).run(
+          COMPUTER_UNCERTAIN_ACK_REASON,
+          Date.now(),
+          actionId,
+          ...COMPUTER_EFFECT_ACTION_TYPES,
+          COMPUTER_UNCERTAIN_ACK_REASON,
+        )
+        return result.changes === 1
+      })
+      return tx()
     },
 
     // ── Proof refs ───────────────────────────────────────────────────────

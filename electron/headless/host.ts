@@ -16,6 +16,7 @@ import { createConnectorRegistry } from '../connectors/registry'
 import { PROVIDERS, createProvider, type ProviderId } from '../ai/registry'
 import { createToolsForProject } from '../ai/tools'
 import { createCostGuard } from '../ai/cost-guard'
+import { isComputerUseComposerAttempt } from '../ai/computer/intent'
 import { prepareSystemContext } from '../ai/compose-system'
 import { isWithinKnownRoots } from '../ai/path-policy'
 import { runApiConversation } from '../ai/runner-api'
@@ -569,6 +570,12 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     idempotencyMeta: ReturnType<typeof normalizeTaskIdempotency>,
   ): Promise<StartedTask> {
     if (closing) throw new Error('headless-хост закрывается')
+    // Headless tasks cannot prove a fresh visible desktop-composer gesture.
+    // Reject before idempotency claims, workspace creation, provider setup or
+    // any durable user row so the raw instruction never enters runtime sinks.
+    if (isComputerUseComposerAttempt(task.prompt)) {
+      throw new Error('COMPUTER_USE_FRESH_COMPOSER_REQUIRED: Computer Use доступен только из нового сообщения в desktop composer.')
+    }
     // Exactly-once replay is not a new start and therefore must not consume or be
     // rejected by active/daily capacity. Conflict is detected at this same point.
     if (idempotencyMeta) {

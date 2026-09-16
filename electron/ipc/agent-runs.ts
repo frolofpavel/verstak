@@ -17,8 +17,8 @@ import { parseEnvelope, previewControlRestore, applyControlRestore, type Restore
  *  - agent-runs:list   → прогоны проекта (новейшие первыми, фильтры status/owner)
  *  - agent-runs:get    → агрегат одного прогона: run + events (Timeline) +
  *    субы (parentChatId == run.chatId) + todos (sessionId == run.chatId)
- *  - agent-runs:stop   → Фаза 4: переиспользует ai:stop abort по send_id,
- *    помечает прогон stopped
+ *  - agent-runs:stop   → Фаза 4: переиспользует ai:stop abort+ACK по send_id,
+ *    затем помечает прогон stopped
  *  - agent-runs:resume → Фаза 4: честный re-send из run_inputs (renderer сам
  *    переключает чат и зовёт обычный ai:send тем же текстом)
  */
@@ -27,7 +27,7 @@ export function registerAgentRunsIpc(
   subSessions: SubSessions,
   sessionTodos: SessionTodos,
   db: Database,
-  abortSend: (sendId: number) => boolean,
+  abortSendAndWait: (sendId: number) => Promise<boolean>,
   reconciledAt: number
 ): void {
   // Crash-resume: прогоны, отклонённые пользователем в баннере на этом старте.
@@ -100,17 +100,17 @@ export function registerAgentRunsIpc(
     return { run, events, subs, todos }
   })
 
-  // Stop (Фаза 4): прерываем активный прогон через тот же abort, что и ai:stop
-  // (каскадит в субы + sub-queue.cancel через ctx.signal). После аборта явно
+  // Stop (Фаза 4): прерываем активный прогон через тот же abort+ACK, что и ai:stop
+  // (каскадит в субы + sub-queue.cancel через ctx.signal). Только после ACK явно
   // помечаем прогон stopped — finish идемпотентен (WHERE ended_at IS NULL), так
   // что естественный finally runner'а с exitReason='aborted' уже не затрёт это.
   // send_id неактивен (прогон завершён / уже без процесса) → no-op, false.
-  ipcMain.handle('agent-runs:stop', (_e, runId: string): boolean => {
+  ipcMain.handle('agent-runs:stop', async (_e, runId: string): Promise<boolean> => {
     const run = agentRuns.get(runId)
     if (!run || run.sendId == null) return false
     // Уже завершён — нечего останавливать.
     if (run.endedAt != null) return false
-    const aborted = abortSend(run.sendId)
+    const aborted = await abortSendAndWait(run.sendId)
     if (!aborted) return false
     try {
       agentRuns.finish(runId, 'stopped', {})

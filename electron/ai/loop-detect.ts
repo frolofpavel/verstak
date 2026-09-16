@@ -32,7 +32,7 @@
  * чтобы следующий мутирующий инструмент попадал сюда сам.
  */
 import { observationDigest } from './progress'
-import { MUTATING_BROWSER_TOOLS } from './mode-policy'
+import { MUTATING_BROWSER_TOOLS, MUTATING_COMPUTER_TOOLS } from './mode-policy'
 import { MUTATING_TOOL_NAMES } from './review-gate'
 
 /** Наблюдения безаргументных инструментов за прогон: имя → что видели и сколько раз подряд. */
@@ -88,6 +88,7 @@ export function changesObservation(name: string): boolean {
   return name === 'browser_navigate'
     || name === 'run_command'
     || MUTATING_BROWSER_TOOLS.includes(name)
+    || MUTATING_COMPUTER_TOOLS.includes(name)
     || MUTATING_TOOL_NAMES.has(name)
 }
 

@@ -28,6 +28,7 @@
     "bench:browser-run": "node scripts/bench/browser-run-bench.mjs",
     "release:build": "node scripts/release-build.mjs",
     "release:gate": "node scripts/release-gate.mjs",
+    "check:computer-use-package": "node scripts/check-computer-use-package.mjs --smoke",
     "release:publish": "node scripts/release-publish.mjs",
     "release:stop": "node scripts/release-stop.mjs",
     "lint:full": "eslint .",
@@ -90,6 +91,10 @@
       {
         "from": "resources/browser-bridge/host-metadata.json",
         "to": "browser-bridge/host-metadata.json"
+      },
+      {
+        "from": "resources/computer-use/helper.ps1",
+        "to": "computer-use/helper.ps1"
       },
       {
         "from": "browser-extension",

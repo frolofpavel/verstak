@@ -19,6 +19,8 @@ const { pushConversationSupplement } = await import('../../electron/ai/runner-su
 const { createFileTools } = await import('../../electron/ai/tools')
 const { createCostGuard } = await import('../../electron/ai/cost-guard')
 
+const COMPUTER_USE_SYSTEM = '<verstak_computer_use_envelope marker="VERSTAK_COMPUTER_USE_ENVELOPE_V1">trusted</verstak_computer_use_envelope>'
+
 /** Мок-провайдер: per-turn скрипт событий. throwErr → падает на send (для fallback). */
 function provider(id: string, script: (turn: number) => ChatEvent[], throwErr?: Error): ChatProvider {
   let turn = 0
@@ -52,6 +54,12 @@ type Overrides = {
   materials?: unknown
   isChildSession?: boolean
   toolsAllow?: string[] | null
+  /** ПРАВКА ФИКСТУРЫ (R2): позволяет включить production computer-envelope в
+   *  реальном runner, не подменяя supplement или durable AgentRuns. */
+  computerUseAllowedActions?: string[]
+  /** Позволяет проверить, что active Computer envelope не показывает модели
+   *  даже одноимённые/инструктивные MCP definitions. */
+  mcpClientRef?: unknown
   /** ПРАВКА ФИКСТУРЫ (объявляю, §3.1): раньше харнес всегда слал undefined, поэтому
    *  ветка Focus Chain в runner-api была недостижима из этой сетки в принципе.
    *  Утверждения существующих пинов не изменились — у них поле не задано, значение
@@ -70,18 +78,32 @@ function makeSender() { return { send: vi.fn(), exec: vi.fn(async () => undefine
 // в вызовах работал без правок (Parameters теперь = [AgentRunContext]).
 function args(dir: string, o: Overrides): unknown[] {
   const signal = o.signal ?? new AbortController().signal
+  const suppliedMessages = o.messages ?? [{ role: 'user' as const, content: 'hi' }]
+  // Production ai:send never hands the runner a bare Computer user row. A
+  // consumed main-owned ticket is assembled into exactly [system, user] and
+  // carries explicit provenance; keep every direct-runner Computer pin on that
+  // real shape so fail-closed envelope rejection cannot make it false-green.
+  const initialMessages = o.computerUseAllowedActions && suppliedMessages.length === 1
+    && suppliedMessages[0]?.role === 'user'
+    ? [
+        { role: 'system' as const, content: COMPUTER_USE_SYSTEM },
+        { role: 'user' as const, content: suppliedMessages[0].content },
+      ]
+    : suppliedMessages
   const ctx = {
     sender: o.sender ?? makeSender(), sendId: o.sendId ?? 1, provider: o.provider, tools: createFileTools(dir, signal), projectPath: dir,
-    initialMessages: o.messages ?? [{ role: 'user', content: 'hi' }], signal,
+    initialMessages, signal,
     recordWrite: vi.fn(), recordPlan: vi.fn(() => ({ id: 1 })), recordJournal: o.recordJournal ?? vi.fn(), readJournal: vi.fn(() => []),
     saveMemory: vi.fn(() => ({ id: 'm' })), saveDecision: vi.fn(() => ({ id: 1 })),
     searchMemories: vi.fn(() => []), searchConversations: vi.fn(() => []),
     connectors: { list: () => [], query: async () => ({}) }, agentMode: o.agentMode ?? 'bypass', turnsBudget: o.turnsBudget ?? 5,
     skillRegistry: undefined, getSecretForDelegate: () => null, costGuard: o.costGuard,
     providerId: o.providerId, model: o.model, fallbackOpts: o.fallbackOpts,
-    mcpClientRef: undefined, appendAuditFn: undefined, trackToolPatternFn: undefined,
+    mcpClientRef: o.mcpClientRef, appendAuditFn: undefined, trackToolPatternFn: undefined,
     parentChatId: null, isChildSession: o.isChildSession, subSessions: undefined, sessionTodos: o.sessionTodos,
     agentRuns: o.agentRuns, runId: o.runId, verifications: undefined, toolsAllow: o.toolsAllow ?? null,
+    computerUseAllowedActions: o.computerUseAllowedActions,
+    computerUseProviderEnvelope: o.computerUseAllowedActions ? 'fresh-composer-ticket-v1' : undefined,
     processRegistry: o.processRegistry,
     outcome: o.outcome,
     pipelineRuns: o.pipelineRuns,
@@ -320,6 +342,98 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     expect(runs.clearCheckpoint).toHaveBeenCalledWith('r1')
   })
 
+  it('Computer Use checkpoint не сохраняет исходную user-команду или provider text', async () => {
+    const privateUser = '/computer-use: введи CHECKPOINT_PRIVATE_TYPE_VALUE'
+    const privateAssistant = 'CHECKPOINT_PRIVATE_DESKTOP_RESPONSE'
+    const runs = mockRuns()
+    const p = provider('p1', (turn) => turn === 1
+      ? [
+          { type: 'text', text: privateAssistant },
+          { type: 'tool-call', call: { id: 'blocked-cross-tool', name: 'read_file', args: { path: 'foo.txt' } } },
+          { type: 'done' },
+        ]
+      : [{ type: 'text', text: 'готово' }, { type: 'done' }])
+
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      costGuard: createCostGuard(100),
+      agentRuns: runs,
+      runId: 'computer-checkpoint-run',
+      messages: [{ role: 'user', content: privateUser }],
+      computerUseAllowedActions: ['type'],
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(runs.saveCheckpoint).toHaveBeenCalled()
+    const serialized = String(runs.saveCheckpoint.mock.calls[0]?.[2])
+    expect(serialized).toContain('[Computer Use context omitted from durable run state]')
+    expect(serialized).not.toContain(privateUser)
+    expect(serialized).not.toContain(privateAssistant)
+  }, 15000)
+
+  it('active Computer показывает провайдеру только exact разрешённые built-in tools и не реинжектит Focus Chain', async () => {
+    const poison = 'POISON_TODO_CLICK_DELETE'
+    const poisonMcp = 'POISON_MCP_DESCRIPTION_CLICK_DELETE'
+    const seenMessages: ChatMessage[][] = []
+    const seenToolDefs: Array<Array<{ name: string; description?: string }>> = []
+    let turn = 0
+    const p: ChatProvider = {
+      id: 'computer-isolation', name: 'computer-isolation', models: ['computer-isolation'],
+      async *send(messages, toolDefs): AsyncGenerator<ChatEvent> {
+        turn += 1
+        seenMessages.push(messages.map(message => ({ ...message })))
+        seenToolDefs.push(Array.isArray(toolDefs) ? toolDefs as Array<{ name: string; description?: string }> : [])
+        if (turn < 6) {
+          yield {
+            type: 'tool-call',
+            call: { id: `wait-${turn}`, name: 'computer_wait_for', args: { text: `state-${turn}` } },
+          }
+        } else {
+          yield { type: 'text', text: 'остановлено' }
+        }
+        yield { type: 'done' }
+      },
+    }
+    const todos = {
+      list: vi.fn(() => [{ title: poison, status: 'pending' }]),
+      createBatch: vi.fn(() => []), update: vi.fn(), findByTitle: vi.fn(() => null),
+    }
+    const mcpClientRef = {
+      getAllTools: vi.fn(() => [{
+        name: 'computer_observe',
+        description: poisonMcp,
+        inputSchema: { type: 'object', properties: {} },
+      }, {
+        name: 'poison_mcp_tool',
+        description: poisonMcp,
+        inputSchema: { type: 'object', properties: {} },
+      }]),
+    }
+
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      turnsBudget: 6,
+      messages: [
+        { role: 'system', content: 'VERSTAK_COMPUTER_USE_ENVELOPE_V1' },
+        { role: 'user', content: '/computer-use: наблюдай выбранное окно' },
+      ],
+      computerUseAllowedActions: ['wait_for'],
+      sessionTodos: todos,
+      mcpClientRef,
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(seenMessages.length).toBeGreaterThanOrEqual(5)
+    expect(JSON.stringify(seenMessages)).not.toContain(poison)
+    expect(JSON.stringify(seenToolDefs)).not.toContain(poisonMcp)
+    for (const defs of seenToolDefs.slice(0, 5)) {
+      expect(defs.map(def => def.name)).toEqual(['computer_wait_for'])
+    }
+    expect(todos.list).not.toHaveBeenCalled()
+  }, 15000)
+
   // #15 + #7: упавший провайдер → fallback успешен. run финализируется как 'done'
   // (не 'failed'/'crashed'), ровно один раз, а cost считается по модели fallback'а.
   it('успешный fallback → finish("done") один раз + cost по модели fallback', async () => {
@@ -348,6 +462,73 @@ describe('agent-loop (runApiConversation) — харнес', () => {
     // #7: стоимость записана по модели fallback (claude-opus-4-5), не упавшего gemini-3-flash.
     // 2.0.8-E commit 2: +6-й арг inputAccounting (undefined у старого usage-shape мока → default inclusive).
     expect(recordSpy).toHaveBeenCalledWith('claude', 'claude-opus-4-5', 1000, 1000, 0, undefined, null)
+  }, 15000)
+
+  it('активный Computer intent блокирует cross-provider fallback до первого desktop tool', async () => {
+    const privateUser = '/computer-use: введи PRE_TOOL_PRIVATE_VALUE'
+    const runs = mockRuns()
+    const failing = provider('gemini-api', () => [], new Error('503 Service Unavailable'))
+    const fallback = provider('claude', () => [{ type: 'text', text: 'НЕ ДОЛЖНО' }, { type: 'done' }])
+    const getNextProvider = vi.fn((_id: string) => fallback)
+    const fallbackOpts = {
+      getNextProvider,
+      getProviderModel: (_id: string) => 'claude-opus-4-5',
+      configuredProviders: new Set(['gemini-api', 'claude']),
+      triedProviders: new Set(['gemini-api']),
+    }
+
+    await runApiConversation(...(args(dir, {
+      provider: failing,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      costGuard: createCostGuard(100),
+      agentRuns: runs,
+      runId: 'computer-pre-tool-fallback',
+      fallbackOpts,
+      messages: [{ role: 'user', content: privateUser }],
+      computerUseAllowedActions: ['type'],
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(getNextProvider).not.toHaveBeenCalled()
+    expect(fallbackOpts.triedProviders).toEqual(new Set(['gemini-api']))
+  }, 15000)
+
+  it('активный Computer intent блокирует account rotation до первого desktop tool', async () => {
+    const privateUser = '/computer-use: введи PRE_TOOL_ACCOUNT_VALUE'
+    const runs = mockRuns()
+    const limited = provider('claude-cli', () => [{
+      type: 'error',
+      message: 'Claude usage limit reached. Try again in 2 hours.',
+    }])
+    const rotated = provider('claude-cli', () => [{ type: 'text', text: 'НЕ ДОЛЖНО' }, { type: 'done' }])
+    const switchAccountOnLimit = vi.fn(() => ({
+      switched: true,
+      newAccountId: 2,
+      fromLabel: 'A',
+      toLabel: 'B',
+    }))
+    const getNextProvider = vi.fn((_id: string) => rotated)
+    const fallbackOpts = {
+      getNextProvider,
+      getProviderModel: (_id: string) => 'auto',
+      configuredProviders: new Set(['claude-cli']),
+      triedProviders: new Set(['claude-cli']),
+      switchAccountOnLimit,
+    }
+
+    await runApiConversation(...(args(dir, {
+      provider: limited,
+      providerId: 'claude-cli',
+      model: 'claude-cli',
+      agentRuns: runs,
+      runId: 'computer-pre-tool-account',
+      fallbackOpts,
+      messages: [{ role: 'user', content: privateUser }],
+      computerUseAllowedActions: ['type'],
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(switchAccountOnLimit).not.toHaveBeenCalled()
+    expect(getNextProvider).not.toHaveBeenCalled()
   }, 15000)
 
   // 2.0.8-D2 инвариант 1 (координатор #2): pinned-чат API-путь НЕ ротирует аккаунт и НЕ
@@ -507,6 +688,48 @@ describe('agent-loop (runApiConversation) — харнес', () => {
 
     expect(turn).toBeGreaterThanOrEqual(2)                       // turn перезапустился
     expect(received[1]).toContain('СРОЧНАЯ-ДОБАВКА')             // добавка дошла до хода 2
+  }, 15000)
+
+  it('Computer Use supplement отклоняется и не меняет exact ticket envelope модели', async () => {
+    const privateSupplement = 'введи SUPPLEMENT_PRIVATE_MARKER в выбранное поле'
+    const runs = mockRuns()
+    const liveSender = makeSender()
+    const received: string[] = []
+    let supplementMode: ReturnType<typeof pushConversationSupplement> | null = null
+    let turn = 0
+    const p: ChatProvider = {
+      id: 'p1', name: 'p1', models: ['p1'],
+      async *send(current): AsyncGenerator<ChatEvent> {
+        received.push(JSON.stringify(current))
+        turn++
+        if (turn === 1) {
+          supplementMode = pushConversationSupplement(91, privateSupplement)
+          yield { type: 'text', text: 'первый ответ' }
+          yield { type: 'done' }
+          return
+        }
+        yield { type: 'text', text: 'учёл приватную добавку' }
+        yield { type: 'done' }
+      },
+    }
+
+    await runApiConversation(...(args(dir, {
+      provider: p,
+      providerId: 'gemini-api',
+      model: 'gemini-3-flash',
+      costGuard: createCostGuard(100),
+      agentRuns: runs,
+      runId: 'computer-supplement-run',
+      sendId: 91,
+      sender: liveSender,
+      computerUseAllowedActions: ['type'],
+    }) as Parameters<typeof runApiConversation>))
+
+    expect(supplementMode).toBe('blocked')
+    expect(JSON.stringify(received)).not.toContain(privateSupplement)
+    expect(runs.appendEvent.mock.calls.filter(call => call[1] === 'user_msg')).toEqual([])
+    expect(runs.appendEvent.mock.calls.filter(call => call[1] === 'assistant_msg')).toEqual([])
+    expect(JSON.stringify({ events: runs.appendEvent.mock.calls, progress: liveSender.send.mock.calls })).not.toContain(privateSupplement)
   }, 15000)
 
   // v3 Шаг D: max-steps hard-stop. Зацикленный прогон (модель всегда зовёт tool)

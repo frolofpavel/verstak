@@ -67,6 +67,20 @@ export interface AutoApprove {
 export const MUTATING_BROWSER_TOOLS: readonly string[] = ['browser_click', 'browser_click_by_number', 'browser_type_by_number', 'browser_press_key']
 
 /**
+ * R2 Computer Use writes to the selected Windows window. Binding and candidate
+ * discovery never belong to the model tool surface; of the six task-scoped
+ * tools only observe/wait are read-only. Keep this category separate from the
+ * browser list so a later browser exception cannot silently authorize global
+ * desktop input.
+ */
+export const MUTATING_COMPUTER_TOOLS: readonly string[] = [
+  'computer_click',
+  'computer_type',
+  'computer_key',
+  'computer_scroll',
+]
+
+/**
  * Инструменты, СОЗДАЮЩИЕ ФАЙЛ на диске (артефакты): все три реально пишут в проект
  * (render_chart → .svg, generate_html → .html, generate_docx → .docx). Седьмой обход
  * гейта (08.08): их не было ни в одной категории → auto-accept во ВСЕХ режимах, включая
@@ -91,7 +105,9 @@ export function isGovernedTool(toolName: string): boolean {
   const isEdit = toolName === 'write_file' || toolName === 'apply_patch' || toolName === 'propose_edits' || toolName === 'edit_spreadsheet'
   const isCommand = toolName === 'run_command' || toolName === 'connector_query' || toolName === 'execute_code'
   return isEdit || isCommand || ARTIFACT_TOOLS.includes(toolName)
-    || MUTATING_BROWSER_TOOLS.includes(toolName) || toolName === 'spawn_task_session'
+    || MUTATING_BROWSER_TOOLS.includes(toolName)
+    || MUTATING_COMPUTER_TOOLS.includes(toolName)
+    || toolName === 'spawn_task_session'
 }
 
 export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoApprove): ToolDecision {
@@ -105,6 +121,7 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
   // (там «только чтение»), в остальных режимах порог сегодня НЕ ужесточается —
   // его выберет человек по фактическим цифрам, когда они наберутся.
   const isBrowserMutation = MUTATING_BROWSER_TOOLS.includes(toolName)
+  const isComputerMutation = MUTATING_COMPUTER_TOOLS.includes(toolName)
   // ВОСЬМОЙ ОБХОД (08.08): spawn_task_session ПОРОЖДАЕТ ИСПОЛНЕНИЕ (дочерняя сессия пишет
   // файлы/запускает команды), но не входил ни в одну категорию → auto-accept во всех
   // режимах, включая plan. По эффекту ближе к isCommand, НО confirm ему не даём: модалки
@@ -116,11 +133,11 @@ export function decide(toolName: string, mode: AgentMode, autoApprove?: AutoAppr
   // reads + операции с СОБСТВЕННОЙ памятью агента (memory_save/memory_invalidate/
   // core_memory_*) всегда проходят: plan-режим гейтит изменения ПРОЕКТА (файлы/команды),
   // а не курирование агентом своей памяти (дёшево, обратимо, не трогает рабочее дерево).
-  if (!isEdit && !isCommand && !isBrowserMutation && !isArtifact && !isSpawn) return 'auto-accept'
+  if (!isEdit && !isCommand && !isBrowserMutation && !isComputerMutation && !isArtifact && !isSpawn) return 'auto-accept'
   // Браузерная мутация, артефакт (запись файла) и спавн (порождает исполнение): строгость
   // только там, где режим означает «ничего не менять» (plan → block), иначе auto-accept.
   // Confirm сознательно НЕ здесь — модалок подтверждения для них нет (см. ARTIFACT_TOOLS/isSpawn).
-  if (isBrowserMutation || isArtifact || isSpawn) return mode === 'plan' ? 'block' : 'auto-accept'
+  if (isBrowserMutation || isComputerMutation || isArtifact || isSpawn) return mode === 'plan' ? 'block' : 'auto-accept'
 
   let decision: ToolDecision
   switch (mode) {
@@ -147,6 +164,11 @@ export function blockReason(toolName: string, mode: AgentMode): string {
              `страница залогинена, и нажатие может отправить, опубликовать, удалить или оплатить. ` +
              `Смотреть страницу можно: browser_navigate, browser_read_page и browser_screenshot работают. ` +
              `Пользователь сам переключит режим, когда захочет разрешить действия.`
+    }
+    if (MUTATING_COMPUTER_TOOLS.includes(toolName)) {
+      return `Активен режим "Режим планирования" — действие Computer Use (${toolName}) запрещено. ` +
+             `Доступны только наблюдение и ожидание выбранного окна. ` +
+             `Пользователь сам переключит режим, когда захочет управлять окном.`
     }
     if (toolName === 'connector_query') {
       return `Активен режим "Режим планирования" — запросы к коннекторам (внешние системы: SSH, HTTP, Telegram, Битрикс24 и т.п.) запрещены, ` +

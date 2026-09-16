@@ -12,6 +12,7 @@
 
 import type { ChatMessage } from '../../ai/types'
 import type { ProviderId } from '../../ai/registry'
+import { COMPUTER_CONTEXT_OMITTED } from '../../ai/tool-telemetry'
 
 export type SaveRunInput = (input: {
   runId: string
@@ -34,6 +35,8 @@ export function saveRunInputSnapshot(input: {
   /** Уже готовая system-строка: API — composedSystem без cache-маркера, CLI — payload. */
   systemPrompt: string
   messages: ChatMessage[]
+  /** Computer-команда и собранный CLI payload являются execution data, а не Debug Packet. */
+  omitComputerContext?: boolean
 }): void {
   if (!input.save) return
   const lastUser = [...input.messages].reverse().find(m => m.role === 'user')
@@ -45,8 +48,8 @@ export function saveRunInputSnapshot(input: {
       timestamp: Date.now(),
       providerId: input.providerId,
       model: input.model,
-      systemPrompt: input.systemPrompt,
-      userMessage: lastUser?.content ?? ''
+      systemPrompt: input.omitComputerContext ? COMPUTER_CONTEXT_OMITTED : input.systemPrompt,
+      userMessage: input.omitComputerContext ? COMPUTER_CONTEXT_OMITTED : (lastUser?.content ?? '')
     })
   } catch { /* snapshot not critical — run continues unaffected */ }
 }

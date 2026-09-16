@@ -21,6 +21,12 @@ export interface Journal {
   clear: (projectPath: string) => number
 }
 
+export interface JournalOptions {
+  /** Main-owned durable Computer Use provenance. A read failure must omit the
+   *  affected chat from derived summaries instead of copying execution data. */
+  isChatComputerTainted?: (chatId: number) => boolean
+}
+
 interface Row {
   id: number
   kind: JournalKind
@@ -30,6 +36,7 @@ interface Row {
 }
 
 interface ChatRow {
+  sessionId: number | null
   role: 'user' | 'assistant' | string
   content: string
   createdAt: number
@@ -63,7 +70,7 @@ interface SessionSummary {
   errors: string[]
 }
 
-export function createJournal(db: Database): Journal {
+export function createJournal(db: Database, options: JournalOptions = {}): Journal {
   const appSessionStart = Date.now()
   const activeSinceByProject = new Map<string, number>()
 
@@ -115,8 +122,8 @@ export function createJournal(db: Database): Journal {
         AND kind != 'session'
       ORDER BY id ASC
     `).all(projectPath, start, end) as Row[]
-    const messages = db.prepare(`
-      SELECT role, content, created_at as createdAt
+    const rawMessages = db.prepare(`
+      SELECT session_id as sessionId, role, content, created_at as createdAt
       FROM chats
       WHERE project_path = ?
         AND created_at >= ?
@@ -124,6 +131,26 @@ export function createJournal(db: Database): Journal {
         AND role IN ('user', 'assistant')
       ORDER BY id ASC
     `).all(projectPath, start, end) as ChatRow[]
+    const taintByChat = new Map<number, boolean>()
+    const messages = rawMessages.filter(message => {
+      const chatId = message.sessionId
+      // Computer Use authority requires a durable positive chat id. Legacy
+      // session-less rows could never have owned that capability.
+      if (!options.isChatComputerTainted
+        || typeof chatId !== 'number'
+        || !Number.isSafeInteger(chatId)
+        || chatId <= 0) return true
+      let tainted = taintByChat.get(chatId)
+      if (tainted === undefined) {
+        try {
+          tainted = options.isChatComputerTainted(chatId) === true
+        } catch {
+          tainted = true
+        }
+        taintByChat.set(chatId, tainted)
+      }
+      return !tainted
+    })
     if (events.length === 0 && messages.length === 0) return null
     return buildSessionSummary(messages, events, start, end, reason)
   }

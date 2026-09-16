@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../../i18n'
 import type { BrowserBridgeStateDTO } from '../../types/api'
+import { ComputerUseSettingsCard } from './ComputerUseSettingsCard'
 
 type BrowserSetupStatus =
   | 'loading'
@@ -168,6 +169,7 @@ export function BrowserSettingsTab() {
 
         <BrowserConnectionDetails state={state} t={t} />
       </section>
+      <ComputerUseSettingsCard />
     </div>
   )
 }

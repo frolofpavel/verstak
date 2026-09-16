@@ -19,6 +19,7 @@ import type { AgentJobs } from '../../storage/agent-jobs'
 import type { AgentJobScheduler } from '../../ai/agent-job-scheduler'
 import type { ScheduleSpec } from '../../storage/scheduled-jobs'
 import type { BrowserAdapter } from '../../ai/browser/types'
+import type { ComputerAction } from '../../ai/computer/types'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -119,6 +120,11 @@ export interface ToolContext {
   autoRejectConfirms?: (info: { callId: string; toolName: string; subject: string }) => void
   /** Active agent mode — controls auto-accept / confirm / block per tool. */
   agentMode: AgentMode
+  /**
+   * Least-authority desktop action scope derived in main from the untouched
+   * latest user message. Tool/model output can never promote this allowlist.
+   */
+  computerUseAllowedActions?: readonly ComputerAction[]
   /** Сырой tools_allow активного скилла этого прогона (для наследования дочерней
    *  сессией: spawn_task_session прокидывает его в overrides ребёнка). null = нет скилла. */
   toolsAllow?: string[] | null
@@ -284,6 +290,7 @@ export interface ToolHandler {
 // мелочь — иначе Timeline раздувается. Команда/коннектор/делегирование значимы.
 const TIMELINE_TOOL_CALLS = new Set([
   'run_command', 'connector_query', 'delegate_task', 'delegate_parallel', 'review_before_commit',
+  'computer_observe', 'computer_click', 'computer_type', 'computer_key', 'computer_scroll', 'computer_wait_for',
   // Читающие инструменты (запрос №6): без них переоткрытая вкладка показывала итог без
   // хода работы, и на вопрос «откуда цифры» ответить было нечем — в таймлайне не
   // оставалось следа ни от одного запроса в интернет.
@@ -353,6 +360,34 @@ export function awaitCommandConfirm(
 
 
 export function summarizeToolCall(name: string, args: Record<string, unknown>, result: unknown): { label: string; detail: string } | null {
+  if (name === 'computer_observe') {
+    return { label: name, detail: 'свежее наблюдение выбранного окна' }
+  }
+  if (name === 'computer_click') {
+    return { label: name, detail: 'клик по выбранному элементу' }
+  }
+  if (name === 'computer_type') {
+    // Never include text or its length: even metadata about a password-like
+    // value is needless durable leakage. Target refs are opaque per binding.
+    return { label: name, detail: 'ввод в выбранное поле' }
+  }
+  if (name === 'computer_key') {
+    const key = String(args.key ?? '')
+    return {
+      label: name,
+      detail: ['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown'].includes(key)
+        ? `клавиша ${key}`
+        : 'клавиша вне разрешённого списка',
+    }
+  }
+  if (name === 'computer_scroll') {
+    return { label: name, detail: 'прокрутка выбранного окна' }
+  }
+  if (name === 'computer_wait_for') {
+    // Wait conditions can quote document contents; durable trace only needs
+    // the kind of work, not the raw model argument.
+    return { label: name, detail: 'ожидание состояния выбранного окна' }
+  }
   if (name === 'read_file') {
     const p = String(args.path ?? '')
     const len = typeof result === 'string' ? result.length : 0

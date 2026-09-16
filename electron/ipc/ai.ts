@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { basename } from 'path'
 import { notifyRunEvent, shouldSendAutoProofReport } from '../ai/run-notify'
 import { clearRunUntilGreenForSend, clearSmartApproveForSend } from './tool-handlers/command'
@@ -38,6 +38,7 @@ import { buildProviderRuntimeOptions } from './ai-send/provider-options'
 import { saveRunInputSnapshot } from './ai-send/run-input'
 import { registerAiResolveIpc } from './ai-resolve'
 import { BROWSER_APPROVAL_TIMEOUT_MS, configureBrowserHandler } from './tool-handlers/browser'
+import { authorizeComputerRun, waitForComputerRunStop } from './tool-handlers/computer'
 import { webviewB0Capability } from '../ai/browser/capability'
 import { connectedBrowserDataPolicy, decideProviderBrowserContext, localWebviewDataPolicy, parseClientDataPolicy } from '../ai/browser/data-policy'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
@@ -57,6 +58,13 @@ import type { MaterialsRunContext } from '../ai/runner-api'
 import { logRuntime, logRuntimeError } from '../runtime-log'
 import { registerAiCountTokensIpc } from './ai-count-tokens'
 import { maskSecretsForDiff, redactForDisplay } from '../ai/secret-scanner'
+import {
+  allowedComputerUseActionsForRun,
+  computerUseOriginalTextFromPersistedContent,
+  isComputerUseComposerAttempt,
+} from '../ai/computer/intent'
+import { isChatComputerTainted, materializeChatComputerTaint, projectConversationSearchForComputerTaint } from '../ai/computer/durable-taint'
+import { COMPUTER_CONTEXT_OMITTED, projectMessagesForPersistence } from '../ai/tool-telemetry'
 
 export type { ProviderId } from '../ai/registry'
 
@@ -85,6 +93,14 @@ export interface AiDeps {
    *  дочерняя сессия (parent задан) не получает spawn_task_session. Опционально —
    *  в тестах/делегатах не передаётся (тогда undefined → трактуем как корень). */
   getChatParentChatId?: (chatId: number) => number | null
+  /** Latest persisted user row for a chat. Computer Use composer tickets fail
+   *  closed when this exact session/id/role/content binding cannot be proved. */
+  getLatestChatUserMessage?: (chatId: number) => {
+    id: number
+    sessionId: number
+    role: string
+    content: string
+  } | null
   /** 1.9.3 мультиаккаунт: аккаунт подписки провайдера. Резолвит секрет из SafeStorage по
    *  cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит last_used_at.
    *  null = нет заведённых аккаунтов (падаем на legacy-секрет).
@@ -94,7 +110,11 @@ export interface AiDeps {
    *  2.1.3-CD: opts.accountId — явный one-shot выбор аккаунта. Явный выбор и pin проверяются
    *  на готовность: `{ blocked: true, reason, resetAt, label }` — стоп с понятной причиной
    *  (cooling / login-required) ДО старта прогона, вместо гарантированного фейла в рантайме. */
-  resolveSubscriptionAccount?: (providerId: string, chatId?: number, opts?: { accountId?: number | null }) => ResolvedSubscription | null
+  resolveSubscriptionAccount?: (
+    providerId: string,
+    chatId?: number,
+    opts?: { accountId?: number | null; allowAutoRotation?: boolean },
+  ) => ResolvedSubscription | null
   /** 1.9.4: активный аккаунт провайдера исчерпал лимит → пометить cooling и переключить на
    *  следующий готовый аккаунт пула. switched:false = пул исчерпан (падаем на provider-fallback).
    *  2.1.3-CD: reason (quota/rate-limit) пишется в cooldown для честного UI; результат несёт
@@ -229,6 +249,13 @@ export interface AiDeps {
 
 let currentSendId = 0
 const activeAborts = new Map<number, AbortController>()
+// Stop is a two-phase operation for Computer Use: AbortController revocation is
+// synchronous, while the selected-window helper acknowledges queue cancellation
+// asynchronously. Keep one main-owned flight per send until that exact barrier
+// settles so duplicate IPC surfaces cannot acknowledge Stop early or cancel the
+// helper twice. Cardinality is bounded by the concurrently stopping sends.
+const inFlightStops = new Map<number, Promise<boolean>>()
+let inFlightStopAll: Promise<boolean> | null = null
 // `done`/`run-finalized` уже ушёл из main, но async runner ещё может не успеть
 // финализировать DB и снять AbortController. В этом окне reload не
 // имеет права воскрешать send. Set bounded числом active run и чистится cleanup.
@@ -527,6 +554,116 @@ export function abortSend(sendId: number): boolean {
   return true
 }
 
+/** Renderer-facing Stop: abort synchronously, then wait for the exact Computer
+ * Use helper queue ACK started by that signal. Non-Computer sends resolve at
+ * once and retain the existing boolean contract. */
+export function abortSendAndWait(sendId: number): Promise<boolean> {
+  if (sendId <= 0) return abortAllSendsAndWait()
+
+  const existing = inFlightStops.get(sendId)
+  if (existing) return existing
+  const controller = activeAborts.get(sendId)
+  if (!controller) return Promise.resolve(false)
+
+  const flight = createStopFlight(sendId)
+  let aborted: boolean
+  try {
+    aborted = abortSend(sendId)
+  } catch (err) {
+    flight.reject(err)
+    return flight.promise
+  }
+  settleStopFlightAtComputerBarrier(flight, controller.signal, aborted)
+  return flight.promise
+}
+
+interface StopFlight {
+  promise: Promise<boolean>
+  resolve: (aborted: boolean) => void
+  reject: (reason: unknown) => void
+}
+
+function createStopFlight(sendId: number): StopFlight {
+  let resolve!: (aborted: boolean) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<boolean>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  inFlightStops.set(sendId, promise)
+  const cleanup = () => {
+    if (inFlightStops.get(sendId) === promise) inFlightStops.delete(sendId)
+  }
+  void promise.then(cleanup, cleanup)
+  return { promise, resolve, reject }
+}
+
+function settleStopFlightAtComputerBarrier(
+  flight: StopFlight,
+  signal: AbortSignal,
+  aborted: boolean,
+): void {
+  try {
+    void waitForComputerRunStop(signal).then(
+      () => flight.resolve(aborted),
+      err => flight.reject(err),
+    )
+  } catch (err) {
+    flight.reject(err)
+  }
+}
+
+function abortAllSendsAndWait(): Promise<boolean> {
+  const active = [...activeAborts.entries()]
+  // No newly-active send appeared while the previous stop-all is waiting: this
+  // is the same operation and must expose the same exact helper barrier.
+  if (inFlightStopAll && active.length === 0) return inFlightStopAll
+
+  const priorStopAll = inFlightStopAll
+  const waits = new Set<Promise<boolean>>(inFlightStops.values())
+  const newFlights: Array<{ flight: StopFlight; signal: AbortSignal }> = []
+  for (const [activeSendId, controller] of active) {
+    const existing = inFlightStops.get(activeSendId)
+    if (existing) {
+      waits.add(existing)
+      continue
+    }
+    const flight = createStopFlight(activeSendId)
+    waits.add(flight.promise)
+    newFlights.push({ flight, signal: controller.signal })
+  }
+  if (priorStopAll) waits.add(priorStopAll)
+
+  let resolveAll!: (aborted: boolean) => void
+  let rejectAll!: (reason: unknown) => void
+  const stopAll = new Promise<boolean>((resolve, reject) => {
+    resolveAll = resolve
+    rejectAll = reject
+  })
+  inFlightStopAll = stopAll
+  const cleanup = () => {
+    if (inFlightStopAll === stopAll) inFlightStopAll = null
+  }
+  void stopAll.then(cleanup, cleanup)
+
+  let aborted: boolean
+  try {
+    aborted = abortSend(0)
+  } catch (err) {
+    for (const { flight } of newFlights) flight.reject(err)
+    rejectAll(err)
+    return stopAll
+  }
+  for (const { flight, signal } of newFlights) {
+    settleStopFlightAtComputerBarrier(flight, signal, aborted)
+  }
+  void Promise.all(waits).then(
+    () => resolveAll(aborted),
+    err => rejectAll(err),
+  )
+  return stopAll
+}
+
 
 // Read-only набор для unattended-прогона. Локальные read-тулзы + connector_query/
 // list_connectors — НО connector_query гейтится op-level политикой (ctx.readOnlyConnectors):
@@ -770,6 +907,12 @@ export interface AiSendOverrides {
  * isolatedRoot из renderer'а был бы обходом гейта известных корней проекта.
  */
 export interface AiSendInternal {
+  /** Ephemeral text recovered only after main consumes and verifies an opaque
+   *  composer ticket, or supplied by an explicitly trusted main invocation. */
+  originalUserText?: string | null
+  /** Canonical latest user row re-read by main after consuming the ticket.
+   *  In a tainted chat it is the only conversation text allowed back to the provider. */
+  verifiedUserContent?: string | null
   /** Изолированный корень прогона (workspace попытки состязания). Побеждает
    *  worktree-сессию чата — попытка работает строго в своём каталоге. */
   isolatedRoot?: string
@@ -814,7 +957,130 @@ export interface AiIpcGateway {
   ) => void
 }
 
+const COMPUTER_USE_COMPOSER_TICKET_TTL_MS = 60_000
+const MAX_PENDING_COMPUTER_USE_COMPOSER_TICKETS = 128
+const MAX_COMPUTER_USE_PERSISTED_USER_CONTENT_BYTES = 64 * 1024
+
+interface ComputerUseComposerTicketRecord {
+  senderId: number
+  chatId: number
+  originalUserText: string
+  persistedUserContentHash: string
+  expiresAt: number
+}
+
+function hashComputerUseComposerContent(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('base64url')
+}
+
+function parseComputerUseComposerGrant(value: unknown): { ticket: string; userMessageId: number } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  const ticket = typeof source.ticket === 'string' ? source.ticket : ''
+  const userMessageId = source.userMessageId
+  if (!ticket || ticket.length > 128 || !Number.isSafeInteger(userMessageId) || (userMessageId as number) <= 0) return null
+  return { ticket, userMessageId: userMessageId as number }
+}
+
+function composerOverridesAreFresh(overrides: AiSendOverrides | undefined): boolean {
+  return composerOverridesPreserveFreshProvenance(overrides)
+}
+
+function composerOverridesPreserveFreshProvenance(overrides: AiSendOverrides | undefined): boolean {
+  if (!overrides) return true
+  // A fresh Computer Use turn may select routing/runtime preferences, but no
+  // renderer-owned field may add prompt text, materials, skills, recipes or an
+  // automatic continuation around the exact persisted composer instruction.
+  const safeKeys = new Set([
+    'providerId',
+    'model',
+    'selectedProviderId',
+    'selectedModel',
+    'effortLevel',
+    'agentMode',
+    'promptRoute',
+  ])
+  return Object.entries(overrides).every(([key, value]) => value === undefined || safeKeys.has(key))
+}
+
 export function registerAiIpc(deps: AiDeps): AiIpcGateway {
+  // Raw composer text lives only in this bounded, short-lived main-process map.
+  // The renderer receives an opaque ticket and generic ai:send cannot mint one.
+  const computerUseComposerTickets = new Map<string, ComputerUseComposerTicketRecord>()
+  const pruneComputerUseComposerTickets = (now: number): void => {
+    for (const [ticket, record] of computerUseComposerTickets) {
+      if (record.expiresAt <= now) computerUseComposerTickets.delete(ticket)
+    }
+    while (computerUseComposerTickets.size >= MAX_PENDING_COMPUTER_USE_COMPOSER_TICKETS) {
+      const oldest = computerUseComposerTickets.keys().next().value as string | undefined
+      if (!oldest) break
+      computerUseComposerTickets.delete(oldest)
+    }
+  }
+
+  ipcMain.on?.('ai:mint-computer-use-composer-ticket', (event, chatIdValue: unknown, canonicalUserContentValue: unknown) => {
+    event.returnValue = null
+    const chatId = typeof chatIdValue === 'string' ? Number(chatIdValue) : NaN
+    const senderId = event.sender?.id
+    const canonicalUserContent = typeof canonicalUserContentValue === 'string' ? canonicalUserContentValue : ''
+    // Attachment labels are display metadata. The shared main-owned extractor
+    // keeps ticket minting and pre-persistence privacy taint on one boundary.
+    const originalUserText = computerUseOriginalTextFromPersistedContent(canonicalUserContent)
+    if (
+      !Number.isSafeInteger(chatId)
+      || chatId <= 0
+      || !Number.isSafeInteger(senderId)
+      || (senderId ?? 0) <= 0
+      || !originalUserText
+      || canonicalUserContent.length === 0
+      || Buffer.byteLength(canonicalUserContent, 'utf8') > MAX_COMPUTER_USE_PERSISTED_USER_CONTENT_BYTES
+    ) return
+
+    const now = Date.now()
+    pruneComputerUseComposerTickets(now)
+    const ticket = `cu-${randomUUID()}`
+    computerUseComposerTickets.set(ticket, {
+      senderId: senderId!,
+      chatId,
+      originalUserText,
+      persistedUserContentHash: hashComputerUseComposerContent(canonicalUserContent),
+      expiresAt: now + COMPUTER_USE_COMPOSER_TICKET_TTL_MS,
+    })
+    event.returnValue = ticket
+  })
+
+  const consumeComputerUseComposerTicket = (
+    sender: Electron.WebContents,
+    chatIdValue: string | undefined,
+    grantValue: unknown,
+  ): { originalUserText: string; verifiedUserContent: string } | null => {
+    const grant = parseComputerUseComposerGrant(grantValue)
+    if (!grant) return null
+    const record = computerUseComposerTickets.get(grant.ticket)
+    if (!record) return null
+    // Consume before every trust check and before handleAiSend can create a run.
+    computerUseComposerTickets.delete(grant.ticket)
+    const chatId = chatIdValue ? Number(chatIdValue) : NaN
+    if (
+      record.expiresAt <= Date.now()
+      || sender.id !== record.senderId
+      || !Number.isSafeInteger(chatId)
+      || chatId !== record.chatId
+    ) return null
+    const latest = deps.getLatestChatUserMessage?.(chatId)
+    if (
+      !latest
+      || latest.id !== grant.userMessageId
+      || latest.sessionId !== chatId
+      || latest.role !== 'user'
+      || hashComputerUseComposerContent(latest.content) !== record.persistedUserContentHash
+    ) return null
+    return {
+      originalUserText: record.originalUserText,
+      verifiedUserContent: latest.content,
+    }
+  }
+
   configureBrowserHandler({
     controller: deps.browserController,
     resolveAdapterId: deps.resolveBrowserAdapterId,
@@ -872,13 +1138,35 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     if (projectPath && !isWithinKnownRoots(projectPath, deps.getKnownRoots())) {
       throw new Error('Доступ запрещён: путь проекта не зарегистрирован')
     }
-    // Outcome preflight (2.1.10-E, срез 1): pipeline/phase/step сверяются с durable
-    // состоянием ДО старта прогона; непроверенный контекст = throw, прогона нет.
-    const outcomePreflight = overrides?.outcome
-      ? preflightOutcome(overrides.outcome, projectPath, deps)
-      : null
-    const outcome = outcomePreflight?.outcome
-    const outcomeStepInstruction = outcomePreflight?.stepInstruction ?? null
+    const chatIdNum = chatId ? Number(chatId) : undefined
+    const hasDurableChat = Number.isSafeInteger(chatIdNum) && (chatIdNum ?? 0) > 0
+    const incomingUserContent = [...incomingMessages].reverse()
+      .find(message => message.role === 'user')?.content ?? null
+    const incomingComputerUseAttempt = isComputerUseComposerAttempt(incomingUserContent)
+    const verifiedUserContent = internal?.verifiedUserContent ?? null
+    const verifiedComputerUseRequestText = internal?.originalUserText ?? null
+    const hasVerifiedDesktopComposerTicket = verifiedUserContent !== null
+      && isComputerUseComposerAttempt(verifiedComputerUseRequestText)
+    // Shared backstop for every caller of handleAiSend (IPC, browser gateway,
+    // future main-owned invokers). Only an exact consumed desktop-composer
+    // ticket may carry a recognized Computer Use attempt. If an out-of-band
+    // caller already persisted the raw row, materialize content-free taint
+    // before the generic rejection so crash/retry cannot reuse that history.
+    if (incomingComputerUseAttempt && !hasVerifiedDesktopComposerTicket) {
+      if (hasDurableChat && chatIdNum != null) {
+        try {
+          const latest = deps.getLatestChatUserMessage?.(chatIdNum)
+          if (latest?.sessionId === chatIdNum && latest.role === 'user' && isComputerUseComposerAttempt(latest.content)) {
+            if (!deps.browserTasks) throw new Error('durable Computer Use taint storage unavailable')
+            materializeChatComputerTaint(deps.browserTasks, chatIdNum, projectPath ?? '')
+          }
+        } catch (err) {
+          logRuntimeError('computer_use.out_of_band_taint.fail', err, { chatId: chatIdNum })
+          throw new Error('COMPUTER_USE_STATE_UNAVAILABLE: не удалось зафиксировать приватную границу Computer Use.')
+        }
+      }
+      throw new Error('COMPUTER_USE_FRESH_COMPOSER_REQUIRED: Computer Use доступен только из нового сообщения в desktop composer.')
+    }
     // #5 worktree-lifecycle: изолированный чат работает ЦЕЛИКОМ на своём worktree —
     // tools + контекст + recordWrite/undo (effRoot ниже). Иначе undo бил бы по main
     // (ревью: critical data-loss — правки в worktree, а undo-стек ключевался main).
@@ -890,7 +1178,83 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     const isolatedRoot = internal?.isolatedRoot
       ?? (chatId ? (deps.worktreeSessions?.activePath(Number(chatId)) ?? null) : null)
     // 2.0.8-D2: числовой chatId для резолва per-chat pin аккаунта (2.0.8-B binding).
-    const chatIdNum = chatId ? Number(chatId) : undefined
+    // Cross-run Computer Use provenance is content-free and main-owned. A
+    // synthetic/review/queue/resume send cannot carry old desktop-derived text
+    // into a new execution context. A fresh visible composer send may continue,
+    // but receives a provider-only sanitized history below.
+    const durableComputerContextTainted = hasDurableChat
+      ? isChatComputerTainted(chatIdNum, {
+          browserTasks: deps.browserTasks,
+          getChatParentChatId: deps.getChatParentChatId,
+        })
+      : false
+    const computerUseComposerAttempt = hasDurableChat
+      && isComputerUseComposerAttempt(verifiedComputerUseRequestText)
+    // Derive the exact-ticket intent independently from synthetic run overrides.
+    // resume/review/outcome may suppress authority, but must never erase the
+    // privacy boundary carried by a valid main-issued composer ticket.
+    const computerUseRequestedActions = hasDurableChat
+      ? allowedComputerUseActionsForRun(verifiedComputerUseRequestText, {
+          resumeFromRunId: null,
+        })
+      : []
+    const freshComposerText = composerOverridesAreFresh(overrides)
+      ? verifiedComputerUseRequestText
+      : null
+    // Persist content-free taint before outcome validation, attachment expansion,
+    // account/provider selection, or any other sink. A valid ticket combined
+    // with an automatic/review/resume override is an invalid mixed provenance,
+    // not an ordinary tools run with Computer authority silently removed.
+    if (computerUseComposerAttempt && deps.browserTasks && chatIdNum != null) {
+      try {
+        materializeChatComputerTaint(deps.browserTasks, chatIdNum, projectPath ?? '')
+      } catch (err) {
+        logRuntimeError('computer_use.intent_taint.fail', err, { chatId: chatIdNum })
+        throw new Error('COMPUTER_USE_STATE_UNAVAILABLE: не удалось зафиксировать приватную границу Computer Use.')
+      }
+    }
+    if (computerUseComposerAttempt && !composerOverridesPreserveFreshProvenance(overrides)) {
+      throw new Error('COMPUTER_USE_FRESH_COMPOSER_REQUIRED: Computer Use нельзя совмещать с автоматическим, повторным, review- или pipeline-запуском.')
+    }
+    if (computerUseComposerAttempt && computerUseRequestedActions.length === 0) {
+      throw new Error('COMPUTER_USE_ACTION_UNSUPPORTED: команда Computer Use не содержит действия, разрешённого выбранному Windows-окну.')
+    }
+    let verifiedUserIndex = -1
+    if (verifiedUserContent !== null) {
+      verifiedUserIndex = incomingMessages.map(message => message.role).lastIndexOf('user')
+      const incomingUserContent = verifiedUserIndex >= 0
+        ? incomingMessages[verifiedUserIndex]?.content
+        : null
+      if (typeof incomingUserContent !== 'string' || incomingUserContent !== verifiedUserContent) {
+        throw new Error('COMPUTER_USE_COMPOSER_ENVELOPE_MISMATCH: входящий текст не совпадает с сохранённым сообщением, связанным с ticket.')
+      }
+    }
+    const computerUseEnvelopeLocked = computerUseRequestedActions.length > 0
+      && verifiedUserContent !== null
+      && verifiedComputerUseRequestText !== null
+    if (durableComputerContextTainted && !freshComposerText) {
+      throw new Error('Этот чат содержит контекст Computer Use. Отправьте новое сообщение вручную из основного поля ввода; автоматический, повторный или review-запуск заблокирован.')
+    }
+    // Consent comes only from separately carried untouched composer text and
+    // only for a durable chat. No-chat runs cannot anchor authority across runs.
+    const computerUseAllowedActions = freshComposerText ? computerUseRequestedActions : []
+    const computerUseTechnicalSinksOmitted = computerUseAllowedActions.length > 0
+    // Outcome preflight (2.1.10-E, срез 1): pipeline/phase/step сверяются с durable
+    // состоянием ДО старта прогона; непроверенный контекст = throw, прогона нет.
+    // Computer ticket provenance is rejected and tainted above before this can throw.
+    const outcomePreflight = overrides?.outcome
+      ? preflightOutcome(overrides.outcome, projectPath, deps)
+      : null
+    const outcome = outcomePreflight?.outcome
+    const outcomeStepInstruction = outcomePreflight?.stepInstruction ?? null
+    const safeSearchConversations: AiDeps['searchConversations'] = (searchProjectPath, query, limit) =>
+      projectConversationSearchForComputerTaint(
+        deps.searchConversations(searchProjectPath, query, limit),
+        resultChatId => isChatComputerTainted(resultChatId, {
+          browserTasks: deps.browserTasks,
+          getChatParentChatId: deps.getChatParentChatId,
+        }),
+      )
     // 2.1.3-CD: явный one-shot аккаунт (promptRoute.accountId) — резолвится строго:
     // именно он идёт в провайдер, без тихой ротации на активный. Объявлено здесь (до
     // providerId), а сам resolveAcct — после providerId (он нужен для сверки).
@@ -900,16 +1264,51 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // в сборке запроса. Снапшота нет → история как есть (поведение прежнее).
     // resume-путь не задет: он перезаписывает messagesWithSystem целиком (историей из
     // чекпойнта, которая уже полная).
-    const contextSnapshot = chatIdNum ? (deps.getContextSnapshot?.(chatIdNum) ?? null) : null
-    const messages = prepareHistoryForModel(await expandOfficeAttachments(incomingMessages), contextSnapshot)
+    const contextSnapshot = hasDurableChat
+      && !durableComputerContextTainted
+      && !computerUseEnvelopeLocked
+      ? (deps.getContextSnapshot?.(chatIdNum!) ?? null)
+      : null
+    // Keep the provider envelope anchored to the exact persisted composer row,
+    // even after the strict equality check above. Renderer-owned message
+    // objects are never an independent Computer Use instruction channel.
+    const ticketBoundMessages: ChatMessage[] = computerUseEnvelopeLocked
+      ? [{ role: 'user', content: verifiedComputerUseRequestText }]
+      : verifiedUserIndex >= 0
+        ? incomingMessages.map((message, index) => index === verifiedUserIndex
+            ? { ...message, content: verifiedUserContent! }
+            : message)
+        : incomingMessages
+    const expandedMessages = await expandOfficeAttachments(ticketBoundMessages)
+    const providerHistory = durableComputerContextTainted
+      ? (() => {
+          const projected = projectMessagesForPersistence(expandedMessages, {
+            computerContextInitiallyExposed: true,
+            omitConversationContent: true,
+          })
+          const verifiedProviderUserContent = computerUseEnvelopeLocked
+            ? verifiedComputerUseRequestText
+            : verifiedUserContent
+          if (!verifiedProviderUserContent) return projected
+          const latestUserIndex = expandedMessages.map(message => message.role).lastIndexOf('user')
+          if (latestUserIndex < 0) return projected
+          return projected.map((message, index) => index === latestUserIndex
+            ? { ...message, content: verifiedProviderUserContent, attachments: expandedMessages[index]?.attachments }
+            : message)
+        })()
+      : expandedMessages
+    const messages = prepareHistoryForModel(providerHistory, contextSnapshot)
     if (outcomeStepInstruction) messages.push({ role: 'user', content: outcomeStepInstruction })
     // Crash-resume Фаза 2: возобновление с накопленным контекстом. Если передан
     // resumeFromRunId и у прогона есть валидный чекпойнт — берём полную историю
     // (она уже содержит system + все turn'ы), минуя пере-сборку system ниже.
     // Невалидный/отсутствующий снапшот → null → обычный старт по incomingMessages.
-    const resumedMessages = overrides?.resumeFromRunId
+    const resumedCheckpoint = overrides?.resumeFromRunId
       ? parseResumeCheckpoint(deps.agentRuns?.latestCheckpoint(overrides.resumeFromRunId)?.messagesJson ?? null)
       : null
+    const resumedMessages = durableComputerContextTainted && resumedCheckpoint
+      ? projectMessagesForPersistence(resumedCheckpoint, { computerContextInitiallyExposed: true })
+      : resumedCheckpoint
     // 1.9.8 #4: прогон чекпойнта — для гарда совместимости провайдера (ниже).
     const checkpointRun = overrides?.resumeFromRunId
       ? (deps.agentRuns?.get(overrides.resumeFromRunId) ?? null)
@@ -942,6 +1341,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       checkpointRun,
       getProviderId: deps.getProviderId,
     })
+    const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath !== null
     const sendId = ++currentSendId
     const planningOutcome = outcome?.phase === 'refine' || outcome?.phase === 'plan' || outcome?.phase === 'replan'
     const agentMode: AgentMode = planningOutcome ? 'plan' : (overrides?.agentMode ?? deps.getAgentMode())
@@ -970,6 +1370,19 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     }
     deps.setWebviewAdapterExec?.(taggedSender.exec)
     const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
+    // A Computer Use request is valid only on Verstak's tools transport. CLI,
+    // tunnel, forced no-tools, and projectless routes can expose their own
+    // shell/file capabilities outside the exact-window controller. Reject the
+    // verified request before claiming the helper or creating a provider/run.
+    const earlyRouteStop = (message: string): 0 => {
+      taggedSender.send('ai:event', { id: 0, chatId: chatIdNum ?? null, event: { type: 'error', message } })
+      activeAborts.delete(sendId)
+      clearRunTimeout()
+      return 0
+    }
+    if (computerUseRequestedActions.length > 0 && !useToolsPath) {
+      return earlyRouteStop('COMPUTER_USE_TRANSPORT_UNSUPPORTED: Computer Use доступен только через API-маршрут Verstak с инструментами и привязанным проектом.')
+    }
     const browserContextProviderAllowed = (candidateProviderId: ProviderId): boolean => {
       const task = deps.browserTasks?.get(browserTaskId)
       const policy = task ? parseClientDataPolicy(task.dataPolicy) : null
@@ -1002,7 +1415,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
           // webview's empty allowlist (= allow every provider). Narrow it before
           // binding an authenticated Chrome/Edge tab to this run. An existing
           // scoped policy is preserved, so provider fallback cannot grant itself.
-          if (connectedBrowserIntent) {
+          if (!existingPolicy || connectedBrowserIntent) {
             deps.browserTasks.setDataPolicy(browserTaskId, seedPolicy as unknown as Record<string, unknown>)
           }
           deps.browserController.attachRun({ browserTaskId, runId, providerId, handoffReason: 'new_send' })
@@ -1025,17 +1438,12 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       providerId,
       chatId: chatIdNum,
       oneShotAccountId,
+      allowAutoRotation: computerUseRequestedActions.length === 0,
       resolve: deps.resolveSubscriptionAccount,
     })
     // Ранняя ошибка маршрута: id:0 (owner ещё не зарегистрирован) + chatId в обёртке —
     // рендерер доставляет спец-текст в нужный чат (CD; раньше дропался роутером, и
     // пользователь видел только общий «провайдер недоступен»).
-    const earlyRouteStop = (message: string): 0 => {
-      taggedSender.send('ai:event', { id: 0, chatId: chatIdNum ?? null, event: { type: 'error', message } })
-      activeAborts.delete(sendId)
-      clearRunTimeout()
-      return 0
-    }
     if (!acctPreflight.ok) return earlyRouteStop(acctPreflight.message)
     // EF-R2 Б1: ЕДИНЫЙ resolved account context попытки. Между этой точкой и
     // createProvider — await'ы (attachments/context/CLI-prompt): повторный resolve после
@@ -1047,8 +1455,25 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // по-настоящему. Раньше стояло рядом с activeAborts.set, и ранний выход оставлял чат
     // «занятым» навсегда — кнопка сжатия серела до перезапуска (ревью B #5/#7). Снимается
     // в cleanup, между этой строкой и ним ранних выходов нет — забыть снятие нельзя.
+    // Claim the already selected main-owned target after every early route
+    // preflight, but before the model sees tools. The send AbortSignal owns the
+    // exact lineage from this point, including Stop while the model is thinking.
+    if (computerUseAllowedActions.length > 0) {
+      const authorization = authorizeComputerRun({ browserTaskId, runId, signal: ctrl.signal })
+      if (!authorization.ok) {
+        logRuntime('computer_use.authorization.blocked', {
+          sendId,
+          runId,
+          browserTaskId,
+          reason: authorization.error,
+        }, 'warn')
+        return earlyRouteStop(`COMPUTER_USE_AUTHORIZATION_FAILED: ${authorization.error}`)
+      }
+    }
     registerChatRun(sendId, chatIdNum)
-    const lastUserText = compactProgressText([...messages].reverse().find(m => m.role === 'user')?.content, 260)
+    const lastUserText = computerUseTechnicalSinksOmitted
+      ? COMPUTER_CONTEXT_OMITTED
+      : compactProgressText([...messages].reverse().find(m => m.role === 'user')?.content, 260)
     emitAgentProgress(taggedSender, sendId, {
       id: 'run-accepted',
       phase: 'understand',
@@ -1151,15 +1576,17 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // Топ-5 воспоминаний проекта — инжектируются в context-pack один раз за
     // app-сессию для данного чата. Вычисляем до ветки API/CLI чтобы CLI-провайдеры
     // тоже получали память через buildCliPrompt → prepareParts.
-    const { memories, consolidationHint, coreMemory: coreMemorySnapshot } = buildSendMemoryContext({
-      projectPath,
-      chatId,
-      messages,
-      deps: { searchMemories: deps.searchMemories, memoryConsolidationHint: deps.memoryConsolidationHint },
-      sendId,
-      runId,
-      emitProgress: payload => emitAgentProgress(taggedSender, sendId, payload),
-    })
+    const { memories, consolidationHint, coreMemory: coreMemorySnapshot } = computerUseEnvelopeLocked
+      ? { memories: [], consolidationHint: null, coreMemory: { memory: '', user: '' } }
+      : buildSendMemoryContext({
+          projectPath,
+          chatId,
+          messages,
+          deps: { searchMemories: deps.searchMemories, memoryConsolidationHint: deps.memoryConsolidationHint },
+          sendId,
+          runId,
+          emitProgress: payload => emitAgentProgress(taggedSender, sendId, payload),
+        })
 
     let messagesWithSystem = messages
     // composedSystem — точная system-строка, ушедшая модели в API-пути. Захватываем
@@ -1172,12 +1599,16 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // используем ниже во всех точках инъекции (API path, CLI fallback, CLI provider).
     // Нет recipe → возвращает overrides.systemPrompt как есть (обычный skill не меняется).
     // Reviewer override не задаёт recipe → изоляция ревьюера не нарушается.
-    const skillLayerPrompt = applyRecipeToSkillPrompt(overrides?.systemPrompt, overrides?.recipe)
+    const skillLayerPrompt = computerUseEnvelopeLocked
+      ? null
+      : applyRecipeToSkillPrompt(overrides?.systemPrompt, overrides?.recipe)
     emitAgentProgress(taggedSender, sendId, {
       id: 'context-build',
       phase: 'context',
       title: 'Готовлю рабочий запрос',
-      detail: descriptor.transport === 'API'
+      detail: computerUseEnvelopeLocked
+        ? 'Фиксирую изолированный системный слой и точную команду выбранного окна.'
+        : descriptor.transport === 'API'
         ? 'Собираю системный слой, память, скиллы, режим чата и последние сообщения в один запрос.'
         : 'Собираю prompt для внешнего CLI-агента с учётом скиллов, памяти и текущего режима.',
       status: 'running'
@@ -1196,6 +1627,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       skillLayerPrompt,
       skillOverridePrompt: overrides?.systemPrompt,
       useReviewerPrompt: Boolean(overrides?.useReviewerPrompt),
+      computerUseEnvelopeLocked,
       memories,
       consolidationHint,
       coreMemory: coreMemorySnapshot,
@@ -1232,7 +1664,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       id: 'context-build',
       phase: 'context',
       title: 'Рабочий контекст готов',
-      detail: descriptor.transport === 'API'
+      detail: computerUseEnvelopeLocked
+        ? 'Передаю модели только неизменяемый Computer Use протокол и точную команду.'
+        : descriptor.transport === 'API'
         ? 'Передаю модели собранный контекст и историю чата.'
         : 'Передаю внешнему агенту подготовленный prompt.',
       status: 'done'
@@ -1350,6 +1784,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         model: model ?? null,
         systemPrompt: stripCacheBreakpoint(composedSystem),
         messages,
+        omitComputerContext: computerUseTechnicalSinksOmitted,
       })
     }
 
@@ -1357,13 +1792,15 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // prepareSystemContext выше), и для CLI (через createCliProvider →
     // buildCliPrompt). Читаем один раз. Не пробрасываем при reviewer override —
     // ревьюер работает в изоляции, не должен подхватывать project-prompt.
-    const projectSystemPromptForProvider = (overrides?.useReviewerPrompt || overrides?.systemPrompt)
+    const projectSystemPromptForProvider = (computerUseEnvelopeLocked || overrides?.useReviewerPrompt || overrides?.systemPrompt)
       ? null
       : (projectPath ? deps.getSecret(`system_prompt_${projectPath}`) : null)
     // Skill-промпт для CLI-провайдеров: наслаивается секцией <skill_layer> внутри
     // buildCliPrompt (как в API-пути). Не пробрасываем при reviewer override —
     // ревьюер работает в изоляции. Уже содержит anti-stall nudge (Chat.tsx).
-    const skillPromptForProvider = overrides?.useReviewerPrompt ? null : (skillLayerPrompt ?? null)
+    const skillPromptForProvider = (computerUseEnvelopeLocked || overrides?.useReviewerPrompt)
+      ? null
+      : (skillLayerPrompt ?? null)
 
     // 2.2 speed: Debug Packet получает ФАКТИЧЕСКИЙ payload через callback самого
     // CLI-провайдера. Раньше здесь синхронно строился второй полный context-pack,
@@ -1378,6 +1815,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
           model: model ?? null,
           systemPrompt: cliPayload,
           messages,
+          omitComputerContext: computerUseTechnicalSinksOmitted,
         })
       : undefined
 
@@ -1472,7 +1910,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // если/когда тот начнёт писать прогоны. finish вызывают сами runner'ы в
     // finally по exitReason. Best-effort: agentRuns опционален + try/catch.
     const runOwner: AgentRunOwner = overrides?.useReviewerPrompt ? 'review' : 'main'
-    const runTitle = ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
+    const runTitle = computerUseTechnicalSinksOmitted
+      ? COMPUTER_CONTEXT_OMITTED
+      : ([...messages].reverse().find(m => m.role === 'user')?.content ?? '').slice(0, 120)
     const emitRunEvent = (event: unknown) => taggedSender.send('ai:event', { id: sendId, event })
     // Происхождение прогона: чем он был сделан. Best-effort — учёт не должен
     // мешать работе, ради которой прогон и запущен.
@@ -1525,7 +1965,6 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     })
 
     // Force-plain path: review uses no tools regardless of provider capability.
-    const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
     if (outcome && !useToolsPath) {
       const message = 'OUTCOME_TRANSPORT_UNSUPPORTED: выбранный CLI/tunnel transport не гарантирует Task Contract и Proof. Используй API provider.'
       taggedSender.send('ai:event', { id: sendId, event: { type: 'error', message } })
@@ -1628,7 +2067,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         const items = listFolderMaterials(materialsFolder)
         if (items.length > 0) materials = { source: 'folder', base: runRoot, items }
       } else {
-        const lastUserOriginal = [...incomingMessages].reverse().find(m => m.role === 'user') ?? null
+        const lastUserOriginal = [...ticketBoundMessages].reverse().find(m => m.role === 'user') ?? null
         const att = await deriveAttachmentMaterials(lastUserOriginal)
         if (att) materials = { source: 'attachments', base: runRoot, items: att.items, attachmentOutcomes: att.outcomes }
       }
@@ -1647,7 +2086,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         agentJobs: deps.agentJobs, agentJobScheduler: deps.agentJobScheduler,
         recordJournal: deps.recordJournal, readJournal: deps.readJournal,
         saveMemory: deps.saveMemory, saveDecision: deps.saveDecision, invalidateMemory: deps.invalidateMemory,
-        searchMemories: deps.searchMemories, searchConversations: deps.searchConversations,
+        searchMemories: deps.searchMemories, searchConversations: safeSearchConversations,
         connectors: deps.connectors, agentMode, turnsBudget, autoContinueTurns,
         // Б2: авто-отказ подтверждений прогона без поверхности (main-only internal).
         autoRejectConfirms: internal?.onConfirmAutoRejected
@@ -1666,6 +2105,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         browserRunActive: internal?.browserRunActive === true,
         browserContextProviderAllowed,
         browserScreenshotProviderAllowed,
+        computerContextExposed: durableComputerContextTainted,
+        computerUseAllowedActions,
+        computerUseProviderEnvelope: computerUseEnvelopeLocked ? 'fresh-composer-ticket-v1' : undefined,
         // Гард глубины спавна (задача C): дочерняя сессия — та, у чьего чата задан
         // parent_chat_id (посчитано выше вместе с бюджетом, единый источник).
         isChildSession,
@@ -1711,15 +2153,21 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         fallbackOpts,
         agentRuns: deps.agentRuns,
         runId,
+        computerContextActive: computerUseTechnicalSinksOmitted || durableComputerContextTainted,
       }).finally(cleanup)
     }
     return sendId
   }
 
-  // IPC-регистрация форвардит РОВНО пять аргументов renderer'а: internal (isolatedRoot)
-  // из IPC недостижим — см. AiSendInternal.
-  ipcMain.handle('ai:send', (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string) =>
-    handleAiSend(e.sender, incomingMessages, projectPath, budget, overrides, chatId))
+  // IPC-регистрация не принимает internal/raw text из renderer. Optional arg
+  // #6 is only an opaque one-shot grant tied to a main-verified persisted row.
+  ipcMain.handle('ai:send', (e, incomingMessages: ChatMessage[], projectPath: string | null, budget?: number, overrides?: AiSendOverrides, chatId?: string, computerUseGrant?: unknown) => {
+    const verifiedComposer = consumeComputerUseComposerTicket(e.sender, chatId, computerUseGrant)
+    return handleAiSend(e.sender, incomingMessages, projectPath, budget, overrides, chatId, {
+      originalUserText: verifiedComposer?.originalUserText ?? null,
+      verifiedUserContent: verifiedComposer?.verifiedUserContent ?? null,
+    })
+  })
 
   // Renderer reload не должен останавливать живой main-run. Возвращаем только
   // пересечение durable agent_runs с реально живым AbortController и только
@@ -1794,7 +2242,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
   // Управление идущим прогоном (стоп / приостановка / append-context) и резолв
   // pending-подтверждений — самостоятельный модуль (2.1.10-F). abortSend передаётся
   // параметром: его ядро (activeAborts + дренаж pending сессии) остаётся здесь.
-  registerAiResolveIpc(ipcMain, abortSend)
+  registerAiResolveIpc(ipcMain, abortSendAndWait)
 
   const resolveBrowserAction = (
     actionId: string,

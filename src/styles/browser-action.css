@@ -95,6 +95,9 @@
   min-height: 100%;
   padding: 24px;
   box-sizing: border-box;
+  display: grid;
+  align-content: start;
+  gap: 18px;
 }
 
 .gg-browser-settings-card {
@@ -265,6 +268,67 @@
 .gg-browser-settings-diagnostics dt,
 .gg-browser-settings-diagnostics dd {
   margin: 0;
+}
+
+.gg-computer-use-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.gg-computer-use-target {
+  display: grid;
+  gap: 3px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-base) 52%, transparent);
+}
+
+.gg-computer-use-target span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.gg-computer-use-candidates {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.gg-computer-use-candidates > button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-primary);
+  text-align: left;
+  background: color-mix(in srgb, var(--bg-base) 52%, transparent);
+  cursor: pointer;
+}
+
+.gg-computer-use-candidates > button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+}
+
+.gg-computer-use-candidates > button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
+.gg-computer-use-candidates span,
+.gg-computer-use-candidates small,
+.gg-computer-use-boundary {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.gg-computer-use-boundary {
+  margin: 16px 0 0;
+  line-height: 1.5;
 }
 
 .gg-browser-settings-diagnostics dd {

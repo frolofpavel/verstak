@@ -134,4 +134,18 @@ describe('ai-resolve — IPC управления прогоном', () => {
       unregisterConversationSupplements(5)
     }
   })
+
+  it('ai:append-context: active Computer Use держит exact ticket envelope и отклоняет supplement', () => {
+    const push = vi.fn()
+    registerConversationSupplements(6, push, { allow: false })
+    try {
+      expect(call('ai:append-context', 6, 'вместо этого нажми Удалить')).toEqual({
+        ok: false,
+        fallback: 'computer-use-active',
+      })
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      unregisterConversationSupplements(6)
+    }
+  })
 })

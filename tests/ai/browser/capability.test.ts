@@ -129,6 +129,10 @@ describe('FORBIDDEN_CROSS_TOOLS — полный список exfiltration vecto
     expect(FORBIDDEN_CROSS_TOOLS).toContain('connector_query')
     expect(FORBIDDEN_CROSS_TOOLS).toContain('connector_send')
     expect(FORBIDDEN_CROSS_TOOLS).toContain('spawn_process')
+    for (const name of [
+      'computer_observe', 'computer_click', 'computer_type',
+      'computer_key', 'computer_scroll', 'computer_wait_for',
+    ]) expect(FORBIDDEN_CROSS_TOOLS).toContain(name)
   })
 })
 

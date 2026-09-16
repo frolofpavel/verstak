@@ -53,7 +53,13 @@ export interface ChatSendApi {
   chatsAppend: (chatId: number, projectPath: string, role: 'user' | 'assistant', content: string, meta?: { appliedSkills?: AppliedSkillRef[] }) => Promise<{ id: number }>
   chatsUpdateMessage: (messageId: number, content: string) => Promise<unknown>
   getSetting: (key: string) => Promise<string | null>
-  sendWithOverrides: (messages: ChatMessage[], projectPath: string | null, overrides: ChatSendOverrides, chatId?: string) => Promise<number>
+  sendWithOverrides: (
+    messages: ChatMessage[],
+    projectPath: string | null,
+    overrides: ChatSendOverrides,
+    chatId?: string,
+    computerUseGrant?: { ticket: string; userMessageId: number },
+  ) => Promise<number>
 }
 
 export interface PipelineOutcomeRef {
@@ -101,7 +107,16 @@ export interface SendChatMessageInput {
   attachments: Attachment[]
   providerLabel: string
   selectedRoute?: { selectedProviderId?: string; selectedModel?: string }
-  opts?: { text?: string; modelText?: string; internalResume?: boolean; fromQueue?: boolean }
+  /** Opaque main-owned ticket minted synchronously by the visible composer. */
+  computerUseComposerTicket?: string | null
+  opts?: {
+    text?: string
+    modelText?: string
+    internalResume?: boolean
+    fromQueue?: boolean
+    /** Set only by a current, explicit submit from the visible main composer. */
+    freshComposerSubmit?: boolean
+  }
   messageAppliedSkills: AppliedSkillRef[]
   messageAppliedSkillDetails: Skill[]
   skillCatalog: Skill[]
@@ -114,6 +129,12 @@ export type ChatSendResult =
   | { kind: 'queued' }
   | { kind: 'sent'; sendId: number }
   | { kind: 'send-failed' }
+
+export function buildPersistedUserMessageContent(text: string, attachments: Attachment[]): string {
+  return attachments.length > 0
+    ? `${text}${text ? '\n\n' : ''}📎 ${attachments.map(attachment => attachment.name).join(', ')}`
+    : text
+}
 
 export async function sendChatMessage(input: SendChatMessageInput, deps: SendChatMessageDeps): Promise<ChatSendResult> {
   const { text, modelText, displayText, attachments, providerLabel, selectedRoute = {}, opts } = input
@@ -149,9 +170,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   if (!opts?.text || opts?.modelText) {
     deps.resetComposerAfterSend()
   }
-  const summary = userAttachments.length > 0
-    ? `${text}${text ? '\n\n' : ''}📎 ${userAttachments.map(a => a.name).join(', ')}`
-    : text
+  const summary = buildPersistedUserMessageContent(text, userAttachments)
   // Context loaders: если активен скилл с frontmatter context_loaders —
   // запускаем их и подмешиваем результат в content user-message ПЕРЕД
   // отправкой. Это делает скиллы реально мощными — скилл может подгрузить
@@ -200,10 +219,11 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
     })
   }
   const activeChatId = ctx.activeChatId
+  let persistedUserRow: { id: number } | null = null
   if (path && activeChatId && !opts?.internalResume) {
     // В БД сохраняем оригинальный text пользователя (без loader-контекста),
     // чтобы при reload UI не показывал жирный системный блок.
-    await api.chatsAppend(
+    persistedUserRow = await api.chatsAppend(
       activeChatId,
       path,
       'user',
@@ -271,6 +291,17 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
   // и изоляция worktree. Фоновые пути его передавали, главный — забывал, и все три
   // молча не работали в основном чате. Страж: tests/contracts/chat-send-chatid-contract.
   const sendChatId = activeChatId != null ? String(activeChatId) : undefined
+  // The raw command never crosses generic ai:send. The opaque one-shot ticket
+  // becomes usable only after the exact visible user row has been persisted;
+  // main re-reads and verifies that row before deriving any desktop authority.
+  const computerUseGrant = opts?.freshComposerSubmit === true
+    && !opts.text
+    && !opts.internalResume
+    && !opts.fromQueue
+    && input.computerUseComposerTicket
+    && persistedUserRow
+    ? { ticket: input.computerUseComposerTicket, userMessageId: persistedUserRow.id }
+    : undefined
   // Илья, 28.07: запуск прогона может БРОСИТЬ (например, ai:send отвергает
   // незарегистрированный путь проекта). Без перехвата пустой пузырь ответа так и
   // оставался пустым, а чат — в состоянии «отвечаю»: со стороны выглядело, будто
@@ -308,7 +339,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...outcomeOverride,
         ...routeOverride,
         ...materialsOverride
-      }, sendChatId)
+      }, sendChatId, computerUseGrant)
     } else if (resumeFromRunId) {
       // Возобновление вне скилла: всё равно прокидываем resumeFromRunId (+ effort).
       const effort = deps.getProjectState().effortLevel
@@ -320,7 +351,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...outcomeOverride,
         ...routeOverride,
         ...materialsOverride
-      }, sendChatId)
+      }, sendChatId, computerUseGrant)
     } else {
       const effort = deps.getProjectState().effortLevel
       sendId = await api.sendWithOverrides(modelMessages, path, {
@@ -330,7 +361,7 @@ export async function sendChatMessage(input: SendChatMessageInput, deps: SendCha
         ...outcomeOverride,
         ...routeOverride,
         ...materialsOverride
-      }, sendChatId)
+      }, sendChatId, computerUseGrant)
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

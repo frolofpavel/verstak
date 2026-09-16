@@ -26,4 +26,31 @@ describe('GeminiProvider', () => {
     }
     expect(events.join('')).toBe('Hello world')
   })
+
+  it('does not log raw retry errors that may echo a private Computer Use envelope', async () => {
+    const privateMarker = 'PRIVATE_COMPUTER_COMMAND_ECHO'
+    const malformed = (async function*() {
+      yield { candidates: [{ finishReason: 'MALFORMED_FUNCTION_CALL' }] }
+    })()
+    const sdk = {
+      models: {
+        generateContentStream: vi.fn()
+          .mockResolvedValueOnce(malformed)
+          .mockRejectedValueOnce(new Error(`upstream echoed ${privateMarker}`)),
+      },
+    }
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const provider = createGeminiProvider({ apiKey: 'k', sdk: sdk as never })
+      const tools = [{ name: 'computer_wait_for', description: 'wait', parameters: { type: 'object' } }]
+      for await (const _event of provider.send([{ role: 'user', content: privateMarker }], tools)) {
+        // Drain the provider through its malformed-function retry branch.
+      }
+      const logged = JSON.stringify(errorSpy.mock.calls)
+      expect(logged).toContain('retry failed')
+      expect(logged).not.toContain(privateMarker)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 })

@@ -29,6 +29,29 @@ const PROVIDER_LABELS: Record<string, string> = {
   'codex-cli': 'Codex'
 }
 
+const COMPUTER_TAINT_BLOCKED = 'Действие заблокировано: этот чат содержит контекст Computer Use. Начни новый обычный чат, чтобы использовать ревью.'
+const COMPUTER_TAINT_CHECK_FAILED = 'Не удалось безопасно проверить контекст Computer Use. Действие заблокировано без сохранения данных.'
+
+async function computerTaintBlockReason(chatId: number): Promise<string | null> {
+  try {
+    return await window.api.computerUse.isChatTainted(chatId)
+      ? COMPUTER_TAINT_BLOCKED
+      : null
+  } catch {
+    return COMPUTER_TAINT_CHECK_FAILED
+  }
+}
+
+function reviewJournalMetadata(input: {
+  reviewChatId: number
+  providerId: string
+  model: string | null
+  findingCount: number
+  payloadChars: number
+}): string {
+  return JSON.stringify(input)
+}
+
 export function ReviewPills() {
   const activeChatId = useProject(s => s.activeChatId)
   const reviews = useProject(s => s.reviews)
@@ -78,11 +101,9 @@ export function ReviewPanel() {
   const openedReviewId = useProject(s => s.openedReviewId)
   const reviews = useProject(s => s.reviews)
   const toggleReviewPanel = useProject(s => s.toggleReviewPanel)
-  const addMessage = useProject(s => s.addMessage)
   const path = useProject(s => s.path)
   const activeChatId = useProject(s => s.activeChatId)
   const isStreaming = useActiveChatField('isStreaming') ?? false
-  const setStreaming = useProject(s => s.setStreaming)
   const registerSendOwner = useProject(s => s.registerSendOwner)
   const toggleFinding = useProject(s => s.toggleFinding)
 
@@ -127,18 +148,48 @@ export function ReviewPanel() {
       return
     }
     const wrapped = `[Review from ${label}]:\n\n${text}`
-    addMessage({ role: 'user', content: wrapped })
-    void window.api.chats.append(activeChatId, path, 'user', wrapped).catch(() => {})
-    void window.api.journal.append(path, 'note', `Учёл ревью от ${label}`,
-      text.length > 300 ? text.slice(0, 300) + '…' : text)
-    addMessage({ role: 'assistant', content: '' })
-    setStreaming(true)
-    const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1)
+    const blocked = await computerTaintBlockReason(activeChatId)
+    if (blocked) {
+      window.alert(blocked)
+      return
+    }
+    if (useProject.getState().activeChatId !== activeChatId) {
+      window.alert('Активный чат изменился. Ревью не отправлено и не сохранено.')
+      return
+    }
+    const allMessages = [
+      ...(getActiveChatBundle()?.messages ?? []),
+      { role: 'user' as const, content: wrapped },
+    ]
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
     // через registerSendOwner — main об этом не знал.
-    const sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
+    let sendId: number
+    try {
+      // Main preflight обязан принять запуск ДО любой durable записи reviewer output.
+      sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
+    } catch {
+      window.alert('Не удалось безопасно отправить ревью. Сообщение не сохранено.')
+      return
+    }
     registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
+    useProject.getState().updateChatBundle(activeChatId, bundle => ({
+      messages: [
+        ...bundle.messages,
+        { role: 'user', content: wrapped, createdAt: Date.now() },
+        { role: 'assistant', content: '', createdAt: Date.now() },
+      ],
+      isStreaming: true,
+      streamStartedAt: Date.now(),
+    }))
+    void window.api.chats.append(activeChatId, path, 'user', wrapped).catch(() => {})
+    void window.api.journal.append(path, 'note', `Учёл ревью от ${label}`, reviewJournalMetadata({
+      reviewChatId: review.reviewChatId,
+      providerId: review.providerId,
+      model: review.model,
+      findingCount: review.findings.length,
+      payloadChars: wrapped.length,
+    })).catch(() => {})
     toggleReviewPanel(null)
   }
 
@@ -161,19 +212,49 @@ export function ReviewPanel() {
       return
     }
     const prompt = composeFixPrompt(chosen)
-    addMessage({ role: 'user', content: prompt })
-    void window.api.chats.append(activeChatId, path, 'user', prompt).catch(() => {})
-    void window.api.journal.append(path, 'note',
-      `✓ Исправить выбранные замечания ревью (${chosen.length})`,
-      prompt.length > 300 ? prompt.slice(0, 300) + '…' : prompt)
-    addMessage({ role: 'assistant', content: '' })
-    setStreaming(true)
-    const allMessages = [...(getActiveChatBundle()?.messages ?? [])].slice(0, -1)
+    const blocked = await computerTaintBlockReason(activeChatId)
+    if (blocked) {
+      window.alert(blocked)
+      return
+    }
+    if (useProject.getState().activeChatId !== activeChatId) {
+      window.alert('Активный чат изменился. Замечания не отправлены и не сохранены.')
+      return
+    }
+    const allMessages = [
+      ...(getActiveChatBundle()?.messages ?? []),
+      { role: 'user' as const, content: prompt },
+    ]
     // chatId обязателен: без него в main мертвы компакция, закреплённый аккаунт и
     // изоляция worktree (ре-ревью B, #2). Ниже прогон и так привязывается к activeChatId
     // через registerSendOwner — main об этом не знал.
-    const sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
+    let sendId: number
+    try {
+      // Main preflight обязан принять запуск ДО любой durable записи reviewer output.
+      sendId = await window.api.ai.send(allMessages, path, String(activeChatId))
+    } catch {
+      window.alert('Не удалось безопасно отправить замечания. Сообщение не сохранено.')
+      return
+    }
     registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId, projectPath: path })
+    useProject.getState().updateChatBundle(activeChatId, bundle => ({
+      messages: [
+        ...bundle.messages,
+        { role: 'user', content: prompt, createdAt: Date.now() },
+        { role: 'assistant', content: '', createdAt: Date.now() },
+      ],
+      isStreaming: true,
+      streamStartedAt: Date.now(),
+    }))
+    void window.api.chats.append(activeChatId, path, 'user', prompt).catch(() => {})
+    void window.api.journal.append(path, 'note',
+      `✓ Исправить выбранные замечания ревью (${chosen.length})`, reviewJournalMetadata({
+        reviewChatId: review.reviewChatId,
+        providerId: review.providerId,
+        model: review.model,
+        findingCount: chosen.length,
+        payloadChars: prompt.length,
+      })).catch(() => {})
     toggleReviewPanel(null)
   }
 
@@ -181,16 +262,31 @@ export function ReviewPanel() {
   // = шаг плана → persist + статус (pending→done/skipped/failed) + связка
   // шаг→прогон→верификация. Закрывает петлю «нашёл → исправил → перепроверил».
   async function saveFindingsToPlan() {
-    if (!review || !path) return
+    if (!review || !path || activeChatId == null) return
     const selected = review.findings.filter(f => review.accepted.includes(f.id))
     const chosen = selected.length > 0 ? selected : review.findings
     if (chosen.length === 0) { setPlanNotice('Нет находок для сохранения.'); return }
+    const blocked = await computerTaintBlockReason(activeChatId)
+    if (blocked) {
+      setPlanNotice(blocked)
+      return
+    }
+    if (useProject.getState().activeChatId !== activeChatId) {
+      setPlanNotice('Активный чат изменился. План не создан.')
+      return
+    }
     const steps = findingsToPlanSteps(chosen)
     const title = `Ревью от ${label} · ${chosen.length} ${plural(chosen.length, 'находка', 'находки', 'находок')}`
     try {
       const plan = await window.api.plans.create(path, title, steps)
       void window.api.journal.append(path, 'note', `📋 Находки ревью → план «${title}»`,
-        chosen.map(f => `${f.severity} ${f.file}: ${f.title}`).join('\n')).catch(() => {})
+        reviewJournalMetadata({
+          reviewChatId: review.reviewChatId,
+          providerId: review.providerId,
+          model: review.model,
+          findingCount: chosen.length,
+          payloadChars: steps.reduce((total, step) => total + step.title.length + (step.detail?.length ?? 0), 0),
+        })).catch(() => {})
       setPlanNotice(plan ? `✓ Сохранено в план «${title}». Открой вкладку «Планы» — статус по каждой находке, связка с прогоном и верификацией.` : 'Не удалось создать план.')
     } catch {
       setPlanNotice('Не удалось создать план.')

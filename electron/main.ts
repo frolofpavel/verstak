@@ -42,7 +42,7 @@ import { FIRST_SEEN_VERSION_KEY } from '../shared/contracts/first-run'
 import { registerConnectorsIpc } from './ipc/connectors'
 import { registerCliAuthIpc } from './ipc/cli-auth'
 import { registerSubscriptionAccountsIpc } from './ipc/subscription-accounts'
-import { registerAiIpc, abortSend, runScheduledHeadless, type AiIpcGateway } from './ipc/ai'
+import { registerAiIpc, abortSend, abortSendAndWait, runScheduledHeadless, type AiIpcGateway } from './ipc/ai'
 import { globalProcessRegistry } from './ai/process-registry'
 import { registerSchedulerIpc } from './ipc/scheduler'
 import { registerChatsIpc } from './ipc/chats'
@@ -69,6 +69,12 @@ import { createSkillUsageStore } from './storage/skill-usage'
 import { createWorktreeSessions } from './storage/worktree-sessions'
 import { createBrowserTasks } from './storage/browser-tasks'
 import { createBrowserController, type BrowserController } from './ai/browser/controller'
+import { ComputerHelperClient } from './ai/computer/helper-client'
+import { createComputerHelperBackend } from './ai/computer/helper-backend'
+import { createComputerController, type ComputerController } from './ai/computer/controller'
+import { isComputerUseComposerAttempt } from './ai/computer/intent'
+import { configureComputerHandler } from './ipc/tool-handlers/computer'
+import { registerComputerUseIpc } from './ipc/computer-use'
 import { createWebviewAdapter } from './ai/browser/adapters/webview'
 import { createExtensionAdapter } from './ai/browser/adapters/extension'
 import { bindAttachedTabToTask, selectBrowserAdapter } from './ai/browser/adapter-selection'
@@ -153,6 +159,7 @@ import { registerMemoryIpc } from './ipc/memory'
 import { saveMemory, searchMemories, listMemories, applyMemoryDecay, invalidateMemory } from './storage/memories'
 import { findConsolidationNudge, buildConsolidationHint } from './ai/memory-consolidate'
 import { searchConversations } from './storage/chats'
+import { isChatComputerTainted, projectConversationSearchForComputerTaint } from './ai/computer/durable-taint'
 import { registerCommandsIpc } from './ipc/commands'
 import { registerMcpIpc } from './ipc/mcp'
 import { mcpClient } from './mcp/client'
@@ -645,6 +652,12 @@ app.whenReady().then(() => {
   }
   logRuntime('startup.agent_runs.ready')
   const browserTasks = createBrowserTasks(db)
+  const durableComputerTaintDeps = {
+    browserTasks,
+    getChatParentChatId: (chatId: number) => chatSessions.get(chatId)?.parentChatId ?? null,
+  }
+  const chatHasDurableComputerTaint = (chatId: number): boolean =>
+    isChatComputerTainted(chatId, durableComputerTaintDeps)
   logRuntime('startup.browser_tasks.ready')
   const agentJobs = createAgentJobs(db)
   const agentJobScheduler = new AgentJobScheduler({ jobs: agentJobs, queue: subAgentQueue })
@@ -684,17 +697,51 @@ app.whenReady().then(() => {
   // EXT-B0/R1: reconcile stale browser actions (executing → uncertain).
   // Те же crash-recovery гарантии, что и agent_runs: прерванные на execute
   // действия НЕ повторяются автоматически, только fresh observe решает.
+  let browserActionsReconciled = false
   try {
     const browserStaleCount = browserTasks.reconcileStaleActions()
     if (browserStaleCount > 0) {
       console.log(`[browser-tasks] reconciled ${browserStaleCount} stale action(s) → uncertain`)
       logRuntime('browser_tasks.reconcile_stale', { browserStaleCount })
     }
+    browserActionsReconciled = true
   } catch (err) {
     logRuntimeError('browser_tasks.reconcile_stale.fail', err)
     console.warn('[browser-tasks] reconcileStaleActions failed:', err instanceof Error ? err.message : err)
   }
   logRuntime('startup.browser_tasks.reconciled')
+
+  // R2 Windows Computer Use: selected-window capability backed by the SAME
+  // durable action ledger as Browser Employee. The helper is lazy-spawned on
+  // first use; startup never enumerates or touches the desktop. Unsupported
+  // platforms and missing reviewed payload fail closed in both tool and IPC.
+  const computerUseSupported = process.platform === 'win32'
+  const computerHelperPath = app.isPackaged
+    ? join(process.resourcesPath, 'computer-use', 'helper.ps1')
+    : join(app.getAppPath(), 'resources', 'computer-use', 'helper.ps1')
+  let computerController: ComputerController | null = null
+  if (computerUseSupported && browserActionsReconciled && fsExistsSync(computerHelperPath)) {
+    const computerHelperClient = new ComputerHelperClient({
+      helperPath: computerHelperPath,
+      appVersion: app.getVersion(),
+    })
+    const computerBackend = createComputerHelperBackend(computerHelperClient)
+    computerController = createComputerController({
+      storage: browserTasks,
+      backend: computerBackend,
+    })
+  }
+  configureComputerHandler({ controller: computerController })
+  registerComputerUseIpc({
+    controller: computerController,
+    supported: computerUseSupported,
+    isChatTainted: chatHasDurableComputerTaint,
+  })
+  app.once('before-quit', () => { void computerController?.shutdown() })
+  logRuntime('startup.computer_use.ready', {
+    supported: computerUseSupported,
+    helperReady: computerController != null,
+  })
 
   // EXT-B0/R2: единый BrowserController. Capability/dataPolicy/mode — из
   // durable browser_tasks (persisted policy), не из module-level defaults.
@@ -833,6 +880,11 @@ app.whenReady().then(() => {
       },
       onTaskSubmit: async (prompt) => {
         if (!aiGateway) throw new Error('Verstak AI ещё запускается')
+        // The extension sidepanel has no desktop-composer ticket surface. Keep
+        // recognized Computer Use attempts out of chat storage and the provider.
+        if (isComputerUseComposerAttempt(prompt)) {
+          throw new Error('COMPUTER_USE_FRESH_COMPOSER_REQUIRED: Computer Use доступен только из нового сообщения в desktop composer.')
+        }
         const projectPath = getActiveProjectPath()
         if (!projectPath) throw new Error('Откройте проект в Verstak')
         const state = browserBridge?.getPublicState()
@@ -999,7 +1051,9 @@ app.whenReady().then(() => {
   const brainStore = createProjectBrainStore(db)
   registerBrainIpc({ store: brainStore, getProjectRoot: getActiveProjectPath })
   const tasks = createTasks(db)
-  const journal = createJournal(db)
+  const journal = createJournal(db, {
+    isChatComputerTainted: chatHasDurableComputerTaint,
+  })
   const reminders = createReminders(db)
   logRuntime('startup.core_storage.ready')
   let journalRolloverTimer: ReturnType<typeof setTimeout> | null = null
@@ -1075,7 +1129,7 @@ app.whenReady().then(() => {
   registerProjectIpc(projects, projectGroups, db)
   registerProjectMapIpc(knownRoots)
   registerFilesIpc({ getProjectRoot: getActiveProjectPath, getKnownRoots: knownRoots })
-  registerChatsIpc(chats, chatSessions, db)
+  registerChatsIpc(chats, chatSessions, db, durableComputerTaintDeps)
   logRuntime('startup.minimal_ipc.ready')
 
   logRuntime('startup.window.create.begin')
@@ -1128,6 +1182,19 @@ app.whenReady().then(() => {
     // Гард глубины спавна (задача C): дочерняя сессия (parent_chat_id задан) не получает
     // spawn_task_session. Постоянное свойство чата — берём из chat_sessions.
     getChatParentChatId: (chatId) => chatSessions.get(chatId)?.parentChatId ?? null,
+    getLatestChatUserMessage: (chatId) => {
+      const latestUser = [...chats.listWindowBySession(chatId, { limit: 20 }).messages]
+        .reverse()
+        .find(message => message.role === 'user')
+      return latestUser
+        ? {
+            id: latestUser.id,
+            sessionId: chatId,
+            role: latestUser.role,
+            content: latestUser.content,
+          }
+        : null
+    },
     // 1.9.3 мультиаккаунт → 2.1.3-CD: единый резолвер (readiness pin/one-shot внутри,
     // см. electron/ai/resolve-subscription-account.ts). Auto-путь не изменён.
     resolveSubscriptionAccount: createResolveSubscriptionAccount(db, {
@@ -1190,7 +1257,10 @@ app.whenReady().then(() => {
       } catch { return null }
     },
     searchConversations: (projectPath, query, limit) => {
-      return searchConversations(db, projectPath, query, limit)
+      return projectConversationSearchForComputerTaint(
+        searchConversations(db, projectPath, query, limit),
+        chatHasDurableComputerTaint,
+      )
     },
     connectors: {
       list: () => connectorRegistry.list().map(c => ({ ...c })),
@@ -1352,7 +1422,7 @@ app.whenReady().then(() => {
       sessions: chatSessions,
       chats,
       startRun,
-      stopRun: async runId => abortSend(Number(runId)),
+      stopRun: async runId => abortSendAndWait(Number(runId)),
     })
   }
   // NL-cron планировщик: unattended-прогоны по расписанию, исходящий пуш в Telegram.
@@ -1390,11 +1460,11 @@ app.whenReady().then(() => {
   registerPersistentJobsIpc({ jobs: persistentJobs, publish: (s) => jobBus.publish(s), getKnownRoots: knownRoots })
   registerAgentsIpc(subSessions, chats, sessionTodos)
   // Вкладка «Задачи» (Multi-agent Manager) — список прогонов + stop/resume (Фаза 4).
-  // abortSend переиспользует ядро ai:stop; db — для getRunInput при resume.
+  // abortSendAndWait переиспользует полный ai:stop barrier; db — для getRunInput при resume.
   // agentRunsReconciledAt — метка реконсайла этого старта для ai:list-resumable
   // (Crash-resume): findResumable отбирает прогоны, помеченные failed ИМЕННО на
   // этом старте.
-  registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSend, agentRunsReconciledAt)
+  registerAgentRunsIpc(agentRuns, subSessions, sessionTodos, db, abortSendAndWait, agentRunsReconciledAt)
   registerAgentJobsIpc(agentJobs, undoStack, agentJobScheduler)
   registerWorktreeIpc(worktreeSessions)
   // История Verification Artifact (Фаза 3) — list/latest/get для Review DoD и панели.
@@ -1429,6 +1499,7 @@ app.whenReady().then(() => {
   registerContextCompactionIpc({
     db,
     chats,
+    isChatComputerTainted: chatHasDurableComputerTaint,
     createSummaryProvider: () => {
       // EF-R2 Б3: Codex OAuth для компакции проходит через тот же canonical resolver,
       // что и ai:send — codexHome аккаунта, а не молчаливый default ~/.codex. Парк

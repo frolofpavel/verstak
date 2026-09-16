@@ -114,6 +114,65 @@ describe('runner-attempt — provider/account lifecycle', () => {
   })
 })
 
+describe('runner-attempt — Computer Use account data boundary', () => {
+  it('не ротирует аккаунт после Computer Use context до любых route side effects', () => {
+    const desktopMarker = 'PRIVATE WINDOW TITLE AND TEXT'
+    const switchAccountOnLimit = vi.fn(() => ({
+      switched: true,
+      newAccountId: 7,
+      fromLabel: 'A',
+      toLabel: 'B',
+    }))
+    const getNextAttempt = vi.fn(() => ({
+      provider: provider('gemini-api'),
+      accountId: 7,
+    }))
+    const runs = createRuns()
+    const opts = fallbackOpts({
+      configuredProviders: new Set(['gemini-api']),
+      getNextAttempt,
+      switchAccountOnLimit,
+    })
+    const c = controller({
+      fallbackOpts: opts,
+      agentRuns: runs as unknown as AgentRuns,
+      runId: 'run-computer-context',
+      currentMessages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'observe-1', name: 'computer_observe', args: {} }],
+        },
+        {
+          role: 'user',
+          content: '',
+          toolResults: [{
+            id: 'observe-1',
+            name: 'computer_observe',
+            result: { ok: true, observation: { title: desktopMarker, text: desktopMarker } },
+          }],
+        },
+      ],
+      hasBrowserContext: () => true,
+    })
+
+    expect(
+      c.api.attemptAccountSwitch(
+        new Error('Claude usage limit reached. Try again in 2 hours.')
+      )
+    ).toBeNull()
+    expect(switchAccountOnLimit).not.toHaveBeenCalled()
+    expect(getNextAttempt).not.toHaveBeenCalled()
+    expect(opts.accountSwitchCount).toBeUndefined()
+    expect(runs.updateActual).not.toHaveBeenCalled()
+    expect(runs.updateActualAccount).not.toHaveBeenCalled()
+    expect(c.emitRouteChanged).not.toHaveBeenCalled()
+    expect(c.onHandedOff).not.toHaveBeenCalled()
+    expect(c.createTools).not.toHaveBeenCalled()
+    expect(c.runFallbackFrame).not.toHaveBeenCalled()
+  })
+})
+
 describe('runner-attempt — policy и bounded rotation', () => {
   it('pinned account запрещает и ротацию, и provider fallback', () => {
     const switchAccountOnLimit = vi.fn(() => ({ switched: true }))

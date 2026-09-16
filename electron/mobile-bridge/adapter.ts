@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import type { Chats } from '../storage/chats'
 import type { ChatSessions } from '../storage/chat-sessions'
+import { isComputerUseComposerAttempt } from '../ai/computer/intent'
 import type { RootCapabilities } from './roots'
 import type { MobileCommandHandlers } from './types'
 
@@ -65,6 +66,12 @@ export function createMobileHandlers(deps: AdapterDeps): MobileCommandHandlers {
       const chatId = numberField(input, 'chatId')
       const { projectPath } = sessionForRoot(rootId, chatId)
       const text = textField(input, 'text')
+      // Desktop input authority is minted only by the visible desktop composer.
+      // A relay command must not first become durable chat text and then rely on
+      // a downstream provider/tool guard to contain it.
+      if (isComputerUseComposerAttempt(text)) {
+        throw new Error('COMPUTER_USE_FRESH_COMPOSER_REQUIRED: Computer Use доступен только из нового сообщения в desktop composer.')
+      }
       deps.chats.appendToSession(chatId, projectPath, 'user', text)
       return deps.startRun({ chatId, projectPath, text })
     },

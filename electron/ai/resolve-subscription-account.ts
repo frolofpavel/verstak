@@ -106,12 +106,20 @@ export function createResolveSubscriptionAccount(db: Database, deps: ResolveSubs
 
   /** EF: Auto pre-flight — активный не готов → следующий готовый аккаунт провайдера.
    *  Порядок кандидатов как у switchActiveOnLimit (редко использованные вперёд). */
-  function resolveAuto(providerId: string): ResolvedSubscription | null {
+  function resolveAuto(providerId: string, allowAutoRotation: boolean): ResolvedSubscription | null {
     const now = nowOf()
     const active = getActiveAccount(db, providerId)
     if (!active) return null // legacy: аккаунтов нет — env/secret путь прежний
     const activeBlock = blockReason(active, now)
     if (!activeBlock) return successOf(active, false)
+
+    // Computer Use authority includes the selected account identity. Moving an active
+    // desktop run to another account would cross that authority boundary before the
+    // model sees a tool, so readiness failure is a hard pre-flight stop. In particular,
+    // do not call setActiveAccount here: the user's global selection must remain intact.
+    if (!allowAutoRotation) {
+      return { blocked: true, ...activeBlock, label: active.label }
+    }
 
     // Активный не готов: ищем готового кандидата ДО сетевого запроса.
     const others = listSubscriptionAccounts(db, providerId)
@@ -145,7 +153,7 @@ export function createResolveSubscriptionAccount(db: Database, deps: ResolveSubs
   return (
     providerId: string,
     chatId?: number,
-    opts?: { accountId?: number | null },
+    opts?: { accountId?: number | null; allowAutoRotation?: boolean },
   ): ResolvedSubscription | null => {
     // EF-R1 Б1: КАНОНИЧЕСКОЕ семейство аккаунтов для ВСЕХ веток, не только one-shot.
     // Раньше auto/pin шли по raw providerId → для openai-codex-oauth пул codex-cli был
@@ -174,6 +182,6 @@ export function createResolveSubscriptionAccount(db: Database, deps: ResolveSubs
       return readyOrBlocked(acct, true)
     }
     // EF: Auto — pre-flight skip недоступного активного (см. resolveAuto).
-    return resolveAuto(canonical)
+    return resolveAuto(canonical, opts?.allowAutoRotation !== false)
   }
 }

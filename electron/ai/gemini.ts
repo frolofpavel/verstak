@@ -252,8 +252,11 @@ export function createGeminiProvider(opts: GeminiOptions): ChatProvider {
                 }
               }
             }
-          } catch (err) {
-            console.error('[gemini] retry failed:', err instanceof Error ? err.message : String(err))
+          } catch {
+            // Upstream/proxy errors can echo the request body. Computer Use
+            // envelopes may contain arbitrary private window text, so provider
+            // logs keep only the bounded failure class, never Error.message.
+            console.error('[gemini] retry failed')
           }
         }
 
