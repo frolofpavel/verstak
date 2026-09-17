@@ -135,6 +135,44 @@ export function newInstallLedger(): InstallLedger {
   return { replaced: [], created: [] }
 }
 
+type RenameRetryOptions = {
+  maxAttempts?: number
+  delayMs?: number
+  renameFn?: (source: string, target: string) => Promise<void>
+  sleepFn?: (ms: number) => Promise<void>
+}
+
+const TRANSIENT_RENAME_CODES = new Set(['EBUSY', 'EPERM', 'EACCES'])
+
+/**
+ * Chrome can briefly respawn the Native Messaging host after the desktop app
+ * exits. Electron then maps app.asar for a fraction of a second between the
+ * installer's running-process preflight and the actual replacement. Retry only
+ * Windows-style transient lock errors, for a bounded 15 seconds; every other
+ * failure remains immediate and the normal rollback contract stays intact.
+ */
+export async function renameWithTransientLockRetry(
+  source: string,
+  target: string,
+  options: RenameRetryOptions = {},
+): Promise<void> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 61)
+  const delayMs = Math.max(0, options.delayMs ?? 250)
+  const renameFn = options.renameFn ?? rename
+  const sleepFn = options.sleepFn ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await renameFn(source, target)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (!TRANSIENT_RENAME_CODES.has(String(code)) || attempt === maxAttempts) throw error
+      await sleepFn(delayMs)
+    }
+  }
+}
+
 export async function copyPayload(
   payloadRoot: string,
   installDir: string,
@@ -158,7 +196,7 @@ export async function copyPayload(
     if (existsSync(target)) {
       const backup = `${target}${INSTALL_BACKUP_SUFFIX}`
       await rm(backup, { force: true }).catch(() => {})
-      await rename(target, backup)
+      await renameWithTransientLockRetry(target, backup)
       ledger.replaced.push(file.rel)
     } else {
       ledger.created.push(file.rel)
@@ -434,7 +472,7 @@ async function writeUninstaller(installDir: string, ledger: InstallLedger): Prom
   if (existsSync(scriptPath)) {
     const backup = `${scriptPath}${INSTALL_BACKUP_SUFFIX}`
     await rm(backup, { force: true }).catch(() => {})
-    await rename(scriptPath, backup)
+    await renameWithTransientLockRetry(scriptPath, backup)
     ledger.replaced.push(rel)
   } else {
     ledger.created.push(rel)
@@ -452,7 +490,7 @@ async function writeNativeHostOwnerMarker(
   if (existsSync(path)) {
     const backup = `${path}${INSTALL_BACKUP_SUFFIX}`
     await rm(backup, { force: true }).catch(() => {})
-    await rename(path, backup)
+    await renameWithTransientLockRetry(path, backup)
     ledger.replaced.push(NATIVE_HOST_OWNER_MARKER)
   } else {
     ledger.created.push(NATIVE_HOST_OWNER_MARKER)
@@ -517,7 +555,7 @@ export async function rollbackInstall(
     const target = join(installDir, rel)
     // rename на Windows идёт через MoveFileEx(REPLACE_EXISTING) — недописанная
     // новая версия перекрывается прежней одним движением.
-    await rename(`${target}${INSTALL_BACKUP_SUFFIX}`, target).catch(() => {})
+    await renameWithTransientLockRetry(`${target}${INSTALL_BACKUP_SUFFIX}`, target).catch(() => {})
   }
 }
 

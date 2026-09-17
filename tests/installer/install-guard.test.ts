@@ -7,6 +7,7 @@ import {
   commitInstall,
   copyPayload,
   newInstallLedger,
+  renameWithTransientLockRetry,
   rollbackInstall,
   runInstall,
 } from '../../electron/installer/engine'
@@ -30,6 +31,28 @@ describe('installer: сбой не убивает рабочую установ�
   afterEach(() => { rmSync(base, { recursive: true, force: true }) })
 
   const silent = () => {}
+
+  it('повторяет rename после краткого EBUSY и не теряет обновление', async () => {
+    const attempts: number[] = []
+    const delays: number[] = []
+
+    await renameWithTransientLockRetry('app.asar', 'app.asar.verstak-bak', {
+      maxAttempts: 4,
+      delayMs: 25,
+      renameFn: async () => {
+        attempts.push(attempts.length + 1)
+        if (attempts.length < 3) {
+          const error = new Error('resource busy') as NodeJS.ErrnoException
+          error.code = 'EBUSY'
+          throw error
+        }
+      },
+      sleepFn: async (ms) => { delays.push(ms) },
+    })
+
+    expect(attempts).toEqual([1, 2, 3])
+    expect(delays).toEqual([25, 25])
+  })
 
   /** Прежняя (рабочая) установка + payload новой версии поверх неё. */
   function makeUpgradeStand() {
