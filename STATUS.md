@@ -42,7 +42,7 @@
 
 ## В работе
 
-- **Verstak Online Search V2 P3.1 Repair (17.09).** Zero-cost SearXNG retrieval
+- **Verstak Online Search V2 P3.1 Repair (17–18.09).** Zero-cost SearXNG retrieval
   уже принят production-canary: 5/5 запросов дали candidates и evidence,
   `paid_search_rate=0%`, расход 0 ₽. Причина следующих synthesis-сбоев установлена
   по Gateway telemetry: transient upstream HTTP 503 завершал logical route после
@@ -53,10 +53,18 @@
   telemetry без публичных provider/model. Explicit RU/EN запрос официального
   источника получает query-scoped primary boost и primary-first synthesis;
   обычные запросы сохраняют mixed ranking, secondary не выдаётся за официальный.
-  Offline-пины и мутация пройдены; repeated production-canary этого repair ещё
-  должен подтвердить стабильный synthesis. Gateway отдельно обязан исчерпывать
-  bounded failover на pre-token 408/429/5xx либо возвращать структурный retryable
-  stream error; Gateway в этом Online-пакете не менялся.
+  Offline-пины и мутация пройдены. Repeated production-canary (2×5 исходных
+  запросов) подтвердил candidates/evidence `10/10`, `paid_search_rate=0%` и
+  отсутствие дублей, но synthesis завершился `0/10`: обе Online-попытки каждого
+  прогона получили `provider_network`. Gateway telemetry показала transient 503:
+  первый logical request падал, повторный исчерпывал все 5 route candidates и
+  также падал. Python official intent реально включил `python.org` в evidence;
+  в запросах Яндекса и закона официальный источник retrieval не нашёл. Рабочий
+  Chrome на live reload дал `ERR_TIMED_OUT`, поэтому browser restoration после
+  repair не принят; durable thread readback на сервере пройден. P3.1 остаётся
+  незакрытым до отдельного Gateway repair: восстановить хотя бы один живой
+  inference-route и гарантировать bounded failover/структурный pre-token error.
+  Gateway в этом Online-пакете не менялся.
 
 - **Verstak Online Search V2 P2 (17.09).** В headless добавлен отдельный
   Search Executor: детерминированный поиск через DDG HTML, нормализация и
