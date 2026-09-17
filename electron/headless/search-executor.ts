@@ -52,11 +52,17 @@ export interface SearchBackend {
   id: string
   coverage?: SearchBackendCoverage
   structured?: boolean
+  costTier?: 'zero' | 'paid' | 'diagnostic'
   estimatedCost?: SearchCost
   search: (
     query: string,
-    opts: { signal: AbortSignal; timeoutMs: number; limit: number },
-  ) => Promise<SearchCandidate[]>
+    opts: { signal: AbortSignal; timeoutMs: number; limit: number; cacheScope?: string },
+  ) => Promise<SearchCandidate[] | SearchBackendResponse>
+}
+
+export interface SearchBackendResponse {
+  candidates: SearchCandidate[]
+  cacheStatus?: 'hit' | 'miss' | 'bypass'
 }
 
 export interface SearchBackendTrace {
@@ -69,6 +75,7 @@ export interface SearchBackendTrace {
   cost: SearchCost | null
   errorClass: string | null
   rateLimited: boolean
+  cacheStatus: 'hit' | 'miss' | 'bypass' | null
 }
 
 export interface SearchFetchResult {
@@ -118,6 +125,16 @@ export interface SearchExecutionResult {
   evidence: SearchEvidence[]
   fetches: SearchFetchTrace[]
   backendTraces: SearchBackendTrace[]
+  retrievalBackend: string | null
+  attemptedBackends: string[]
+  fallbackReason: 'zero_candidates' | 'insufficient_candidates' | 'retrieval_timeout' | 'retrieval_error' | 'insufficient_evidence' | null
+  candidateCountByBackend: Record<string, number>
+  normalizedCount: number
+  paidBackendUsed: boolean
+  paidBackendCalls: number
+  estimatedSearchCost: SearchCost[]
+  cacheHits: number
+  cacheMisses: number
   timeoutReason: 'search' | 'fetch' | 'total' | null
   timings: {
     searchMs: number
@@ -144,6 +161,8 @@ export interface SearchExecutorDeps {
   fetchConcurrency?: number
   evidenceTarget?: number
   minEvidenceChars?: number
+  cacheScope?: string
+  allowPaidFallback?: boolean
   onStage?: (stage: 'search' | 'fetch') => void
 }
 
@@ -440,7 +459,9 @@ function emptyResult(
   timeoutReason: SearchExecutionResult['timeoutReason'] = null,
   queriesAttempted: string[] = [],
   backendTraces: SearchBackendTrace[] = [],
+  fallbackReason: SearchExecutionResult['fallbackReason'] = null,
 ): SearchExecutionResult {
+  const telemetry = retrievalTelemetry(backendTraces, 0, fallbackReason)
   return {
     status,
     originalQuery: query,
@@ -455,8 +476,48 @@ function emptyResult(
     evidence: [],
     fetches: [],
     backendTraces,
+    ...telemetry,
     timeoutReason,
     timings: { searchMs, fetchMs: 0, totalMs: Date.now() - startedAt },
+  }
+}
+
+function backendCostTier(backend: SearchBackend): NonNullable<SearchBackend['costTier']> {
+  if (backend.costTier) return backend.costTier
+  if (backend.structured === false || backend.coverage === 'diagnostic') return 'diagnostic'
+  return (backend.estimatedCost?.amount ?? 0) > 0 ? 'paid' : 'zero'
+}
+
+function retrievalTelemetry(
+  traces: SearchBackendTrace[],
+  normalizedCount: number,
+  fallbackReason: SearchExecutionResult['fallbackReason'],
+): Pick<SearchExecutionResult,
+  'retrievalBackend' | 'attemptedBackends' | 'fallbackReason' | 'candidateCountByBackend'
+  | 'normalizedCount' | 'paidBackendUsed' | 'paidBackendCalls' | 'estimatedSearchCost'
+  | 'cacheHits' | 'cacheMisses'> {
+  const attemptedBackends = [...new Set(traces.map(item => item.backend))]
+  const candidateCountByBackend: Record<string, number> = {}
+  const costs = new Map<SearchCost['currency'], number>()
+  let paidBackendCalls = 0
+  for (const trace of traces) {
+    candidateCountByBackend[trace.backend] = (candidateCountByBackend[trace.backend] ?? 0) + trace.candidateCount
+    if (trace.cost && trace.cost.amount > 0) {
+      paidBackendCalls += 1
+      costs.set(trace.cost.currency, (costs.get(trace.cost.currency) ?? 0) + trace.cost.amount)
+    }
+  }
+  return {
+    retrievalBackend: traces.find(item => item.candidateCount > 0)?.backend ?? null,
+    attemptedBackends,
+    fallbackReason,
+    candidateCountByBackend,
+    normalizedCount,
+    paidBackendUsed: paidBackendCalls > 0,
+    paidBackendCalls,
+    estimatedSearchCost: [...costs].map(([currency, amount]) => ({ amount, currency })),
+    cacheHits: traces.filter(item => item.cacheStatus === 'hit').length,
+    cacheMisses: traces.filter(item => item.cacheStatus === 'miss').length,
   }
 }
 
@@ -471,37 +532,51 @@ export async function executeSearch(
   const backends = deps.backends?.length ? deps.backends : createConfiguredSearchBackends()
   const backendIds = backends.map(item => item.id)
   const limit = Math.max(1, Math.min(20, Math.floor(deps.limit ?? DEFAULT_LIMIT)))
-  const desiredCandidates = Math.min(limit, DEFAULT_EVIDENCE_TARGET)
+  const evidenceTarget = Math.max(1, Math.floor(deps.evidenceTarget ?? DEFAULT_EVIDENCE_TARGET))
+  const desiredCandidates = Math.min(limit, evidenceTarget)
   const rewrittenQuery = rewriteSearchQuery(query)
   const queries = rewrittenQuery && rewrittenQuery !== query ? [query, rewrittenQuery] : [query]
   const candidates: SearchCandidate[] = []
   const queriesAttempted: string[] = []
   const backendTraces: SearchBackendTrace[] = []
   const intent = classifySearchIntent(query)
-  const waves = planSearchBackends(intent, backends)
+  const plannedWaves = planSearchBackends(intent, backends)
+  const wavesForTier = (tier: NonNullable<SearchBackend['costTier']>): SearchBackend[][] => plannedWaves
+    .map(wave => wave.filter(item => backendCostTier(item) === tier))
+    .filter(wave => wave.length > 0)
   let searchMs = 0
-  let backendFailures = 0
   let retrievalTimeoutReason: SearchExecutionResult['timeoutReason'] = null
+  let fallbackReason: SearchExecutionResult['fallbackReason'] = null
+  let paidAttempted = false
 
   deps.onStage?.('search')
-  for (const attemptedQuery of queries) {
-    for (const wave of waves) {
-      if (rankAndDedupeCandidates(candidates, query, limit).length >= desiredCandidates) break
+  const retrieve = async (
+    waves: SearchBackend[][],
+    stopWhenEnough: boolean,
+  ): Promise<void> => {
+    const before = candidates.length
+    for (const attemptedQuery of queries) {
+      const traceStart = backendTraces.length
+      for (const wave of waves) {
+        if (stopWhenEnough && rankAndDedupeCandidates(candidates.slice(before), query, limit).length >= desiredCandidates) break
       const attemptResults = await Promise.all(wave.map(async searchBackend => {
         const attemptStarted = Date.now()
         queriesAttempted.push(attemptedQuery)
         try {
-          const found = await withinBudget(
+          const response = await withinBudget(
             signal => searchBackend.search(attemptedQuery, {
               signal,
               timeoutMs: budgets.searchMs,
               limit,
+              cacheScope: deps.cacheScope,
             }),
             'search',
             budgets.searchMs,
             deadlineAt,
             deps.signal,
           )
+          const found = Array.isArray(response) ? response : response.candidates
+          const cacheStatus = Array.isArray(response) ? null : response.cacheStatus ?? null
           const latencyMs = Date.now() - attemptStarted
           backendTraces.push({
             backend: searchBackend.id,
@@ -513,6 +588,7 @@ export async function executeSearch(
             cost: searchBackend.estimatedCost ?? null,
             errorClass: null,
             rateLimited: false,
+            cacheStatus,
           })
           return found.map(item => ({ ...item, backend: searchBackend.id }))
         } catch (error) {
@@ -529,13 +605,13 @@ export async function executeSearch(
             status: timedOut ? 'timeout' : rateLimited ? 'rate_limited' : 'error',
             candidateCount: 0,
             acceptedCandidateCount: 0,
-            cost: null,
+            cost: searchBackend.estimatedCost ?? null,
             errorClass: typeof details.errorClass === 'string'
               ? details.errorClass
               : timedOut ? 'timeout' : 'backend_error',
             rateLimited,
+            cacheStatus: null,
           })
-          backendFailures += 1
           if (timedOut && retrievalTimeoutReason == null) {
             retrievalTimeoutReason = error instanceof SearchTimeoutError ? error.stage : 'total'
           }
@@ -545,17 +621,53 @@ export async function executeSearch(
       for (const found of attemptResults) candidates.push(...found)
       if (deps.signal?.aborted) break
     }
-    if (candidates.length > 0 || deps.signal?.aborted) break
+      if (candidates.length > before || deps.signal?.aborted) break
+      if (backendTraces.slice(traceStart).some(item => item.status === 'error' || item.status === 'rate_limited' || item.status === 'timeout')) break
+    }
+  }
+
+  await retrieve(wavesForTier('zero'), true)
+
+  const allowPaidFallback = deps.allowPaidFallback
+    ?? process.env.VERSTAK_SEARCH_PAID_FALLBACK_ENABLED !== '0'
+  const runPaidFallback = async (reason: NonNullable<SearchExecutionResult['fallbackReason']>): Promise<void> => {
+    const paidWaves = wavesForTier('paid')
+    if (!allowPaidFallback || paidAttempted || paidWaves.length === 0) return
+    fallbackReason ??= reason
+    paidAttempted = true
+    await retrieve(paidWaves, true)
+  }
+
+  let normalized = rankAndDedupeCandidates(candidates, query, limit)
+  if (normalized.length === 0) {
+    const zeroTraces = backendTraces.filter(trace => {
+      const backend = backends.find(item => item.id === trace.backend)
+      return backend != null && backendCostTier(backend) === 'zero'
+    })
+    const reason = zeroTraces.some(item => item.status === 'timeout')
+      ? 'retrieval_timeout'
+      : zeroTraces.some(item => item.status === 'error' || item.status === 'rate_limited')
+        ? 'retrieval_error'
+        : 'zero_candidates'
+    await runPaidFallback(reason)
+  } else if (normalized.length < desiredCandidates) {
+    await runPaidFallback('insufficient_candidates')
+  }
+
+  normalized = rankAndDedupeCandidates(candidates, query, limit)
+  if (normalized.length === 0) {
+    await retrieve(wavesForTier('diagnostic'), true)
+    normalized = rankAndDedupeCandidates(candidates, query, limit)
   }
 
   searchMs = backendTraces.reduce((sum, trace) => sum + trace.latencyMs, 0)
-  const normalized = rankAndDedupeCandidates(candidates, query, limit)
   for (const trace of backendTraces) {
     trace.acceptedCandidateCount = normalized.filter(item => candidateBackends(item).includes(trace.backend)).length
   }
   if (!normalized.length) {
+    const allFailed = backendTraces.length > 0 && backendTraces.every(item => item.status === 'error' || item.status === 'rate_limited' || item.status === 'timeout')
     return emptyResult(
-      retrievalTimeoutReason ? 'timeout' : backendFailures === backendTraces.length ? 'backend_error' : 'no_results',
+      retrievalTimeoutReason && allFailed ? 'timeout' : allFailed ? 'backend_error' : 'no_results',
       query,
       rewrittenQuery,
       backendIds,
@@ -564,27 +676,31 @@ export async function executeSearch(
       retrievalTimeoutReason,
       queriesAttempted,
       backendTraces,
+      fallbackReason,
     )
   }
 
   const fetchStartedAt = Date.now()
   deps.onStage?.('fetch')
   const fetchPage = deps.fetchPage ?? defaultFetch
-  const evidenceTarget = Math.max(1, Math.floor(deps.evidenceTarget ?? DEFAULT_EVIDENCE_TARGET))
   const minEvidenceChars = Math.max(1, Math.floor(deps.minEvidenceChars ?? DEFAULT_MIN_EVIDENCE_CHARS))
   const concurrency = Math.max(1, Math.min(8, Math.floor(deps.fetchConcurrency ?? DEFAULT_CONCURRENCY)))
   const evidence: SearchEvidence[] = []
   const fetches: SearchFetchTrace[] = []
-  const active = new Set<AbortController>()
-  let cursor = 0
-  let reachedTarget = false
+  const fetchedUrls = new Set<string>()
 
-  const worker = async (): Promise<void> => {
-    while (!reachedTarget) {
+  const fetchCandidates = async (batch: SearchCandidate[]): Promise<void> => {
+    const active = new Set<AbortController>()
+    let cursor = 0
+    let reachedTarget = evidence.length >= evidenceTarget
+    const worker = async (): Promise<void> => {
+      while (!reachedTarget) {
       const index = cursor
       cursor += 1
-      if (index >= normalized.length) return
-      const item = normalized[index]
+      if (index >= batch.length) return
+      const item = batch[index]
+      if (fetchedUrls.has(item.url)) continue
+      fetchedUrls.add(item.url)
       const itemStartedAt = Date.now()
       const ctrl = new AbortController()
       const detachOuter = relayAbort(deps.signal, ctrl)
@@ -657,9 +773,26 @@ export async function executeSearch(
         detachOuter()
       }
     }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, () => worker()))
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, normalized.length) }, () => worker()))
+  await fetchCandidates(normalized)
+
+  if (evidence.length < evidenceTarget && !paidAttempted) {
+    const before = candidates.length
+    await runPaidFallback('insufficient_evidence')
+    if (candidates.length > before) {
+      normalized = rankAndDedupeCandidates(candidates, query, limit + evidenceTarget)
+      await fetchCandidates(normalized.filter(item => !fetchedUrls.has(item.url)))
+    }
+  }
+
+  searchMs = backendTraces.reduce((sum, trace) => sum + trace.latencyMs, 0)
+  normalized = rankAndDedupeCandidates(candidates, query, limit)
+  for (const trace of backendTraces) {
+    trace.acceptedCandidateCount = normalized.filter(item => candidateBackends(item).includes(trace.backend)).length
+  }
 
   const fetchSuccess = fetches.filter(item => item.usable).length
   const fetchRejected = fetches.filter(item => !item.usable).length
@@ -680,6 +813,7 @@ export async function executeSearch(
     status = 'no_evidence'
   }
 
+  const telemetry = retrievalTelemetry(backendTraces, normalized.length, fallbackReason)
   return {
     status,
     originalQuery: query,
@@ -694,6 +828,7 @@ export async function executeSearch(
     evidence,
     fetches,
     backendTraces,
+    ...telemetry,
     timeoutReason,
     timings: {
       searchMs,

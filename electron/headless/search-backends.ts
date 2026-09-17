@@ -8,6 +8,8 @@ import type {
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
+const SEARXNG_CACHE = new Map<string, { expiresAt: number; candidates: SearchCandidate[] }>()
+
 export class SearchBackendError extends Error {
   constructor(
     message: string,
@@ -103,6 +105,7 @@ export function createYandexSearchBackend(options: YandexSearchBackendOptions): 
     id,
     coverage: options.searchType === 'ru' ? 'ru' : 'global',
     structured: true,
+    costTier: 'paid',
     estimatedCost: { amount: 0.488, currency: 'RUB' },
     async search(query, opts) {
       const response = await fetchImpl('https://searchapi.api.cloud.yandex.net/v2/web/search', {
@@ -190,6 +193,7 @@ export function createBraveSearchBackend(options: BraveSearchBackendOptions): Se
     id: 'brave_global',
     coverage: 'global',
     structured: true,
+    costTier: 'paid',
     estimatedCost: { amount: 0.005, currency: 'USD' },
     async search(query, opts) {
       const endpoint = new URL('https://api.search.brave.com/res/v1/web/search')
@@ -215,6 +219,7 @@ export function createDuckDuckGoDiagnosticBackend(): SearchBackend {
     id: 'duckduckgo_html',
     coverage: 'diagnostic',
     structured: false,
+    costTier: 'diagnostic',
     estimatedCost: { amount: 0, currency: 'USD' },
     async search(query, opts) {
       const results = await webSearch(query, {
@@ -237,8 +242,114 @@ export function createDuckDuckGoDiagnosticBackend(): SearchBackend {
   }
 }
 
+interface SearxngResult {
+  url?: unknown
+  title?: unknown
+  content?: unknown
+  publishedDate?: unknown
+  published_date?: unknown
+}
+
+export function parseSearxngSearchJson(payload: unknown, limit: number): SearchCandidate[] {
+  const results = (payload as { results?: unknown })?.results
+  if (!Array.isArray(results)) return []
+  return results.slice(0, limit).flatMap((raw, index) => {
+    const item = raw as SearxngResult
+    if (typeof item.url !== 'string' || !item.url.trim()) return []
+    return [{
+      url: item.url,
+      canonicalUrl: item.url,
+      title: cleanMarkup(item.title),
+      snippet: cleanMarkup(item.content),
+      rank: index + 1,
+      backend: 'searxng_zero_cost',
+      language: null,
+      publishedAt: parseIsoDate(item.publishedDate) ?? parseIsoDate(item.published_date),
+      metadata: {},
+    }]
+  })
+}
+
+export interface SearxngSearchBackendOptions {
+  baseUrl: string
+  engines: string[]
+  fetchImpl?: FetchLike
+  cacheTtlMs?: number
+  cacheMaxEntries?: number
+}
+
+function assertInternalSearxngUrl(raw: string): URL {
+  const url = new URL(raw)
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+    throw new Error('SearXNG endpoint must be an internal loopback HTTP URL')
+  }
+  return url
+}
+
+function cloneCandidates(input: SearchCandidate[]): SearchCandidate[] {
+  return input.map(item => ({ ...item, metadata: { ...item.metadata } }))
+}
+
+export function createSearxngSearchBackend(options: SearxngSearchBackendOptions): SearchBackend {
+  const baseUrl = assertInternalSearxngUrl(options.baseUrl)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const engines = [...new Set(options.engines.map(item => item.trim()).filter(Boolean))]
+  const cacheTtlMs = Math.max(1_000, options.cacheTtlMs ?? 5 * 60_000)
+  const cacheMaxEntries = Math.max(1, Math.min(1_024, options.cacheMaxEntries ?? 256))
+  return {
+    id: 'searxng_zero_cost',
+    coverage: 'mixed',
+    structured: true,
+    costTier: 'zero',
+    estimatedCost: { amount: 0, currency: 'RUB' },
+    async search(query, opts) {
+      const normalizedQuery = query.replace(/\s+/g, ' ').trim().toLowerCase()
+      const cacheKey = opts.cacheScope
+        ? `${opts.cacheScope}\u0000${normalizedQuery}\u0000${engines.join(',')}\u0000${opts.limit}`
+        : null
+      const now = Date.now()
+      if (cacheKey) {
+        const cached = SEARXNG_CACHE.get(cacheKey)
+        if (cached && cached.expiresAt > now) {
+          SEARXNG_CACHE.delete(cacheKey)
+          SEARXNG_CACHE.set(cacheKey, cached)
+          return { candidates: cloneCandidates(cached.candidates), cacheStatus: 'hit' }
+        }
+        if (cached) SEARXNG_CACHE.delete(cacheKey)
+      }
+      const endpoint = new URL('/search', baseUrl)
+      endpoint.searchParams.set('q', query)
+      endpoint.searchParams.set('format', 'json')
+      endpoint.searchParams.set('language', 'all')
+      if (engines.length) endpoint.searchParams.set('engines', engines.join(','))
+      const response = await fetchImpl(endpoint, {
+        headers: { accept: 'application/json' },
+        signal: opts.signal,
+      })
+      if (!response.ok) throw responseError('searxng_zero_cost', response.status)
+      const candidates = parseSearxngSearchJson(await response.json(), opts.limit)
+      if (cacheKey) {
+        SEARXNG_CACHE.set(cacheKey, { expiresAt: now + cacheTtlMs, candidates: cloneCandidates(candidates) })
+        while (SEARXNG_CACHE.size > cacheMaxEntries) {
+          const oldest = SEARXNG_CACHE.keys().next().value as string | undefined
+          if (oldest == null) break
+          SEARXNG_CACHE.delete(oldest)
+        }
+      }
+      return { candidates, cacheStatus: cacheKey ? 'miss' : 'bypass' }
+    },
+  }
+}
+
 export function createConfiguredSearchBackends(env: NodeJS.ProcessEnv = process.env): SearchBackend[] {
   const configured: SearchBackend[] = []
+  const searxngUrl = env.SEARXNG_SEARCH_URL?.trim()
+  if (searxngUrl) {
+    const engines = (env.SEARXNG_SEARCH_ENGINES || 'google,bing,brave,yandex,yep,github,arxiv,wikipedia')
+      .split(',').map(item => item.trim()).filter(Boolean)
+    configured.push(createSearxngSearchBackend({ baseUrl: searxngUrl, engines }))
+  }
   const yandexKey = env.YANDEX_SEARCH_API_KEY?.trim()
   const yandexFolder = env.YANDEX_SEARCH_FOLDER_ID?.trim()
   if (yandexKey && yandexFolder) {

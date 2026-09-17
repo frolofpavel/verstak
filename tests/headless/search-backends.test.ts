@@ -4,7 +4,9 @@ import {
   classifySearchIntent,
   createBraveSearchBackend,
   createConfiguredSearchBackends,
+  createSearxngSearchBackend,
   createYandexSearchBackend,
+  parseSearxngSearchJson,
   planSearchBackends,
 } from '../../electron/headless/search-backends'
 import type { SearchBackend } from '../../electron/headless/search-executor'
@@ -145,5 +147,74 @@ describe('Search backends P3', () => {
       rateLimited: true,
       statusCode: 429,
     }))
+  })
+})
+
+describe('Search backends P3.1 zero-cost retrieval', () => {
+  it('нормализует SearXNG JSON и не выпускает названия внутренних engines', () => {
+    const found = parseSearxngSearchJson({
+      results: [{
+        url: 'https://developers.openai.com/api/docs/responses',
+        title: '<b>Responses API</b>',
+        content: 'Official API documentation',
+        publishedDate: '2026-09-17T10:00:00Z',
+        engines: ['google', 'bing'],
+        positions: [1, 2],
+        score: 4.2,
+      }],
+      unresponsive_engines: [['duckduckgo', 'timeout']],
+    }, 5)
+
+    expect(found).toEqual([expect.objectContaining({
+      url: 'https://developers.openai.com/api/docs/responses',
+      title: 'Responses API',
+      snippet: 'Official API documentation',
+      backend: 'searxng_zero_cost',
+      publishedAt: '2026-09-17T10:00:00.000Z',
+    })])
+    expect(JSON.stringify(found)).not.toContain('google')
+    expect(JSON.stringify(found)).not.toContain('bing')
+    expect(JSON.stringify(found)).not.toContain('duckduckgo')
+  })
+
+  it('кэширует только внутри tenant scope и сообщает hit/miss/bypass', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [{ url: 'https://example.org/a', title: 'A', content: 'Body' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const search = createSearxngSearchBackend({
+      baseUrl: 'http://127.0.0.1:8888',
+      engines: ['google'],
+      fetchImpl,
+      cacheTtlMs: 60_000,
+      cacheMaxEntries: 8,
+    })
+    const opts = { signal: new AbortController().signal, timeoutMs: 1_000, limit: 5 }
+
+    const first = await search.search('  Same QUERY ', { ...opts, cacheScope: 'tenant-a' })
+    const second = await search.search('same query', { ...opts, cacheScope: 'tenant-a' })
+    const otherTenant = await search.search('same query', { ...opts, cacheScope: 'tenant-b' })
+    const bypass = await search.search('same query', opts)
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(Array.isArray(first) ? null : first.cacheStatus).toBe('miss')
+    expect(Array.isArray(second) ? null : second.cacheStatus).toBe('hit')
+    expect(Array.isArray(otherTenant) ? null : otherTenant.cacheStatus).toBe('miss')
+    expect(Array.isArray(bypass) ? null : bypass.cacheStatus).toBe('bypass')
+  })
+
+  it('ставит SearXNG первым, а платные backend оставляет fallback', () => {
+    const configured = createConfiguredSearchBackends({
+      SEARXNG_SEARCH_URL: 'http://127.0.0.1:8888',
+      SEARXNG_SEARCH_ENGINES: 'google,bing',
+      YANDEX_SEARCH_API_KEY: 'yandex-key',
+      YANDEX_SEARCH_FOLDER_ID: 'folder',
+    })
+
+    expect(configured.map(item => [item.id, item.costTier])).toEqual([
+      ['searxng_zero_cost', 'zero'],
+      ['yandex_ru', 'paid'],
+      ['yandex_global', 'paid'],
+      ['duckduckgo_html', 'diagnostic'],
+    ])
   })
 })

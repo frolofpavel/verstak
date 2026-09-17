@@ -263,3 +263,98 @@ describe('Search Executor P3 retrieval and ranking', () => {
     expect(result.backendTraces.map(item => item.backend)).toEqual(['yandex_ru', 'duckduckgo_html'])
   })
 })
+
+describe('Search Executor P3.1 zero-cost routing', () => {
+  const tierBackend = (
+    id: string,
+    costTier: SearchBackend['costTier'],
+    results: SearchCandidate[] | (() => Promise<SearchCandidate[]>),
+  ): SearchBackend => ({
+    id,
+    coverage: 'mixed',
+    structured: true,
+    costTier,
+    estimatedCost: costTier === 'paid' ? { amount: 0.488, currency: 'RUB' } : { amount: 0, currency: 'RUB' },
+    search: vi.fn(typeof results === 'function' ? results : async () => results),
+  })
+
+  it('завершает обычный поиск на zero-cost backend без платного вызова', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [1, 2, 3, 4].map(index => ({
+      ...candidate(`https://official-${index}.example/doc`, index), backend: 'searxng_zero_cost',
+    })))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('официальный отчёт', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)), cacheScope: 'tenant-a',
+    })
+
+    expect(zero.search).toHaveBeenCalledOnce()
+    expect(paid.search).not.toHaveBeenCalled()
+    expect(result.paidBackendUsed).toBe(false)
+    expect(result.paidBackendCalls).toBe(0)
+    expect(result.fallbackReason).toBeNull()
+    expect(result.retrievalBackend).toBe('searxng_zero_cost')
+  })
+
+  it('вызывает paid fallback при нуле zero-cost candidates и пишет telemetry', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [])
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://publication.pravo.gov.ru/doc', 1)])
+
+    const result = await executeSearch('действующий закон России', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('zero_candidates')
+    expect(result.paidBackendUsed).toBe(true)
+    expect(result.paidBackendCalls).toBe(1)
+    expect(result.candidateCountByBackend).toEqual({ searxng_zero_cost: 0, yandex_ru: 1 })
+    expect(result.estimatedSearchCost).toEqual([{ amount: 0.488, currency: 'RUB' }])
+  })
+
+  it('вызывает paid fallback после недостаточного evidence от zero-cost candidates', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [1, 2, 3, 4].map(index => (
+      candidate(`https://thin.example/${index}`, index)
+    )))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://government.ru/news/1', 1)])
+    const fetchPage = vi.fn(async (item: SearchCandidate) => item.url.includes('thin')
+      ? page(item.url, 'коротко')
+      : page(item.url))
+
+    const result = await executeSearch('официальные новости', {
+      backends: [zero, paid], fetchPage, evidenceTarget: 1,
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('insufficient_evidence')
+    expect(result.usableEvidenceCount).toBe(1)
+    expect(result.paidBackendUsed).toBe(true)
+  })
+
+  it('не вызывает paid backend при явном запрете canary', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [])
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('zero-only canary', {
+      backends: [zero, paid], fetchPage: vi.fn(), allowPaidFallback: false,
+    })
+
+    expect(paid.search).not.toHaveBeenCalled()
+    expect(result.paidBackendUsed).toBe(false)
+    expect(result.status).toBe('no_results')
+  })
+
+  it('fallback срабатывает после timeout zero-cost backend', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', () => new Promise<SearchCandidate[]>(() => {}))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('timeout fallback', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)),
+      budgets: { searchMs: 15, fetchMs: 50, totalMs: 250 },
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('retrieval_timeout')
+    expect(result.status).toBe('success')
+  })
+})

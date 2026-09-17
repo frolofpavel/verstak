@@ -946,6 +946,9 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
 
       const search = await (opts.searchExecutor ?? executeSearch)(task.prompt, {
         signal: ctrl.signal,
+        // One host owns one tenant dataDir. Including it in the cache key keeps
+        // public retrieval results from crossing tenant boundaries.
+        cacheScope: opts.dataDir,
         onStage: stage => progress(stage),
       })
       const attemptedQueries = search.queriesAttempted.length
@@ -998,13 +1001,18 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         const detail = JSON.stringify({
           intent: 'web_search',
           status: finalStatus,
-          backend: search.backends,
           candidates: search.candidateCount,
           fetch_attempted: search.fetchAttempted,
           fetch_success: search.fetchSuccess,
           fetch_rejected: search.fetchRejected,
           evidence: search.usableEvidenceCount,
-          backend_traces: search.backendTraces,
+          fallback_reason: search.fallbackReason,
+          normalized_count: search.normalizedCount,
+          paid_backend_used: search.paidBackendUsed,
+          paid_backend_calls: search.paidBackendCalls,
+          estimated_search_cost: search.estimatedSearchCost,
+          cache_hits: search.cacheHits,
+          cache_misses: search.cacheMisses,
           timings: { ...search.timings, synthesisMs, totalMs: Date.now() - searchStartedAt },
           timeout_reason: finalTimeoutReason,
         })
@@ -1012,6 +1020,20 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           label: finalStatus,
           detail,
           status: finalStatus === 'success' || finalStatus === 'partial_success' ? 'ok' : 'error',
+        })
+        logRuntime('headless.search.retrieval', {
+          runId,
+          retrievalBackend: search.retrievalBackend,
+          attemptedBackends: search.attemptedBackends,
+          candidateCountByBackend: search.candidateCountByBackend,
+          backendTraces: search.backendTraces,
+          fallbackReason: search.fallbackReason,
+          paidBackendUsed: search.paidBackendUsed,
+          paidBackendCalls: search.paidBackendCalls,
+          estimatedSearchCost: search.estimatedSearchCost,
+          cacheHits: search.cacheHits,
+          cacheMisses: search.cacheMisses,
+          retrievalLatencyMs: search.timings.searchMs,
         })
       }
 

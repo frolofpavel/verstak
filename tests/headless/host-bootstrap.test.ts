@@ -134,8 +134,12 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
       backendTraces: [{
         backend: 'test', query: 'актуальный факт', latencyMs: 3, status: 'success',
         candidateCount: 1, acceptedCandidateCount: 1, cost: null,
-        errorClass: null, rateLimited: false,
+        errorClass: null, rateLimited: false, cacheStatus: null,
       }],
+      retrievalBackend: 'test', attemptedBackends: ['test'], fallbackReason: null,
+      candidateCountByBackend: { test: 1 }, normalizedCount: 1,
+      paidBackendUsed: false, paidBackendCalls: 0, estimatedSearchCost: [],
+      cacheHits: 0, cacheMisses: 0,
       timeoutReason: null, timings: { searchMs: 3, fetchMs: 5, totalMs: 8 },
     }
     const host = await makeHost({ searchExecutor: vi.fn(async (_query, deps) => {
@@ -158,9 +162,8 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     const execution = events.find(event => event.kind === 'search_execution')
     expect(execution?.label).toBe('success')
     const executionDetail = JSON.parse(execution?.detail ?? '{}') as Record<string, unknown>
-    expect(executionDetail.backend_traces).toEqual([expect.objectContaining({
-      backend: 'test', candidateCount: 1, acceptedCandidateCount: 1,
-    })])
+    expect(executionDetail).not.toHaveProperty('backend_traces')
+    expect(executionDetail.paid_backend_used).toBe(false)
     expect(execution?.detail).not.toContain('deepseek')
     expect(executionDetail).not.toHaveProperty('provider')
     expect(executionDetail).not.toHaveProperty('model')
@@ -179,6 +182,10 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
         bodyChars: 0, usable: false, reason: 'http_403', elapsedMs: 4,
       }],
       backendTraces: [],
+      retrievalBackend: 'test', attemptedBackends: ['test'], fallbackReason: null,
+      candidateCountByBackend: { test: 1 }, normalizedCount: 1,
+      paidBackendUsed: false, paidBackendCalls: 0, estimatedSearchCost: [],
+      cacheHits: 0, cacheMisses: 0,
       timeoutReason: null, timings: { searchMs: 2, fetchMs: 4, totalMs: 6 },
     }
     const host = await makeHost({ searchExecutor: vi.fn(async () => failed) })
