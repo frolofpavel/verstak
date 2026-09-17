@@ -127,7 +127,7 @@ describe('ComputerUseSettingsCard', () => {
 
     expect(await screen.findByText(/текст, названия и роли видимых UIA-элементов/i)).toBeTruthy()
     expect(screen.getByText(/передаются выбранной AI-модели/i)).toBeTruthy()
-    expect(screen.getByText(/снимки экрана в R2 не передаются/i)).toBeTruthy()
+    expect(screen.getByText(/ограниченный снимок только точно выбранного окна.*весь рабочий стол не снимается/i)).toBeTruthy()
     expect(screen.getByText(/не копирует содержимое наблюдений.*в техническую телеметрию, checkpoints, журнал agent-run и память.*обычная видимая переписка.*общей политике данных приложения/i)).toBeTruthy()
   })
 

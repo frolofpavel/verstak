@@ -82,6 +82,7 @@ import {
   projectToolResultForTelemetry,
 } from './tool-telemetry'
 import { COMPUTER_TOOL_ACTION, isComputerToolName } from './computer/tool-names'
+import { R3_ARTIFACT_TOOLS, type R3ServerHandoff } from './browser/capability'
 
 // Local TaggedSender alias — shape-compatible with tool-handlers.TaggedSender.
 type TaggedSender = HandlerTaggedSender
@@ -189,11 +190,19 @@ export interface AgentRunContext {
    * может, ослабить нет. Не задан — поведение гейта прежнее.
    */
   capabilityTrust?: import('../../shared/contracts/capability').TrustLevel
+  /** Server-owned lineage/capability identity used by the S2-A1 policy facade. */
+  policyIdentity?: ToolContext['policyIdentity']
   /** Original-user desktop action scope fixed for the whole run/fallback chain. */
   computerUseAllowedActions?: ToolContext['computerUseAllowedActions']
   /** Main-owned proof that initialMessages came from the exact fresh composer
    * ticket envelope, not from history/resume/browser/headless reconstruction. */
   computerUseProviderEnvelope?: 'fresh-composer-ticket-v1'
+  /** Fresh composer text explicitly authorized the bounded R3 combined lane. */
+  r3HandoffAllowed?: boolean
+  /** Durable server-owned handoff restored only for an explicit continuation. */
+  r3Handoff?: R3ServerHandoff
+  appendBrowserArtifactProof?: ToolContext['appendBrowserArtifactProof']
+  persistR3HandoffCheckpoint?: ToolContext['persistR3HandoffCheckpoint']
   sender: TaggedSender
   sendId: number
   provider: ChatProvider
@@ -338,6 +347,23 @@ function selectComputerToolDefs<T extends { name: string }>(
   ))
 }
 
+function selectR3ToolDefs<T extends { name: string }>(
+  builtins: readonly T[],
+  allowedActions: readonly string[] | undefined,
+  phase: R3ServerHandoff['phase'] | null | 'all',
+): T[] {
+  const computer = new Set(selectComputerToolDefs(builtins, allowedActions).map(definition => definition.name))
+  const artifacts = new Set<string>(R3_ARTIFACT_TOOLS)
+  return builtins.filter(definition => {
+    if (phase === 'artifact-ready') return computer.has(definition.name)
+    if (phase === 'browser-ready') {
+      return definition.name.startsWith('browser_') || artifacts.has(definition.name)
+    }
+    if (phase === null) return definition.name.startsWith('browser_')
+    return definition.name.startsWith('browser_') || artifacts.has(definition.name) || computer.has(definition.name)
+  })
+}
+
 export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
   const {
     sender: rawSender, sendId, provider, tools, projectPath, initialMessages, signal,
@@ -346,7 +372,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     turnsBudget = DEFAULT_AGENT_TURNS, autoContinueTurns, skillRegistry, getSecretForDelegate, costGuard,
     resolveSubscriptionAccount,
     providerId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn,
-    parentChatId, browserTaskIdResolver, browserRunActive, browserContextExposed, browserContextProviderAllowed, browserScreenshotExposed, browserScreenshotProviderAllowed, browserAdapterPreference, computerContextExposed, computerUseAllowedActions, computerUseProviderEnvelope, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust,
+    parentChatId, browserTaskIdResolver, browserRunActive, browserContextExposed, browserContextProviderAllowed, browserScreenshotExposed, browserScreenshotProviderAllowed, browserAdapterPreference, computerContextExposed, computerUseAllowedActions, computerUseProviderEnvelope, r3HandoffAllowed, r3Handoff, appendBrowserArtifactProof, persistR3HandoffCheckpoint, isChildSession, subSessions, sessionTodos, agentRuns, runId, verifications, toolsAllow, capabilityTrust, policyIdentity,
     processRegistry = globalProcessRegistry, outcome, pipelineRuns, revisePlanId,
     isFallbackFrame,
   } = ctx
@@ -357,6 +383,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     active: browserRunActive === true,
     contextExposed: browserContextExposed === true || messagesContainBrowserContext(initialMessages),
     screenshotExposed: browserScreenshotExposed === true || messagesContainBrowserScreenshot(initialMessages),
+    r3HandoffAllowed: r3HandoffAllowed === true,
+    r3Handoff: r3HandoffAllowed === true ? r3Handoff : undefined,
   }
   const computerRunState = {
     // The capability envelope starts at original-user intent, before the first
@@ -471,7 +499,10 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     : []
   const toolsAllowResolution = resolveToolsAllowSet(toolsAllow, TOOL_DEFS.map(d => d.name), mcpNamesForAllow)
   const allowedToolNames = computerRunState.active
-    ? new Set(selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions).map(definition => definition.name))
+    ? new Set((r3HandoffAllowed
+        ? selectR3ToolDefs(TOOL_DEFS, computerUseAllowedActions, 'all')
+        : selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions)
+      ).map(definition => definition.name))
     : toolsAllowResolution.allowed
   // Fail-open ОСТАВЛЯЕТ СЛЕД (штаб): сломанный tools_allow → ограничение НЕ применяется,
   // но это обязано быть ВИДНО в журнале прогона — иначе опечатка тихо снимает защиту, и
@@ -1193,7 +1224,9 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
     let allToolDefs = isLastTurn
       ? []
       : computerRunState.active
-        ? selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions)
+        ? r3HandoffAllowed && !computerRunState.contextExposed
+          ? selectR3ToolDefs(TOOL_DEFS, computerUseAllowedActions, browserRunState.r3Handoff?.phase ?? null)
+          : selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions)
         : selectAllowedToolDefs(TOOL_DEFS, mcpToolDefs, toolsAllow)
     // PTC (T1.4) пока opt-in: execute_code предлагается модели только при
     // ptc_enabled='true' (по умолчанию выкл — фича ждёт live-проверки петли).
@@ -1707,6 +1740,7 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
       // Реестр возможностей: уровень доверия возможности, которой сделан прогон.
       // Последний слой гейта; ослабить решение не может по построению.
       capabilityTrust,
+      policyIdentity,
       sender, sendId, signal, projectPath, tools,
         recordWrite, recordPlan, getPlan, plans, planOutcomes, tasks, agentJobs, agentJobScheduler, scheduledJobs, recordJournal, readJournal, saveMemory, saveDecision, searchMemories, searchConversations, connectors,
         outcome, pipelineRuns, revisePlanId: revisePlanId ?? null,
@@ -1779,6 +1813,8 @@ export async function runApiConversation(ctx: AgentRunContext): Promise<void> {
         : (typeof parentChatId === 'number' ? `bt-${parentChatId}` : null),
       browserRunState,
       computerRunState,
+      appendBrowserArtifactProof,
+      persistR3HandoffCheckpoint,
       browserAdapterState,
       recordRunEvent: (kind, p) => {
         if (!agentRuns || !runId) return

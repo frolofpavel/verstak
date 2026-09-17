@@ -358,6 +358,30 @@ describe('computer use packaged artifact checker', () => {
       .toContain('observable text and post-action input epoch contract missing')
   })
 
+  it('pins visual observation to the exact selected HWND without desktop capture APIs', () => {
+    const source = readFileSync(join(ROOT, 'resources', 'computer-use', 'helper.ps1'), 'utf8')
+    expect(checker.auditComputerHelperSource(source)).not.toContain(
+      'exact-window privacy-safe visual observation missing',
+    )
+
+    const desktopMutation = source.replace(
+      'PrintWindow(expected.Hwnd, hdc, PrintWindowRenderFullContent)',
+      'CopyFromScreen(0, 0, 0, 0, source.Size)',
+    )
+    expect(desktopMutation).not.toBe(source)
+    expect(checker.auditComputerHelperSource(desktopMutation))
+      .toContain('exact-window privacy-safe visual observation missing')
+
+    const root = sourceFixture()
+    const clientPath = join(root, 'electron', 'ai', 'computer', 'helper-client.ts')
+    writeFileSync(clientPath, readFileSync(clientPath, 'utf8').replace(
+      'bytes.length > MAX_COMPUTER_SCREENSHOT_BYTES',
+      'false /* mutated: unbounded screenshot transport */',
+    ))
+    const result = checker.checkComputerUsePackage({ root, sourceDir: fixture(root) })
+    expect(result.failures).toContain('desktop screenshot transport bounds missing')
+  })
+
   it('pins owner/terminal exclusion, physical hooks, drained Stop and the production global-input boundary', () => {
     const source = readFileSync(join(ROOT, 'resources', 'computer-use', 'helper.ps1'), 'utf8')
     const ownerMutation = source.replace('actual.Pid == OwnerPid', 'false')
@@ -439,6 +463,17 @@ describe('computer use packaged artifact checker', () => {
     expect(helperClearMutation.helper).not.toBe(actionSources.helper)
     expect(checker.auditComputerReducedActionSources(helperClearMutation))
       .toContain('clearFirst or empty type boundary missing')
+
+    const oneShotReadbackMutation = {
+      ...actionSources,
+      controller: actionSources.controller.replace(
+        'assertStablePostObservation(postObservation, settledObservation)',
+        '/* mutated: a transient first read is enough */',
+      ),
+    }
+    expect(oneShotReadbackMutation.controller).not.toBe(actionSources.controller)
+    expect(checker.auditComputerReducedActionSources(oneShotReadbackMutation))
+      .toContain('controller stable two-observation postcondition contract missing')
   })
 
   it('pins whole-surface exclusion and exact UIA Value/Toggle/Selection/Scroll proof semantics', () => {

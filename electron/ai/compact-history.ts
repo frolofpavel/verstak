@@ -28,6 +28,32 @@
  */
 
 import type { ChatMessage } from './types'
+import { R3_HANDOFF_CHECKPOINT_PREFIX, isR3ArtifactTool } from './browser/capability'
+
+function trustedR3Checkpoint(name: string, result: unknown): string | null {
+  if (!isR3ArtifactTool(name) || typeof result !== 'string') return null
+  const markerIndex = result.lastIndexOf(R3_HANDOFF_CHECKPOINT_PREFIX)
+  if (markerIndex < 0) return null
+  const json = result.slice(markerIndex + R3_HANDOFF_CHECKPOINT_PREFIX.length).trim()
+  try {
+    const value = JSON.parse(json) as Record<string, unknown>
+    if (!value || typeof value !== 'object' || value.checkpoint == null) return null
+    return `${R3_HANDOFF_CHECKPOINT_PREFIX}${JSON.stringify(value)}`
+  } catch {
+    return null
+  }
+}
+
+function latestTrustedR3Checkpoint(messages: ChatMessage[]): string | null {
+  for (let mi = messages.length - 1; mi >= 0; mi -= 1) {
+    const results = messages[mi].toolResults ?? []
+    for (let ri = results.length - 1; ri >= 0; ri -= 1) {
+      const checkpoint = trustedR3Checkpoint(results[ri].name, results[ri].result)
+      if (checkpoint) return checkpoint
+    }
+  }
+  return null
+}
 import { estimateTokens, getContextLimit, COMPACT_THRESHOLD } from './context-limits'
 import { CACHE_BREAKPOINT } from './compose-prompt'
 
@@ -155,6 +181,8 @@ function compactOldResults(m: ChatMessage, turnIdx: number): ChatMessage {
     ...m,
     toolResults: m.toolResults.map(r => {
       const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+      const checkpoint = trustedR3Checkpoint(r.name, r.result)
+      if (checkpoint) return { ...r, result: checkpoint }
       // Совсем мелкие результаты не трогаем — экономия копеечная, а сигнал
       // полезный (например, мелкий read_file у конфига).
       if (raw.length < 400) return r
@@ -168,6 +196,11 @@ function capFreshResults(m: ChatMessage): ChatMessage {
   let changed = false
   const next = m.toolResults.map(r => {
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+    const checkpoint = trustedR3Checkpoint(r.name, r.result)
+    if (checkpoint) {
+      changed = changed || checkpoint !== raw
+      return { ...r, result: checkpoint }
+    }
     if (raw.length <= FRESH_RESULT_HARD_CAP) return r
     changed = true
     return { ...r, result: smartCompressResult(r.name, raw, FRESH_RESULT_HARD_CAP) }
@@ -335,6 +368,10 @@ export function createCompactedHistory(summary: string, messages: ChatMessage[],
     })
   }
   systemMsgs.push(summaryMsg)
+  const r3Checkpoint = latestTrustedR3Checkpoint(messages)
+  if (r3Checkpoint) {
+    systemMsgs.push({ role: 'system', content: r3Checkpoint })
+  }
 
   return [...systemMsgs, ...recentTurns]
 }
@@ -442,7 +479,8 @@ export function microcompact(
     if (isProtected) continue
     messages[mi].toolResults!.forEach((r, ri) => {
       const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
-      if (raw.length >= minChars && !raw.startsWith('[microcompacted:') && !raw.startsWith('[compacted:')) {
+      if (raw.length >= minChars && !trustedR3Checkpoint(r.name, r.result)
+        && !raw.startsWith('[microcompacted:') && !raw.startsWith('[compacted:')) {
         candidates.push({ mi, ri, size: raw.length })
       }
     })

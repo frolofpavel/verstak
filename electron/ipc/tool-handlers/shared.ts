@@ -20,6 +20,9 @@ import type { AgentJobScheduler } from '../../ai/agent-job-scheduler'
 import type { ScheduleSpec } from '../../storage/scheduled-jobs'
 import type { BrowserAdapter } from '../../ai/browser/types'
 import type { ComputerAction } from '../../ai/computer/types'
+import type { DecisionCapabilityV1, PolicyDecisionMode } from '../../../shared/contracts/policy-decision'
+import type { BrowserArtifactEvidence } from '../../ai/artifacts'
+import type { R3ServerHandoff } from '../../ai/browser/capability'
 
 /** Stable identifier for an in-flight `ai:send` call. */
 export type SendId = number
@@ -72,6 +75,19 @@ export interface ToolContext {
   }
   /** Parent durable job for nested delegation. */
   parentJobId?: string | null
+  /** S2-A1: main-owned identity. A nested job overrides jobId at decision time. */
+  policyIdentity?: {
+    agentId: string | null
+    ownerId: string | null
+    taskId: string | null
+    capability: DecisionCapabilityV1 | null
+  }
+  /** Rollout switch: shadow preserves existing behaviour, enforce tightens it. */
+  policyDecisionMode?: PolicyDecisionMode
+  /** R3: server-owned projection into the existing browser proof ledger. */
+  appendBrowserArtifactProof?: (evidence: BrowserArtifactEvidence) => void
+  /** R3: persist only a sanitized handoff checkpoint for this task lineage. */
+  persistR3HandoffCheckpoint?: (handoff: R3ServerHandoff) => void
   /** Server-owned Outcome context: pipelineId никогда не берётся из args модели. */
   outcome?: {
     pipelineId: number

@@ -505,6 +505,73 @@ describe('computer helper wire protocol', () => {
     child.exit(0)
   })
 
+  it('normalizes unavailable nullable UIA state to omitted controller fields', async () => {
+    const child = new FakeChild()
+    child.onWrite = request => {
+      if (request.type === 'hello') child.reply(request, {
+        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+      })
+      if (request.type !== 'observe') return
+      child.reply(request, {
+        observation: {
+          probe: {
+            identity, title: 'Temporary canary', titleFingerprint,
+            geometry: { left: 1, top: 2, width: 300, height: 200 }, dpi: 120,
+            foreground: true, screenLocked: false, userInputEpoch: 10,
+          },
+          elements: [{
+            backendRef: 'nullable-state', semanticFingerprint: 'a'.repeat(64),
+            role: 'text', label: 'Read only', isPassword: false,
+            supportedActions: [], valueState: null, scrollState: null,
+          }],
+          omissions: [],
+        },
+      })
+    }
+    const client = createClient(child)
+
+    const observation = await client.observe(identity)
+    expect(observation.elements[0]).not.toHaveProperty('valueState')
+    expect(observation.elements[0]).not.toHaveProperty('scrollState')
+    child.exit(0)
+  })
+
+  it('accepts only bounded PNG window captures and rejects oversized or non-PNG image payloads', async () => {
+    const child = new FakeChild()
+    let observationCount = 0
+    const onePixelPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lQj8WQAAAABJRU5ErkJggg=='
+    child.onWrite = request => {
+      if (request.type === 'hello') child.reply(request, {
+        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+      })
+      if (request.type !== 'observe') return
+      observationCount += 1
+      child.reply(request, {
+        observation: {
+          probe: {
+            identity, title: 'Temporary canary', titleFingerprint,
+            geometry: { left: 1, top: 2, width: 300, height: 200 }, dpi: 120,
+            foreground: true, screenLocked: false, userInputEpoch: 10,
+          },
+          elements: [], omissions: [],
+          screenshotDataUrl: observationCount === 1
+            ? `data:image/png;base64,${onePixelPng}`
+            : observationCount === 2
+              ? `data:image/png;base64,${Buffer.alloc(16_385).toString('base64')}`
+              : 'data:image/svg+xml;base64,PHN2Zy8+',
+        },
+      })
+    }
+    const client = createClient(child)
+
+    await expect(client.observe(identity)).resolves.toMatchObject({
+      screenshotDataUrl: `data:image/png;base64,${onePixelPng}`,
+    })
+    await expect(client.observe(identity)).rejects.toThrow(/screenshot/i)
+    await expect(client.observe(identity)).rejects.toThrow(/screenshot/i)
+    child.exit(0)
+  })
+
   it('runs prepare -> prepared -> commit and marks the exact transfer boundary', async () => {
     const child = new FakeChild()
     autoHello(child)

@@ -20,6 +20,9 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -53,6 +56,12 @@ namespace VerstakComputerUse
         private const int MaxSurfaceInspectionElements = 512;
         private const int BindingSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationTimeoutMs = 1500;
+        private const int MaxScreenshotBytes = 16384;
+        private const int MaxScreenshotWidth = 512;
+        private const int MaxScreenshotHeight = 384;
+        private const int MaxScreenshotSourceDimension = 4096;
+        private const long MaxScreenshotSourcePixels = 8388608;
+        private const uint PrintWindowRenderFullContent = 2;
         private const int MaxDestroyedWindowTombstones = 256;
         private const uint ProcessQueryLimitedInformation = 0x1000;
         private const uint Synchronize = 0x00100000;
@@ -312,6 +321,7 @@ namespace VerstakComputerUse
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+        [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
         [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
@@ -703,13 +713,18 @@ namespace VerstakComputerUse
                 || !SameGeometry(probe.Geometry, finalProbe.Geometry) || probe.Dpi != finalProbe.Dpi)
                 throw new SafeError("target_changed", "window title, geometry or DPI changed during observation");
             RequireObservationBudget(cancellation, timer);
+            string screenshotDataUrl = CaptureExactWindowPng(expected, finalProbe, cancellation, timer);
+            if (String.IsNullOrEmpty(screenshotDataUrl)) omissions.Add("screenshot-unavailable-or-not-foreground");
+            RequireObservationBudget(cancellation, timer);
             Elements.Clear();
             foreach (var pair in observedElements) Elements[pair.Key] = pair.Value;
-            return new Dictionary<string, object> {
+            var result = new Dictionary<string, object> {
                 { "probe", ProbeObject(finalProbe) }, { "elements", output.ToArray() },
                 { "omissions", omissions.ToArray() }, { "observationId", observationId },
                 { "observationVersion", version }, { "text", aggregateText.ToString() }
             };
+            if (!String.IsNullOrEmpty(screenshotDataUrl)) result["screenshotDataUrl"] = screenshotDataUrl;
+            return result;
         }
 
         private static void RequireObservationBudget(CancellationToken cancellation, Stopwatch timer)
@@ -717,6 +732,86 @@ namespace VerstakComputerUse
             cancellation.ThrowIfCancellationRequested();
             if (timer.ElapsedMilliseconds > ObservationTimeoutMs)
                 throw new SafeError("observe_timeout", "observation exceeded bounded deadline");
+        }
+
+        private static string CaptureExactWindowPng(
+            WindowIdentity expected, WindowProbe probe, CancellationToken cancellation, Stopwatch timer)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            RequireObservationBudget(cancellation, timer);
+            if (!SameIdentity(expected, probe.Identity)) throw new SafeError("target_changed", "visual target identity changed");
+            if (!probe.Foreground) return null;
+            if (probe.ScreenLocked || probe.Elevated || probe.ProtectedProcess || probe.SecureSurface)
+                throw new SafeError("protected_surface", "visual capture blocked for unsafe surface");
+            if (HasUnsafeSurfaceDescendant(expected.Hwnd, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs))
+                throw new SafeError("protected_surface", "visual capture blocked for password, credential or launch surface");
+
+            int sourceWidth = probe.Geometry.Right - probe.Geometry.Left;
+            int sourceHeight = probe.Geometry.Bottom - probe.Geometry.Top;
+            if (sourceWidth < 1 || sourceHeight < 1
+                || sourceWidth > MaxScreenshotSourceDimension || sourceHeight > MaxScreenshotSourceDimension
+                || (long)sourceWidth * sourceHeight > MaxScreenshotSourcePixels) return null;
+
+            byte[] encoded = null;
+            using (var source = new Bitmap(sourceWidth, sourceHeight, PixelFormat.Format24bppRgb))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                bool captured;
+                using (Graphics graphics = Graphics.FromImage(source))
+                {
+                    IntPtr hdc = graphics.GetHdc();
+                    try { captured = PrintWindow(expected.Hwnd, hdc, PrintWindowRenderFullContent); }
+                    finally { graphics.ReleaseHdc(hdc); }
+                }
+                cancellation.ThrowIfCancellationRequested();
+                RequireObservationBudget(cancellation, timer);
+                if (!captured) return null;
+
+                double scale = Math.Min(1.0, Math.Min(
+                    (double)MaxScreenshotWidth / sourceWidth,
+                    (double)MaxScreenshotHeight / sourceHeight));
+                int targetWidth = Math.Max(1, (int)Math.Floor(sourceWidth * scale));
+                int targetHeight = Math.Max(1, (int)Math.Floor(sourceHeight * scale));
+                while (targetWidth >= 1 && targetHeight >= 1)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    RequireObservationBudget(cancellation, timer);
+                    encoded = EncodeWindowPng(source, targetWidth, targetHeight);
+                    if (encoded.Length <= MaxScreenshotBytes) break;
+                    if (targetWidth == 1 && targetHeight == 1) { encoded = null; break; }
+                    targetWidth = Math.Max(1, targetWidth / 2);
+                    targetHeight = Math.Max(1, targetHeight / 2);
+                }
+            }
+            cancellation.ThrowIfCancellationRequested();
+            RequireObservationBudget(cancellation, timer);
+            if (encoded == null || encoded.Length == 0 || encoded.Length > MaxScreenshotBytes) return null;
+
+            WindowProbe after = ProbeExact(expected, true);
+            cancellation.ThrowIfCancellationRequested();
+            RequireObservationBudget(cancellation, timer);
+            if (!SameIdentity(expected, after.Identity)
+                || !after.Foreground || after.ScreenLocked || after.Elevated || after.ProtectedProcess || after.SecureSurface
+                || !String.Equals(probe.Title, after.Title, StringComparison.Ordinal)
+                || !String.Equals(probe.TitleFingerprint, after.TitleFingerprint, StringComparison.Ordinal)
+                || !SameGeometry(probe.Geometry, after.Geometry) || probe.Dpi != after.Dpi)
+                throw new SafeError("target_changed", "visual target changed during exact-window capture");
+            return "data:image/png;base64," + Convert.ToBase64String(encoded);
+        }
+
+        private static byte[] EncodeWindowPng(Bitmap source, int width, int height)
+        {
+            using (var scaled = new Bitmap(width, height, PixelFormat.Format24bppRgb))
+            using (Graphics graphics = Graphics.FromImage(scaled))
+            using (var stream = new MemoryStream())
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.DrawImage(source, new Rectangle(0, 0, width, height));
+                scaled.Save(stream, ImageFormat.Png);
+                return stream.ToArray();
+            }
         }
 
         private static void HandlePrepare(string requestId, IDictionary<string, object> message)
@@ -2488,6 +2583,7 @@ namespace VerstakComputerUse
 try {
     Add-Type -TypeDefinition $helperSource -Language CSharp -ReferencedAssemblies @(
         'System.Core',
+        'System.Drawing',
         'System.Web.Extensions',
         'WindowsBase',
         'UIAutomationClient',

@@ -3,7 +3,7 @@ import { mkdtemp, rm, readFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname, resolve } from 'path'
-import { generateHtml, generateDocx, artifactsDir, resolveDocxDir, commonReadDir } from '../../electron/ai/artifacts'
+import { generateHtml, generateDocx, artifactsDir, resolveDocxDir, commonReadDir, buildBrowserArtifactEvidence } from '../../electron/ai/artifacts'
 import { sep } from 'path'
 
 let projectPath: string
@@ -37,6 +37,19 @@ describe('generateHtml', () => {
     expect(content).toContain('<!DOCTYPE html>')
     expect(content).toContain('Test KP')
     expect(content).toContain('<h1>Hello</h1>')
+  })
+
+  it('R3 evidence считает checksum/rows сервером и не копирует содержимое', async () => {
+    const r = await generateHtml(projectPath, {
+      filename: 'r3-proof', content_html: '<table><tr><th>A</th></tr><tr><td>secret-row</td></tr></table>'
+    })
+    const evidence = await buildBrowserArtifactEvidence({
+      browserTaskId: 'bt-r3', runId: 'run-r3', result: r,
+      source: 'https://example.test/report', account: 'cab-7', period: '2026-09', rowCount: 1,
+    })
+    expect(evidence).toMatchObject({ browserTaskId: 'bt-r3', runId: 'run-r3', rowCount: 1 })
+    expect(evidence.checksum).toMatch(/^sha256:[a-f0-9]{64}$/)
+    expect(JSON.stringify(evidence)).not.toContain('secret-row')
   })
 
   it('экранирует HTML в title', async () => {

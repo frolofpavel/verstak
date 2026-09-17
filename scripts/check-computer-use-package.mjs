@@ -170,6 +170,9 @@ export function auditComputerHelperSource(source) {
   const executeObserveImplementation = source.match(
     /private\s+static\s+IDictionary<string,\s*object>\s+ExecuteObserve[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireObservationBudget)/,
   )?.[0] ?? ''
+  const exactWindowCaptureImplementation = source.match(
+    /private\s+static\s+string\s+CaptureExactWindowPng[\s\S]*?(?=\n\s*private\s+static\s+byte\[\]\s+EncodeWindowPng)/,
+  )?.[0] ?? ''
   const secureSurfaceImplementation = source.match(
     /private\s+static\s+bool\s+IsSecureSurface\s*\(\s*IntPtr\s+hwnd,\s*string\s+title,\s*int\s+maxElements[\s\S]*?(?=\n\s*private\s+static\s+bool\s+IsPassword)/,
   )?.[0] ?? ''
@@ -231,6 +234,20 @@ export function auditComputerHelperSource(source) {
   if (!/\{\s*"text"\s*,\s*aggregateText\.ToString\s*\(\s*\)\s*\}/.test(source)
     || !/action\.Expected\.UserInputEpoch\s*=\s*expectedInput/.test(source)) {
     failures.push('observable text and post-action input epoch contract missing')
+  }
+  if (!/private\s+const\s+int\s+MaxScreenshotBytes\s*=\s*16384\s*;/.test(source)
+    || !/private\s+const\s+int\s+MaxScreenshotWidth\s*=\s*512\s*;/.test(source)
+    || !/private\s+const\s+int\s+MaxScreenshotHeight\s*=\s*384\s*;/.test(source)
+    || !/PrintWindow\s*\(\s*expected\.Hwnd\s*,\s*hdc\s*,\s*PrintWindowRenderFullContent\s*\)/.test(exactWindowCaptureImplementation)
+    || !/SameIdentity\s*\(\s*expected\s*,\s*probe\.Identity\s*\)/.test(exactWindowCaptureImplementation)
+    || !/!probe\.Foreground/.test(exactWindowCaptureImplementation)
+    || !/probe\.ScreenLocked\s*\|\|\s*probe\.Elevated\s*\|\|\s*probe\.ProtectedProcess\s*\|\|\s*probe\.SecureSurface/.test(exactWindowCaptureImplementation)
+    || !/HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd/.test(exactWindowCaptureImplementation)
+    || !/cancellation\.ThrowIfCancellationRequested\s*\(\s*\)/.test(exactWindowCaptureImplementation)
+    || !/ProbeExact\s*\(\s*expected\s*,\s*true\s*\)/.test(exactWindowCaptureImplementation)
+    || !/result\["screenshotDataUrl"\]\s*=\s*screenshotDataUrl/.test(executeObserveImplementation)
+    || /(?:CopyFromScreen|BitBlt|GetDesktopWindow|GetDC\s*\(\s*IntPtr\.Zero|GetWindowDC)/.test(source)) {
+    failures.push('exact-window privacy-safe visual observation missing')
   }
   if (!/\[Parameter\s*\(\s*Mandatory\s*=\s*\$true\s*\)\][\s\S]{0,160}\[int\]\$OwnerPid/.test(source)
     || !/actual\.Pid\s*==\s*OwnerPid/.test(source)
@@ -416,6 +433,13 @@ export function auditComputerReducedActionSources({ helper, controller, main, to
     || !/prepared\.expectedAfterValueState\.scalarLength\s*!==\s*expectedAfterLength/.test(controller)
     || !/!postObservationMatchesValueState\s*\(/.test(controller)) {
     failures.push('controller ValuePattern independent readback contract missing')
+  }
+  if (!/await\s+delayWithAbort\s*\(\s*postconditionSettleMs\s*,\s*attempt\s*\)/.test(controller)
+    || !/settledObservation\s*=\s*await\s+captureObservation\s*\(\s*browserTaskId\s*,\s*runId\s*,\s*false\s*,\s*attempt\s*\)/.test(controller)
+    || !/assertStablePostObservation\s*\(\s*postObservation\s*,\s*settledObservation\s*\)/.test(controller)
+    || (controller.match(/assertPostActionObservation\s*\(/g)?.length ?? 0) < 3
+    || !/Math\.min\s*\(\s*MAX_POSTCONDITION_SETTLE_MS/.test(controller)) {
+    failures.push('controller stable two-observation postcondition contract missing')
   }
   if (!/expectedTransition:\s*\{\s*\.\.\.expectedElementTransition\s*\}/.test(controller)
     || !/!postObservationMatchesTransition\s*\(/.test(controller)) {
@@ -645,6 +669,17 @@ export function checkComputerUsePackage({ root, sourceDir }) {
   for (const message of auditComputerReducedActionSources({
     helper: sourceText, controller, main, tools, handler,
   })) fail(`reduced action surface: ${message}`)
+  if (!/MAX_COMPUTER_SCREENSHOT_BYTES\s*=\s*16\s*\*\s*1024/.test(protocol)
+    || !/MAX_COMPUTER_SCREENSHOT_WIDTH\s*=\s*512/.test(protocol)
+    || !/MAX_COMPUTER_SCREENSHOT_HEIGHT\s*=\s*384/.test(protocol)
+    || !/function\s+readScreenshotDataUrl\s*\(/.test(client)
+    || !/bytes\.length\s*>\s*MAX_COMPUTER_SCREENSHOT_BYTES/.test(client)
+    || !/bytes\.readUInt32BE\s*\(\s*16\s*\)/.test(client)
+    || !/width\s*>\s*MAX_COMPUTER_SCREENSHOT_WIDTH/.test(client)
+    || !/height\s*>\s*MAX_COMPUTER_SCREENSHOT_HEIGHT/.test(client)
+    || !/screenshotDataUrl:\s*readScreenshotDataUrl\s*\(\s*observation\.screenshotDataUrl\s*\)/.test(client)) {
+    fail('desktop screenshot transport bounds missing')
+  }
   const ensureChildImplementation = client.match(
     /private\s+ensureChild\s*\(\s*\)[\s\S]*?(?=\n\s*private\s+nextRequestId)/,
   )?.[0] ?? ''

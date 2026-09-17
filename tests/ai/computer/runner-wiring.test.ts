@@ -49,6 +49,7 @@ describe('Computer Use untrusted-context production wiring', () => {
     expect(source).toContain('resumeFromRunId: null')
     expect(source).toContain('!composerOverridesPreserveFreshProvenance(overrides)')
     expect(source).toContain('COMPUTER_USE_FRESH_COMPOSER_REQUIRED:')
+    expect(source).toContain("r3HandoffIntent.allowed && (!deps.browserController || !deps.browserTasks)")
   })
 
   it('wires durable taint through send, fork/delete and conversation search without raw content', () => {
@@ -151,6 +152,18 @@ describe('Computer Use untrusted-context production wiring', () => {
     expect(source).toContain('const hooks: CompiledHooks | null = !computerRunState.active')
     expect(source).toContain('selectComputerToolDefs(TOOL_DEFS, computerUseAllowedActions)')
     expect(source).toContain('sessionTodos: activeSessionTodos,')
+  })
+
+  it('offers the R3 lane in server-owned browser -> artifact -> computer phases only', () => {
+    const runner = readFileSync(join(process.cwd(), 'electron', 'ai', 'runner-api.ts'), 'utf8')
+    const dispatcher = readFileSync(join(process.cwd(), 'electron', 'ai', 'runner-tool-turn.ts'), 'utf8')
+    expect(runner).toContain("if (phase === 'artifact-ready') return computer.has(definition.name)")
+    expect(runner).toContain("if (phase === 'browser-ready')")
+    expect(runner).toContain("if (phase === null) return definition.name.startsWith('browser_')")
+    expect(runner).toContain("browserRunState.r3Handoff?.phase ?? null")
+    expect(dispatcher).toContain('createR3ServerHandoff(')
+    expect(dispatcher).toContain('persistR3HandoffCheckpoint?.(browserRunState.r3Handoff)')
+    expect(dispatcher).toContain('isR3BrowserMutationTool(toolName)')
   })
 
   it('fails route changes closed from active selected-window authority before any tool', () => {

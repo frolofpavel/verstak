@@ -26,6 +26,110 @@ function context(events: unknown[]): ToolContext {
 }
 
 describe('dispatchToolTurn', () => {
+  it('R3: browser-derived artifact is blocked without a server-owned handoff', async () => {
+    const handled: string[] = []
+    const [artifact] = await dispatchToolTurn({
+      toolCalls: [call('a1', 'generate_html')],
+      context: {
+        ...context([]),
+        browserTaskId: 'bt-r3', runId: 'run-r3',
+        browserRunState: { active: true, contextExposed: true },
+        computerRunState: { active: false, contextExposed: false },
+      } as ToolContext,
+      hooks: null,
+      addContext: vi.fn(),
+      resolveHandler: name => ({
+        mode: 'sequential',
+        handle: async toolCall => { handled.push(name); return result(toolCall) },
+      }),
+    })
+    expect(handled).toEqual([])
+    expect(artifact.error).toMatch(/handoff|Browser run|capability envelope/i)
+  })
+
+  it('security pin: ordinary browser read cannot mint an R3 artifact handoff', async () => {
+    const handled: string[] = []
+    const state = { active: false, contextExposed: false, screenshotExposed: false }
+    const ctx = {
+      ...context([]), browserTaskId: 'bt-ordinary', runId: 'run-ordinary',
+      browserRunState: state, computerRunState: { active: false, contextExposed: false },
+    } as unknown as ToolContext
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async current => { handled.push(name); return result(current) },
+    })
+    await dispatchToolTurn({ toolCalls: [call('b1', 'browser_read_page')], context: ctx, hooks: null, addContext: vi.fn(), resolveHandler })
+    const [artifact] = await dispatchToolTurn({ toolCalls: [call('a1', 'generate_html')], context: ctx, hooks: null, addContext: vi.fn(), resolveHandler })
+    expect(artifact.error).toMatch(/handoff|capability envelope/i)
+    expect(handled).toEqual(['browser_read_page'])
+    expect((state as any).r3Handoff).toBeUndefined()
+  })
+
+  it('R3: browser -> task artifact -> Computer uses one server-owned lineage and fresh composer consent', async () => {
+    const handled: string[] = []
+    const addContext = vi.fn()
+    const persistR3HandoffCheckpoint = vi.fn()
+    const browserRunState = { active: false, contextExposed: false, screenshotExposed: false, r3HandoffAllowed: true }
+    const computerRunState = { active: true, contextExposed: false }
+    const ctx = {
+      ...context([]),
+      browserTaskId: 'bt-r3', runId: 'run-r3',
+      browserRunState, computerRunState,
+      computerUseAllowedActions: ['observe', 'click'],
+      persistR3HandoffCheckpoint,
+    } as unknown as ToolContext
+    const resolveHandler = (name: string): ToolHandler => ({
+      mode: 'sequential',
+      handle: async toolCall => {
+        handled.push(name)
+        if (name === 'browser_read_page') {
+          return { ...result(toolCall), result: { finalUrl: 'https://example.test/report?token=secret', account: 'cab-7', observationText: 'row A\nrow B' } }
+        }
+        if (name === 'generate_html') {
+          const state = (ctx as any).browserRunState.r3Handoff
+          state.phase = 'artifact-ready'
+          state.checkpoint.resultRefs = [{ kind: 'artifact', ref: 'C:/repo/.verstak/artifacts/report.html', checksum: 'sha256:abc' }]
+          return { ...result(toolCall), result: 'HTML artifact saved: C:/repo/.verstak/artifacts/report.html' }
+        }
+        return result(toolCall)
+      },
+    })
+
+    const [read] = await dispatchToolTurn({ toolCalls: [call('b1', 'browser_read_page')], context: ctx, hooks: null, addContext, resolveHandler })
+    expect(read.error).toBeUndefined()
+    expect((browserRunState as any).r3Handoff).toMatchObject({ browserTaskId: 'bt-r3', runId: 'run-r3', phase: 'browser-ready' })
+    expect(persistR3HandoffCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ phase: 'browser-ready' }))
+
+    const [artifact] = await dispatchToolTurn({ toolCalls: [call('a1', 'generate_html')], context: ctx, hooks: null, addContext, resolveHandler })
+    expect(artifact.error).toBeUndefined()
+
+    const [computer] = await dispatchToolTurn({ toolCalls: [call('c1', 'computer_observe')], context: ctx, hooks: null, addContext, resolveHandler })
+    expect(computer.error).toBeUndefined()
+    expect(handled).toEqual(['browser_read_page', 'generate_html', 'computer_observe'])
+    expect(addContext).toHaveBeenCalledWith(expect.stringContaining('[VERSTAK_R3_HANDOFF_V1]'))
+  })
+
+  it('R3 mutation pin: completed browser handoff cannot replay a browser mutation', async () => {
+    const handled: string[] = []
+    const ctx = {
+      ...context([]), browserTaskId: 'bt-r3', runId: 'run-r3',
+      browserRunState: {
+        active: true, contextExposed: true, r3HandoffAllowed: true,
+        r3Handoff: {
+          version: 1, browserTaskId: 'bt-r3', runId: 'run-r3', phase: 'artifact-ready',
+          checkpoint: { version: 1, goal: 'browser-to-artifact-to-computer', constraints: [], confirmedActions: [], environment: {}, pendingApproval: null, resultRefs: [] },
+        },
+      },
+      computerRunState: { active: true, contextExposed: false },
+      computerUseAllowedActions: ['observe'],
+    } as unknown as ToolContext
+    const [replay] = await dispatchToolTurn({
+      toolCalls: [call('b2', 'browser_click')], context: ctx, hooks: null, addContext: vi.fn(),
+      resolveHandler: name => ({ mode: 'sequential', handle: async current => { handled.push(name); return result(current) } }),
+    })
+    expect(handled).toEqual([])
+    expect(replay.error).toMatch(/повтор|replay|handoff|Computer Use/i)
+  })
   it('browser run блокирует cross-tool мутацию, но исполняет browser tool', async () => {
     const events: unknown[] = []
     const handled: string[] = []

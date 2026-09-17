@@ -82,6 +82,55 @@ describe('generate_docx: дефолт места — «туда, где чело
     expect(savedPath(res).startsWith(join(project, '.verstak', 'artifacts'))).toBe(true)
   })
 
+  it('R3 browser handoff не позволяет модели вынести artifact из task dir', async () => {
+    const res = await generateDocxHandler.handle(
+      call({ filename: 'отчёт', sections: SECTIONS, save_to: 'downloads' }),
+      ctx({
+        projectPath: project, artifactsDownloadsDir: downloads, runId: 'run-r3', browserTaskId: 'bt-r3',
+        browserRunState: {
+          active: true, contextExposed: true, r3HandoffAllowed: true,
+          r3Handoff: {
+            version: 1, browserTaskId: 'bt-r3', runId: 'run-r3', phase: 'browser-ready',
+            checkpoint: { version: 1, goal: 'browser-to-artifact-to-computer', constraints: [], confirmedActions: [], environment: { source: null, account: null, period: null, rowCount: null, sourceChecksum: 'sha256:x' }, pendingApproval: null, resultRefs: [] },
+          },
+        },
+        appendBrowserArtifactProof: vi.fn(),
+        persistR3HandoffCheckpoint: vi.fn(),
+      } as any),
+    )
+    expect(res.error).toMatch(/task dir|project/i)
+    expect(existsSync(join(downloads, 'отчёт.docx'))).toBe(false)
+  })
+
+  it('R3 successful artifact emits proof + durable checkpoint callbacks from actual handler', async () => {
+    const appendBrowserArtifactProof = vi.fn()
+    const persistR3HandoffCheckpoint = vi.fn()
+    const handoff = {
+      version: 1 as const, browserTaskId: 'bt-r3', runId: 'run-r3', phase: 'browser-ready' as const,
+      checkpoint: {
+        version: 1 as const, goal: 'browser-to-artifact-to-computer' as const, constraints: ['no-replay'], confirmedActions: ['browser_read_page'],
+        environment: { source: 'https://example.test/report', account: 'cab-7', period: '2026-09', rowCount: 1, sourceChecksum: 'sha256:source' },
+        pendingApproval: null, resultRefs: [],
+      },
+    }
+    const res = await generateDocxHandler.handle(
+      call({ filename: 'отчёт-r3', sections: [{ paragraphs: ['итог'], table: { rows: [['a']] } }] }),
+      ctx({
+        projectPath: project, runId: 'run-r3', browserTaskId: 'bt-r3',
+        browserRunState: { active: true, contextExposed: true, r3HandoffAllowed: true, r3Handoff: handoff },
+        appendBrowserArtifactProof, persistR3HandoffCheckpoint,
+      } as any),
+    )
+    expect(res.error).toBeUndefined()
+    expect(String(res.result)).toContain('[VERSTAK_R3_HANDOFF_V1]')
+    expect(appendBrowserArtifactProof).toHaveBeenCalledWith(expect.objectContaining({
+      browserTaskId: 'bt-r3', runId: 'run-r3', rowCount: 1,
+      checksum: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+    }))
+    expect(persistR3HandoffCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ phase: 'artifact-ready' }))
+    expect(savedPath(res).startsWith(join(project, '.verstak', 'artifacts'))).toBe(true)
+  })
+
   it('§3.1 видимый след: строка активности называет ПОЛНЫЙ ПУТЬ (не только имя)', async () => {
     const sender = { send: vi.fn(), exec: vi.fn(async () => undefined) }
     await generateDocxHandler.handle(

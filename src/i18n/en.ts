@@ -384,7 +384,7 @@ export const en = {
       boundNotice: 'Access is limited to the selected window.',
       revokedNotice: 'Window access revoked.',
       stoppedNotice: 'Input queue stopped.',
-      dataScope: "Text, names, and roles of visible UIA elements in the selected window are sent to the selected AI model after recognizable secrets are redacted locally. Screenshots are not sent in R2. The Computer Use layer does not copy observation or window contents, or text typed into the target, into technical telemetry, checkpoints, the agent-run journal, or memory. Ordinary visible chat and selected-model data handling remain governed by the app's general data policy.",
+      dataScope: "Text, names, and roles of visible UIA elements in the selected window are sent to the selected AI model after recognizable secrets are redacted locally. R2 may also send a bounded capture of the exact selected window after local protected, password, and credential-surface checks; it never captures the full desktop. The Computer Use layer does not copy observation or window contents, or text typed into the target, into technical telemetry, checkpoints, the agent-run journal, or memory. Ordinary visible chat and selected-model data handling remain governed by the app's general data policy.",
       boundary: 'UAC, sign-in screens, CAPTCHA, 2FA, passwords, and elevated windows are unsupported. Physical user input or focus loss stops the queue.',
     },
     nightMode: 'Night mode',

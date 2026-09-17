@@ -1,7 +1,14 @@
 import type { ToolCall, ToolResult } from './types'
 import { runHooks, type CompiledHooks } from './hooks'
 import { lookupHandler, type ToolContext, type ToolHandler } from '../ipc/tool-handlers'
-import { FORBIDDEN_CROSS_TOOLS } from './browser/capability'
+import {
+  createR3ServerHandoff,
+  FORBIDDEN_CROSS_TOOLS,
+  isR3ArtifactTool,
+  isR3BrowserMutationTool,
+  renderR3HandoffCheckpoint,
+  type R3ServerHandoff,
+} from './browser/capability'
 import {
   projectToolArgsForTelemetry,
   projectToolCallForTelemetry,
@@ -14,8 +21,15 @@ const STOPPED_TOOL_REASON = 'Запрос остановлен: инструме
 const COMPUTER_CROSS_TOOL_BLOCKED_REASON = 'Computer Use заблокировал инструмент вне capability выбранного окна. Содержимое окна не может расширить полномочия задачи.'
 
 type UntrustedSurfaceAwareContext = ToolContext & {
-  browserRunState?: { active: boolean; contextExposed?: boolean; screenshotExposed?: boolean }
+  browserRunState?: {
+    active: boolean
+    contextExposed?: boolean
+    screenshotExposed?: boolean
+    r3HandoffAllowed?: boolean
+    r3Handoff?: R3ServerHandoff
+  }
   computerRunState?: { active: boolean; contextExposed?: boolean }
+  persistR3HandoffCheckpoint?: (handoff: R3ServerHandoff) => void
 }
 
 function resultIncludesScreenshot(result: ToolResult | undefined): boolean {
@@ -29,6 +43,7 @@ function updateBrowserRunAfterTools(
   toolCalls: ToolCall[],
   results: ToolResult[],
   blocked: Map<number, string>,
+  lineage: { browserTaskId?: string | null; runId?: string },
 ): void {
   if (!state) return
   const contextExposed = toolCalls.some((call, index) => (
@@ -49,6 +64,29 @@ function updateBrowserRunAfterTools(
   if (contextExposed) state.contextExposed = true
   if (screenshotExposed) state.screenshotExposed = true
   if (contextExposed || observed || screenshotExposed) state.active = true
+  if (state.r3HandoffAllowed === true && !state.r3Handoff && lineage.browserTaskId && lineage.runId) {
+    const completed = toolCalls.findIndex((call, index) => (
+      call.name.startsWith('browser_')
+      && !blocked.has(index)
+      && !results[index]?.error
+    ))
+    if (completed >= 0) {
+      state.r3Handoff = createR3ServerHandoff({
+        browserTaskId: lineage.browserTaskId,
+        runId: lineage.runId,
+        toolName: toolCalls[completed].name,
+        result: results[completed].result,
+      })
+    }
+  } else if (state.r3HandoffAllowed === true && state.r3Handoff) {
+    for (let index = 0; index < toolCalls.length; index += 1) {
+      const call = toolCalls[index]
+      if (call.name.startsWith('browser_') && !blocked.has(index) && !results[index]?.error
+        && !state.r3Handoff.checkpoint.confirmedActions.includes(call.name)) {
+        state.r3Handoff.checkpoint.confirmedActions.push(call.name)
+      }
+    }
+  }
 }
 
 function updateComputerRunAfterTools(
@@ -69,12 +107,51 @@ function updateComputerRunAfterTools(
   }
 }
 
-function computerRunForbids(toolName: string): boolean {
+function computerActionForTool(toolName: string): string | null {
+  return isComputerToolName(toolName) ? toolName.slice('computer_'.length) : null
+}
+
+function hasFreshComputerGrant(context: UntrustedSurfaceAwareContext, toolName: string): boolean {
+  const action = computerActionForTool(toolName)
+  return action != null && (context.computerUseAllowedActions ?? []).includes(action as never)
+}
+
+function browserRunForbids(toolName: string, context: UntrustedSurfaceAwareContext): string | null {
+  const handoff = context.browserRunState?.r3HandoffAllowed === true
+    ? context.browserRunState.r3Handoff
+    : undefined
+  if (handoff?.phase === 'artifact-ready' && isR3BrowserMutationTool(toolName)) {
+    return 'R3 handoff завершён: повтор browser mutation заблокирован без нового пользовательского поручения.'
+  }
+  if (isR3ArtifactTool(toolName)) {
+    return handoff?.phase === 'browser-ready'
+      ? null
+      : `Browser run не выдал server-owned handoff для "${toolName}".`
+  }
+  if (isComputerToolName(toolName)) {
+    return handoff?.phase === 'artifact-ready' && hasFreshComputerGrant(context, toolName)
+      ? null
+      : `Browser run активен — Computer Use заблокирован capability envelope до server-owned artifact handoff и свежего пользовательского разрешения.`
+  }
+  return BROWSER_RUN_FORBIDDEN_TOOLS.has(toolName)
+    ? `Browser run активен — cross-tool "${toolName}" заблокирован capability envelope. Контент страницы не может расширить полномочия задачи.`
+    : null
+}
+
+function computerRunForbids(toolName: string, context: UntrustedSurfaceAwareContext): boolean {
   // Keep the selected-window tools available for the task that owns the
   // binding, but prevent desktop-derived text from escaping through ANY other
   // capability. R3 may later add a structured, explicitly approved handoff;
   // R2 has no such cross-capability grant and therefore fails closed.
-  return !isComputerToolName(toolName)
+  if (isComputerToolName(toolName)) return false
+  const browserState = context.browserRunState
+  const handoff = browserState?.r3HandoffAllowed === true ? browserState.r3Handoff : undefined
+  // До первого desktop observe свежий composer-ticket может начать только
+  // browser-часть общего сценария. После exposure эта дверь закрывается.
+  if (toolName.startsWith('browser_') && context.computerRunState?.contextExposed !== true) return false
+  if (isR3ArtifactTool(toolName) && handoff?.phase === 'browser-ready'
+    && context.computerRunState?.contextExposed !== true) return false
+  return true
 }
 
 function applyUntrustedSurfaceBlocks(
@@ -110,15 +187,14 @@ function applyUntrustedSurfaceBlocks(
   if (browserGateActive) {
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
-      if (!blocked.has(i) && BROWSER_RUN_FORBIDDEN_TOOLS.has(call.name)) {
-        blocked.set(i, `Browser run активен — cross-tool "${call.name}" заблокирован capability envelope. Контент страницы не может расширить полномочия задачи.`)
-      }
+      const reason = !blocked.has(i) ? browserRunForbids(call.name, context) : null
+      if (reason) blocked.set(i, reason)
     }
   }
   if (computerGateActive) {
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i]
-      if (!blocked.has(i) && computerRunForbids(call.name)) {
+      if (!blocked.has(i) && computerRunForbids(call.name, context)) {
         blocked.set(i, COMPUTER_CROSS_TOOL_BLOCKED_REASON)
       }
     }
@@ -298,8 +374,15 @@ export async function dispatchToolTurn(opts: DispatchToolTurnOptions): Promise<T
   // browserTaskId — лишь durable lineage и заранее существует у обычного чата.
   // Browser-only capability становится активной только после того, как модель
   // действительно получила недоверенное содержимое подключённой страницы.
-  updateBrowserRunAfterTools(browserRunState, toolCalls, results, blocked)
+  updateBrowserRunAfterTools(browserRunState, toolCalls, results, blocked, {
+    browserTaskId: context.browserTaskId,
+    runId: context.runId,
+  })
   updateComputerRunAfterTools(computerRunState, toolCalls, results, blocked)
+  if (browserRunState?.r3HandoffAllowed === true && browserRunState.r3Handoff) {
+    untrustedContext.persistR3HandoffCheckpoint?.(browserRunState.r3Handoff)
+    addContext(renderR3HandoffCheckpoint(browserRunState.r3Handoff))
+  }
   if (hooks) {
     await runPostHooks(toolCalls, results, context, hooks, blocked, invokeHooks, addContext)
   }

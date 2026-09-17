@@ -388,6 +388,43 @@ describe('EXT-B0: crash recovery — executing → uncertain без повтор
 })
 
 describe('EXT-B0: proof refs (BR-016) — redacted, no raw secrets', () => {
+  it('R3 checkpoint durable: constraints/pending approval/result refs переживают reopen и run handoff', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    bt.saveR3HandoffCheckpoint({
+      version: 1, browserTaskId: 'bt', runId: 'r1', phase: 'artifact-ready',
+      checkpoint: {
+        version: 1, goal: 'browser-to-artifact-to-computer', constraints: ['no-replay'],
+        confirmedActions: ['browser_read_page'], environment: { source: 'https://example.test/report', account: null, period: '2026-09', rowCount: 7, sourceChecksum: 'sha256:source' },
+        pendingApproval: { kind: 'computer:click', digest: 'digest-1' },
+        resultRefs: [{ kind: 'artifact', ref: '/p/.verstak/artifacts/report.html', checksum: 'sha256:artifact' }],
+      },
+    })
+    bt.appendRun({ browserTaskId: 'bt', runId: 'r2', handoffReason: 'pause_resume' })
+    bt.setDataPolicy('bt', { screenshots: 'redacted' })
+    expect(bt.getR3HandoffCheckpoint('bt')).toMatchObject({
+      browserTaskId: 'bt', runId: 'r1', phase: 'artifact-ready',
+      checkpoint: { constraints: ['no-replay'], pendingApproval: { digest: 'digest-1' }, resultRefs: [{ checksum: 'sha256:artifact' }] },
+    })
+    expect(bt.get('bt')!.dataPolicy).toMatchObject({ screenshots: 'redacted' })
+  })
+
+  it('R3 artifact evidence пишется в тот же ledger и проверяет task/run lineage', () => {
+    bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
+    expect(bt.appendArtifactProof({
+      browserTaskId: 'bt', runId: 'r1', artifactPath: '/p/.verstak/artifacts/report.html',
+      checksum: 'sha256:abc', source: 'https://example.test/report', account: 'cab-7',
+      period: '2026-09', rowCount: 12,
+    })).toBeGreaterThan(0)
+    expect(() => bt.appendArtifactProof({
+      browserTaskId: 'bt', runId: 'foreign', artifactPath: '/p/x.html', checksum: 'sha256:def',
+      source: null, account: null, period: null, rowCount: null,
+    })).toThrow(/lineage/i)
+    const [ref] = bt.listProofRefs('bt')
+    expect(ref.kind).toBe('action')
+    expect(ref.artifactDigest).toBe('sha256:abc')
+    expect(ref.redactedSummary).toContain('"rowCount":12')
+  })
+
   it('appendProofRef не принимает cookie/token (contract)', () => {
     bt.create({ browserTaskId: 'bt', projectPath: '/p', runId: 'r1' })
     const id = bt.appendProofRef({

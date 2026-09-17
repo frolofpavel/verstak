@@ -1311,6 +1311,16 @@ app.whenReady().then(() => {
       const id = makeCapabilityId('skill', skill.id)
       return computeTrust(collectEvidence(db, id, skillVersion(skill))).level
     },
+    /** Identity/version share the exact resolver used by provenance linking. */
+    getCapabilityIdentity: (skillId: string) => {
+      const skill = skillRegistry.list().find(s => s.id === skillId)
+      if (!skill) return undefined
+      return { id: makeCapabilityId('skill', skill.id), version: skillVersion(skill) }
+    },
+    getActivePolicyOwnerId: () => {
+      const profile = userProfiles.getActive()
+      return profile ? `profile:${profile.id}` : null
+    },
     // MCP client — внешние инструменты через Model Context Protocol
     mcpClient,
     // Процедурная память — детектирует паттерны решения задач

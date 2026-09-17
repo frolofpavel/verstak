@@ -8,7 +8,8 @@
  * для send_document через telegram коннектор.
  */
 
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import { createHash } from 'node:crypto'
 import { join, dirname, resolve, sep } from 'path'
 import { Document, Paragraph, HeadingLevel, TextRun, Packer, Table, TableRow, TableCell, WidthType } from 'docx'
 import { renderVerificationHtml, type VerificationArtifact } from './verification'
@@ -20,6 +21,45 @@ export interface ArtifactResult {
   kind: 'html' | 'docx'
   sizeBytes: number
   filename: string
+}
+
+export interface BrowserArtifactEvidence {
+  browserTaskId: string
+  runId: string
+  artifactPath: string
+  checksum: string
+  source: string | null
+  account: string | null
+  period: string | null
+  rowCount: number | null
+}
+
+/**
+ * R3 proof projection. The checksum is calculated from the file written by our
+ * artifact generator; document contents are never copied into the durable
+ * ledger. Metadata arrives from the redacted server-owned browser handoff.
+ */
+export async function buildBrowserArtifactEvidence(input: {
+  browserTaskId: string
+  runId: string
+  result: ArtifactResult
+  source: string | null
+  account: string | null
+  period: string | null
+  rowCount: number | null
+}): Promise<BrowserArtifactEvidence> {
+  const bytes = await readFile(input.result.path)
+  const checksum = createHash('sha256').update(bytes).digest('hex')
+  return {
+    browserTaskId: input.browserTaskId,
+    runId: input.runId,
+    artifactPath: input.result.path,
+    checksum: `sha256:${checksum}`,
+    source: input.source,
+    account: input.account,
+    period: input.period,
+    rowCount: input.rowCount,
+  }
 }
 
 /** Корень для артефактов внутри проекта. */

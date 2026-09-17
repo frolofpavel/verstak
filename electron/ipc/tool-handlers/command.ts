@@ -3,7 +3,6 @@ import type { ToolHandler } from './shared'
 import { awaitCommandConfirm } from './shared'
 import { scanText } from '../../ai/secret-scanner'
 import { blockReason } from '../../ai/mode-policy'
-import { resolveDecision } from '../../ai/permission-rules'
 import { parseAllowlist, matchesAllowlist } from '../../ai/bash-allowlist'
 import { hashCommandForAudit, type SmartApproveResult } from '../../ai/smart-approve'
 import { isVerifierCommand } from '../../ai/command-policy'
@@ -12,6 +11,8 @@ import { join } from 'path'
 import { artifactsDir } from '../../ai/artifacts'
 import { splitLargeOutput, commandOutputFileName, COMMAND_OUTPUT_LIMIT } from '../../ai/large-output'
 import { attributeFailure, formatAttribution } from '../../ai/failure-attribution'
+import { createDecisionReadback, evaluatePolicyDecision, serializeDecisionTrace } from '../../ai/policy-decision'
+import type { DecisionContextV1, DecisionReadbackV1, DecisionTraceV1 } from '../../../shared/contracts/policy-decision'
 
 export function isSmartApproveEnabled(ctx: Parameters<ToolHandler['handle']>[1]): boolean {
   return ctx.smartApproveEnabled ?? process.env.USE_SMART_APPROVE === 'true'
@@ -81,45 +82,105 @@ export function recordSmartApproveAudit(
   } catch { /* best-effort */ }
 }
 
+function commandDecisionContext(ctx: Parameters<ToolHandler['handle']>[1]): DecisionContextV1 {
+  const identity = ctx.policyIdentity
+  const capability = identity?.capability
+    ? { ...identity.capability, trust: ctx.capabilityTrust ?? identity.capability.trust }
+    : null
+  return {
+    schemaVersion: 1,
+    policyVersion: 's2-a1-v1',
+    timestamp: Date.now(),
+    agentId: identity?.agentId ?? null,
+    ownerId: identity?.ownerId ?? null,
+    taskId: identity?.taskId ?? null,
+    // A nested durable job is more specific than the run-level identity and is
+    // read from server context, never from tool args.
+    jobId: ctx.parentJobId ?? null,
+    runId: ctx.runId ?? null,
+    capability,
+    mode: ctx.agentMode,
+    tool: 'run_command',
+    operation: 'execute',
+    normalizedTarget: { kind: 'command', digest: '', scope: 'project' },
+    dataClass: 'project-local',
+    envelope: { costCents: null, runtimeMs: null },
+    effectful: true,
+  }
+}
+
+function recordPolicyTrace(ctx: Parameters<ToolHandler['handle']>[1], trace: DecisionTraceV1): void {
+  if (trace.rolloutMode === 'off') return
+  const detail = serializeDecisionTrace(trace)
+  try { ctx.recordRunEvent?.('policy_decision', { label: trace.context.tool, detail, status: trace.enforcedDecision }) } catch { /* best-effort */ }
+  try { ctx.appendAudit?.('policy_decision', detail) } catch { /* best-effort */ }
+}
+
+function recordPolicyReadback(
+  ctx: Parameters<ToolHandler['handle']>[1],
+  trace: DecisionTraceV1,
+  readback: DecisionReadbackV1,
+): void {
+  if (trace.rolloutMode === 'off') return
+  const detail = JSON.stringify(readback)
+  try { ctx.recordRunEvent?.('policy_result', { label: 'run_command', detail, status: readback.status }) } catch { /* best-effort */ }
+  try { ctx.appendAudit?.('policy_result', detail) } catch { /* best-effort */ }
+}
+
 export const runCommandHandler: ToolHandler = {
   mode: 'sequential',
   async handle(call, ctx) {
     const command = String(call.args.command ?? '')
+    let hardDenyReason: string | undefined
+    let hardDenyResponse: string | undefined
     if (ctx.parentJobId && ctx.agentJobs) {
       const job = ctx.agentJobs.get(ctx.parentJobId)
       if (!job) {
-        return { id: call.id, name: call.name, result: '', error: 'Agent Job не найдена: команда безопасно остановлена.' }
-      }
-      const unrestrictedWriter = job.writeScope.includes('**')
-      if (!unrestrictedWriter && !isVerifierCommand(command)) {
-        const reason = job.writeScope.length === 0
-          ? 'Read-only Agent Job может запускать только проверочные команды.'
-          : 'Команда может писать вне ограниченного write scope; используй write_file/apply_patch или расширь scope через решение пользователя.'
-        return { id: call.id, name: call.name, result: '', error: reason }
+        hardDenyReason = 'agent-job-not-found'
+        hardDenyResponse = 'Agent Job не найдена: команда безопасно остановлена.'
+      } else {
+        const unrestrictedWriter = job.writeScope.includes('**')
+        if (!unrestrictedWriter && !isVerifierCommand(command)) {
+          const reason = job.writeScope.length === 0
+            ? 'Read-only Agent Job может запускать только проверочные команды.'
+            : 'Команда может писать вне ограниченного write scope; используй write_file/apply_patch или расширь scope через решение пользователя.'
+          hardDenyReason = 'agent-job-scope-deny'
+          hardDenyResponse = reason
+        }
       }
     }
     const verdict = ctx.tools.classifyCommand(command)
-    if (!verdict.allowed) {
-      ctx.sender.send('ai:event', {
-        id: ctx.sendId,
-        event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason: verdict.reason ?? 'denylist' }
-      })
-      return {
-        id: call.id, name: call.name,
-        result: `Command: ${command}`,
-        error: `Blocked by safety policy: ${verdict.reason ?? 'denylist'}`
-      }
+    if (!verdict.allowed && !hardDenyReason) {
+      hardDenyReason = verdict.reason ?? 'denylist'
+      hardDenyResponse = `Blocked by safety policy: ${verdict.reason ?? 'denylist'}`
     }
-    // Mode policy: plan blocks, ask confirms, auto/bypass auto-accept,
-    // accept-edits still confirms commands (only edits auto-pass).
-    const { decision, reason: denyReason, confirmCause } = resolveDecision('run_command', call.args, ctx.agentMode, ctx.autoApprove, ctx.permissionRules, ctx.capabilityTrust)
+    const policy = evaluatePolicyDecision({
+      context: commandDecisionContext(ctx),
+      args: call.args,
+      autoApprove: ctx.autoApprove,
+      permissionRules: ctx.permissionRules,
+      capabilityTrust: ctx.capabilityTrust,
+      featureMode: ctx.policyDecisionMode,
+      hardDenyReason,
+    })
+    recordPolicyTrace(ctx, policy.trace)
+    const decision = policy.decision === 'deny'
+      ? 'block'
+      : policy.decision === 'require_confirmation' ? 'confirm' : 'auto-accept'
+    const confirmCause = policy.confirmCause
     if (decision === 'block') {
-      const reason = denyReason ?? blockReason('run_command', ctx.agentMode)
+      const reason = hardDenyResponse ?? policy.denyReason ?? blockReason('run_command', ctx.agentMode)
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
         event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason }
       })
-      return { id: call.id, name: call.name, result: '', error: reason }
+      recordPolicyReadback(ctx, policy.trace, createDecisionReadback(policy.trace, { status: 'blocked' }))
+      return {
+        id: call.id,
+        name: call.name,
+        result: hardDenyResponse?.startsWith('Blocked by safety policy:') ? `Command: ${command}` : '',
+        error: reason,
+      }
     }
     // Tier-2 #4: доверенная команда (настройка bash_allowlist) авто-аппрувится —
     // но ТОЛЬКО когда подтверждения требует РЕЖИМ (confirmCause === 'mode').
@@ -141,6 +202,7 @@ export const runCommandHandler: ToolHandler = {
           id: ctx.sendId,
           event: { type: 'tool-blocked', callId: call.id, name: 'run_command', command, reason }
         })
+        recordPolicyReadback(ctx, policy.trace, createDecisionReadback(policy.trace, { status: 'blocked' }))
         return { id: call.id, name: call.name, result: `Command: ${command}`, error: reason }
       }
       if (smart.verdict === 'escalate') {
@@ -164,6 +226,7 @@ export const runCommandHandler: ToolHandler = {
     }
     if (!accepted) {
       ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'command-result', callId: call.id, command, status: 'rejected' } })
+      recordPolicyReadback(ctx, policy.trace, createDecisionReadback(policy.trace, { status: 'rejected' }))
       return { id: call.id, name: call.name, result: `Command: ${command}`, error: 'User rejected' }
     }
     try {
@@ -173,6 +236,12 @@ export const runCommandHandler: ToolHandler = {
       // контекст и в Timeline.
       const stdout = scanText(result.stdout).redacted
       const stderr = scanText(result.stderr).redacted
+      recordPolicyReadback(ctx, policy.trace, createDecisionReadback(policy.trace, {
+        status: result.exitCode === 0 ? 'ok' : 'error',
+        exitCode: result.exitCode,
+        stdout,
+        stderr,
+      }))
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
         event: { type: 'command-result', callId: call.id, command, status: 'ok', exitCode: result.exitCode, stdout, stderr }
@@ -211,6 +280,7 @@ export const runCommandHandler: ToolHandler = {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      recordPolicyReadback(ctx, policy.trace, createDecisionReadback(policy.trace, { status: 'error', stderr: scanText(msg).redacted }))
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
         event: { type: 'command-result', callId: call.id, command, status: 'error', error: msg }

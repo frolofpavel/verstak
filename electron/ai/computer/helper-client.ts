@@ -13,6 +13,9 @@ import {
   MAX_COMPUTER_CANDIDATES,
   MAX_COMPUTER_ELEMENTS,
   MAX_COMPUTER_MESSAGE_BYTES,
+  MAX_COMPUTER_SCREENSHOT_BYTES,
+  MAX_COMPUTER_SCREENSHOT_HEIGHT,
+  MAX_COMPUTER_SCREENSHOT_WIDTH,
   MAX_COMPUTER_STDERR_BYTES,
   MAX_COMPUTER_TEXT_BYTES,
   makeComputerRequest,
@@ -246,6 +249,37 @@ function asValueState(value: unknown, errorMessage: string): ComputerValueState 
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readScreenshotDataUrl(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  const prefix = 'data:image/png;base64,'
+  if (typeof value !== 'string' || !value.startsWith(prefix)) {
+    throw new ComputerHelperProtocolError('helper screenshot must be a bounded PNG data URL')
+  }
+  const encoded = value.slice(prefix.length)
+  if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
+    throw new ComputerHelperProtocolError('helper screenshot base64 is invalid')
+  }
+  const bytes = Buffer.from(encoded, 'base64')
+  if (bytes.length === 0
+    || bytes.length > MAX_COMPUTER_SCREENSHOT_BYTES
+    || bytes.toString('base64') !== encoded) {
+    throw new ComputerHelperProtocolError('helper screenshot exceeds the byte limit')
+  }
+  if (bytes.length < 24
+    || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    || bytes.readUInt32BE(8) !== 13
+    || bytes.subarray(12, 16).toString('ascii') !== 'IHDR') {
+    throw new ComputerHelperProtocolError('helper screenshot PNG header is invalid')
+  }
+  const width = bytes.readUInt32BE(16)
+  const height = bytes.readUInt32BE(20)
+  if (width < 1 || width > MAX_COMPUTER_SCREENSHOT_WIDTH
+    || height < 1 || height > MAX_COMPUTER_SCREENSHOT_HEIGHT) {
+    throw new ComputerHelperProtocolError('helper screenshot dimensions exceed the limit')
+  }
+  return value
 }
 
 function asIdentity(value: unknown): ComputerWindowIdentity {
@@ -505,8 +539,12 @@ export class ComputerHelperClient {
           verticalPercent: value.scrollState.verticalPercent,
         }
       }
+      // JSON `null` means the helper could not expose this optional state. Do
+      // not leak the raw nullable wire fields into the stricter controller
+      // contract, where optional state is represented only by `undefined`.
+      const { valueState: _wireValueState, scrollState: _wireScrollState, ...element } = value
       return {
-        ...(value as unknown as ComputerObservation['elements'][number]),
+        ...(element as unknown as ComputerObservation['elements'][number]),
         ...(valueState ? { valueState } : {}),
         ...(scrollState ? { scrollState } : {}),
       }
@@ -515,10 +553,7 @@ export class ComputerHelperClient {
       probe: this.readProbe(observation.probe),
       elements,
       text: typeof observation.text === 'string' ? observation.text : undefined,
-      screenshotDataUrl: typeof observation.screenshotDataUrl === 'string'
-        && observation.screenshotDataUrl.startsWith('data:image/')
-        ? observation.screenshotDataUrl
-        : undefined,
+      screenshotDataUrl: readScreenshotDataUrl(observation.screenshotDataUrl),
       omissions: Array.isArray(observation.omissions)
         ? observation.omissions.filter((value): value is string => typeof value === 'string')
         : [],

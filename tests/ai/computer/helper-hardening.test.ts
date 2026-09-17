@@ -211,6 +211,24 @@ function scrollStateGuardIsPinned(source: string): boolean {
     && source.includes('if (delta == 0) return before == after;')
 }
 
+function exactWindowVisualObservationIsPinned(source: string): boolean {
+  const capture = source.match(
+    /private\s+static\s+string\s+CaptureExactWindowPng[\s\S]*?(?=\n\s*private\s+static\s+byte\[\]\s+EncodeWindowPng)/,
+  )?.[0] ?? ''
+  return /private\s+const\s+int\s+MaxScreenshotBytes\s*=\s*16384\s*;/.test(source)
+    && /private\s+const\s+int\s+MaxScreenshotWidth\s*=\s*512\s*;/.test(source)
+    && /private\s+const\s+int\s+MaxScreenshotHeight\s*=\s*384\s*;/.test(source)
+    && /PrintWindow\s*\(\s*expected\.Hwnd\s*,\s*hdc\s*,\s*PrintWindowRenderFullContent\s*\)/.test(capture)
+    && /SameIdentity\s*\(\s*expected\s*,\s*probe\.Identity\s*\)/.test(capture)
+    && /!probe\.Foreground/.test(capture)
+    && /probe\.ScreenLocked\s*\|\|\s*probe\.Elevated\s*\|\|\s*probe\.ProtectedProcess\s*\|\|\s*probe\.SecureSurface/.test(capture)
+    && /HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd/.test(capture)
+    && /cancellation\.ThrowIfCancellationRequested\s*\(\s*\)/.test(capture)
+    && /ProbeExact\s*\(\s*expected\s*,\s*true\s*\)/.test(capture)
+    && /"screenshotDataUrl"/.test(source)
+    && !/(?:CopyFromScreen|BitBlt|GetDesktopWindow|GetDC\s*\(\s*IntPtr\.Zero|GetWindowDC)/.test(source)
+}
+
 function unicodeToken(value: string, token: string): boolean {
   let from = 0
   while (from <= value.length - token.length) {
@@ -226,6 +244,18 @@ function unicodeToken(value: string, token: string): boolean {
 }
 
 describe('computer helper hardening contracts', () => {
+  it('captures pixels only from the exact safe selected HWND with hard privacy bounds', () => {
+    const source = helperSource()
+    expect(exactWindowVisualObservationIsPinned(source)).toBe(true)
+
+    const desktopMutation = source.replace(
+      'PrintWindow(expected.Hwnd, hdc, PrintWindowRenderFullContent)',
+      'CopyFromScreen(0, 0, 0, 0, source.Size)',
+    )
+    expect(desktopMutation).not.toBe(source)
+    expect(exactWindowVisualObservationIsPinned(desktopMutation)).toBe(false)
+  })
+
   it('prefilters 130 ineligible windows before lifecycle-arm and retains a following valid window', () => {
     const source = helperSource()
     expect(candidatePrefilterIsArmedSafely(source)).toBe(true)
@@ -256,8 +286,8 @@ describe('computer helper hardening contracts', () => {
     expect(bindingSurfaceBudgetIsPinned(source)).toBe(true)
 
     const actionBudgetMutation = source.replace(
-      'MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs',
-      'MaxSurfaceInspectionElements, BindingSurfaceInspectionTimeoutMs',
+      'return ProbeExact(expected, blockUnsafe, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs);',
+      'return ProbeExact(expected, blockUnsafe, MaxSurfaceInspectionElements, BindingSurfaceInspectionTimeoutMs);',
     )
     expect(actionBudgetMutation).not.toBe(source)
     expect(bindingSurfaceBudgetIsPinned(actionBudgetMutation)).toBe(false)

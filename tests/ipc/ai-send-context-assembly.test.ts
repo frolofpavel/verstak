@@ -58,6 +58,21 @@ beforeEach(() => {
 })
 
 describe('assembleSendSystem — приоритет веток системного слоя', () => {
+  it('R3 ticket uses one isolated browser-artifact-computer envelope and no project context', async () => {
+    const r = await assembleSendSystem({
+      ...baseInput,
+      computerUseEnvelopeLocked: true,
+      r3HandoffAllowed: true,
+      projectPath: tmpdir(),
+    })
+    expect(r.messagesWithSystem).toHaveLength(2)
+    expect(r.messagesWithSystem[0].content).toContain('lane="browser-artifact-computer"')
+    expect(r.messagesWithSystem[0].content).toContain('browser → artifact → selected-window')
+    expect(r.messagesWithSystem[1]).toEqual(messages[0])
+    expect(r.brain).toBeNull()
+    expect(prepareSystemContext).not.toHaveBeenCalled()
+  })
+
   it('resume того же провайдера подаёт историю чекпойнта как есть, без пере-сборки', async () => {
     const resumed = [{ role: 'system' as const, content: 'OLD' }, { role: 'user' as const, content: 'ранее' }]
     const r = await assembleSendSystem({

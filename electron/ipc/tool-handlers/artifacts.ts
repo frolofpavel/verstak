@@ -4,6 +4,72 @@ import type { ToolHandler } from './shared'
 import { resolveDecision } from '../../ai/permission-rules'
 import { blockReason } from '../../ai/mode-policy'
 import type { ToolCall } from '../../ai/types'
+import type { BrowserArtifactEvidence } from '../../ai/artifacts'
+import { renderR3HandoffCheckpoint, type R3ServerHandoff } from '../../ai/browser/capability'
+
+export type AppendBrowserArtifactProof = (evidence: BrowserArtifactEvidence) => void
+export type PersistR3HandoffCheckpoint = (handoff: R3ServerHandoff) => void
+
+type R3ArtifactContext = Parameters<ToolHandler['handle']>[1] & {
+  browserRunState?: { r3HandoffAllowed?: boolean; r3Handoff?: R3ServerHandoff }
+  appendBrowserArtifactProof?: AppendBrowserArtifactProof
+  persistR3HandoffCheckpoint?: PersistR3HandoffCheckpoint
+}
+
+function activeR3Handoff(ctx: R3ArtifactContext): R3ServerHandoff | null {
+  const handoff = ctx.browserRunState?.r3Handoff
+  if (ctx.browserRunState?.r3HandoffAllowed !== true || !handoff || handoff.phase !== 'browser-ready') return null
+  if (!ctx.browserTaskId || !ctx.runId
+    || handoff.browserTaskId !== ctx.browserTaskId || handoff.runId !== ctx.runId) return null
+  return handoff
+}
+
+function r3ArtifactPreflightError(ctx: R3ArtifactContext): string | null {
+  if (ctx.browserRunState?.r3HandoffAllowed !== true) return null
+  if (!activeR3Handoff(ctx)) return 'R3 artifact handoff missing or lineage mismatch.'
+  if (!ctx.appendBrowserArtifactProof || !ctx.persistR3HandoffCheckpoint) {
+    return 'R3 durable proof storage unavailable; artifact was not created.'
+  }
+  return null
+}
+
+async function completeR3Artifact(
+  ctx: R3ArtifactContext,
+  result: import('../../ai/artifacts').ArtifactResult,
+  rowCount: number | null,
+): Promise<string | null> {
+  const handoff = activeR3Handoff(ctx)
+  if (!handoff) return null
+  if (!ctx.appendBrowserArtifactProof || !ctx.persistR3HandoffCheckpoint) {
+    throw new Error('R3 durable proof storage unavailable after artifact generation; do not retry automatically.')
+  }
+  const { buildBrowserArtifactEvidence } = await import('../../ai/artifacts')
+  const evidence = await buildBrowserArtifactEvidence({
+    browserTaskId: handoff.browserTaskId,
+    runId: handoff.runId,
+    result,
+    source: handoff.checkpoint.environment.source,
+    account: handoff.checkpoint.environment.account,
+    period: handoff.checkpoint.environment.period,
+    rowCount: rowCount ?? handoff.checkpoint.environment.rowCount,
+  })
+  ctx.appendBrowserArtifactProof(evidence)
+  handoff.phase = 'artifact-ready'
+  handoff.checkpoint.resultRefs = [{ kind: 'artifact', ref: evidence.artifactPath, checksum: evidence.checksum }]
+  ctx.persistR3HandoffCheckpoint(handoff)
+  try {
+    ctx.recordRunEvent?.('artifact', {
+      label: result.filename,
+      ref: result.path,
+      status: 'ok',
+      detail: JSON.stringify({
+        source: evidence.source, account: evidence.account, period: evidence.period,
+        rowCount: evidence.rowCount, checksum: evidence.checksum,
+      }),
+    })
+  } catch { /* best-effort */ }
+  return renderR3HandoffCheckpoint(handoff)
+}
 
 /**
  * Гейт режима для артефактов (седьмой обход, 08.08). Артефакты ПИШУТ ФАЙЛ на диск, но
@@ -26,6 +92,8 @@ export const renderChartHandler: ToolHandler = {
     try {
       const blocked = artifactModeBlock(call, ctx)
       if (blocked) return blocked
+      const r3Error = r3ArtifactPreflightError(ctx as R3ArtifactContext)
+      if (r3Error) return { id: call.id, name: call.name, result: '', error: r3Error }
       const { renderChartSvg } = await import('../../ai/charts')
       const { artifactsDir } = await import('../../ai/artifacts')
       const { mkdir, writeFile } = await import('fs/promises')
@@ -67,12 +135,16 @@ export const generateHtmlHandler: ToolHandler = {
     try {
       const blocked = artifactModeBlock(call, ctx)
       if (blocked) return blocked
+      const r3Error = r3ArtifactPreflightError(ctx as R3ArtifactContext)
+      if (r3Error) return { id: call.id, name: call.name, result: '', error: r3Error }
       const { generateHtml } = await import('../../ai/artifacts')
       const filename = String(call.args.filename ?? 'untitled')
       const title = call.args.title ? String(call.args.title) : undefined
       const content = String(call.args.content_html ?? '')
       if (!content) return { id: call.id, name: call.name, result: '', error: 'generate_html: content_html обязателен' }
       const res = await generateHtml(ctx.projectPath, { filename, title, content_html: content })
+      const rowCount = Math.max(0, (content.match(/<tr\b/gi) ?? []).length - (content.match(/<tr\b[^>]*>[\s\S]*?<th\b/gi) ?? []).length)
+      const r3Checkpoint = await completeR3Artifact(ctx as R3ArtifactContext, res, rowCount)
       try { ctx.recordJournal(ctx.projectPath, 'tool', `📄 Артефакт HTML: ${res.filename}`, `${res.sizeBytes} bytes → ${res.path}`) } catch { /* */ }
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
@@ -84,7 +156,7 @@ export const generateHtmlHandler: ToolHandler = {
       })
       // Timeline задачи (Фаза 4): создан артефакт. label=имя файла, ref=путь.
       try { ctx.recordRunEvent?.('artifact', { label: res.filename, ref: res.path, status: 'ok' }) } catch { /* best-effort */ }
-      return { id: call.id, name: call.name, result: `HTML artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes` }
+      return { id: call.id, name: call.name, result: `HTML artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes${r3Checkpoint ? `\n${r3Checkpoint}` : ''}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
@@ -97,21 +169,29 @@ export const generateDocxHandler: ToolHandler = {
     try {
       const blocked = artifactModeBlock(call, ctx)
       if (blocked) return blocked
+      const r3Error = r3ArtifactPreflightError(ctx as R3ArtifactContext)
+      if (r3Error) return { id: call.id, name: call.name, result: '', error: r3Error }
       const { generateDocx } = await import('../../ai/artifacts')
       const filename = String(call.args.filename ?? 'untitled')
       const title = call.args.title ? String(call.args.title) : undefined
       const sections = Array.isArray(call.args.sections) ? call.args.sections as Array<{ heading?: string; level?: number; paragraphs?: string[]; bullets?: string[]; table?: { header?: string[]; rows: string[][] } }> : []
       if (sections.length === 0) return { id: call.id, name: call.name, result: '', error: 'generate_docx: sections обязательны (>= 1)' }
+      const handoff = activeR3Handoff(ctx as R3ArtifactContext)
+      if (handoff && call.args.save_to != null && String(call.args.save_to) !== 'project') {
+        return { id: call.id, name: call.name, result: '', error: 'R3 artifact handoff разрешает запись только в project task dir.' }
+      }
       // ЗАДАЧА 2: явный save_to модели побеждает; при его молчании — дефолт из
       // источника материалов (папка→alongside, вложения→downloads), заполняющий
       // пустоту, а не спорящий с моделью. Итог — «туда, где человек найдёт».
-      const saveTo = call.args.save_to != null ? String(call.args.save_to) : ctx.defaultDocxSaveTo
+      const saveTo = handoff ? 'project' : (call.args.save_to != null ? String(call.args.save_to) : ctx.defaultDocxSaveTo)
       // ЗАДАЧА A: alongside → папка материалов. Приоритет: папка из композера
       // (ctx.materialsDir), иначе общий каталог реально прочитанных файлов (вариант i,
       // зажат в корень). Оба известны — материалы из папки, поэтому composer выигрывает.
       const materialsDir = ctx.materialsDir ?? ctx.getReadCommonDir?.()
       const res = await generateDocx(ctx.projectPath, { filename, title, sections, save_to: saveTo },
         { downloadsDir: ctx.artifactsDownloadsDir, materialsDir })
+      const rowCount = sections.reduce((sum, section) => sum + (section.table?.rows?.length ?? 0), 0)
+      const r3Checkpoint = await completeR3Artifact(ctx as R3ArtifactContext, res, rowCount)
       try { ctx.recordJournal(ctx.projectPath, 'tool', `📄 Артефакт DOCX: ${res.filename}`, `${res.sizeBytes} bytes → ${res.path}`) } catch { /* */ }
       // ЗАДАЧА 2 (§3.1 видимый след): дефолт мог СМЕНИТЬ место записи (рядом/в
       // Загрузки), поэтому строка активности называет ПОЛНЫЙ ПУТЬ, а не только имя —
@@ -127,7 +207,7 @@ export const generateDocxHandler: ToolHandler = {
       })
       // Timeline задачи (Фаза 4): создан артефакт. label=имя файла, ref=путь.
       try { ctx.recordRunEvent?.('artifact', { label: res.filename, ref: res.path, status: 'ok' }) } catch { /* best-effort */ }
-      return { id: call.id, name: call.name, result: `DOCX artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes` }
+      return { id: call.id, name: call.name, result: `DOCX artifact saved: ${res.path}\nSize: ${res.sizeBytes} bytes${r3Checkpoint ? `\n${r3Checkpoint}` : ''}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }

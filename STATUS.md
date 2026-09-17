@@ -1,6 +1,6 @@
 # STATUS — Verstak
 
-**Версия: 2.8.2** (релизный код подготовлен 12.09.2026) · эталон тестов **6700**.
+**Версия: 2.8.2** (release-candidate R2/R3/S2-A1 подготовлен 17.09.2026) · эталон тестов **7362**.
 Публикация считается состоявшейся только когда GitHub и `agi-iri.ru/verstak`
 отдают одну версию; финальный релизный гейт выполняется по собранному коммиту.
 
@@ -181,14 +181,37 @@
   memory; обычный пользовательский текст видимого чата этим слоем не скрывается.
   Exact JSON provider envelope, все out-of-band ingress, oversized-intent
   boundary, durable taint после restart и successor-safe teardown helper
-  дополнительно закрыты fail-closed. Component/integration, реальный read-only
-  Windows helper smoke и независимый review проходят; полный автоматический
-  замер: 773 test files (767 passed, 6 skipped), 7328 tests (7312 passed,
-  16 skipped), 0 failed.
-  Живые действия 10/10, DPI/monitor/move/resize/occlusion/focus/recreate/Stop/crash
-  матрица и desktop-пилот 5/5 ещё не выполнены; visual/screenshot fallback в
-  кандидате отключён. Поэтому R2 технически собран, но не принят; R3 и S2-A1
-  удерживаются и не начаты.
+  дополнительно закрыты fail-closed. Postcondition теперь принимается только по
+  двум согласованным независимым observations с bounded abort-aware settle.
+  Visual observation включён только для точного foreground HWND: `PrintWindow`,
+  предел 512×384/16 KiB, повторная identity/geometry/DPI-проверка и запрет
+  password/credential/protected/elevated поверхностей; desktop capture API не
+  используются. Privacy disclosure приведён в соответствие фактической передаче.
+  Полный автоматический замер: 778 test files (771 passed, 7 skipped), 7362 tests
+  (7345 passed, 17 skipped), 0 failed. Нативный Windows-canary выполнил 10/10
+  последовательных UIA type, каждый результат независимо подтверждён внешним
+  файлом; bounded screenshot и Stop ACK ≤500 ms также подтверждены. Физическая
+  матрица второго монитора и системных DPI 125/150 не выдаётся за проверенную на
+  машине, где таких поверхностей нет.
+
+- **R3 — browser → artifact → Computer handoff.** Свежая composer-команда должна
+  явно назвать все три стадии; page/window content не может выдать capability.
+  Server-owned handoff хранит task/run lineage, ограничения, подтверждённые
+  действия, redacted source/account/period/rowCount, checksum исхода и refs.
+  Артефакт создаётся только в project task dir, получает SHA-256 proof в
+  существующем browser ledger; после `artifact-ready` browser mutation replay
+  блокируется, а Computer получает только действия исходной команды. Checkpoint
+  переживает compaction и явный resume без повторного browser-шага. Ordinary
+  browser run не может открыть этот переход.
+
+- **S2-A1 — единый DecisionContext/DecisionTrace v1.** `run_command` проходит
+  через фасад над существующим `resolveDecision`; rollout по умолчанию `shadow`,
+  поэтому legacy-решение исполнения не меняется, но candidate/enforced/readback
+  фиксируются в существующих `agent_run_events` и `audit_log`. Trace не содержит
+  raw args/output, остаётся parseable в лимите 500 символов и связывает agent,
+  активный profile-owner, task/job/run и versioned capability. В `enforce`
+  неизвестная identity/capability требует подтверждения, а ослабление legacy
+  решения запрещено.
 
 ## Открытый долг
 

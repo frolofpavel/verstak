@@ -9,6 +9,9 @@ export const MAX_COMPUTER_STDERR_BYTES = 8 * 1024
 export const MAX_COMPUTER_CANDIDATES = 128
 export const MAX_COMPUTER_ELEMENTS = 300
 export const MAX_COMPUTER_TEXT_BYTES = 32 * 1024
+export const MAX_COMPUTER_SCREENSHOT_BYTES = 16 * 1024
+export const MAX_COMPUTER_SCREENSHOT_WIDTH = 512
+export const MAX_COMPUTER_SCREENSHOT_HEIGHT = 384
 
 export interface ComputerWindowIdentity {
   pid: number

@@ -39,7 +39,11 @@ import { saveRunInputSnapshot } from './ai-send/run-input'
 import { registerAiResolveIpc } from './ai-resolve'
 import { BROWSER_APPROVAL_TIMEOUT_MS, configureBrowserHandler } from './tool-handlers/browser'
 import { authorizeComputerRun, waitForComputerRunStop } from './tool-handlers/computer'
-import { webviewB0Capability } from '../ai/browser/capability'
+import {
+  r3HandoffIntentFromOriginalUserText,
+  webviewB0Capability,
+  type R3ServerHandoff,
+} from '../ai/browser/capability'
 import { connectedBrowserDataPolicy, decideProviderBrowserContext, localWebviewDataPolicy, parseClientDataPolicy } from '../ai/browser/data-policy'
 // Распил ai.ts (1.9.8 #1): CLI-путь (4b) + API-путь/ядро (4c) вынесены в runner-модули.
 import { runPlainConversation } from '../ai/runner-plain'
@@ -188,6 +192,10 @@ export interface AiDeps {
    * прежде: слой доверия не имеет права включиться сам собой.
    */
   getCapabilityTrust?: (skillId: string) => import('../../shared/contracts/capability').TrustLevel | undefined
+  /** Server-owned capability identity for S2-A1 decision traces. */
+  getCapabilityIdentity?: (skillId: string) => { id: string; version: string } | undefined
+  /** Active local profile identity. Names never enter the policy trace. */
+  getActivePolicyOwnerId?: () => string | null
   /** MCP client — внешние серверы, опционально. */
   mcpClient?: McpClient
   /** Процедурная память — детектирует паттерны решения задач из tool events. */
@@ -1238,6 +1246,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // Consent comes only from separately carried untouched composer text and
     // only for a durable chat. No-chat runs cannot anchor authority across runs.
     const computerUseAllowedActions = freshComposerText ? computerUseRequestedActions : []
+    const r3HandoffIntent = computerUseAllowedActions.length > 0
+      ? r3HandoffIntentFromOriginalUserText(freshComposerText)
+      : { allowed: false, resume: false }
     const computerUseTechnicalSinksOmitted = computerUseAllowedActions.length > 0
     // Outcome preflight (2.1.10-E, срез 1): pipeline/phase/step сверяются с durable
     // состоянием ДО старта прогона; непроверенный контекст = throw, прогона нет.
@@ -1370,6 +1381,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     }
     deps.setWebviewAdapterExec?.(taggedSender.exec)
     const browserTaskId = chatIdNum != null ? `bt-${chatIdNum}` : `bt-run-${runId}`
+    let r3HandoffForRun: R3ServerHandoff | undefined
     // A Computer Use request is valid only on Verstak's tools transport. CLI,
     // tunnel, forced no-tools, and projectless routes can expose their own
     // shell/file capabilities outside the exact-window controller. Reject the
@@ -1396,6 +1408,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       if (!policy) return false
       return decideProviderBrowserContext(policy, candidateProviderId).kind === 'allow'
     }
+    if (r3HandoffIntent.allowed && (!deps.browserController || !deps.browserTasks)) {
+      return earlyRouteStop('R3_HANDOFF_STATE_UNAVAILABLE: durable browser task storage and controller are required.')
+    }
     if (deps.browserController && deps.browserTasks) {
       try {
         const existing = deps.browserTasks.get(browserTaskId)
@@ -1420,6 +1435,26 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
           }
           deps.browserController.attachRun({ browserTaskId, runId, providerId, handoffReason: 'new_send' })
         }
+        if (r3HandoffIntent.resume) {
+          const stored = deps.browserTasks.getR3HandoffCheckpoint(browserTaskId)
+          if (stored) {
+            r3HandoffForRun = {
+              ...stored,
+              runId,
+              checkpoint: {
+                ...stored.checkpoint,
+                constraints: [...stored.checkpoint.constraints],
+                confirmedActions: [...stored.checkpoint.confirmedActions],
+                environment: { ...stored.checkpoint.environment },
+                pendingApproval: stored.checkpoint.pendingApproval
+                  ? { ...stored.checkpoint.pendingApproval }
+                  : null,
+                resultRefs: stored.checkpoint.resultRefs.map(ref => ({ ...ref })),
+              },
+            }
+            deps.browserTasks.saveR3HandoffCheckpoint(r3HandoffForRun)
+          }
+        }
         if (deps.syncBrowserContext) {
           deps.syncBrowserContext({ browserTaskId, runId })
         } else {
@@ -1427,6 +1462,9 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         }
       } catch (err) {
         logRuntimeError('browser.attach_run.fail', err)
+        if (r3HandoffIntent.allowed) {
+          return earlyRouteStop('R3_HANDOFF_STATE_UNAVAILABLE: не удалось закрепить общий task lineage для browser → artifact → Computer.')
+        }
       }
     }
     // 2.0.8-D2 + 2.1.3-CD: ранние стопы маршрута ДО создания run/провайдера — чистый выход.
@@ -1628,6 +1666,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       skillOverridePrompt: overrides?.systemPrompt,
       useReviewerPrompt: Boolean(overrides?.useReviewerPrompt),
       computerUseEnvelopeLocked,
+      r3HandoffAllowed: r3HandoffIntent.allowed,
       memories,
       consolidationHint,
       coreMemory: coreMemorySnapshot,
@@ -2037,6 +2076,20 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
             } catch { /* audit not critical */ }
           }
         : undefined
+      const capabilityIdentity = overrides?.skillId
+        ? deps.getCapabilityIdentity?.(overrides.skillId)
+        : undefined
+      const policyIdentity = {
+        agentId: capabilityIdentity ? `agent:${capabilityIdentity.id}` : `agent:${runOwner}`,
+        ownerId: deps.getActivePolicyOwnerId?.() ?? null,
+        taskId: chatId ? `chat:${chatId}` : `send:${sendId}`,
+        capability: capabilityIdentity
+          ? {
+            ...capabilityIdentity,
+            trust: deps.getCapabilityTrust?.(overrides!.skillId!) ?? null,
+          }
+          : null,
+      }
       // Run-start маркер: одна audit-запись на старте run'а с самим runId.
       // Инспектор группирует по runId; этот маркер также даёт точку отсчёта run'а
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
@@ -2108,11 +2161,20 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         computerContextExposed: durableComputerContextTainted,
         computerUseAllowedActions,
         computerUseProviderEnvelope: computerUseEnvelopeLocked ? 'fresh-composer-ticket-v1' : undefined,
+        r3HandoffAllowed: r3HandoffIntent.allowed,
+        r3Handoff: r3HandoffForRun,
+        appendBrowserArtifactProof: deps.browserTasks
+          ? evidence => { deps.browserTasks!.appendArtifactProof(evidence) }
+          : undefined,
+        persistR3HandoffCheckpoint: deps.browserTasks
+          ? handoff => { deps.browserTasks!.saveR3HandoffCheckpoint(handoff) }
+          : undefined,
         // Гард глубины спавна (задача C): дочерняя сессия — та, у чьего чата задан
         // parent_chat_id (посчитано выше вместе с бюджетом, единый источник).
         isChildSession,
         subSessions: deps.subSessions, sessionTodos: deps.sessionTodos,
         agentRuns: deps.agentRuns, runId, verifications: deps.verifications,
+        policyIdentity,
         toolsAllow: outcomeToolsAllow ?? overrides?.toolsAllow ?? null,
         // Реестр возможностей: уровень доверия скилла, которым идёт прогон.
         // Последний слой гейта — ужесточает решение, ослабить не может.

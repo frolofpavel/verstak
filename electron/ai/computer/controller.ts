@@ -108,6 +108,11 @@ export interface ComputerControllerDeps {
   now?: () => number
   prepareTimeoutMs?: number
   commitTimeoutMs?: number
+  /**
+   * Bounded quiet period between two independent post-action observations.
+   * Tests may shorten it; production remains capped and abort-aware.
+   */
+  postconditionSettleMs?: number
   /** Tests may shorten this bound; production is always capped at 30 seconds. */
   maxSnapshotAgeMs?: number
   /**
@@ -153,6 +158,8 @@ const BINDING_CLAIM_TTL_MS = 5 * 60_000
 const DEFAULT_MAX_SNAPSHOT_AGE_MS = 30_000
 const DEFAULT_PREPARE_TIMEOUT_MS = 5_000
 const DEFAULT_COMMIT_TIMEOUT_MS = 15_000
+const DEFAULT_POSTCONDITION_SETTLE_MS = 50
+const MAX_POSTCONDITION_SETTLE_MS = 250
 const ACKNOWLEDGEMENT_CHALLENGE_TTL_MS = 60_000
 const MAX_ACKNOWLEDGEMENT_CHALLENGES = 16
 
@@ -160,6 +167,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
   const now = deps.now ?? (() => Date.now())
   const prepareTimeoutMs = deps.prepareTimeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
   const commitTimeoutMs = deps.commitTimeoutMs ?? DEFAULT_COMMIT_TIMEOUT_MS
+  const postconditionSettleMs = boundedPostconditionSettle(deps.postconditionSettleMs)
   const maxSnapshotAgeMs = boundedSnapshotAge(deps.maxSnapshotAgeMs)
   const allowUnverifiedGlobalInput = deps.testOnlyAllowUnverifiedGlobalInput === true
   let candidates = new Map<string, InternalCandidate>()
@@ -1098,37 +1106,24 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
         throw new ComputerSafetyError('readback-failed')
       }
       const expectedPostInputEpoch = postUserInputEpoch ?? snapshot.probe.userInputEpoch
-      if (postObservation.userInputEpoch !== expectedPostInputEpoch) {
-        throw new ComputerSafetyError('hardware-input')
+      assertPostActionObservation(postObservation)
+
+      // A native control may expose a requested state for one UIA read and
+      // immediately roll it back while an async handler finishes. One such
+      // snapshot is not a stable postcondition. Wait a short, abort-aware
+      // quiet period, then require a second independent observation to agree
+      // on the exact window state and the semantic effect.
+      await delayWithAbort(postconditionSettleMs, attempt)
+      let settledObservation: ComputerObservation
+      try {
+        settledObservation = await captureObservation(browserTaskId, runId, false, attempt)
+      } catch (error) {
+        if (attempt.abort.signal.aborted) throw error
+        throw new ComputerSafetyError('readback-failed')
       }
-      if (!postObservation.foreground) throw new ComputerSafetyError('focus-lost')
-      if (postObservation.screenLocked) throw new ComputerSafetyError('screen-locked')
-      if (expectedElementTransition && element
-        && !postObservationMatchesTransition(
-          currentObservation,
-          element.backend.semanticFingerprint,
-          expectedElementTransition,
-        )) {
-        throw new ComputerSafetyError('readback-mismatch')
-      }
-      if (input.action === 'scroll' && element?.backend.scrollState
-        && !postObservationMatchesScroll(
-          currentObservation,
-          element.backend.semanticFingerprint,
-          element.backend.scrollState,
-          finite(input.deltaX),
-          finite(input.deltaY),
-        )) {
-        throw new ComputerSafetyError('readback-mismatch')
-      }
-      if (input.action === 'type' && element && prepared.expectedAfterValueState
-        && !postObservationMatchesValueState(
-          currentObservation,
-          element.backend.semanticFingerprint,
-          prepared.expectedAfterValueState,
-        )) {
-        throw new ComputerSafetyError('readback-mismatch')
-      }
+      assertStablePostObservation(postObservation, settledObservation)
+      assertPostActionObservation(settledObservation)
+      postObservation = settledObservation
       throwIfAborted(attempt)
       finalize(actionId, browserTaskId, 'verified', 'independent-readback-verified', attemptId)
       return result(
@@ -1137,6 +1132,40 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
         'independent-readback-verified',
         input.action === 'type' ? omitTypedContent(postObservation) : postObservation,
       )
+
+      function assertPostActionObservation(observation: ComputerObservation): void {
+        if (observation.userInputEpoch !== expectedPostInputEpoch) {
+          throw new ComputerSafetyError('hardware-input')
+        }
+        if (!observation.foreground) throw new ComputerSafetyError('focus-lost')
+        if (observation.screenLocked) throw new ComputerSafetyError('screen-locked')
+        if (expectedElementTransition && element
+          && !postObservationMatchesTransition(
+            currentObservation,
+            element.backend.semanticFingerprint,
+            expectedElementTransition,
+          )) {
+          throw new ComputerSafetyError('readback-mismatch')
+        }
+        if (input.action === 'scroll' && element?.backend.scrollState
+          && !postObservationMatchesScroll(
+            currentObservation,
+            element.backend.semanticFingerprint,
+            element.backend.scrollState,
+            finite(input.deltaX),
+            finite(input.deltaY),
+          )) {
+          throw new ComputerSafetyError('readback-mismatch')
+        }
+        if (input.action === 'type' && element && prepared.expectedAfterValueState
+          && !postObservationMatchesValueState(
+            currentObservation,
+            element.backend.semanticFingerprint,
+            prepared.expectedAfterValueState,
+          )) {
+          throw new ComputerSafetyError('readback-mismatch')
+        }
+      }
     } catch (error) {
       const reason = attempt.cancelReason ?? computerErrorCode(error, 'transport-lost')
       if (attempt.commitTransferred) {
@@ -1942,6 +1971,31 @@ function boundedSnapshotAge(value: number | undefined): number {
   return Math.max(1, Math.min(DEFAULT_MAX_SNAPSHOT_AGE_MS, Math.floor(Number(value))))
 }
 
+function boundedPostconditionSettle(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_POSTCONDITION_SETTLE_MS
+  return Math.max(1, Math.min(MAX_POSTCONDITION_SETTLE_MS, Math.floor(Number(value))))
+}
+
+function assertStablePostObservation(
+  first: ComputerObservation,
+  second: ComputerObservation,
+): void {
+  if (first.browserTaskId !== second.browserTaskId
+    || first.runId !== second.runId
+    || first.bindingGeneration !== second.bindingGeneration
+    || first.targetFingerprint !== second.targetFingerprint
+    || first.title !== second.title
+    || !sameGeometry(first.geometry, second.geometry)
+    || first.dpi !== second.dpi
+    || first.userInputEpoch !== second.userInputEpoch
+    || !first.foreground
+    || !second.foreground
+    || first.screenLocked
+    || second.screenLocked) {
+    throw new ComputerSafetyError('readback-mismatch')
+  }
+}
+
 function freshObservation(capturedAt: number, currentTime: number, maxAgeMs: number): boolean {
   const age = currentTime - capturedAt
   return Number.isFinite(capturedAt) && Number.isFinite(currentTime) && age >= 0 && age < maxAgeMs
@@ -1969,6 +2023,23 @@ async function withTimeout<T>(
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function delayWithAbort(ms: number, attempt: ActiveAttempt): Promise<void> {
+  throwIfAborted(attempt)
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      attempt.abort.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, Math.max(1, ms))
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(attempt.abort.signal.reason instanceof Error
+        ? attempt.abort.signal.reason
+        : new ComputerCancelledError(attempt.cancelReason ?? 'stopped'))
+    }
+    attempt.abort.signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function fireAndForget(value: void | Promise<unknown>): void {

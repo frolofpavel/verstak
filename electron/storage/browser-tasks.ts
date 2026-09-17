@@ -14,6 +14,7 @@
 //   • НИКАКИХ raw cookie/token/session — только redacted refs (BR-016).
 
 import type { Database as DB } from 'better-sqlite3'
+import type { R3ServerHandoff } from '../ai/browser/capability'
 
 // ── Типы (mirror SQL-схемы миграции v54) ─────────────────────────────────────
 
@@ -117,6 +118,17 @@ export interface BrowserProofRefRow {
   createdAt: number
 }
 
+export interface BrowserArtifactProofInput {
+  browserTaskId: string
+  runId: string
+  artifactPath: string
+  checksum: string
+  source: string | null
+  account: string | null
+  period: string | null
+  rowCount: number | null
+}
+
 export interface CreateTaskInput {
   browserTaskId: string
   projectPath: string
@@ -189,6 +201,8 @@ export interface BrowserTasks {
   setAllowedDomains(browserTaskId: string, domains: string[]): void
   setCaps(browserTaskId: string, caps: Record<string, unknown>): void
   setDataPolicy(browserTaskId: string, policy: Record<string, unknown>): void
+  saveR3HandoffCheckpoint(handoff: R3ServerHandoff): void
+  getR3HandoffCheckpoint(browserTaskId: string): R3ServerHandoff | null
   endTask(browserTaskId: string): void
 
   // run lineage (BR-015)
@@ -223,6 +237,8 @@ export interface BrowserTasks {
 
   // proof refs (BR-016)
   appendProofRef(ref: Omit<BrowserProofRefRow, 'id' | 'createdAt'>): number
+  /** R3: append a content-free artifact proof after validating task/run lineage. */
+  appendArtifactProof(ref: BrowserArtifactProofInput): number
   listProofRefs(browserTaskId: string): BrowserProofRefRow[]
 
   // crash recovery (BR-013)
@@ -480,8 +496,48 @@ export function createBrowserTasks(db: DB): BrowserTasks {
     },
 
     setDataPolicy(browserTaskId, policy) {
+      const current = db.prepare(`SELECT data_policy_json FROM browser_tasks WHERE browser_task_id = ?`)
+        .get(browserTaskId) as { data_policy_json?: string | null } | undefined
+      const existingCheckpoint = parseJsonObject(current?.data_policy_json).r3HandoffCheckpoint
+      const next = { ...policy }
+      // Only saveR3HandoffCheckpoint may write this server-owned key. Ordinary
+      // policy refreshes preserve it and cannot inject/replace it.
+      delete next.r3HandoffCheckpoint
+      if (existingCheckpoint && typeof existingCheckpoint === 'object') {
+        next.r3HandoffCheckpoint = existingCheckpoint
+      }
       db.prepare(`UPDATE browser_tasks SET data_policy_json = ?, updated_at = ? WHERE browser_task_id = ?`)
-        .run(JSON.stringify(policy), Date.now(), browserTaskId)
+        .run(JSON.stringify(next), Date.now(), browserTaskId)
+    },
+
+    saveR3HandoffCheckpoint(handoff) {
+      const lineage = db.prepare(
+        `SELECT 1 FROM browser_task_runs WHERE browser_task_id = ? AND run_id = ? LIMIT 1`
+      ).get(handoff.browserTaskId, handoff.runId)
+      if (!lineage) throw new Error('R3 handoff checkpoint lineage mismatch')
+      const task = db.prepare(`SELECT data_policy_json FROM browser_tasks WHERE browser_task_id = ?`)
+        .get(handoff.browserTaskId) as { data_policy_json?: string | null } | undefined
+      if (!task) throw new Error('R3 handoff task not found')
+      const policy = parseJsonObject(task.data_policy_json)
+      // The object was built by the server handoff facade and contains no raw
+      // page/tool args. JSON round-trip also prevents retaining mutable refs.
+      policy.r3HandoffCheckpoint = JSON.parse(JSON.stringify(handoff))
+      db.prepare(`UPDATE browser_tasks SET data_policy_json = ?, updated_at = ? WHERE browser_task_id = ?`)
+        .run(JSON.stringify(policy), Date.now(), handoff.browserTaskId)
+    },
+
+    getR3HandoffCheckpoint(browserTaskId) {
+      const row = db.prepare(`SELECT data_policy_json FROM browser_tasks WHERE browser_task_id = ?`)
+        .get(browserTaskId) as { data_policy_json?: string | null } | undefined
+      if (!row) return null
+      const value = parseJsonObject(row.data_policy_json).r3HandoffCheckpoint
+      if (!value || typeof value !== 'object') return null
+      const handoff = value as Partial<R3ServerHandoff>
+      if (handoff.version !== 1 || handoff.browserTaskId !== browserTaskId
+        || typeof handoff.runId !== 'string'
+        || (handoff.phase !== 'browser-ready' && handoff.phase !== 'artifact-ready')
+        || !handoff.checkpoint || handoff.checkpoint.version !== 1) return null
+      return handoff as R3ServerHandoff
     },
 
     endTask(browserTaskId) {
@@ -853,6 +909,46 @@ export function createBrowserTasks(db: DB): BrowserTasks {
         JSON.stringify(ref.omissions ?? []),
         ref.retentionUntil ?? null,
         now
+      )
+      return Number(res.lastInsertRowid)
+    },
+
+    appendArtifactProof(ref) {
+      const lineage = db.prepare(
+        `SELECT 1 FROM browser_task_runs WHERE browser_task_id = ? AND run_id = ? LIMIT 1`
+      ).get(ref.browserTaskId, ref.runId)
+      if (!lineage) throw new Error('R3 artifact proof lineage mismatch')
+      if (!/^sha256:[a-f0-9]+$/i.test(ref.checksum)) {
+        throw new Error('R3 artifact proof checksum must be sha256')
+      }
+      const clean = (value: string | null, cap: number): string | null => {
+        if (value == null) return null
+        const oneLine = value.replace(/[\r\n]+/g, ' ').trim().slice(0, cap)
+        if (!oneLine) return null
+        return /(bearer\s+|password|cookie|token|secret)/i.test(oneLine) ? '[REDACTED]' : oneLine
+      }
+      const source = clean(ref.source, 300)?.replace(/[?#].*$/, '') ?? null
+      const summary = JSON.stringify({
+        source,
+        account: clean(ref.account, 160),
+        period: clean(ref.period, 80),
+        rowCount: Number.isSafeInteger(ref.rowCount) && Number(ref.rowCount) >= 0 ? ref.rowCount : null,
+      })
+      const now = Date.now()
+      const res = db.prepare(
+        `INSERT INTO browser_proof_refs
+          (action_id, browser_task_id, run_id, kind, artifact_path, artifact_digest,
+           origin, url, redacted_summary, omissions_json, retention_until, created_at)
+         VALUES (NULL, ?, ?, 'action', ?, ?, ?, NULL, ?, ?, NULL, ?)`
+      ).run(
+        ref.browserTaskId,
+        ref.runId,
+        ref.artifactPath,
+        ref.checksum,
+        source,
+        summary,
+        JSON.stringify(['artifact-content-not-copied']),
+        now,
       )
       return Number(res.lastInsertRowid)
     },

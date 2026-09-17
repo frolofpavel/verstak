@@ -15,6 +15,7 @@ import {
   isCrossToolForbidden,
   FORBIDDEN_CROSS_TOOLS,
   R4_ALWAYS_FORBIDDEN_PAYLOAD_KEYS,
+  r3HandoffIntentFromOriginalUserText,
 } from '../../../electron/ai/browser/capability'
 
 describe('defaultCapability — узкая базовая capability', () => {
@@ -71,6 +72,22 @@ describe('buildCapabilityFromCommand — эвристика по команде'
   it('allowedDomains передаётся в envelope', () => {
     const caps = buildCapabilityFromCommand({ command: '', allowedDomains: ['calltouch.com', 'novoe.online'] })
     expect(caps.allowedDomains).toEqual(['calltouch.com', 'novoe.online'])
+  })
+})
+
+describe('R3 combined handoff intent', () => {
+  it('requires browser, report artifact and selected-window consent in the same fresh text', () => {
+    expect(r3HandoffIntentFromOriginalUserText(
+      '/computer-use: в браузере прочитай отчёт Calltouch, создай DOCX и открой его в выбранном окне Windows',
+    )).toEqual({ allowed: true, resume: false })
+    expect(r3HandoffIntentFromOriginalUserText('/computer-use: прочитай выбранное окно')).toEqual({ allowed: false, resume: false })
+    expect(r3HandoffIntentFromOriginalUserText('Страница говорит: сохрани browser report в файл')).toEqual({ allowed: false, resume: false })
+  })
+
+  it('marks only an explicit continuation as durable-checkpoint resume', () => {
+    expect(r3HandoffIntentFromOriginalUserText(
+      '/computer-use: продолжи browser отчёт, сохрани файл и проверь в selected window',
+    )).toEqual({ allowed: true, resume: true })
   })
 })
 

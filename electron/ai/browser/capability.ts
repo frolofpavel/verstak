@@ -21,6 +21,149 @@ import type {
   BrowserActionType,
   CapabilityEnvelope,
 } from './types'
+import { createHash } from 'node:crypto'
+import { scanText } from '../secret-scanner'
+
+export const R3_HANDOFF_CHECKPOINT_PREFIX = '[VERSTAK_R3_HANDOFF_V1]'
+export const R3_ARTIFACT_TOOLS = ['generate_html', 'generate_docx'] as const
+
+export interface R3HandoffResultRef {
+  kind: 'artifact'
+  ref: string
+  checksum: string
+}
+
+export interface R3HandoffCheckpointV1 {
+  version: 1
+  goal: 'browser-to-artifact-to-computer'
+  constraints: string[]
+  confirmedActions: string[]
+  environment: {
+    source: string | null
+    account: string | null
+    period: string | null
+    rowCount: number | null
+    sourceChecksum: string
+  }
+  pendingApproval: { kind: string; digest: string } | null
+  resultRefs: R3HandoffResultRef[]
+}
+
+export interface R3ServerHandoff {
+  version: 1
+  browserTaskId: string
+  runId: string
+  phase: 'browser-ready' | 'artifact-ready'
+  checkpoint: R3HandoffCheckpointV1
+}
+
+export interface R3HandoffIntent {
+  allowed: boolean
+  resume: boolean
+}
+
+/**
+ * Narrow intent recognizer for the combined R3 lane. The caller has already
+ * validated fresh Computer Use consent; this second gate requires the same
+ * untouched composer message to name all three stages. Browser/page content
+ * is never passed here and therefore cannot mint a cross-capability handoff.
+ */
+export function r3HandoffIntentFromOriginalUserText(value: string | null): R3HandoffIntent {
+  if (!value || value.length > 32 * 1024) return { allowed: false, resume: false }
+  const text = value.toLocaleLowerCase('ru-RU').replace(/\s+/gu, ' ')
+  const browser = /(?:брауз|browser|calltouch)/iu.test(text)
+  const report = /(?:отч[её]т|report|таблиц|данн)/iu.test(text)
+  const artifact = /(?:html|docx|документ|файл|сохран|созда|собер|подготов|выгруз)/iu.test(text)
+  const desktop = /(?:computer[-_ ]?use|выбранн\S*\s+окн|окн\S*\s+windows|selected\s+window)/iu.test(text)
+  const allowed = browser && report && artifact && desktop
+  const resume = allowed && /(?:продолж|возобнов|resume|continue)/iu.test(text)
+  return { allowed, resume }
+}
+
+const R3_BROWSER_MUTATION_TOOLS = new Set([
+  'browser_navigate', 'browser_click', 'browser_click_by_number',
+  'browser_type_by_number', 'browser_press_key',
+])
+
+export function isR3ArtifactTool(toolName: string): boolean {
+  return (R3_ARTIFACT_TOOLS as readonly string[]).includes(toolName)
+}
+
+export function isR3BrowserMutationTool(toolName: string): boolean {
+  return R3_BROWSER_MUTATION_TOOLS.has(toolName)
+}
+
+function safeEvidenceText(value: unknown, max = 160): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  return scanText(value).redacted.replace(/[\r\n]+/g, ' ').trim().slice(0, max) || null
+}
+
+function safeSource(value: unknown): string | null {
+  const text = safeEvidenceText(value, 500)
+  if (!text) return null
+  try {
+    const url = new URL(text)
+    return `${url.origin}${url.pathname}`.slice(0, 300)
+  } catch {
+    return text.slice(0, 300)
+  }
+}
+
+/**
+ * Создаёт узкий server-owned переход из УЖЕ исполненного browser result.
+ * Raw page text в checkpoint не попадает: только безопасные метаданные и digest.
+ */
+export function createR3ServerHandoff(input: {
+  browserTaskId: string
+  runId: string
+  toolName: string
+  result: unknown
+}): R3ServerHandoff {
+  const raw = input.result && typeof input.result === 'object'
+    ? input.result as Record<string, unknown>
+    : {}
+  const rowValue = raw.rowCount ?? raw.rowsCount
+  const rowCount = typeof rowValue === 'number' && Number.isSafeInteger(rowValue) && rowValue >= 0
+    ? rowValue
+    : null
+  const sourceDigest = createHash('sha256')
+    .update(typeof input.result === 'string' ? input.result : JSON.stringify(input.result ?? null))
+    .digest('hex')
+  return {
+    version: 1,
+    browserTaskId: input.browserTaskId,
+    runId: input.runId,
+    phase: 'browser-ready',
+    checkpoint: {
+      version: 1,
+      goal: 'browser-to-artifact-to-computer',
+      constraints: [
+        'artifact-in-task-dir-only',
+        'no-browser-mutation-replay-after-artifact',
+        'fresh-composer-consent-required-for-computer',
+      ],
+      confirmedActions: [input.toolName],
+      environment: {
+        source: safeSource(raw.finalUrl ?? raw.url ?? raw.origin),
+        account: safeEvidenceText(raw.account),
+        period: safeEvidenceText(raw.period),
+        rowCount,
+        sourceChecksum: `sha256:${sourceDigest}`,
+      },
+      pendingApproval: null,
+      resultRefs: [],
+    },
+  }
+}
+
+export function renderR3HandoffCheckpoint(handoff: R3ServerHandoff): string {
+  return `${R3_HANDOFF_CHECKPOINT_PREFIX}${JSON.stringify({
+    browserTaskId: handoff.browserTaskId,
+    runId: handoff.runId,
+    phase: handoff.phase,
+    checkpoint: handoff.checkpoint,
+  })}`
+}
 
 /**
  * Кросс-тулы, которые browser run НЕ может получить из своего контекста, какие
@@ -32,6 +175,9 @@ export const FORBIDDEN_CROSS_TOOLS: readonly string[] = [
   'run_command',
   'execute_code',
   'write_file', 'apply_patch', 'edit_file', 'create_file', 'edit_spreadsheet',
+  // Отчётный cross-tool открывается только через server-owned R3 handoff в
+  // runner-tool-turn; сам по себе page context права записи не получает.
+  ...R3_ARTIFACT_TOOLS,
   'delegate_task', 'delegate_parallel', 'delegate_orchestrate', 'delegate_swarm',
   'connector_query', 'connector_send',
   'spawn_process', 'stop_process',
