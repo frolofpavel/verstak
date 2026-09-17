@@ -1,6 +1,10 @@
-import { webSearch } from '../ai/web-search'
 import { fetchUrl } from '../ai/web-fetch'
 import type { ChatProvider } from '../ai/types'
+import {
+  classifySearchIntent,
+  createConfiguredSearchBackends,
+  planSearchBackends,
+} from './search-backends'
 
 export type SearchExecutionStatus =
   | 'success'
@@ -12,8 +16,27 @@ export type SearchExecutionStatus =
   | 'fetch_error'
   | 'quality_rejected'
 
+export type SearchIntent = 'ru' | 'global' | 'mixed'
+export type SearchBackendCoverage = SearchIntent | 'diagnostic'
+export type PrimarySourceType =
+  | 'official'
+  | 'government'
+  | 'company'
+  | 'documentation'
+  | 'paper'
+  | 'repository'
+  | 'media'
+  | 'aggregator'
+  | 'secondary'
+
+export interface SearchCost {
+  amount: number
+  currency: 'RUB' | 'USD'
+}
+
 export interface SearchCandidate {
   url: string
+  canonicalUrl?: string | null
   title: string
   snippet: string
   rank: number
@@ -21,14 +44,31 @@ export interface SearchCandidate {
   language: string | null
   publishedAt: string | null
   metadata: Record<string, unknown>
+  sourceType?: PrimarySourceType
+  score?: number
 }
 
 export interface SearchBackend {
   id: string
+  coverage?: SearchBackendCoverage
+  structured?: boolean
+  estimatedCost?: SearchCost
   search: (
     query: string,
     opts: { signal: AbortSignal; timeoutMs: number; limit: number },
   ) => Promise<SearchCandidate[]>
+}
+
+export interface SearchBackendTrace {
+  backend: string
+  query: string
+  latencyMs: number
+  status: 'success' | 'no_results' | 'error' | 'rate_limited' | 'timeout'
+  candidateCount: number
+  acceptedCandidateCount: number
+  cost: SearchCost | null
+  errorClass: string | null
+  rateLimited: boolean
 }
 
 export interface SearchFetchResult {
@@ -47,6 +87,8 @@ export interface SearchEvidence {
   rank: number
   language: string | null
   publishedAt: string | null
+  sourceType: PrimarySourceType
+  score: number
   contentType: string
   text: string
   truncated: boolean
@@ -75,6 +117,7 @@ export interface SearchExecutionResult {
   usableEvidenceCount: number
   evidence: SearchEvidence[]
   fetches: SearchFetchTrace[]
+  backendTraces: SearchBackendTrace[]
   timeoutReason: 'search' | 'fetch' | 'total' | null
   timings: {
     searchMs: number
@@ -114,6 +157,9 @@ const DEFAULT_CONCURRENCY = 3
 const DEFAULT_EVIDENCE_TARGET = 4
 const DEFAULT_MIN_EVIDENCE_CHARS = 200
 const MAX_EVIDENCE_CHARS = 12_000
+const TRACKING_QUERY_KEYS = new Set([
+  'fbclid', 'gclid', 'yclid', 'msclkid', 'ref', 'referrer', 'source',
+])
 
 class SearchTimeoutError extends Error {
   constructor(readonly stage: 'search' | 'fetch' | 'total') {
@@ -130,7 +176,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || /abort/i.test(error.message))
 }
 
-function canonicalizeUrl(raw: string): string | null {
+export function canonicalizeSearchUrl(raw: string): string | null {
   try {
     const parsed = new URL(raw)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
@@ -139,10 +185,189 @@ function canonicalizeUrl(raw: string): string | null {
     if ((parsed.protocol === 'https:' && parsed.port === '443') || (parsed.protocol === 'http:' && parsed.port === '80')) {
       parsed.port = ''
     }
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (key.toLowerCase().startsWith('utm_') || TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
+        parsed.searchParams.delete(key)
+      }
+    }
+    parsed.searchParams.sort()
+    if (parsed.pathname !== '/') parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/'
     return parsed.toString().replace(/\/$/, parsed.pathname === '/' && !parsed.search ? '' : '/')
   } catch {
     return null
   }
+}
+
+const GOVERNMENT_HOSTS = [
+  'government.ru', 'kremlin.ru', 'pravo.gov.ru', 'publication.pravo.gov.ru',
+]
+const REPOSITORY_HOSTS = ['github.com', 'gitlab.com', 'codeberg.org', 'sourcecraft.dev']
+const PAPER_HOSTS = ['arxiv.org', 'doi.org', 'pubmed.ncbi.nlm.nih.gov', 'aclanthology.org']
+const MEDIA_HOSTS = [
+  'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk', 'tass.ru', 'interfax.ru',
+  'rbc.ru', 'kommersant.ru',
+]
+const AGGREGATOR_HOSTS = ['news.google.com', 'dzen.ru', 'news.mail.ru', 'medium.com']
+
+function hostMatches(hostname: string, domains: string[]): boolean {
+  return domains.some(domain => hostname === domain || hostname.endsWith(`.${domain}`))
+}
+
+export function detectPrimarySourceType(url: string, title: string, snippet: string): PrimarySourceType {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return 'secondary' }
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '')
+  const path = parsed.pathname.toLowerCase()
+  const text = `${title} ${snippet}`.toLowerCase()
+  if (host.endsWith('.gov.ru') || hostMatches(host, GOVERNMENT_HOSTS)) return 'government'
+  if (hostMatches(host, REPOSITORY_HOSTS)) return 'repository'
+  if (hostMatches(host, PAPER_HOSTS)) return 'paper'
+  if (host.startsWith('docs.') || host.startsWith('developer.') || /\/(?:docs?|documentation|reference|manual)(?:\/|$)/.test(path) || host === 'learn.microsoft.com') {
+    return 'documentation'
+  }
+  if (hostMatches(host, AGGREGATOR_HOSTS)) return 'aggregator'
+  if (hostMatches(host, MEDIA_HOSTS)) return 'media'
+  if (/\b(?:официальн\S*|official)\b/i.test(text)) return 'official'
+  const brand = host.split('.')[0].replace(/[^a-zа-яё0-9]/gi, '')
+  if (brand.length >= 4 && text.replace(/[^a-zа-яё0-9]/gi, '').includes(brand)) return 'company'
+  return 'secondary'
+}
+
+function normalizedTokens(value: string): Set<string> {
+  return new Set(value.toLowerCase().match(/[a-zа-яё0-9]{2,}/gi) ?? [])
+}
+
+function relevanceScore(query: string, item: SearchCandidate): number {
+  const queryTokens = normalizedTokens(query)
+  if (!queryTokens.size) return 0
+  const itemTokens = normalizedTokens(`${item.title} ${item.snippet} ${item.url}`)
+  let matches = 0
+  for (const token of queryTokens) if (itemTokens.has(token)) matches += 1
+  return matches / queryTokens.size
+}
+
+function sourceBoost(type: PrimarySourceType): number {
+  return {
+    government: 1,
+    documentation: 0.95,
+    paper: 0.92,
+    repository: 0.9,
+    company: 0.86,
+    official: 0.82,
+    media: 0.45,
+    secondary: 0.2,
+    aggregator: 0,
+  }[type]
+}
+
+function freshnessScore(value: string | null): number {
+  if (!value) return 0
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return 0
+  const days = Math.max(0, (Date.now() - timestamp) / 86_400_000)
+  return Math.max(0, 1 - days / 730)
+}
+
+function candidateScore(query: string, item: SearchCandidate, sourceType: PrimarySourceType): number {
+  const queryIsRu = /[а-яё]/i.test(query)
+  const languageFit = item.language == null
+    ? 0.5
+    : queryIsRu === item.language.toLowerCase().startsWith('ru') ? 1 : 0.25
+  const host = (() => { try { return new URL(item.url).hostname } catch { return '' } })()
+  const geoFit = queryIsRu && (host.endsWith('.ru') || host.endsWith('.рф')) ? 1 : 0.4
+  return relevanceScore(query, item) * 4
+    + sourceBoost(sourceType) * 3
+    + (1 / Math.max(1, item.rank))
+    + freshnessScore(item.publishedAt) * 0.5
+    + languageFit * 0.25
+    + geoFit * 0.15
+}
+
+function titleFingerprint(title: string): string | null {
+  const normalized = title.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, ' ').replace(/\s+/g, ' ').trim()
+  return normalized.length >= 24 ? normalized : null
+}
+
+function candidateBackends(item: SearchCandidate): string[] {
+  const existing = Array.isArray(item.metadata?.backends)
+    ? item.metadata.backends.filter((value): value is string => typeof value === 'string')
+    : []
+  return [...new Set([item.backend, ...existing])]
+}
+
+function mergeCandidates(preferred: SearchCandidate, other: SearchCandidate): SearchCandidate {
+  const backends = [...new Set([...candidateBackends(preferred), ...candidateBackends(other)])]
+  return {
+    ...preferred,
+    snippet: preferred.snippet || other.snippet,
+    publishedAt: preferred.publishedAt || other.publishedAt,
+    metadata: { ...other.metadata, ...preferred.metadata, backends },
+  }
+}
+
+export function rankAndDedupeCandidates(
+  input: SearchCandidate[],
+  query: string,
+  limit: number,
+): SearchCandidate[] {
+  const normalized: SearchCandidate[] = []
+  for (const raw of input) {
+    const url = canonicalizeSearchUrl(raw.canonicalUrl || raw.url)
+    if (!url) continue
+    const item: SearchCandidate = {
+      ...raw,
+      url,
+      canonicalUrl: url,
+      title: String(raw.title || '').trim(),
+      snippet: String(raw.snippet || '').trim(),
+      rank: Number.isFinite(raw.rank) ? raw.rank : normalized.length + 1,
+      backend: String(raw.backend || 'unknown'),
+      language: raw.language ? String(raw.language) : null,
+      publishedAt: raw.publishedAt ? String(raw.publishedAt) : null,
+      metadata: raw.metadata && typeof raw.metadata === 'object'
+        ? { ...raw.metadata, backends: candidateBackends(raw) }
+        : { backends: [String(raw.backend || 'unknown')] },
+    }
+    item.sourceType = detectPrimarySourceType(item.url, item.title, item.snippet)
+    item.score = candidateScore(query, item, item.sourceType)
+    normalized.push(item)
+  }
+  normalized.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.rank - b.rank)
+
+  const byUrl = new Map<string, SearchCandidate>()
+  for (const item of normalized) {
+    const current = byUrl.get(item.url)
+    byUrl.set(item.url, current ? mergeCandidates(current, item) : item)
+  }
+  const byTitle = new Map<string, SearchCandidate>()
+  const withoutTitle: SearchCandidate[] = []
+  for (const item of byUrl.values()) {
+    const fingerprint = titleFingerprint(item.title)
+    if (!fingerprint) {
+      withoutTitle.push(item)
+      continue
+    }
+    const current = byTitle.get(fingerprint)
+    if (!current) byTitle.set(fingerprint, item)
+    else {
+      const preferred = (item.score ?? 0) > (current.score ?? 0) ? item : current
+      const other = preferred === item ? current : item
+      byTitle.set(fingerprint, mergeCandidates(preferred, other))
+    }
+  }
+  const deduped = [...byTitle.values(), ...withoutTitle]
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.rank - b.rank)
+  const result: SearchCandidate[] = []
+  const hostCounts = new Map<string, number>()
+  for (const item of deduped) {
+    const host = new URL(item.url).hostname.replace(/^www\./, '')
+    const count = hostCounts.get(host) ?? 0
+    if (count >= 2 && deduped.length > limit) continue
+    hostCounts.set(host, count + 1)
+    result.push(item)
+    if (result.length >= limit) break
+  }
+  return result
 }
 
 export function rewriteSearchQuery(query: string): string {
@@ -155,29 +380,6 @@ export function rewriteSearchQuery(query: string): string {
     .trim()
   const base = rewritten || withoutLead || compact
   return `${base.slice(0, 240)} официальный источник`.replace(/\s+/g, ' ').trim()
-}
-
-function defaultBackend(): SearchBackend {
-  return {
-    id: 'duckduckgo_html',
-    async search(query, opts) {
-      const results = await webSearch(query, {
-        signal: opts.signal,
-        timeoutMs: opts.timeoutMs,
-        limit: opts.limit,
-      })
-      return results.map((item, index) => ({
-        url: item.url,
-        title: item.title,
-        snippet: item.snippet,
-        rank: index + 1,
-        backend: 'duckduckgo_html',
-        language: null,
-        publishedAt: null,
-        metadata: {},
-      }))
-    },
-  }
 }
 
 async function defaultFetch(
@@ -228,28 +430,6 @@ async function withinBudget<T>(
   }
 }
 
-function dedupeCandidates(input: SearchCandidate[], limit: number): SearchCandidate[] {
-  const seen = new Set<string>()
-  const result: SearchCandidate[] = []
-  for (const item of input) {
-    const url = canonicalizeUrl(item.url)
-    if (!url || seen.has(url)) continue
-    seen.add(url)
-    result.push({
-      url,
-      title: String(item.title || '').trim(),
-      snippet: String(item.snippet || '').trim(),
-      rank: Number.isFinite(item.rank) ? item.rank : result.length + 1,
-      backend: String(item.backend || 'unknown'),
-      language: item.language ? String(item.language) : null,
-      publishedAt: item.publishedAt ? String(item.publishedAt) : null,
-      metadata: item.metadata && typeof item.metadata === 'object' ? item.metadata : {},
-    })
-    if (result.length >= limit) break
-  }
-  return result
-}
-
 function emptyResult(
   status: SearchExecutionStatus,
   query: string,
@@ -259,6 +439,7 @@ function emptyResult(
   searchMs: number,
   timeoutReason: SearchExecutionResult['timeoutReason'] = null,
   queriesAttempted: string[] = [],
+  backendTraces: SearchBackendTrace[] = [],
 ): SearchExecutionResult {
   return {
     status,
@@ -273,6 +454,7 @@ function emptyResult(
     usableEvidenceCount: 0,
     evidence: [],
     fetches: [],
+    backendTraces,
     timeoutReason,
     timings: { searchMs, fetchMs: 0, totalMs: Date.now() - startedAt },
   }
@@ -286,66 +468,102 @@ export async function executeSearch(
   const query = rawQuery.replace(/\s+/g, ' ').trim()
   const budgets = { ...DEFAULT_BUDGETS, ...deps.budgets }
   const deadlineAt = startedAt + Math.max(1, budgets.totalMs)
-  const backends = deps.backends?.length ? deps.backends : [defaultBackend()]
+  const backends = deps.backends?.length ? deps.backends : createConfiguredSearchBackends()
   const backendIds = backends.map(item => item.id)
   const limit = Math.max(1, Math.min(20, Math.floor(deps.limit ?? DEFAULT_LIMIT)))
+  const desiredCandidates = Math.min(limit, DEFAULT_EVIDENCE_TARGET)
   const rewrittenQuery = rewriteSearchQuery(query)
   const queries = rewrittenQuery && rewrittenQuery !== query ? [query, rewrittenQuery] : [query]
   const candidates: SearchCandidate[] = []
   const queriesAttempted: string[] = []
+  const backendTraces: SearchBackendTrace[] = []
+  const intent = classifySearchIntent(query)
+  const waves = planSearchBackends(intent, backends)
   let searchMs = 0
   let backendFailures = 0
+  let retrievalTimeoutReason: SearchExecutionResult['timeoutReason'] = null
 
   deps.onStage?.('search')
-  for (let backendIndex = 0; backendIndex < backends.length && candidates.length === 0; backendIndex += 1) {
-    const searchBackend = backends[backendIndex]
-    for (let queryIndex = 0; queryIndex < queries.length && candidates.length === 0; queryIndex += 1) {
-      const attemptStarted = Date.now()
-      queriesAttempted.push(queries[queryIndex])
-      try {
-        const found = await withinBudget(
-          signal => searchBackend.search(queries[queryIndex], {
-            signal,
-            timeoutMs: budgets.searchMs,
-            limit,
-          }),
-          'search',
-          budgets.searchMs,
-          deadlineAt,
-          deps.signal,
-        )
-        candidates.push(...dedupeCandidates(found, limit))
-      } catch (error) {
-        if (error instanceof SearchTimeoutError) {
-          return emptyResult(
-            'timeout', query, rewrittenQuery, backendIds, startedAt,
-            searchMs + Date.now() - attemptStarted, error.stage, queriesAttempted,
+  for (const attemptedQuery of queries) {
+    for (const wave of waves) {
+      if (rankAndDedupeCandidates(candidates, query, limit).length >= desiredCandidates) break
+      const attemptResults = await Promise.all(wave.map(async searchBackend => {
+        const attemptStarted = Date.now()
+        queriesAttempted.push(attemptedQuery)
+        try {
+          const found = await withinBudget(
+            signal => searchBackend.search(attemptedQuery, {
+              signal,
+              timeoutMs: budgets.searchMs,
+              limit,
+            }),
+            'search',
+            budgets.searchMs,
+            deadlineAt,
+            deps.signal,
           )
+          const latencyMs = Date.now() - attemptStarted
+          backendTraces.push({
+            backend: searchBackend.id,
+            query: attemptedQuery,
+            latencyMs,
+            status: found.length ? 'success' : 'no_results',
+            candidateCount: found.length,
+            acceptedCandidateCount: 0,
+            cost: searchBackend.estimatedCost ?? null,
+            errorClass: null,
+            rateLimited: false,
+          })
+          return found.map(item => ({ ...item, backend: searchBackend.id }))
+        } catch (error) {
+          const latencyMs = Date.now() - attemptStarted
+          const details = error as {
+            errorClass?: unknown; rateLimited?: unknown; statusCode?: unknown
+          }
+          const timedOut = error instanceof SearchTimeoutError || deps.signal?.aborted || isAbortError(error)
+          const rateLimited = details.rateLimited === true || details.statusCode === 429
+          backendTraces.push({
+            backend: searchBackend.id,
+            query: attemptedQuery,
+            latencyMs,
+            status: timedOut ? 'timeout' : rateLimited ? 'rate_limited' : 'error',
+            candidateCount: 0,
+            acceptedCandidateCount: 0,
+            cost: null,
+            errorClass: typeof details.errorClass === 'string'
+              ? details.errorClass
+              : timedOut ? 'timeout' : 'backend_error',
+            rateLimited,
+          })
+          backendFailures += 1
+          if (timedOut && retrievalTimeoutReason == null) {
+            retrievalTimeoutReason = error instanceof SearchTimeoutError ? error.stage : 'total'
+          }
+          return []
         }
-        if (deps.signal?.aborted || isAbortError(error)) {
-          return emptyResult(
-            'timeout', query, rewrittenQuery, backendIds, startedAt,
-            searchMs + Date.now() - attemptStarted, 'total', queriesAttempted,
-          )
-        }
-        backendFailures += 1
-      } finally {
-        searchMs += Date.now() - attemptStarted
-      }
+      }))
+      for (const found of attemptResults) candidates.push(...found)
+      if (deps.signal?.aborted) break
     }
+    if (candidates.length > 0 || deps.signal?.aborted) break
   }
 
-  const normalized = dedupeCandidates(candidates, limit)
+  searchMs = backendTraces.reduce((sum, trace) => sum + trace.latencyMs, 0)
+  const normalized = rankAndDedupeCandidates(candidates, query, limit)
+  for (const trace of backendTraces) {
+    trace.acceptedCandidateCount = normalized.filter(item => candidateBackends(item).includes(trace.backend)).length
+  }
   if (!normalized.length) {
     return emptyResult(
-      backendFailures === backends.length * queries.length ? 'backend_error' : 'no_results',
+      retrievalTimeoutReason ? 'timeout' : backendFailures === backendTraces.length ? 'backend_error' : 'no_results',
       query,
       rewrittenQuery,
       backendIds,
       startedAt,
       searchMs,
-      null,
+      retrievalTimeoutReason,
       queriesAttempted,
+      backendTraces,
     )
   }
 
@@ -379,7 +597,7 @@ export async function executeSearch(
           deadlineAt,
           ctrl.signal,
         )
-        const finalUrl = canonicalizeUrl(fetched.finalUrl) ?? item.url
+        const finalUrl = canonicalizeSearchUrl(fetched.finalUrl) ?? item.url
         const body = String(fetched.text || '').trim()
         const okStatus = fetched.status >= 200 && fetched.status < 300
         const usable = okStatus && body.length >= minEvidenceChars
@@ -408,6 +626,8 @@ export async function executeSearch(
             rank: item.rank,
             language: item.language,
             publishedAt: item.publishedAt,
+            sourceType: item.sourceType ?? 'secondary',
+            score: item.score ?? 0,
             contentType: fetched.contentType,
             text: body.slice(0, MAX_EVIDENCE_CHARS),
             truncated: fetched.truncated || body.length > MAX_EVIDENCE_CHARS,
@@ -473,6 +693,7 @@ export async function executeSearch(
     usableEvidenceCount: evidence.length,
     evidence,
     fetches,
+    backendTraces,
     timeoutReason,
     timings: {
       searchMs,

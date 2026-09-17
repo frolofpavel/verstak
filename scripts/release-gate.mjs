@@ -741,9 +741,9 @@ const GATE_MAX_WORKERS = 4
 // сохранения и пользовательский сценарий выбора модели.
 // -> 6007 ИЗМЕРЕНО 11.09: пользовательские модели OpenAI-compatible доходят
 // до селектора чата, а явный выбор модели в Settings закрепляется за активным чатом.
-// -> 6016 ИЗМЕРЕНО 17.09: Search Executor P2 детерминированно получает и
-// проверяет evidence до синтеза; ноль evidence не вызывает модель.
-const EXPECTED_TOTAL_TESTS = 6016
+// -> 6026 ИЗМЕРЕНО 17.09: Search V2 P3 добавил structured RU/global backends,
+// policy, общий ranking/dedup и внутреннюю telemetry без публичной утечки.
+const EXPECTED_TOTAL_TESTS = 6026
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

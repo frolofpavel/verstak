@@ -1004,6 +1004,7 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           fetch_success: search.fetchSuccess,
           fetch_rejected: search.fetchRejected,
           evidence: search.usableEvidenceCount,
+          backend_traces: search.backendTraces,
           timings: { ...search.timings, synthesisMs, totalMs: Date.now() - searchStartedAt },
           timeout_reason: finalTimeoutReason,
         })

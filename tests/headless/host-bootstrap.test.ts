@@ -124,11 +124,17 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
       evidence: [{
         url: 'https://official.example/fact', title: 'Официальный факт', snippet: '',
         backend: 'test', rank: 1, language: 'ru', publishedAt: null,
+        sourceType: 'official', score: 1,
         contentType: 'text/html', text: 'Проверенный текст источника '.repeat(20), truncated: false,
       }],
       fetches: [{
         url: 'https://official.example/fact', finalUrl: 'https://official.example/fact',
         status: 200, bodyChars: 560, usable: true, reason: null, elapsedMs: 5,
+      }],
+      backendTraces: [{
+        backend: 'test', query: 'актуальный факт', latencyMs: 3, status: 'success',
+        candidateCount: 1, acceptedCandidateCount: 1, cost: null,
+        errorClass: null, rateLimited: false,
       }],
       timeoutReason: null, timings: { searchMs: 3, fetchMs: 5, totalMs: 8 },
     }
@@ -149,7 +155,15 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     expect(host.getRunStatus(task.runId), JSON.stringify(events)).toBe('done')
     expect(events.some(event => event.label === 'web_search')).toBe(true)
     expect(events.some(event => event.label === 'web_fetch' && event.detail?.includes('200'))).toBe(true)
-    expect(events.find(event => event.kind === 'search_execution')?.label).toBe('success')
+    const execution = events.find(event => event.kind === 'search_execution')
+    expect(execution?.label).toBe('success')
+    const executionDetail = JSON.parse(execution?.detail ?? '{}') as Record<string, unknown>
+    expect(executionDetail.backend_traces).toEqual([expect.objectContaining({
+      backend: 'test', candidateCount: 1, acceptedCandidateCount: 1,
+    })])
+    expect(execution?.detail).not.toContain('deepseek')
+    expect(executionDetail).not.toHaveProperty('provider')
+    expect(executionDetail).not.toHaveProperty('model')
     expect(host.getThread(task.runId)?.messages.at(-1)?.content).toContain('Ответ по evidence')
   })
 
@@ -164,6 +178,7 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
         url: 'https://closed.example', finalUrl: 'https://closed.example', status: 403,
         bodyChars: 0, usable: false, reason: 'http_403', elapsedMs: 4,
       }],
+      backendTraces: [],
       timeoutReason: null, timings: { searchMs: 2, fetchMs: 4, totalMs: 6 },
     }
     const host = await makeHost({ searchExecutor: vi.fn(async () => failed) })
