@@ -75,6 +75,11 @@ function observationCaptureSurfaceBudgetIsPinned(source: string): boolean {
     && /HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd\s*,\s*MaxSurfaceInspectionElements\s*,\s*ObservationSurfaceInspectionTimeoutMs\s*\)/.test(capture)
 }
 
+function observationDeadlineLeavesSurfaceScanHeadroom(source: string): boolean {
+  return /private\s+const\s+int\s+ObservationSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source)
+    && /private\s+const\s+int\s+ObservationTimeoutMs\s*=\s*5000\s*;/.test(source)
+}
+
 function ownerCreationIdentityIsPinned(source: string): boolean {
   const watchdog = source.match(
     /private\s+static\s+void\s+StartOwnerWatchdog[\s\S]*?(?=\n\s*private\s+static\s+void\s+StartInputHooks)/,
@@ -311,6 +316,18 @@ describe('computer helper hardening contracts', () => {
     )
     expect(actionDeadlineMutation).not.toBe(source)
     expect(observationCaptureSurfaceBudgetIsPinned(actionDeadlineMutation)).toBe(false)
+  })
+
+  it('leaves enough total observation headroom for traversal, screenshot encoding, and the safety rescan', () => {
+    const source = helperSource()
+    expect(observationDeadlineLeavesSurfaceScanHeadroom(source)).toBe(true)
+
+    const collapsedDeadlineMutation = source.replace(
+      'private const int ObservationTimeoutMs = 5000;',
+      'private const int ObservationTimeoutMs = 1500;',
+    )
+    expect(collapsedDeadlineMutation).not.toBe(source)
+    expect(observationDeadlineLeavesSurfaceScanHeadroom(collapsedDeadlineMutation)).toBe(false)
   })
 
   it('pins the exact owner creation FILETIME before the watchdog handle is retained', () => {

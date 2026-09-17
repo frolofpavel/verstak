@@ -56,7 +56,7 @@ namespace VerstakComputerUse
         private const int MaxSurfaceInspectionElements = 512;
         private const int BindingSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationSurfaceInspectionTimeoutMs = 1500;
-        private const int ObservationTimeoutMs = 1500;
+        private const int ObservationTimeoutMs = 5000;
         private const int MaxScreenshotBytes = 16384;
         private const int MaxScreenshotWidth = 512;
         private const int MaxScreenshotHeight = 384;
