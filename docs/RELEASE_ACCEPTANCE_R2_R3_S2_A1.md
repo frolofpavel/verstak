@@ -2,7 +2,7 @@
 
 **Дата:** 2026-09-17
 
-**Кодовый кандидат:** `28abdcd598b129b4c1c9348b4178a82e4730a238`
+**Кодовый кандидат:** `7d344997f0f8310ad4af763da4529625838b7981`
 
 **Ветка:** `codex/next-r0-r3`
 
@@ -18,10 +18,11 @@
 | Проверка | Результат |
 |---|---|
 | `check:mojibake` → `lint:full` → `type` → `test:fast` → `build` → `check:performance` → `git diff --check` | PASS |
-| Полный тестовый эталон | 7362 total / 7345 passed / 17 skipped / 0 failed |
+| Полный тестовый эталон | 7369 total / 7352 passed / 17 skipped / 0 failed |
 | Performance bundle | 1 515 483 / 1 600 000 bytes |
-| Windows Setup | 336 130 318 bytes, SHA-256 `251AF8B8786447C85AD2AEA2B35D4384F75482DF6C699EBB05631DD72266D0DB` |
-| Windows Portable | 180 958 302 bytes, SHA-256 `4A7094FF63C1CF319ABCF85F88AAA0E360DC777CDCE51D9CF27795D455CCA9B1` |
+| Windows Setup | 336 133 256 bytes, SHA-256 `0DFB809398E1D29C14BCF0B3B056A39622DF7DAE1F8767902E295F03653B7991` |
+| Windows Portable | 180 955 235 bytes, SHA-256 `0BE7D8937FB69A34CEAF7AA6D94BD90B50BA3E5F9112DBB0D78F21B6F4D65B07` |
+| Packaged / установленный `app.asar` | SHA-256 `2CF47EC67BF298AC8FA3547957BD7CD7BB0C6C0813AD2E676E36C93B2321D599`, точное совпадение |
 | Setup payload ↔ `win-unpacked` | PASS, 560 файлов совпали |
 | Packaged Computer helper contract/read-only smoke | PASS |
 | Setup-extracted helper contract/read-only smoke | PASS |
@@ -37,6 +38,8 @@
 | Снимок только выбранного окна | `PrintWindow`, exact foreground HWND, 512×384 и 16 KiB caps, повторная identity/geometry/DPI проверка | PASS |
 | Защищённые поверхности | password/credential/CAPTCHA/2FA/elevated/protected блокируются fail-closed | PASS |
 | Stop | ACK ≤500 ms в нативном canary, после ACK новые actions отсутствуют | PASS |
+| Native composer provenance в установленной сборке | Свежий native ticket принят; exact-window `computer_observe` дважды завершён verified | PASS |
+| Effectful live-write в установленной сборке | Два `computer_type` остановлены `hardware-input` после нового физического ввода; значение внешнего state-file осталось пустым | BLOCKED fail-closed, write не засчитан |
 | DPI 125/150 и второй монитор | На машине один `DISPLAY1`, 1920×1080, DPI 96 / 100% | BLOCKED: оборудования/поверхности нет |
 | Реальный desktop-пилот 5/5 | Требует согласованного рабочего приложения и файла результата | BLOCKED: живая среда не выбрана |
 
@@ -80,9 +83,10 @@
 
 ## Оставшиеся внешние действия
 
-1. Павел вводит пароль/2FA в оставленной вкладке Calltouch; секреты агент не
-   читает и не извлекает.
-2. На авторизованном точном отчёте выполняется Calltouch 5/5.
+1. На авторизованном точном отчёте выполняется Calltouch 5/5; пароль/2FA при
+   необходимости вводит Павел, секреты агент не читает и не извлекает.
+2. На спокойном desktop-пилоте без нового физического ввода между observe и
+   effect выполняется R2 write 5/5 с внешним readback.
 3. На машине с DPI 125/150 и вторым монитором выполняется физическая R2-матрица
    и реальный desktop-пилот 5/5.
 4. После этого выполняются объединённая R3-цепочка 5/5 и ограниченный preview.
