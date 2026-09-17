@@ -32,6 +32,13 @@ describe('installer: сбой не убивает рабочую установ�
 
   const silent = () => {}
 
+  it('проверяет app.asar через original-fs, не через Electron patched fs', () => {
+    const source = readFileSync(join(process.cwd(), 'electron', 'installer', 'engine.ts'), 'utf8')
+    expect(source).not.toContain("import { existsSync } from 'fs'")
+    expect(source).toContain("import { nativeFs, nativeFsPromises } from './native-fs'")
+    expect(source).toContain('const { existsSync } = nativeFs')
+  })
+
   it('повторяет rename после краткого EBUSY и не теряет обновление', async () => {
     const attempts: number[] = []
     const delays: number[] = []

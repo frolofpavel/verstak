@@ -1,12 +1,12 @@
-import { existsSync } from 'fs'
 import { dirname, join, relative } from 'path'
-import { nativeFsPromises } from './native-fs'
+import { nativeFs, nativeFsPromises } from './native-fs'
 import {
   NATIVE_HOST_OWNER_MARKER,
   nativeHostOwnerMarker,
 } from '../../shared/contracts/native-host-owner'
 
 const { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } = nativeFsPromises
+const { existsSync } = nativeFs
 
 const STALE_UNPACKED = join('resources', 'app.asar.unpacked')
 
