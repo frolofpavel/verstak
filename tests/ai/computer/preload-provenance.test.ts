@@ -60,6 +60,7 @@ describe('Computer Use preload composer provenance', () => {
       'ai:mint-computer-use-composer-ticket',
       '17',
       '/computer-use: click Save',
+      { kind: 'keyboard', key: 'Enter' },
     )
   })
 })

@@ -829,7 +829,7 @@ const GATE_MAX_WORKERS = 4
 // -> 7362 ИЗМЕРЕНО 17.09 (R2/R3/S2-A1): stable double readback,
 // exact-window visual observation, native 10/10 canary, durable browser →
 // artifact → Computer handoff and shadow policy decision/readback traces.
-const EXPECTED_TOTAL_TESTS = 7362
+const EXPECTED_TOTAL_TESTS = 7369
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

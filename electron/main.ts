@@ -73,6 +73,7 @@ import { ComputerHelperClient } from './ai/computer/helper-client'
 import { createComputerHelperBackend } from './ai/computer/helper-backend'
 import { createComputerController, type ComputerController } from './ai/computer/controller'
 import { isComputerUseComposerAttempt } from './ai/computer/intent'
+import { createComputerUseComposerActivationGate } from './ai/computer/composer-activation'
 import { configureComputerHandler } from './ipc/tool-handlers/computer'
 import { registerComputerUseIpc } from './ipc/computer-use'
 import { createWebviewAdapter } from './ai/browser/adapters/webview'
@@ -1136,6 +1137,15 @@ app.whenReady().then(() => {
   const mainWindow = createWindow(settings)
   logRuntime('startup.window.create.ok')
   mainWindowRef = mainWindow
+  const computerUseComposerActivationGate = createComputerUseComposerActivationGate()
+  mainWindow.webContents.on('input-event', (_event, input) => {
+    if (input.type === 'mouseUp') {
+      computerUseComposerActivationGate.noteMouse(input as Electron.MouseInputEvent)
+    }
+  })
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    computerUseComposerActivationGate.noteKey(input)
+  })
   mainWindow.on('closed', () => {
     if (mainWindowRef === mainWindow) mainWindowRef = null
   })
@@ -1195,6 +1205,10 @@ app.whenReady().then(() => {
           }
         : null
     },
+    consumeComputerUseComposerActivation: (sender, proof) => (
+      sender.id === mainWindow.webContents.id
+      && computerUseComposerActivationGate.consume(proof)
+    ),
     // 1.9.3 мультиаккаунт → 2.1.3-CD: единый резолвер (readiness pin/one-shot внутри,
     // см. electron/ai/resolve-subscription-account.ts). Auto-путь не изменён.
     resolveSubscriptionAccount: createResolveSubscriptionAccount(db, {

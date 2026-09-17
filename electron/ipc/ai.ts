@@ -105,6 +105,8 @@ export interface AiDeps {
     role: string
     content: string
   } | null
+  /** Main-owned native input gate paired with the renderer DOM control proof. */
+  consumeComputerUseComposerActivation: (sender: Electron.WebContents, proof: unknown) => boolean
   /** 1.9.3 мультиаккаунт: аккаунт подписки провайдера. Резолвит секрет из SafeStorage по
    *  cred_ref, метаданные env-биндинга (config_dir/base_url) и touch'ит last_used_at.
    *  null = нет заведённых аккаунтов (падаем на legacy-секрет).
@@ -1026,35 +1028,43 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     }
   }
 
-  ipcMain.on?.('ai:mint-computer-use-composer-ticket', (event, chatIdValue: unknown, canonicalUserContentValue: unknown) => {
-    event.returnValue = null
-    const chatId = typeof chatIdValue === 'string' ? Number(chatIdValue) : NaN
-    const senderId = event.sender?.id
-    const canonicalUserContent = typeof canonicalUserContentValue === 'string' ? canonicalUserContentValue : ''
-    // Attachment labels are display metadata. The shared main-owned extractor
-    // keeps ticket minting and pre-persistence privacy taint on one boundary.
-    const originalUserText = computerUseOriginalTextFromPersistedContent(canonicalUserContent)
-    if (
-      !Number.isSafeInteger(chatId)
-      || chatId <= 0
-      || !Number.isSafeInteger(senderId)
-      || (senderId ?? 0) <= 0
-      || !originalUserText
-      || canonicalUserContent.length === 0
-      || Buffer.byteLength(canonicalUserContent, 'utf8') > MAX_COMPUTER_USE_PERSISTED_USER_CONTENT_BYTES
-    ) return
+  ipcMain.on?.('ai:mint-computer-use-composer-ticket', (event, chatIdValue: unknown, canonicalUserContentValue: unknown, activationProofValue: unknown) => {
+    // Electron's synchronous IPC reply is completed by the first returnValue
+    // assignment. Compute the result first and assign exactly once; assigning a
+    // defensive null before the ticket made every valid live mint return null.
+    event.returnValue = (() => {
+      const chatId = typeof chatIdValue === 'string' ? Number(chatIdValue) : NaN
+      const senderId = event.sender?.id
+      const canonicalUserContent = typeof canonicalUserContentValue === 'string' ? canonicalUserContentValue : ''
+      // Attachment labels are display metadata. The shared main-owned extractor
+      // keeps ticket minting and pre-persistence privacy taint on one boundary.
+      const originalUserText = computerUseOriginalTextFromPersistedContent(canonicalUserContent)
+      const activationAccepted = deps.consumeComputerUseComposerActivation(event.sender, activationProofValue)
+      logRuntime('computer_use.composer_activation', { senderId, accepted: activationAccepted })
+      if (
+        !activationAccepted
+        ||
+        !Number.isSafeInteger(chatId)
+        || chatId <= 0
+        || !Number.isSafeInteger(senderId)
+        || (senderId ?? 0) <= 0
+        || !originalUserText
+        || canonicalUserContent.length === 0
+        || Buffer.byteLength(canonicalUserContent, 'utf8') > MAX_COMPUTER_USE_PERSISTED_USER_CONTENT_BYTES
+      ) return null
 
-    const now = Date.now()
-    pruneComputerUseComposerTickets(now)
-    const ticket = `cu-${randomUUID()}`
-    computerUseComposerTickets.set(ticket, {
-      senderId: senderId!,
-      chatId,
-      originalUserText,
-      persistedUserContentHash: hashComputerUseComposerContent(canonicalUserContent),
-      expiresAt: now + COMPUTER_USE_COMPOSER_TICKET_TTL_MS,
-    })
-    event.returnValue = ticket
+      const now = Date.now()
+      pruneComputerUseComposerTickets(now)
+      const ticket = `cu-${randomUUID()}`
+      computerUseComposerTickets.set(ticket, {
+        senderId: senderId!,
+        chatId,
+        originalUserText,
+        persistedUserContentHash: hashComputerUseComposerContent(canonicalUserContent),
+        expiresAt: now + COMPUTER_USE_COMPOSER_TICKET_TTL_MS,
+      })
+      return ticket
+    })()
   })
 
   const consumeComputerUseComposerTicket = (
@@ -1063,26 +1073,64 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     grantValue: unknown,
   ): { originalUserText: string; verifiedUserContent: string } | null => {
     const grant = parseComputerUseComposerGrant(grantValue)
-    if (!grant) return null
+    if (!grant) {
+      // Ordinary sends carry no grant. Log only an actually supplied malformed
+      // envelope so normal chat traffic does not pollute the runtime journal.
+      if (grantValue !== undefined && grantValue !== null) {
+        const source = typeof grantValue === 'object' && !Array.isArray(grantValue)
+          ? grantValue as Record<string, unknown>
+          : null
+        logRuntime('computer_use.composer_ticket.consume', {
+          accepted: false,
+          reason: 'grant-invalid',
+          valueType: typeof grantValue,
+          array: Array.isArray(grantValue),
+          ticketType: typeof source?.ticket,
+          ticketLength: typeof source?.ticket === 'string' ? source.ticket.length : null,
+          userMessageIdType: typeof source?.userMessageId,
+          userMessageIdSafeInteger: Number.isSafeInteger(source?.userMessageId),
+        })
+      }
+      return null
+    }
     const record = computerUseComposerTickets.get(grant.ticket)
-    if (!record) return null
+    if (!record) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'ticket-missing' })
+      return null
+    }
     // Consume before every trust check and before handleAiSend can create a run.
     computerUseComposerTickets.delete(grant.ticket)
     const chatId = chatIdValue ? Number(chatIdValue) : NaN
-    if (
-      record.expiresAt <= Date.now()
-      || sender.id !== record.senderId
-      || !Number.isSafeInteger(chatId)
-      || chatId !== record.chatId
-    ) return null
+    if (record.expiresAt <= Date.now()) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'expired' })
+      return null
+    }
+    if (sender.id !== record.senderId) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'sender-mismatch' })
+      return null
+    }
+    if (!Number.isSafeInteger(chatId) || chatId !== record.chatId) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'chat-mismatch' })
+      return null
+    }
     const latest = deps.getLatestChatUserMessage?.(chatId)
-    if (
-      !latest
-      || latest.id !== grant.userMessageId
-      || latest.sessionId !== chatId
-      || latest.role !== 'user'
-      || hashComputerUseComposerContent(latest.content) !== record.persistedUserContentHash
-    ) return null
+    if (!latest) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'latest-missing' })
+      return null
+    }
+    if (latest.id !== grant.userMessageId) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'message-id-mismatch' })
+      return null
+    }
+    if (latest.sessionId !== chatId || latest.role !== 'user') {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'message-envelope-mismatch' })
+      return null
+    }
+    if (hashComputerUseComposerContent(latest.content) !== record.persistedUserContentHash) {
+      logRuntime('computer_use.composer_ticket.consume', { accepted: false, reason: 'content-mismatch' })
+      return null
+    }
+    logRuntime('computer_use.composer_ticket.consume', { accepted: true })
     return {
       originalUserText: record.originalUserText,
       verifiedUserContent: latest.content,

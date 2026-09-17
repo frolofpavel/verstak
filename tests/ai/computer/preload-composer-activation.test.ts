@@ -7,6 +7,8 @@ type CapturedListener = (event: {
   shiftKey?: boolean
   ctrlKey?: boolean
   metaKey?: boolean
+  clientX?: number
+  clientY?: number
   composedPath: () => unknown[]
 }) => void
 
@@ -38,11 +40,13 @@ describe('Computer Use preload composer activation latch', () => {
 
     listeners.get('click')!({
       isTrusted: true,
+      clientX: 120,
+      clientY: 240,
       composedPath: () => [element('gg-send-btn')],
     })
 
-    expect(consume()).toBe(true)
-    expect(consume()).toBe(false)
+    expect(consume()).toEqual({ kind: 'mouse', x: 120, y: 240 })
+    expect(consume()).toBeNull()
   })
 
   it('trusted Enter in the visible composer arms mint without relying on isolated-world userActivation', () => {
@@ -59,7 +63,7 @@ describe('Computer Use preload composer activation latch', () => {
       composedPath: () => [element('gg-composer-textarea')],
     })
 
-    expect(consume()).toBe(true)
+    expect(consume()).toEqual({ kind: 'keyboard', key: 'Enter' })
   })
 
   it('rejects synthetic, unrelated, modified, stop and expired input', () => {
@@ -69,11 +73,11 @@ describe('Computer Use preload composer activation latch', () => {
     const click = listeners.get('click')!
     const keydown = listeners.get('keydown')!
 
-    click({ isTrusted: false, composedPath: () => [element('gg-send-btn')] })
-    expect(consume()).toBe(false)
+    click({ isTrusted: false, clientX: 1, clientY: 2, composedPath: () => [element('gg-send-btn')] })
+    expect(consume()).toBeNull()
 
-    click({ isTrusted: true, composedPath: () => [element('gg-send-btn', 'gg-stop-btn')] })
-    expect(consume()).toBe(false)
+    click({ isTrusted: true, clientX: 1, clientY: 2, composedPath: () => [element('gg-send-btn', 'gg-stop-btn')] })
+    expect(consume()).toBeNull()
 
     keydown({
       isTrusted: true,
@@ -83,13 +87,13 @@ describe('Computer Use preload composer activation latch', () => {
       metaKey: false,
       composedPath: () => [element('gg-composer-textarea')],
     })
-    expect(consume()).toBe(false)
+    expect(consume()).toBeNull()
 
     click({ isTrusted: true, composedPath: () => [element('other-button')] })
-    expect(consume()).toBe(false)
+    expect(consume()).toBeNull()
 
-    click({ isTrusted: true, composedPath: () => [element('gg-send-btn')] })
-    now += 1_001
-    expect(consume()).toBe(false)
+    click({ isTrusted: true, clientX: 5, clientY: 6, composedPath: () => [element('gg-send-btn')] })
+    now += 251
+    expect(consume()).toBeNull()
   })
 })

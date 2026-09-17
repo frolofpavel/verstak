@@ -1,4 +1,6 @@
-const COMPOSER_ACTIVATION_WINDOW_MS = 50
+import type { ComputerUseComposerActivationProof } from '../shared/contracts/computer-use-composer-activation'
+
+const COMPOSER_ACTIVATION_WINDOW_MS = 250
 
 interface ActivationEventLike {
   readonly isTrusted: boolean
@@ -6,6 +8,8 @@ interface ActivationEventLike {
   readonly shiftKey?: boolean
   readonly ctrlKey?: boolean
   readonly metaKey?: boolean
+  readonly clientX?: number
+  readonly clientY?: number
   composedPath(): unknown[]
 }
 
@@ -35,10 +39,12 @@ function pathHasClass(event: ActivationEventLike, className: string): boolean {
 export function installComputerUseComposerActivationLatch(
   target: ActivationTargetLike,
   now: () => number = () => performance.now(),
-): () => boolean {
+): () => ComputerUseComposerActivationProof | null {
   let armedUntil = 0
+  let proof: ComputerUseComposerActivationProof | null = null
 
-  const arm = () => {
+  const arm = (nextProof: ComputerUseComposerActivationProof) => {
+    proof = nextProof
     armedUntil = now() + COMPOSER_ACTIVATION_WINDOW_MS
   }
 
@@ -48,7 +54,9 @@ export function installComputerUseComposerActivationLatch(
       && pathHasClass(event, 'gg-send-btn')
       && !pathHasClass(event, 'gg-stop-btn')
       && !pathHasClass(event, 'gg-pause-btn')
-    ) arm()
+      && Number.isSafeInteger(event.clientX)
+      && Number.isSafeInteger(event.clientY)
+    ) arm({ kind: 'mouse', x: event.clientX!, y: event.clientY! })
   }, { capture: true })
 
   target.addEventListener('keydown', event => {
@@ -59,12 +67,13 @@ export function installComputerUseComposerActivationLatch(
       && event.ctrlKey !== true
       && event.metaKey !== true
       && pathHasClass(event, 'gg-composer-textarea')
-    ) arm()
+    ) arm({ kind: 'keyboard', key: 'Enter' })
   }, { capture: true })
 
   return () => {
-    const accepted = armedUntil > 0 && now() <= armedUntil
+    const accepted = armedUntil > 0 && now() <= armedUntil ? proof : null
     armedUntil = 0
+    proof = null
     return accepted
   }
 }

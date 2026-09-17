@@ -9,6 +9,8 @@ const consumeComputerUseComposerActivation = typeof window !== 'undefined'
   // Unit harnesses import preload without a DOM. Production always takes the
   // trusted-event latch above; this fallback preserves the isolated API test.
   : () => navigator.userActivation.isActive === true
+    ? { kind: 'keyboard' as const, key: 'Enter' as const }
+    : null
 
 contextBridge.exposeInMainWorld('api', {
   // VSK-PRODUCT-A1 (композер): «Папка с документами» — открывает папку как проект
@@ -202,11 +204,13 @@ contextBridge.exposeInMainWorld('api', {
       chatId: string,
       canonicalUserContent: string,
     ): string | null => {
-      if (!consumeComputerUseComposerActivation()) return null
+      const activationProof = consumeComputerUseComposerActivation()
+      if (!activationProof) return null
       const ticket = ipcRenderer.sendSync(
         'ai:mint-computer-use-composer-ticket',
         chatId,
         canonicalUserContent,
+        activationProof,
       )
       return typeof ticket === 'string' && ticket.length > 0 ? ticket : null
     },

@@ -41,7 +41,11 @@ vi.mock('../../electron/ai/registry', async importOriginal => {
   }
 })
 
-const { registerAiIpc } = await import('../../electron/ipc/ai')
+const { registerAiIpc: registerAiIpcBase } = await import('../../electron/ipc/ai')
+const registerAiIpc = (deps: Parameters<typeof registerAiIpcBase>[0]) => registerAiIpcBase({
+  ...deps,
+  consumeComputerUseComposerActivation: () => true,
+})
 const projectPath = mkdtempSync(join(tmpdir(), 'vst-browser-wiring-'))
 const messages: ChatMessage[] = [{ role: 'user', content: 'Прочитай открытую вкладку' }]
 
@@ -143,12 +147,19 @@ function mintComposerTicket(
   chatId: number,
   canonicalUserContent: string,
 ): string {
-  const event = { sender: webContents, returnValue: null as unknown }
+  const assignments: unknown[] = []
+  const event = { sender: webContents } as { sender: Electron.WebContents; returnValue: unknown }
+  Object.defineProperty(event, 'returnValue', {
+    get: () => assignments.at(-1),
+    set: value => { assignments.push(value) },
+  })
   syncHandlers.get('ai:mint-computer-use-composer-ticket')!(
     event,
-    String(chatId),
-    canonicalUserContent,
-  )
+      String(chatId),
+      canonicalUserContent,
+      { kind: 'keyboard', key: 'Enter' },
+    )
+  expect(assignments).toHaveLength(1)
   expect(event.returnValue).toEqual(expect.any(String))
   return event.returnValue as string
 }

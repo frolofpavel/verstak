@@ -133,7 +133,11 @@ vi.mock('../../electron/ai/registry', async importOriginal => {
   }
 })
 
-const { registerAiIpc } = await import('../../electron/ipc/ai')
+const { registerAiIpc: registerAiIpcBase } = await import('../../electron/ipc/ai')
+const registerAiIpc = (deps: Parameters<typeof registerAiIpcBase>[0]) => registerAiIpcBase({
+  ...deps,
+  consumeComputerUseComposerActivation: () => true,
+})
 const { pendingWrites, pendingCommands, pendingBrowserActions, scopedKey } = await import('../../electron/ai/runner-shared')
 const { configureComputerHandler } = await import('../../electron/ipc/tool-handlers/computer')
 
@@ -233,6 +237,7 @@ describe('ai:live-state — renderer reload recovery', () => {
       event,
       String(chatId),
       canonicalUserContent,
+      { kind: 'keyboard', key: 'Enter' },
     )
     expect(event.returnValue).toEqual(expect.any(String))
     return event.returnValue as string
