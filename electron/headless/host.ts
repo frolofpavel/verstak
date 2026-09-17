@@ -1017,11 +1017,6 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           estimated_search_cost: search.estimatedSearchCost,
           cache_hits: search.cacheHits,
           cache_misses: search.cacheMisses,
-          synthesis_status: synthesisStatus,
-          synthesis_attempts: synthesisAttempts,
-          synthesis_retries: synthesisRetries,
-          synthesis_error_class: synthesisErrorClass,
-          synthesis_error_status: synthesisErrorStatus,
           timings: { ...search.timings, synthesisMs, totalMs: Date.now() - searchStartedAt },
           timeout_reason: finalTimeoutReason,
         })
@@ -1030,6 +1025,19 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           detail,
           status: finalStatus === 'success' || finalStatus === 'partial_success' ? 'ok' : 'error',
         })
+        if (synthesisStatus !== 'not_started') {
+          agentRuns.appendEvent(runId, 'search_synthesis', {
+            label: synthesisStatus,
+            detail: JSON.stringify({
+              attempts: synthesisAttempts,
+              retries: synthesisRetries,
+              error_class: synthesisErrorClass,
+              error_status: synthesisErrorStatus,
+              timing_ms: synthesisMs,
+            }),
+            status: synthesisStatus === 'success' ? 'ok' : 'error',
+          })
+        }
         logRuntime('headless.search.retrieval', {
           runId,
           retrievalBackend: search.retrievalBackend,
