@@ -2,6 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { RecipeSpec } from './ai/skills/types'
 import type { PromptRouteOverride } from '../shared/contracts/provider'
 import type { ChatSubscriptionBindingDTO } from '../shared/contracts/subscription'
+import { installComputerUseComposerActivationLatch } from './preload-computer-use-activation'
+
+const consumeComputerUseComposerActivation = typeof window !== 'undefined'
+  ? installComputerUseComposerActivationLatch(window)
+  // Unit harnesses import preload without a DOM. Production always takes the
+  // trusted-event latch above; this fallback preserves the isolated API test.
+  : () => navigator.userActivation.isActive === true
 
 contextBridge.exposeInMainWorld('api', {
   // VSK-PRODUCT-A1 (композер): «Папка с документами» — открывает папку как проект
@@ -195,7 +202,7 @@ contextBridge.exposeInMainWorld('api', {
       chatId: string,
       canonicalUserContent: string,
     ): string | null => {
-      if (navigator.userActivation.isActive !== true) return null
+      if (!consumeComputerUseComposerActivation()) return null
       const ticket = ipcRenderer.sendSync(
         'ai:mint-computer-use-composer-ticket',
         chatId,
