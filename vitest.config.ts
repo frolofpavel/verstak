@@ -1,11 +1,13 @@
 import { defineConfig, configDefaults } from 'vitest/config'
 
-// Файлы с РЕАЛЬНЫМИ git-субпроцессами + temp-репо inherently враждебны параллелизму: под
-// нагрузкой (Codex/сборка/полный suite) git возвращает EPERM на очистке temp-дерева и мусор
-// в snapshot/reconcile (cross-contention нескольких git-процессов). Гоняем их СТРОГО ПО ОДНОМУ
-// отдельным проектом; остальной suite остаётся параллельным. rmDirRobust добивает транзиентные
-// локи, сериализация — cross-contention. См. память verstak-worktree-* и STATUS.
+// Файлы с РЕАЛЬНЫМИ git/PowerShell/reg.exe subprocess + temp-репо inherently враждебны
+// параллелизму: под нагрузкой (Codex/сборка/полный suite) внешние процессы не укладываются в
+// общий 20-секундный testTimeout и оставляют temp/registry contention. Гоняем их СТРОГО ПО
+// ОДНОМУ отдельным проектом; остальной suite остаётся параллельным. rmDirRobust добивает
+// транзиентные локи, сериализация — cross-contention. См. память verstak-worktree-* и STATUS.
 const WORKTREE_FILES = [
+  'tests/ai/agent-job-worktree-smoke.test.ts',
+  'tests/ai/browser/bridge-host-lifecycle.test.ts',
   'tests/ai/worktree-lifecycle.test.ts',
   'tests/ai/worktree-status.test.ts',
   'tests/ai/git-worktree.test.ts',

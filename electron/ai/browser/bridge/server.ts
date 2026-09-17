@@ -665,6 +665,13 @@ export function createBridgeServer(deps: BridgeServerDeps): BridgeServer {
           ? `Browser Employee несовместим: app=${deps.appVersion}, extension=${String(msg.extensionVersion || 'нет')}, host=${String(msg.hostVersion || 'нет')}, protocol=${BRIDGE_PROTOCOL_VERSION}`
           : null
         if (versionReason) {
+          session.setError(versionReason)
+          log('bridge.version_incompatible', {
+            appVersion: deps.appVersion,
+            extensionVersion: msg.extensionVersion || null,
+            hostVersion: msg.hostVersion || null,
+            protocolVersion: BRIDGE_PROTOCOL_VERSION,
+          })
           send(makeError(msg.requestId, 'version_incompatible', versionReason))
           return
         }

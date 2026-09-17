@@ -81,25 +81,31 @@ describe('Browser Employee version handshake', () => {
 
   it('fails closed with one stable reason when the native host is stale', async () => {
     const response = await requestHello('9.8.6')
+    const expectedReason = `Browser Employee несовместим: app=${APP_VERSION}, extension=${BROWSER_EXTENSION_VERSION}, host=9.8.6, protocol=${BRIDGE_PROTOCOL_VERSION}`
     expect(response).toMatchObject({
       type: 'error',
       code: 'version_incompatible',
     })
-    expect('message' in response ? response.message : '').toBe(
-      `Browser Employee несовместим: app=${APP_VERSION}, extension=${BROWSER_EXTENSION_VERSION}, host=9.8.6, protocol=${BRIDGE_PROTOCOL_VERSION}`,
-    )
+    expect('message' in response ? response.message : '').toBe(expectedReason)
+    expect(server?.getPublicState()).toMatchObject({
+      ui: 'error',
+      lastError: expectedReason,
+    })
     expect(server?.isExtensionAuthenticated()).toBe(false)
   })
 
   it('fails closed before authentication when the extension runtime is stale', async () => {
     const response = await requestHello(APP_VERSION, '0.1.9')
+    const expectedReason = `Browser Employee несовместим: app=${APP_VERSION}, extension=0.1.9, host=${APP_VERSION}, protocol=${BRIDGE_PROTOCOL_VERSION}`
     expect(response).toMatchObject({
       type: 'error',
       code: 'version_incompatible',
     })
-    expect('message' in response ? response.message : '').toBe(
-      `Browser Employee несовместим: app=${APP_VERSION}, extension=0.1.9, host=${APP_VERSION}, protocol=${BRIDGE_PROTOCOL_VERSION}`,
-    )
+    expect('message' in response ? response.message : '').toBe(expectedReason)
+    expect(server?.getPublicState()).toMatchObject({
+      ui: 'error',
+      lastError: expectedReason,
+    })
     expect(server?.isExtensionAuthenticated()).toBe(false)
   })
 })
