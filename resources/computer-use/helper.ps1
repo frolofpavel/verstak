@@ -55,6 +55,7 @@ namespace VerstakComputerUse
         private const int MaxWindowTitleDisplayChars = 300;
         private const int MaxSurfaceInspectionElements = 512;
         private const int BindingSurfaceInspectionTimeoutMs = 1500;
+        private const int ObservationSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationTimeoutMs = 1500;
         private const int MaxScreenshotBytes = 16384;
         private const int MaxScreenshotWidth = 512;
@@ -743,7 +744,7 @@ namespace VerstakComputerUse
             if (!probe.Foreground) return null;
             if (probe.ScreenLocked || probe.Elevated || probe.ProtectedProcess || probe.SecureSurface)
                 throw new SafeError("protected_surface", "visual capture blocked for unsafe surface");
-            if (HasUnsafeSurfaceDescendant(expected.Hwnd, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs))
+            if (HasUnsafeSurfaceDescendant(expected.Hwnd, MaxSurfaceInspectionElements, ObservationSurfaceInspectionTimeoutMs))
                 throw new SafeError("protected_surface", "visual capture blocked for password, credential or launch surface");
 
             int sourceWidth = probe.Geometry.Right - probe.Geometry.Left;

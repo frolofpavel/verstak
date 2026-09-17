@@ -67,6 +67,14 @@ function bindingSurfaceBudgetIsPinned(source: string): boolean {
     && /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds\s*\)/.test(probe)
 }
 
+function observationCaptureSurfaceBudgetIsPinned(source: string): boolean {
+  const capture = source.match(
+    /private\s+static\s+string\s+CaptureExactWindowPng[\s\S]*?(?=\n\s*private\s+static\s+byte\[\]\s+EncodeWindowPng)/,
+  )?.[0] ?? ''
+  return /private\s+const\s+int\s+ObservationSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source)
+    && /HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd\s*,\s*MaxSurfaceInspectionElements\s*,\s*ObservationSurfaceInspectionTimeoutMs\s*\)/.test(capture)
+}
+
 function ownerCreationIdentityIsPinned(source: string): boolean {
   const watchdog = source.match(
     /private\s+static\s+void\s+StartOwnerWatchdog[\s\S]*?(?=\n\s*private\s+static\s+void\s+StartInputHooks)/,
@@ -291,6 +299,18 @@ describe('computer helper hardening contracts', () => {
     )
     expect(actionBudgetMutation).not.toBe(source)
     expect(bindingSurfaceBudgetIsPinned(actionBudgetMutation)).toBe(false)
+  })
+
+  it('keeps the read-only screenshot safety rescan bounded without the 50 ms action deadline', () => {
+    const source = helperSource()
+    expect(observationCaptureSurfaceBudgetIsPinned(source)).toBe(true)
+
+    const actionDeadlineMutation = source.replace(
+      'HasUnsafeSurfaceDescendant(expected.Hwnd, MaxSurfaceInspectionElements, ObservationSurfaceInspectionTimeoutMs)',
+      'HasUnsafeSurfaceDescendant(expected.Hwnd, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs)',
+    )
+    expect(actionDeadlineMutation).not.toBe(source)
+    expect(observationCaptureSurfaceBudgetIsPinned(actionDeadlineMutation)).toBe(false)
   })
 
   it('pins the exact owner creation FILETIME before the watchdog handle is retained', () => {
