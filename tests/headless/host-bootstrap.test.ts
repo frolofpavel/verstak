@@ -103,7 +103,7 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     expect(events[0].kind).toBe('user_msg')
   })
 
-  it('web_search детерминированно идёт через Search Executor, затем синтез без legacy tools', async () => {
+  it('web_search после pre-token 503 повторяет только synthesis и сохраняет один ответ без legacy tools', async () => {
     let providerCalls = 0
     let synthesisMessages: import('../../electron/ai/types').ChatMessage[] = []
     let synthesisTools: import('../../electron/ai/types').ToolDefinition[] = []
@@ -113,6 +113,10 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
         providerCalls++
         synthesisMessages = messages
         synthesisTools = tools
+        if (providerCalls === 1) {
+          yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+          return
+        }
         yield { type: 'text', text: 'Ответ по evidence [1]' }
         yield { type: 'done' }
       }
@@ -151,7 +155,7 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     })
     await task.completion
 
-    expect(providerCalls).toBe(1)
+    expect(providerCalls).toBe(2)
     expect(synthesisTools).toEqual([])
     expect(synthesisMessages.some(message => message.content.includes('Проверенный текст источника'))).toBe(true)
     expect(synthesisMessages.some(message => message.content.includes('Инструкция проекта'))).toBe(true)
@@ -164,10 +168,17 @@ describe('headless host bootstrap (Этап 1а, №2)', () => {
     const executionDetail = JSON.parse(execution?.detail ?? '{}') as Record<string, unknown>
     expect(executionDetail).not.toHaveProperty('backend_traces')
     expect(executionDetail.paid_backend_used).toBe(false)
+    expect(executionDetail.synthesis_status).toBe('success')
+    expect(executionDetail.synthesis_attempts).toBe(2)
+    expect(executionDetail.synthesis_retries).toBe(1)
+    expect(executionDetail.synthesis_error_class).toBe('provider_network')
+    expect(executionDetail.synthesis_error_status).toBe(503)
     expect(execution?.detail).not.toContain('deepseek')
     expect(executionDetail).not.toHaveProperty('provider')
     expect(executionDetail).not.toHaveProperty('model')
-    expect(host.getThread(task.runId)?.messages.at(-1)?.content).toContain('Ответ по evidence')
+    const assistantMessages = host.getThread(task.runId)?.messages.filter(message => message.role === 'assistant') ?? []
+    expect(assistantMessages).toHaveLength(1)
+    expect(assistantMessages[0].content).toContain('Ответ по evidence')
   })
 
   it('0 evidence не вызывает модель и сохраняет controlled failure в разговоре', async () => {

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  boundedSearchProvider,
   detectPrimarySourceType,
+  hasExplicitOfficialSourceIntent,
   executeSearch,
   rankAndDedupeCandidates,
   searchEvidencePrompt,
@@ -9,6 +11,7 @@ import {
   type SearchCandidate,
   type SearchFetchResult,
 } from '../../electron/headless/search-executor'
+import type { ChatEvent, ChatProvider } from '../../electron/ai/types'
 
 const candidate = (url: string, rank: number): SearchCandidate => ({
   url,
@@ -381,5 +384,152 @@ describe('Search Executor P3.1 zero-cost routing', () => {
 
     expect(prompt.length).toBeLessThan(26_000)
     for (const index of [1, 2, 3, 4]) expect(prompt).toContain(`[${index}] Источник ${index}`)
+  })
+
+  it.each([
+    'Что OpenAI пишет о X? Только официальный источник.',
+    'Найди официальный текст закона РФ о X.',
+    'According to the official Apple documentation, how does X work?',
+  ])('распознаёт explicit official-source intent: %s', query => {
+    expect(hasExplicitOfficialSourceIntent(query)).toBe(true)
+  })
+
+  it('не включает official-source режим для обычного запроса со смешанными источниками', () => {
+    expect(hasExplicitOfficialSourceIntent('Сравни мнения о новом MacBook и дай краткий вывод.')).toBe(false)
+  })
+
+  it('при explicit intent поднимает релевантный официальный домен, но обычный ranking оставляет mixed', () => {
+    const secondary = {
+      ...candidate('https://reviews.example/apple-x', 1),
+      title: 'Apple X подробный обзор',
+      snippet: 'Apple X характеристики и тесты',
+      language: 'en',
+    }
+    const official = {
+      ...candidate('https://support.apple.com/guide/x', 8),
+      title: 'Apple X User Guide',
+      snippet: 'Reference for Apple X',
+      language: 'en',
+    }
+
+    expect(rankAndDedupeCandidates([secondary, official], 'Apple X review', 2)[0].url)
+      .toBe('https://reviews.example/apple-x')
+    const ranked = rankAndDedupeCandidates(
+      [secondary, official],
+      'According to the official Apple documentation, explain Apple X',
+      2,
+    )
+    expect(ranked[0].url).toBe('https://support.apple.com/guide/x')
+    expect(ranked[0].isOfficialSource).toBe(true)
+  })
+
+  it('official prompt ставит подтверждённый primary первым и не называет secondary официальным', () => {
+    const prompt = searchEvidencePrompt({
+      originalQuery: 'Что OpenAI пишет о X? Только официальный источник.',
+      evidence: [
+        {
+          url: 'https://analysis.example/x', title: 'Анализ X', snippet: '', backend: 'test', rank: 1,
+          language: 'ru', publishedAt: null, sourceType: 'secondary', score: 8,
+          contentType: 'text/html', text: 'Вторичный материал '.repeat(30), truncated: false,
+          isOfficialSource: false,
+        },
+        {
+          url: 'https://openai.com/x', title: 'OpenAI X', snippet: '', backend: 'test', rank: 2,
+          language: 'en', publishedAt: null, sourceType: 'company', score: 7,
+          contentType: 'text/html', text: 'Primary material '.repeat(30), truncated: false,
+          isOfficialSource: true,
+        },
+      ],
+    } as never)
+
+    expect(prompt.indexOf('https://openai.com/x')).toBeLessThan(prompt.indexOf('https://analysis.example/x'))
+    expect(prompt).toContain('официальные/primary источники')
+    expect(prompt).toContain('не называй secondary-источник официальным')
+  })
+})
+
+describe('Search Executor P3.1 synthesis repair', () => {
+  const collect = async (provider: ChatProvider): Promise<ChatEvent[]> => {
+    const result: ChatEvent[] = []
+    for await (const event of provider.send([], [])) result.push(event)
+    return result
+  }
+
+  it('повторяет transient 503 ровно один раз до первого токена и не отдаёт первый error наружу', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        if (attempts === 1) {
+          yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+          return
+        }
+        yield { type: 'text', text: 'Готовый ответ' }
+        yield { type: 'done' }
+      },
+    }
+    const onRetry = vi.fn()
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn(), { onRetry }))
+
+    expect(attempts).toBe(2)
+    expect(onRetry).toHaveBeenCalledOnce()
+    expect(events).toEqual([
+      { type: 'text', text: 'Готовый ответ' },
+      { type: 'done' },
+    ])
+  })
+
+  it('не повторяет transient error после первого видимого токена, чтобы не дублировать ответ', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        yield { type: 'text', text: 'Начало ответа' }
+        yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+      },
+    }
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn()))
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([
+      { type: 'text', text: 'Начало ответа' },
+      { type: 'error', message: 'HTTP 503 upstream unavailable' },
+    ])
+  })
+
+  it('не повторяет non-transient 400 до первого токена', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        yield { type: 'error', message: 'HTTP 400 invalid request' }
+      },
+    }
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn()))
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([{ type: 'error', message: 'HTTP 400 invalid request' }])
+  })
+
+  it('Stop отменяет retry даже если текущая попытка завершилась transient 503', async () => {
+    let attempts = 0
+    const ctrl = new AbortController()
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        ctrl.abort()
+        yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+      },
+    }
+    const provider = boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn())
+    const events: ChatEvent[] = []
+    for await (const event of provider.send([], [], undefined, ctrl.signal)) events.push(event)
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([{ type: 'error', message: 'HTTP 503 upstream unavailable' }])
   })
 })

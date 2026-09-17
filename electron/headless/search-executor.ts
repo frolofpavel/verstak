@@ -1,5 +1,6 @@
 import { fetchUrl } from '../ai/web-fetch'
-import type { ChatProvider } from '../ai/types'
+import { classifyFallbackReason } from '../ai/smart-fallback'
+import type { ChatEvent, ChatProvider } from '../ai/types'
 import {
   classifySearchIntent,
   createConfiguredSearchBackends,
@@ -45,6 +46,8 @@ export interface SearchCandidate {
   publishedAt: string | null
   metadata: Record<string, unknown>
   sourceType?: PrimarySourceType
+  /** True only when the candidate is a plausible primary source for this query. */
+  isOfficialSource?: boolean
   score?: number
 }
 
@@ -95,6 +98,7 @@ export interface SearchEvidence {
   language: string | null
   publishedAt: string | null
   sourceType: PrimarySourceType
+  isOfficialSource?: boolean
   score: number
   contentType: string
   text: string
@@ -279,6 +283,33 @@ function sourceBoost(type: PrimarySourceType): number {
   }[type]
 }
 
+/** Explicit user preference only. Merely mentioning a company/product must not
+ * collapse normal mixed-source ranking into an official-only search. */
+export function hasExplicitOfficialSourceIntent(query: string): boolean {
+  const value = String(query || '')
+  return /(?:только[^.!?]{0,48}официальн\S*|официальн\S*\s+(?:источник\S*|сайт\S*|документац\S*|документ\S*|текст\S*|публикац\S*|данн\S*)|по\s+данным\s+(?:правительств\S*|компани\S*|организац\S*))/.test(value.toLowerCase())
+    || /(?:\bonly\b[^.!?]{0,48}\bofficial\b|\bofficial\s+(?:source|site|website|documentation|docs?|text|publication|data)\b|\baccording\s+to\s+(?:the\s+)?official\b)/i.test(value)
+}
+
+const PRIMARY_SOURCE_TYPES = new Set<PrimarySourceType>([
+  'government', 'documentation', 'company', 'official', 'paper', 'repository',
+])
+
+function isOfficialSourceForQuery(
+  query: string,
+  item: SearchCandidate,
+  sourceType: PrimarySourceType,
+): boolean {
+  if (sourceType === 'government' || sourceType === 'documentation') return true
+  let host = ''
+  try { host = new URL(item.url).hostname.toLowerCase().replace(/^www\./, '') } catch { return false }
+  const queryTokens = normalizedTokens(query)
+  const hostParts = host.split('.').filter(part => part.length >= 3 && !['com', 'org', 'net', 'gov', 'edu'].includes(part))
+  const organizationMatches = hostParts.some(part => queryTokens.has(part))
+  if (organizationMatches) return true
+  return PRIMARY_SOURCE_TYPES.has(sourceType) && sourceType !== 'official'
+}
+
 function freshnessScore(value: string | null): number {
   if (!value) return 0
   const timestamp = Date.parse(value)
@@ -287,19 +318,26 @@ function freshnessScore(value: string | null): number {
   return Math.max(0, 1 - days / 730)
 }
 
-function candidateScore(query: string, item: SearchCandidate, sourceType: PrimarySourceType): number {
+function candidateScore(
+  query: string,
+  item: SearchCandidate,
+  sourceType: PrimarySourceType,
+  isOfficialSource: boolean,
+): number {
   const queryIsRu = /[а-яё]/i.test(query)
   const languageFit = item.language == null
     ? 0.5
     : queryIsRu === item.language.toLowerCase().startsWith('ru') ? 1 : 0.25
   const host = (() => { try { return new URL(item.url).hostname } catch { return '' } })()
   const geoFit = queryIsRu && (host.endsWith('.ru') || host.endsWith('.рф')) ? 1 : 0.4
+  const officialIntentBoost = hasExplicitOfficialSourceIntent(query) && isOfficialSource ? 12 : 0
   return relevanceScore(query, item) * 4
     + sourceBoost(sourceType) * 3
     + (1 / Math.max(1, item.rank))
     + freshnessScore(item.publishedAt) * 0.5
     + languageFit * 0.25
     + geoFit * 0.15
+    + officialIntentBoost
 }
 
 function titleFingerprint(title: string): string | null {
@@ -348,7 +386,8 @@ export function rankAndDedupeCandidates(
         : { backends: [String(raw.backend || 'unknown')] },
     }
     item.sourceType = detectPrimarySourceType(item.url, item.title, item.snippet)
-    item.score = candidateScore(query, item, item.sourceType)
+    item.isOfficialSource = isOfficialSourceForQuery(query, item, item.sourceType)
+    item.score = candidateScore(query, item, item.sourceType, item.isOfficialSource)
     normalized.push(item)
   }
   normalized.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.rank - b.rank)
@@ -744,6 +783,7 @@ export async function executeSearch(
             language: item.language,
             publishedAt: item.publishedAt,
             sourceType: item.sourceType ?? 'secondary',
+            isOfficialSource: item.isOfficialSource === true,
             score: item.score ?? 0,
             contentType: fetched.contentType,
             text: body.slice(0, MAX_EVIDENCE_CHARS),
@@ -814,6 +854,12 @@ export async function executeSearch(
     status = 'no_evidence'
   }
 
+  if (hasExplicitOfficialSourceIntent(query)) {
+    evidence.sort((a, b) => Number(b.isOfficialSource === true) - Number(a.isOfficialSource === true)
+      || b.score - a.score
+      || a.rank - b.rank)
+  }
+
   const telemetry = retrievalTelemetry(backendTraces, normalized.length, fallbackReason)
   return {
     status,
@@ -850,10 +896,17 @@ export function controlledSearchMessage(status: SearchExecutionStatus): string {
 }
 
 export function searchEvidencePrompt(result: SearchExecutionResult): string {
+  const officialIntent = hasExplicitOfficialSourceIntent(result.originalQuery)
+  const orderedEvidence = officialIntent
+    ? [...result.evidence].sort((a, b) => Number(b.isOfficialSource === true) - Number(a.isOfficialSource === true)
+      || b.score - a.score
+      || a.rank - b.rank)
+    : result.evidence
   const perSourceChars = Math.max(500, Math.floor(24_000 / Math.max(1, result.evidence.length)))
-  const sources = result.evidence.map((item, index) => [
+  const sources = orderedEvidence.map((item, index) => [
     `[${index + 1}] ${item.title || new URL(item.url).hostname}`,
     `URL: ${item.url}`,
+    officialIntent ? `Тип: ${item.isOfficialSource === true ? 'официальный/primary' : 'secondary'}` : '',
     item.publishedAt ? `Дата публикации: ${item.publishedAt}` : '',
     `Проверенный текст:\n${item.text.slice(0, perSourceChars)}`,
   ].filter(Boolean).join('\n')).join('\n\n')
@@ -862,9 +915,39 @@ export function searchEvidencePrompt(result: SearchExecutionResult): string {
     'Используй только приведённые ниже материалы. Не добавляй факты из памяти модели.',
     'Для проверяемых утверждений ставь ссылки на источники в формате [1], [2].',
     'Если материалов недостаточно для части запроса, прямо назови ограничение.',
+    officialIntent
+      ? orderedEvidence.some(item => item.isOfficialSource === true)
+        ? 'Пользователь явно запросил официальный источник: опирайся прежде всего на отмеченные официальные/primary источники; secondary используй только для контекста и не называй secondary-источник официальным.'
+        : 'Пользователь явно запросил официальный источник, но подтверждённый primary не найден: прямо скажи об этом и не называй secondary-источник официальным.'
+      : '',
     '',
     sources,
   ].join('\n')
+}
+
+export interface SearchSynthesisRetryHooks {
+  onAttempt?: (attempt: number) => void
+  onRetry?: (details: { attempt: number; errorClass: string; statusCode: number | null }) => void
+  onFailure?: (details: { attempts: number; errorClass: string; statusCode: number | null }) => void
+  onSuccess?: (attempts: number) => void
+}
+
+function synthesisFailure(message: string): { retryable: boolean; errorClass: string; statusCode: number | null } {
+  const statusMatch = message.match(/\b([45]\d\d)\b/)
+  const statusCode = statusMatch ? Number(statusMatch[1]) : null
+  const reason = classifyFallbackReason(Object.assign(new Error(message), statusCode == null ? {} : { status: statusCode }))
+  const retryable = reason === 'provider_network'
+    || reason === 'provider_rate_limit'
+    || /internal server error|upstream|temporar(?:y|ily)|service unavailable/i.test(message)
+  return { retryable, errorClass: reason, statusCode }
+}
+
+function synthesisCommitsOutput(event: ChatEvent): boolean {
+  return event.type === 'text' && event.text.length > 0
+    || event.type === 'tool-call'
+    || event.type === 'pending-write'
+    || event.type === 'pending-command'
+    || event.type === 'command-result'
 }
 
 /** Детерминированный ответ controlled failure проходит через обычный runner,
@@ -887,6 +970,7 @@ export function boundedSearchProvider(
   delegate: ChatProvider,
   deadlineAt: number,
   onTimeout: () => void,
+  hooks: SearchSynthesisRetryHooks = {},
 ): ChatProvider {
   return {
     id: delegate.id,
@@ -915,17 +999,70 @@ export function boundedSearchProvider(
       // Search synthesis is evidence-only. Do not merely deny tool execution in
       // the runner: hide the shared tool catalogue from the model as well, so it
       // cannot decide to start a second, unbounded retrieval path.
-      const iterator = delegate.send(messages, [], toolResults, ctrl.signal)[Symbol.asyncIterator]()
       try {
-        for (;;) {
-          const next = await Promise.race([iterator.next(), timeout])
-          if (next.done) break
-          yield next.value
+        const maxAttempts = 2
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          hooks.onAttempt?.(attempt)
+          const iterator = delegate.send(messages, [], toolResults, ctrl.signal)[Symbol.asyncIterator]()
+          const buffered: ChatEvent[] = []
+          let committed = false
+          let retry = false
+          try {
+            for (;;) {
+              const next = await Promise.race([iterator.next(), timeout])
+              if (next.done) {
+                for (const bufferedEvent of buffered) yield bufferedEvent
+                hooks.onSuccess?.(attempt)
+                return
+              }
+              const event = next.value
+              if (event.type === 'error') {
+                const failure = synthesisFailure(event.message)
+                if (!committed && failure.retryable && attempt < maxAttempts && !signal?.aborted) {
+                  hooks.onRetry?.({ attempt, errorClass: failure.errorClass, statusCode: failure.statusCode })
+                  retry = true
+                  void iterator.return?.()
+                  break
+                }
+                for (const bufferedEvent of buffered) yield bufferedEvent
+                hooks.onFailure?.({ attempts: attempt, errorClass: failure.errorClass, statusCode: failure.statusCode })
+                yield event
+                return
+              }
+              if (event.type === 'done') {
+                for (const bufferedEvent of buffered) yield bufferedEvent
+                hooks.onSuccess?.(attempt)
+                yield event
+                return
+              }
+              if (!committed && synthesisCommitsOutput(event)) {
+                committed = true
+                for (const bufferedEvent of buffered) yield bufferedEvent
+                buffered.length = 0
+                yield event
+              } else if (committed) {
+                yield event
+              } else {
+                buffered.push(event)
+              }
+            }
+          } catch (error) {
+            if (timedOut) throw error
+            const failure = synthesisFailure(errorText(error))
+            if (!committed && failure.retryable && attempt < maxAttempts && !signal?.aborted) {
+              hooks.onRetry?.({ attempt, errorClass: failure.errorClass, statusCode: failure.statusCode })
+              retry = true
+              void iterator.return?.()
+            } else {
+              hooks.onFailure?.({ attempts: attempt, errorClass: failure.errorClass, statusCode: failure.statusCode })
+              throw error
+            }
+          }
+          if (!retry) return
         }
       } catch (error) {
         if (!timedOut) throw error
         onTimeout()
-        void iterator.return?.()
         yield { type: 'text', text: controlledSearchMessage('timeout') }
         yield { type: 'done' }
       } finally {

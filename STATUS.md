@@ -1,6 +1,6 @@
 # STATUS — Verstak
 
-**Версия: 2.8.2** (релизный код подготовлен 12.09.2026) · эталон тестов **6026**.
+**Версия: 2.8.2** (релизный код подготовлен 12.09.2026) · эталон тестов **6046**.
 Публикация считается состоявшейся только когда GitHub и `agi-iri.ru/verstak`
 отдают одну версию; финальный релизный гейт выполняется по собранному коммиту.
 
@@ -42,15 +42,21 @@
 
 ## В работе
 
-- **Verstak Online Search V2 P3 (17.09).** Retrieval-слой подготовлен к
-  production structured API: Yandex Search RU для российского web, Brave Search
-  для мирового web и Yandex COM как резерв; DDG HTML оставлен последним
-  diagnostic fallback. Общий ranking учитывает смысл запроса, тип первоисточника,
-  свежесть, язык и географию; tracking-варианты и точные перепечатки объединяются
-  до fetch. Каждый вызов backend сохраняет внутреннюю latency/status/count/cost/
-  rate-limit/accepted telemetry, но публичный Online-контракт её вырезает.
-  Код и offline-контракт проверены; живой production-canary и закрытие P3 требуют
-  отдельного разрешения на доступ Yandex Search API и ограниченный платный прогон.
+- **Verstak Online Search V2 P3.1 Repair (17.09).** Zero-cost SearXNG retrieval
+  уже принят production-canary: 5/5 запросов дали candidates и evidence,
+  `paid_search_rate=0%`, расход 0 ₽. Причина следующих synthesis-сбоев установлена
+  по Gateway telemetry: transient upstream HTTP 503 завершал logical route после
+  одной попытки до первого токена, retrieval при этом был исправен. В Online
+  добавлен один bounded retry только до первого видимого ответа: после начала
+  текста повтор запрещён, Stop отменяет retry, в conversation остаётся одно
+  assistant-сообщение. Synthesis attempt/retry/error теперь видны во внутренней
+  telemetry без публичных provider/model. Explicit RU/EN запрос официального
+  источника получает query-scoped primary boost и primary-first synthesis;
+  обычные запросы сохраняют mixed ranking, secondary не выдаётся за официальный.
+  Offline-пины и мутация пройдены; repeated production-canary этого repair ещё
+  должен подтвердить стабильный synthesis. Gateway отдельно обязан исчерпывать
+  bounded failover на pre-token 408/429/5xx либо возвращать структурный retryable
+  stream error; Gateway в этом Online-пакете не менялся.
 
 - **Verstak Online Search V2 P2 (17.09).** В headless добавлен отдельный
   Search Executor: детерминированный поиск через DDG HTML, нормализация и

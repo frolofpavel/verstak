@@ -743,7 +743,11 @@ const GATE_MAX_WORKERS = 4
 // до селектора чата, а явный выбор модели в Settings закрепляется за активным чатом.
 // -> 6026 ИЗМЕРЕНО 17.09: Search V2 P3 добавил structured RU/global backends,
 // policy, общий ranking/dedup и внутреннюю telemetry без публичной утечки.
-const EXPECTED_TOTAL_TESTS = 6036
+// -> 6036 ИЗМЕРЕНО 17.09: P3.1 добавил zero-cost SearXNG retrieval, tenant cache,
+// bounded overfetch, evidence и paid-fallback telemetry.
+// -> 6046 ИЗМЕРЕНО 17.09: P3.1 Repair добавил explicit RU/EN official intent и
+// безопасный synthesis retry только до первого видимого токена, включая Stop pin.
+const EXPECTED_TOTAL_TESTS = 6046
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

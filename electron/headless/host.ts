@@ -993,13 +993,17 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
 
       let finalStatus: SearchExecutionStatus = search.status
       let finalTimeoutReason = search.timeoutReason
+      let synthesisStatus: 'not_started' | 'success' | 'failed' | 'timeout' = 'not_started'
+      let synthesisAttempts = 0
+      let synthesisRetries = 0
+      let synthesisErrorClass: string | null = null
+      let synthesisErrorStatus: number | null = null
       let finalRecorded = false
       const recordFinal = (): void => {
         if (finalRecorded) return
         finalRecorded = true
         const synthesisMs = Math.max(0, Date.now() - searchStartedAt - search.timings.totalMs)
         const detail = JSON.stringify({
-          intent: 'web_search',
           status: finalStatus,
           candidates: search.candidateCount,
           fetch_attempted: search.fetchAttempted,
@@ -1013,6 +1017,11 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
           estimated_search_cost: search.estimatedSearchCost,
           cache_hits: search.cacheHits,
           cache_misses: search.cacheMisses,
+          synthesis_status: synthesisStatus,
+          synthesis_attempts: synthesisAttempts,
+          synthesis_retries: synthesisRetries,
+          synthesis_error_class: synthesisErrorClass,
+          synthesis_error_status: synthesisErrorStatus,
           timings: { ...search.timings, synthesisMs, totalMs: Date.now() - searchStartedAt },
           timeout_reason: finalTimeoutReason,
         })
@@ -1046,8 +1055,29 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
 
       progress('synthesis')
       const synthesisProvider = boundedSearchProvider(provider, searchDeadlineAt, () => {
+        synthesisStatus = 'timeout'
         finalStatus = 'timeout'
         finalTimeoutReason = 'total'
+      }, {
+        onAttempt: attempt => { synthesisAttempts = attempt },
+        onRetry: failure => {
+          synthesisRetries += 1
+          synthesisErrorClass = failure.errorClass
+          synthesisErrorStatus = failure.statusCode
+          logRuntime('headless.search.synthesis_retry', {
+            runId,
+            attempt: failure.attempt,
+            errorClass: failure.errorClass,
+            statusCode: failure.statusCode,
+          })
+        },
+        onFailure: failure => {
+          synthesisStatus = 'failed'
+          synthesisErrorClass = failure.errorClass
+          synthesisErrorStatus = failure.statusCode
+          finalStatus = 'backend_error'
+        },
+        onSuccess: () => { synthesisStatus = 'success' },
       })
       const evidenceMessages: ChatMessage[] = [
         { role: 'system', content: composed.system },
