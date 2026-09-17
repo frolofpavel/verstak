@@ -532,6 +532,7 @@ export async function executeSearch(
   const backends = deps.backends?.length ? deps.backends : createConfiguredSearchBackends()
   const backendIds = backends.map(item => item.id)
   const limit = Math.max(1, Math.min(20, Math.floor(deps.limit ?? DEFAULT_LIMIT)))
+  const retrievalLimit = Math.min(40, limit * 4)
   const evidenceTarget = Math.max(1, Math.floor(deps.evidenceTarget ?? DEFAULT_EVIDENCE_TARGET))
   const desiredCandidates = Math.min(limit, evidenceTarget)
   const rewrittenQuery = rewriteSearchQuery(query)
@@ -567,7 +568,7 @@ export async function executeSearch(
             signal => searchBackend.search(attemptedQuery, {
               signal,
               timeoutMs: budgets.searchMs,
-              limit,
+              limit: retrievalLimit,
               cacheScope: deps.cacheScope,
             }),
             'search',
@@ -849,11 +850,12 @@ export function controlledSearchMessage(status: SearchExecutionStatus): string {
 }
 
 export function searchEvidencePrompt(result: SearchExecutionResult): string {
+  const perSourceChars = Math.max(500, Math.floor(24_000 / Math.max(1, result.evidence.length)))
   const sources = result.evidence.map((item, index) => [
     `[${index + 1}] ${item.title || new URL(item.url).hostname}`,
     `URL: ${item.url}`,
     item.publishedAt ? `Дата публикации: ${item.publishedAt}` : '',
-    `Проверенный текст:\n${item.text}`,
+    `Проверенный текст:\n${item.text.slice(0, perSourceChars)}`,
   ].filter(Boolean).join('\n')).join('\n\n')
   return [
     'Ты синтезируешь ответ по уже загруженным источникам Search Executor.',

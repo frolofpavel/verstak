@@ -4,6 +4,7 @@ import {
   detectPrimarySourceType,
   executeSearch,
   rankAndDedupeCandidates,
+  searchEvidencePrompt,
   type SearchBackend,
   type SearchCandidate,
   type SearchFetchResult,
@@ -356,5 +357,29 @@ describe('Search Executor P3.1 zero-cost routing', () => {
     expect(paid.search).toHaveBeenCalledOnce()
     expect(result.fallbackReason).toBe('retrieval_timeout')
     expect(result.status).toBe('success')
+  })
+
+  it('overfetch передаёт ranking достаточно кандидатов без расширения финального limit', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [candidate('https://example.org/a', 1)])
+    const result = await executeSearch('primary source', {
+      backends: [zero], limit: 5, evidenceTarget: 1,
+      fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(zero.search).toHaveBeenCalledWith('primary source', expect.objectContaining({ limit: 20 }))
+    expect(result.candidateCount).toBeLessThanOrEqual(5)
+  })
+
+  it('ограничивает общий evidence prompt, сохраняя заголовки всех источников', () => {
+    const evidence = [1, 2, 3, 4].map(index => ({
+      url: `https://source-${index}.example/doc`, title: `Источник ${index}`, snippet: '',
+      backend: 'searxng_zero_cost', rank: index, language: 'ru', publishedAt: null,
+      sourceType: 'official' as const, score: 1, contentType: 'text/html',
+      text: `Факт ${index} `.repeat(4_000), truncated: false,
+    }))
+    const prompt = searchEvidencePrompt({ evidence } as never)
+
+    expect(prompt.length).toBeLessThan(26_000)
+    for (const index of [1, 2, 3, 4]) expect(prompt).toContain(`[${index}] Источник ${index}`)
   })
 })
