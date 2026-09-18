@@ -7,6 +7,7 @@ import {
   waitForComputerRunStop,
 } from '../../../electron/ipc/tool-handlers/computer'
 import type { ToolContext } from '../../../electron/ipc/tool-handlers/shared'
+import { compilePermissionConfig } from '../../../electron/ai/permission-rules'
 
 const OBSERVATION_REF = 'wo-00000000-0000-4000-8000-000000000001'
 const ELEMENT_REF = 'we-00000000-0000-4000-8000-000000000002'
@@ -26,13 +27,29 @@ function context(mode: 'plan' | 'auto', signal = new AbortController().signal): 
 }
 
 describe('Computer Use production handler', () => {
-  it('claims the selected target through a main-only pre-model call', () => {
+  it('claims the selected target through a main-only pre-model call', async () => {
     const authorizeRun = vi.fn(() => ({ ok: true, bindingGeneration: 3, expiresAt: 123 }))
     configureComputerHandler({ controller: { authorizeRun } as never })
 
-    expect(authorizeComputerRun({ browserTaskId: 'bt-r2', runId: 'run-r2' }))
+    await expect(authorizeComputerRun({ browserTaskId: 'bt-r2', runId: 'run-r2' }))
+      .resolves
       .toEqual({ ok: true, bindingGeneration: 3, expiresAt: 123 })
     expect(authorizeRun).toHaveBeenCalledWith({ browserTaskId: 'bt-r2', runId: 'run-r2' })
+  })
+
+  it('prepares an automatic target from an ordinary fresh composer command', async () => {
+    const prepareAutomaticRun = vi.fn(async () => ({ ok: true, bindingGeneration: 4, expiresAt: 456 }))
+    const authorizeRun = vi.fn()
+    configureComputerHandler({ controller: { prepareAutomaticRun, authorizeRun } as never })
+
+    const originalUserText = 'Открой Блокнот и напиши: Тест Verstak Computer Use'
+    await expect(authorizeComputerRun({
+      browserTaskId: 'bt-auto', runId: 'run-auto', originalUserText,
+    })).resolves.toEqual({ ok: true, bindingGeneration: 4, expiresAt: 456 })
+    expect(prepareAutomaticRun).toHaveBeenCalledWith({
+      browserTaskId: 'bt-auto', runId: 'run-auto', originalUserText,
+    })
+    expect(authorizeRun).not.toHaveBeenCalled()
   })
 
   it('binds the pre-model claim to the send AbortSignal before any tool starts', async () => {
@@ -45,9 +62,9 @@ describe('Computer Use production handler', () => {
       } as never,
     })
 
-    expect(authorizeComputerRun({
+    await expect(authorizeComputerRun({
       browserTaskId: 'bt-r2', runId: 'run-r2', signal: abort.signal,
-    })).toMatchObject({ ok: true })
+    })).resolves.toMatchObject({ ok: true })
     abort.abort()
 
     await vi.waitFor(() => expect(cancelRun).toHaveBeenCalledWith('bt-r2', 'run-r2'))
@@ -72,9 +89,9 @@ describe('Computer Use production handler', () => {
         cancelRun,
       } as never,
     })
-    expect(authorizeComputerRun({
+    await expect(authorizeComputerRun({
       browserTaskId: 'bt-r2', runId: 'run-r2', signal: abort.signal,
-    })).toMatchObject({ ok: true })
+    })).resolves.toMatchObject({ ok: true })
     const pending = computerHandler.handle(
       { id: 'call-coalesced', name: 'computer_observe', args: {} },
       context('auto', abort.signal),
@@ -191,6 +208,34 @@ describe('Computer Use production handler', () => {
 
     expect(result.error).toMatch(/план/i)
     expect(controller.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('uses the native allow-once confirmation surface when a permission rule asks', async () => {
+    const dispatch = vi.fn(async (input: { actionId: string }) => ({
+      ok: true, actionId: input.actionId, status: 'verified', detail: 'проверено',
+    }))
+    configureComputerHandler({ controller: { dispatch, cancelRun: vi.fn(), stop: vi.fn() } as never })
+    const pendingCommands = new Map<string, { sendId: number; resolve: (accept: boolean) => void }>()
+    const ctx = {
+      ...context('auto'),
+      permissionRules: compilePermissionConfig({ ask: ['computer_type(selected-element)'] }),
+      pendingCommands,
+      scopedKey: (sendId: number, callId: string) => `${sendId}:${callId}`,
+    } as unknown as ToolContext
+
+    const pending = computerHandler.handle({
+      id: 'call-confirm-type', name: 'computer_type',
+      args: { observationId: OBSERVATION_REF, elementRef: ELEMENT_REF, text: 'private document text' },
+    }, ctx)
+    await vi.waitFor(() => expect(pendingCommands.has('17:call-confirm-type')).toBe(true))
+    const confirmationEvent = vi.mocked(ctx.sender.send).mock.calls.find(([, payload]) => (
+      (payload as { event?: { type?: string } }).event?.type === 'pending-command'
+    ))
+    expect(JSON.stringify(confirmationEvent)).not.toContain('private document text')
+    pendingCommands.get('17:call-confirm-type')!.resolve(true)
+
+    await expect(pending).resolves.not.toHaveProperty('error')
+    expect(dispatch).toHaveBeenCalledOnce()
   })
 
   it.each([

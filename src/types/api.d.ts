@@ -1286,6 +1286,7 @@ export interface ComputerUseStateDTO {
   helperReady: boolean
   bound: boolean
   bindingGeneration: number
+  bindingSource?: 'manual' | 'automatic' | null
   target: { processName: string; title: string } | null
   /** Fixed run-claim expiry; null while a window is selected but no task owns it. */
   expiresAt: number | null

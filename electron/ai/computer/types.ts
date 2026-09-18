@@ -34,6 +34,9 @@ export interface BackendCandidate {
   topLevelClassName?: string
   /** SHA-256 of the complete bounded normalized Win32 title; never renderer-visible. */
   titleFingerprint: string
+  geometry: WindowGeometry
+  visible: boolean
+  foreground: boolean
   title: string
   elevated: boolean
   protectedProcess: boolean
@@ -220,6 +223,8 @@ export type ComputerBackendEvent =
 export interface ComputerBackend {
   listCandidates(): Promise<BackendCandidate[]>
   probeBinding(identity: ComputerIdentity, candidateToken?: string): Promise<ComputerProbe>
+  /** Bring the already bound exact HWND to the foreground and return a fresh probe. */
+  focusBinding(identity: ComputerIdentity): Promise<ComputerProbe>
   observe(identity: ComputerIdentity): Promise<BackendObservation>
   /** Must be effect-free. */
   prepareAction(request: ComputerPrepareRequest): Promise<ComputerPreparedAction>
@@ -273,6 +278,7 @@ export interface ComputerBindingResult {
 
 export interface ComputerBindingView {
   bindingGeneration: number
+  source: 'manual' | 'automatic'
   targetFingerprint: string
   processName: string
   title: string

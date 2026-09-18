@@ -30,6 +30,11 @@ import type {
   WindowGeometry,
 } from './types'
 import { isComputerElementRef, isComputerObservationRef } from './refs'
+import {
+  chooseAutomaticTarget,
+  parseAutomaticComputerUseRequest,
+  type AutomaticComputerApp,
+} from './automatic-target'
 
 interface InternalCandidate {
   candidate: BackendCandidate
@@ -50,6 +55,7 @@ interface InternalBinding {
   processName: string
   title: string
   titleFingerprint: string
+  source: 'manual' | 'automatic'
   claim: {
     browserTaskId: string
     runId: string
@@ -122,11 +128,18 @@ export interface ComputerControllerDeps {
   testOnlyAllowUnverifiedGlobalInput?: boolean
   /** Test-only visibility into bounded cancelled-lineage bookkeeping. */
   testOnlyOnRunCancelEpochCount?: (size: number) => void
+  /** Main-owned allowlisted launcher; arbitrary executable names never enter here. */
+  launchApplication?: (app: AutomaticComputerApp) => Promise<void>
+  /** Test seam for the bounded post-launch discovery wait. */
+  automaticDiscoveryDelayMs?: number
 }
 
 export type ComputerRunAuthorizationResult =
   | { ok: true; bindingGeneration: number; expiresAt: number }
   | { ok: false; error: ComputerSafetyCode }
+
+export type ComputerAutomaticRunResult = ComputerRunAuthorizationResult
+  | { ok: false; error: 'automatic-intent-unrecognized' | 'automatic-target-missing' | 'automatic-target-ambiguous' | 'automatic-launch-failed' | 'manual-target-mismatch' }
 
 export interface ComputerUncertainAcknowledgementChallenge {
   challenge: string
@@ -141,6 +154,11 @@ export interface ComputerController {
   unbind(): Promise<void>
   getBinding(): ComputerBindingView | null
   authorizeRun(input: { browserTaskId: string; runId: string }): ComputerRunAuthorizationResult
+  prepareAutomaticRun(input: {
+    browserTaskId: string
+    runId: string
+    originalUserText: string
+  }): Promise<ComputerAutomaticRunResult>
   observe(input: { browserTaskId: string; runId: string }): Promise<ComputerObservation>
   dispatch(input: ComputerDispatchInput): Promise<ComputerDispatchResult>
   cancelRun(browserTaskId: string, runId: string): Promise<void>
@@ -169,6 +187,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
   const commitTimeoutMs = deps.commitTimeoutMs ?? DEFAULT_COMMIT_TIMEOUT_MS
   const postconditionSettleMs = boundedPostconditionSettle(deps.postconditionSettleMs)
   const maxSnapshotAgeMs = boundedSnapshotAge(deps.maxSnapshotAgeMs)
+  const automaticDiscoveryDelayMs = Math.max(0, Math.min(2_000, deps.automaticDiscoveryDelayMs ?? 300))
   const allowUnverifiedGlobalInput = deps.testOnlyAllowUnverifiedGlobalInput === true
   let candidates = new Map<string, InternalCandidate>()
   let binding: InternalBinding | null = null
@@ -269,7 +288,10 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     })
   }
 
-  async function bindCandidate(candidateId: string): Promise<ComputerBindingResult> {
+  async function bindCandidateWithSource(
+    candidateId: string,
+    source: InternalBinding['source'],
+  ): Promise<ComputerBindingResult> {
     return enqueue(async () => {
       const bindSafetyEpoch = safetyEpoch
       const listed = candidates.get(candidateId)
@@ -307,6 +329,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
         processName: listed.candidate.processName,
         title: probe.title,
         titleFingerprint: probe.titleFingerprint,
+        source,
         claim: null,
         uncertain: null,
         uncertainLookupFailed: false,
@@ -323,6 +346,100 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     })
   }
 
+  async function bindCandidate(candidateId: string): Promise<ComputerBindingResult> {
+    return bindCandidateWithSource(candidateId, 'manual')
+  }
+
+  async function focusCurrentBinding(): Promise<ComputerRunAuthorizationResult | null> {
+    return enqueue(async () => {
+      const current = binding
+      if (!current) return { ok: false, error: 'no-binding' }
+      try {
+        const probe = normalizeProbe(await deps.backend.focusBinding(current.identity))
+        assertSafeProbe(probe)
+        assertBinding(current, probe)
+        if (!probe.foreground) return { ok: false, error: 'focus-lost' }
+        currentObservation = null
+        return null
+      } catch (error) {
+        return { ok: false, error: computerErrorCode(error, 'focus-lost') }
+      }
+    })
+  }
+
+  async function prepareAutomaticRun(input: {
+    browserTaskId: string
+    runId: string
+    originalUserText: string
+  }): Promise<ComputerAutomaticRunResult> {
+    const request = parseAutomaticComputerUseRequest(input.originalUserText)
+    if (!request) return { ok: false, error: 'automatic-intent-unrecognized' }
+    if (active || stopAcksInFlight > 0) {
+      return { ok: false, error: 'binding-active' }
+    }
+    if (binding?.claim && binding.claim.browserTaskId !== input.browserTaskId) {
+      return { ok: false, error: 'binding-owner-mismatch' }
+    }
+
+    if (binding?.source === 'manual') {
+      const forced = chooseAutomaticTarget(request.targetApp, [{
+        candidateId: 'manual-binding',
+        processName: binding.processName,
+        title: binding.title,
+        bounds: { left: 0, top: 0, width: 1, height: 1 },
+        visible: true,
+        foreground: false,
+        blocked: false,
+      }])
+      if (forced.kind !== 'selected') return { ok: false, error: 'manual-target-mismatch' }
+      const focusError = await focusCurrentBinding()
+      if (focusError) return focusError
+      return authorizeRun(input)
+    }
+
+    if (binding) await unbind()
+    let listed = await listCandidates()
+    let selection = chooseAutomaticTarget(request.targetApp, automaticTargetCandidates(listed))
+    if (selection.kind === 'missing' && request.openTargetIfMissing) {
+      if (!deps.launchApplication) return { ok: false, error: 'automatic-target-missing' }
+      try {
+        await deps.launchApplication(request.targetApp)
+      } catch {
+        return { ok: false, error: 'automatic-launch-failed' }
+      }
+      for (let attempt = 0; attempt < 10 && selection.kind === 'missing'; attempt += 1) {
+        if (automaticDiscoveryDelayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, automaticDiscoveryDelayMs))
+        }
+        listed = await listCandidates()
+        selection = chooseAutomaticTarget(request.targetApp, automaticTargetCandidates(listed))
+      }
+    }
+    if (selection.kind === 'missing') return { ok: false, error: 'automatic-target-missing' }
+    if (selection.kind === 'ambiguous') return { ok: false, error: 'automatic-target-ambiguous' }
+
+    const bound = await bindCandidateWithSource(selection.candidateId, 'automatic')
+    if (!bound.ok) return { ok: false, error: computerErrorCode(bound.error, 'no-binding') }
+    const focusError = await focusCurrentBinding()
+    if (focusError) return focusError
+    return authorizeRun(input)
+
+    function automaticTargetCandidates(list: readonly ComputerCandidate[]) {
+      return list.flatMap(candidate => {
+        const internal = candidates.get(candidate.candidateId)?.candidate
+        return internal ? [{
+          candidateId: candidate.candidateId,
+          processName: internal.processName,
+          title: internal.title,
+          bounds: { ...internal.geometry },
+          visible: internal.visible,
+          foreground: internal.foreground,
+          blocked: candidateBlockedReason(internal) != null,
+        }] : []
+      })
+    }
+  }
+
   function getBinding(): ComputerBindingView | null {
     if (binding?.claim && now() >= binding.claim.expiresAt) invalidateExpiredBinding(binding)
     if (!binding) return null
@@ -332,6 +449,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     )
     return {
       bindingGeneration: binding.generation,
+      source: binding.source,
       targetFingerprint: binding.targetFingerprint,
       processName: binding.processName,
       title: binding.title,
@@ -1381,6 +1499,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     unbind,
     getBinding,
     authorizeRun,
+    prepareAutomaticRun,
     observe,
     dispatch,
     cancelRun,

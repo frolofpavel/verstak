@@ -5,12 +5,13 @@ import type { ComputerController, ComputerRunAuthorizationResult } from '../../a
 import { wrapComputerObservationForModel } from '../../ai/computer/untrusted'
 import { COMPUTER_TOOL_ACTION, isComputerToolName } from '../../ai/computer/tool-names'
 import { isComputerElementRef, isComputerObservationRef } from '../../ai/computer/refs'
+import { parseAutomaticComputerUseRequest } from '../../ai/computer/automatic-target'
 import { scanText } from '../../ai/secret-scanner'
 import { blockReason } from '../../ai/mode-policy'
 import { resolveDecision } from '../../ai/permission-rules'
 import { projectToolCallForTelemetry } from '../../ai/tool-telemetry'
 import type { ToolContext, ToolHandler } from './shared'
-import { emitActivity, summarizeToolCall } from './shared'
+import { awaitCommandConfirm, emitActivity, summarizeToolCall } from './shared'
 
 export interface ComputerHandlerDeps {
   controller?: ComputerController | null
@@ -88,18 +89,27 @@ function startComputerRunStop(state: SignalComputerStops, tracked: TrackedComput
 export function authorizeComputerRun(input: {
   browserTaskId: string
   runId: string
+  originalUserText?: string | null
   signal?: AbortSignal
-}): ComputerRunAuthorizationResult | { ok: false; error: 'computer-use-unavailable' } {
+}): Promise<ComputerRunAuthorizationResult | { ok: false; error: string }> {
   const controller = depsRef.controller
-  if (!controller) return { ok: false, error: 'computer-use-unavailable' }
-  const authorization = controller.authorizeRun({
-    browserTaskId: input.browserTaskId,
-    runId: input.runId,
+  if (!controller) return Promise.resolve({ ok: false, error: 'computer-use-unavailable' })
+  return Promise.resolve().then(async () => {
+    const authorization = parseAutomaticComputerUseRequest(input.originalUserText) != null
+      ? await controller.prepareAutomaticRun({
+          browserTaskId: input.browserTaskId,
+          runId: input.runId,
+          originalUserText: input.originalUserText!,
+        })
+      : controller.authorizeRun({
+          browserTaskId: input.browserTaskId,
+          runId: input.runId,
+        })
+    if (authorization.ok && input.signal) {
+      trackComputerRunStop(input.signal, controller, input.browserTaskId, input.runId)
+    }
+    return authorization
   })
-  if (authorization.ok && input.signal) {
-    trackComputerRunStop(input.signal, controller, input.browserTaskId, input.runId)
-  }
-  return authorization
 }
 
 function discreteScrollStep(value: unknown): value is -1 | 0 | 1 {
@@ -187,7 +197,7 @@ export const computerHandler: ToolHandler = {
         id: call.id,
         name: call.name,
         result: '',
-        error: `Computer Use заблокирован: исходная команда пользователя не разрешает действие ${action} в выбранном окне.`,
+        error: `Computer Use заблокирован: исходная команда пользователя не разрешает действие ${action} в целевом окне.`,
       }
     }
     if (typeof call.args?.text === 'string' && scanText(call.args.text).hits.length > 0) {
@@ -252,15 +262,27 @@ export const computerHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: '', error: reason ?? blockReason(call.name, ctx.agentMode) }
     }
     if (decision === 'confirm') {
-      // The selected-window capability is the R2 consent boundary. There is no
-      // generic command modal that could truthfully approve an OS-input action;
-      // a trust/ask rule that demands an additional pause therefore fails closed.
-      return { id: call.id, name: call.name, result: '', error: 'Computer Use требует отдельного подтверждения, но поверхность подтверждения недоступна — действие заблокировано.' }
+      // Reuse the native allow-once / remember-permission surface. The summary
+      // contains only the action class: target text and typed document data stay
+      // inside the Computer Use privacy boundary.
+      const summary = `Computer Use: ${action} в целевом окне`
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'pending-command', callId: call.id, command: summary, toolName: call.name, sendId: ctx.sendId },
+      })
+      const accepted = await awaitCommandConfirm(ctx, call.id, { toolName: call.name, subject: summary })
+      if (!accepted) {
+        ctx.sender.send('ai:event', {
+          id: ctx.sendId,
+          event: { type: 'command-result', callId: call.id, command: summary, status: 'rejected' },
+        })
+        return { id: call.id, name: call.name, result: '', error: 'Computer Use: пользователь не разрешил действие.' }
+      }
     }
 
     const controller = depsRef.controller
     if (!controller) {
-      return { id: call.id, name: call.name, result: '', error: 'Computer Use не настроен — выберите окно в настройках.' }
+      return { id: call.id, name: call.name, result: '', error: 'Computer Use недоступен: локальный исполнитель не запущен.' }
     }
     const trackedStop = trackComputerRunStop(
       ctx.signal,

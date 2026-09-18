@@ -36,10 +36,10 @@ describe('Computer Use untrusted-context production wiring', () => {
     expect(source).toContain('latest.id !== grant.userMessageId')
     expect(source).toMatch(/ipcMain\.handle\('ai:send',[\s\S]*?computerUseGrant\?: unknown/u)
     expect(source).not.toMatch(/ipcMain\.handle\('ai:send',[^\n]*originalUserText/u)
-    expect(source).toContain('authorizeComputerRun({ browserTaskId, runId, signal: ctrl.signal })')
+    expect(source).toContain('const authorization = await authorizeComputerRun({')
     const intentTaint = source.indexOf('materializeChatComputerTaint(deps.browserTasks, chatIdNum')
     const unsupportedRoute = source.indexOf('COMPUTER_USE_TRANSPORT_UNSUPPORTED:')
-    const authorize = source.indexOf('authorizeComputerRun({ browserTaskId, runId, signal: ctrl.signal })')
+    const authorize = source.indexOf('const authorization = await authorizeComputerRun({')
     const registered = source.indexOf('registerChatRun(sendId, chatIdNum)')
     expect(intentTaint).toBeGreaterThan(0)
     expect(intentTaint).toBeLessThan(unsupportedRoute)
@@ -141,6 +141,14 @@ describe('Computer Use untrusted-context production wiring', () => {
     expect(source).toMatch(/computerUseAllowedActions,\s*\/\/[^\n]*run-scoped/u)
     expect(source).toContain("computerUseProviderEnvelope?: 'fresh-composer-ticket-v1'")
     expect(ai).toContain("computerUseProviderEnvelope: computerUseEnvelopeLocked ? 'fresh-composer-ticket-v1' : undefined")
+  })
+
+  it('describes the runtime-selected exact target instead of requiring a Settings bind', () => {
+    const system = readFileSync(join(process.cwd(), 'electron', 'ipc', 'ai-send', 'system-assembly.ts'), 'utf8')
+    const tools = readFileSync(join(process.cwd(), 'electron', 'ai', 'tools.ts'), 'utf8')
+    expect(system).toContain('runtime-selected exact native window')
+    expect(system).not.toContain('one explicitly selected native window')
+    expect(tools).not.toContain('Настройки → Браузер и Computer Use')
   })
 
   it('keeps the desktop gate across tool turns and fallback frames', () => {

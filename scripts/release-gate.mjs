@@ -837,7 +837,9 @@ const GATE_MAX_WORKERS = 4
 // безопасный synthesis retry только до первого видимого токена, включая Stop pin.
 // -> 7411 ИЗМЕРЕНО 18.09: единый кандидат 2.9.0 после объединения Search V2
 // с R0-R3/S2-A1 и синхронизации version-triplet упакованных помощников.
-const EXPECTED_TOTAL_TESTS = 7411
+// -> 7440 ИЗМЕРЕНО 18.09: 2.9.1 automatic Computer Use discovery/selection,
+// allowlisted app launch, native focus, permissions, Invoke readback и пины упаковки.
+const EXPECTED_TOTAL_TESTS = 7440
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

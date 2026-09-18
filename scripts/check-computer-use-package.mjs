@@ -146,6 +146,9 @@ export function auditComputerHelperSource(source) {
   const executeClickImplementation = source.match(
     /private\s+static\s+ExecutionOutcome\s+ExecuteClick[\s\S]*?(?=\n\s*private\s+static\s+ExecutionOutcome\s+ExecuteType)/,
   )?.[0] ?? ''
+  const surfaceStateImplementation = source.match(
+    /private\s+static\s+string\s+SurfaceStateFingerprint[\s\S]*?(?=\n\s*private\s+static\s+string\s+ChooseMethod)/,
+  )?.[0] ?? ''
   const prepareImplementation = source.match(
     /private\s+static\s+void\s+HandlePrepare[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleCommit)/,
   )?.[0] ?? ''
@@ -224,11 +227,10 @@ export function auditComputerHelperSource(source) {
     failures.push('prepared action must be Stop-scoped and one-shot')
   }
   if (!supportedActionsImplementation
-    || !/TogglePattern\.Pattern[\s\S]*SelectionItemPattern\.Pattern[\s\S]*result\.Add\s*\(\s*"click"\s*\)/.test(supportedActionsImplementation)
+    || !/TogglePattern\.Pattern[\s\S]*SelectionItemPattern\.Pattern[\s\S]*InvokePattern\.Pattern[\s\S]*result\.Add\s*\(\s*"click"\s*\)/.test(supportedActionsImplementation)
     || !/ValuePattern\.Pattern[\s\S]*!\(\(ValuePattern\)ignored\)\.Current\.IsReadOnly[\s\S]*result\.Add\s*\(\s*"type"\s*\)/.test(supportedActionsImplementation)
     || !/ScrollPattern\.Pattern[\s\S]*result\.Add\s*\(\s*"scroll"\s*\)/.test(supportedActionsImplementation)
-    || /result\.Add\s*\(\s*"key"\s*\)/.test(supportedActionsImplementation)
-    || /InvokePattern/.test(supportedActionsImplementation)) {
+    || /result\.Add\s*\(\s*"key"\s*\)/.test(supportedActionsImplementation)) {
     failures.push('reduced UIA action surface contract missing')
   }
   if (!/\{\s*"text"\s*,\s*aggregateText\.ToString\s*\(\s*\)\s*\}/.test(source)
@@ -339,10 +341,15 @@ export function auditComputerHelperSource(source) {
   if (!supportedActionsImplementation
     || !chooseMethodImplementation
     || !executeClickImplementation
-    || /InvokePattern/.test(supportedActionsImplementation)
-    || /InvokePattern/.test(chooseMethodImplementation)
-    || /InvokePattern/.test(executeClickImplementation)) {
-    failures.push('Invoke-only controls must not advertise or dispatch unverifiable click')
+    || !surfaceStateImplementation
+    || !/InvokePattern\.Pattern[\s\S]*result\.Add\s*\(\s*"click"\s*\)/.test(supportedActionsImplementation)
+    || !/action\.Kind\s*==\s*"click"[\s\S]*InvokePattern\.Pattern[\s\S]*return\s+"uia"/.test(chooseMethodImplementation)
+    || !/InvokePattern\.Pattern[\s\S]*RequireTimelyActionCurrent\s*\(\s*action\s*,\s*expectedInput\s*,\s*cancellation\s*\)[\s\S]*RequireElementCurrent\s*\(\s*entry\s*\)[\s\S]*beforeSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*\(\(InvokePattern\)pattern\)\.Invoke\s*\(\s*\)[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*DateTime\.UtcNow\.AddMilliseconds\s*\(\s*1200\s*\)[\s\S]*afterSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*!String\.Equals\s*\(\s*beforeSurface\s*,\s*afterSurface\s*,\s*StringComparison\.Ordinal\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*true\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*false\s*\)/.test(executeClickImplementation)
+    || !/count\+\+\s*>=\s*MaxElements\s*\|\|\s*timer\.ElapsedMilliseconds\s*>\s*750/.test(surfaceStateImplementation)
+    || !/element\.Current\.IsPassword\s*\|\|\s*IsAuthenticationControl\s*\(\s*element\s*\)\s*\|\|\s*IsLaunchSurfaceControl\s*\(\s*element\s*\)/.test(surfaceStateImplementation)
+    || !/ValuePattern\.Pattern[\s\S]*Current\.Value/.test(surfaceStateImplementation)
+    || !/IdentityKey\s*\(\s*identity\s*\)/.test(surfaceStateImplementation)) {
+    failures.push('UIA InvokePattern bounded surface readback contract missing')
   }
   const elementRevalidations = source.match(/RequireElementCurrent\s*\(\s*entry\s*\)\s*;/g)?.length ?? 0
   if (!/public\s+string\s+Fingerprint\s*;/.test(source)
@@ -415,8 +422,7 @@ export function auditComputerReducedActionSources({ helper, controller, main, to
     || !/return\s+action\s*===\s*['"]key['"]\s*\|\|\s*!element\?\.backend\.supportedActions\.includes\s*\(\s*action\s*\)/.test(controller)
     || !/if\s*\(\s*uiaRequired\s*&&\s*prepared\.method\s*!==\s*['"]uia['"]\s*\)/.test(controller)
     || !/if\s*\(\s*prepared\.method\s*!==\s*['"]uia['"]\s*&&\s*!allowUnverifiedGlobalInput\s*\)/.test(controller)
-    || /result\.Add\s*\(\s*"key"\s*\)/.test(supportedActions)
-    || /InvokePattern/.test(supportedActions)) {
+    || /result\.Add\s*\(\s*"key"\s*\)/.test(supportedActions)) {
     failures.push('production global input/key/coordinates boundary missing')
   }
 

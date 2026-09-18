@@ -14,6 +14,7 @@ interface ComputerUseControllerFacade {
   getBinding(): null | {
     bindingGeneration?: number
     generation?: number
+    source?: 'manual' | 'automatic'
     processName?: string
     title?: string
     expiresAt?: number | null
@@ -60,6 +61,7 @@ function publicState(deps: ComputerUseIpcDeps) {
     helperReady: supported && deps.controller != null,
     bound: binding != null,
     bindingGeneration: binding?.bindingGeneration ?? binding?.generation ?? 0,
+    bindingSource: binding?.source === 'automatic' ? 'automatic' : binding ? 'manual' : null,
     target: binding
       ? {
           processName: safeLabel(binding.processName),

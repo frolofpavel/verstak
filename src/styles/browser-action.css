@@ -276,6 +276,23 @@
   margin-top: 16px;
 }
 
+.gg-computer-use-advanced {
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.gg-computer-use-advanced strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.gg-computer-use-advanced p {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .gg-computer-use-target {
   display: grid;
   gap: 3px;

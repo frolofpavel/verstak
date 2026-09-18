@@ -41,6 +41,9 @@ export class FakeComputerBackend implements ComputerBackend {
     processName: 'notepad.exe',
     title: 'Temporary canary',
     titleFingerprint: 'b'.repeat(64),
+    geometry: { left: 100, top: 80, width: 900, height: 700 },
+    visible: true,
+    foreground: true,
     elevated: false,
     protectedProcess: false,
     secureSurface: false,
@@ -80,6 +83,7 @@ export class FakeComputerBackend implements ComputerBackend {
 
   listCount = 0
   probeCount = 0
+  focusCount = 0
   observeCount = 0
   prepareCount = 0
   commitCount = 0
@@ -119,6 +123,28 @@ export class FakeComputerBackend implements ComputerBackend {
     })
   }
 
+  notepadCandidate(overrides: {
+    hwnd?: string
+    title?: string
+    foreground?: boolean
+  } = {}): Omit<BackendCandidate, 'candidateToken'> {
+    const title = overrides.title ?? 'Temporary canary'
+    return {
+      identity: { ...IDENTITY, ...(overrides.hwnd ? { hwnd: overrides.hwnd } : {}) },
+      processName: 'notepad.exe',
+      title,
+      titleFingerprint: overrides.title
+        ? createHash('sha256').update(`window-title|${title}`).digest('hex')
+        : 'b'.repeat(64),
+      geometry: { left: 100, top: 80, width: 900, height: 700 },
+      visible: true,
+      foreground: overrides.foreground ?? false,
+      elevated: false,
+      protectedProcess: false,
+      secureSurface: false,
+    }
+  }
+
   async probeBinding(identity: ComputerIdentity, candidateToken?: string): Promise<ComputerProbe> {
     this.probeCount += 1
     if (candidateToken) {
@@ -135,6 +161,15 @@ export class FakeComputerBackend implements ComputerBackend {
       identity: { ...this.probe.identity },
       geometry: { ...this.probe.geometry },
     }
+  }
+
+  async focusBinding(identity: ComputerIdentity): Promise<ComputerProbe> {
+    this.focusCount += 1
+    if (!this.selectedIdentity || !sameIdentity(this.selectedIdentity, identity)) {
+      throw new Error('binding required before focus')
+    }
+    this.probe.foreground = true
+    return this.probeBinding(identity)
   }
 
   async observe(_identity: ComputerIdentity): Promise<BackendObservation> {

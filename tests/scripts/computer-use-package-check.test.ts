@@ -243,7 +243,7 @@ describe('computer use packaged artifact checker', () => {
     const result = checker.checkComputerUsePackage({ root: ROOT, sourceDir: fixture() })
     expect(result.ok, result.failures.join('; ')).toBe(true)
     expect(result.evidence).toMatchObject({
-      versionTriplet: { protocolVersion: 1, appVersion: '2.9.0', helperVersion: '2.9.0' },
+      versionTriplet: { protocolVersion: 1, appVersion: '2.9.1', helperVersion: '2.9.1' },
       helperBytes: expect.any(Number),
       helperSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     })
@@ -288,8 +288,8 @@ describe('computer use packaged artifact checker', () => {
     const root = sourceFixture()
     const sourceHelper = join(root, 'resources', 'computer-use', 'helper.ps1')
     writeFileSync(sourceHelper, readFileSync(sourceHelper, 'utf8').replace(
-      'private const string HelperVersion = "2.9.0";',
       'private const string HelperVersion = "2.9.1";',
+      'private const string HelperVersion = "2.9.2";',
     ))
     const result = checker.checkComputerUsePackage({ root, sourceDir: fixture(root) })
     expect(result.ok).toBe(false)
@@ -591,13 +591,13 @@ describe('computer use packaged artifact checker', () => {
     expect(checker.auditComputerHelperSource(oversizedScrollMutation))
       .toContain('UIA ScrollPattern one-step state/direction contract missing')
 
-    const invokeOnlyMutation = source.replace(
-      'if (element.TryGetCurrentPattern(TogglePattern.Pattern, out ignored) || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out ignored)) result.Add("click");',
-      'if (element.TryGetCurrentPattern(InvokePattern.Pattern, out ignored) || element.TryGetCurrentPattern(TogglePattern.Pattern, out ignored) || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out ignored)) result.Add("click");',
+    const invokeReadbackMutation = source.replace(
+      'string beforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);',
+      'string beforeSurface = "unverified"; /* mutated: Invoke has no before-state */',
     )
-    expect(invokeOnlyMutation).not.toBe(source)
-    expect(checker.auditComputerHelperSource(invokeOnlyMutation))
-      .toContain('Invoke-only controls must not advertise or dispatch unverifiable click')
+    expect(invokeReadbackMutation).not.toBe(source)
+    expect(checker.auditComputerHelperSource(invokeReadbackMutation))
+      .toContain('UIA InvokePattern bounded surface readback contract missing')
   })
 
   it('pins the desktop client Stop timeout to exact-child exit confirmation', () => {

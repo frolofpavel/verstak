@@ -201,6 +201,19 @@ function browserApplicationBoundaryIsPinned(source: string): boolean {
   ].every(marker => blockedApplication.toLocaleLowerCase('en-US').includes(marker))
 }
 
+function automaticFocusUsesExactThreadAttachment(source: string): boolean {
+  const focus = source.match(
+    /private\s+static\s+void\s+HandleFocus[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleObserve)/,
+  )?.[0] ?? ''
+  return /AttachThreadInput\s*\(/.test(source)
+    && /AutomationElement\.FromHandle\(expected\.Hwnd\)[\s\S]*\.SetFocus\(\)/.test(focus)
+    && /SwitchToThisWindow\s*\(\s*expected\.Hwnd,\s*true\s*\)/.test(focus)
+    && /AttachThreadInput\s*\(\s*currentThread,\s*foregroundThread,\s*true\s*\)/.test(focus)
+    && /AttachThreadInput\s*\(\s*currentThread,\s*targetThread,\s*true\s*\)/.test(focus)
+    && /finally[\s\S]*AttachThreadInput\s*\(\s*currentThread,\s*targetThread,\s*false\s*\)[\s\S]*AttachThreadInput\s*\(\s*currentThread,\s*foregroundThread,\s*false\s*\)/.test(focus)
+    && /if\s*\(!after\.Foreground\)\s*throw\s+new\s+SafeError\("focus_lost"/.test(focus)
+}
+
 function valuePatternStateGuardIsPinned(source: string): boolean {
   const observe = source.match(
     /private\s+static\s+IDictionary<string, object>\s+ExecuteObserve[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireObservationBudget)/,
@@ -453,6 +466,18 @@ describe('computer helper hardening contracts', () => {
     const classMutation = source.replace('"chrome_widgetwin_",', '"mutated-browser-class",')
     expect(classMutation).not.toBe(source)
     expect(browserApplicationBoundaryIsPinned(classMutation)).toBe(false)
+  })
+
+  it('focuses only the exact bound window through a bounded attach and always detaches threads', () => {
+    const source = helperSource()
+    expect(automaticFocusUsesExactThreadAttachment(source)).toBe(true)
+
+    const mutation = source.replace(
+      'AttachThreadInput(currentThread, targetThread, false);',
+      '/* mutated: target thread remains attached */',
+    )
+    expect(mutation).not.toBe(source)
+    expect(automaticFocusUsesExactThreadAttachment(mutation)).toBe(false)
   })
 
   it('pins a salted opaque ValuePattern state immediately before SetValue()', () => {

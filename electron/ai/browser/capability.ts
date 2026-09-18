@@ -75,7 +75,11 @@ export function r3HandoffIntentFromOriginalUserText(value: string | null): R3Han
   const report = /(?:отч[её]т|report|таблиц|данн)/iu.test(text)
   const artifact = /(?:html|docx|документ|файл|сохран|созда|собер|подготов|выгруз)/iu.test(text)
   const desktop = /(?:computer[-_ ]?use|выбранн\S*\s+окн|окн\S*\s+windows|selected\s+window)/iu.test(text)
-  const allowed = browser && report && artifact && desktop
+  const explicitBrowserToNotepad = browser
+    && /(?:текст|content)/iu.test(text)
+    && /(?:возьми|скопируй|перенеси|вставь|copy|take|paste|transfer)/iu.test(text)
+    && /(?:блокнот|notepad)/iu.test(text)
+  const allowed = (browser && report && artifact && desktop) || explicitBrowserToNotepad
   const resume = allowed && /(?:продолж|возобнов|resume|continue)/iu.test(text)
   return { allowed, resume }
 }

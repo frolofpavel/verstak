@@ -73,9 +73,9 @@ function registerBrowserBridgeIpc(deps: BrowserBridgeTestDeps): void {
     hostPolicy: { mode: 'installed', canInstall: true, canRegister: true, reason: null },
     hostVersions: {
       protocolVersion: 1,
-      appVersion: '2.9.0',
+      appVersion: '2.9.1',
       extensionVersion: '0.2.0',
-      hostVersion: '2.9.0',
+      hostVersion: '2.9.1',
     },
   })
 }
@@ -367,9 +367,9 @@ describe('browser bridge connect IPC', () => {
       hostPolicy: { mode: 'portable', canInstall: false, canRegister: false, reason },
       hostVersions: {
         protocolVersion: 1,
-        appVersion: '2.9.0',
+        appVersion: '2.9.1',
         extensionVersion: '0.2.0',
-        hostVersion: '2.9.0',
+        hostVersion: '2.9.1',
       },
     })
 

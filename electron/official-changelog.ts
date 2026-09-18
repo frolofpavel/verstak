@@ -4,6 +4,13 @@ import { normalizeVersion, semverGt } from './update-remote'
 /** Автоген из scripts/sync-verstak-changelog.cjs — не править вручную. */
 export const OFFICIAL_NOTES: ReleaseNote[] = [
   {
+    version: '2.9.1',
+    name: 'Verstak 2.9.1',
+    publishedAt: '2026-09-18T12:00:00Z',
+    body: '### Computer Use без ручной привязки\n- Computer Use запускается прямо из обычного чата: Verstak сам находит или открывает нужное Windows-приложение, фокусирует его и проверяет результат.\n- Ручной выбор окна остался в Advanced/Debug для отладки и принудительного ограничения scope; в обычном сценарии Settings не нужны.\n- Выбор цели учитывает process, title, HWND, bounds, visibility и focus; защищённые, elevated, credential, CAPTCHA/2FA и запрещённые приложения по-прежнему блокируются.\n- Явная команда даёт узкое run-scoped разрешение. Правила allow, deny и ask работают до действия, а текст документа не попадает в карточку подтверждения.\n- Кнопки Калькулятора нажимаются через UI Automation InvokePattern только с bounded-снимком состояния до действия и независимым readback после.',
+    htmlUrl: 'https://github.com/frolofpavel/verstak/releases/tag/v2.9.1'
+  },
+  {
     version: '2.9.0',
     name: 'Verstak 2.9.0',
     publishedAt: '2026-09-18T12:00:00Z',

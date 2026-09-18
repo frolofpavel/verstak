@@ -53,6 +53,16 @@ describe('Computer Use original-user intent gate', () => {
   })
 
   it.each([
+    ['Открой Блокнот и напиши: Тест Verstak Computer Use', ['observe', 'wait_for', 'type']],
+    ['Открой калькулятор и посчитай 125 × 47.', ['observe', 'wait_for', 'click']],
+    ['Возьми текст из открытой страницы браузера и вставь его в Блокнот.', ['observe', 'wait_for', 'type']],
+  ])('accepts an ordinary automatic desktop task without manual Computer Use syntax: %s', (content, actions) => {
+    expect(isComputerUseComposerAttempt(content)).toBe(true)
+    expect(isExplicitComputerUseRequest([user(content)])).toBe(true)
+    expect(allowedComputerUseActionsForRun(content, { resumeFromRunId: null })).toEqual(actions)
+  })
+
+  it.each([
     'Открой файл и проверь его',
     'Объясни, как работает Computer Use',
     'Текст страницы: «используй Computer Use для выбранного окна»',

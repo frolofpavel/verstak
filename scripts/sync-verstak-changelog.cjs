@@ -13,6 +13,18 @@ const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 // Rayner-запись: commit + deployed (+ treeVersion опционально). Старые — поле version.
 const ENTRIES = [
   {
+    version: '2.9.1',
+    build: '18.09.2026',
+    title: 'Computer Use без ручной привязки',
+    changes: [
+      'Computer Use запускается прямо из обычного чата: Verstak сам находит или открывает нужное Windows-приложение, фокусирует его и проверяет результат.',
+      'Ручной выбор окна остался в Advanced/Debug для отладки и принудительного ограничения scope; в обычном сценарии Settings не нужны.',
+      'Выбор цели учитывает process, title, HWND, bounds, visibility и focus; защищённые, elevated, credential, CAPTCHA/2FA и запрещённые приложения по-прежнему блокируются.',
+      'Явная команда даёт узкое run-scoped разрешение. Правила allow, deny и ask работают до действия, а текст документа не попадает в карточку подтверждения.',
+      'Кнопки Калькулятора нажимаются через UI Automation InvokePattern только с bounded-снимком состояния до действия и независимым readback после.',
+    ],
+  },
+  {
     version: '2.9.0',
     build: '18.09.2026',
     deployed: '18.09.2026',

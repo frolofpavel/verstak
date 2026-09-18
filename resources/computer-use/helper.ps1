@@ -11,8 +11,8 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $script:ProtocolVersion = 1
-$script:HelperVersion = '2.9.0'
-$script:AppVersion = '2.9.0'
+$script:HelperVersion = '2.9.1'
+$script:AppVersion = '2.9.1'
 
 $helperSource = @'
 using System;
@@ -39,8 +39,8 @@ namespace VerstakComputerUse
     public static class Helper
     {
         private const int ProtocolVersion = 1;
-        private const string HelperVersion = "2.9.0";
-        private const string AppVersion = "2.9.0";
+        private const string HelperVersion = "2.9.1";
+        private const string AppVersion = "2.9.1";
         private const int MaxMessageBytes = 65536;
         private const int MaxCandidates = 128;
         private const int MaxCandidateLeases = 128;
@@ -90,6 +90,7 @@ namespace VerstakComputerUse
         private const uint WmForegroundBarrier = 0x8001;
         private const uint EventSystemForeground = 0x0003;
         private const uint EventObjectDestroy = 0x8001;
+        private const int SwRestore = 9;
         private const uint WineventOutOfContext = 0x0000;
         private const int ObjIdWindow = 0;
         private const int ChildIdSelf = 0;
@@ -157,6 +158,9 @@ namespace VerstakComputerUse
             public string TopLevelClassName;
             public string Title;
             public string TitleFingerprint;
+            public RECT Geometry;
+            public bool Visible;
+            public bool Foreground;
             public bool Elevated;
             public bool ProtectedProcess;
             public bool SecureSurface;
@@ -325,6 +329,12 @@ namespace VerstakComputerUse
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern void SwitchToThisWindow(IntPtr hwnd, bool altTab);
+        [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hwnd, int command);
         [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
         [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
         [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
@@ -403,6 +413,7 @@ namespace VerstakComputerUse
                     case "ping": WriteOk(type, requestId, null); break;
                     case "list_candidates": HandleListCandidates(requestId); break;
                     case "probe_binding": HandleProbe(requestId, message); break;
+                    case "focus_binding": HandleFocus(requestId, message); break;
                     case "observe": HandleObserve(requestId, message); break;
                     case "prepare_action": HandlePrepare(requestId, message); break;
                     case "commit_action": HandleCommit(requestId, message); break;
@@ -477,6 +488,9 @@ namespace VerstakComputerUse
                 // omitted; exact probe/observe still run the deeper guard.
                 bool secure = IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 500);
                 if (secure) return true;
+                RECT geometry;
+                if (DwmGetWindowAttribute(armedIdentity.Hwnd, DwmwaExtendedFrameBounds, out geometry, Marshal.SizeOf(typeof(RECT))) != 0
+                    && !GetWindowRect(armedIdentity.Hwnd, out geometry)) return true;
                 snapshots.Add(new CandidateSnapshot {
                     Identity = armedIdentity, DestroyGeneration = destroyGeneration,
                     ProcessName = SafeDisplay(processName, 120),
@@ -484,6 +498,8 @@ namespace VerstakComputerUse
                     TopLevelClassName = SafeDisplay(topLevelClassName, 160),
                     Title = DisplayWindowTitle(armedTitle),
                     TitleFingerprint = WindowTitleFingerprint(armedTitle),
+                    Geometry = geometry, Visible = IsWindowVisible(armedIdentity.Hwnd),
+                    Foreground = GetForegroundWindow() == armedIdentity.Hwnd,
                     Elevated = elevated, ProtectedProcess = protectedProcess, SecureSurface = secure
                 });
                 return true;
@@ -509,6 +525,8 @@ namespace VerstakComputerUse
                         { "processName", snapshot.ProcessName }, { "title", snapshot.Title },
                         { "productName", snapshot.ProductName }, { "topLevelClassName", snapshot.TopLevelClassName },
                         { "titleFingerprint", snapshot.TitleFingerprint },
+                        { "geometry", GeometryObject(snapshot.Geometry.Left, snapshot.Geometry.Top, snapshot.Geometry.Right - snapshot.Geometry.Left, snapshot.Geometry.Bottom - snapshot.Geometry.Top) },
+                        { "visible", snapshot.Visible }, { "foreground", snapshot.Foreground },
                         { "elevated", snapshot.Elevated }, { "protectedProcess", snapshot.ProtectedProcess },
                         { "secureSurface", snapshot.SecureSurface }
                     });
@@ -570,6 +588,52 @@ namespace VerstakComputerUse
                         PendingProbeWindowInstance = null;
                 }
             }
+        }
+
+        private static void HandleFocus(string requestId, IDictionary<string, object> message)
+        {
+            WindowIdentity expected = ParseIdentity(RequiredDictionary(message, "identity"));
+            lock (WindowLifecycleLock)
+            {
+                if (SelectedWindowInstance == null || !SameIdentity(SelectedWindowInstance, expected))
+                    throw new SafeError("binding_required", "exact selected binding required before focus");
+            }
+            WindowProbe before = ProbeExact(expected, true);
+            if (before.ScreenLocked) throw new SafeError("screen_locked", "interactive desktop unavailable");
+            uint ignoredPid;
+            uint currentThread = GetCurrentThreadId();
+            uint targetThread = GetWindowThreadProcessId(expected.Hwnd, out ignoredPid);
+            IntPtr previousForeground = GetForegroundWindow();
+            uint foregroundThread = previousForeground == IntPtr.Zero
+                ? 0
+                : GetWindowThreadProcessId(previousForeground, out ignoredPid);
+            bool attachedForeground = false;
+            bool attachedTarget = false;
+            try
+            {
+                if (foregroundThread != 0 && foregroundThread != currentThread)
+                    attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+                if (targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread)
+                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+                if (IsIconic(expected.Hwnd)) ShowWindowAsync(expected.Hwnd, SwRestore);
+                AutomationElement focusRoot = AutomationElement.FromHandle(expected.Hwnd);
+                if (focusRoot == null) throw new SafeError("uia_unavailable", "UI Automation root unavailable for focus");
+                focusRoot.SetFocus();
+                BringWindowToTop(expected.Hwnd);
+                SetForegroundWindow(expected.Hwnd);
+                SwitchToThisWindow(expected.Hwnd, true);
+            }
+            finally
+            {
+                if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+                if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
+            }
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(1500);
+            while (GetForegroundWindow() != expected.Hwnd && DateTime.UtcNow < deadline) Thread.Sleep(25);
+            DrainForegroundEvents();
+            WindowProbe after = ProbeExact(expected, true);
+            if (!after.Foreground) throw new SafeError("focus_lost", "Windows rejected foreground activation");
+            WriteOk("focus_binding", requestId, new Dictionary<string, object> { { "probe", ProbeObject(after) } });
         }
 
         private static void HandleObserve(string requestId, IDictionary<string, object> message)
@@ -1100,6 +1164,25 @@ namespace VerstakComputerUse
                 RequireDispatchWithinInterval(timer);
                 bool after = selection.Current.IsSelected;
                 return Outcome(true, MatchesExpectedElementTransition(action, "selection", after ? "selected" : "not-selected"));
+            }
+            if (entry != null && entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+            {
+                RequireTimelyActionCurrent(action, expectedInput, cancellation);
+                RequireElementCurrent(entry);
+                string beforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);
+                Stopwatch timer = Stopwatch.StartNew();
+                ((InvokePattern)pattern).Invoke();
+                action.DispatchAccepted = true;
+                RequireDispatchWithinInterval(timer);
+                DateTime deadline = DateTime.UtcNow.AddMilliseconds(1200);
+                while (DateTime.UtcNow < deadline)
+                {
+                    RequireTimelyActionCurrent(action, expectedInput, cancellation);
+                    string afterSurface = SurfaceStateFingerprint(action.Identity, cancellation);
+                    if (!String.Equals(beforeSurface, afterSurface, StringComparison.Ordinal)) return Outcome(true, true);
+                    Thread.Sleep(25);
+                }
+                return Outcome(true, false);
             }
             POINT point = ActionPoint(action, entry);
             RequireTimelyActionCurrent(action, expectedInput, cancellation);
@@ -1928,7 +2011,9 @@ namespace VerstakComputerUse
         {
             var result = new List<string>();
             object ignored;
-            if (element.TryGetCurrentPattern(TogglePattern.Pattern, out ignored) || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out ignored)) result.Add("click");
+            if (element.TryGetCurrentPattern(TogglePattern.Pattern, out ignored)
+                || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out ignored)
+                || element.TryGetCurrentPattern(InvokePattern.Pattern, out ignored)) result.Add("click");
             if (element.TryGetCurrentPattern(ValuePattern.Pattern, out ignored))
             {
                 try { if (!((ValuePattern)ignored).Current.IsReadOnly) result.Add("type"); } catch { }
@@ -1949,13 +2034,53 @@ namespace VerstakComputerUse
             return null;
         }
 
+        private static string SurfaceStateFingerprint(WindowIdentity identity, CancellationToken cancellation)
+        {
+            Stopwatch timer = Stopwatch.StartNew();
+            AutomationElement root = AutomationElement.FromHandle(identity.Hwnd);
+            if (root == null) throw new SafeError("uia_unavailable", "UI Automation root unavailable");
+            TreeWalker walker = TreeWalker.ControlViewWalker;
+            var pending = new Queue<AutomationElement>();
+            pending.Enqueue(root);
+            var state = new StringBuilder();
+            int count = 0;
+            while (pending.Count > 0)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (count++ >= MaxElements || timer.ElapsedMilliseconds > 750)
+                    throw new SafeError("surface_state_timeout", "bounded UI Automation state read exceeded limit");
+                AutomationElement element = pending.Dequeue();
+                try
+                {
+                    if (element.Current.IsPassword || IsAuthenticationControl(element) || IsLaunchSurfaceControl(element))
+                        throw new SafeError("protected_surface", "unsafe UI Automation state blocked");
+                    AutomationElement child = walker.GetFirstChild(element);
+                    if (child != null) pending.Enqueue(child);
+                    AutomationElement sibling = walker.GetNextSibling(element);
+                    if (sibling != null) pending.Enqueue(sibling);
+                    state.Append(element.Current.ControlType == null ? 0 : element.Current.ControlType.Id).Append('|')
+                        .Append(FingerprintPart(element.Current.AutomationId)).Append('|')
+                        .Append(FingerprintPart(element.Current.Name)).Append('|')
+                        .Append(element.Current.IsEnabled ? '1' : '0').Append('|')
+                        .Append(element.Current.IsOffscreen ? '1' : '0').Append(';');
+                    object valuePattern;
+                    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out valuePattern))
+                        state.Append(FingerprintPart(((ValuePattern)valuePattern).Current.Value)).Append(';');
+                }
+                catch (ElementNotAvailableException) { throw new SafeError("target_changed", "UI Automation state changed during readback"); }
+            }
+            return Hash("surface-state|" + IdentityKey(identity) + "|" + state.ToString());
+        }
+
         private static string ChooseMethod(PreparedAction action)
         {
             ElementEntry entry;
             if (!String.IsNullOrEmpty(action.BackendRef) && Elements.TryGetValue(action.BackendRef, out entry))
             {
                 object pattern;
-                if (action.Kind == "click" && (entry.Element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern) || entry.Element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))) return "uia";
+                if (action.Kind == "click" && (entry.Element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)
+                    || entry.Element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)
+                    || entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))) return "uia";
                 if (action.Kind == "type" && entry.Element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)
                     && CanUseBoundedValuePattern(action, (ValuePattern)pattern)) return "uia";
                 if (action.Kind == "scroll" && entry.Element.TryGetCurrentPattern(ScrollPattern.Pattern, out pattern)) return "uia";

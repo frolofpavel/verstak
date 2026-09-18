@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types'
 import type { ComputerAction } from './types'
+import { parseAutomaticComputerUseRequest } from './automatic-target'
 
 export const MAX_COMPUTER_USE_ORIGINAL_USER_TEXT_BYTES = 32 * 1024
 export const COMPUTER_USE_PERSISTED_ATTACHMENT_BOUNDARY = '\n\n📎 '
@@ -212,14 +213,16 @@ export function isComputerUseComposerAttempt(value: unknown): boolean {
   const content = boundedComposer
     .trim()
     .replace(/\s+/gu, ' ')
-  return !!content && !NEGATED_COMMAND.test(content) && COMPUTER_USE_COMMAND.test(content)
+  return !!content && (
+    (!NEGATED_COMMAND.test(content) && COMPUTER_USE_COMMAND.test(content))
+    || parseAutomaticComputerUseRequest(content) != null
+  )
 }
 
-function latestExplicitContent(messages: readonly OriginalUserMessage[]): string | null {
+function latestIntentContent(messages: readonly OriginalUserMessage[]): string | null {
   const latest = [...messages].reverse().find(message => message.role === 'user')
   if (!latest || latest.source === 'reminder') return null
-  const original = computerUseOriginalTextFromPersistedContent(latest.content)
-  return original ? normalizeExplicitContent(original) : null
+  return computerUseOriginalTextFromPersistedContent(latest.content)
 }
 
 /**
@@ -229,10 +232,14 @@ function latestExplicitContent(messages: readonly OriginalUserMessage[]): string
  * them, so an unknown or deferred suffix grants nothing.
  */
 export function allowedComputerUseActions(messages: readonly OriginalUserMessage[]): readonly ComputerAction[] {
-  return deriveAllowedComputerUseActions(latestExplicitContent(messages))
+  return deriveAllowedComputerUseActions(latestIntentContent(messages))
 }
 
-function deriveAllowedComputerUseActions(content: string | null): readonly ComputerAction[] {
+function deriveAllowedComputerUseActions(rawContent: string | null): readonly ComputerAction[] {
+  if (!rawContent) return []
+  const automatic = parseAutomaticComputerUseRequest(rawContent)
+  if (automatic) return [...automatic.allowedActions]
+  const content = normalizeExplicitContent(rawContent)
   if (!content) return []
   // Restrictions are evaluated on the complete current command before any
   // data delimiter is truncated. A quoted target must not hide a later
@@ -302,7 +309,7 @@ export function allowedComputerUseActionsForRun(
 ): readonly ComputerAction[] {
   if (!originalUserText || context.resumeFromRunId) return []
   const validated = validateComputerUseOriginalUserText(originalUserText)
-  return deriveAllowedComputerUseActions(validated ? normalizeExplicitContent(validated) : null)
+  return deriveAllowedComputerUseActions(validated)
 }
 
 function hasUnnegatedAction(text: string, positive: RegExp, negative: RegExp): boolean {

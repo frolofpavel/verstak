@@ -34,6 +34,7 @@ describe('Computer Use renderer IPC', () => {
       getBinding: vi.fn(() => ({
         candidateId: 'opaque-selected',
         bindingGeneration: 7,
+        source: 'automatic',
         targetFingerprint: 'must-stay-main-only',
         identity: { pid: 4242, processStartTime100ns: '123', hwnd: '0x1234' },
         processName: 'notepad.exe',
@@ -94,6 +95,7 @@ describe('Computer Use renderer IPC', () => {
       helperReady: true,
       bound: true,
       bindingGeneration: 7,
+      bindingSource: 'automatic',
       target: { processName: 'notepad.exe', title: 'Temporary R2 document' },
       expiresAt: 123456789,
       reconciliationRequired: false,
@@ -142,6 +144,7 @@ describe('Computer Use renderer IPC', () => {
     controller.getBinding.mockReturnValue({
       candidateId: 'opaque-selected',
       bindingGeneration: 7,
+      source: 'automatic',
       targetFingerprint: 'must-stay-main-only',
       identity: { pid: 4242, processStartTime100ns: '123', hwnd: '0x1234' },
       processName: 'notepad.exe',

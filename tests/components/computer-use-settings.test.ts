@@ -66,11 +66,21 @@ describe('ComputerUseSettingsCard', () => {
     })
   }
 
+  it('presents automatic chat use as the primary flow and manual binding as advanced only', async () => {
+    installApi()
+    renderCard()
+
+    expect(await screen.findByText(/поставьте задачу в обычном чате/i)).toBeTruthy()
+    expect(screen.getByText(/сам найдёт или откроет приложение/i)).toBeTruthy()
+    expect(screen.getByText(/ручная привязка нужна только для отладки/i)).toBeTruthy()
+    expect(screen.getByText('Расширенные настройки и отладка')).toBeTruthy()
+  })
+
   it('binds only the exact opaque window selected by the user', async () => {
     const api = installApi()
     renderCard()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно вручную' }))
     const safe = await screen.findByRole('button', { name: /Temporary R2 document/ })
     const blocked = screen.getByRole('button', { name: /Elevated window/ })
     expect((blocked as HTMLButtonElement).disabled).toBe(true)
@@ -104,7 +114,7 @@ describe('ComputerUseSettingsCard', () => {
     await waitFor(() => expect(api.unbind).toHaveBeenCalledTimes(1))
   })
 
-  it('tells the user how to transfer foreground before an effectful run', async () => {
+  it('does not require the user to transfer foreground before an automatic run', async () => {
     const api = installApi()
     api.getState.mockResolvedValue({
       supported: true,
@@ -117,8 +127,26 @@ describe('ComputerUseSettingsCard', () => {
     })
     renderCard()
 
-    expect(await screen.findByText(/после отправки команды переключитесь в выбранное окно/i)).toBeTruthy()
-    expect(screen.getByText(/не используйте мышь и клавиатуру до завершения/i)).toBeTruthy()
+    expect(await screen.findByText(/принудительное ограничение цели включено/i)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/переключитесь в выбранное окно/i)
+  })
+
+  it('labels a runtime-selected binding as automatic instead of a manual restriction', async () => {
+    const api = installApi()
+    api.getState.mockResolvedValue({
+      supported: true,
+      helperReady: true,
+      bound: true,
+      bindingSource: 'automatic',
+      bindingGeneration: 3,
+      target: { processName: 'notepad.exe', title: 'Безымянный — Блокнот' },
+      expiresAt: Date.now() + 300_000,
+      reconciliationRequired: false,
+    })
+    renderCard()
+
+    expect(await screen.findByText('Цель выбрана автоматически')).toBeTruthy()
+    expect(screen.getByText(/окно найдено и сфокусировано по исходной команде/i)).toBeTruthy()
   })
 
   it('discloses the provider data scope and persistence boundary before selection', async () => {
@@ -135,9 +163,9 @@ describe('ComputerUseSettingsCard', () => {
     const bindApi = installApi()
     renderCard()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно вручную' }))
     fireEvent.click(await screen.findByRole('button', { name: /Temporary R2 document/ }))
-    await screen.findByText('Доступ выдан только выбранному окну.')
+    await screen.findByText('Принудительное ограничение установлено только на выбранное окно.')
     expectNoticeSeverity('is-ok')
 
     cleanup()
@@ -160,7 +188,7 @@ describe('ComputerUseSettingsCard', () => {
     api.listCandidates.mockRejectedValueOnce(new Error('helper unavailable'))
     renderCard()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно вручную' }))
     await screen.findByText(/Computer Use недоступен/)
     expectNoticeSeverity('is-error')
   })
@@ -234,7 +262,7 @@ describe('ComputerUseSettingsCard', () => {
     } as never)
     renderCard()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать окно вручную' }))
     fireEvent.click(await screen.findByRole('button', { name: /Temporary R2 document/ }))
     await screen.findByText('Выбранное окно больше недоступно')
     expectNoticeSeverity('is-error')

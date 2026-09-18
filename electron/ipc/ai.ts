@@ -1545,7 +1545,12 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // preflight, but before the model sees tools. The send AbortSignal owns the
     // exact lineage from this point, including Stop while the model is thinking.
     if (computerUseAllowedActions.length > 0) {
-      const authorization = authorizeComputerRun({ browserTaskId, runId, signal: ctrl.signal })
+      const authorization = await authorizeComputerRun({
+        browserTaskId,
+        runId,
+        originalUserText: freshComposerText,
+        signal: ctrl.signal,
+      })
       if (!authorization.ok) {
         logRuntime('computer_use.authorization.blocked', {
           sendId,

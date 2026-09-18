@@ -13,6 +13,7 @@ import type {
 type HelperClient = Pick<ComputerHelperClient,
   | 'listCandidates'
   | 'probeBinding'
+  | 'focusBinding'
   | 'observe'
   | 'prepareAction'
   | 'commitAction'
@@ -60,12 +61,16 @@ export function createComputerHelperBackend(client: HelperClient): ComputerBacke
         ...(candidate.topLevelClassName ? { topLevelClassName: candidate.topLevelClassName } : {}),
         title: candidate.title,
         titleFingerprint: candidate.titleFingerprint,
+        geometry: candidate.geometry,
+        visible: candidate.visible,
+        foreground: candidate.foreground,
         elevated: candidate.elevated,
         protectedProcess: candidate.protectedProcess,
         secureSurface: candidate.secureSurface,
       }))
     },
     probeBinding: (identity, candidateToken) => client.probeBinding(identity, candidateToken),
+    focusBinding: identity => client.focusBinding(identity),
     observe: identity => client.observe(identity),
     prepareAction: request => client.prepareAction(wirePrepare(request)) as Promise<ComputerPreparedAction>,
     async commitAction(prepared: ComputerPreparedAction, options: ComputerCommitOptions) {

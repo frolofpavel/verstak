@@ -130,6 +130,7 @@ export function ComputerUseSettingsCard() {
   const supported = state?.supported !== false
   const ready = Boolean(state?.helperReady)
   const bound = Boolean(state?.bound)
+  const automaticBound = bound && state?.bindingSource === 'automatic'
 
   return (
     <section className="gg-browser-settings-card gg-computer-use-card" aria-live="polite" data-testid="computer-use-settings">
@@ -150,17 +151,26 @@ export function ComputerUseSettingsCard() {
       <div className="gg-browser-settings-state">
         <span className={`gg-browser-settings-dot is-${bound ? 'connected' : ready ? 'ready' : 'repair'}`} aria-hidden />
         <div>
-          <strong>{!supported ? t.unsupported : bound ? t.bound : ready ? t.ready : t.unavailable}</strong>
+          <strong>{!supported ? t.unsupported : bound ? automaticBound ? t.automaticBound : t.bound : ready ? t.ready : t.unavailable}</strong>
           <p>{bound
             ? state?.reconciliationRequired
               ? state.reconciliationAcknowledgementAvailable
                 ? t.reconcileHint
                 : t.reconcileUnavailableHint
-              : state?.expiresAt
-                ? `${t.claimExpires} ${new Date(state.expiresAt).toLocaleTimeString()}`
-                : t.boundHint
+              : automaticBound
+                ? state?.expiresAt
+                  ? `${t.automaticBoundHint} ${t.claimExpires} ${new Date(state.expiresAt).toLocaleTimeString()}`
+                  : t.automaticBoundHint
+                : state?.expiresAt
+                  ? `${t.boundHint} ${t.claimExpires} ${new Date(state.expiresAt).toLocaleTimeString()}`
+                  : t.boundHint
             : t.readyHint}</p>
         </div>
+      </div>
+
+      <div className="gg-computer-use-advanced">
+        <strong>{t.advanced}</strong>
+        <p>{t.advancedHint}</p>
       </div>
 
       {bound && state?.target && (

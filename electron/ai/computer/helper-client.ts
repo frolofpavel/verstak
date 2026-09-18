@@ -22,6 +22,7 @@ import {
   parseComputerMessage,
   serializeComputerRequest,
   type ComputerCandidate,
+  type ComputerGeometry,
   type ComputerCommitResult,
   type ComputerHelperEvent,
   type ComputerObservation,
@@ -300,6 +301,24 @@ function asIdentity(value: unknown): ComputerWindowIdentity {
   }
 }
 
+function readGeometry(value: unknown): ComputerGeometry {
+  if (!isPlainObject(value)) throw new ComputerHelperProtocolError('helper geometry invalid')
+  for (const key of ['left', 'top', 'width', 'height'] as const) {
+    if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) {
+      throw new ComputerHelperProtocolError('helper geometry invalid')
+    }
+  }
+  if ((value.width as number) <= 0 || (value.height as number) <= 0) {
+    throw new ComputerHelperProtocolError('helper geometry invalid')
+  }
+  return {
+    left: value.left as number,
+    top: value.top as number,
+    width: value.width as number,
+    height: value.height as number,
+  }
+}
+
 function validateTextChunks(chunks: string[] | undefined): void {
   if (!chunks) return
   let totalBytes = 0
@@ -446,6 +465,9 @@ export class ComputerHelperClient {
         || value.title !== normalizeWindowTitle(value.title)
         || typeof value.titleFingerprint !== 'string'
         || !SHA256_PATTERN.test(value.titleFingerprint)
+        || !isPlainObject(value.geometry)
+        || typeof value.visible !== 'boolean'
+        || typeof value.foreground !== 'boolean'
         || (value.productName !== undefined && (
           typeof value.productName !== 'string'
           || value.productName.length > 160
@@ -469,6 +491,9 @@ export class ComputerHelperClient {
           : {}),
         title: value.title,
         titleFingerprint: value.titleFingerprint,
+        geometry: readGeometry(value.geometry),
+        visible: value.visible,
+        foreground: value.foreground,
         elevated: value.elevated === true,
         protectedProcess: value.protectedProcess === true,
         secureSurface: value.secureSurface === true,
@@ -484,6 +509,11 @@ export class ComputerHelperClient {
       identity,
       ...(candidateToken ? { candidateToken } : {}),
     })
+    return this.readProbe(response.probe)
+  }
+
+  async focusBinding(identity: ComputerWindowIdentity): Promise<ComputerWindowProbe> {
+    const response = await this.request('focus_binding', { identity })
     return this.readProbe(response.probe)
   }
 

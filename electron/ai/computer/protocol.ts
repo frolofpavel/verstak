@@ -3,7 +3,7 @@
 // path, script or arbitrary-command escape hatch.
 
 export const COMPUTER_PROTOCOL_VERSION = 1 as const
-export const COMPUTER_HELPER_VERSION = '2.9.0' as const
+export const COMPUTER_HELPER_VERSION = '2.9.1' as const
 export const MAX_COMPUTER_MESSAGE_BYTES = 64 * 1024
 export const MAX_COMPUTER_STDERR_BYTES = 8 * 1024
 export const MAX_COMPUTER_CANDIDATES = 128
@@ -53,6 +53,9 @@ export interface ComputerCandidate {
   topLevelClassName?: string
   title: string
   titleFingerprint: string
+  geometry: ComputerGeometry
+  visible: boolean
+  foreground: boolean
   elevated: boolean
   protectedProcess: boolean
   secureSurface: boolean
@@ -169,6 +172,7 @@ export type ComputerRequestType =
   | 'ping'
   | 'list_candidates'
   | 'probe_binding'
+  | 'focus_binding'
   | 'observe'
   | 'prepare_action'
   | 'commit_action'
@@ -196,7 +200,7 @@ export type ComputerParseResult =
   | { ok: false; code: string; message: string }
 
 const RESPONSE_TYPES = new Set<ComputerResponseType>([
-  'hello', 'ping', 'list_candidates', 'probe_binding', 'observe',
+  'hello', 'ping', 'list_candidates', 'probe_binding', 'focus_binding', 'observe',
   'prepare_action', 'commit_action', 'cancel', 'stop', 'shutdown',
   'event', 'error',
 ])

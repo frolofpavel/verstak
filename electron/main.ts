@@ -72,6 +72,7 @@ import { createBrowserController, type BrowserController } from './ai/browser/co
 import { ComputerHelperClient } from './ai/computer/helper-client'
 import { createComputerHelperBackend } from './ai/computer/helper-backend'
 import { createComputerController, type ComputerController } from './ai/computer/controller'
+import { launchComputerApplication } from './ai/computer/application-launcher'
 import { isComputerUseComposerAttempt } from './ai/computer/intent'
 import { createComputerUseComposerActivationGate } from './ai/computer/composer-activation'
 import { configureComputerHandler } from './ipc/tool-handlers/computer'
@@ -730,6 +731,7 @@ app.whenReady().then(() => {
     computerController = createComputerController({
       storage: browserTasks,
       backend: computerBackend,
+      launchApplication: launchComputerApplication,
     })
   }
   configureComputerHandler({ controller: computerController })

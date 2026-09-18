@@ -79,9 +79,9 @@ describe('Browser Employee packaged artifact checker', () => {
     expect(result.evidence).toMatchObject({
       versionTriplet: {
         protocolVersion: 1,
-        appVersion: '2.9.0',
+        appVersion: '2.9.1',
         extensionVersion: '0.2.0',
-        hostVersion: '2.9.0',
+        hostVersion: '2.9.1',
       },
     })
   })
