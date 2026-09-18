@@ -1838,14 +1838,21 @@ namespace VerstakComputerUse
                     string runtime = runtimeId == null ? "runtime-missing" : String.Join(",", runtimeId.Select(value => value.ToString(CultureInfo.InvariantCulture)).ToArray());
                     ControlType controlType = current.Current.ControlType;
                     var bounds = current.Current.BoundingRectangle;
+                    // The selected app may legitimately update only its top-level
+                    // title as a direct result of this element's edit (for example,
+                    // Notepad adds the unsaved marker after the first chunk). The
+                    // exact PID/start/HWND, root runtime id/class/handle/bounds and
+                    // every descendant segment remain pinned; only the mutable root
+                    // accessible name is excluded from element identity.
+                    bool isRoot = Automation.Compare(current, root);
                     string segment = runtime + "|" + (controlType == null ? "control-missing" : controlType.Id.ToString(CultureInfo.InvariantCulture))
-                        + "|" + FingerprintPart(current.Current.AutomationId) + "|" + FingerprintPart(current.Current.Name)
+                        + "|" + FingerprintPart(current.Current.AutomationId) + "|" + FingerprintPart(isRoot ? "" : current.Current.Name)
                         + "|" + FingerprintPart(current.Current.ClassName) + "|" + current.Current.NativeWindowHandle.ToString(CultureInfo.InvariantCulture)
                         + "|" + Math.Round(bounds.Left).ToString(CultureInfo.InvariantCulture) + "," + Math.Round(bounds.Top).ToString(CultureInfo.InvariantCulture)
                         + "," + Math.Round(bounds.Width).ToString(CultureInfo.InvariantCulture) + "," + Math.Round(bounds.Height).ToString(CultureInfo.InvariantCulture)
                         + (depth == 0 ? "|" + ElementPatternSignature(current) : "");
                     path.Add(Hash(segment));
-                    if (Automation.Compare(current, root)) { reachedRoot = true; break; }
+                    if (isRoot) { reachedRoot = true; break; }
                     current = walker.GetParent(current);
                 }
                 if (!reachedRoot) throw new SafeError("stale_element", "UI Automation element is no longer under exact window root");

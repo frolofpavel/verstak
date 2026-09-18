@@ -840,7 +840,9 @@ const GATE_MAX_WORKERS = 4
 // -> 7441 ИЗМЕРЕНО 18.09: 2.9.1 automatic Computer Use discovery/selection,
 // allowlisted app launch, native focus, permissions, Invoke readback, упаковка
 // и повторный fresh-lease выбор после Windows focus redirect.
-const EXPECTED_TOTAL_TESTS = 7441
+// -> 7442 ИЗМЕРЕНО 19.09: pin для штатной смены top-level title после первого
+// ValuePattern chunk без ослабления exact PID/start/HWND/element identity.
+const EXPECTED_TOTAL_TESTS = 7442
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

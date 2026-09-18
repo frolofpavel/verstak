@@ -282,6 +282,15 @@ function valuePatternStateGuardIsPinned(source: string): boolean {
     && finalExact > setValue
 }
 
+function mutableRootTitleIsExcludedFromElementIdentity(source: string): boolean {
+  const fingerprint = source.match(
+    /private\s+static\s+string\s+CaptureElementFingerprint[\s\S]*?(?=\n\s*private\s+static\s+string\s+FingerprintPart)/,
+  )?.[0] ?? ''
+  return /bool\s+isRoot\s*=\s*Automation\.Compare\(current,\s*root\)\s*;/.test(fingerprint)
+    && /FingerprintPart\(isRoot\s*\?\s*""\s*:\s*current\.Current\.Name\)/.test(fingerprint)
+    && /if\s*\(isRoot\)\s*\{\s*reachedRoot\s*=\s*true;\s*break;\s*\}/.test(fingerprint)
+}
+
 function scrollStateGuardIsPinned(source: string): boolean {
   const observe = source.match(
     /private\s+static\s+IDictionary<string, object>\s+ExecuteObserve[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireObservationBudget)/,
@@ -588,6 +597,18 @@ describe('computer helper hardening contracts', () => {
     )
     expect(finalTokenMutation).not.toBe(source)
     expect(valuePatternStateGuardIsPinned(finalTokenMutation)).toBe(false)
+  })
+
+  it('keeps a writable element stable when its own edit changes only the top-level window title', () => {
+    const source = helperSource()
+    expect(mutableRootTitleIsExcludedFromElementIdentity(source)).toBe(true)
+
+    const mutation = source.replace(
+      'FingerprintPart(isRoot ? "" : current.Current.Name)',
+      'FingerprintPart(current.Current.Name)',
+    )
+    expect(mutation).not.toBe(source)
+    expect(mutableRootTitleIsExcludedFromElementIdentity(mutation)).toBe(false)
   })
 
   it('pins exact ScrollPattern pre-state and signed post direction around Scroll()', () => {
