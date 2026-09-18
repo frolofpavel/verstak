@@ -64,7 +64,8 @@ function bindingSurfaceBudgetIsPinned(source: string): boolean {
     && /ProbeExact\s*\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*BindingSurfaceInspectionTimeoutMs\s*\)/.test(handler)
     && /return\s+ProbeExact\s*\(\s*expected,\s*blockUnsafe,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs\s*\)\s*;/.test(probe)
     && /ProbeExact\s*\(\s*WindowIdentity\s+expected,\s*bool\s+blockUnsafe,\s*int\s+surfaceMaxElements,\s*int\s+surfaceMaxMilliseconds\s*\)/.test(probe)
-    && /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds\s*\)/.test(probe)
+    && /return\s+ProbeExact\s*\(\s*expected,\s*blockUnsafe,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds,\s*true\s*\)\s*;/.test(probe)
+    && /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds,\s*inspectSurfaceDescendants\s*\)/.test(probe)
 }
 
 function observationCaptureSurfaceBudgetIsPinned(source: string): boolean {
@@ -78,6 +79,38 @@ function observationCaptureSurfaceBudgetIsPinned(source: string): boolean {
 function observationDeadlineLeavesSurfaceScanHeadroom(source: string): boolean {
   return /private\s+const\s+int\s+ObservationSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source)
     && /private\s+const\s+int\s+ObservationTimeoutMs\s*=\s*5000\s*;/.test(source)
+}
+
+function actionSurfaceScanPrecedesFastDispatchGuard(source: string): boolean {
+  const timely = source.match(
+    /private\s+static\s+void\s+RequireTimelyActionCurrent[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireDispatchWithinInterval)/,
+  )?.[0] ?? ''
+  const current = source.match(
+    /private\s+static\s+void\s+RequireActionCurrent[\s\S]*?(?=\n\s*private\s+static\s+WindowProbe\s+ProbeExact)/,
+  )?.[0] ?? ''
+  const probe = source.match(
+    /private\s+static\s+WindowProbe\s+ProbeExact[\s\S]*?(?=\n\s*private\s+static\s+bool\s+IsDestroyedWindowInstance)/,
+  )?.[0] ?? ''
+  const secure = source.match(
+    /private\s+static\s+bool\s+IsSecureSurface[\s\S]*?(?=\n\s*private\s+static\s+bool\s+IsPassword)/,
+  )?.[0] ?? ''
+
+  const surfaceScan = timely.indexOf(
+    'ProbeExact(action.Identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs);',
+  )
+  const fastTimer = timely.indexOf('Stopwatch timer = Stopwatch.StartNew();')
+  const fastCurrent = timely.indexOf('RequireActionCurrent(action, expectedInput, true, cancellation);')
+
+  return [
+    /private\s+const\s+int\s+ActionSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source),
+    surfaceScan >= 0,
+    fastTimer > surfaceScan,
+    fastCurrent > fastTimer,
+    /ProbeExact\s*\(\s*action\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/.test(current),
+    /bool\s+inspectSurfaceDescendants/.test(probe),
+    /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds,\s*inspectSurfaceDescendants\s*\)/.test(probe),
+    /return\s+inspectSurfaceDescendants\s*&&\s*HasUnsafeSurfaceDescendant\s*\(/.test(secure),
+  ].every(Boolean)
 }
 
 function ownerCreationIdentityIsPinned(source: string): boolean {
@@ -328,6 +361,11 @@ describe('computer helper hardening contracts', () => {
     )
     expect(collapsedDeadlineMutation).not.toBe(source)
     expect(observationDeadlineLeavesSurfaceScanHeadroom(collapsedDeadlineMutation)).toBe(false)
+  })
+
+  it('finishes the fail-closed action surface scan before applying the 50 ms dispatch guard', () => {
+    const source = helperSource()
+    expect(actionSurfaceScanPrecedesFastDispatchGuard(source)).toBe(true)
   })
 
   it('pins the exact owner creation FILETIME before the watchdog handle is retained', () => {

@@ -255,7 +255,7 @@ export function auditComputerHelperSource(source) {
     failures.push('owner/terminal/development-surface exclusion missing')
   }
   if (!/private\s+static\s+bool\s+HasUnsafeSurfaceDescendant\s*\(/.test(source)
-    || !/return\s+HasUnsafeSurfaceDescendant\s*\(\s*hwnd\s*,\s*maxElements\s*,\s*maxMilliseconds\s*\)\s*;/.test(source)
+    || !/return\s+inspectSurfaceDescendants\s*&&\s*HasUnsafeSurfaceDescendant\s*\(\s*hwnd\s*,\s*maxElements\s*,\s*maxMilliseconds\s*\)\s*;/.test(source)
     || !/IsPassword\s*\(\s*element\s*\)\s*\|\|\s*IsAuthenticationControl\s*\(\s*element\s*\)\s*\|\|\s*IsLaunchSurfaceControl\s*\(\s*element\s*\)/.test(source)
     || !/"address bar"[\s\S]*"location bar"[\s\S]*"run"[\s\S]*"выполнить"/.test(source)
     || !/if\s*\(\s*secure\s*\)\s*return\s+true\s*;/.test(source)
@@ -547,7 +547,10 @@ export function auditComputerCandidateLeaseSources({ helper, protocol, types, cl
     /private\s+const\s+int\s+BindingSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(helper),
     /ProbeExact\s*\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*BindingSurfaceInspectionTimeoutMs\s*\)/.test(probe),
     /return\s+ProbeExact\s*\(\s*expected,\s*blockUnsafe,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs\s*\)\s*;/.test(helper),
-    /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds\s*\)/.test(helper),
+    /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds,\s*inspectSurfaceDescendants\s*\)/.test(helper),
+    /private\s+const\s+int\s+ActionSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(helper),
+    /ProbeExact\s*\(\s*action\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*ActionSurfaceInspectionTimeoutMs\s*\)[\s\S]*?Stopwatch\s+timer\s*=\s*Stopwatch\.StartNew\s*\(\s*\)[\s\S]*?RequireActionCurrent\s*\(\s*action,\s*expectedInput,\s*true,\s*cancellation\s*\)/.test(helper),
+    /ProbeExact\s*\(\s*action\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/.test(helper),
     /SelectedWindowInstance\s*==\s*null\s*\|\|\s*!SameIdentity\s*\(\s*SelectedWindowInstance,\s*expected\s*\)/.test(probe),
     /CandidateLeases\.TryRemove\s*\(\s*candidateToken/.test(consume),
     /lease\.ExpiresUtc\s*<=\s*DateTime\.UtcNow/.test(consume),

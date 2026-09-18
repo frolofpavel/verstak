@@ -55,6 +55,7 @@ namespace VerstakComputerUse
         private const int MaxWindowTitleDisplayChars = 300;
         private const int MaxSurfaceInspectionElements = 512;
         private const int BindingSurfaceInspectionTimeoutMs = 1500;
+        private const int ActionSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationTimeoutMs = 5000;
         private const int MaxScreenshotBytes = 16384;
@@ -1225,6 +1226,8 @@ namespace VerstakComputerUse
 
         private static void RequireTimelyActionCurrent(PreparedAction action, long expectedInput, CancellationToken cancellation)
         {
+            cancellation.ThrowIfCancellationRequested();
+            ProbeExact(action.Identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs);
             Stopwatch timer = Stopwatch.StartNew();
             RequireActionCurrent(action, expectedInput, true, cancellation);
             if (timer.ElapsedMilliseconds > MaxTargetCheckIntervalMs)
@@ -1247,7 +1250,11 @@ namespace VerstakComputerUse
                 throw new SafeError("foreground_changed", "foreground changed after prepare");
             }
             WindowProbe current;
-            try { current = ProbeExact(action.Identity, true); }
+            try
+            {
+                current = ProbeExact(
+                    action.Identity, true, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs, false);
+            }
             catch (SafeError error)
             {
                 if (error.Code == "target_destroyed" || error.Code == "target_changed") EmitEvent("target-destroyed", action.Identity, "exact target identity changed");
@@ -1286,6 +1293,13 @@ namespace VerstakComputerUse
         private static WindowProbe ProbeExact(
             WindowIdentity expected, bool blockUnsafe, int surfaceMaxElements, int surfaceMaxMilliseconds)
         {
+            return ProbeExact(expected, blockUnsafe, surfaceMaxElements, surfaceMaxMilliseconds, true);
+        }
+
+        private static WindowProbe ProbeExact(
+            WindowIdentity expected, bool blockUnsafe, int surfaceMaxElements, int surfaceMaxMilliseconds,
+            bool inspectSurfaceDescendants)
+        {
             DrainForegroundEvents();
             long destroyGeneration = WindowDestroyGeneration(expected.Hwnd);
             if (IsDestroyedWindowInstance(expected)) throw new SafeError("target_destroyed", "selected HWND instance was destroyed");
@@ -1301,7 +1315,8 @@ namespace VerstakComputerUse
                 throw new SafeError("forbidden_target", "Verstak, terminal, shell or development surface blocked");
             bool protectedProcess;
             bool elevated = IsElevated(actual.Pid, out protectedProcess);
-            bool secure = IsSecureSurface(actual.Hwnd, title, surfaceMaxElements, surfaceMaxMilliseconds);
+            bool secure = IsSecureSurface(
+                actual.Hwnd, title, surfaceMaxElements, surfaceMaxMilliseconds, inspectSurfaceDescendants);
             if (blockUnsafe && (protectedProcess || elevated || secure)) throw new SafeError("protected_target", "elevated, protected or secure surface blocked");
             RECT rect;
             if (DwmGetWindowAttribute(actual.Hwnd, DwmwaExtendedFrameBounds, out rect, Marshal.SizeOf(typeof(RECT))) != 0 && !GetWindowRect(actual.Hwnd, out rect))
@@ -1674,6 +1689,12 @@ namespace VerstakComputerUse
 
         private static bool IsSecureSurface(IntPtr hwnd, string title, int maxElements, int maxMilliseconds)
         {
+            return IsSecureSurface(hwnd, title, maxElements, maxMilliseconds, true);
+        }
+
+        private static bool IsSecureSurface(
+            IntPtr hwnd, string title, int maxElements, int maxMilliseconds, bool inspectSurfaceDescendants)
+        {
             string className = WindowClass(hwnd);
             string joined = (className + " " + title).ToLowerInvariant();
             if (ContainsCredentialMarker(joined)
@@ -1698,7 +1719,7 @@ namespace VerstakComputerUse
                 || joined.Contains("log in") || joined.Contains("login") || joined.Contains("authentication")
                 || joined.Contains("капча") || joined.Contains("код подтверждения") || joined.Contains("авторизац")
                 || joined.Contains("вход в") || joined.Contains("войти")) return true;
-            return HasUnsafeSurfaceDescendant(hwnd, maxElements, maxMilliseconds);
+            return inspectSurfaceDescendants && HasUnsafeSurfaceDescendant(hwnd, maxElements, maxMilliseconds);
         }
 
         private static bool IsPassword(AutomationElement element)

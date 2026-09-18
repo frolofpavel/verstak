@@ -480,7 +480,7 @@ describe('computer use packaged artifact checker', () => {
     const source = readFileSync(join(ROOT, 'resources', 'computer-use', 'helper.ps1'), 'utf8')
 
     const surfaceMutation = source.replace(
-      'return HasUnsafeSurfaceDescendant(hwnd, maxElements, maxMilliseconds);',
+      'return inspectSurfaceDescendants && HasUnsafeSurfaceDescendant(hwnd, maxElements, maxMilliseconds);',
       'return false;',
     )
     expect(surfaceMutation).not.toBe(source)
