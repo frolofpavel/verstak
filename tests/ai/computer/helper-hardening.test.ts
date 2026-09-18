@@ -205,7 +205,11 @@ function automaticFocusUsesExactThreadAttachment(source: string): boolean {
   const focus = source.match(
     /private\s+static\s+void\s+HandleFocus[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleObserve)/,
   )?.[0] ?? ''
+  const boundedSurfaceChecks = focus.match(
+    /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*FocusSurfaceInspectionTimeoutMs\s*\)/g,
+  ) ?? []
   return /AttachThreadInput\s*\(/.test(source)
+    && boundedSurfaceChecks.length === 2
     && /AutomationElement\.FromHandle\(expected\.Hwnd\)[\s\S]*\.SetFocus\(\)/.test(focus)
     && /SwitchToThisWindow\s*\(\s*expected\.Hwnd,\s*true\s*\)/.test(focus)
     && /AttachThreadInput\s*\(\s*currentThread,\s*foregroundThread,\s*true\s*\)/.test(focus)
@@ -478,6 +482,13 @@ describe('computer helper hardening contracts', () => {
     )
     expect(mutation).not.toBe(source)
     expect(automaticFocusUsesExactThreadAttachment(mutation)).toBe(false)
+
+    const timeoutMutation = source.replace(
+      /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*FocusSurfaceInspectionTimeoutMs\s*\)/,
+      'ProbeExact(expected, true)',
+    )
+    expect(timeoutMutation).not.toBe(source)
+    expect(automaticFocusUsesExactThreadAttachment(timeoutMutation)).toBe(false)
   })
 
   it('pins a salted opaque ValuePattern state immediately before SetValue()', () => {

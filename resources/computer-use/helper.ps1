@@ -55,6 +55,7 @@ namespace VerstakComputerUse
         private const int MaxWindowTitleDisplayChars = 300;
         private const int MaxSurfaceInspectionElements = 512;
         private const int BindingSurfaceInspectionTimeoutMs = 1500;
+        private const int FocusSurfaceInspectionTimeoutMs = 1500;
         private const int ActionSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationSurfaceInspectionTimeoutMs = 1500;
         private const int ObservationTimeoutMs = 5000;
@@ -598,7 +599,8 @@ namespace VerstakComputerUse
                 if (SelectedWindowInstance == null || !SameIdentity(SelectedWindowInstance, expected))
                     throw new SafeError("binding_required", "exact selected binding required before focus");
             }
-            WindowProbe before = ProbeExact(expected, true);
+            WindowProbe before = ProbeExact(
+                expected, true, MaxSurfaceInspectionElements, FocusSurfaceInspectionTimeoutMs);
             if (before.ScreenLocked) throw new SafeError("screen_locked", "interactive desktop unavailable");
             uint ignoredPid;
             uint currentThread = GetCurrentThreadId();
@@ -631,7 +633,8 @@ namespace VerstakComputerUse
             DateTime deadline = DateTime.UtcNow.AddMilliseconds(1500);
             while (GetForegroundWindow() != expected.Hwnd && DateTime.UtcNow < deadline) Thread.Sleep(25);
             DrainForegroundEvents();
-            WindowProbe after = ProbeExact(expected, true);
+            WindowProbe after = ProbeExact(
+                expected, true, MaxSurfaceInspectionElements, FocusSurfaceInspectionTimeoutMs);
             if (!after.Foreground) throw new SafeError("focus_lost", "Windows rejected foreground activation");
             WriteOk("focus_binding", requestId, new Dictionary<string, object> { { "probe", ProbeObject(after) } });
         }
