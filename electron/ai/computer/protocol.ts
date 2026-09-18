@@ -3,7 +3,7 @@
 // path, script or arbitrary-command escape hatch.
 
 export const COMPUTER_PROTOCOL_VERSION = 1 as const
-export const COMPUTER_HELPER_VERSION = '2.8.2' as const
+export const COMPUTER_HELPER_VERSION = '2.9.0' as const
 export const MAX_COMPUTER_MESSAGE_BYTES = 64 * 1024
 export const MAX_COMPUTER_STDERR_BYTES = 8 * 1024
 export const MAX_COMPUTER_CANDIDATES = 128

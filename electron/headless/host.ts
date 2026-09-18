@@ -41,6 +41,14 @@ import type { TaggedSender } from '../ipc/tool-handlers/shared'
 import { buildProviderRuntimeOptions } from '../ipc/ai-send/provider-options'
 import { STAGE1_CANARY_TOOLS_ALLOW, STAGE1_TOOLS_ALLOW, STAGE1_CONNECTOR_DENY } from './stage1'
 import { CLOUD_SYSTEM_LAYER_PROMPT } from './cloud-layer'
+import {
+  boundedSearchProvider,
+  controlledSearchMessage,
+  executeSearch,
+  searchEvidencePrompt,
+  staticSearchProvider,
+  type SearchExecutionStatus,
+} from './search-executor'
 import type { AgentMode } from '../ai/mode-policy'
 import type { NewStep, CreatePlanMeta } from '../storage/plans'
 import type { JournalKind } from '../storage/journal'
@@ -73,6 +81,8 @@ export interface HeadlessHostOptions {
    * и подмена провайдера снаружи процесса была бы дырой.
    */
   providerFactory?: (providerId: ProviderId, model: string, signal: AbortSignal, workspace: string) => ChatProvider | null
+  /** DI-шов Search Executor для детерминированной интеграционной проверки без сети. */
+  searchExecutor?: typeof executeSearch
   /**
    * C1 (P5): период опроса расписания в мс; null — выключить scheduler (тесты,
    * потребители с собственным циклом). По умолчанию 30 секунд.
@@ -167,6 +177,10 @@ export interface StartTaskOptions {
    */
   threadId?: number
   prompt: string
+  /** Внутренний маршрут Gateway. web_search никогда не выбирается моделью заново. */
+  executionKind?: 'web_search' | 'artifact_task' | 'simple_chat'
+  /** Контекст сохранённого Gateway-разговора/проекта для первого headless-хода. */
+  contextMessages?: ChatMessage[]
   /** Не обязателен, если задан inference (тогда выводится custom-openai). */
   providerId?: ProviderId
   model?: string
@@ -344,6 +358,8 @@ export function computeHeadlessTaskRequestHash(
     // A continue always inherits the thread workspace; a supplied workspace is ignored.
     workspace: operation === 'continue' ? null : (task.workspace ?? null),
     prompt: task.prompt,
+    executionKind: task.executionKind ?? null,
+    contextMessages: task.contextMessages ?? null,
     providerId: task.providerId ?? (task.inference ? 'custom-openai' : null),
     model: task.model ?? null,
     agentMode: task.agentMode ?? null,
@@ -729,15 +745,27 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
     // История треда идёт в контекст ходом ранее записанными сообщениями — той же
     // формой user/assistant, какую десктопный renderer шлёт в ai:send. Роль 'system'
     // отсеиваем: системный слой собирается заново на каждый прогон.
-    const priorMessages: ChatMessage[] = (existingThread ? chats.listBySession(existingThread.id) : [])
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ role: m.role, content: m.content }))
+    const requestContext = (task.contextMessages ?? [])
+      .filter(message => message && typeof message.content === 'string' && message.content.trim())
+      .slice(-40)
+    const contextSystem = requestContext
+      .filter(message => message.role === 'system')
+      .map(message => message.content)
+      .join('\n\n')
+    const priorMessages: ChatMessage[] = [
+      ...requestContext.filter(message => message.role === 'user' || message.role === 'assistant'),
+      ...(existingThread ? chats.listBySession(existingThread.id) : [])
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content } as ChatMessage)),
+    ]
     const userMsg: ChatMessage = { role: 'user', content: task.prompt }
 
     const composed = await awaitPreparation(prepareSystemContext({
       // Облачная персона вместо десктопной: в облаке нет проекта и кода, а десктопный
       // слой заставлял агента отказываться от обычных деловых задач.
-      systemLayer: CLOUD_SYSTEM_LAYER_PROMPT,
+      systemLayer: contextSystem
+        ? `${CLOUD_SYSTEM_LAYER_PROMPT}\n\nКонтекст сохранённого разговора/проекта:\n${contextSystem}`
+        : CLOUD_SYSTEM_LAYER_PROMPT,
       projectPath: workspace,
       messages: [...priorMessages, userMsg],
       recentWrites: undoStack.list(workspace).slice(0, 8).map(e => ({ filePath: e.filePath, createdAt: e.createdAt }))
@@ -801,9 +829,13 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
       }
     }
 
-    const runCompletion = runApiConversation({
-      sender, sendId, provider, tools, projectPath: workspace,
-      initialMessages: [{ role: 'system', content: composed.system }, ...priorMessages, userMsg],
+    const runConversation = (
+      runProvider: ChatProvider,
+      initialMessages: ChatMessage[],
+      runToolsAllow: string[] | null,
+    ): Promise<void> => runApiConversation({
+      sender, sendId, provider: runProvider, tools, projectPath: workspace,
+      initialMessages,
       signal: ctrl.signal,
       recordWrite: (projectPath: string, filePath: string, before: string | null, after: string, provenance?: { runId?: string | null; chatId?: number | null; messageId?: number | null }) =>
         undoStack.push(projectPath, filePath, before, after, provenance),
@@ -878,12 +910,201 @@ export async function createHeadlessHost(opts: HeadlessHostOptions): Promise<Hea
         }
       },
       // undefined → дефолт Этапа 1; явный null = «все инструменты» задаётся сознательно.
-      toolsAllow: task.toolsAllow === undefined
-        ? (opts.enableScheduledTasks === false ? STAGE1_CANARY_TOOLS_ALLOW : STAGE1_TOOLS_ALLOW)
-        : task.toolsAllow
+      toolsAllow: runToolsAllow
       // Каст через unknown: опциональные фасады (subSessions, verifications, pipelineRuns…)
       // на Этапе 1 сознательно не поднимаются — им соответствуют выключенные инструменты.
     } as unknown as Parameters<typeof runApiConversation>[0])
+
+    const defaultToolsAllow = task.toolsAllow === undefined
+      ? (opts.enableScheduledTasks === false ? STAGE1_CANARY_TOOLS_ALLOW : STAGE1_TOOLS_ALLOW)
+      : task.toolsAllow
+    const baseInitialMessages: ChatMessage[] = [
+      { role: 'system', content: composed.system },
+      ...priorMessages,
+      userMsg,
+    ]
+
+    const runSearchOrConversation = async (): Promise<void> => {
+      if (task.executionKind !== 'web_search') {
+        await runConversation(provider, baseInitialMessages, defaultToolsAllow)
+        return
+      }
+
+      const searchStartedAt = Date.now()
+      const searchDeadlineAt = searchStartedAt + 55_000
+      const progress = (stage: 'search' | 'fetch' | 'synthesis'): void => {
+        const title = stage === 'search'
+          ? 'Ищу источники'
+          : stage === 'fetch'
+            ? 'Читаю материалы'
+            : 'Сопоставляю информацию'
+        sender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'agent-progress',
+            id: `search-${stage}`,
+            phase: stage === 'synthesis' ? 'reasoning' : 'tool',
+            title,
+            status: 'running',
+          },
+        })
+        agentRuns.appendEvent(runId, 'search_stage', { label: title, detail: '', status: 'running' })
+      }
+
+      const search = await (opts.searchExecutor ?? executeSearch)(task.prompt, {
+        signal: ctrl.signal,
+        // One host owns one tenant dataDir. Including it in the cache key keeps
+        // public retrieval results from crossing tenant boundaries.
+        cacheScope: opts.dataDir,
+        onStage: stage => progress(stage),
+      })
+      const attemptedQueries = search.queriesAttempted.length
+        ? search.queriesAttempted
+        : [search.originalQuery]
+      attemptedQueries.forEach((query, index) => {
+        const count = index === attemptedQueries.length - 1 ? search.candidateCount : 0
+        agentRuns.appendEvent(runId, 'tool_call', {
+          label: 'web_search',
+          detail: `${query.slice(0, 380)} · ${count}`,
+          status: 'ok',
+        })
+        sender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'tool-activity',
+            callId: `search-query-${index}`,
+            name: 'web_search',
+            detail: `${count} результатов`,
+            status: 'ok',
+          },
+        })
+      })
+      search.fetches.forEach((item, index) => {
+        const detail = item.status == null
+          ? `${item.url} · error · 0 симв.`
+          : `${item.finalUrl ?? item.url} · ${item.status} · ${item.bodyChars} симв.`
+        agentRuns.appendEvent(runId, 'tool_call', {
+          label: 'web_fetch', detail: detail.slice(0, 500), status: item.usable ? 'ok' : 'error',
+        })
+        sender.send('ai:event', {
+          id: sendId,
+          event: {
+            type: 'tool-activity',
+            callId: `search-fetch-${index}`,
+            name: 'web_fetch',
+            detail: item.usable ? 'Источник прочитан' : 'Источник отклонён',
+            status: item.usable ? 'ok' : 'error',
+          },
+        })
+      })
+
+      let finalStatus: SearchExecutionStatus = search.status
+      let finalTimeoutReason = search.timeoutReason
+      let synthesisStatus: 'not_started' | 'success' | 'failed' | 'timeout' = 'not_started'
+      let synthesisAttempts = 0
+      let synthesisRetries = 0
+      let synthesisErrorClass: string | null = null
+      let synthesisErrorStatus: number | null = null
+      let finalRecorded = false
+      const recordFinal = (): void => {
+        if (finalRecorded) return
+        finalRecorded = true
+        const synthesisMs = Math.max(0, Date.now() - searchStartedAt - search.timings.totalMs)
+        const detail = JSON.stringify({
+          status: finalStatus,
+          candidates: search.candidateCount,
+          fetch_attempted: search.fetchAttempted,
+          fetch_success: search.fetchSuccess,
+          fetch_rejected: search.fetchRejected,
+          evidence: search.usableEvidenceCount,
+          fallback_reason: search.fallbackReason,
+          normalized_count: search.normalizedCount,
+          paid_backend_used: search.paidBackendUsed,
+          paid_backend_calls: search.paidBackendCalls,
+          estimated_search_cost: search.estimatedSearchCost,
+          cache_hits: search.cacheHits,
+          cache_misses: search.cacheMisses,
+          timings: { ...search.timings, synthesisMs, totalMs: Date.now() - searchStartedAt },
+          timeout_reason: finalTimeoutReason,
+        })
+        agentRuns.appendEvent(runId, 'search_execution', {
+          label: finalStatus,
+          detail,
+          status: finalStatus === 'success' || finalStatus === 'partial_success' ? 'ok' : 'error',
+        })
+        if (synthesisStatus !== 'not_started') {
+          agentRuns.appendEvent(runId, 'search_synthesis', {
+            label: synthesisStatus,
+            detail: JSON.stringify({
+              attempts: synthesisAttempts,
+              retries: synthesisRetries,
+              error_class: synthesisErrorClass,
+              error_status: synthesisErrorStatus,
+              timing_ms: synthesisMs,
+            }),
+            status: synthesisStatus === 'success' ? 'ok' : 'error',
+          })
+        }
+        logRuntime('headless.search.retrieval', {
+          runId,
+          retrievalBackend: search.retrievalBackend,
+          attemptedBackends: search.attemptedBackends,
+          candidateCountByBackend: search.candidateCountByBackend,
+          backendTraces: search.backendTraces,
+          fallbackReason: search.fallbackReason,
+          paidBackendUsed: search.paidBackendUsed,
+          paidBackendCalls: search.paidBackendCalls,
+          estimatedSearchCost: search.estimatedSearchCost,
+          cacheHits: search.cacheHits,
+          cacheMisses: search.cacheMisses,
+          retrievalLatencyMs: search.timings.searchMs,
+        })
+      }
+
+      if (!search.evidence.length) {
+        const message = controlledSearchMessage(search.status)
+        await runConversation(staticSearchProvider(message), baseInitialMessages, [])
+        recordFinal()
+        return
+      }
+
+      progress('synthesis')
+      const synthesisProvider = boundedSearchProvider(provider, searchDeadlineAt, () => {
+        synthesisStatus = 'timeout'
+        finalStatus = 'timeout'
+        finalTimeoutReason = 'total'
+      }, {
+        onAttempt: attempt => { synthesisAttempts = attempt },
+        onRetry: failure => {
+          synthesisRetries += 1
+          synthesisErrorClass = failure.errorClass
+          synthesisErrorStatus = failure.statusCode
+          logRuntime('headless.search.synthesis_retry', {
+            runId,
+            attempt: failure.attempt,
+            errorClass: failure.errorClass,
+            statusCode: failure.statusCode,
+          })
+        },
+        onFailure: failure => {
+          synthesisStatus = 'failed'
+          synthesisErrorClass = failure.errorClass
+          synthesisErrorStatus = failure.statusCode
+          finalStatus = 'backend_error'
+        },
+        onSuccess: () => { synthesisStatus = 'success' },
+      })
+      const evidenceMessages: ChatMessage[] = [
+        { role: 'system', content: composed.system },
+        ...priorMessages,
+        { role: 'system', content: searchEvidencePrompt(search) },
+        userMsg,
+      ]
+      await runConversation(synthesisProvider, evidenceMessages, [])
+      recordFinal()
+    }
+
+    const runCompletion = runSearchOrConversation()
       // Ответ пишем на ЛЮБОМ исходе: оборванный прогон, успевший что-то сказать, для
       // следующего хода такой же контекст, как удачный. Ошибку пробрасываем дальше —
       // семантика completion не меняется.

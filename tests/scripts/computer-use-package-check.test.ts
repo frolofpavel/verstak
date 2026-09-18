@@ -243,7 +243,7 @@ describe('computer use packaged artifact checker', () => {
     const result = checker.checkComputerUsePackage({ root: ROOT, sourceDir: fixture() })
     expect(result.ok, result.failures.join('; ')).toBe(true)
     expect(result.evidence).toMatchObject({
-      versionTriplet: { protocolVersion: 1, appVersion: '2.8.2', helperVersion: '2.8.2' },
+      versionTriplet: { protocolVersion: 1, appVersion: '2.9.0', helperVersion: '2.9.0' },
       helperBytes: expect.any(Number),
       helperSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     })
@@ -288,8 +288,8 @@ describe('computer use packaged artifact checker', () => {
     const root = sourceFixture()
     const sourceHelper = join(root, 'resources', 'computer-use', 'helper.ps1')
     writeFileSync(sourceHelper, readFileSync(sourceHelper, 'utf8').replace(
-      'private const string HelperVersion = "2.8.2";',
-      'private const string HelperVersion = "2.8.3";',
+      'private const string HelperVersion = "2.9.0";',
+      'private const string HelperVersion = "2.9.1";',
     ))
     const result = checker.checkComputerUsePackage({ root, sourceDir: fixture(root) })
     expect(result.ok).toBe(false)

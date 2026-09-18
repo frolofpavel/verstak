@@ -1,6 +1,6 @@
 # STATUS — Verstak
 
-**Версия: 2.8.2** (release-candidate R2/R3/S2-A1 обновлён 18.09.2026) · эталон тестов **7369**.
+**Версия: 2.9.0** (release-candidate R0–R3/S2-A1 + Search V2 объединён 18.09.2026) · эталон тестов **7369**.
 Публикация считается состоявшейся только когда GitHub и `agi-iri.ru/verstak`
 отдают одну версию; финальный релизный гейт выполняется по собранному коммиту.
 [Матрица доказательств кандидата и внешних блокеров](docs/RELEASE_ACCEPTANCE_R2_R3_S2_A1.md).
@@ -66,6 +66,43 @@
   16 штатных skip, 0 failed; локальный `dist:win`, package contract и smoke
   `startup.ok/db.open.ok` на отдельном userData — PASS. Unpacked остаётся preview;
   живой Calltouch 5/5 и Chrome Web Store не выдаются за принятую поставку.
+- **Verstak Online Search V2 P3.1 Repair (17–18.09).** Zero-cost SearXNG retrieval
+  уже принят production-canary: 5/5 запросов дали candidates и evidence,
+  `paid_search_rate=0%`, расход 0 ₽. Причина следующих synthesis-сбоев установлена
+  по Gateway telemetry: transient upstream HTTP 503 завершал logical route после
+  одной попытки до первого токена, retrieval при этом был исправен. В Online
+  добавлен один bounded retry только до первого видимого ответа: после начала
+  текста повтор запрещён, Stop отменяет retry, в conversation остаётся одно
+  assistant-сообщение. Synthesis attempt/retry/error теперь видны во внутренней
+  telemetry без публичных provider/model. Explicit RU/EN запрос официального
+  источника получает query-scoped primary boost и primary-first synthesis;
+  обычные запросы сохраняют mixed ranking, secondary не выдаётся за официальный.
+  Offline-пины и мутация пройдены. Repeated production-canary (2×5 исходных
+  запросов) подтвердил candidates/evidence `10/10`, `paid_search_rate=0%` и
+  отсутствие дублей, но synthesis завершился `0/10`: обе Online-попытки каждого
+  прогона получили `provider_network`. Gateway telemetry показала transient 503:
+  первый logical request падал, повторный исчерпывал все 5 route candidates и
+  также падал. Python official intent реально включил `python.org` в evidence;
+  в запросах Яндекса и закона официальный источник retrieval не нашёл. Рабочий
+  Chrome на live reload дал `ERR_TIMED_OUT`, поэтому browser restoration после
+  repair не принят; durable thread readback на сервере пройден. P3.1 остаётся
+  незакрытым до отдельного Gateway repair: восстановить хотя бы один живой
+  inference-route и гарантировать bounded failover/структурный pre-token error.
+  Gateway в этом Online-пакете не менялся.
+
+- **Verstak Online Search V2 P2 (17.09).** В headless добавлен отдельный
+  Search Executor: детерминированный поиск через DDG HTML, нормализация и
+  дедупликация кандидатов, ограниченная параллельная загрузка страниц, quality
+  gate evidence и общий deadline до синтеза. Ноль пригодных источников больше не
+  передаётся модели как основание для ответа. Gateway передаёт внутренний
+  `executionKind=web_search` и контекст сохранённого разговора/проекта; точные
+  provider/model остаются вне публичного контракта. Production-приёмка пяти
+  исходных P0-запросов закрыла routing, зависание и пустой ответ: все пять
+  детерминированно завершились контролируемым `no_results` за 3.2–5.8 с,
+  состояние и Retry пережили reload. Причина нулевой выдачи локализована ниже
+  Executor: DDG HTML отвечает серверу anti-bot/anomaly страницей HTTP 202 без
+  candidates. Поэтому продуктовая результативность поиска остаётся отдельной
+  задачей P3; новый backend в рамках P2 не подключался.
 
 - **Реестр возможностей (шаг 1 из 7)** — скиллы, MCP-серверы, коннекторы и роли
   агента получили единый паспорт: происхождение, владелец, версия, риск, доверие,
@@ -188,8 +225,9 @@
   предел 512×384/16 KiB, повторная identity/geometry/DPI-проверка и запрет
   password/credential/protected/elevated поверхностей; desktop capture API не
   используются. Privacy disclosure приведён в соответствие фактической передаче.
-  Полный автоматический замер: 780 test files (773 passed, 7 skipped), 7372 tests
-  (7355 passed, 17 skipped), 0 failed. После устранения ложного
+  Полный автоматический замер объединённого кандидата 2.9.0: 782 test files
+  (775 passed, 7 skipped), 7411 tests (7394 passed, 17 skipped), 0 failed.
+  После устранения ложного
   `protected_target` полный fail-closed scan защищённой поверхности отделён от
   50-ms окна непосредственной dispatch-проверки. Нативный Windows-canary прошёл
   пять последовательных серий по 10/10 UIA type (50/50), каждый результат

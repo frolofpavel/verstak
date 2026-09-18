@@ -1,0 +1,535 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import {
+  boundedSearchProvider,
+  detectPrimarySourceType,
+  hasExplicitOfficialSourceIntent,
+  executeSearch,
+  rankAndDedupeCandidates,
+  searchEvidencePrompt,
+  type SearchBackend,
+  type SearchCandidate,
+  type SearchFetchResult,
+} from '../../electron/headless/search-executor'
+import type { ChatEvent, ChatProvider } from '../../electron/ai/types'
+
+const candidate = (url: string, rank: number): SearchCandidate => ({
+  url,
+  title: `Документ ${rank}`,
+  snippet: `Описание ${rank}`,
+  rank,
+  backend: 'test',
+  language: 'ru',
+  publishedAt: null,
+  metadata: {},
+})
+
+function backend(results: SearchCandidate[]): SearchBackend {
+  return {
+    id: 'test',
+    search: vi.fn(async () => results),
+  }
+}
+
+function page(url: string, text = 'Проверенный текст '.repeat(30)): SearchFetchResult {
+  return { finalUrl: url, status: 200, contentType: 'text/html', text, truncated: false }
+}
+
+describe('Search Executor P2', () => {
+  it('нормализует URL, убирает дубли и считает только реально прочитанные страницы evidence', async () => {
+    const primary = backend([
+      candidate('https://example.org/report#part', 1),
+      candidate('https://EXAMPLE.org/report', 2),
+      candidate('https://blocked.example/doc', 3),
+    ])
+    const fetchPage = vi.fn(async (item: SearchCandidate) => {
+      if (item.url.includes('blocked')) return { ...page(item.url), status: 403, text: '' }
+      return page(item.url)
+    })
+
+    const result = await executeSearch('официальный отчёт', {
+      backends: [primary],
+      fetchPage,
+    })
+
+    expect(result.status).toBe('partial_success')
+    expect(result.candidateCount).toBe(2)
+    expect(result.fetchAttempted).toBe(2)
+    expect(result.evidence).toHaveLength(1)
+    expect(result.evidence[0].url).toBe('https://example.org/report')
+    expect(result.fetches.find(item => item.status === 403)?.usable).toBe(false)
+  })
+
+  it('при нуле candidates делает ровно один ограниченный rewrite и возвращает no_results', async () => {
+    const primary = backend([])
+    const result = await executeSearch(
+      'Найди действующую редакцию закона. Дай ссылку и кратко объясни.',
+      { backends: [primary], fetchPage: vi.fn() },
+    )
+
+    expect(result.status).toBe('no_results')
+    expect(primary.search).toHaveBeenCalledTimes(2)
+    expect(result.rewrittenQuery).not.toBe(result.originalQuery)
+    expect(result.fetchAttempted).toBe(0)
+  })
+
+  it('отличает найденные, но недоступные страницы от пустой выдачи', async () => {
+    const result = await executeSearch('закрытые источники', {
+      backends: [backend([candidate('https://closed.example/a', 1)])],
+      fetchPage: vi.fn(async item => ({ ...page(item.url), status: 403, text: '' })),
+    })
+
+    expect(result.status).toBe('no_evidence')
+    expect(result.candidateCount).toBe(1)
+    expect(result.usableEvidenceCount).toBe(0)
+  })
+
+  it('отличает системный transport failure fetch от no_evidence', async () => {
+    const result = await executeSearch('источник с сетевой ошибкой', {
+      backends: [backend([candidate('https://broken.example/a', 1)])],
+      fetchPage: vi.fn(async () => { throw new Error('DNS unavailable') }),
+    })
+
+    expect(result.status).toBe('fetch_error')
+    expect(result.fetchRejected).toBe(1)
+  })
+
+  it('помечает слишком короткие 2xx страницы как quality_rejected', async () => {
+    const result = await executeSearch('пустая страница', {
+      backends: [backend([candidate('https://thin.example/a', 1)])],
+      fetchPage: vi.fn(async item => page(item.url, 'слишком коротко')),
+    })
+
+    expect(result.status).toBe('quality_rejected')
+    expect(result.evidence).toEqual([])
+  })
+
+  it('ограничивает зависший search backend собственным timeout', async () => {
+    const hanging: SearchBackend = {
+      id: 'hang',
+      search: vi.fn(() => new Promise<SearchCandidate[]>(() => {})),
+    }
+    const started = Date.now()
+    const result = await executeSearch('зависший поиск', {
+      backends: [hanging],
+      fetchPage: vi.fn(),
+      budgets: { searchMs: 15, fetchMs: 15, totalMs: 50 },
+    })
+
+    expect(result.status).toBe('timeout')
+    expect(result.timeoutReason).toBe('search')
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
+  it('после достаточного evidence set не запускает оставшиеся fetch', async () => {
+    const fetchPage = vi.fn(async (item: SearchCandidate) => page(item.url))
+    const result = await executeSearch('много источников', {
+      backends: [backend([
+        candidate('https://one.example/a', 1),
+        candidate('https://two.example/a', 2),
+        candidate('https://three.example/a', 3),
+        candidate('https://four.example/a', 4),
+      ])],
+      fetchPage,
+      evidenceTarget: 2,
+      fetchConcurrency: 1,
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.evidence).toHaveLength(2)
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Search Executor P3 retrieval and ranking', () => {
+  it('убирает tracking variants, объединяет backend и предпочитает первоисточник перепечатке', () => {
+    const ranked = rankAndDedupeCandidates([
+      {
+        ...candidate('https://publication.pravo.gov.ru/document/42?utm_source=mail', 3),
+        title: 'Официальное опубликование федерального закона 42',
+        backend: 'yandex_ru',
+      },
+      {
+        ...candidate('https://publication.pravo.gov.ru/document/42?yclid=123', 1),
+        title: 'Официальное опубликование федерального закона 42',
+        backend: 'brave_global',
+      },
+      {
+        ...candidate('https://news.example/repost', 1),
+        title: 'Официальное опубликование федерального закона 42',
+        backend: 'brave_global',
+      },
+    ], 'федеральный закон 42', 8)
+
+    expect(ranked).toHaveLength(1)
+    expect(ranked[0]).toEqual(expect.objectContaining({
+      url: 'https://publication.pravo.gov.ru/document/42',
+      canonicalUrl: 'https://publication.pravo.gov.ru/document/42',
+      sourceType: 'government',
+    }))
+    expect(ranked[0].metadata.backends).toEqual(expect.arrayContaining(['yandex_ru', 'brave_global']))
+  })
+
+  it('оценивает первоисточник по смыслу запроса, а не по языку', () => {
+    const ranked = rankAndDedupeCandidates([
+      { ...candidate('https://blog.example.ru/python-3-14', 1), title: 'Пересказ Python 3.14' },
+      { ...candidate('https://docs.python.org/3.14/whatsnew/3.14.html', 5), title: 'What is new in Python 3.14', language: 'en' },
+      { ...candidate('https://openai.com/research/example', 4), title: 'OpenAI research release', language: 'en' },
+      { ...candidate('https://ru-news.example/openai', 1), title: 'Пересказ исследования OpenAI' },
+    ], 'Python 3.14 documentation OpenAI research', 8)
+
+    expect(ranked.slice(0, 2).map(item => item.url)).toEqual([
+      'https://docs.python.org/3.14/whatsnew/3.14.html',
+      'https://openai.com/research/example',
+    ])
+    expect(detectPrimarySourceType('https://github.com/org/repo', 'repo', 'repo')).toBe('repository')
+    expect(detectPrimarySourceType('https://arxiv.org/abs/1234.5678', 'paper', 'paper')).toBe('paper')
+  })
+
+  it('сохраняет telemetry каждого backend и считает accepted после общего ranking', async () => {
+    const limited: SearchBackend = {
+      id: 'yandex_ru', coverage: 'ru', structured: true,
+      estimatedCost: { amount: 0.488, currency: 'RUB' },
+      search: vi.fn(async () => {
+        const error = new Error('rate limited') as Error & {
+          errorClass: string; rateLimited: boolean; statusCode: number
+        }
+        error.errorClass = 'rate_limit'; error.rateLimited = true; error.statusCode = 429
+        throw error
+      }),
+    }
+    const global: SearchBackend = {
+      id: 'brave_global', coverage: 'global', structured: true,
+      estimatedCost: { amount: 0.005, currency: 'USD' },
+      search: vi.fn(async () => [candidate('https://openai.com/research/example', 1)]),
+    }
+    const result = await executeSearch('сравни рынок России и global AI market', {
+      backends: [limited, global],
+      fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.backendTraces).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        backend: 'yandex_ru', status: 'rate_limited', candidateCount: 0,
+        acceptedCandidateCount: 0, rateLimited: true, errorClass: 'rate_limit',
+      }),
+      expect.objectContaining({
+        backend: 'brave_global', status: 'success', candidateCount: 1,
+        acceptedCandidateCount: 1, rateLimited: false,
+        cost: { amount: 0.005, currency: 'USD' },
+      }),
+    ]))
+    expect(result.evidence[0].url).toBe('https://openai.com/research/example')
+  })
+
+  it('не вызывает diagnostic DDG, когда structured primary дал достаточно candidates', async () => {
+    const primary: SearchBackend = {
+      id: 'yandex_ru', coverage: 'ru', structured: true,
+      search: vi.fn(async () => [1, 2, 3, 4].map(index => ({
+        ...candidate(`https://official-${index}.example/doc`, index),
+        backend: 'yandex_ru',
+      }))),
+    }
+    const diagnostic: SearchBackend = {
+      id: 'duckduckgo_html', coverage: 'diagnostic', structured: false,
+      search: vi.fn(async () => [candidate('https://fallback.example/doc', 1)]),
+    }
+
+    const result = await executeSearch('документы российского рынка', {
+      backends: [primary, diagnostic],
+      fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(primary.search).toHaveBeenCalledOnce()
+    expect(diagnostic.search).not.toHaveBeenCalled()
+    expect(result.backendTraces.map(item => item.backend)).toEqual(['yandex_ru'])
+  })
+
+  it('использует diagnostic DDG только после degradation structured backend', async () => {
+    const primary: SearchBackend = {
+      id: 'yandex_ru', coverage: 'ru', structured: true,
+      search: vi.fn(async () => { throw new Error('upstream unavailable') }),
+    }
+    const diagnostic: SearchBackend = {
+      id: 'duckduckgo_html', coverage: 'diagnostic', structured: false,
+      search: vi.fn(async () => [candidate('https://fallback.example/doc', 1)]),
+    }
+
+    const result = await executeSearch('документы российского рынка', {
+      backends: [primary, diagnostic],
+      fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(primary.search).toHaveBeenCalledOnce()
+    expect(diagnostic.search).toHaveBeenCalledOnce()
+    expect(result.status).toBe('success')
+    expect(result.backendTraces.map(item => item.backend)).toEqual(['yandex_ru', 'duckduckgo_html'])
+  })
+})
+
+describe('Search Executor P3.1 zero-cost routing', () => {
+  const tierBackend = (
+    id: string,
+    costTier: SearchBackend['costTier'],
+    results: SearchCandidate[] | (() => Promise<SearchCandidate[]>),
+  ): SearchBackend => ({
+    id,
+    coverage: 'mixed',
+    structured: true,
+    costTier,
+    estimatedCost: costTier === 'paid' ? { amount: 0.488, currency: 'RUB' } : { amount: 0, currency: 'RUB' },
+    search: vi.fn(typeof results === 'function' ? results : async () => results),
+  })
+
+  it('завершает обычный поиск на zero-cost backend без платного вызова', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [1, 2, 3, 4].map(index => ({
+      ...candidate(`https://official-${index}.example/doc`, index), backend: 'searxng_zero_cost',
+    })))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('официальный отчёт', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)), cacheScope: 'tenant-a',
+    })
+
+    expect(zero.search).toHaveBeenCalledOnce()
+    expect(paid.search).not.toHaveBeenCalled()
+    expect(result.paidBackendUsed).toBe(false)
+    expect(result.paidBackendCalls).toBe(0)
+    expect(result.fallbackReason).toBeNull()
+    expect(result.retrievalBackend).toBe('searxng_zero_cost')
+  })
+
+  it('вызывает paid fallback при нуле zero-cost candidates и пишет telemetry', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [])
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://publication.pravo.gov.ru/doc', 1)])
+
+    const result = await executeSearch('действующий закон России', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('zero_candidates')
+    expect(result.paidBackendUsed).toBe(true)
+    expect(result.paidBackendCalls).toBe(1)
+    expect(result.candidateCountByBackend).toEqual({ searxng_zero_cost: 0, yandex_ru: 1 })
+    expect(result.estimatedSearchCost).toEqual([{ amount: 0.488, currency: 'RUB' }])
+  })
+
+  it('вызывает paid fallback после недостаточного evidence от zero-cost candidates', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [1, 2, 3, 4].map(index => (
+      candidate(`https://thin.example/${index}`, index)
+    )))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://government.ru/news/1', 1)])
+    const fetchPage = vi.fn(async (item: SearchCandidate) => item.url.includes('thin')
+      ? page(item.url, 'коротко')
+      : page(item.url))
+
+    const result = await executeSearch('официальные новости', {
+      backends: [zero, paid], fetchPage, evidenceTarget: 1,
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('insufficient_evidence')
+    expect(result.usableEvidenceCount).toBe(1)
+    expect(result.paidBackendUsed).toBe(true)
+  })
+
+  it('не вызывает paid backend при явном запрете canary', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [])
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('zero-only canary', {
+      backends: [zero, paid], fetchPage: vi.fn(), allowPaidFallback: false,
+    })
+
+    expect(paid.search).not.toHaveBeenCalled()
+    expect(result.paidBackendUsed).toBe(false)
+    expect(result.status).toBe('no_results')
+  })
+
+  it('fallback срабатывает после timeout zero-cost backend', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', () => new Promise<SearchCandidate[]>(() => {}))
+    const paid = tierBackend('yandex_ru', 'paid', [candidate('https://paid.example/doc', 1)])
+
+    const result = await executeSearch('timeout fallback', {
+      backends: [zero, paid], fetchPage: vi.fn(async item => page(item.url)),
+      budgets: { searchMs: 15, fetchMs: 50, totalMs: 250 },
+    })
+
+    expect(paid.search).toHaveBeenCalledOnce()
+    expect(result.fallbackReason).toBe('retrieval_timeout')
+    expect(result.status).toBe('success')
+  })
+
+  it('overfetch передаёт ranking достаточно кандидатов без расширения финального limit', async () => {
+    const zero = tierBackend('searxng_zero_cost', 'zero', [candidate('https://example.org/a', 1)])
+    const result = await executeSearch('primary source', {
+      backends: [zero], limit: 5, evidenceTarget: 1,
+      fetchPage: vi.fn(async item => page(item.url)),
+    })
+
+    expect(zero.search).toHaveBeenCalledWith('primary source', expect.objectContaining({ limit: 20 }))
+    expect(result.candidateCount).toBeLessThanOrEqual(5)
+  })
+
+  it('ограничивает общий evidence prompt, сохраняя заголовки всех источников', () => {
+    const evidence = [1, 2, 3, 4].map(index => ({
+      url: `https://source-${index}.example/doc`, title: `Источник ${index}`, snippet: '',
+      backend: 'searxng_zero_cost', rank: index, language: 'ru', publishedAt: null,
+      sourceType: 'official' as const, score: 1, contentType: 'text/html',
+      text: `Факт ${index} `.repeat(4_000), truncated: false,
+    }))
+    const prompt = searchEvidencePrompt({ evidence } as never)
+
+    expect(prompt.length).toBeLessThan(26_000)
+    for (const index of [1, 2, 3, 4]) expect(prompt).toContain(`[${index}] Источник ${index}`)
+  })
+
+  it.each([
+    'Что OpenAI пишет о X? Только официальный источник.',
+    'Найди официальный текст закона РФ о X.',
+    'According to the official Apple documentation, how does X work?',
+  ])('распознаёт explicit official-source intent: %s', query => {
+    expect(hasExplicitOfficialSourceIntent(query)).toBe(true)
+  })
+
+  it('не включает official-source режим для обычного запроса со смешанными источниками', () => {
+    expect(hasExplicitOfficialSourceIntent('Сравни мнения о новом MacBook и дай краткий вывод.')).toBe(false)
+  })
+
+  it('при explicit intent поднимает релевантный официальный домен, но обычный ranking оставляет mixed', () => {
+    const secondary = {
+      ...candidate('https://reviews.example/apple-x', 1),
+      title: 'Apple X подробный обзор',
+      snippet: 'Apple X характеристики и тесты',
+      language: 'en',
+    }
+    const official = {
+      ...candidate('https://support.apple.com/guide/x', 8),
+      title: 'Apple X User Guide',
+      snippet: 'Reference for Apple X',
+      language: 'en',
+    }
+
+    expect(rankAndDedupeCandidates([secondary, official], 'Apple X review', 2)[0].url)
+      .toBe('https://reviews.example/apple-x')
+    const ranked = rankAndDedupeCandidates(
+      [secondary, official],
+      'According to the official Apple documentation, explain Apple X',
+      2,
+    )
+    expect(ranked[0].url).toBe('https://support.apple.com/guide/x')
+    expect(ranked[0].isOfficialSource).toBe(true)
+  })
+
+  it('official prompt ставит подтверждённый primary первым и не называет secondary официальным', () => {
+    const prompt = searchEvidencePrompt({
+      originalQuery: 'Что OpenAI пишет о X? Только официальный источник.',
+      evidence: [
+        {
+          url: 'https://analysis.example/x', title: 'Анализ X', snippet: '', backend: 'test', rank: 1,
+          language: 'ru', publishedAt: null, sourceType: 'secondary', score: 8,
+          contentType: 'text/html', text: 'Вторичный материал '.repeat(30), truncated: false,
+          isOfficialSource: false,
+        },
+        {
+          url: 'https://openai.com/x', title: 'OpenAI X', snippet: '', backend: 'test', rank: 2,
+          language: 'en', publishedAt: null, sourceType: 'company', score: 7,
+          contentType: 'text/html', text: 'Primary material '.repeat(30), truncated: false,
+          isOfficialSource: true,
+        },
+      ],
+    } as never)
+
+    expect(prompt.indexOf('https://openai.com/x')).toBeLessThan(prompt.indexOf('https://analysis.example/x'))
+    expect(prompt).toContain('официальные/primary источники')
+    expect(prompt).toContain('не называй secondary-источник официальным')
+  })
+})
+
+describe('Search Executor P3.1 synthesis repair', () => {
+  const collect = async (provider: ChatProvider): Promise<ChatEvent[]> => {
+    const result: ChatEvent[] = []
+    for await (const event of provider.send([], [])) result.push(event)
+    return result
+  }
+
+  it('повторяет transient 503 ровно один раз до первого токена и не отдаёт первый error наружу', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        if (attempts === 1) {
+          yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+          return
+        }
+        yield { type: 'text', text: 'Готовый ответ' }
+        yield { type: 'done' }
+      },
+    }
+    const onRetry = vi.fn()
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn(), { onRetry }))
+
+    expect(attempts).toBe(2)
+    expect(onRetry).toHaveBeenCalledOnce()
+    expect(events).toEqual([
+      { type: 'text', text: 'Готовый ответ' },
+      { type: 'done' },
+    ])
+  })
+
+  it('не повторяет transient error после первого видимого токена, чтобы не дублировать ответ', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        yield { type: 'text', text: 'Начало ответа' }
+        yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+      },
+    }
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn()))
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([
+      { type: 'text', text: 'Начало ответа' },
+      { type: 'error', message: 'HTTP 503 upstream unavailable' },
+    ])
+  })
+
+  it('не повторяет non-transient 400 до первого токена', async () => {
+    let attempts = 0
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        yield { type: 'error', message: 'HTTP 400 invalid request' }
+      },
+    }
+    const events = await collect(boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn()))
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([{ type: 'error', message: 'HTTP 400 invalid request' }])
+  })
+
+  it('Stop отменяет retry даже если текущая попытка завершилась transient 503', async () => {
+    let attempts = 0
+    const ctrl = new AbortController()
+    const delegate: ChatProvider = {
+      id: 'test', name: 'test', models: ['test'],
+      async *send() {
+        attempts += 1
+        ctrl.abort()
+        yield { type: 'error', message: 'HTTP 503 upstream unavailable' }
+      },
+    }
+    const provider = boundedSearchProvider(delegate, Date.now() + 5_000, vi.fn())
+    const events: ChatEvent[] = []
+    for await (const event of provider.send([], [], undefined, ctrl.signal)) events.push(event)
+
+    expect(attempts).toBe(1)
+    expect(events).toEqual([{ type: 'error', message: 'HTTP 503 upstream unavailable' }])
+  })
+})

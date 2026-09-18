@@ -93,7 +93,7 @@ const titleFingerprint = 'b'.repeat(64)
 function createClient(child: FakeChild, options: Record<string, unknown> = {}): ComputerHelperClient {
   return new ComputerHelperClient({
     helperPath: 'C:\\reviewed\\helper.ps1',
-    appVersion: '2.8.2',
+    appVersion: '2.9.0',
     spawn: vi.fn(() => child),
     requestTimeoutMs: 100,
     stopAckTimeoutMs: 40,
@@ -107,8 +107,8 @@ function autoHello(child: FakeChild): void {
       if (request.type === 'hello') {
       child.reply(request, {
         protocolVersion: COMPUTER_PROTOCOL_VERSION,
-        helperVersion: '2.8.2',
-        appVersion: '2.8.2',
+        helperVersion: '2.9.0',
+        appVersion: '2.9.0',
         inputMonitorReady: true,
       })
     }
@@ -172,13 +172,13 @@ describe('computer helper wire protocol', () => {
     })
     const client = new ComputerHelperClient({
       helperPath: 'C:\\reviewed path\\helper.ps1',
-      appVersion: '2.8.2',
+      appVersion: '2.9.0',
       spawn,
       resolveOwnerStartTime100ns,
     })
 
     expect(spawn).not.toHaveBeenCalled()
-    await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.8.2' })
+    await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.9.0' })
     expect(resolveOwnerStartTime100ns).toHaveBeenCalledWith(process.pid)
     expect(order).toEqual(['owner-identity', 'helper-spawn'])
     expect(spawn).toHaveBeenCalledWith(SYSTEM_POWERSHELL, [
@@ -245,7 +245,7 @@ describe('computer helper wire protocol', () => {
     const spawn = vi.fn(() => child)
     const client = new ComputerHelperClient({
       helperPath: 'C:\\reviewed\\helper.ps1',
-      appVersion: '2.8.2',
+      appVersion: '2.9.0',
       spawn,
       resolveOwnerStartTime100ns: () => { throw new Error('owner unavailable') },
     })
@@ -259,7 +259,7 @@ describe('computer helper wire protocol', () => {
     const candidateToken = `candidate-lease:${'a'.repeat(24)}`
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0', inputMonitorReady: true,
       })
       if (request.type === 'list_candidates') child.reply(request, {
         candidates: [{
@@ -295,7 +295,7 @@ describe('computer helper wire protocol', () => {
     const child = new FakeChild()
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0', inputMonitorReady: true,
       })
       if (request.type === 'probe_binding') child.reply(request, {
         probe: {
@@ -319,7 +319,7 @@ describe('computer helper wire protocol', () => {
       const child = new FakeChild()
       child.onWrite = request => {
         if (request.type === 'hello') child.reply(request, {
-          protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+          protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0', inputMonitorReady: true,
         })
         if (request.type === 'probe_binding') child.reply(request, {
           probe: {
@@ -343,7 +343,7 @@ describe('computer helper wire protocol', () => {
     const spawn = vi.fn(() => child)
     const client = new ComputerHelperClient({
       helperPath: 'C:\\reviewed\\helper.ps1',
-      appVersion: '2.8.2',
+      appVersion: '2.9.0',
       spawn,
     })
 
@@ -357,7 +357,7 @@ describe('computer helper wire protocol', () => {
     const spawn = vi.fn(() => child)
     const client = new ComputerHelperClient({
       helperPath: 'C:\\reviewed\\helper.ps1',
-      appVersion: '2.8.2',
+      appVersion: '2.9.0',
       spawn,
       resolveOwnerStartTime100ns: () => '1337133713371337',
       requestTimeoutMs: 10_000,
@@ -388,8 +388,8 @@ describe('computer helper wire protocol', () => {
         if (request.type === 'hello' && requestKind !== 'hello') {
           stalledChild.reply(request, {
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
-            helperVersion: '2.8.2',
-            appVersion: '2.8.2',
+            helperVersion: '2.9.0',
+            appVersion: '2.9.0',
             inputMonitorReady: true,
           })
         }
@@ -401,7 +401,7 @@ describe('computer helper wire protocol', () => {
         .mockReturnValueOnce(freshChild)
       const client = new ComputerHelperClient({
         helperPath: 'C:\\reviewed\\helper.ps1',
-        appVersion: '2.8.2',
+        appVersion: '2.9.0',
         spawn,
         requestTimeoutMs: 20,
         resolveOwnerStartTime100ns: () => '1337133713371337',
@@ -442,7 +442,7 @@ describe('computer helper wire protocol', () => {
 
       stalledChild.exit(1)
       expect(lifecycleEvents).toEqual(['helper-crashed'])
-      await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.8.2' })
+      await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.9.0' })
       expect(spawn).toHaveBeenCalledTimes(2)
       freshChild.exit(0)
     },
@@ -465,7 +465,7 @@ describe('computer helper wire protocol', () => {
     let observationCount = 0
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'observe') {
@@ -509,7 +509,7 @@ describe('computer helper wire protocol', () => {
     const child = new FakeChild()
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0', inputMonitorReady: true,
       })
       if (request.type !== 'observe') return
       child.reply(request, {
@@ -542,7 +542,7 @@ describe('computer helper wire protocol', () => {
     const onePixelPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lQj8WQAAAABJRU5ErkJggg=='
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2', inputMonitorReady: true,
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0', inputMonitorReady: true,
       })
       if (request.type !== 'observe') return
       observationCount += 1
@@ -577,7 +577,7 @@ describe('computer helper wire protocol', () => {
     autoHello(child)
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'prepare_action') child.reply(request, {
@@ -641,7 +641,7 @@ describe('computer helper wire protocol', () => {
     const expectedAfterValueState = { fingerprint: 'e'.repeat(64), scalarLength: 17 }
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'prepare_action') child.reply(request, {
@@ -690,7 +690,7 @@ describe('computer helper wire protocol', () => {
     autoHello(child)
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'commit_action') queueMicrotask(() => child.exit(7))
@@ -725,7 +725,7 @@ describe('computer helper wire protocol', () => {
         .mockReturnValueOnce(successorChild)
       const client = new ComputerHelperClient({
         helperPath: 'C:\\reviewed\\helper.ps1',
-        appVersion: '2.8.2',
+        appVersion: '2.9.0',
         spawn,
         requestTimeoutMs: 1_000,
         resolveOwnerStartTime100ns: () => '1337133713371337',
@@ -765,7 +765,7 @@ describe('computer helper wire protocol', () => {
       failedChild.exit(1)
       await expect(stopped).resolves.toEqual({ stopped: true })
       expect(lifecycleEvents).toEqual(['helper-crashed'])
-      await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.8.2' })
+      await expect(client.hello()).resolves.toMatchObject({ helperVersion: '2.9.0' })
       expect(spawn).toHaveBeenCalledTimes(2)
       successorChild.exit(0)
     },
@@ -793,7 +793,7 @@ describe('computer helper wire protocol', () => {
     autoHello(child)
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'cancel') child.reply(request, { cancelled: true })
@@ -811,7 +811,7 @@ describe('computer helper wire protocol', () => {
     autoHello(child)
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'stop') {
@@ -837,7 +837,7 @@ describe('computer helper wire protocol', () => {
     const child = new FakeChild()
     child.onWrite = request => {
       if (request.type === 'hello') child.reply(request, {
-        protocolVersion: 1, helperVersion: '2.8.2', appVersion: '2.8.2',
+        protocolVersion: 1, helperVersion: '2.9.0', appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'stop') child.reply(request)
@@ -942,8 +942,8 @@ describe('computer helper wire protocol', () => {
     successorChild.onWrite = request => {
       if (request.type === 'hello') successorChild.reply(request, {
         protocolVersion: COMPUTER_PROTOCOL_VERSION,
-        helperVersion: '2.8.2',
-        appVersion: '2.8.2',
+        helperVersion: '2.9.0',
+        appVersion: '2.9.0',
         inputMonitorReady: true,
       })
       if (request.type === 'shutdown') successorChild.reply(request)
@@ -953,7 +953,7 @@ describe('computer helper wire protocol', () => {
       .mockReturnValueOnce(successorChild)
     const client = new ComputerHelperClient({
       helperPath: 'C:\\reviewed\\helper.ps1',
-      appVersion: '2.8.2',
+      appVersion: '2.9.0',
       spawn,
       resolveOwnerStartTime100ns: () => '1337133713371337',
       requestIdFactory: () => 'same-logical-id',

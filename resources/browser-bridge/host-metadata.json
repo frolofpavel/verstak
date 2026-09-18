@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "protocolVersion": 1,
-  "appVersion": "2.8.2",
+  "appVersion": "2.9.0",
   "extensionVersion": "0.2.0",
-  "hostVersion": "2.8.2",
+  "hostVersion": "2.9.0",
   "files": {
     "host.cmd": "46ce627afbcd4e14da41c02ab027d1f802b9d4637dfc4943ef642d9b2ee1d479",
     "host.mjs": "a58532a76827f7f58cccb35d779be0ef579a8f45d0cc1875749920725a4931cf",

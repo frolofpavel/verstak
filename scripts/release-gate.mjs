@@ -829,7 +829,15 @@ const GATE_MAX_WORKERS = 4
 // -> 7362 ИЗМЕРЕНО 17.09 (R2/R3/S2-A1): stable double readback,
 // exact-window visual observation, native 10/10 canary, durable browser →
 // artifact → Computer handoff and shadow policy decision/readback traces.
-const EXPECTED_TOTAL_TESTS = 7369
+// -> 6026 ИЗМЕРЕНО 17.09: Search V2 P3 добавил structured RU/global backends,
+// policy, общий ranking/dedup и внутреннюю telemetry без публичной утечки.
+// -> 6036 ИЗМЕРЕНО 17.09: P3.1 добавил zero-cost SearXNG retrieval, tenant cache,
+// bounded overfetch, evidence и paid-fallback telemetry.
+// -> 6046 ИЗМЕРЕНО 17.09: P3.1 Repair добавил explicit RU/EN official intent и
+// безопасный synthesis retry только до первого видимого токена, включая Stop pin.
+// -> 7411 ИЗМЕРЕНО 18.09: единый кандидат 2.9.0 после объединения Search V2
+// с R0-R3/S2-A1 и синхронизации version-triplet упакованных помощников.
+const EXPECTED_TOTAL_TESTS = 7411
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

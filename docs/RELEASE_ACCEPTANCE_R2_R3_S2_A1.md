@@ -18,7 +18,7 @@
 | Проверка | Результат |
 |---|---|
 | `check:mojibake` → `lint:full` → `type` → `test:fast` → `build` → `check:performance` → `git diff --check` | PASS |
-| Полный тестовый эталон | 7372 total / 7355 passed / 17 skipped / 0 failed |
+| Полный тестовый эталон | 7411 total / 7394 passed / 17 skipped / 0 failed |
 | Performance bundle | 1 515 483 / 1 600 000 bytes |
 | Windows Setup | 336 132 524 bytes, SHA-256 `EC89C18443866B6D1DC7E7B98B9C60BF83FF075139C8255DD9E0F285708FCE87` |
 | Windows Portable | 180 955 449 bytes, SHA-256 `9C1E723B9CC3382AEFDB7279C4CEDF6A5A3DBF2C22C7FCE3A356514127F9F627` |

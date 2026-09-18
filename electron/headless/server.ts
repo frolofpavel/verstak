@@ -433,8 +433,29 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       const idempotencyKey = Array.isArray(rawIdempotencyKey)
         ? rawIdempotencyKey.join(',')
         : rawIdempotencyKey
+      const executionKind = body.executionKind === 'web_search'
+        || body.executionKind === 'artifact_task'
+        || body.executionKind === 'simple_chat'
+        ? body.executionKind
+        : undefined
+      const rawContext = Array.isArray(body.contextMessages) ? body.contextMessages : []
+      let contextChars = 0
+      const contextMessages: NonNullable<StartTaskOptions['contextMessages']> = rawContext.slice(-40).map(item => {
+        if (!item || typeof item !== 'object') throw new Error('contextMessages: ожидаются объекты')
+        const value = item as Record<string, unknown>
+        const role = value.role
+        const content = typeof value.content === 'string' ? value.content : ''
+        if (role !== 'system' && role !== 'user' && role !== 'assistant') {
+          throw new Error('contextMessages: неизвестная роль')
+        }
+        contextChars += content.length
+        if (contextChars > 60_000) throw new Error('contextMessages: превышен лимит')
+        return { role: role as 'system' | 'user' | 'assistant', content }
+      })
       const startOpts: StartTaskOptions = {
         prompt: String(body.prompt ?? ''),
+        executionKind,
+        contextMessages: contextMessages.length ? contextMessages : undefined,
         providerId: body.providerId as StartTaskOptions['providerId'],
         model: body.model === undefined ? undefined : String(body.model),
         agentMode: body.agentMode as StartTaskOptions['agentMode'],

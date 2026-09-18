@@ -70,7 +70,7 @@ describe('computer helper/controller Windows native canary', () => {
       storage.appendRun({ browserTaskId: 'bt-native', runId: 'run-native' })
       const backend = new ComputerHelperClient({
         helperPath: join(process.cwd(), 'resources', 'computer-use', 'helper.ps1'),
-        appVersion: '2.8.2',
+        appVersion: '2.9.0',
         requestTimeoutMs: 15_000,
       })
       controller = createComputerController({ storage, backend: createComputerHelperBackend(backend) })
