@@ -89,6 +89,7 @@ namespace VerstakComputerUse
         private const uint LlmhfInjected = 0x01;
         private const uint WmQuit = 0x0012;
         private const uint WmForegroundBarrier = 0x8001;
+        private const uint PmNoRemove = 0x0000;
         private const uint EventSystemForeground = 0x0003;
         private const uint EventObjectDestroy = 0x8001;
         private const int SwRestore = 9;
@@ -350,6 +351,7 @@ namespace VerstakComputerUse
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr module, WinEventProc callback, uint processId, uint threadId, uint flags);
         [DllImport("user32.dll")] private static extern bool UnhookWinEvent(IntPtr hook);
         [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG message, IntPtr hwnd, uint min, uint max, uint remove);
         [DllImport("user32.dll")] private static extern int GetMessage(out MSG message, IntPtr hwnd, uint min, uint max);
         [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint threadId, uint message, UIntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
@@ -492,6 +494,7 @@ namespace VerstakComputerUse
                 RECT geometry;
                 if (DwmGetWindowAttribute(armedIdentity.Hwnd, DwmwaExtendedFrameBounds, out geometry, Marshal.SizeOf(typeof(RECT))) != 0
                     && !GetWindowRect(armedIdentity.Hwnd, out geometry)) return true;
+                if (geometry.Right <= geometry.Left || geometry.Bottom <= geometry.Top) return true;
                 snapshots.Add(new CandidateSnapshot {
                     Identity = armedIdentity, DestroyGeneration = destroyGeneration,
                     ProcessName = SafeDisplay(processName, 120),
@@ -604,6 +607,8 @@ namespace VerstakComputerUse
             if (before.ScreenLocked) throw new SafeError("screen_locked", "interactive desktop unavailable");
             uint ignoredPid;
             uint currentThread = GetCurrentThreadId();
+            MSG currentThreadMessage;
+            PeekMessage(out currentThreadMessage, IntPtr.Zero, 0, 0, PmNoRemove);
             uint targetThread = GetWindowThreadProcessId(expected.Hwnd, out ignoredPid);
             IntPtr previousForeground = GetForegroundWindow();
             uint foregroundThread = previousForeground == IntPtr.Zero
@@ -689,7 +694,8 @@ namespace VerstakComputerUse
         {
             Stopwatch timer = Stopwatch.StartNew();
             RequireObservationBudget(cancellation, timer);
-            WindowProbe probe = ProbeExact(expected, true);
+            WindowProbe probe = ProbeExact(
+                expected, true, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs, false);
             if (probe.ScreenLocked) throw new SafeError("screen_locked", "interactive desktop unavailable");
             AutomationElement root;
             try { root = AutomationElement.FromHandle(expected.Hwnd); }
@@ -774,7 +780,8 @@ namespace VerstakComputerUse
                 catch (UnauthorizedAccessException) { throw new SafeError("protected_surface", "inaccessible UI Automation descendant blocked"); }
             }
             RequireObservationBudget(cancellation, timer);
-            WindowProbe finalProbe = ProbeExact(expected, true);
+            WindowProbe finalProbe = ProbeExact(
+                expected, true, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs, false);
             RequireObservationBudget(cancellation, timer);
             if (finalProbe.ScreenLocked) throw new SafeError("screen_locked", "interactive desktop unavailable");
             if (!String.Equals(probe.Title, finalProbe.Title, StringComparison.Ordinal)
@@ -856,7 +863,7 @@ namespace VerstakComputerUse
             RequireObservationBudget(cancellation, timer);
             if (encoded == null || encoded.Length == 0 || encoded.Length > MaxScreenshotBytes) return null;
 
-            WindowProbe after = ProbeExact(expected, true);
+            WindowProbe after = ProbeExact(expected, true, MaxSurfaceInspectionElements, ObservationSurfaceInspectionTimeoutMs);
             cancellation.ThrowIfCancellationRequested();
             RequireObservationBudget(cancellation, timer);
             if (!SameIdentity(expected, after.Identity)

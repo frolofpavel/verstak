@@ -246,7 +246,7 @@ export function auditComputerHelperSource(source) {
     || !/probe\.ScreenLocked\s*\|\|\s*probe\.Elevated\s*\|\|\s*probe\.ProtectedProcess\s*\|\|\s*probe\.SecureSurface/.test(exactWindowCaptureImplementation)
     || !/HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd/.test(exactWindowCaptureImplementation)
     || !/cancellation\.ThrowIfCancellationRequested\s*\(\s*\)/.test(exactWindowCaptureImplementation)
-    || !/ProbeExact\s*\(\s*expected\s*,\s*true\s*\)/.test(exactWindowCaptureImplementation)
+    || !/ProbeExact\s*\(\s*expected\s*,\s*true\s*,\s*MaxSurfaceInspectionElements\s*,\s*ObservationSurfaceInspectionTimeoutMs\s*\)/.test(exactWindowCaptureImplementation)
     || !/result\["screenshotDataUrl"\]\s*=\s*screenshotDataUrl/.test(executeObserveImplementation)
     || /(?:CopyFromScreen|BitBlt|GetDesktopWindow|GetDC\s*\(\s*IntPtr\.Zero|GetWindowDC)/.test(source)) {
     failures.push('exact-window privacy-safe visual observation missing')
@@ -382,7 +382,7 @@ export function auditComputerHelperSource(source) {
   }
   if (!executeObserveImplementation
     || /(?:GetForegroundWindow|ForegroundEventEpoch|SetFocus|SetForegroundWindow|RequireExpected|RequireActionCurrent|\b(?:probe|finalProbe)\.Foreground\b)/.test(executeObserveImplementation)
-    || (executeObserveImplementation.match(/ProbeExact\s*\(\s*expected\s*,\s*true\s*\)/g)?.length ?? 0) < 2
+    || (executeObserveImplementation.match(/ProbeExact\s*\(\s*expected\s*,\s*true\s*,\s*MaxSurfaceInspectionElements\s*,\s*MaxTargetCheckIntervalMs\s*,\s*false\s*\)/g)?.length ?? 0) < 2
     || (executeObserveImplementation.match(/\.ScreenLocked\s*\)\s*throw\s+new\s+SafeError\s*\(\s*"screen_locked"/g)?.length ?? 0) < 2
     || !/SameGeometry\s*\(\s*probe\.Geometry\s*,\s*finalProbe\.Geometry\s*\)/.test(executeObserveImplementation)
     || !/probe\.Dpi\s*!=\s*finalProbe\.Dpi/.test(executeObserveImplementation)

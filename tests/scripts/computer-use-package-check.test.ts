@@ -678,8 +678,8 @@ describe('computer use packaged artifact checker', () => {
       .toContain('bounded asynchronous observation/Stop isolation missing')
 
     const foregroundObserveMutation = source.replace(
-      'RequireObservationBudget(cancellation, timer);\n            WindowProbe probe = ProbeExact(expected, true);',
-      'RequireObservationBudget(cancellation, timer);\n            WindowProbe probe = ProbeExact(expected, true);\n            if (!probe.Foreground) throw new SafeError("stale_focus", "mutated");',
+      /(WindowProbe probe = ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\);)/,
+      '$1\n            if (!probe.Foreground) throw new SafeError("stale_focus", "mutated");',
     )
     expect(foregroundObserveMutation).not.toBe(source)
     expect(checker.auditComputerHelperSource(foregroundObserveMutation))

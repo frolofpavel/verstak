@@ -25,6 +25,12 @@ function candidatePrefilterIsArmedSafely(source: string): boolean {
   const armedBlocked = callback.indexOf('IsBlockedApplication(armedIdentity, armedTitle)', armedTitle)
   const elevated = callback.indexOf('IsElevated(armedIdentity.Pid', armLock)
   const secure = callback.indexOf('IsSecureSurface(armedIdentity.Hwnd, armedTitle, 64, 500)', armLock)
+  const geometryRead = callback.indexOf('DwmGetWindowAttribute(armedIdentity.Hwnd', secure)
+  const positiveGeometry = callback.indexOf(
+    'if (geometry.Right <= geometry.Left || geometry.Bottom <= geometry.Top) return true;',
+    geometryRead,
+  )
+  const snapshotAdd = callback.indexOf('snapshots.Add(new CandidateSnapshot', positiveGeometry)
   const postEnumerationDrain = callback.indexOf('DrainForegroundEvents();', callback.indexOf('}, IntPtr.Zero);'))
   const generationRecheck = callback.indexOf(
     'snapshot.DestroyGeneration != WindowDestroyGeneration(snapshot.Identity.Hwnd)',
@@ -45,6 +51,9 @@ function candidatePrefilterIsArmedSafely(source: string): boolean {
     armedBlocked > armedTitle,
     elevated > armedBlocked,
     secure > elevated,
+    geometryRead > secure,
+    positiveGeometry > geometryRead,
+    snapshotAdd > positiveGeometry,
     (callback.match(/IsElevated\(/g)?.length ?? 0) === 1,
     (callback.match(/IsSecureSurface\(/g)?.length ?? 0) === 1,
     postEnumerationDrain > secure,
@@ -69,11 +78,19 @@ function bindingSurfaceBudgetIsPinned(source: string): boolean {
 }
 
 function observationCaptureSurfaceBudgetIsPinned(source: string): boolean {
+  const observe = source.match(
+    /private\s+static\s+IDictionary<string, object>\s+ExecuteObserve[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireObservationBudget)/,
+  )?.[0] ?? ''
   const capture = source.match(
     /private\s+static\s+string\s+CaptureExactWindowPng[\s\S]*?(?=\n\s*private\s+static\s+byte\[\]\s+EncodeWindowPng)/,
   )?.[0] ?? ''
+  const lightweightIdentityProbes = observe.match(
+    /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/g,
+  ) ?? []
   return /private\s+const\s+int\s+ObservationSurfaceInspectionTimeoutMs\s*=\s*1500\s*;/.test(source)
+    && lightweightIdentityProbes.length === 2
     && /HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd\s*,\s*MaxSurfaceInspectionElements\s*,\s*ObservationSurfaceInspectionTimeoutMs\s*\)/.test(capture)
+    && /WindowProbe\s+after\s*=\s*ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*ObservationSurfaceInspectionTimeoutMs\s*\)\s*;/.test(capture)
 }
 
 function observationDeadlineLeavesSurfaceScanHeadroom(source: string): boolean {
@@ -208,7 +225,15 @@ function automaticFocusUsesExactThreadAttachment(source: string): boolean {
   const boundedSurfaceChecks = focus.match(
     /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*FocusSurfaceInspectionTimeoutMs\s*\)/g,
   ) ?? []
+  const messageQueue = focus.indexOf(
+    'PeekMessage(out currentThreadMessage, IntPtr.Zero, 0, 0, PmNoRemove);',
+  )
+  const firstAttach = focus.indexOf('AttachThreadInput(currentThread, foregroundThread, true)')
   return /AttachThreadInput\s*\(/.test(source)
+    && /private\s+const\s+uint\s+PmNoRemove\s*=\s*0x0000\s*;/.test(source)
+    && /private\s+static\s+extern\s+bool\s+PeekMessage\s*\(\s*out\s+MSG\s+message,\s*IntPtr\s+hwnd,\s*uint\s+min,\s*uint\s+max,\s*uint\s+remove\s*\)\s*;/.test(source)
+    && messageQueue >= 0
+    && firstAttach > messageQueue
     && boundedSurfaceChecks.length === 2
     && /AutomationElement\.FromHandle\(expected\.Hwnd\)[\s\S]*\.SetFocus\(\)/.test(focus)
     && /SwitchToThisWindow\s*\(\s*expected\.Hwnd,\s*true\s*\)/.test(focus)
@@ -287,7 +312,7 @@ function exactWindowVisualObservationIsPinned(source: string): boolean {
     && /probe\.ScreenLocked\s*\|\|\s*probe\.Elevated\s*\|\|\s*probe\.ProtectedProcess\s*\|\|\s*probe\.SecureSurface/.test(capture)
     && /HasUnsafeSurfaceDescendant\s*\(\s*expected\.Hwnd/.test(capture)
     && /cancellation\.ThrowIfCancellationRequested\s*\(\s*\)/.test(capture)
-    && /ProbeExact\s*\(\s*expected\s*,\s*true\s*\)/.test(capture)
+    && /ProbeExact\s*\(\s*expected\s*,\s*true\s*,\s*MaxSurfaceInspectionElements\s*,\s*ObservationSurfaceInspectionTimeoutMs\s*\)/.test(capture)
     && /"screenshotDataUrl"/.test(source)
     && !/(?:CopyFromScreen|BitBlt|GetDesktopWindow|GetDC\s*\(\s*IntPtr\.Zero|GetWindowDC)/.test(source)
 }
@@ -342,6 +367,13 @@ describe('computer helper hardening contracts', () => {
     )
     expect(armFirstMutation).not.toBe(source)
     expect(candidatePrefilterIsArmedSafely(armFirstMutation)).toBe(false)
+
+    const zeroGeometryMutation = source.replace(
+      'if (geometry.Right <= geometry.Left || geometry.Bottom <= geometry.Top) return true;',
+      '/* mutated: zero-area candidate reaches the wire */',
+    )
+    expect(zeroGeometryMutation).not.toBe(source)
+    expect(candidatePrefilterIsArmedSafely(zeroGeometryMutation)).toBe(false)
   })
 
   it('uses a bounded one-time surface budget for binding while action probes retain the 50 ms guard', () => {
@@ -366,6 +398,20 @@ describe('computer helper hardening contracts', () => {
     )
     expect(actionDeadlineMutation).not.toBe(source)
     expect(observationCaptureSurfaceBudgetIsPinned(actionDeadlineMutation)).toBe(false)
+
+    const probeDeadlineMutation = source.replace(
+      /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/,
+      'ProbeExact(expected, true)',
+    )
+    expect(probeDeadlineMutation).not.toBe(source)
+    expect(observationCaptureSurfaceBudgetIsPinned(probeDeadlineMutation)).toBe(false)
+
+    const postCaptureDeadlineMutation = source.replace(
+      'WindowProbe after = ProbeExact(expected, true, MaxSurfaceInspectionElements, ObservationSurfaceInspectionTimeoutMs);',
+      'WindowProbe after = ProbeExact(expected, true);',
+    )
+    expect(postCaptureDeadlineMutation).not.toBe(source)
+    expect(observationCaptureSurfaceBudgetIsPinned(postCaptureDeadlineMutation)).toBe(false)
   })
 
   it('leaves enough total observation headroom for traversal, screenshot encoding, and the safety rescan', () => {
@@ -482,6 +528,13 @@ describe('computer helper hardening contracts', () => {
     )
     expect(mutation).not.toBe(source)
     expect(automaticFocusUsesExactThreadAttachment(mutation)).toBe(false)
+
+    const messageQueueMutation = source.replace(
+      'PeekMessage(out currentThreadMessage, IntPtr.Zero, 0, 0, PmNoRemove);',
+      '/* mutated: helper thread has no Win32 message queue */',
+    )
+    expect(messageQueueMutation).not.toBe(source)
+    expect(automaticFocusUsesExactThreadAttachment(messageQueueMutation)).toBe(false)
 
     const timeoutMutation = source.replace(
       /ProbeExact\(\s*expected,\s*true,\s*MaxSurfaceInspectionElements,\s*FocusSurfaceInspectionTimeoutMs\s*\)/,
