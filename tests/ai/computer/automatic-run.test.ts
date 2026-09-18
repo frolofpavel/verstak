@@ -6,6 +6,7 @@ import type { Database } from 'better-sqlite3'
 import { openDb } from '../../../electron/storage/db'
 import { createBrowserTasks, type BrowserTasks } from '../../../electron/storage/browser-tasks'
 import { createComputerController, type ComputerController } from '../../../electron/ai/computer/controller'
+import { ComputerSafetyError } from '../../../electron/ai/computer/errors'
 import { FakeComputerBackend } from '../../helpers/fake-computer-backend'
 
 let dir: string
@@ -83,6 +84,33 @@ describe('ComputerController — automatic target preparation', () => {
 
     expect(backend.focusCount).toBe(0)
     expect(controller.getBinding()).toBeNull()
+  })
+
+  it('re-discovers the foreground target once when Windows redirects automatic focus', async () => {
+    const focusBinding = backend.focusBinding.bind(backend)
+    let focusAttempts = 0
+    vi.spyOn(backend, 'focusBinding').mockImplementation(async identity => {
+      focusAttempts += 1
+      if (focusAttempts === 1) {
+        backend.candidates = [backend.notepadCandidate({ foreground: true })]
+        throw new ComputerSafetyError('focus-lost')
+      }
+      return focusBinding(identity)
+    })
+    controller = createComputerController({ storage, backend })
+
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      originalUserText: 'Открой Блокнот и напиши: Тест Verstak Computer Use',
+    })).resolves.toMatchObject({ ok: true })
+
+    expect(backend.listCount).toBe(2)
+    expect(focusAttempts).toBe(2)
+    expect(controller.getBinding()).toMatchObject({
+      source: 'automatic',
+      processName: 'notepad.exe',
+    })
   })
 
   it('reselects automatically for a later run in the same chat instead of requiring claim expiry', async () => {

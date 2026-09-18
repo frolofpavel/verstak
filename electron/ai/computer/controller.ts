@@ -420,7 +420,21 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
 
     const bound = await bindCandidateWithSource(selection.candidateId, 'automatic')
     if (!bound.ok) return { ok: false, error: computerErrorCode(bound.error, 'no-binding') }
-    const focusError = await focusCurrentBinding()
+    let focusError = await focusCurrentBinding()
+    if (focusError && !focusError.ok && focusError.error === 'focus-lost') {
+      // Modern Windows apps may redirect activation to a sibling top-level
+      // HWND (Notepad tabs/windows are the common case). Never follow that
+      // HWND implicitly: discard the old binding, obtain fresh helper leases,
+      // and bind the newly foreground candidate through the normal selector.
+      await unbind()
+      listed = await listCandidates()
+      selection = chooseAutomaticTarget(request.targetApp, automaticTargetCandidates(listed))
+      if (selection.kind === 'missing') return { ok: false, error: 'automatic-target-missing' }
+      if (selection.kind === 'ambiguous') return { ok: false, error: 'automatic-target-ambiguous' }
+      const rebound = await bindCandidateWithSource(selection.candidateId, 'automatic')
+      if (!rebound.ok) return { ok: false, error: computerErrorCode(rebound.error, 'no-binding') }
+      focusError = await focusCurrentBinding()
+    }
     if (focusError) return focusError
     return authorizeRun(input)
 
