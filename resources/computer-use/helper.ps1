@@ -918,7 +918,7 @@ namespace VerstakComputerUse
             if (kind == "type" && parsedTextChunks.Count == 0)
                 throw new SafeError("empty_text", "type requires non-empty text");
             WindowProbe expected = ParseExpected(RequiredDictionary(message, "expected"), identity);
-            WindowProbe current = ProbeExact(identity, true);
+            WindowProbe current = ProbeExact(identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs);
             RequireExpected(expected, current, true);
             if (!HooksReady) throw new SafeError("input_monitor_unavailable", "physical input monitor unavailable");
             long prepareForegroundEpoch = Interlocked.Read(ref ForegroundEventEpoch);
@@ -1016,13 +1016,13 @@ namespace VerstakComputerUse
                     InputQueue.Wait(cancellation.Token);
                     try
                     {
-                        WindowProbe before = ProbeExact(prepared.Identity, true);
+                        WindowProbe before = ProbeExact(prepared.Identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs);
                         RequireExpected(prepared.Expected, before, true);
                         effectStarted = true;
                         ExecutionOutcome outcome = ExecutePrepared(prepared, cancellation.Token);
                         cancellation.Token.ThrowIfCancellationRequested();
                         DrainForegroundEvents();
-                        WindowProbe after = ProbeExact(prepared.Identity, false);
+                        WindowProbe after = ProbeExact(prepared.Identity, false, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs);
                         DrainForegroundEvents();
                         long postForegroundEpoch = Interlocked.Read(ref ForegroundEventEpoch);
                         bool matched = SameIdentity(prepared.Identity, after.Identity)

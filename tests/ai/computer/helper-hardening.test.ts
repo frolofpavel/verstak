@@ -99,6 +99,12 @@ function observationDeadlineLeavesSurfaceScanHeadroom(source: string): boolean {
 }
 
 function actionSurfaceScanPrecedesFastDispatchGuard(source: string): boolean {
+  const prepare = source.match(
+    /private\s+static\s+void\s+HandlePrepare[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleCommit)/,
+  )?.[0] ?? ''
+  const commit = source.match(
+    /private\s+static\s+void\s+HandleCommit[\s\S]*?(?=\n\s*private\s+static\s+void\s+HandleCancel)/,
+  )?.[0] ?? ''
   const timely = source.match(
     /private\s+static\s+void\s+RequireTimelyActionCurrent[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireDispatchWithinInterval)/,
   )?.[0] ?? ''
@@ -123,6 +129,9 @@ function actionSurfaceScanPrecedesFastDispatchGuard(source: string): boolean {
     surfaceScan >= 0,
     fastTimer > surfaceScan,
     fastCurrent > fastTimer,
+    /ProbeExact\s*\(\s*identity,\s*true,\s*MaxSurfaceInspectionElements,\s*ActionSurfaceInspectionTimeoutMs\s*\)/.test(prepare),
+    /WindowProbe\s+before\s*=\s*ProbeExact\s*\(\s*prepared\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*ActionSurfaceInspectionTimeoutMs\s*\)/.test(commit),
+    /WindowProbe\s+after\s*=\s*ProbeExact\s*\(\s*prepared\.Identity,\s*false,\s*MaxSurfaceInspectionElements,\s*ActionSurfaceInspectionTimeoutMs\s*\)/.test(commit),
     /ProbeExact\s*\(\s*action\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/.test(current),
     /bool\s+inspectSurfaceDescendants/.test(probe),
     /IsSecureSurface\s*\(\s*actual\.Hwnd,\s*title,\s*surfaceMaxElements,\s*surfaceMaxMilliseconds,\s*inspectSurfaceDescendants\s*\)/.test(probe),
@@ -429,6 +438,24 @@ describe('computer helper hardening contracts', () => {
   it('finishes the fail-closed action surface scan before applying the 50 ms dispatch guard', () => {
     const source = helperSource()
     expect(actionSurfaceScanPrecedesFastDispatchGuard(source)).toBe(true)
+
+    for (const mutation of [
+      source.replace(
+        'ProbeExact(identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs)',
+        'ProbeExact(identity, true)',
+      ),
+      source.replace(
+        'ProbeExact(prepared.Identity, true, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs)',
+        'ProbeExact(prepared.Identity, true)',
+      ),
+      source.replace(
+        'ProbeExact(prepared.Identity, false, MaxSurfaceInspectionElements, ActionSurfaceInspectionTimeoutMs)',
+        'ProbeExact(prepared.Identity, false)',
+      ),
+    ]) {
+      expect(mutation).not.toBe(source)
+      expect(actionSurfaceScanPrecedesFastDispatchGuard(mutation)).toBe(false)
+    }
   })
 
   it('pins the exact owner creation FILETIME before the watchdog handle is retained', () => {
