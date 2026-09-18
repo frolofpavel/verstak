@@ -1243,7 +1243,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'computer_click',
-    description: 'Нажать elementRef из свежего computer_observe через UIA Toggle/SelectionItem либо InvokePattern с независимым bounded surface readback. Координатный fallback отключён. Неизвестный исход не повторяется.',
+    description: 'Нажать elementRef из свежего computer_observe: UIA Toggle/SelectionItem остаются нативными. Для Calculator нужен exact role=Button и точный label, никогда display/Text по совпадению цифры; stateless-кнопка использует защищённый bounded coordinate-клик по наблюдённым bounds с независимым surface readback. Неизвестный исход не повторяется.',
     parameters: {
       type: 'object',
       properties: {

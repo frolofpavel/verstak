@@ -344,18 +344,17 @@ export function auditComputerHelperSource(source) {
     || !surfaceStateImplementation
     || !/InvokePattern\.Pattern[\s\S]*result\.Add\s*\(\s*"click"\s*\)/.test(supportedActionsImplementation)
     || !/action\.Kind\s*==\s*"click"[\s\S]*InvokePattern\.Pattern[\s\S]*return\s+"coordinates"/.test(chooseMethodImplementation)
-    || !/InvokePattern\.Pattern[\s\S]*RequireTimelyActionCurrent\s*\(\s*action\s*,\s*expectedInput\s*,\s*cancellation\s*\)[\s\S]*RequireElementCurrent\s*\(\s*entry\s*\)[\s\S]*beforeSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*\(\(InvokePattern\)pattern\)\.Invoke\s*\(\s*\)[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*DateTime\.UtcNow\.AddMilliseconds\s*\(\s*1200\s*\)[\s\S]*afterSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*!String\.Equals\s*\(\s*beforeSurface\s*,\s*afterSurface\s*,\s*StringComparison\.Ordinal\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*true\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*false\s*\)/.test(executeClickImplementation)
     || !/ActionEffectFingerprintElements\s*=\s*64/.test(source)
     || !/count\+\+\s*>=\s*ActionEffectFingerprintElements\s*\)\s*break/.test(surfaceStateImplementation)
     || !/timer\.ElapsedMilliseconds\s*>\s*750/.test(surfaceStateImplementation)
-    || !/HasKeyboardFocus/.test(surfaceStateImplementation)
+    || /HasKeyboardFocus/.test(surfaceStateImplementation)
     || !/element\.Current\.IsPassword\s*\|\|\s*IsAuthenticationControl\s*\(\s*element\s*\)\s*\|\|\s*IsLaunchSurfaceControl\s*\(\s*element\s*\)/.test(surfaceStateImplementation)
     || !/ValuePattern\.Pattern[\s\S]*Current\.Value/.test(surfaceStateImplementation)
     || !/IdentityKey\s*\(\s*identity\s*\)/.test(surfaceStateImplementation)
     || !/pointerBeforeSurface\s*=\s*SurfaceStateFingerprint[\s\S]*SendMouseClick\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*pointerAfterSurface\s*=\s*SurfaceStateFingerprint[\s\S]*!String\.Equals\s*\(\s*pointerBeforeSurface\s*,\s*pointerAfterSurface\s*,\s*StringComparison\.Ordinal\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*true\s*\)/.test(executeClickImplementation)
     || (executeClickImplementation.match(/SendMouseClick\s*\(/g)?.length ?? 0) !== 1
-    || !/RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*RequireNoHeldInputState[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*dispatchTimer\s*=\s*Stopwatch\.StartNew[\s\S]*SendInput[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*RequireDispatchWithinInterval\s*\(\s*dispatchTimer\s*\)[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)/.test(source)) {
-    failures.push('UIA InvokePattern bounded surface readback contract missing')
+    || !/RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*RequireNoHeldInputState[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*dispatchTimer\s*=\s*Stopwatch\.StartNew[\s\S]*SendInput[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*RequireDispatchWithinInterval\s*\(\s*dispatchTimer\s*\)[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*,\s*false\s*\)/.test(source)) {
+    failures.push('exact stateless coordinate click bounded surface readback contract missing')
   }
   const elementRevalidations = source.match(/RequireElementCurrent\s*\(\s*entry\s*\)\s*;/g)?.length ?? 0
   if (!/public\s+string\s+Fingerprint\s*;/.test(source)

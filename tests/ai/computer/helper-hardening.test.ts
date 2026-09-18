@@ -234,11 +234,11 @@ function statelessCoordinateClickEffectProofIsPinned(source: string): boolean {
   const sendInput = sendMouse.indexOf('SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)))', dispatchTimer)
   const dispatchAccepted = sendMouse.indexOf('action.DispatchAccepted = true;', sendInput)
   const intervalProof = sendMouse.indexOf('RequireDispatchWithinInterval(dispatchTimer);', dispatchAccepted)
-  const postTargetCheck = sendMouse.indexOf('RequireSendInputTarget(action, entry, point);', intervalProof)
+  const postTargetCheck = sendMouse.indexOf('RequireSendInputTarget(action, entry, point, false);', intervalProof)
 
   return /private\s+const\s+int\s+ActionEffectFingerprintElements\s*=\s*64\s*;/.test(source)
     && /if\s*\(count\+\+\s*>=\s*ActionEffectFingerprintElements\)\s*break\s*;/.test(fingerprint)
-    && /Append\(element\.Current\.HasKeyboardFocus\s*\?\s*'1'\s*:\s*'0'\)/.test(fingerprint)
+    && !fingerprint.includes('HasKeyboardFocus')
     && beforeSurface >= 0
     && dispatch > beforeSurface
     && inputEpoch > dispatch
@@ -589,6 +589,11 @@ describe('computer helper hardening contracts', () => {
     const source = helperSource()
     expect(statelessCoordinateClickEffectProofIsPinned(source)).toBe(true)
 
+    const fingerprint = source.match(
+      /private\s+static\s+string\s+SurfaceStateFingerprint[\s\S]*?(?=\n\s*private\s+static\s+string\s+ChooseMethod)/,
+    )?.[0] ?? ''
+    expect(fingerprint).not.toContain('HasKeyboardFocus')
+
     const proof = 'if (!String.Equals(pointerBeforeSurface, pointerAfterSurface, StringComparison.Ordinal)) return Outcome(true, true);'
     const coordinateStart = source.indexOf('POINT point = ActionPoint(action, entry);')
     const proofIndex = source.indexOf(proof, coordinateStart)
@@ -597,6 +602,34 @@ describe('computer helper hardening contracts', () => {
       + source.slice(proofIndex + proof.length)
     expect(unprovenMutation).not.toBe(source)
     expect(statelessCoordinateClickEffectProofIsPinned(unprovenMutation)).toBe(false)
+  })
+
+  it('reports only the bounded safe-error code when a post-dispatch guard becomes uncertain', () => {
+    const source = helperSource()
+    expect(source).toContain(
+      '"uncertain: post-dispatch safety check failed (" + error.Code + ")"',
+    )
+    expect(source).not.toContain(
+      '"uncertain: post-dispatch safety check failed (" + error.Message + ")"',
+    )
+  })
+
+  it('keeps exact post-click element identity but does not reject an already dispatched click only for a slow matching fingerprint', () => {
+    const source = helperSource()
+    const sendMouse = source.match(
+      /private\s+static\s+void\s+SendMouseClick[\s\S]*?(?=\n\s*private\s+static\s+void\s+SendWheel)/,
+    )?.[0] ?? ''
+    const dispatchAccepted = sendMouse.indexOf('action.DispatchAccepted = true;')
+    const postDispatch = sendMouse.indexOf(
+      'RequireSendInputTarget(action, entry, point, false);',
+      dispatchAccepted,
+    )
+    expect(dispatchAccepted).toBeGreaterThanOrEqual(0)
+    expect(postDispatch).toBeGreaterThan(dispatchAccepted)
+    expect(source).toMatch(
+      /private\s+static\s+void\s+RequireElementCurrent\(ElementEntry entry, bool enforceInterval = true\)[\s\S]*?if\s*\(enforceInterval\s*&&\s*timer\.ElapsedMilliseconds\s*>\s*MaxTargetCheckIntervalMs\)/,
+    )
+    expect(source).toContain('RequireElementCurrent(entry, enforceElementInterval);')
   })
 
   it('denies common browser executables while retaining ordinary desktop canaries', () => {

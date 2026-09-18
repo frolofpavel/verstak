@@ -847,7 +847,10 @@ const GATE_MAX_WORKERS = 4
 // перед discovery следующего чата, сохраняя manual и uncertain блокировки.
 // -> 7446 ИЗМЕРЕНО 19.09: stateless Invoke-only control получает один exact
 // coordinate click с bounded surface proof; stateful Toggle/Selection остаются UIA.
-const EXPECTED_TOTAL_TESTS = 7446
+// -> 7449 ИЗМЕРЕНО 19.09: Calculator orchestration закрепляет clean baseline и
+// exact Button labels; post-click guard не путает совпавший fingerprint с timeout,
+// а uncertain readback сообщает только безопасный код сработавшей границы.
+const EXPECTED_TOTAL_TESTS = 7449
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

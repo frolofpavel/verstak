@@ -71,22 +71,24 @@ describe('Computer Use automatic Windows app acceptance', () => {
     expect(prepared).toMatchObject({ ok: true })
 
     for (const labels of [
-      ['1', 'One', 'Один'],
-      ['2', 'Two', 'Два'],
-      ['5', 'Five', 'Пять'],
-      ['×', 'Multiply by', 'Умножить'],
-      ['4', 'Four', 'Четыре'],
-      ['7', 'Seven', 'Семь'],
-      ['=', 'Equals', 'Равно'],
+      ['Clear', 'Очистить'],
+      ['One', 'Один'],
+      ['Two', 'Два'],
+      ['Five', 'Пять'],
+      ['Multiply by', 'Умножить на'],
+      ['Four', 'Четыре'],
+      ['Seven', 'Семь'],
+      ['Equals', 'Равно'],
     ]) {
       const observation = await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
       const button = observation.elements.find(element => (
-        element.supportedActions.includes('click')
-        && labels.some(label => normalized(element.label).includes(normalized(label)))
+        normalized(element.role) === normalized('Button')
+        && element.supportedActions.includes('click')
+        && labels.some(label => normalized(element.label) === normalized(label))
       ))
       expect(button, JSON.stringify({ labels, elements: observation.elements })).toBeDefined()
       const result = await controller.dispatch({
-        actionId: `native-auto-calculator-${labels[0]}`,
+        actionId: `native-auto-calculator-${labels.at(-1)}`,
         browserTaskId: 'bt-auto-native',
         runId: 'run-auto-native',
         action: 'click',

@@ -117,9 +117,9 @@ describe('R2 Computer Use: production tool contract', () => {
     })
   })
 
-  it('describes the production UIA-only boundary including verified InvokePattern without promising global input', () => {
+  it('describes exact Calculator key selection and the bounded stateless coordinate path', () => {
     const descriptions = new Map(TOOL_DEFS.map(tool => [tool.name, tool.description]))
-    expect(descriptions.get('computer_click')).toMatch(/UIA.*(?:Toggle|SelectionItem).*InvokePattern.*readback.*координат.*отключ/iu)
+    expect(descriptions.get('computer_click')).toMatch(/UIA.*(?:Toggle|SelectionItem).*exact role=Button.*display.*bounded.*coordinate.*readback/iu)
     expect(descriptions.get('computer_type')).toMatch(/UIA ValuePattern.*чанк.*до 16.*SendInput.*отключ/iu)
     expect(descriptions.get('computer_key')).toMatch(/SendInput.*отключ.*заблокирован/iu)
     expect(descriptions.get('computer_scroll')).toMatch(/UIA ScrollPattern.*один.*small step.*SendInput.*отключ/iu)

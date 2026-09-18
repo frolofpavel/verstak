@@ -1056,7 +1056,7 @@ namespace VerstakComputerUse
                 catch (SafeError error)
                 {
                     if (effectStarted)
-                        WriteOk("commit_action", requestId, new Dictionary<string, object> { { "readback", ReadbackObject(prepared, null, false, prepared.DispatchAccepted, false, "uncertain: target changed or safety interval exceeded after dispatch began") } });
+                        WriteOk("commit_action", requestId, new Dictionary<string, object> { { "readback", ReadbackObject(prepared, null, false, prepared.DispatchAccepted, false, "uncertain: post-dispatch safety check failed (" + error.Code + ")") } });
                     else WriteError(requestId, error.Code, error.Message);
                 }
                 catch
@@ -1922,7 +1922,7 @@ namespace VerstakComputerUse
                 + (writableValue ? "v" : "-") + (scroll ? "r" : "-");
         }
 
-        private static void RequireElementCurrent(ElementEntry entry)
+        private static void RequireElementCurrent(ElementEntry entry, bool enforceInterval = true)
         {
             if (entry == null) return;
             Stopwatch timer = Stopwatch.StartNew();
@@ -1932,7 +1932,7 @@ namespace VerstakComputerUse
             string current = CaptureElementFingerprint(entry.Element, entry.Identity);
             if (!String.Equals(entry.Fingerprint, current, StringComparison.Ordinal))
                 throw new SafeError("stale_element", "UI Automation element semantic identity changed");
-            if (timer.ElapsedMilliseconds > MaxTargetCheckIntervalMs)
+            if (enforceInterval && timer.ElapsedMilliseconds > MaxTargetCheckIntervalMs)
                 throw new SafeError("element_check_timeout", "UI Automation element validation exceeded safety interval");
         }
 
@@ -2117,8 +2117,7 @@ namespace VerstakComputerUse
                         .Append(FingerprintPart(element.Current.AutomationId)).Append('|')
                         .Append(FingerprintPart(element.Current.Name)).Append('|')
                         .Append(element.Current.IsEnabled ? '1' : '0').Append('|')
-                        .Append(element.Current.IsOffscreen ? '1' : '0').Append('|')
-                        .Append(element.Current.HasKeyboardFocus ? '1' : '0').Append(';');
+                        .Append(element.Current.IsOffscreen ? '1' : '0').Append(';');
                     object valuePattern;
                     if (element.TryGetCurrentPattern(ValuePattern.Pattern, out valuePattern))
                         state.Append(FingerprintPart(((ValuePattern)valuePattern).Current.Value)).Append(';');
@@ -2215,7 +2214,7 @@ namespace VerstakComputerUse
             if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) != inputs.Length) throw new SafeError("send_input_failed", "mouse input rejected");
             action.DispatchAccepted = true;
             RequireDispatchWithinInterval(dispatchTimer);
-            RequireSendInputTarget(action, entry, point);
+            RequireSendInputTarget(action, entry, point, false);
         }
 
         private static void SendWheel(PreparedAction action, ElementEntry entry, POINT point, int delta)
@@ -2273,10 +2272,10 @@ namespace VerstakComputerUse
             RequireSendInputTarget(action, entry, point);
         }
 
-        private static void RequireSendInputTarget(PreparedAction action, ElementEntry entry, POINT point)
+        private static void RequireSendInputTarget(PreparedAction action, ElementEntry entry, POINT point, bool enforceElementInterval = true)
         {
             DrainForegroundEvents();
-            RequireElementCurrent(entry);
+            RequireElementCurrent(entry, enforceElementInterval);
             if (!HooksReady || Interlocked.Read(ref ForegroundEventEpoch) != action.PreparedForegroundEpoch)
             {
                 EmitEvent("focus-lost", action.Identity, "foreground changed at SendInput boundary");

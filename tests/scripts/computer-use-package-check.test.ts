@@ -603,12 +603,12 @@ describe('computer use packaged artifact checker', () => {
       .toContain('UIA ScrollPattern one-step state/direction contract missing')
 
     const invokeReadbackMutation = source.replace(
-      'string beforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);',
-      'string beforeSurface = "unverified"; /* mutated: Invoke has no before-state */',
+      'string pointerBeforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);',
+      'string pointerBeforeSurface = "unverified"; /* mutated: click has no before-state */',
     )
     expect(invokeReadbackMutation).not.toBe(source)
     expect(checker.auditComputerHelperSource(invokeReadbackMutation))
-      .toContain('UIA InvokePattern bounded surface readback contract missing')
+      .toContain('exact stateless coordinate click bounded surface readback contract missing')
   })
 
   it('pins the desktop client Stop timeout to exact-child exit confirmation', () => {
