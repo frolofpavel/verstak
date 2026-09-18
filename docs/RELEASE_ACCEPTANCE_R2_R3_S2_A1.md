@@ -1,8 +1,8 @@
 # R2 / R3 / S2-A1 — release-candidate acceptance record
 
-**Дата:** 2026-09-17
+**Дата:** 2026-09-18
 
-**Кодовый кандидат:** `7d344997f0f8310ad4af763da4529625838b7981`
+**Кодовый кандидат:** `9f9924bf` (поверх `7d344997`: финальные bounded-scan исправления)
 
 **Ветка:** `codex/next-r0-r3`
 
@@ -18,11 +18,12 @@
 | Проверка | Результат |
 |---|---|
 | `check:mojibake` → `lint:full` → `type` → `test:fast` → `build` → `check:performance` → `git diff --check` | PASS |
-| Полный тестовый эталон | 7369 total / 7352 passed / 17 skipped / 0 failed |
+| Полный тестовый эталон | 7372 total / 7355 passed / 17 skipped / 0 failed |
 | Performance bundle | 1 515 483 / 1 600 000 bytes |
-| Windows Setup | 336 133 256 bytes, SHA-256 `0DFB809398E1D29C14BCF0B3B056A39622DF7DAE1F8767902E295F03653B7991` |
-| Windows Portable | 180 955 235 bytes, SHA-256 `0BE7D8937FB69A34CEAF7AA6D94BD90B50BA3E5F9112DBB0D78F21B6F4D65B07` |
+| Windows Setup | 336 132 524 bytes, SHA-256 `EC89C18443866B6D1DC7E7B98B9C60BF83FF075139C8255DD9E0F285708FCE87` |
+| Windows Portable | 180 955 449 bytes, SHA-256 `9C1E723B9CC3382AEFDB7279C4CEDF6A5A3DBF2C22C7FCE3A356514127F9F627` |
 | Packaged / установленный `app.asar` | SHA-256 `2CF47EC67BF298AC8FA3547957BD7CD7BB0C6C0813AD2E676E36C93B2321D599`, точное совпадение |
+| Source / packaged / Setup / установленный Computer helper | SHA-256 `9A71D216BA027B11A3F6E0ED26F586444812244C54417E214F804CA21799763D`, точное совпадение |
 | Setup payload ↔ `win-unpacked` | PASS, 560 файлов совпали |
 | Packaged Computer helper contract/read-only smoke | PASS |
 | Setup-extracted helper contract/read-only smoke | PASS |
@@ -33,7 +34,8 @@
 | Требование | Доказательство | Статус |
 |---|---|---|
 | Точная выбранная цель | PID + start time + HWND + generation; pre/post identity, geometry и DPI checks | PASS |
-| UIA `type` и независимый результат | Нативный Windows fixture, 10/10; каждый прогон подтверждён внешним state-file | PASS |
+| UIA `type` и независимый результат | Нативный Windows fixture, 5 последовательных серий × 10/10 = 50/50; каждый ввод подтверждён внешним state-file | PASS |
+| Security scan и dispatch deadline | Полный fail-closed descendant scan выполняется с bounded 1500 ms; после него exact target повторно проверяется в 50-ms окне перед dispatch | PASS |
 | Стабильный postcondition | Два независимых observations через bounded abort-aware settle | PASS |
 | Снимок только выбранного окна | `PrintWindow`, exact foreground HWND, 512×384 и 16 KiB caps, повторная identity/geometry/DPI проверка | PASS |
 | Защищённые поверхности | password/credential/CAPTCHA/2FA/elevated/protected блокируются fail-closed | PASS |

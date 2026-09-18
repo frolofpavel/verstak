@@ -1,6 +1,6 @@
 # STATUS — Verstak
 
-**Версия: 2.8.2** (release-candidate R2/R3/S2-A1 подготовлен 17.09.2026) · эталон тестов **7369**.
+**Версия: 2.8.2** (release-candidate R2/R3/S2-A1 обновлён 18.09.2026) · эталон тестов **7369**.
 Публикация считается состоявшейся только когда GitHub и `agi-iri.ru/verstak`
 отдают одну версию; финальный релизный гейт выполняется по собранному коммиту.
 [Матрица доказательств кандидата и внешних блокеров](docs/RELEASE_ACCEPTANCE_R2_R3_S2_A1.md).
@@ -188,13 +188,17 @@
   предел 512×384/16 KiB, повторная identity/geometry/DPI-проверка и запрет
   password/credential/protected/elevated поверхностей; desktop capture API не
   используются. Privacy disclosure приведён в соответствие фактической передаче.
-  Полный автоматический замер: 780 test files (773 passed, 7 skipped), 7369 tests
-  (7352 passed, 17 skipped), 0 failed. Нативный Windows-canary выполнил 10/10
-  последовательных UIA type, каждый результат независимо подтверждён внешним
-  файлом; bounded screenshot и Stop ACK ≤500 ms также подтверждены. Физическая
+  Полный автоматический замер: 780 test files (773 passed, 7 skipped), 7372 tests
+  (7355 passed, 17 skipped), 0 failed. После устранения ложного
+  `protected_target` полный fail-closed scan защищённой поверхности отделён от
+  50-ms окна непосредственной dispatch-проверки. Нативный Windows-canary прошёл
+  пять последовательных серий по 10/10 UIA type (50/50), каждый результат
+  независимо подтверждён внешним файлом; bounded screenshot и Stop ACK ≤500 ms
+  также подтверждены. Физическая
   матрица второго монитора и системных DPI 125/150 не выдаётся за проверенную на
   машине, где таких поверхностей нет. Установленный кандидат с точным packaged
-  `app.asar` принял свежий native composer-ticket и дважды получил verified
+  `app.asar` и helper SHA-256 `9A71D216…99763D` установлены; свежий native
+  composer-ticket ранее дважды получил verified
   observe выбранного WinForms-поля. Effectful `type` в живом пилоте дважды
   остановлен штатным `hardware-input` fail-closed после нового физического ввода;
   это подтверждает предохранитель, но не засчитывается как живой write-пилот.
