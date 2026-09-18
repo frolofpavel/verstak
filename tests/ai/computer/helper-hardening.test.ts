@@ -291,6 +291,23 @@ function mutableRootTitleIsExcludedFromElementIdentity(source: string): boolean 
     && /if\s*\(isRoot\)\s*\{\s*reachedRoot\s*=\s*true;\s*break;\s*\}/.test(fingerprint)
 }
 
+function verifiedValueChunkRebasesOnlyMutableTitle(source: string): boolean {
+  const executeType = source.match(
+    /private\s+static\s+ExecutionOutcome\s+ExecuteType[\s\S]*?(?=\n\s*private\s+static\s+ExecutionOutcome\s+ExecuteKey)/,
+  )?.[0] ?? ''
+  const refresh = source.match(
+    /private\s+static\s+void\s+RefreshExpectedAfterVerifiedValueEffect[\s\S]*?(?=\n\s*private\s+static\s+)/,
+  )?.[0] ?? ''
+  return /string\s+afterChunkValue\s*=\s*valuePattern\.Current\.Value\s*\?\?\s*""\s*;/.test(executeType)
+    && /if\s*\(!String\.Equals\(afterChunkValue,\s*accumulated,\s*StringComparison\.Ordinal\)\)\s*return\s+Outcome\(true,\s*false\)\s*;/.test(executeType)
+    && /RefreshExpectedAfterVerifiedValueEffect\(action,\s*entry,\s*afterChunkValue,\s*expectedInput,\s*cancellation\)\s*;/.test(executeType)
+    && /RequireElementCurrent\(entry\)\s*;/.test(refresh)
+    && /ProbeExact\(\s*action\.Identity,\s*true,\s*MaxSurfaceInspectionElements,\s*MaxTargetCheckIntervalMs,\s*false\s*\)/.test(refresh)
+    && /current\.UserInputEpoch\s*!=\s*expectedInput[\s\S]*"hardware_input"/.test(refresh)
+    && /action\.Expected\.Title\s*=\s*current\.Title\s*;/.test(refresh)
+    && /action\.Expected\.TitleFingerprint\s*=\s*current\.TitleFingerprint\s*;/.test(refresh)
+}
+
 function scrollStateGuardIsPinned(source: string): boolean {
   const observe = source.match(
     /private\s+static\s+IDictionary<string, object>\s+ExecuteObserve[\s\S]*?(?=\n\s*private\s+static\s+void\s+RequireObservationBudget)/,
@@ -609,6 +626,18 @@ describe('computer helper hardening contracts', () => {
     )
     expect(mutation).not.toBe(source)
     expect(mutableRootTitleIsExcludedFromElementIdentity(mutation)).toBe(false)
+  })
+
+  it('adopts a self-caused title change only after an exact ValuePattern chunk and no input drift', () => {
+    const source = helperSource()
+    expect(verifiedValueChunkRebasesOnlyMutableTitle(source)).toBe(true)
+
+    const mutation = source.replace(
+      'action.Expected.Title = current.Title;',
+      '/* mutated: next chunk still uses the pre-effect title */',
+    )
+    expect(mutation).not.toBe(source)
+    expect(verifiedValueChunkRebasesOnlyMutableTitle(mutation)).toBe(false)
   })
 
   it('pins exact ScrollPattern pre-state and signed post direction around Scroll()', () => {

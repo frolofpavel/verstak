@@ -1238,6 +1238,9 @@ namespace VerstakComputerUse
                     action.DispatchAccepted = true;
                     RequireDispatchWithinInterval(chunkTimer);
                     cancellation.ThrowIfCancellationRequested();
+                    string afterChunkValue = valuePattern.Current.Value ?? "";
+                    if (!String.Equals(afterChunkValue, accumulated, StringComparison.Ordinal)) return Outcome(true, false);
+                    RefreshExpectedAfterVerifiedValueEffect(action, entry, afterChunkValue, expectedInput, cancellation);
                 }
                 if (firstChunk) throw new SafeError("empty_text", "type requires non-empty text");
                 string afterValue = valuePattern.Current.Value;
@@ -1259,6 +1262,32 @@ namespace VerstakComputerUse
                 cancellation.ThrowIfCancellationRequested();
             }
             return Outcome(action.DispatchAccepted, false);
+        }
+
+        private static void RefreshExpectedAfterVerifiedValueEffect(
+            PreparedAction action, ElementEntry entry, string exactValue, long expectedInput, CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if (action.PreparedStopEpoch != Interlocked.Read(ref StopEpoch)) throw new OperationCanceledException();
+            RequireElementCurrent(entry);
+            object pattern;
+            if (!entry.Element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)
+                || !String.Equals(((ValuePattern)pattern).Current.Value ?? "", exactValue, StringComparison.Ordinal))
+                throw new SafeError("stale_value_state", "ValuePattern changed after verified chunk");
+            WindowProbe current = ProbeExact(
+                action.Identity, true, MaxSurfaceInspectionElements, MaxTargetCheckIntervalMs, false);
+            if (action.PreparedForegroundEpoch != Interlocked.Read(ref ForegroundEventEpoch)
+                || !current.Foreground || current.ScreenLocked)
+                throw new SafeError("foreground_changed", "foreground changed after verified ValuePattern effect");
+            if (!SameGeometry(action.Expected.Geometry, current.Geometry) || action.Expected.Dpi != current.Dpi)
+                throw new SafeError("target_changed", "window geometry or DPI changed after verified ValuePattern effect");
+            if (current.UserInputEpoch != expectedInput)
+                throw new SafeError("hardware_input", "hardware input changed during verified ValuePattern effect");
+            // A verified edit may legitimately add an unsaved marker to the
+            // same HWND title. Rebase only that mutable claim so the next
+            // chunk remains pinned to the exact process/window/element.
+            action.Expected.Title = current.Title;
+            action.Expected.TitleFingerprint = current.TitleFingerprint;
         }
 
         private static ExecutionOutcome ExecuteKey(PreparedAction action, ElementEntry entry, ref long expectedInput, CancellationToken cancellation)
