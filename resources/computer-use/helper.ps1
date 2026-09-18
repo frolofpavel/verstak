@@ -47,6 +47,7 @@ namespace VerstakComputerUse
         private const int MaxTrackedWindowLifecycles = MaxCandidateLeases + 2;
         private const int CandidateLeaseTtlSeconds = 30;
         private const int MaxElements = 300;
+        private const int ActionEffectFingerprintElements = 64;
         private const int MaxPrepared = 32;
         private const int PreparedTtlSeconds = 30;
         private const int MaxTargetCheckIntervalMs = 50;
@@ -1175,7 +1176,7 @@ namespace VerstakComputerUse
                 bool after = selection.Current.IsSelected;
                 return Outcome(true, MatchesExpectedElementTransition(action, "selection", after ? "selected" : "not-selected"));
             }
-            if (entry != null && entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+            if (action.Method == "uia" && entry != null && entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
             {
                 RequireTimelyActionCurrent(action, expectedInput, cancellation);
                 RequireElementCurrent(entry);
@@ -1197,10 +1198,17 @@ namespace VerstakComputerUse
             POINT point = ActionPoint(action, entry);
             RequireTimelyActionCurrent(action, expectedInput, cancellation);
             RequireHitTest(action.Identity.Hwnd, point);
-            Stopwatch clickTimer = Stopwatch.StartNew();
+            string pointerBeforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);
             SendMouseClick(action, entry, point);
-            RequireDispatchWithinInterval(clickTimer);
             expectedInput = UserInputEpoch();
+            DateTime pointerDeadline = DateTime.UtcNow.AddMilliseconds(1200);
+            while (DateTime.UtcNow < pointerDeadline)
+            {
+                RequireTimelyActionCurrent(action, expectedInput, cancellation);
+                string pointerAfterSurface = SurfaceStateFingerprint(action.Identity, cancellation);
+                if (!String.Equals(pointerBeforeSurface, pointerAfterSurface, StringComparison.Ordinal)) return Outcome(true, true);
+                Thread.Sleep(25);
+            }
             return Outcome(true, false);
         }
 
@@ -2093,7 +2101,8 @@ namespace VerstakComputerUse
             while (pending.Count > 0)
             {
                 cancellation.ThrowIfCancellationRequested();
-                if (count++ >= MaxElements || timer.ElapsedMilliseconds > 750)
+                if (count++ >= ActionEffectFingerprintElements) break;
+                if (timer.ElapsedMilliseconds > 750)
                     throw new SafeError("surface_state_timeout", "bounded UI Automation state read exceeded limit");
                 AutomationElement element = pending.Dequeue();
                 try
@@ -2108,7 +2117,8 @@ namespace VerstakComputerUse
                         .Append(FingerprintPart(element.Current.AutomationId)).Append('|')
                         .Append(FingerprintPart(element.Current.Name)).Append('|')
                         .Append(element.Current.IsEnabled ? '1' : '0').Append('|')
-                        .Append(element.Current.IsOffscreen ? '1' : '0').Append(';');
+                        .Append(element.Current.IsOffscreen ? '1' : '0').Append('|')
+                        .Append(element.Current.HasKeyboardFocus ? '1' : '0').Append(';');
                     object valuePattern;
                     if (element.TryGetCurrentPattern(ValuePattern.Pattern, out valuePattern))
                         state.Append(FingerprintPart(((ValuePattern)valuePattern).Current.Value)).Append(';');
@@ -2125,8 +2135,9 @@ namespace VerstakComputerUse
             {
                 object pattern;
                 if (action.Kind == "click" && (entry.Element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)
-                    || entry.Element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)
-                    || entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))) return "uia";
+                    || entry.Element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))) return "uia";
+                if (action.Kind == "click" && entry.Element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+                    return "coordinates";
                 if (action.Kind == "type" && entry.Element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)
                     && CanUseBoundedValuePattern(action, (ValuePattern)pattern)) return "uia";
                 if (action.Kind == "scroll" && entry.Element.TryGetCurrentPattern(ScrollPattern.Pattern, out pattern)) return "uia";
@@ -2196,12 +2207,14 @@ namespace VerstakComputerUse
             RequireSendInputTarget(action, entry, point);
             RequireNoHeldInputState();
             RequireSendInputTarget(action, entry, point);
+            Stopwatch dispatchTimer = Stopwatch.StartNew();
             INPUT[] inputs = new INPUT[3];
             inputs[0] = MouseMove(point);
             inputs[1] = new INPUT { Type = InputMouse, U = new InputUnion { Mi = new MOUSEINPUT { DwFlags = MouseeventfLeftdown } } };
             inputs[2] = new INPUT { Type = InputMouse, U = new InputUnion { Mi = new MOUSEINPUT { DwFlags = MouseeventfLeftup } } };
             if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) != inputs.Length) throw new SafeError("send_input_failed", "mouse input rejected");
             action.DispatchAccepted = true;
+            RequireDispatchWithinInterval(dispatchTimer);
             RequireSendInputTarget(action, entry, point);
         }
 

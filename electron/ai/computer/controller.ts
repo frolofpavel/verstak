@@ -1107,10 +1107,12 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       throwIfAborted(attempt)
 
       const chunks = input.action === 'type' ? chunkText(input.text ?? '') : undefined
+      const exactElementCoordinateClick = acceptsExactElementCoordinateClick(input.action, element)
       // UI Automation exposes no generic keyboard pattern. A key is scoped by
       // its resolved element, then delivered to the exact foreground HWND.
       const uiaRequired = input.action !== 'key'
         && !!element?.backend.supportedActions.includes(input.action)
+        && !exactElementCoordinateClick
       const prepareRequest: ComputerPrepareRequest = {
         attemptId,
         identity: cloneIdentity(actionBinding.identity),
@@ -1161,7 +1163,8 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
         throw new ComputerSafetyError('uia-priority-violated')
       }
       assertPreparedMethod(input.action, prepared.method, element)
-      if (prepared.method !== 'uia' && !allowUnverifiedGlobalInput) {
+      if (prepared.method !== 'uia' && !allowUnverifiedGlobalInput
+        && !(exactElementCoordinateClick && prepared.method === 'coordinates')) {
         throw new ComputerSafetyError('global-input-not-accepted')
       }
       if (input.action === 'type') {
@@ -1790,6 +1793,16 @@ function requiresUnverifiedGlobalInput(
   element: InternalElement | null,
 ): boolean {
   return action === 'key' || !element?.backend.supportedActions.includes(action)
+}
+
+function acceptsExactElementCoordinateClick(
+  action: Exclude<ComputerAction, 'observe' | 'wait_for'>,
+  element: InternalElement | null,
+): boolean {
+  return action === 'click'
+    && !!element?.backend.bounds
+    && element.backend.supportedActions.includes('click')
+    && !isStatefulClickState(element.backend.state)
 }
 
 function assertCoordinateFallback(probe: ComputerProbe, requiresHitTest: boolean): void {

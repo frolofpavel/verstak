@@ -207,6 +207,56 @@ function toggleTransitionGuardIsPinned(source: string): boolean {
     && exactAfter > dispatch
 }
 
+function statelessCoordinateClickEffectProofIsPinned(source: string): boolean {
+  const click = source.match(
+    /private\s+static\s+ExecutionOutcome\s+ExecuteClick[\s\S]*?(?=\n\s*private\s+static\s+ExecutionOutcome\s+ExecuteType)/,
+  )?.[0] ?? ''
+  const coordinate = click.slice(click.indexOf('POINT point = ActionPoint(action, entry);'))
+  const beforeSurface = coordinate.indexOf('string pointerBeforeSurface = SurfaceStateFingerprint(action.Identity, cancellation);')
+  const dispatch = coordinate.indexOf('SendMouseClick(action, entry, point);', beforeSurface)
+  const inputEpoch = coordinate.indexOf('expectedInput = UserInputEpoch();', dispatch)
+  const deadline = coordinate.indexOf('DateTime pointerDeadline = DateTime.UtcNow.AddMilliseconds(1200);', inputEpoch)
+  const afterSurface = coordinate.indexOf('string pointerAfterSurface = SurfaceStateFingerprint(action.Identity, cancellation);', deadline)
+  const proven = coordinate.indexOf(
+    'if (!String.Equals(pointerBeforeSurface, pointerAfterSurface, StringComparison.Ordinal)) return Outcome(true, true);',
+    afterSurface,
+  )
+  const uncertain = coordinate.indexOf('return Outcome(true, false);', proven)
+  const fingerprint = source.match(
+    /private\s+static\s+string\s+SurfaceStateFingerprint[\s\S]*?(?=\n\s*private\s+static\s+string\s+ChooseMethod)/,
+  )?.[0] ?? ''
+  const sendMouse = source.match(
+    /private\s+static\s+void\s+SendMouseClick[\s\S]*?(?=\n\s*private\s+static\s+void\s+SendWheel)/,
+  )?.[0] ?? ''
+  const firstTargetCheck = sendMouse.indexOf('RequireSendInputTarget(action, entry, point);')
+  const secondTargetCheck = sendMouse.indexOf('RequireSendInputTarget(action, entry, point);', firstTargetCheck + 1)
+  const dispatchTimer = sendMouse.indexOf('Stopwatch dispatchTimer = Stopwatch.StartNew();', secondTargetCheck)
+  const sendInput = sendMouse.indexOf('SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)))', dispatchTimer)
+  const dispatchAccepted = sendMouse.indexOf('action.DispatchAccepted = true;', sendInput)
+  const intervalProof = sendMouse.indexOf('RequireDispatchWithinInterval(dispatchTimer);', dispatchAccepted)
+  const postTargetCheck = sendMouse.indexOf('RequireSendInputTarget(action, entry, point);', intervalProof)
+
+  return /private\s+const\s+int\s+ActionEffectFingerprintElements\s*=\s*64\s*;/.test(source)
+    && /if\s*\(count\+\+\s*>=\s*ActionEffectFingerprintElements\)\s*break\s*;/.test(fingerprint)
+    && /Append\(element\.Current\.HasKeyboardFocus\s*\?\s*'1'\s*:\s*'0'\)/.test(fingerprint)
+    && beforeSurface >= 0
+    && dispatch > beforeSurface
+    && inputEpoch > dispatch
+    && deadline > inputEpoch
+    && afterSurface > deadline
+    && proven > afterSurface
+    && uncertain > proven
+    && (coordinate.match(/SendMouseClick\(/g)?.length ?? 0) === 1
+    && !coordinate.includes('Stopwatch clickTimer = Stopwatch.StartNew();')
+    && firstTargetCheck >= 0
+    && secondTargetCheck > firstTargetCheck
+    && dispatchTimer > secondTargetCheck
+    && sendInput > dispatchTimer
+    && dispatchAccepted > sendInput
+    && intervalProof > dispatchAccepted
+    && postTargetCheck > intervalProof
+}
+
 function helperBlocksProcess(source: string, processName: string): boolean {
   const blockedApplication = source.match(
     /private\s+static\s+bool\s+IsBlockedApplication[\s\S]*?(?=\n\s*private\s+static\s+string\s+FileTime100ns)/,
@@ -533,6 +583,20 @@ describe('computer helper hardening contracts', () => {
     )
     expect(staleStateMutation).not.toBe(source)
     expect(toggleTransitionGuardIsPinned(staleStateMutation)).toBe(false)
+  })
+
+  it('proves an exact stateless coordinate click only from a bounded surface change without retrying', () => {
+    const source = helperSource()
+    expect(statelessCoordinateClickEffectProofIsPinned(source)).toBe(true)
+
+    const proof = 'if (!String.Equals(pointerBeforeSurface, pointerAfterSurface, StringComparison.Ordinal)) return Outcome(true, true);'
+    const coordinateStart = source.indexOf('POINT point = ActionPoint(action, entry);')
+    const proofIndex = source.indexOf(proof, coordinateStart)
+    const unprovenMutation = source.slice(0, proofIndex)
+      + proof.replace('Outcome(true, true)', 'Outcome(true, false)')
+      + source.slice(proofIndex + proof.length)
+    expect(unprovenMutation).not.toBe(source)
+    expect(statelessCoordinateClickEffectProofIsPinned(unprovenMutation)).toBe(false)
   })
 
   it('denies common browser executables while retaining ordinary desktop canaries', () => {

@@ -845,7 +845,9 @@ const GATE_MAX_WORKERS = 4
 // только после точного chunk readback без hardware/focus drift.
 // -> 7444 ИЗМЕРЕНО 19.09: automatic binding завершённого чата освобождает claim
 // перед discovery следующего чата, сохраняя manual и uncertain блокировки.
-const EXPECTED_TOTAL_TESTS = 7444
+// -> 7446 ИЗМЕРЕНО 19.09: stateless Invoke-only control получает один exact
+// coordinate click с bounded surface proof; stateful Toggle/Selection остаются UIA.
+const EXPECTED_TOTAL_TESTS = 7446
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

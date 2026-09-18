@@ -343,12 +343,18 @@ export function auditComputerHelperSource(source) {
     || !executeClickImplementation
     || !surfaceStateImplementation
     || !/InvokePattern\.Pattern[\s\S]*result\.Add\s*\(\s*"click"\s*\)/.test(supportedActionsImplementation)
-    || !/action\.Kind\s*==\s*"click"[\s\S]*InvokePattern\.Pattern[\s\S]*return\s+"uia"/.test(chooseMethodImplementation)
+    || !/action\.Kind\s*==\s*"click"[\s\S]*InvokePattern\.Pattern[\s\S]*return\s+"coordinates"/.test(chooseMethodImplementation)
     || !/InvokePattern\.Pattern[\s\S]*RequireTimelyActionCurrent\s*\(\s*action\s*,\s*expectedInput\s*,\s*cancellation\s*\)[\s\S]*RequireElementCurrent\s*\(\s*entry\s*\)[\s\S]*beforeSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*\(\(InvokePattern\)pattern\)\.Invoke\s*\(\s*\)[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*DateTime\.UtcNow\.AddMilliseconds\s*\(\s*1200\s*\)[\s\S]*afterSurface\s*=\s*SurfaceStateFingerprint\s*\(\s*action\.Identity\s*,\s*cancellation\s*\)[\s\S]*!String\.Equals\s*\(\s*beforeSurface\s*,\s*afterSurface\s*,\s*StringComparison\.Ordinal\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*true\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*false\s*\)/.test(executeClickImplementation)
-    || !/count\+\+\s*>=\s*MaxElements\s*\|\|\s*timer\.ElapsedMilliseconds\s*>\s*750/.test(surfaceStateImplementation)
+    || !/ActionEffectFingerprintElements\s*=\s*64/.test(source)
+    || !/count\+\+\s*>=\s*ActionEffectFingerprintElements\s*\)\s*break/.test(surfaceStateImplementation)
+    || !/timer\.ElapsedMilliseconds\s*>\s*750/.test(surfaceStateImplementation)
+    || !/HasKeyboardFocus/.test(surfaceStateImplementation)
     || !/element\.Current\.IsPassword\s*\|\|\s*IsAuthenticationControl\s*\(\s*element\s*\)\s*\|\|\s*IsLaunchSurfaceControl\s*\(\s*element\s*\)/.test(surfaceStateImplementation)
     || !/ValuePattern\.Pattern[\s\S]*Current\.Value/.test(surfaceStateImplementation)
-    || !/IdentityKey\s*\(\s*identity\s*\)/.test(surfaceStateImplementation)) {
+    || !/IdentityKey\s*\(\s*identity\s*\)/.test(surfaceStateImplementation)
+    || !/pointerBeforeSurface\s*=\s*SurfaceStateFingerprint[\s\S]*SendMouseClick\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*pointerAfterSurface\s*=\s*SurfaceStateFingerprint[\s\S]*!String\.Equals\s*\(\s*pointerBeforeSurface\s*,\s*pointerAfterSurface\s*,\s*StringComparison\.Ordinal\s*\)[\s\S]*return\s+Outcome\s*\(\s*true\s*,\s*true\s*\)/.test(executeClickImplementation)
+    || (executeClickImplementation.match(/SendMouseClick\s*\(/g)?.length ?? 0) !== 1
+    || !/RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*RequireNoHeldInputState[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)[\s\S]*dispatchTimer\s*=\s*Stopwatch\.StartNew[\s\S]*SendInput[\s\S]*action\.DispatchAccepted\s*=\s*true[\s\S]*RequireDispatchWithinInterval\s*\(\s*dispatchTimer\s*\)[\s\S]*RequireSendInputTarget\s*\(\s*action\s*,\s*entry\s*,\s*point\s*\)/.test(source)) {
     failures.push('UIA InvokePattern bounded surface readback contract missing')
   }
   const elementRevalidations = source.match(/RequireElementCurrent\s*\(\s*entry\s*\)\s*;/g)?.length ?? 0
@@ -415,13 +421,19 @@ export function auditComputerReducedActionSources({ helper, controller, main, to
   const mainController = mainControllerStart >= 0 && mainControllerEnd > mainControllerStart
     ? main.slice(mainControllerStart, mainControllerEnd)
     : ''
+  const exactElementCoordinateClick = matchedSourceSection(controller,
+    /function\s+acceptsExactElementCoordinateClick[\s\S]*?(?=\n}\n\nfunction\s+assertCoordinateFallback)/,
+  )
 
   if (!/const\s+allowUnverifiedGlobalInput\s*=\s*deps\.testOnlyAllowUnverifiedGlobalInput\s*===\s*true/.test(controller)
     || /testOnlyAllowUnverifiedGlobalInput/.test(mainController)
     || !/if\s*\(\s*!allowUnverifiedGlobalInput\s*&&\s*requiresUnverifiedGlobalInput\s*\(\s*input\.action\s*,\s*element\s*\)\s*\)/.test(controller)
     || !/return\s+action\s*===\s*['"]key['"]\s*\|\|\s*!element\?\.backend\.supportedActions\.includes\s*\(\s*action\s*\)/.test(controller)
+    || !/const\s+exactElementCoordinateClick\s*=\s*acceptsExactElementCoordinateClick\s*\(\s*input\.action\s*,\s*element\s*\)/.test(controller)
+    || !/const\s+uiaRequired[\s\S]{0,220}&&\s*!exactElementCoordinateClick/.test(controller)
     || !/if\s*\(\s*uiaRequired\s*&&\s*prepared\.method\s*!==\s*['"]uia['"]\s*\)/.test(controller)
-    || !/if\s*\(\s*prepared\.method\s*!==\s*['"]uia['"]\s*&&\s*!allowUnverifiedGlobalInput\s*\)/.test(controller)
+    || !/if\s*\(\s*prepared\.method\s*!==\s*['"]uia['"]\s*&&\s*!allowUnverifiedGlobalInput\s*&&\s*!\(\s*exactElementCoordinateClick\s*&&\s*prepared\.method\s*===\s*['"]coordinates['"]\s*\)\s*\)/.test(controller)
+    || !/action\s*===\s*['"]click['"][\s\S]*!!element\?\.backend\.bounds[\s\S]*supportedActions\.includes\s*\(\s*['"]click['"]\s*\)[\s\S]*!isStatefulClickState\s*\(\s*element\.backend\.state\s*\)/.test(exactElementCoordinateClick)
     || /result\.Add\s*\(\s*"key"\s*\)/.test(supportedActions)) {
     failures.push('production global input/key/coordinates boundary missing')
   }

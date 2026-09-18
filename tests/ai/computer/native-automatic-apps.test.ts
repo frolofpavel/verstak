@@ -18,11 +18,13 @@ let dir: string
 let db: Database
 let controller: ComputerController
 let beforePids: Set<number>
+let lastCommit: unknown
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'verstak-auto-apps-'))
   db = openDb(join(dir, 'acceptance.db'))
   beforePids = applicationPids()
+  lastCommit = null
 })
 
 afterEach(async () => {
@@ -91,7 +93,13 @@ describe('Computer Use automatic Windows app acceptance', () => {
         observationId: observation.observationId,
         elementRef: button!.elementRef,
       })
-      expect(result).toMatchObject({ status: 'verified', reason: 'independent-readback-verified' })
+      const failureReadback = result.status === 'verified'
+        ? null
+        : await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
+      expect(result, JSON.stringify({ labels, button, result, lastCommit, failureReadback })).toMatchObject({
+        status: 'verified',
+        reason: 'independent-readback-verified',
+      })
     }
 
     const readback = await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
@@ -108,9 +116,16 @@ function createNativeController(): ComputerController {
     appVersion: '2.9.1',
     requestTimeoutMs: 15_000,
   })
+  const backend = createComputerHelperBackend(client)
+  const commitAction = backend.commitAction.bind(backend)
+  backend.commitAction = async (...args) => {
+    const commit = await commitAction(...args)
+    lastCommit = commit
+    return commit
+  }
   return createComputerController({
     storage,
-    backend: createComputerHelperBackend(client),
+    backend,
     launchApplication: launch,
     automaticDiscoveryDelayMs: 200,
   })

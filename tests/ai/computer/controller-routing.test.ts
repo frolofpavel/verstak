@@ -452,7 +452,8 @@ describe('ComputerController — fresh routing and UIA-first', () => {
     expect(JSON.stringify(storage.listActions('bt-1'))).not.toContain(forgedElement)
   })
 
-  it('requires UIA when the observed element exposes the matching pattern', async () => {
+  it('requires UIA for an observed stateful click transition', async () => {
+    backend.observation.elements[0]!.state = 'off'
     backend.forceMethod = 'coordinates'
     const observation = await controller.observe({ browserTaskId: 'bt-1', runId: 'run-1' })
     const result = await controller.dispatch({
@@ -462,6 +463,24 @@ describe('ComputerController — fresh routing and UIA-first', () => {
     expect(result.status).toBe('blocked')
     expect(result.reason).toBe('uia-priority-violated')
     expect(backend.commitCount).toBe(0)
+  })
+
+  it('allows an exact element-backed coordinate click for a stateless Invoke-only control', async () => {
+    backend.observation.elements[0]!.role = 'Button'
+    backend.observation.elements[0]!.label = 'One'
+    backend.observation.elements[0]!.state = undefined
+    backend.observation.elements[0]!.supportedActions = ['click']
+    backend.forceMethod = 'coordinates'
+    const observation = await controller.observe({ browserTaskId: 'bt-1', runId: 'run-1' })
+    const result = await controller.dispatch({
+      actionId: 'invoke-only-coordinate', browserTaskId: 'bt-1', runId: 'run-1', action: 'click',
+      observationId: observation.observationId, elementRef: observation.elements[0]!.elementRef,
+    })
+
+    expect(result.status).toBe('verified')
+    expect(backend.lastPrepare?.uiaRequired).toBe(false)
+    expect(backend.lastPrepared?.requiresHitTest).toBe(true)
+    expect(backend.commitCount).toBe(1)
   })
 
   it('blocks unaccepted global SendInput in the production-default controller before commit', async () => {

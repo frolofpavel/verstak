@@ -423,12 +423,23 @@ describe('computer use packaged artifact checker', () => {
     const postPrepareFallbackMutation = {
       ...actionSources,
       controller: actionSources.controller.replace(
-        "if (prepared.method !== 'uia' && !allowUnverifiedGlobalInput)",
-        "if (false /* mutated: helper fallback may commit */)",
+        "&& !(exactElementCoordinateClick && prepared.method === 'coordinates')) {",
+        "&& false /* mutated: any helper fallback may commit */) {",
       ),
     }
     expect(postPrepareFallbackMutation.controller).not.toBe(actionSources.controller)
     expect(checker.auditComputerReducedActionSources(postPrepareFallbackMutation))
+      .toContain('production global input/key/coordinates boundary missing')
+
+    const unboundedCoordinateMutation = {
+      ...actionSources,
+      controller: actionSources.controller.replace(
+        '&& !isStatefulClickState(element.backend.state)',
+        '|| true /* mutated: any click may use coordinates */',
+      ),
+    }
+    expect(unboundedCoordinateMutation.controller).not.toBe(actionSources.controller)
+    expect(checker.auditComputerReducedActionSources(unboundedCoordinateMutation))
       .toContain('production global input/key/coordinates boundary missing')
 
     const mainBypassMutation = {
