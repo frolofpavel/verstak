@@ -843,7 +843,9 @@ const GATE_MAX_WORKERS = 4
 // -> 7443 ИЗМЕРЕНО 19.09: pin для штатной смены top-level title после первого
 // ValuePattern chunk без ослабления exact PID/start/HWND/element identity и
 // только после точного chunk readback без hardware/focus drift.
-const EXPECTED_TOTAL_TESTS = 7443
+// -> 7444 ИЗМЕРЕНО 19.09: automatic binding завершённого чата освобождает claim
+// перед discovery следующего чата, сохраняя manual и uncertain блокировки.
+const EXPECTED_TOTAL_TESTS = 7444
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

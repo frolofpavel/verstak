@@ -378,7 +378,19 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       return { ok: false, error: 'binding-active' }
     }
     if (binding?.claim && binding.claim.browserTaskId !== input.browserTaskId) {
-      return { ok: false, error: 'binding-owner-mismatch' }
+      if (binding.source !== 'automatic') {
+        return { ok: false, error: 'binding-owner-mismatch' }
+      }
+      if (!refreshDurableUncertainty(binding, binding.claim.browserTaskId)) {
+        return { ok: false, error: 'uncertain-reconciliation-required' }
+      }
+      if (deps.storage.listActions(binding.claim.browserTaskId, { status: 'executing' }).length > 0) {
+        return { ok: false, error: 'binding-active' }
+      }
+      // Automatic bindings are per-run leases, not a user-selected scope.
+      // Once the prior effect is durably settled, release its claim so a new
+      // ordinary chat can discover and bind its own target without Settings.
+      await unbind()
     }
 
     if (binding?.source === 'manual') {

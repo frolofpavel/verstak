@@ -130,4 +130,25 @@ describe('ComputerController — automatic target preparation', () => {
 
     expect(backend.focusCount).toBe(2)
   })
+
+  it('releases a completed automatic claim before preparing a different chat', async () => {
+    controller = createComputerController({ storage, backend })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      originalUserText: 'Открой Блокнот и напиши первый текст',
+    })).resolves.toMatchObject({ ok: true })
+
+    storage.create({ browserTaskId: 'bt-next', projectPath: '/p', runId: 'run-next' })
+    storage.appendRun({ browserTaskId: 'bt-next', runId: 'run-next' })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-next',
+      runId: 'run-next',
+      originalUserText: 'Открой Блокнот и напиши второй текст',
+    })).resolves.toMatchObject({ ok: true })
+
+    expect(backend.stopCount).toBe(1)
+    expect(backend.focusCount).toBe(2)
+    expect(controller.getBinding()).toMatchObject({ source: 'automatic' })
+  })
 })
