@@ -46,6 +46,11 @@ describe('Computer Use untrusted-context production wiring', () => {
     expect(authorize).toBeLessThan(registered)
     expect(source).toContain('return earlyRouteStop(`COMPUTER_USE_AUTHORIZATION_FAILED: ${authorization.error}`)')
     expect(source).toContain('computerUseAllowedActions,')
+    // Прогон, начатый поверх снятой отметки, обязан сказать об этом человеку
+    // карточкой в чате: иначе тихая компенсация неотличима от нормы.
+    expect(source).toContain('authorization.settledStaleUncertainty === true')
+    expect(source).toMatch(/computerStaleUncertaintySettled\)\s*\{\s*emitAgentProgress\(/u)
+    expect(source).toContain("id: 'computer-stale-uncertainty',")
     expect(source).toContain('resumeFromRunId: null')
     expect(source).toContain('!composerOverridesPreserveFreshProvenance(overrides)')
     expect(source).toContain('COMPUTER_USE_FRESH_COMPOSER_REQUIRED:')

@@ -135,7 +135,15 @@ export interface ComputerControllerDeps {
 }
 
 export type ComputerRunAuthorizationResult =
-  | { ok: true; bindingGeneration: number; expiresAt: number }
+  | {
+      ok: true
+      bindingGeneration: number
+      expiresAt: number
+      /** Прогон начался поверх недоказанного исхода прошлого действия, и эта
+       *  команда закрыла его сама. Фолбэк, работающий молча, прячет то, что
+       *  компенсирует, — человек обязан увидеть, что тут было неизвестное. */
+      settledStaleUncertainty?: boolean
+    }
   | { ok: false; error: ComputerSafetyCode }
 
 export type ComputerAutomaticRunResult = ComputerRunAuthorizationResult
@@ -410,8 +418,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       if (forced.kind !== 'selected') return { ok: false, error: 'manual-target-mismatch' }
       const focusError = await focusCurrentBinding()
       if (focusError) return focusError
-      await settleStaleUncertaintyForNewRequest(input.browserTaskId)
-      return authorizeRun(input)
+      return settleThenAuthorizeRun(input)
     }
 
     if (binding) await unbind()
@@ -453,8 +460,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       focusError = await focusCurrentBinding()
     }
     if (focusError) return focusError
-    await settleStaleUncertaintyForNewRequest(input.browserTaskId)
-    return authorizeRun(input)
+    return settleThenAuthorizeRun(input)
 
     function automaticTargetCandidates(list: readonly ComputerCandidate[]) {
       return list.flatMap(candidate => {
@@ -858,36 +864,50 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
    *  наблюдение, чтобы следующий шаг обязан был увидеть фактическое состояние.
    *  Что НЕ снимается автоматически: действие, числящееся выполняющимся прямо
    *  сейчас, и нечитаемый журнал — там исход ещё не решён и решать его нечем. */
-  async function settleStaleUncertaintyForNewRequest(browserTaskId: string): Promise<boolean> {
+  async function settleStaleUncertaintyForNewRequest(
+    browserTaskId: string,
+  ): Promise<'settled' | 'nothing-to-settle' | 'blocked'> {
     const current = binding
-    if (!current || active || stopAcksInFlight > 0) return false
+    if (!current || active || stopAcksInFlight > 0) return 'blocked'
     refreshDurableUncertainty(current, browserTaskId)
-    if (current.uncertainLookupFailed) return false
+    if (current.uncertainLookupFailed) return 'blocked'
     const pending = current.uncertain
-    if (!pending) return true
-    if (pending.status !== 'uncertain') return false
-    if (pending.targetFingerprint !== current.targetFingerprint) return false
+    if (!pending) return 'nothing-to-settle'
+    if (pending.status !== 'uncertain') return 'blocked'
+    if (pending.targetFingerprint !== current.targetFingerprint) return 'blocked'
 
     try {
       const probe = normalizeProbe(await deps.backend.probeBinding(current.identity))
       assertSafeProbe(probe)
-      if (!sameIdentity(current.identity, probe.identity)) return false
+      if (!sameIdentity(current.identity, probe.identity)) return 'blocked'
     } catch {
-      return false
+      return 'blocked'
     }
-    if (binding !== current || active || stopAcksInFlight > 0) return false
+    if (binding !== current || active || stopAcksInFlight > 0) return 'blocked'
 
     try {
-      if (!deps.storage.settleComputerEffectForNewRequest(pending.actionId)) return false
+      if (!deps.storage.settleComputerEffectForNewRequest(pending.actionId)) return 'blocked'
     } catch {
       current.uncertainLookupFailed = true
       currentObservation = null
-      return false
+      return 'blocked'
     }
     currentObservation = null
     current.uncertain = null
     refreshDurableUncertainty(current, browserTaskId)
-    return !current.uncertainLookupFailed && current.uncertain == null
+    return !current.uncertainLookupFailed && current.uncertain == null ? 'settled' : 'blocked'
+  }
+
+  /** Снятие отметки и выдача capability идут одной операцией, чтобы прогон,
+   *  начатый поверх неизвестного исхода, всегда нёс об этом пометку наружу. */
+  async function settleThenAuthorizeRun(
+    input: { browserTaskId: string; runId: string },
+  ): Promise<ComputerRunAuthorizationResult> {
+    const settlement = await settleStaleUncertaintyForNewRequest(input.browserTaskId)
+    const authorization = authorizeRun(input)
+    return authorization.ok && settlement === 'settled'
+      ? { ...authorization, settledStaleUncertainty: true }
+      : authorization
   }
 
   async function shutdown(): Promise<void> {

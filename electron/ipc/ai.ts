@@ -1544,6 +1544,7 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
     // Claim the already selected main-owned target after every early route
     // preflight, but before the model sees tools. The send AbortSignal owns the
     // exact lineage from this point, including Stop while the model is thinking.
+    let computerStaleUncertaintySettled = false
     if (computerUseAllowedActions.length > 0) {
       const authorization = await authorizeComputerRun({
         browserTaskId,
@@ -1560,6 +1561,10 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
         }, 'warn')
         return earlyRouteStop(`COMPUTER_USE_AUTHORIZATION_FAILED: ${authorization.error}`)
       }
+      computerStaleUncertaintySettled = authorization.settledStaleUncertainty === true
+      if (computerStaleUncertaintySettled) {
+        logRuntime('computer_use.uncertain.settled_by_new_request', { sendId, runId, browserTaskId })
+      }
     }
     registerChatRun(sendId, chatIdNum)
     const lastUserText = computerUseTechnicalSinksOmitted
@@ -1572,6 +1577,18 @@ export function registerAiIpc(deps: AiDeps): AiIpcGateway {
       detail: lastUserText ? `Запрос: ${lastUserText}` : 'Получил новое сообщение и готовлю запуск.',
       status: 'done'
     })
+    // Работа началась поверх неизвестного исхода прошлого действия. Молчать об
+    // этом нельзя: тихая компенсация делает деградацию неотличимой от нормы.
+    if (computerStaleUncertaintySettled) {
+      emitAgentProgress(taggedSender, sendId, {
+        id: 'computer-stale-uncertainty',
+        phase: 'understand',
+        title: 'Исход прошлого действия в окне остался непроверенным',
+        detail: 'Окно то же самое, отметка снята этой командой. Начинаю со свежего снимка окна, '
+          + 'чтобы увидеть фактическое состояние.',
+        status: 'done'
+      })
+    }
     emitAgentProgress(taggedSender, sendId, {
       id: 'context',
       phase: 'context',

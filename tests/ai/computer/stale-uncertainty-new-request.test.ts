@@ -91,6 +91,31 @@ describe('Computer Use — незакрытая отметка не запира
     })).resolves.toMatchObject({ ok: true })
   })
 
+  // Фолбэк, срабатывающий молча, прячет дефект, который компенсирует. Прогон,
+  // начатый поверх неизвестного исхода, обязан нести пометку наружу — по ней
+  // ipc/ai.ts показывает человеку карточку в чате.
+  it('сообщает наружу, что прогон начат поверх снятой отметки', async () => {
+    controller = createComputerController({ storage, backend })
+    await leaveUncertainEffect()
+
+    storage.appendRun({ browserTaskId: 'bt-auto', runId: 'run-2' })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto', runId: 'run-2', originalUserText: CALC,
+    })).resolves.toMatchObject({ ok: true, settledStaleUncertainty: true })
+  })
+
+  // Контрольная пара: снимать было нечего — пометки нет, иначе карточка висела
+  // бы на каждой обычной команде и перестала что-либо значить.
+  it('без незакрытой отметки пометки о снятии нет', async () => {
+    controller = createComputerController({ storage, backend })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto', runId: 'run-1', originalUserText: CALC,
+    })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    expect(await controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto', runId: 'run-1', originalUserText: CALC,
+    })).not.toHaveProperty('settledStaleUncertainty')
+  })
+
   it('снятие оставляет след в журнале и не выдумывает исход действия', async () => {
     controller = createComputerController({ storage, backend })
     await leaveUncertainEffect()
