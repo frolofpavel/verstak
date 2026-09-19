@@ -15,6 +15,7 @@
     "mobile:relay:start": "node out/mobile-relay/server.mjs",
     "smoke:browser-spa": "node scripts/smoke-browser-spa.mjs",
     "smoke:isolated-browser": "node scripts/smoke-isolated-browser.mjs",
+    "smoke:context-menu": "node scripts/smoke-context-menu.mjs",
     "smoke:agency-ui": "npm run electron-rebuild && npm run build && node scripts/smoke-agency-ui.mjs",
     "pretest": "node scripts/safe-rebuild.cjs",
     "test": "vitest run",

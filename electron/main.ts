@@ -8,6 +8,7 @@ import { registerRuntimeLogIpc } from './runtime-log-ipc'
 import { decidePopupNavigation } from './ai/popup-policy'
 import { runtimeFlagOn } from '../shared/contracts/runtime-flag-policy'
 import { decideMainWindowNavigation, decideMainWindowPopup } from './main-window-navigation'
+import { buildEditableContextMenu } from './editable-context-menu'
 import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish, isTrackedWebview } from './browser/network-capture'
 import { shouldStampAppCsp } from './browser/csp-scope'
 import { closeAllIsolatedSessions } from './browser/isolated-session'
@@ -522,6 +523,17 @@ app.whenReady().then(() => {
           logRuntime('window.popup.blocked', { url: String(url).slice(0, 500), reason: popup.reason }, 'warn')
         }
         return { action: 'deny' }
+      })
+      // 2.9.2: правый клик в поле ввода. У Electron контекстного меню нет —
+      // Chromium только сообщает событие, меню строит приложение. Подписки не
+      // было, и вставить ключ Gateway правой кнопкой было нельзя (@lovelymist).
+      // Строим только на редактируемом элементе: проекты и чаты остаются за
+      // своим renderer-меню. Ни текст выделения, ни буфер обмена здесь не
+      // читаются — вставку делает сам Chromium по роли.
+      contents.on('context-menu', (_ev, params) => {
+        const template = buildEditableContextMenu(params)
+        if (!template) return
+        Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined })
       })
     }
     if (contents.getType() === 'webview') {
