@@ -324,12 +324,20 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     const markDisconnectedDuringHostInit = (): void => {
       disconnectedDuringHostInit = true
     }
+    const stopTrackingHostInitDisconnect = (): void => {
+      req.off('aborted', markDisconnectedDuringHostInit)
+      req.socket.off('close', markDisconnectedDuringHostInit)
+      res.off('close', markDisconnectedDuringHostInit)
+      res.off('error', markDisconnectedDuringHostInit)
+    }
     req.once('aborted', markDisconnectedDuringHostInit)
+    req.socket.once('close', markDisconnectedDuringHostInit)
     res.once('close', markDisconnectedDuringHostInit)
     res.once('error', markDisconnectedDuringHostInit)
 
     const resolved = await hostFor(req)
     if ('error' in resolved) {
+      stopTrackingHostInitDisconnect()
       res.writeHead(400, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: resolved.error }))
       return
@@ -352,9 +360,13 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     // Клиент мог уйти, пока await hostFor() инициализировал tenant-host. Событие
     // close тогда уже прошло до подписки выше; явный readback не даёт потерять lease.
     if (disconnectedDuringHostInit || req.destroyed || req.aborted || res.destroyed || res.writableEnded) {
+      stopTrackingHostInitDisconnect()
       releaseHost()
       return
     }
+    // Дальше lease защищают события ServerResponse выше. Socket-listener был
+    // нужен только поперёк await hostFor() и не должен копиться на keep-alive.
+    stopTrackingHostInitDisconnect()
     resolved.onShutdown?.(() => {
       // host.close уже дописал/reconcile'нул durable status. Теперь закрываем в том
       // числе SSE зависшего provider и синхронно отпускаем DB-close barrier.
