@@ -69,6 +69,9 @@ describe('assembleSendSystem — приоритет веток системно�
     expect(system).toMatch(/Calculator[\s\S]*visible display is already (?:0|zero)[\s\S]*do not click (?:Clear|Очистить)/iu)
     expect(system).toMatch(/stale expression or result[\s\S]*exact role=Button[\s\S]*(?:Clear|Очистить)/iu)
     expect(system).toMatch(/exact role=Button[\s\S]*never[\s\S]*(?:display|Text)/u)
+    expect(system).toMatch(/never use wait_for[\s\S]*Calculator/iu)
+    expect(system).toMatch(/125 × 47[\s\S]*One[\s\S]*Two[\s\S]*Five[\s\S]*Multiply by[\s\S]*Four[\s\S]*Seven[\s\S]*Equals/u)
+    expect(system).toMatch(/never begin[\s\S]*(?:operator|Equals)/iu)
     expect(system).toMatch(/final observation[\s\S]*visible result/u)
   })
 

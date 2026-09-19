@@ -70,7 +70,12 @@ export function parseAutomaticComputerUseRequest(value: unknown): AutomaticCompu
       targetApp,
       sourceApp: null,
       openTargetIfMissing: true,
-      allowedActions: ['observe', 'wait_for', 'click'],
+      // Calculator is already discovered before the model starts and every
+      // verified click returns its own independent readback. A free-form
+      // wait_for can match the static keypad labels (for example 1, 2 and 5)
+      // even though the display did not change, which lets the agent burn the
+      // whole turn budget without entering the expression.
+      allowedActions: ['observe', 'click'],
     }
   }
   return null

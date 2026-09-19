@@ -70,8 +70,10 @@ describe('Computer Use automatic Windows app acceptance', () => {
     })
     expect(prepared).toMatchObject({ ok: true })
 
+    // Fresh Calculator starts at a clean zero. Clear would be idempotent and
+    // therefore correctly fail the engine's independent-effect proof. The
+    // ordinary agent flow must begin with the first operand instead.
     for (const labels of [
-      ['Clear', 'Очистить'],
       ['One', 'Один'],
       ['Two', 'Два'],
       ['Five', 'Пять'],

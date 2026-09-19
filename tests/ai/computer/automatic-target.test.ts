@@ -37,7 +37,7 @@ describe('Computer Use automatic target intent', () => {
         targetApp: 'calculator',
         sourceApp: null,
         openTargetIfMissing: true,
-        allowedActions: ['observe', 'wait_for', 'click'],
+        allowedActions: ['observe', 'click'],
       })
   })
 
