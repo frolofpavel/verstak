@@ -1,8 +1,8 @@
 # Verstak
 
-Verstak — открытый ИИ-помощник для Windows и универсальный исполнитель задач на компьютере пользователя. Он работает с файлами, документами, браузером, данными и кодом через подключённые AI-модели, сохраняя проекты, историю, память и инструменты в одной независимой рабочей среде.
+Verstak — открытый ИИ-помощник для работы и жизни. Он помогает выбирать, учиться, писать и планировать, а когда нужно — работает с файлами, браузером, программами и кодом на компьютере пользователя.
 
-*AI work assistant for Windows: describe a task in plain words, Verstak does it on your computer.*
+*AI assistant for work and everyday life: ask, choose, write, plan, or let Verstak handle a task on your Windows computer.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -12,9 +12,9 @@ Verstak — открытый ИИ-помощник для Windows и униве�
 
 ## What is Verstak
 
-You describe a task in plain words; Verstak uses a connected AI model and the tools on your computer to do the work — read the material, create or change files, work with a website or an app, prepare a document, a table, a research note, a design or code.
+You describe a question or task in plain words; Verstak can help you choose, understand, write, and plan — or use tools on your computer to read material, change files, work with a website or an app, prepare a document, a design, or code.
 
-Verstak is not only an editor, not only an IDE, not only a programmer's assistant, and not a chat that hands out advice. Working with code is one of its capabilities alongside documents, files, the browser, data, and other work tasks.
+Verstak is not only an editor, IDE, programmer's assistant, or business tool. Code and professional work are capabilities alongside everyday questions, learning, writing, planning, documents, files, and the browser.
 
 The working environment lives on your machine and is not permanently tied to one AI company. Connect the API, subscription, or local model available to you: projects, history, memory, and tools belong to the app, so switching the model does not mean moving your whole workspace. One available connection is enough to start.
 

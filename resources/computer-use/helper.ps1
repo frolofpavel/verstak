@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $script:ProtocolVersion = 1
 $script:HelperVersion = '2.9.1'
-$script:AppVersion = '2.9.1'
+$script:AppVersion = '2.9.2'
 
 $helperSource = @'
 using System;
@@ -40,7 +40,7 @@ namespace VerstakComputerUse
     {
         private const int ProtocolVersion = 1;
         private const string HelperVersion = "2.9.1";
-        private const string AppVersion = "2.9.1";
+        private const string AppVersion = "2.9.2";
         private const int MaxMessageBytes = 65536;
         private const int MaxCandidates = 128;
         private const int MaxCandidateLeases = 128;

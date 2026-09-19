@@ -7,7 +7,7 @@ describe('computer helper Windows read-only smoke', () => {
   it.runIf(process.platform === 'win32')('rejects clearFirst and empty type at the direct helper prepare boundary', async () => {
     const client = new ComputerHelperClient({
       helperPath: join(process.cwd(), 'resources', 'computer-use', 'helper.ps1'),
-      appVersion: '2.9.1',
+      appVersion: '2.9.2',
       requestTimeoutMs: 15_000,
     })
     const base = {
@@ -61,14 +61,14 @@ describe('computer helper Windows read-only smoke', () => {
   it.runIf(process.platform === 'win32')('handshakes, enumerates candidates and shuts down without desktop action', async () => {
     const client = new ComputerHelperClient({
       helperPath: join(process.cwd(), 'resources', 'computer-use', 'helper.ps1'),
-      appVersion: '2.9.1',
+      appVersion: '2.9.2',
       requestTimeoutMs: 15_000,
     })
     const hello = await client.hello()
     expect(hello).toMatchObject({
       protocolVersion: 1,
       helperVersion: '2.9.1',
-      appVersion: '2.9.1',
+      appVersion: '2.9.2',
       inputMonitorReady: true,
     })
     await expect(client.ping()).resolves.toMatchObject({ ok: true })
@@ -118,7 +118,7 @@ describe('computer helper Windows read-only smoke', () => {
     if (!owner.pid) throw new Error('temporary owner process did not start')
     const client = new ComputerHelperClient({
       helperPath: join(process.cwd(), 'resources', 'computer-use', 'helper.ps1'),
-      appVersion: '2.9.1',
+      appVersion: '2.9.2',
       ownerPid: owner.pid,
       requestTimeoutMs: 15_000,
     })
@@ -146,7 +146,7 @@ describe('computer helper Windows read-only smoke', () => {
   it.runIf(process.platform === 'win32')('rejects the correct owner PID with the wrong exact creation FILETIME', async () => {
     const client = new ComputerHelperClient({
       helperPath: join(process.cwd(), 'resources', 'computer-use', 'helper.ps1'),
-      appVersion: '2.9.1',
+      appVersion: '2.9.2',
       ownerPid: process.pid,
       resolveOwnerStartTime100ns: () => '1',
       requestTimeoutMs: 15_000,

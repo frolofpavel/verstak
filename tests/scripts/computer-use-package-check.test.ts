@@ -243,7 +243,7 @@ describe('computer use packaged artifact checker', () => {
     const result = checker.checkComputerUsePackage({ root: ROOT, sourceDir: fixture() })
     expect(result.ok, result.failures.join('; ')).toBe(true)
     expect(result.evidence).toMatchObject({
-      versionTriplet: { protocolVersion: 1, appVersion: '2.9.1', helperVersion: '2.9.1' },
+      versionTriplet: { protocolVersion: 1, appVersion: '2.9.2', helperVersion: '2.9.1' },
       helperBytes: expect.any(Number),
       helperSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     })

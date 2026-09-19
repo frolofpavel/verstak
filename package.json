@@ -1,6 +1,6 @@
 {
   "name": "verstak",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "AI work assistant for Windows: describe a task in plain words, Verstak does it on your computer.",
   "main": "out/main/main.mjs",
   "scripts": {
