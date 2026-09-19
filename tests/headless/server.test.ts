@@ -516,8 +516,7 @@ describe('headless server — HTTP/SSE транспорт (Этап 1а, №3)',
 
     const live = await openSse(port, '/tasks/run-fake-1/events')
     emit({ type: 'text', text: `live-only-${'x'.repeat(2048)}` })
-    await new Promise<void>(resolve => setImmediate(resolve))
-    expect(live.lines.some(line => line.includes('live-only-'))).toBe(true)
+    await vi.waitFor(() => expect(live.lines.some(line => line.includes('live-only-'))).toBe(true))
     live.req.destroy()
     await live.closed
 

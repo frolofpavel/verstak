@@ -1,8 +1,8 @@
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join, resolve } from 'path'
+import { join } from 'path'
 import {
   addWorktree,
   listWorktrees,
@@ -16,6 +16,7 @@ import {
   reconcileOrphanWorktrees,
   type WorktreeGcEntry,
 } from '../../electron/ai/worktree-lifecycle'
+import { canonicalPathForComparison } from '../../electron/ai/path-policy'
 
 vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
 
@@ -57,11 +58,8 @@ function commit(repo: string, message: string): void {
 }
 
 function samePath(a: string, b: string): boolean {
-  const canonical = (value: string) => {
-    try { return realpathSync(value) } catch { return resolve(value) }
-  }
-  const left = canonical(a).replace(/\\/g, '/').toLowerCase()
-  const right = canonical(b).replace(/\\/g, '/').toLowerCase()
+  const left = canonicalPathForComparison(a).replace(/\\/g, '/').toLowerCase()
+  const right = canonicalPathForComparison(b).replace(/\\/g, '/').toLowerCase()
   return left === right
 }
 

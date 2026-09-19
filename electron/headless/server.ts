@@ -339,7 +339,7 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     res.once('error', releaseHost)
     // Клиент мог уйти, пока await hostFor() инициализировал tenant-host. Событие
     // close тогда уже прошло до подписки выше; явный readback не даёт потерять lease.
-    if (res.destroyed || res.writableEnded) {
+    if (req.destroyed || req.aborted || res.destroyed || res.writableEnded) {
       releaseHost()
       return
     }
