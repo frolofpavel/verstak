@@ -27,6 +27,11 @@ const memoryText = 'Mac M0 canary memory survived restart.'
 const secretValue = 'mac-m0-canary-secret-value'
 let mounted = false
 let apiCalls = 0
+let phase = 'preflight'
+
+function annotationText(value) {
+  return String(value).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')
+}
 
 function sseChunk(payload) {
   return `data: ${JSON.stringify(payload)}\n\n`
@@ -234,31 +239,42 @@ async function secondRun(page, first) {
 let firstApp
 let secondApp
 try {
+  phase = 'prepare-fixture'
   mkdirSync(mountPoint)
   mkdirSync(installRoot)
   mkdirSync(projectPath)
   writeFileSync(inputFile, 'before mac canary\n', 'utf8')
+  phase = 'mount-dmg'
   execFileSync('/usr/bin/hdiutil', ['attach', join(releaseDir, dmgName), '-nobrowse', '-readonly', '-mountpoint', mountPoint], { stdio: 'inherit' })
   mounted = true
   const sourceApp = join(mountPoint, 'Verstak.app')
   if (!existsSync(sourceApp)) throw new Error('Verstak.app не найден внутри DMG')
+  phase = 'copy-app'
   cpSync(sourceApp, installedApp, { recursive: true })
+  phase = 'start-mock-api'
   const baseUrl = await listen()
 
+  phase = 'first-launch'
   const firstLaunch = await launch()
   firstApp = firstLaunch.electronApp
+  phase = 'first-run-user-flow'
   const first = await firstRun(firstLaunch.page, baseUrl)
+  phase = 'first-shutdown'
   await firstApp.close()
   firstApp = null
 
+  phase = 'second-launch'
   const secondLaunch = await launch()
   secondApp = secondLaunch.electronApp
+  phase = 'restart-persistence'
   const persisted = await secondRun(secondLaunch.page, first)
   const failures = Object.entries(persisted).filter(([, value]) => value !== true)
   if (failures.length) throw new Error(`Restart assertions failed: ${failures.map(([key]) => key).join(', ')}`)
+  phase = 'second-shutdown'
   await secondApp.close()
   secondApp = null
 
+  phase = 'keychain-readback'
   const dbPath = join(userDataDir, 'verstak.db')
   const db = new DatabaseSync(dbPath, { readOnly: true })
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('custom_openai_api_key')
@@ -267,6 +283,7 @@ try {
   const keychainEncrypted = typeof row?.value === 'string' && row.value !== plainBase64
   if (!keychainEncrypted) throw new Error('safeStorage/Keychain encryption was not available')
 
+  phase = 'startup-readback'
   const runtimeLog = join(userDataDir, 'logs', 'runtime.jsonl')
   const startupCount = existsSync(runtimeLog)
     ? (readFileSync(runtimeLog, 'utf8').match(/startup\.ok/g) || []).length
@@ -274,6 +291,7 @@ try {
   if (startupCount < 2) throw new Error(`Expected two packaged startup.ok markers, got ${startupCount}`)
   if (apiCalls < 4) throw new Error(`Shared agent core did not complete tool loop: API calls=${apiCalls}`)
 
+  phase = 'write-evidence'
   const evidence = {
     status: 'passed',
     platform: `${process.platform}-${process.arch}`,
@@ -288,6 +306,24 @@ try {
   }
   writeFileSync(join(releaseDir, 'mac-m0-smoke.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
   console.log(JSON.stringify(evidence, null, 2))
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  const stack = error instanceof Error ? error.stack : undefined
+  const evidence = {
+    status: 'failed',
+    platform: `${process.platform}-${process.arch}`,
+    artifact: basename(dmgName),
+    phase,
+    message,
+    stack,
+    apiCalls,
+  }
+  try {
+    writeFileSync(join(releaseDir, 'mac-m0-smoke.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
+  } catch { /* original failure remains authoritative */ }
+  console.error(`::error title=Mac M0 packaged smoke::${annotationText(`${phase}: ${message}`)}`)
+  console.error(JSON.stringify(evidence, null, 2))
+  throw error
 } finally {
   try { await firstApp?.close() } catch { /* already closed */ }
   try { await secondApp?.close() } catch { /* already closed */ }
