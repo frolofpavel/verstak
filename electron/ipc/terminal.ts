@@ -6,6 +6,20 @@ import { resolve, relative, isAbsolute, sep } from 'path'
 
 const sessions = new Map<number, pty.IPty>()
 
+export function resolveTerminalShell(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  pathExists: (path: string) => boolean = existsSync,
+): string {
+  if (platform === 'win32') return 'powershell.exe'
+  if (platform !== 'darwin') return 'bash'
+
+  const candidates = [env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh']
+  return candidates.find((candidate): candidate is string => Boolean(
+    candidate?.startsWith('/') && pathExists(candidate),
+  )) ?? '/bin/sh'
+}
+
 /** Безопасный cwd для терминала: если запрошенный путь существует И лежит
  *  внутри одного из известных корней проектов — используем его; иначе
  *  откатываемся в домашнюю папку (не спавним в произвольной системной директории). */
@@ -80,7 +94,7 @@ export function registerTerminalIpc(getKnownRoots: () => string[] = () => []): v
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return -1
     const safeCwd = resolveSafeTerminalCwd(cwd, getKnownRoots())
-    const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash'
+    const shell = resolveTerminalShell()
     const env = {
       ...(process.env as Record<string, string>),
       LANG: 'en_US.UTF-8',

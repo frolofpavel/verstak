@@ -161,7 +161,7 @@ describe('Browser Employee native-host ownership policy', () => {
       /installedRegistryOwner:\s*app\.isPackaged\s*&&\s*isStableOwnershipConfirmed\(ownershipMigration\)/,
     )
     expect(source).toMatch(
-      /browserBridge\s*=\s*browserHostPolicy\.canRegister\s*\?\s*createBridgeServer\(/,
+      /browserBridge\s*=\s*desktopCapabilities\.browserEmployee\s*&&\s*browserHostPolicy\.canRegister\s*\?\s*createBridgeServer\(/,
     )
   })
 

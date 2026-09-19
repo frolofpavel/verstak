@@ -869,7 +869,9 @@ const GATE_MAX_WORKERS = 4
 // следующую команду человека — 0 падений, 20 skip, --maxWorkers=4.
 // -> 7476 ИЗМЕРЕНО 19.09: снятие залежавшейся отметки видно человеку строкой
 // в чате, а не только в журнале — 0 падений, 20 skip, --maxWorkers=4.
-const EXPECTED_TOTAL_TESTS = 7476
+// -> 7490 ИЗМЕРЕНО 19.09: Mac M0 platform/package/lifecycle/shell и честные
+// unavailable-контракты Browser Employee — 0 падений, 20 skip, --maxWorkers=4.
+const EXPECTED_TOTAL_TESTS = 7490
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

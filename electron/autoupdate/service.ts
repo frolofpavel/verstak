@@ -31,6 +31,7 @@ import { verifyPayloadRoot } from './payload'
 import { logAutoUpdate } from './log'
 import { acquireLock, nowState, readJson, readState, resetState, writeState, touchLock } from './state'
 import type { AutoUpdateState, AutoUpdateStep, UiUpdateSnapshot } from './types'
+import { desktopPlatformCapabilities } from '../desktop-platform'
 
 const PERIODIC_CHECK_MS = 4 * 60 * 60 * 1000
 
@@ -650,10 +651,35 @@ function registerDevUpdateStateStub(): void {
   }))
 }
 
+export const MAC_M0_UPDATE_DISABLED_REASON = 'Автообновление в Mac M0 отключено. Устанавливайте новую DMG вручную.'
+
+function registerDisabledUpdaterIpc(reason: string): void {
+  if (updaterIpcRegistered || devUpdateStubRegistered) return
+  updaterIpcRegistered = true
+  const snapshot = (): UiUpdateSnapshot => ({
+    phase: 'error',
+    installedVersion: app.getVersion(),
+    error: reason,
+  })
+  ipcMain.handle('update:check', async () => snapshot())
+  ipcMain.handle('update:ensure-download', async () => ({ ok: false, reason }))
+  ipcMain.handle('update:install', async () => ({ ok: false, reason }))
+  ipcMain.handle('update:cleanup-temp', async () => ({
+    ok: true,
+    deletedBytes: 0,
+    deletedPaths: [],
+  }))
+  ipcMain.handle('update:get-state', async () => snapshot())
+}
+
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   registerReleaseNotesIpc()
   if (!app.isPackaged) {
     registerDevUpdateStateStub()
+    return
+  }
+  if (!desktopPlatformCapabilities().autoUpdate) {
+    registerDisabledUpdaterIpc(MAC_M0_UPDATE_DISABLED_REASON)
     return
   }
   new AutoUpdateService(mainWindow).init()

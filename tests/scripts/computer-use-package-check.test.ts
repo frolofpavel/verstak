@@ -299,9 +299,9 @@ describe('computer use packaged artifact checker', () => {
 
   it('packages the helper and wires a fail-closed check into the real release gate', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
-      build?: { extraResources?: Array<{ from?: string; to?: string }> }
+      build?: { win?: { extraResources?: Array<{ from?: string; to?: string }> } }
     }
-    expect(pkg.build?.extraResources).toContainEqual({
+    expect(pkg.build?.win?.extraResources).toContainEqual({
       from: 'resources/computer-use/helper.ps1',
       to: 'computer-use/helper.ps1',
     })

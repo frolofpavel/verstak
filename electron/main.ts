@@ -12,6 +12,7 @@ import { trackWebview, untrackWebview, resetTab, noteStart, noteFinish, isTracke
 import { shouldStampAppCsp } from './browser/csp-scope'
 import { closeAllIsolatedSessions } from './browser/isolated-session'
 import { loadPermissionRules } from './ai/permission-rules'
+import { desktopPlatformCapabilities } from './desktop-platform'
 
 // Linux AppImage + Electron sandbox: на некоторых дистрибутивах (Ubuntu 24+, Fedora)
 // AppImage не может создать sandbox namespace. Electron падает с:
@@ -367,6 +368,7 @@ function installCSP(): void {
 }
 
 installAppIdentity()
+const desktopCapabilities = desktopPlatformCapabilities()
 logRuntime('app.bootstrap', {
   version: app.getVersion(),
   isPackaged: app.isPackaged,
@@ -717,7 +719,7 @@ app.whenReady().then(() => {
   // durable action ledger as Browser Employee. The helper is lazy-spawned on
   // first use; startup never enumerates or touches the desktop. Unsupported
   // platforms and missing reviewed payload fail closed in both tool and IPC.
-  const computerUseSupported = process.platform === 'win32'
+  const computerUseSupported = desktopCapabilities.computerUse
   const computerHelperPath = app.isPackaged
     ? join(process.resourcesPath, 'computer-use', 'helper.ps1')
     : join(app.getAppPath(), 'resources', 'computer-use', 'helper.ps1')
@@ -850,7 +852,7 @@ app.whenReady().then(() => {
       && isStableOwnershipConfirmed(ownershipMigration),
   })
   try {
-    browserBridge = browserHostPolicy.canRegister
+    browserBridge = desktopCapabilities.browserEmployee && browserHostPolicy.canRegister
       ? createBridgeServer({
       stateDir: dir,
       appVersion: app.getVersion(),
@@ -974,7 +976,7 @@ app.whenReady().then(() => {
         }
       } catch { /* next */ }
     }
-    if (hostSrc && browserHostPolicy.canInstall) {
+    if (desktopCapabilities.browserEmployee && hostSrc && browserHostPolicy.canInstall) {
       // Packaged layout: <app>/Verstak.exe + <app>/resources/browser-bridge/*
       // Relative from host.cmd → ../../Verstak.exe. Absolute bake = primary.
       const result = installNativeHost({
@@ -1011,6 +1013,7 @@ app.whenReady().then(() => {
   }
   // Browser card IPC: pairing code, host install/repair, status (EXT-B1/C1).
   registerBrowserBridgeIpc({
+    supported: desktopCapabilities.browserEmployee,
     getBridge: () => browserBridge,
     getHostInstallDir: () => browserHostInstallDir,
     getHostScriptSource: () => {

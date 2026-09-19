@@ -13,6 +13,14 @@ export function installAppIdentity(): void {
 }
 
 let shutdownDone = false
+let appQuitting = false
+
+export function shouldHideWindowOnClose(
+  platform: NodeJS.Platform,
+  isQuitting: boolean,
+): boolean {
+  return platform === 'darwin' && !isQuitting
+}
 
 /** Освобождает вспомогательные окна/PTY/MCP — иначе процесс висит после закрытия UI. */
 export function runAppShutdown(): void {
@@ -25,13 +33,28 @@ export function runAppShutdown(): void {
 }
 
 export function bindMainWindowLifecycle(mainWindow: BrowserWindow): void {
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (event) => {
+    if (shouldHideWindowOnClose(process.platform, appQuitting)) {
+      event.preventDefault()
+      mainWindow.hide()
+      return
+    }
     runAppShutdown()
   })
 }
 
 export function installGlobalQuitHandlers(): void {
-  app.on('before-quit', () => runAppShutdown())
+  app.on('before-quit', () => {
+    appQuitting = true
+    runAppShutdown()
+  })
+  app.on('activate', () => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

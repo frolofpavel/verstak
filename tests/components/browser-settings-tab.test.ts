@@ -152,4 +152,22 @@ describe('BrowserSettingsTab', () => {
 
     await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
   })
+
+  it('на macOS честно показывает недоступность и не запускает подключение', async () => {
+    const { connect } = installApi({
+      supported: false,
+      unavailableReason: 'Browser Employee доступен только в Windows',
+      ui: 'unsupported',
+      connected: false,
+      authenticated: false,
+      host: { installed: false, needsRepair: false },
+      lastError: null,
+    })
+
+    renderBrowserSettings()
+
+    expect(await screen.findByText('Доступно только в Windows')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Проверить' }).hasAttribute('disabled')).toBe(true)
+    expect(connect).not.toHaveBeenCalled()
+  })
 })

@@ -4,6 +4,7 @@ import type { BrowserBridgeStateDTO } from '../../types/api'
 import { ComputerUseSettingsCard } from './ComputerUseSettingsCard'
 
 type BrowserSetupStatus =
+  | 'unsupported'
   | 'loading'
   | 'disconnected'
   | 'ready'
@@ -15,6 +16,7 @@ type BrowserSetupStatus =
 type BrowserSetupCopy = ReturnType<typeof useT>['settings']['browserSetup']
 
 function browserSetupStatus(state: BrowserBridgeStateDTO | null, failed: boolean): BrowserSetupStatus {
+  if (state?.supported === false) return 'unsupported'
   if (state == null && !failed) return 'loading'
   if (failed || state?.ui === 'error' || Boolean(state?.lastError)) return 'repair'
   if (!state?.host.installed) return 'disconnected'
@@ -28,6 +30,7 @@ function browserSetupStatus(state: BrowserBridgeStateDTO | null, failed: boolean
 
 function statusCopy(status: BrowserSetupStatus, t: BrowserSetupCopy): { label: string; hint: string } {
   switch (status) {
+    case 'unsupported': return { label: t.unsupported, hint: t.unsupportedHint }
     case 'loading': return { label: t.loading, hint: t.connectHint }
     case 'disconnected': return { label: t.disconnected, hint: t.connectHint }
     case 'ready': return { label: t.ready, hint: t.readyHint }
@@ -157,13 +160,13 @@ export function BrowserSettingsTab() {
           type="button"
           className="gg-btn gg-btn-primary gg-browser-settings-primary"
           onClick={() => void runPrimaryAction()}
-          disabled={busy || status === 'loading'}
+          disabled={busy || status === 'loading' || status === 'unsupported'}
         >
           {buttonLabel}
         </button>
 
         {notice && <div className="gg-browser-settings-notice is-ok">{notice}</div>}
-        {(failed || status === 'repair') && (
+        {(failed || status === 'repair') && status !== 'unsupported' && (
           <div className="gg-browser-settings-notice is-error">{t.failed}</div>
         )}
 

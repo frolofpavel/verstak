@@ -6,8 +6,9 @@
  *   2) Нет Spectre-mitigated VS-библиотек → MSB8040 в conpty/winpty.
  *
  * better-sqlite3 пересобираем всегда (быстро; тесты переключают его ABI на Node).
- * node-pty — ТОЛЬКО когда бинаря нет или сменился Electron (компиляция C++ долгая,
- * иначе каждый `npm run dev` висел бы минуту на пересборке winpty).
+ * node-pty на Windows — ТОЛЬКО когда бинаря нет или сменился Electron
+ * (компиляция C++ долгая). На macOS/Linux пересобираем оба модуля: бинарники
+ * должны точно совпадать с текущими platform/arch/Electron ABI.
  */
 const { execFileSync } = require('child_process')
 const fs = require('fs')
@@ -44,13 +45,17 @@ function rebuild(target) {
 // 1) better-sqlite3 — всегда (быстрая компиляция, тесты флипают его ABI).
 rebuild('better-sqlite3')
 
-// 2) node-pty — только при необходимости (долгая C++ сборка winpty/conpty).
-const ptyReady = fs.existsSync(ptyBinary)
-  && fs.existsSync(marker)
-  && fs.readFileSync(marker, 'utf8').trim() === electronVer
-if (ptyReady) {
-  console.log('[rebuild-native] node-pty уже собран под Electron', electronVer, '— пропускаю')
+if (process.platform !== 'win32') {
+  rebuild('@homebridge/node-pty-prebuilt-multiarch')
 } else {
+  // 2) node-pty — только при необходимости (долгая C++ сборка winpty/conpty).
+  const ptyReady = fs.existsSync(ptyBinary)
+    && fs.existsSync(marker)
+    && fs.readFileSync(marker, 'utf8').trim() === electronVer
+  if (ptyReady) {
+    console.log('[rebuild-native] node-pty уже собран под Electron', electronVer, '— пропускаю')
+    process.exit(0)
+  }
   // Отключаем SpectreMitigation в gyp node-pty (нет Spectre-libs) — идемпотентно.
   for (const rel of ['binding.gyp', path.join('deps', 'winpty', 'src', 'winpty.gyp')]) {
     const f = path.join(ptyDir, rel)

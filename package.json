@@ -1,7 +1,7 @@
 {
   "name": "verstak",
   "version": "2.9.1",
-  "description": "AI work assistant for Windows: describe a task in plain words, Verstak does it on your computer.",
+  "description": "AI work assistant: describe a task in plain words, Verstak does it on your computer.",
   "main": "out/main/main.mjs",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || exit 0",
@@ -43,7 +43,9 @@
     "dev:installer": "node scripts/dev-installer.cjs",
     "patch:exe-icon": "node scripts/patch-exe-icon.cjs",
     "dist:linux": "npm run build && electron-builder --linux --x64",
-    "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "check:mac-package": "node scripts/check-mac-package.mjs",
+    "smoke:mac:m0": "node scripts/smoke-mac-m0.mjs",
+    "dist:mac": "npm run electron-rebuild && npm run build && electron-builder --mac --arm64 --publish never && npm run check:mac-package",
     "dist:all": "npm run build && electron-builder --win --linux --mac",
     "deploy:local": "node scripts/deploy-local.cjs",
     "sync:shortcuts": "node scripts/sync-windows-shortcuts.cjs",
@@ -63,48 +65,6 @@
       "output": "release",
       "buildResources": "resources"
     },
-    "extraResources": [
-      {
-        "from": "resources/app-update.yml",
-        "to": "app-update.yml"
-      },
-      {
-        "from": "node_modules/7zip-bin/win/x64/7za.exe",
-        "to": "7za.exe"
-      },
-      {
-        "from": "scripts/verstak-auto-update-helper.cjs",
-        "to": "verstak-auto-update-helper.cjs"
-      },
-      {
-        "from": "electron/ai/browser/bridge/host-runtime.mjs",
-        "to": "browser-bridge/host.mjs"
-      },
-      {
-        "from": "resources/browser-bridge/host.cmd",
-        "to": "browser-bridge/host.cmd"
-      },
-      {
-        "from": "resources/browser-bridge/ru.verstak.browser_bridge.json",
-        "to": "browser-bridge/ru.verstak.browser_bridge.json"
-      },
-      {
-        "from": "resources/browser-bridge/host-metadata.json",
-        "to": "browser-bridge/host-metadata.json"
-      },
-      {
-        "from": "resources/computer-use/helper.ps1",
-        "to": "computer-use/helper.ps1"
-      },
-      {
-        "from": "browser-extension",
-        "to": "browser-extension",
-        "filter": [
-          "**/*",
-          "!**/*.md"
-        ]
-      }
-    ],
     "files": [
       "out/**/*",
       "package.json",
@@ -136,18 +96,72 @@
         }
       ],
       "icon": "resources/icon.ico",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "extraResources": [
+        {
+          "from": "resources/app-update.yml",
+          "to": "app-update.yml"
+        },
+        {
+          "from": "node_modules/7zip-bin/win/x64/7za.exe",
+          "to": "7za.exe"
+        },
+        {
+          "from": "scripts/verstak-auto-update-helper.cjs",
+          "to": "verstak-auto-update-helper.cjs"
+        },
+        {
+          "from": "electron/ai/browser/bridge/host-runtime.mjs",
+          "to": "browser-bridge/host.mjs"
+        },
+        {
+          "from": "resources/browser-bridge/host.cmd",
+          "to": "browser-bridge/host.cmd"
+        },
+        {
+          "from": "resources/browser-bridge/ru.verstak.browser_bridge.json",
+          "to": "browser-bridge/ru.verstak.browser_bridge.json"
+        },
+        {
+          "from": "resources/browser-bridge/host-metadata.json",
+          "to": "browser-bridge/host-metadata.json"
+        },
+        {
+          "from": "resources/computer-use/helper.ps1",
+          "to": "computer-use/helper.ps1"
+        },
+        {
+          "from": "browser-extension",
+          "to": "browser-extension",
+          "filter": [
+            "**/*",
+            "!**/*.md"
+          ]
+        }
+      ]
     },
     "portable": {
       "artifactName": "Verstak-Portable-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "icon": "resources/icon.png",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "artifactName": "Verstak-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "target": [

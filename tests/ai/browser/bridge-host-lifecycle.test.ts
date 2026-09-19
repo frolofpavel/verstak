@@ -281,10 +281,11 @@ describe('packaged browser-bridge assets', () => {
     expect(JSON.stringify(raw)).not.toContain('*://')
   })
 
-  it('package.json extraResources includes host.mjs, host.cmd, host json, browser-extension', () => {
+  it('package.json Windows extraResources includes host.mjs, host.cmd, host json, browser-extension', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
-    const extras = pkg.build?.extraResources as Array<{ from: string; to: string }>
+    const extras = pkg.build?.win?.extraResources as Array<{ from: string; to: string }>
     expect(Array.isArray(extras)).toBe(true)
+    expect(pkg.build?.extraResources).toBeUndefined()
     const tos = extras.map((e) => e.to)
     expect(tos).toContain('browser-bridge/host.mjs')
     expect(tos).toContain('browser-bridge/host.cmd')

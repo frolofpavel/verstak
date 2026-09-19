@@ -17,6 +17,8 @@ import {
 import { EXTENSION_ID, NATIVE_HOST_NAME } from '../ai/browser/bridge/constants'
 
 export interface BrowserBridgePublicState {
+  supported: boolean
+  unavailableReason: string | null
   ui: string
   connected: boolean
   authenticated: boolean
@@ -40,6 +42,7 @@ interface BrowserHostStatus {
 }
 
 export interface BrowserBridgeIpcDeps {
+  supported?: boolean
   getBridge: () => BridgeServer | null
   /** Единственный каталог host, уже разрешённый bootstrap'ом приложения. */
   getHostInstallDir: () => string
@@ -106,6 +109,21 @@ function readHostStatus(
 }
 
 function publicState(deps: BrowserBridgeIpcDeps): BrowserBridgePublicState {
+  const supported = deps.supported !== false
+  if (!supported) {
+    return {
+      supported: false,
+      unavailableReason: 'Browser Employee доступен только в Windows',
+      ui: 'unsupported',
+      connected: false,
+      authenticated: false,
+      connectionGeneration: 0,
+      exactTabAttached: false,
+      freshObservation: false,
+      lastError: null,
+      host: { installed: false, needsRepair: false },
+    }
+  }
   const bridge = deps.getBridge()
   const installDir = deps.getHostInstallDir()
   const host = readHostStatus(installDir, deps.hostPolicy, deps.hostVersions)
@@ -125,6 +143,8 @@ function publicState(deps: BrowserBridgeIpcDeps): BrowserBridgePublicState {
     && st.freshObservation.runId === st.runId,
   )
   return {
+    supported: true,
+    unavailableReason: null,
     ui: st?.ui ?? 'offline',
     connected: bridge?.isExtensionConnected() ?? false,
     authenticated: bridge?.isExtensionAuthenticated() ?? false,
@@ -190,6 +210,14 @@ export function registerBrowserBridgeIpc(deps: BrowserBridgeIpcDeps): void {
   })
 
   ipcMain.handle('browser-bridge:connect', async () => {
+    if (deps.supported === false) {
+      return {
+        ok: false,
+        state: publicState(deps),
+        needsExtensionAction: false,
+        error: 'Browser Employee доступен только в Windows',
+      }
+    }
     const installed = installHost(deps)
     const bridge = deps.getBridge()
     let state = publicState(deps)

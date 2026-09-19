@@ -327,6 +327,8 @@ export const en = {
       title: 'Work on the current browser tab',
       description: 'Connect the extension once, then work with the current tab from a regular Verstak chat or the browser panel.',
       loading: 'Checking connection…',
+      unsupported: 'Available on Windows only',
+      unsupportedHint: 'Browser Employee through Native Host is safely disabled in this macOS version.',
       disconnected: 'Browser is not connected',
       ready: 'Ready to connect',
       bridge: 'Extension detected',

@@ -67,14 +67,18 @@ const BOUNDARY = repoBoundary(ROOT)
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
-  build?: { extraResources?: Array<{ from: string; to: string }> }
+  build?: {
+    extraResources?: Array<{ from: string; to: string }>
+    win?: { extraResources?: Array<{ from: string; to: string }> }
+  }
 }
 
 describe('входы сборки установщика', () => {
-  const extra = pkg.build?.extraResources ?? []
+  const extra = pkg.build?.win?.extraResources ?? []
 
-  it('extraResources вообще объявлены', () => {
+  it('Windows extraResources объявлены, а глобальный Mac/Linux payload пуст', () => {
     expect(extra.length).toBeGreaterThan(0)
+    expect(pkg.build?.extraResources).toBeUndefined()
   })
 
   it.each(extra.map(e => [e.from, e.to] as const))(

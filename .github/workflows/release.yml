@@ -8,12 +8,23 @@ on:
   # релизом. Оставлен ТОЛЬКО ручной запуск (Actions → Run workflow) — на случай,
   # если понадобится кросс-платформенная сборка.
   workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - mac-m0
+          - legacy
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: inputs.target != 'mac-m0'
     strategy:
       fail-fast: false
       matrix:
@@ -24,9 +35,6 @@ jobs:
           - os: ubuntu-22.04
             platform: linux
             args: --linux --x64
-          - os: macos-13
-            platform: mac
-            args: --mac --x64
 
     runs-on: ${{ matrix.os }}
 
@@ -100,10 +108,81 @@ jobs:
             release/latest*.yaml
           if-no-files-found: warn
 
+  mac_m0:
+    if: inputs.target != 'legacy'
+    runs-on: macos-15
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Apple Silicon host
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python (needed for node-gyp)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Mojibake gate
+        run: npm run check:mojibake
+
+      - name: Full lint gate
+        run: npm run lint:full
+
+      - name: Type gate
+        run: npm run type
+
+      - name: Fast test gate with completeness report
+        run: npm run test:fast -- --maxWorkers=4 --reporter=json --outputFile=release/mac-test-report.json
+
+      - name: Verify test completeness
+        run: node scripts/check-test-report.mjs release/mac-test-report.json
+
+      - name: Build gate
+        run: npm run build
+
+      - name: Performance gate
+        run: npm run check:performance
+
+      - name: Diff whitespace gate
+        run: git diff --check origin/main...HEAD
+
+      - name: Build unsigned Mac M0 DMG and ZIP
+        run: npm run dist:mac
+
+      - name: Run packaged Mac M0 user smoke
+        run: npm run smoke:mac:m0
+
+      - name: Upload Mac M0 canary and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: verstak-mac-m0-arm64
+          path: |
+            release/*-mac-arm64.dmg
+            release/*-mac-arm64.zip
+            release/mac-m0-smoke.json
+            release/mac-test-report.json
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, mac_m0]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' && needs.mac_m0.result == 'success'
 
     steps:
       - name: Download all artifacts

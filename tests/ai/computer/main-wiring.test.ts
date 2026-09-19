@@ -29,7 +29,9 @@ describe('Computer Use production bootstrap', () => {
 
   it('is Windows-only, resolves the packaged resource and shuts the helper down', () => {
     const source = readFileSync(join(ROOT, 'electron', 'main.ts'), 'utf8')
-    expect(source).toContain("const computerUseSupported = process.platform === 'win32'")
+    expect(source).toContain("import { desktopPlatformCapabilities } from './desktop-platform'")
+    expect(source).toContain('const desktopCapabilities = desktopPlatformCapabilities()')
+    expect(source).toContain('const computerUseSupported = desktopCapabilities.computerUse')
     expect(source).toContain("join(process.resourcesPath, 'computer-use', 'helper.ps1')")
     expect(source).toContain("join(app.getAppPath(), 'resources', 'computer-use', 'helper.ps1')")
     expect(source).toContain('supported: computerUseSupported')

@@ -321,6 +321,8 @@ export const ru: Translations = {
       title: 'Работа с текущей вкладкой браузера',
       description: 'Подключите расширение один раз. Затем работайте с текущей вкладкой из обычного чата Verstak или панели браузера.',
       loading: 'Проверяем подключение…',
+      unsupported: 'Доступно только в Windows',
+      unsupportedHint: 'Browser Employee через Native Host безопасно отключён в этой версии для macOS.',
       disconnected: 'Браузер не подключён',
       ready: 'Готово к подключению',
       bridge: 'Расширение найдено',

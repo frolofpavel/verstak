@@ -170,12 +170,35 @@ describe('browser bridge connect IPC', () => {
       'freshObservation',
       'host',
       'lastError',
+      'supported',
       'ui',
+      'unavailableReason',
     ])
     expect(Object.keys((state as { host: Record<string, unknown> }).host).sort()).toEqual([
       'installed',
       'needsRepair',
     ])
+  })
+
+  it('на macOS не читает и не устанавливает Windows Native Host', async () => {
+    registerBrowserBridgeIpc({
+      supported: false,
+      getBridge: () => null,
+      getHostInstallDir: () => '/Applications/Verstak.app/Contents/Resources/browser-bridge',
+      getHostScriptSource: () => 'host source',
+    })
+
+    const state = await handlers.get('browser-bridge:get-state')?.()
+    const result = await handlers.get('browser-bridge:connect')?.()
+
+    expect(readNativeMessagingRegistry).not.toHaveBeenCalled()
+    expect(installNativeHost).not.toHaveBeenCalled()
+    expect(state).toMatchObject({
+      supported: false,
+      ui: 'unsupported',
+      host: { installed: false, needsRepair: false },
+    })
+    expect(result).toMatchObject({ ok: false, state: { supported: false, ui: 'unsupported' } })
   })
 
   it('одним вызовом чинит native host и возвращает итоговый статус подключения', async () => {

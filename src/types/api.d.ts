@@ -1267,6 +1267,8 @@ export interface AutonomousStatus {
 
 /** EXT-B1/C1 Browser bridge public state (renderer). */
 export interface BrowserBridgeStateDTO {
+  supported: boolean
+  unavailableReason: string | null
   ui: string
   connected: boolean
   authenticated: boolean
