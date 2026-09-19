@@ -58,13 +58,14 @@ beforeEach(() => {
 })
 
 describe('assembleSendSystem — приоритет веток системного слоя', () => {
-  it('Computer Use envelope pins a clean Calculator baseline and exact Button labels', async () => {
+  it('Computer Use envelope reuses a clean Calculator zero state and clears only stale state', async () => {
     const r = await assembleSendSystem({
       ...baseInput,
       computerUseEnvelopeLocked: true,
     })
     const system = String(r.messagesWithSystem[0]?.content ?? '')
-    expect(system).toMatch(/Calculator[\s\S]*known baseline[\s\S]*(?:Clear|Очистить)/u)
+    expect(system).toMatch(/Calculator[\s\S]*visible display is already (?:0|zero)[\s\S]*do not click (?:Clear|Очистить)/iu)
+    expect(system).toMatch(/stale expression or result[\s\S]*exact role=Button[\s\S]*(?:Clear|Очистить)/iu)
     expect(system).toMatch(/exact role=Button[\s\S]*never[\s\S]*(?:display|Text)/u)
     expect(system).toMatch(/final observation[\s\S]*visible result/u)
   })
