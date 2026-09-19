@@ -22,7 +22,13 @@ if (failed !== 0 || total < expected) {
   const failedAssertions = (report.testResults || []).flatMap(suite =>
     (suite.assertionResults || [])
       .filter(assertion => assertion.status === 'failed')
-      .map(assertion => `${suite.name}: ${assertion.fullName || assertion.title}`),
+      .map(assertion => {
+        const title = `${suite.name}: ${assertion.fullName || assertion.title}`
+        const details = Array.isArray(assertion.failureMessages)
+          ? assertion.failureMessages.filter(Boolean).join('\n')
+          : ''
+        return details ? `${title}\n${details}` : title
+      }),
   )
   const failedSuites = (report.testResults || [])
     .filter(
