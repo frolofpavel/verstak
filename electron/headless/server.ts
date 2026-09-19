@@ -357,6 +357,14 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     res.once('finish', releaseHost)
     res.once('close', releaseHost)
     res.once('error', releaseHost)
+    if (opts.tenants && !disconnectedDuringHostInit) {
+      // Клиентский socket.close и серверный socket.close не синхронны: lease
+      // способен разрешиться в microtask раньше, чем poll-фаза обработает уже
+      // пришедший FIN/RST. Один turn сохраняет правило «ушедший клиент не трогает
+      // host» без таймерной задержки и оставляет обычные запросы практически
+      // мгновенными.
+      await new Promise<void>(resolve => setImmediate(resolve))
+    }
     // Клиент мог уйти, пока await hostFor() инициализировал tenant-host. Событие
     // close тогда уже прошло до подписки выше; явный readback не даёт потерять lease.
     if (disconnectedDuringHostInit || req.destroyed || req.aborted || res.destroyed || res.writableEnded) {
