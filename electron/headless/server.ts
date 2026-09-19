@@ -316,6 +316,18 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
       }
     }
 
+    // hostFor() может асинхронно поднимать tenant-host. Пока lease ещё не
+    // получен, клиент уже способен разорвать соединение; после await событие
+    // close повторно не придёт, а флаги IncomingMessage на разных платформах
+    // обновляются не одинаково. Поэтому запоминаем разрыв до ожидания lease.
+    let disconnectedDuringHostInit = req.destroyed || req.aborted || res.destroyed
+    const markDisconnectedDuringHostInit = (): void => {
+      disconnectedDuringHostInit = true
+    }
+    req.once('aborted', markDisconnectedDuringHostInit)
+    res.once('close', markDisconnectedDuringHostInit)
+    res.once('error', markDisconnectedDuringHostInit)
+
     const resolved = await hostFor(req)
     if ('error' in resolved) {
       res.writeHead(400, { 'content-type': 'application/json' })
@@ -339,7 +351,7 @@ export function createHeadlessServer(opts: HeadlessServerOptions): HeadlessServe
     res.once('error', releaseHost)
     // Клиент мог уйти, пока await hostFor() инициализировал tenant-host. Событие
     // close тогда уже прошло до подписки выше; явный readback не даёт потерять lease.
-    if (req.destroyed || req.aborted || res.destroyed || res.writableEnded) {
+    if (disconnectedDuringHostInit || req.destroyed || req.aborted || res.destroyed || res.writableEnded) {
       releaseHost()
       return
     }

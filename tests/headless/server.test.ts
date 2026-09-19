@@ -82,6 +82,27 @@ function openSse(port: number, path: string, headers: Record<string, string> = {
   })
 }
 
+/**
+ * Клиентский close означает, что локальный socket закрыт, но не обещает, что
+ * серверный event loop уже обработал FIN/RST. Повторяем только ожидаемый 429
+ * в коротком bounded-окне: если счётчик не освободится, тест всё равно красный.
+ */
+async function openSseAfterDisconnect(
+  port: number,
+  path: string,
+  headers: Record<string, string> = {},
+  timeoutMs = 1000,
+): Promise<OpenSse> {
+  const deadline = Date.now() + timeoutMs
+  while (true) {
+    const candidate = await openSse(port, path, headers)
+    if (candidate.status !== 429) return candidate
+    await candidate.closed
+    if (Date.now() >= deadline) return candidate
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
 /** Читает SSE до конца стрима (или до maxMs) и отдаёт сырые data-строки. */
 function readSse(port: number, path: string, maxMs = 5000) {
   return new Promise<string[]>((resolve, reject) => {
@@ -563,7 +584,7 @@ describe('headless server — HTTP/SSE транспорт (Этап 1а, №3)',
 
     first.req.destroy()
     await first.closed
-    const replacement = await openSse(port, '/tasks/run-tenant-a/events', headers)
+    const replacement = await openSseAfterDisconnect(port, '/tasks/run-tenant-a/events', headers)
     expect(replacement.status).toBe(200)
     tenantA.finish()
     await replacement.closed
@@ -589,7 +610,7 @@ describe('headless server — HTTP/SSE транспорт (Этап 1а, №3)',
 
     first.req.destroy()
     await first.closed
-    const replacement = await openSse(port, '/tasks/run-tenant-b/events', headersB)
+    const replacement = await openSseAfterDisconnect(port, '/tasks/run-tenant-b/events', headersB)
     expect(replacement.status).toBe(200)
     tenantA.finish()
     tenantB.finish()
