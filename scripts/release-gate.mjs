@@ -853,6 +853,9 @@ const GATE_MAX_WORKERS = 4
 // 7449 ИЗМЕРЕНО повторно 19.09: существующий orchestration pin усилен — уже
 // чистый display 0 считается baseline без идемпотентного Clear, а старое
 // выражение по-прежнему требует exact Clear; число кейсов не изменилось.
+// 7449 ИЗМЕРЕНО повторно 19.09: тот же pin требует observationId и elementRef
+// из одного latest observation непосредственно перед effect; число кейсов
+// не изменилось.
 const EXPECTED_TOTAL_TESTS = 7449
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН

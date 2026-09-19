@@ -64,6 +64,8 @@ describe('assembleSendSystem — приоритет веток системно�
       computerUseEnvelopeLocked: true,
     })
     const system = String(r.messagesWithSystem[0]?.content ?? '')
+    expect(system).toMatch(/latest observation[\s\S]*observationId[\s\S]*elementRef[\s\S]*same observation/iu)
+    expect(system).toMatch(/do not call (?:observe|wait_for)[\s\S]*between choosing[\s\S]*effect/iu)
     expect(system).toMatch(/Calculator[\s\S]*visible display is already (?:0|zero)[\s\S]*do not click (?:Clear|Очистить)/iu)
     expect(system).toMatch(/stale expression or result[\s\S]*exact role=Button[\s\S]*(?:Clear|Очистить)/iu)
     expect(system).toMatch(/exact role=Button[\s\S]*never[\s\S]*(?:display|Text)/u)
