@@ -10,6 +10,14 @@ if (!expectedMatch) throw new Error('EXPECTED_TOTAL_TESTS не найден в s
 const expected = Number(expectedMatch[1])
 const total = Number(report.numTotalTests)
 const failed = Number(report.numFailedTests)
+
+function githubCommandValue(value) {
+  return String(value)
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+}
+
 if (failed !== 0 || total < expected) {
   const failedAssertions = (report.testResults || []).flatMap(suite =>
     (suite.assertionResults || [])
@@ -22,7 +30,12 @@ if (failed !== 0 || total < expected) {
         suite.status === 'failed' && !(suite.assertionResults || []).some(assertion => assertion.status === 'failed'),
     )
     .map(suite => `${suite.name}: ${suite.message || 'suite failed before assertions'}`)
-  for (const failure of [...failedAssertions, ...failedSuites]) console.error(`[test-failure] ${failure}`)
+  for (const failure of [...failedAssertions, ...failedSuites]) {
+    console.error(`[test-failure] ${failure}`)
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      console.error(`::error title=macOS test failure::${githubCommandValue(failure)}`)
+    }
+  }
   throw new Error(`Неполный test:fast: total=${total}, failed=${failed}, expected=${expected}`)
 }
 console.log(`[test-completeness] ${total}/${expected}, failures=0`)
