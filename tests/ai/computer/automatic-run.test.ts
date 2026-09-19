@@ -151,4 +151,67 @@ describe('ComputerController — automatic target preparation', () => {
     expect(backend.focusCount).toBe(2)
     expect(controller.getBinding()).toMatchObject({ source: 'automatic' })
   })
+
+  it('renews an expired automatic observation before an exact unchanged effect', async () => {
+    let clock = 10_000
+    backend.candidates[0]!.processName = 'CalculatorApp.exe'
+    controller = createComputerController({
+      storage,
+      backend,
+      now: () => clock,
+      maxSnapshotAgeMs: 100,
+    })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      originalUserText: 'Открой Калькулятор и посчитай 125 × 47',
+    })).resolves.toMatchObject({ ok: true })
+    const observation = await controller.observe({ browserTaskId: 'bt-auto', runId: 'run-auto' })
+    clock += 100
+
+    const result = await controller.dispatch({
+      actionId: 'automatic-expired-observation',
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      action: 'click',
+      observationId: observation.observationId,
+      elementRef: observation.elements[0]!.elementRef,
+    })
+
+    expect(result.status).toBe('verified')
+    expect(backend.lastPrepare?.resolvedElement?.backendRef).toContain('observation-2')
+    expect(backend.commitCount).toBe(1)
+  })
+
+  it('does not renew an expired automatic observation after physical input', async () => {
+    let clock = 10_000
+    backend.candidates[0]!.processName = 'CalculatorApp.exe'
+    controller = createComputerController({
+      storage,
+      backend,
+      now: () => clock,
+      maxSnapshotAgeMs: 100,
+    })
+    await expect(controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      originalUserText: 'Открой Калькулятор и посчитай 125 × 47',
+    })).resolves.toMatchObject({ ok: true })
+    const observation = await controller.observe({ browserTaskId: 'bt-auto', runId: 'run-auto' })
+    backend.probe.userInputEpoch += 1
+    clock += 100
+
+    const result = await controller.dispatch({
+      actionId: 'automatic-expired-after-input',
+      browserTaskId: 'bt-auto',
+      runId: 'run-auto',
+      action: 'click',
+      observationId: observation.observationId,
+      elementRef: observation.elements[0]!.elementRef,
+    })
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'hardware-input' })
+    expect(backend.prepareCount).toBe(0)
+    expect(backend.commitCount).toBe(0)
+  })
 })

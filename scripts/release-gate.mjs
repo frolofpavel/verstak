@@ -856,7 +856,9 @@ const GATE_MAX_WORKERS = 4
 // 7449 ИЗМЕРЕНО повторно 19.09: тот же pin требует observationId и elementRef
 // из одного latest observation непосредственно перед effect; число кейсов
 // не изменилось.
-const EXPECTED_TOTAL_TESTS = 7449
+// -> 7451 ИЗМЕРЕНО 19.09: просроченный automatic snapshot обновляется только
+// перед точным неизменившимся effect; физический ввод оставляет путь закрытым.
+const EXPECTED_TOTAL_TESTS = 7451
 
 // Тесты: известный флейк verstak-cli-toolname виснет, когда порт 11434 СВОБОДЕН
 // (Node 24 × undici, см. память проекта). Гейт обязан быть ДЕТЕРМИНИРОВАННЫМ, иначе он

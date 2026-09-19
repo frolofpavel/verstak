@@ -929,11 +929,11 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
   }
 
   async function execute(
-    input: ComputerDispatchInput & { actionId: string },
+    requestedInput: ComputerDispatchInput & { actionId: string },
     scheduledSafetyEpoch: number,
     scheduledRunCancelEpoch: number,
   ): Promise<ComputerDispatchResult> {
-    const { actionId, browserTaskId, runId } = input
+    const { actionId, browserTaskId, runId } = requestedInput
     const task = deps.storage.get(browserTaskId)
     const run = deps.storage.currentRun(browserTaskId)
     if (!task || task.endedAt != null || !run || run.runId !== runId || task.currentRunId !== runId) {
@@ -945,7 +945,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     if (scheduledSafetyEpoch !== safetyEpoch) {
       return plainResult(actionId, 'cancelled', 'hardware-input')
     }
-    const invalidRouting = invalidRoutingReason(input)
+    const invalidRouting = invalidRoutingReason(requestedInput)
     if (invalidRouting) return plainResult(actionId, 'blocked', invalidRouting)
     let actionBinding: InternalBinding
     try {
@@ -955,11 +955,44 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     }
     refreshDurableUncertainty(actionBinding, browserTaskId)
 
-    if (hasSecretInput(input)) {
+    if (hasSecretInput(requestedInput)) {
       return plainResult(actionId, 'blocked', 'secret-input')
     }
 
-    const snapshot = currentObservation
+    let input = requestedInput
+    let snapshot = currentObservation
+    if (requiresElement(input.action)
+      && actionBinding.source === 'automatic'
+      && snapshot
+      && input.observationId === snapshot.public.observationId
+      && snapshot.public.browserTaskId === browserTaskId
+      && snapshot.public.runId === runId
+      && snapshot.public.bindingGeneration === actionBinding.generation
+      && observationExpired(snapshot.public.capturedAt, now(), maxSnapshotAgeMs)) {
+      const oldElement = resolveElement(input, snapshot)
+      if (oldElement) {
+        try {
+          await captureObservation(browserTaskId, runId)
+          const refreshed = currentObservation
+          if (!refreshed) throw new ComputerSafetyError('stale-observation')
+          assertProbeMatches(snapshot.probe, refreshed.probe)
+          const matching = [...refreshed.elements.entries()].filter(([, candidate]) => (
+            sameElementForAutomaticRenewal(oldElement.backend, candidate.backend)
+          ))
+          if (matching.length !== 1) throw new ComputerSafetyError('stale-observation')
+          const [elementRef] = matching[0]!
+          input = {
+            ...input,
+            observationId: refreshed.public.observationId,
+            elementRef,
+          }
+          snapshot = refreshed
+        } catch (error) {
+          currentObservation = null
+          return plainResult(actionId, 'blocked', computerErrorCode(error, 'stale-observation'))
+        }
+      }
+    }
     let element: InternalElement | null = null
 
     if (input.action === 'observe') {
@@ -2157,6 +2190,53 @@ function assertStablePostObservation(
 function freshObservation(capturedAt: number, currentTime: number, maxAgeMs: number): boolean {
   const age = currentTime - capturedAt
   return Number.isFinite(capturedAt) && Number.isFinite(currentTime) && age >= 0 && age < maxAgeMs
+}
+
+function observationExpired(capturedAt: number, currentTime: number, maxAgeMs: number): boolean {
+  const age = currentTime - capturedAt
+  return Number.isFinite(capturedAt) && Number.isFinite(currentTime) && age >= maxAgeMs
+}
+
+function sameElementForAutomaticRenewal(
+  previous: BackendObservedElement,
+  current: BackendObservedElement,
+): boolean {
+  return previous.semanticFingerprint === current.semanticFingerprint
+    && previous.role === current.role
+    && previous.label === current.label
+    && previous.state === current.state
+    && previous.isPassword === current.isPassword
+    && sameOptionalGeometry(previous.bounds, current.bounds)
+    && previous.supportedActions.length === current.supportedActions.length
+    && previous.supportedActions.every((action, index) => current.supportedActions[index] === action)
+    && sameOptionalValueState(previous.valueState, current.valueState)
+    && sameOptionalScrollState(previous.scrollState, current.scrollState)
+}
+
+function sameOptionalGeometry(left: WindowGeometry | undefined, right: WindowGeometry | undefined): boolean {
+  return left === undefined ? right === undefined : right !== undefined && sameGeometry(left, right)
+}
+
+function sameOptionalValueState(
+  left: BackendObservedElement['valueState'],
+  right: BackendObservedElement['valueState'],
+): boolean {
+  return left === undefined
+    ? right === undefined
+    : right !== undefined
+      && left.fingerprint === right.fingerprint
+      && left.scalarLength === right.scalarLength
+}
+
+function sameOptionalScrollState(
+  left: BackendObservedElement['scrollState'],
+  right: BackendObservedElement['scrollState'],
+): boolean {
+  return left === undefined
+    ? right === undefined
+    : right !== undefined
+      && left.horizontalPercent === right.horizontalPercent
+      && left.verticalPercent === right.verticalPercent
 }
 
 async function withTimeout<T>(
