@@ -536,7 +536,7 @@ describe('host manifest validate', () => {
   })
 })
 
-describe('install / repair / uninstall lifecycle', () => {
+describe.runIf(process.platform === 'win32')('install / repair / uninstall lifecycle', () => {
   it('does not grant another local caller authority through process-global depth', () => {
     if (process.platform !== 'win32') return
     const mutexName = `Local\\Verstak.LeaseTest.${randomUUID()}`

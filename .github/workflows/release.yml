@@ -154,7 +154,7 @@ jobs:
 
       - name: Fast test gate with completeness report
         continue-on-error: true
-        run: npm run test:fast -- --maxWorkers=4 --reporter=json --outputFile=release/mac-test-report.json
+        run: npm run test:fast -- --maxWorkers=2 --reporter=json --outputFile=release/mac-test-report.json
 
       - name: Verify test completeness
         run: node scripts/check-test-report.mjs release/mac-test-report.json

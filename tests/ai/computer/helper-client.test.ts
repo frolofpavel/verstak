@@ -22,10 +22,13 @@ import {
 
 type Wire = Record<string, unknown> & { requestId: string; type: string }
 
-const SYSTEM_POWERSHELL = realpathSync.native(win32.join(
+const SYSTEM_POWERSHELL_CANDIDATE = win32.join(
   process.env.SystemRoot ?? 'C:\\Windows',
   'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe',
-))
+)
+const SYSTEM_POWERSHELL = process.platform === 'win32'
+  ? realpathSync.native(SYSTEM_POWERSHELL_CANDIDATE)
+  : SYSTEM_POWERSHELL_CANDIDATE
 
 class FakeChild extends EventEmitter implements ComputerHelperChild {
   readonly stdout = new PassThrough()
@@ -134,7 +137,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('computer helper wire protocol', () => {
+describe.runIf(process.platform === 'win32')('computer helper wire protocol', () => {
   it('rejects malformed, unknown-version and oversize messages fail-closed', () => {
     expect(parseComputerMessage('{')).toMatchObject({ ok: false, code: 'malformed_json' })
     expect(parseComputerMessage(JSON.stringify({ v: 999, type: 'ping', requestId: 'r' })))

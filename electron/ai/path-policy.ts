@@ -28,23 +28,39 @@ import { homedir } from 'os'
  */
 export function isWithinKnownRoots(target: string, knownRoots: string[]): boolean {
   let abs: string
-  try {
-    abs = realpathSync(resolve(target))
-  } catch {
-    try { abs = resolve(target) } catch { return false }
-  }
+  try { abs = canonicalPathForComparison(target) } catch { return false }
   for (const root of knownRoots) {
     if (!root) continue
     let realRoot: string
-    try {
-      realRoot = realpathSync(resolve(root))
-    } catch {
-      try { realRoot = resolve(root) } catch { continue }
-    }
+    try { realRoot = canonicalPathForComparison(root) } catch { continue }
     const r = relative(realRoot, abs)
     if (r === '' || (!r.startsWith('..') && !r.includes('..' + sep) && !isAbsolute(r))) return true
   }
   return false
+}
+
+/**
+ * Canonical path even when the final file does not exist yet. macOS exposes the
+ * same temporary tree as both /var/... and /private/var/...; resolving the
+ * nearest existing ancestor keeps boundary checks accurate without weakening
+ * symlink protection for a future file.
+ */
+export function canonicalPathForComparison(candidate: string): string {
+  const absolute = resolve(candidate)
+  let probe = absolute
+  const suffix: string[] = []
+  while (true) {
+    try {
+      return resolve(realpathSync(probe), ...suffix.reverse())
+    } catch (error) {
+      const e = error as NodeJS.ErrnoException
+      if (e.code !== 'ENOENT') return absolute
+      const parent = dirname(probe)
+      if (parent === probe) return absolute
+      suffix.push(probe.slice(parent.length).replace(/^[/\\]+/, ''))
+      probe = parent
+    }
+  }
 }
 
 /** Textual safety only: blocks `..` traversal. Does NOT catch symlinks. */

@@ -1,6 +1,6 @@
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import {
@@ -57,8 +57,11 @@ function commit(repo: string, message: string): void {
 }
 
 function samePath(a: string, b: string): boolean {
-  const left = resolve(a).replace(/\\/g, '/').toLowerCase()
-  const right = resolve(b).replace(/\\/g, '/').toLowerCase()
+  const canonical = (value: string) => {
+    try { return realpathSync(value) } catch { return resolve(value) }
+  }
+  const left = canonical(a).replace(/\\/g, '/').toLowerCase()
+  const right = canonical(b).replace(/\\/g, '/').toLowerCase()
   return left === right
 }
 

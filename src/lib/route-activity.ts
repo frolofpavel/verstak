@@ -29,7 +29,7 @@ const REASON_LABELS: Record<string, string> = {
 }
 
 function shortTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 export function routeChangedActivity(e: RouteChanged): { label: string; detail: string } {

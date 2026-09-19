@@ -103,7 +103,7 @@ export function accountStateLabel(a: SubscriptionAccountDTO): string {
           : cd.reason === 'provider-unavailable' ? 'провайдер недоступен'
             : null
     const until = cd.until != null
-      ? `до ${new Date(cd.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      ? `до ${new Date(cd.until).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', hour12: false })}`
       : 'срок неизвестен'
     return reason ? `остывает · ${reason} · ${until}` : `остывает · ${until}`
   }

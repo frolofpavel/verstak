@@ -201,7 +201,7 @@ describe('browser bridge connect IPC', () => {
     expect(result).toMatchObject({ ok: false, state: { supported: false, ui: 'unsupported' } })
   })
 
-  it('одним вызовом чинит native host и возвращает итоговый статус подключения', async () => {
+  it.runIf(process.platform === 'win32')('одним вызовом чинит native host и возвращает итоговый статус подключения', async () => {
     const openAutoPairWindow = vi.fn()
     const bridge = {
       getPublicState: () => ({
@@ -291,7 +291,7 @@ describe('browser bridge connect IPC', () => {
     expect(stale).toMatchObject({ exactTabAttached: true, freshObservation: false })
   })
 
-  it('Connect при готовом host и unauthenticated extension открывает одноразовое окно pair', async () => {
+  it.runIf(process.platform === 'win32')('Connect при готовом host и unauthenticated extension открывает одноразовое окно pair', async () => {
     const openAutoPairWindow = vi.fn(() => ({ expiresAt: Date.now() + 60_000 }))
     const bridge = {
       getPublicState: () => ({

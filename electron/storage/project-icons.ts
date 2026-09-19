@@ -1,8 +1,9 @@
 import { app, nativeImage } from 'electron'
 import { createHash } from 'crypto'
-import { mkdirSync, writeFileSync, unlinkSync, existsSync, realpathSync } from 'fs'
-import { join, resolve, relative, isAbsolute, sep, extname } from 'path'
+import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs'
+import { join, relative, isAbsolute, sep, extname } from 'path'
 import { isForbiddenPath } from '../ai/secret-scanner'
+import { canonicalPathForComparison } from '../ai/path-policy'
 
 // Ревью F7: importProjectIcon принимал любой sourcePath из рендерера. Ограничиваем
 // расширения изображениями (иначе скомпрометированный рендерер использовал бы
@@ -27,10 +28,8 @@ export function isInsideProjectIcons(p: string): boolean {
   // project-icons, ведущим наружу (→ чтение/удаление произвольного файла через
   // gg-project-icon протокол). realpathSync разворачивает ссылки на обеих
   // сторонах; для несуществующих путей — textual fallback (нечего раскрывать).
-  let dir: string
-  let target: string
-  try { dir = realpathSync(resolve(projectIconsDir())) } catch { dir = resolve(projectIconsDir()) }
-  try { target = realpathSync(resolve(p)) } catch { target = resolve(p) }
+  const dir = canonicalPathForComparison(projectIconsDir())
+  const target = canonicalPathForComparison(p)
   const r = relative(dir, target)
   return r !== '' && !r.startsWith('..') && !r.includes('..' + sep) && !isAbsolute(r)
 }

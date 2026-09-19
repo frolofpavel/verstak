@@ -9,7 +9,7 @@ export interface WriteScopeDecision {
 
 function normalizeRelative(value: string): string | null {
   const normalized = value.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+/g, '/')
-  if (!normalized || isAbsolute(normalized) || normalized.startsWith('/')) return null
+  if (!normalized || isAbsolute(normalized) || normalized.startsWith('/') || /^[a-z]:\//i.test(normalized)) return null
   const parts = normalized.split('/')
   if (parts.some(part => part === '..' || part === '')) return null
   return parts.filter(part => part !== '.').join('/')

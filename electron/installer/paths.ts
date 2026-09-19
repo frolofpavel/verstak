@@ -1,4 +1,4 @@
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { existsSync } from 'fs'
 import { resolvePayloadFromArchive, verifyPayloadRoot } from './payload-extract'
 
@@ -7,8 +7,8 @@ const EXE_NAME = 'Verstak.exe'
 
 export function defaultInstallDir(): string {
   const local = process.env.LOCALAPPDATA
-  if (!local) return join('C:', 'Users', 'Public', APP_FOLDER)
-  return join(local, 'Programs', APP_FOLDER)
+  if (!local) return win32.join('C:', 'Users', 'Public', APP_FOLDER)
+  return win32.join(local, 'Programs', APP_FOLDER)
 }
 
 export function resolvePayloadRoot(): string {

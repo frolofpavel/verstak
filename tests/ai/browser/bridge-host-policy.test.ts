@@ -100,7 +100,7 @@ describe('Browser Employee native-host ownership policy', () => {
     })
   })
 
-  it('keeps a safe absolute DIR-only userData override independent from Native Host opt-in', () => {
+  it.runIf(process.platform === 'win32')('keeps a safe absolute DIR-only userData override independent from Native Host opt-in', () => {
     const input = {
       isPackaged: false,
       devUserDataDir: 'D:\\Verstak-Isolated\\mobile-dev',

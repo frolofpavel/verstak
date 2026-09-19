@@ -746,7 +746,7 @@ describe('computer use packaged artifact checker', () => {
     `)).toBe(false)
   })
 
-  it('pins a bounded canonical owner FILETIME query before every helper spawn', () => {
+  it.runIf(process.platform === 'win32')('pins a bounded canonical owner FILETIME query before every helper spawn', () => {
     const calls: unknown[][] = []
     const exact = checker.queryWindowsProcessStartTime100ns(4242, ((...args: unknown[]) => {
       calls.push(args)

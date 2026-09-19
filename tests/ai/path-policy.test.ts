@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { join } from 'path'
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs'
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { safeJoin, isWithinKnownRoots, resolveReadOnlyPath, resolveWritablePath } from '../../electron/ai/path-policy'
 
@@ -98,7 +98,7 @@ describe('path-policy resolveReadOnlyPath', () => {
     const file = join(outside, 'note.md')
     writeFileSync(file, 'outside')
     const resolved = await resolveReadOnlyPath(realRoot, file)
-    expect(resolved).toBe(file)
+    expect(resolved).toBe(realpathSync(file))
   })
 })
 

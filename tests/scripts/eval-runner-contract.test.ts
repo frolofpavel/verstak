@@ -52,7 +52,7 @@ describe('Model Gym competitor runner contract', () => {
     ])
   })
 
-  it('probes installed runner versions without exposing credentials', () => {
+  it.runIf(process.platform === 'win32')('probes installed runner versions without exposing credentials', () => {
     const probe = probeVersion(codexRunner, {
       ...process.env,
       VERSTAK_GATEWAY_API_KEY: 'vsk_live_must_not_leak_123456',

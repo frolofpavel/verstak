@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import { basename } from 'path'
+import { basename, win32 } from 'path'
 import { pickProjectColor } from '../../src/lib/project-avatar'
 import { sortProjectsByName } from '../../src/lib/project-sort'
 import type { RemoteSource } from '../projects/remote-source'
@@ -171,7 +171,7 @@ export function createProjects(db: Database): Projects {
       if (existing) {
         return mapRow(db, existing)
       }
-      const name = basename(path) || path
+      const name = (path.includes('\\') ? win32.basename(path) : basename(path)) || path
       const color = pickProjectColor(path)
       // hidden задаём явно (а не полагаемся на DEFAULT 0 миграции) — ревью:
       // явное значение надёжнее при изменении дефолтов в будущем.
@@ -182,7 +182,7 @@ export function createProjects(db: Database): Projects {
       const now = Date.now()
       const existing = db.prepare(`SELECT ${SELECT_COLS} FROM projects WHERE path = ?`).get(path) as ProjectMeta | undefined
       if (existing) return mapRow(db, existing)
-      const name = remote.name || basename(path) || path
+      const name = remote.name || (path.includes('\\') ? win32.basename(path) : basename(path)) || path
       const color = pickProjectColor(path)
       db.prepare('INSERT INTO projects (path, name, color, icon_path, created_at, last_opened_at, hidden, kind, remote_json) VALUES (?, ?, ?, NULL, ?, ?, 0, ?, ?)')
         .run(path, name, color, now, now, kind, JSON.stringify(remote))

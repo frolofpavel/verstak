@@ -42,7 +42,7 @@ export interface MaterialsSummary {
 function normalizePath(p: string, base: string): string {
   const abs = isAbsolute(p) ? resolve(p) : resolve(base, p)
   // Windows файловая система регистронезависима — сопоставляем без регистра.
-  return process.platform === 'win32' ? abs.toLowerCase() : abs
+  return process.platform === 'win32' || process.platform === 'darwin' ? abs.toLowerCase() : abs
 }
 
 export interface SummarizeInput {
