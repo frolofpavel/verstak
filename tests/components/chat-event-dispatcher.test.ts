@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, cleanup, act } from '@testing-library/react'
 import { makeApiMock, CHAT_API_DEFAULTS, type ApiMock } from './helpers/window-api-mock'
+import { en } from '../../src/i18n/en'
 
 const { useProject } = await import('../../src/store/projectStore')
 const { Chat } = await import('../../src/components/Chat')
@@ -283,6 +284,50 @@ describe('2.1.3-CD: route-changed и ранние маршрутные стоп�
     const snap = useProject.getState().chats[9]
     expect(snap).toBeTruthy()
     expect(snap.hasUnread).toBe(true)
+  })
+
+  // Живой тупик 19.09: авторизация Computer Use упала на незакрытом uncertain от
+  // прошлого прогона, и человек получил в чат голый машинный код без единого
+  // указания, что блокировка снимается кнопкой в настройках. Код — контракт main
+  // (его стережёт runner-wiring), поэтому понятный текст подставляется здесь.
+  it('ранний стоп Computer Use → человеку уходит понятная причина, а не машинный код', () => {
+    mountChat()
+    act(() => {
+      mock.aiEvents.emit({
+        id: 0, chatId: 7,
+        event: { type: 'error', message: 'COMPUTER_USE_AUTHORIZATION_FAILED: uncertain-reconciliation-required' },
+      })
+    })
+    const message = useProject.getState().earlyRouteStop?.message ?? ''
+    expect(message).not.toContain('COMPUTER_USE_AUTHORIZATION_FAILED')
+    expect(message).toBe(en.chat.computerUseStops['uncertain-reconciliation-required'])
+  })
+
+  it('ранний стоп Computer Use с незнакомым кодом → показываем исходное сообщение как есть', () => {
+    mountChat()
+    act(() => {
+      mock.aiEvents.emit({
+        id: 0, chatId: 7,
+        event: { type: 'error', message: 'COMPUTER_USE_AUTHORIZATION_FAILED: some-future-code' },
+      })
+    })
+    expect(useProject.getState().earlyRouteStop?.message)
+      .toBe('COMPUTER_USE_AUTHORIZATION_FAILED: some-future-code')
+  })
+
+  it('ранний стоп Computer Use ФОНОВОГО чата → в snapshot тоже уходит понятная причина', () => {
+    mountChat()
+    act(() => {
+      mock.aiEvents.emit({
+        id: 0, chatId: 9,
+        event: { type: 'error', message: 'COMPUTER_USE_AUTHORIZATION_FAILED: uncertain-reconciliation-required' },
+      })
+    })
+    const detail = useProject.getState().chats[9]?.agentProgress?.at(-1)?.detail ?? ''
+    expect(detail).not.toContain('COMPUTER_USE_AUTHORIZATION_FAILED')
+    // Карточка прогресса режет detail до 220 символов — сверяем начало.
+    expect(en.chat.computerUseStops['uncertain-reconciliation-required'].startsWith(detail.slice(0, 100)))
+      .toBe(true)
   })
 
   it('error с id=0 БЕЗ chatId (легаси/непонятное) → по-прежнему дропается молча', () => {

@@ -560,10 +560,19 @@ describe('runApiConversation telemetry sinks', () => {
     expect(captured.handlerArgs).toEqual([call.args])
     const computerSignatures = captured.signatures.filter(item => item.name === call.name)
     expect(computerSignatures.length).toBeGreaterThanOrEqual(2)
+    // Приватные поля вызова получают опаковый порядковый тег — по одному на
+    // поле. Их три, а не один: маршрутные elementRef/observationId нужны loop
+    // identity ровно так же, как текст (см. loop-identity-clicks.test.ts).
+    const ephemeralTagKeys = ['ephemeralTextTag', 'ephemeralElementTag', 'ephemeralObservationTag'] as const
+    const withoutEphemeralTags = (args: Record<string, unknown>) => {
+      const rest = { ...args }
+      for (const key of ephemeralTagKeys) delete rest[key]
+      return rest
+    }
     expect(computerSignatures.every(item => (
       item.args !== call.args
-      && typeof item.args.ephemeralTextTag === 'string'
-      && stringify({ ...item.args, ephemeralTextTag: undefined }) === stringify({ ...projection, ephemeralTextTag: undefined })
+      && ephemeralTagKeys.every(key => /^(text|element|observation)-\d+$/.test(String(item.args[key])))
+      && stringify(withoutEphemeralTags(item.args)) === stringify(projection)
     ))).toBe(true)
     expect(new Set(computerSignatures.map(item => item.args.ephemeralTextTag))).toEqual(new Set(['text-1']))
     const blockedSignatures = captured.signatures.filter(item => item.name === COMPUTER_CONTEXT_OMITTED_TOOL)
@@ -642,6 +651,8 @@ describe('runApiConversation telemetry sinks', () => {
     expect(checkpointJson).not.toContain(SECRET)
     expect(checkpointJson).not.toContain('textDigest')
     expect(checkpointJson).not.toContain('ephemeralTextTag')
+    expect(checkpointJson).not.toContain('ephemeralElementTag')
+    expect(checkpointJson).not.toContain('ephemeralObservationTag')
     expect(persistUsage).toHaveBeenCalledWith(expect.objectContaining({
       systemPromptHash: usageHash(COMPUTER_CONTEXT_OMITTED),
     }))

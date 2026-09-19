@@ -131,6 +131,13 @@ export function createToolCallProjector(): (
  * Equal-length but different inputs receive different opaque ordinals, while
  * retries of the exact same value keep one signature. The tag is for an
  * in-memory callSignature only; durable sinks must use createToolCallProjector.
+ *
+ * Живая приёмка 19.09: маршрутные поля (`elementRef`, `observationId`) нуждаются
+ * в том же теге, что и текст. Durable-проекция сводит их к `hasElementRef` /
+ * `hasObservationId`, поэтому без тега подпись КАЖДОГО клика прогона одинакова и
+ * детектор зацикливания глушит третий клик подряд, чем бы он ни был — в
+ * Калькуляторе «125» обрывалось на «12». Тот же класс, что Д4 в `loop-detect.ts`:
+ * вырожденная подпись блокирует работу, а не цикл.
  */
 export function createEphemeralToolCallProjector(
   projectCall = createToolCallProjector(),
@@ -138,18 +145,39 @@ export function createEphemeralToolCallProjector(
   call: ToolCall,
   options?: ToolTelemetryProjectionOptions,
 ) => ToolCall {
-  const textTags = new Map<string, string>()
-  let nextTag = 0
+  const createTagger = (prefix: string) => {
+    const tags = new Map<string, string>()
+    let next = 0
+    return (privateKey: string): string => {
+      let tag = tags.get(privateKey)
+      if (!tag) {
+        tag = tags.size < 2_048 ? `${prefix}-${++next}` : `${prefix}-overflow`
+        if (tags.size < 2_048) tags.set(privateKey, tag)
+      }
+      return tag
+    }
+  }
+  const textTag = createTagger('text')
+  const elementTag = createTagger('element')
+  const observationTag = createTagger('observation')
   return (call, options = {}) => {
     const projected = projectCall(call, options)
-    if (!isComputerToolName(call.name) || projected === call || typeof call.args.text !== 'string') return projected
-    const privateKey = `${call.name}\u0000${call.args.text}`
-    let tag = textTags.get(privateKey)
-    if (!tag) {
-      tag = textTags.size < 2_048 ? `text-${++nextTag}` : 'text-overflow'
-      if (textTags.size < 2_048) textTags.set(privateKey, tag)
+    if (!isComputerToolName(call.name) || projected === call) return projected
+    const args: Record<string, unknown> = { ...projected.args }
+    let tagged = false
+    if (typeof call.args.text === 'string') {
+      args.ephemeralTextTag = textTag(`${call.name}\u0000${call.args.text}`)
+      tagged = true
     }
-    return { ...projected, args: { ...projected.args, ephemeralTextTag: tag } }
+    if (typeof call.args.elementRef === 'string') {
+      args.ephemeralElementTag = elementTag(call.args.elementRef)
+      tagged = true
+    }
+    if (typeof call.args.observationId === 'string') {
+      args.ephemeralObservationTag = observationTag(call.args.observationId)
+      tagged = true
+    }
+    return tagged ? { ...projected, args } : projected
   }
 }
 

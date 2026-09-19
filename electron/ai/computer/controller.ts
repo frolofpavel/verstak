@@ -381,7 +381,11 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       if (binding.source !== 'automatic') {
         return { ok: false, error: 'binding-owner-mismatch' }
       }
-      if (!refreshDurableUncertainty(binding, binding.claim.browserTaskId)) {
+      // Залежавшаяся отметка прошлой задачи claim не держит: её снимет
+      // settleStaleUncertaintyForNewRequest уже после перепривязки к цели.
+      // Держат только живое действие и нечитаемый журнал.
+      refreshDurableUncertainty(binding, binding.claim.browserTaskId)
+      if (binding.uncertainLookupFailed || binding.uncertain?.status === 'executing') {
         return { ok: false, error: 'uncertain-reconciliation-required' }
       }
       if (deps.storage.listActions(binding.claim.browserTaskId, { status: 'executing' }).length > 0) {
@@ -406,6 +410,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       if (forced.kind !== 'selected') return { ok: false, error: 'manual-target-mismatch' }
       const focusError = await focusCurrentBinding()
       if (focusError) return focusError
+      await settleStaleUncertaintyForNewRequest(input.browserTaskId)
       return authorizeRun(input)
     }
 
@@ -448,6 +453,7 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
       focusError = await focusCurrentBinding()
     }
     if (focusError) return focusError
+    await settleStaleUncertaintyForNewRequest(input.browserTaskId)
     return authorizeRun(input)
 
     function automaticTargetCandidates(list: readonly ComputerCandidate[]) {
@@ -843,6 +849,45 @@ export function createComputerController(deps: ComputerControllerDeps): Computer
     current.uncertain = null
     refreshDurableUncertainty(current, refreshed.browserTaskId)
     return true
+  }
+
+  /** Незакрытая отметка прошлого прогона не должна запирать СЛЕДУЮЩУЮ задачу
+   *  человека. Новая команда в чате — это и есть его присутствие; делаем ровно
+   *  то же, что делает кнопка «Я проверил результат»: живьём убеждаемся, что
+   *  окно то же самое, закрываем сверку отдельной причиной в журнале и сбрасываем
+   *  наблюдение, чтобы следующий шаг обязан был увидеть фактическое состояние.
+   *  Что НЕ снимается автоматически: действие, числящееся выполняющимся прямо
+   *  сейчас, и нечитаемый журнал — там исход ещё не решён и решать его нечем. */
+  async function settleStaleUncertaintyForNewRequest(browserTaskId: string): Promise<boolean> {
+    const current = binding
+    if (!current || active || stopAcksInFlight > 0) return false
+    refreshDurableUncertainty(current, browserTaskId)
+    if (current.uncertainLookupFailed) return false
+    const pending = current.uncertain
+    if (!pending) return true
+    if (pending.status !== 'uncertain') return false
+    if (pending.targetFingerprint !== current.targetFingerprint) return false
+
+    try {
+      const probe = normalizeProbe(await deps.backend.probeBinding(current.identity))
+      assertSafeProbe(probe)
+      if (!sameIdentity(current.identity, probe.identity)) return false
+    } catch {
+      return false
+    }
+    if (binding !== current || active || stopAcksInFlight > 0) return false
+
+    try {
+      if (!deps.storage.settleComputerEffectForNewRequest(pending.actionId)) return false
+    } catch {
+      current.uncertainLookupFailed = true
+      currentObservation = null
+      return false
+    }
+    currentObservation = null
+    current.uncertain = null
+    refreshDurableUncertainty(current, browserTaskId)
+    return !current.uncertainLookupFailed && current.uncertain == null
   }
 
   async function shutdown(): Promise<void> {

@@ -29,6 +29,7 @@
 
 import type { ChatMessage } from './types'
 import { R3_HANDOFF_CHECKPOINT_PREFIX, isR3ArtifactTool } from './browser/capability'
+import { serializeProviderToolResultBody } from './provider-tool-result'
 
 function trustedR3Checkpoint(name: string, result: unknown): string | null {
   if (!isR3ArtifactTool(name) || typeof result !== 'string') return null
@@ -180,7 +181,7 @@ function compactOldResults(m: ChatMessage, turnIdx: number): ChatMessage {
   return {
     ...m,
     toolResults: m.toolResults.map(r => {
-      const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+      const raw = serializeProviderToolResultBody(r)
       const checkpoint = trustedR3Checkpoint(r.name, r.result)
       if (checkpoint) return { ...r, result: checkpoint }
       // Совсем мелкие результаты не трогаем — экономия копеечная, а сигнал
@@ -195,7 +196,7 @@ function capFreshResults(m: ChatMessage): ChatMessage {
   if (!m.toolResults?.length) return m
   let changed = false
   const next = m.toolResults.map(r => {
-    const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result)
+    const raw = serializeProviderToolResultBody(r)
     const checkpoint = trustedR3Checkpoint(r.name, r.result)
     if (checkpoint) {
       changed = changed || checkpoint !== raw

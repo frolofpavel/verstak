@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { CACHE_BREAKPOINT } from './compose-prompt'
 import { normalizedUsage } from '../../shared/contracts/usage'
+import { serializeProviderToolResult } from './provider-tool-result'
 
 interface ClaudeOptions {
   apiKey: string
@@ -45,9 +46,7 @@ function buildContent(message: ChatMessage): string | AnyBlock[] {
   // User turn carrying tool results
   if (message.toolResults?.length) {
     for (const r of message.toolResults) {
-      const content = r.error
-        ? `Error: ${r.error}\n${typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000)}`
-        : (typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000))
+      const content = serializeProviderToolResult(r)
       blocks.push({
         type: 'tool_result',
         tool_use_id: r.id,

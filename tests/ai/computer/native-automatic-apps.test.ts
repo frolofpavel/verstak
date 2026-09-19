@@ -8,6 +8,8 @@ import { createComputerController, type ComputerController } from '../../../elec
 import { createComputerHelperBackend } from '../../../electron/ai/computer/helper-backend'
 import { ComputerHelperClient } from '../../../electron/ai/computer/helper-client'
 import type { AutomaticComputerApp } from '../../../electron/ai/computer/automatic-target'
+import { wrapComputerObservationForModel } from '../../../electron/ai/computer/untrusted'
+import { serializeProviderToolResult } from '../../../electron/ai/provider-tool-result'
 import { openDb } from '../../../electron/storage/db'
 import { createBrowserTasks } from '../../../electron/storage/browser-tasks'
 
@@ -109,6 +111,57 @@ describe('Computer Use automatic Windows app acceptance', () => {
     const readback = await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
     expect(readback.text.replace(/[\s,.]/gu, '')).toContain('5875')
   }, 90_000)
+
+  it.runIf(enabled)('clicks 125 × 47 using only the live provider envelope, not the raw observation', async () => {
+    controller = createNativeController()
+    const prepared = await controller.prepareAutomaticRun({
+      browserTaskId: 'bt-auto-native',
+      runId: 'run-auto-native',
+      originalUserText: 'Открой калькулятор и посчитай 125 × 47.',
+    })
+    expect(prepared).toMatchObject({ ok: true })
+
+    for (const labels of [
+      ['One', 'Один'],
+      ['Two', 'Два'],
+      ['Five', 'Пять'],
+      ['Multiply by', 'Умножить на'],
+      ['Four', 'Четыре'],
+      ['Seven', 'Семь'],
+      ['Equals', 'Равно'],
+    ]) {
+      const observation = await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
+      const wrapped = wrapComputerObservationForModel(observation)
+      const envelope = serializeProviderToolResult({
+        id: 'call-observe',
+        name: 'computer_observe',
+        result: {
+          actionId: 'native-live-observe',
+          status: 'verified',
+          detail: 'ok',
+          observation: wrapped.structured,
+          observationText: wrapped.text,
+        },
+      })
+      const button = buttonFromProviderEnvelope(envelope, labels)
+      expect(button, JSON.stringify({ labels, envelope: envelope.slice(0, 800) })).toBeDefined()
+      const result = await controller.dispatch({
+        actionId: `native-live-calculator-${labels.at(-1)}`,
+        browserTaskId: 'bt-auto-native',
+        runId: 'run-auto-native',
+        action: 'click',
+        observationId: observation.observationId,
+        elementRef: button!,
+      })
+      expect(result, JSON.stringify({ labels, button, result, lastCommit })).toMatchObject({
+        status: 'verified',
+        reason: 'independent-readback-verified',
+      })
+    }
+
+    const readback = await controller.observe({ browserTaskId: 'bt-auto-native', runId: 'run-auto-native' })
+    expect(readback.text.replace(/[\s,.]/gu, '')).toContain('5875')
+  }, 90_000)
 })
 
 function createNativeController(): ComputerController {
@@ -147,6 +200,19 @@ async function launch(app: AutomaticComputerApp): Promise<void> {
 
 function normalized(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('ru-RU').replace(/\s+/gu, ' ').trim()
+}
+
+function buttonFromProviderEnvelope(payload: string, labels: string[]): string | undefined {
+  const parsed = JSON.parse(payload) as { observationText?: string }
+  const text = parsed.observationText ?? payload
+  const wanted = new Set(labels.map(normalized))
+  for (const match of text.matchAll(/\[(we-[^\]]+)\] ([^:]+): ([^;]+); actions=([^\n]*)/gu)) {
+    const [, elementRef, role, label, actions] = match
+    if (normalized(role) !== 'button') continue
+    if (!actions.includes('click')) continue
+    if (wanted.has(normalized(label))) return elementRef
+  }
+  return undefined
 }
 
 function applicationPids(): Set<number> {

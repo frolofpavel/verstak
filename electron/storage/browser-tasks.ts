@@ -177,6 +177,13 @@ export interface FinalizeActionInput {
 
 const DETAIL_CAP = 1000
 const COMPUTER_UNCERTAIN_ACK_REASON = 'computer_uncertain_owner_acknowledged'
+/** Второй способ закрыть отметку: человек прислал новую задачу на то же окно.
+ *  Причина отдельная от кнопки — аудит обязан различать, кто снял блокировку. */
+const COMPUTER_UNCERTAIN_REQUEST_REASON = 'computer_uncertain_settled_by_new_request'
+const COMPUTER_UNCERTAIN_RESOLUTIONS = [
+  COMPUTER_UNCERTAIN_ACK_REASON,
+  COMPUTER_UNCERTAIN_REQUEST_REASON,
+] as const
 const COMPUTER_EFFECT_ACTION_TYPES = [
   'computer:click',
   'computer:type',
@@ -234,6 +241,10 @@ export interface BrowserTasks {
    * uncertain outcome. false means the action is absent, ineligible or was
    * already acknowledged. */
   acknowledgeComputerEffect(actionId: string): boolean
+  /** Close a stale uncertain effect because the human sent a new request for
+   * the same window. Same immutability contract as the owner acknowledgement,
+   * distinct audit reason: the ledger must never blur who lifted the block. */
+  settleComputerEffectForNewRequest(actionId: string): boolean
 
   // proof refs (BR-016)
   appendProofRef(ref: Omit<BrowserProofRefRow, 'id' | 'createdAt'>): number
@@ -393,6 +404,39 @@ export function createBrowserTasks(db: DB): BrowserTasks {
       detail ? JSON.stringify(detail).slice(0, DETAIL_CAP) : null,
       Date.now()
     )
+  }
+
+  /** INSERT..SELECT keeps eligibility, deduplication and the audit append
+   *  atomic. The browser_actions row intentionally stays `uncertain`: closing
+   *  the reconciliation permits future work but never invents an outcome. */
+  function resolveComputerEffect(actionId: string, reason: string): boolean {
+    const typePlaceholders = COMPUTER_EFFECT_ACTION_TYPES.map(() => '?').join(', ')
+    const resolutionPlaceholders = COMPUTER_UNCERTAIN_RESOLUTIONS.map(() => '?').join(', ')
+    const tx = db.transaction(() => {
+      const result = db.prepare(
+        `INSERT INTO browser_action_events
+           (action_id, from_status, to_status, reason, detail_json, created_at)
+         SELECT a.action_id, 'uncertain', 'uncertain', ?, NULL, ?
+           FROM browser_actions a
+          WHERE a.action_id = ?
+            AND a.status = 'uncertain'
+            AND a.action_type IN (${typePlaceholders})
+            AND NOT EXISTS (
+              SELECT 1
+                FROM browser_action_events e
+               WHERE e.action_id = a.action_id
+                 AND e.reason IN (${resolutionPlaceholders})
+            )`
+      ).run(
+        reason,
+        Date.now(),
+        actionId,
+        ...COMPUTER_EFFECT_ACTION_TYPES,
+        ...COMPUTER_UNCERTAIN_RESOLUTIONS,
+      )
+      return result.changes === 1
+    })
+    return tx()
   }
 
   return {
@@ -842,7 +886,7 @@ export function createBrowserTasks(db: DB): BrowserTasks {
               SELECT 1
                 FROM browser_action_events e
                WHERE e.action_id = a.action_id
-                 AND e.reason = ?
+                 AND e.reason IN (${COMPUTER_UNCERTAIN_RESOLUTIONS.map(() => '?').join(', ')})
             )
           ORDER BY a.created_at DESC, a.rowid DESC
           LIMIT 1`
@@ -851,41 +895,17 @@ export function createBrowserTasks(db: DB): BrowserTasks {
         targetFingerprint ?? null,
         targetFingerprint ?? null,
         ...COMPUTER_EFFECT_ACTION_TYPES,
-        COMPUTER_UNCERTAIN_ACK_REASON,
+        ...COMPUTER_UNCERTAIN_RESOLUTIONS,
       ) as Record<string, unknown> | undefined
       return mapActionRow(row)
     },
 
     acknowledgeComputerEffect(actionId) {
-      const placeholders = COMPUTER_EFFECT_ACTION_TYPES.map(() => '?').join(', ')
-      const tx = db.transaction(() => {
-        // INSERT..SELECT keeps eligibility, deduplication and the audit append
-        // atomic. The browser_actions row intentionally stays `uncertain`:
-        // acknowledgement permits future work but never invents an outcome.
-        const result = db.prepare(
-          `INSERT INTO browser_action_events
-             (action_id, from_status, to_status, reason, detail_json, created_at)
-           SELECT a.action_id, 'uncertain', 'uncertain', ?, NULL, ?
-             FROM browser_actions a
-            WHERE a.action_id = ?
-              AND a.status = 'uncertain'
-              AND a.action_type IN (${placeholders})
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM browser_action_events e
-                 WHERE e.action_id = a.action_id
-                   AND e.reason = ?
-              )`
-        ).run(
-          COMPUTER_UNCERTAIN_ACK_REASON,
-          Date.now(),
-          actionId,
-          ...COMPUTER_EFFECT_ACTION_TYPES,
-          COMPUTER_UNCERTAIN_ACK_REASON,
-        )
-        return result.changes === 1
-      })
-      return tx()
+      return resolveComputerEffect(actionId, COMPUTER_UNCERTAIN_ACK_REASON)
+    },
+
+    settleComputerEffectForNewRequest(actionId) {
+      return resolveComputerEffect(actionId, COMPUTER_UNCERTAIN_REQUEST_REASON)
     },
 
     // ── Proof refs ───────────────────────────────────────────────────────

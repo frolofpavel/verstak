@@ -25,6 +25,7 @@ import { buildPersistedUserMessageContent, sendChatMessage } from './chat/send-c
 import { AUTO_BOUND_SKILL_MIN_SCORE, resolveAppliedSkillDetails, toAppliedSkillRef } from './chat/skill-prompts'
 import { EMPTY_COMPOSER_DRAFT, resolveComposerDraftKey } from '../lib/composer-drafts'
 import { routeChangedActivity } from '../lib/route-activity'
+import { describeComputerUseStop } from '../lib/computer-use-stop-message'
 import { VisionAttachmentBanner } from './VisionAttachmentBanner'
 import { isImageAttachment, providerSupportsVision } from '../lib/vision-support'
 import { buildPipelineSend, resolvePipelineRunId, resolveProofRunId, resolveReviewCandidateRunIds, reviewGateState } from '../lib/pipeline-brief'
@@ -692,6 +693,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   const [visibleDateLabel, setVisibleDateLabel] = useState<string | null>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(readAutoScrollPref)
   const autoScrollEnabledRef = useRef(autoScrollEnabled)
+  /** Переводы для диспетчера ai.onEvent: его замыкание ставится один раз за жизнь
+   *  экрана (deps трогать нельзя), а язык меняется без перемонтирования. */
+  const tRef = useRef(t)
   /** Пока true и автопрокрутка вкл — новые сообщения тянут чат вниз. */
   const stickToBottomRef = useRef(true)
   /** Отправка своего сообщения — принудительно липнем к низу, onScroll не сбрасывает. */
@@ -1382,13 +1386,19 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
       // причину в тексте ответа. Фоновому — кладём событие в его snapshot (персист,
       // причина будет видна при открытии чата и не прилипнет к активному).
       if (!owner && id === 0 && event.type === 'error' && typeof chatId === 'number') {
-        const message = String((event as { message?: unknown }).message ?? '')
+        // Машинный код Computer Use переводим здесь, на границе показа: main
+        // языка интерфейса не знает, а сам код — его контракт (см. модуль).
+        const message = describeComputerUseStop(
+          String((event as { message?: unknown }).message ?? ''),
+          tRef.current.chat.computerUseStops,
+        )
         if (chatId === store.activeChatId) {
           store.setEarlyRouteStop({ chatId, message, at: Date.now() })
         } else {
           store.applyEventToChat(chatId, {
             ...(event as unknown as { type: string; [k: string]: unknown }),
             chatId,
+            message,
           })
         }
         return
@@ -1752,6 +1762,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, isSetting
   useEffect(() => {
     autoScrollEnabledRef.current = autoScrollEnabled
   }, [autoScrollEnabled])
+
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   const SCROLL_STICK_THRESHOLD = 72
 

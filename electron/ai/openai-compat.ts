@@ -5,6 +5,7 @@ import { normalizedUsage } from '../../shared/contracts/usage'
 import { formatVerstakMeta, mapGatewayError } from './gateway-meta'
 import { mapProviderAuthError } from './provider-errors'
 import { parseTextToolCalls } from './tool-call-repair'
+import { serializeProviderToolResult } from './provider-tool-result'
 
 export interface OpenAiCompatOptions {
   id: string
@@ -85,9 +86,7 @@ function buildOpenAiMessages(messages: ChatMessage[], supportsImages: boolean): 
       // Any actual user text in the same logical turn is emitted FIRST as user.
       if (m.content) out.push({ role: 'user', content: buildUserContent(m, supportsImages) as never })
       for (const r of m.toolResults) {
-        const content = r.error
-          ? `Error: ${r.error}\n${typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000)}`
-          : (typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000))
+        const content = serializeProviderToolResult(r)
         out.push({ role: 'tool', tool_call_id: r.id, content })
       }
     } else {
