@@ -257,6 +257,13 @@ describe('headless server — HTTP/SSE транспорт (Этап 1а, №3)',
     }
     const server = createHeadlessServer({ tenants })
     servers.push(server)
+    // ClientRequest.close подтверждает только локальную сторону TCP. На macOS
+    // server-side socket.close может прийти позже, поэтому lease разрешаем лишь
+    // после того, как сам сервер увидел disconnect. Иначе тест случайно проверяет
+    // невозможную гарантию «клиентский close синхронно известен другой стороне».
+    const serverDisconnected = new Promise<void>(resolve => {
+      server.httpServer.once('connection', socket => socket.once('close', resolve))
+    })
     const port = await server.listen(0)
     const clientClosed = new Promise<void>(resolve => {
       const req = request({
@@ -276,6 +283,7 @@ describe('headless server — HTTP/SSE транспорт (Этап 1а, №3)',
     })
     await entered
     await clientClosed
+    await serverDisconnected
     resolveLease({
       tenantId: 'slow-init',
       host: fake.host,
