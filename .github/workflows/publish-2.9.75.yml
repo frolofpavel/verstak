@@ -1,0 +1,33 @@
+name: Transfer verified 2.9.75 assets
+on:
+  push:
+    branches: [codex/release-2.9.75-transfer]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download exact published installer and feed
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --connect-timeout 20 --max-time 600 https://agi-iri.ru/downloads/verstak/Verstak-Setup-2.9.75-x64.exe -o Verstak-Setup-2.9.75-x64.exe
+          echo '1487a23be5d0a4b8dc61a2c98c94859fb72f20200ec242d510d9ae2c2462536a  Verstak-Setup-2.9.75-x64.exe' | sha256sum --check
+          curl --fail --location --retry 3 --max-time 60 https://agi-iri.ru/downloads/verstak/latest.yml -o latest.yml
+          python3 - <<'PY'
+          import base64, hashlib, pathlib, re
+          data = pathlib.Path('Verstak-Setup-2.9.75-x64.exe').read_bytes()
+          feed = pathlib.Path('latest.yml').read_text()
+          assert len(data) == 349967307
+          assert re.search(r'^version: 2\.9\.75\s*$', feed, re.M)
+          assert base64.b64encode(hashlib.sha512(data).digest()).decode() in feed
+          assert 'Verstak-Setup-2.9.75-x64.exe' in feed
+          PY
+      - name: Upload installer, then update feed last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload v2.9.75 Verstak-Setup-2.9.75-x64.exe --repo frolofpavel/verstak --clobber
+          gh release upload v2.9.75 latest.yml --repo frolofpavel/verstak --clobber
